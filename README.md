@@ -5,26 +5,35 @@ AI-orchestrated task board. Like Trello, but your tasks get specified, executed,
 ## Workflow
 
 ```mermaid
-graph LR
-    H((You)) -->|rough idea| T["Triage<br/><i>AI writes spec</i>"]
-    T --> TD["Todo<br/><i>waiting for deps</i>"]
-    TD -->|agent free| IP
-    IP -->|steps + reviews pass| IR["In Review<br/><i>ready to merge</i>"]
-    IR -->|squash merge| D["Done<br/><i>shipped</i>"]
+graph TD
+    H((You)) -->|rough idea| T["Triage\n<i>auto-specification</i>"]
+    T --> TD["Todo\n<i>scheduled for execution</i>"]
+    TD --> IP["In Progress\n<i>for each step:\nplan, review, execute, review </i>"]
 
-    subgraph IP[" In Progress "]
-        direction TB
-        E[Execute step] --> R{Cross-model\nreview}
-        R -->|approve| E
-        R -->|revise| E
+    subgraph IP["In Progress"]
+        direction TD
+        NS([Begin step]) --> P[Plan]
+        P[Plan] --> R1{Review}
+        R1 -->|revise| P
+        R1 -->|approve| E[Execute]
+        E --> R2{Review}
+        R2 -->|revise| E
+        R2 -->|next step| NS
+        R2 -->|rethink| P
     end
+
+    R2 -->|done| IR["In Review\n<i>ready to merge,\nor auto-merge</i>"]
+    IR -->|squash merge| D["Done"]
 
     style H fill:#161b22,stroke:#8b949e,color:#e6edf3
     style T fill:#2d2006,stroke:#d29922,color:#d29922
     style TD fill:#0d2044,stroke:#58a6ff,color:#58a6ff
     style IP fill:#1a0d2e,stroke:#bc8cff,color:#bc8cff
+    style P fill:#1a0d2e,stroke:#bc8cff,color:#e6edf3
+    style R1 fill:#1a0d2e,stroke:#bc8cff,color:#e6edf3
     style E fill:#1a0d2e,stroke:#bc8cff,color:#e6edf3
-    style R fill:#1a0d2e,stroke:#bc8cff,color:#e6edf3
+    style R2 fill:#1a0d2e,stroke:#bc8cff,color:#e6edf3
+    style NS fill:#1a0d2e,stroke:#bc8cff,color:#e6edf3
     style IR fill:#0d2d16,stroke:#3fb950,color:#3fb950
     style D fill:#1a1a1a,stroke:#8b949e,color:#8b949e
 ```
