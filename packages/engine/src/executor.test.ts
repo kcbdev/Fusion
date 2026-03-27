@@ -29,7 +29,7 @@ vi.mock("node:fs", () => ({
 
 import { TaskExecutor, buildExecutionPrompt } from "./executor.js";
 import { createKbAgent } from "./pi.js";
-import { reviewStep } from "./reviewer.js";
+import { reviewStep as mockedReviewStepFn } from "./reviewer.js";
 import { execSync } from "node:child_process";
 import { findWorktreeUser, aiMergeTask } from "./merger.js";
 import { WorktreePool } from "./worktree-pool.js";
@@ -1014,7 +1014,291 @@ describe("TaskExecutor pause behavior", () => {
   });
 });
 
-const mockedReviewStep = vi.mocked(reviewStep);
+
+// ── Code review verdict enforcement tests ────────────────────────────
+
+const mockedReviewStep = vi.mocked(mockedReviewStepFn);
+
+/**
+ * Helper: executes a task and captures the custom tools passed to createKbAgent.
+ * Returns a map of tool name → tool execute function for direct testing.
+ */
+async function captureTools(): Promise<Record<string, (id: string, params: any) => Promise<any>>> {
+  const store = createMockStore();
+  store.updateStep.mockResolvedValue({
+    steps: [
+      { name: "Preflight", status: "done" },
+      { name: "Implement", status: "in-progress" },
+      { name: "Testing", status: "pending" },
+    ],
+  });
+  mockedExistsSync.mockReturnValue(true);
+
+  let capturedTools: any[] = [];
+  mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    capturedTools = opts.customTools || [];
+    return {
+      session: {
+        prompt: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn(),
+        sessionManager: {
+          getLeafId: vi.fn().mockReturnValue("leaf-id"),
+          branchWithSummary: vi.fn(),
+        },
+        navigateTree: vi.fn().mockResolvedValue({ cancelled: false }),
+      },
+    } as any;
+  });
+
+  const executor = new TaskExecutor(store, "/tmp/test");
+  await executor.execute({
+    id: "KB-TEST",
+    title: "Test",
+    description: "Test",
+    column: "in-progress",
+    dependencies: [],
+    steps: [],
+    currentStep: 0,
+    log: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  const tools: Record<string, any> = {};
+  for (const t of capturedTools) {
+    tools[t.name] = t.execute;
+  }
+  return tools;
+}
+
+describe("Code review verdict tracking", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedExistsSync.mockReturnValue(true);
+  });
+
+  it("code review REVISE sets tracking state", async () => {
+    mockedReviewStep.mockResolvedValue({
+      verdict: "REVISE",
+      review: "Fix the bug",
+      summary: "Needs fixes",
+    });
+
+    const tools = await captureTools();
+    const result = await tools.review_step("call1", {
+      step: 1,
+      type: "code",
+      step_name: "Implement",
+      baseline: "abc123",
+    });
+
+    expect(result.content[0].text).toContain("REVISE");
+    expect(result.content[0].text).toContain("cannot be marked done");
+
+    // Now task_update(step=1, status="done") should be blocked
+    const updateResult = await tools.task_update("call2", { step: 1, status: "done" });
+    expect(updateResult.content[0].text).toContain("Cannot mark Step 1 as done");
+    expect(updateResult.content[0].text).toContain("REVISE");
+  });
+
+  it("code review APPROVE clears tracking state", async () => {
+    // First: REVISE
+    mockedReviewStep.mockResolvedValue({
+      verdict: "REVISE",
+      review: "Fix the bug",
+      summary: "Needs fixes",
+    });
+
+    const tools = await captureTools();
+    await tools.review_step("call1", {
+      step: 1,
+      type: "code",
+      step_name: "Implement",
+      baseline: "abc123",
+    });
+
+    // Verify it's blocked
+    const blocked = await tools.task_update("call2", { step: 1, status: "done" });
+    expect(blocked.content[0].text).toContain("Cannot mark Step 1 as done");
+
+    // Now: APPROVE
+    mockedReviewStep.mockResolvedValue({
+      verdict: "APPROVE",
+      review: "Looks good",
+      summary: "All good",
+    });
+
+    await tools.review_step("call3", {
+      step: 1,
+      type: "code",
+      step_name: "Implement",
+      baseline: "def456",
+    });
+
+    // Now task_update should succeed
+    const updateResult = await tools.task_update("call4", { step: 1, status: "done" });
+    expect(updateResult.content[0].text).toContain("→ done");
+  });
+
+  it("plan review REVISE does NOT set tracking state", async () => {
+    mockedReviewStep.mockResolvedValue({
+      verdict: "REVISE",
+      review: "Reconsider approach",
+      summary: "Plan issues",
+    });
+
+    const tools = await captureTools();
+    const result = await tools.review_step("call1", {
+      step: 1,
+      type: "plan",
+      step_name: "Implement",
+    });
+
+    // Plan REVISE should use the non-enforced text format
+    expect(result.content[0].text).toContain("REVISE");
+    expect(result.content[0].text).not.toContain("cannot be marked done");
+
+    // task_update should still work (plan reviews are advisory)
+    const updateResult = await tools.task_update("call2", { step: 1, status: "done" });
+    expect(updateResult.content[0].text).toContain("→ done");
+  });
+});
+
+describe("Code review verdict enforcement - task_update blocking", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedExistsSync.mockReturnValue(true);
+  });
+
+  it("task_update(status='done') is rejected when last code review was REVISE", async () => {
+    mockedReviewStep.mockResolvedValue({
+      verdict: "REVISE",
+      review: "Fix issues",
+      summary: "Needs work",
+    });
+
+    const tools = await captureTools();
+    await tools.review_step("call1", {
+      step: 1,
+      type: "code",
+      step_name: "Implement",
+      baseline: "abc",
+    });
+
+    const result = await tools.task_update("call2", { step: 1, status: "done" });
+    expect(result.content[0].text).toContain("Cannot mark Step 1 as done");
+    expect(result.content[0].text).toContain("review_step");
+  });
+
+  it("task_update succeeds after a subsequent APPROVE", async () => {
+    const tools = await captureTools();
+
+    // REVISE first
+    mockedReviewStep.mockResolvedValue({ verdict: "REVISE", review: "Fix", summary: "Bad" });
+    await tools.review_step("c1", { step: 1, type: "code", step_name: "Impl", baseline: "a" });
+
+    // Then APPROVE
+    mockedReviewStep.mockResolvedValue({ verdict: "APPROVE", review: "OK", summary: "Good" });
+    await tools.review_step("c2", { step: 1, type: "code", step_name: "Impl", baseline: "b" });
+
+    const result = await tools.task_update("c3", { step: 1, status: "done" });
+    expect(result.content[0].text).toContain("→ done");
+  });
+
+  it("task_update succeeds when no code review was requested (review level 0)", async () => {
+    const tools = await captureTools();
+
+    // No review_step calls at all
+    const result = await tools.task_update("c1", { step: 1, status: "done" });
+    expect(result.content[0].text).toContain("→ done");
+  });
+
+  it("plan-only REVISE does NOT block advancement", async () => {
+    mockedReviewStep.mockResolvedValue({ verdict: "REVISE", review: "Rethink", summary: "Plan issue" });
+
+    const tools = await captureTools();
+    await tools.review_step("c1", { step: 1, type: "plan", step_name: "Impl" });
+
+    const result = await tools.task_update("c2", { step: 1, status: "done" });
+    expect(result.content[0].text).toContain("→ done");
+  });
+
+  it("multiple steps tracked independently (REVISE on step 1 doesn't block step 2)", async () => {
+    mockedReviewStep.mockResolvedValue({ verdict: "REVISE", review: "Fix", summary: "Bad" });
+
+    const tools = await captureTools();
+    await tools.review_step("c1", { step: 1, type: "code", step_name: "Step1", baseline: "a" });
+
+    // Step 1 is blocked
+    const blocked = await tools.task_update("c2", { step: 1, status: "done" });
+    expect(blocked.content[0].text).toContain("Cannot mark Step 1 as done");
+
+    // Step 2 is NOT blocked (no review for step 2)
+    const allowed = await tools.task_update("c3", { step: 2, status: "done" });
+    expect(allowed.content[0].text).toContain("→ done");
+  });
+
+  it("REVISE tool response text includes re-review instructions", async () => {
+    mockedReviewStep.mockResolvedValue({ verdict: "REVISE", review: "Bug found", summary: "Issues" });
+
+    const tools = await captureTools();
+    const result = await tools.review_step("c1", { step: 1, type: "code", step_name: "Implement", baseline: "abc" });
+
+    expect(result.content[0].text).toContain("cannot be marked done");
+    expect(result.content[0].text).toContain("review_step");
+    expect(result.content[0].text).toContain('type="code"');
+  });
+
+  it("EXECUTOR_SYSTEM_PROMPT contains code review enforcement language", async () => {
+    // Capture the system prompt passed to createKbAgent
+    let capturedSystemPrompt = "";
+    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+      capturedSystemPrompt = opts.systemPrompt || "";
+      return {
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          sessionManager: { getLeafId: vi.fn(), branchWithSummary: vi.fn() },
+          navigateTree: vi.fn(),
+        },
+      } as any;
+    });
+
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+    await executor.execute({
+      id: "KB-SYS",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    // Verify enforcement language is present in system prompt
+    expect(capturedSystemPrompt).toContain("enforced");
+    expect(capturedSystemPrompt).toContain("will be rejected until the code review passes");
+    expect(capturedSystemPrompt).toContain("REVISE (plan review)");
+    expect(capturedSystemPrompt).toContain("advisory");
+  });
+
+  it("task_update with non-done status is not blocked by REVISE", async () => {
+    mockedReviewStep.mockResolvedValue({ verdict: "REVISE", review: "Fix", summary: "Bad" });
+
+    const tools = await captureTools();
+    await tools.review_step("c1", { step: 1, type: "code", step_name: "Step1", baseline: "a" });
+
+    // "in-progress" should still work even with REVISE
+    const result = await tools.task_update("c2", { step: 1, status: "in-progress" });
+    expect(result.content[0].text).toContain("→ in-progress");
+  });
+});
+
+// ── RETHINK verdict handling tests ───────────────────────────────────
 
 describe("RETHINK verdict handling", () => {
   const makeTask = (id = "KB-040") => ({
@@ -1043,7 +1327,7 @@ describe("RETHINK verdict handling", () => {
    * Helper: run executor and capture custom tools from createKbAgent mock.
    * Returns the tools map keyed by tool name.
    */
-  async function captureTools(store: any, options?: any) {
+  async function captureRethinkTools(store: any, options?: any) {
     let capturedTools: any[] = [];
     const mockSessionManager = {
       getLeafId: vi.fn().mockReturnValue("leaf-checkpoint-123"),
@@ -1089,7 +1373,7 @@ describe("RETHINK verdict handling", () => {
       summary: "Rejected approach",
     });
 
-    const { toolMap } = await captureTools(store);
+    const { toolMap } = await captureRethinkTools(store);
     const reviewTool = toolMap.get("review_step");
 
     // First call task_update to set in-progress (captures checkpoint)
@@ -1123,7 +1407,7 @@ describe("RETHINK verdict handling", () => {
       summary: "Bad approach",
     });
 
-    const { toolMap, mockNavigateTree } = await captureTools(store);
+    const { toolMap, mockNavigateTree } = await captureRethinkTools(store);
 
     // Capture checkpoint
     const updateTool = toolMap.get("task_update");
@@ -1153,7 +1437,7 @@ describe("RETHINK verdict handling", () => {
       summary: "Rejected",
     });
 
-    const { toolMap } = await captureTools(store);
+    const { toolMap } = await captureRethinkTools(store);
 
     const updateTool = toolMap.get("task_update");
     await updateTool.execute("call-1", { step: 1, status: "in-progress" });
@@ -1181,7 +1465,7 @@ describe("RETHINK verdict handling", () => {
       summary: "Wrong architecture",
     });
 
-    const { toolMap } = await captureTools(store);
+    const { toolMap } = await captureRethinkTools(store);
 
     const updateTool = toolMap.get("task_update");
     await updateTool.execute("call-1", { step: 1, status: "in-progress" });
@@ -1212,7 +1496,7 @@ describe("RETHINK verdict handling", () => {
       summary: "Rejected",
     });
 
-    const { toolMap, mockNavigateTree } = await captureTools(store);
+    const { toolMap, mockNavigateTree } = await captureRethinkTools(store);
 
     const updateTool = toolMap.get("task_update");
     await updateTool.execute("call-1", { step: 1, status: "in-progress" });
@@ -1247,7 +1531,7 @@ describe("RETHINK verdict handling", () => {
       summary: "Rejected",
     });
 
-    const { toolMap, mockNavigateTree } = await captureTools(store);
+    const { toolMap, mockNavigateTree } = await captureRethinkTools(store);
 
     // Do NOT call task_update for step 2, so no checkpoint exists
 
@@ -1272,7 +1556,7 @@ describe("RETHINK verdict handling", () => {
       makeStepResult(step, status),
     );
 
-    const { toolMap, mockSessionManager } = await captureTools(store);
+    const { toolMap, mockSessionManager } = await captureRethinkTools(store);
 
     const updateTool = toolMap.get("task_update");
     await updateTool.execute("call-1", { step: 1, status: "in-progress" });
@@ -1334,6 +1618,241 @@ describe("RETHINK verdict handling", () => {
     expect(mockSessionManager.branchWithSummary).toHaveBeenCalledWith(
       "leaf-checkpoint-456",
       expect.stringContaining("RETHINK"),
+    );
+  });
+});
+
+// ── Plan RETHINK verdict handling tests ──────────────────────────────
+
+describe("Plan RETHINK verdict handling", () => {
+  const makeTask = (id = "KB-050") => ({
+    id,
+    title: "Test",
+    description: "Test",
+    column: "in-progress" as const,
+    dependencies: [],
+    steps: [],
+    currentStep: 0,
+    log: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  function makeStepResult(stepIndex: number, status: string) {
+    const steps = Array.from({ length: Math.max(stepIndex + 1, 3) }, (_, i) => ({
+      name: `Step ${i}`,
+      status: i === stepIndex ? status : "pending",
+    }));
+    return { steps };
+  }
+
+  async function capturePlanRethinkTools(store: any) {
+    let capturedTools: any[] = [];
+    const mockSessionManager = {
+      getLeafId: vi.fn().mockReturnValue("plan-checkpoint-789"),
+      branchWithSummary: vi.fn().mockReturnValue("new-branch-id"),
+    };
+    const mockNavigateTree = vi.fn().mockResolvedValue({ cancelled: false });
+    const mockSession = {
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+      sessionManager: mockSessionManager,
+      navigateTree: mockNavigateTree,
+    };
+
+    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+      capturedTools = opts.customTools || [];
+      return { session: mockSession } as any;
+    });
+
+    const executor = new TaskExecutor(store, "/tmp/test");
+    await executor.execute(makeTask());
+
+    const toolMap = new Map<string, any>();
+    for (const tool of capturedTools) {
+      toolMap.set(tool.name, tool);
+    }
+    return { toolMap, mockSession, mockSessionManager, mockNavigateTree };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedExistsSync.mockReturnValue(true);
+  });
+
+  it("plan RETHINK verdict rewinds session to pre-step checkpoint", async () => {
+    const store = createMockStore();
+    store.updateStep.mockImplementation(async (_id: string, step: number, status: string) =>
+      makeStepResult(step, status),
+    );
+
+    mockedReviewStep.mockResolvedValue({
+      verdict: "RETHINK",
+      review: "Plan is fundamentally flawed",
+      summary: "Bad plan",
+    });
+
+    const { toolMap, mockNavigateTree } = await capturePlanRethinkTools(store);
+
+    // Capture checkpoint by starting step
+    await toolMap.get("task_update").execute("call-1", { step: 1, status: "in-progress" });
+
+    // Trigger plan RETHINK
+    await toolMap.get("review_step").execute("call-2", {
+      step: 1,
+      type: "plan",
+      step_name: "Test Step",
+    });
+
+    // Session should be rewound to checkpoint
+    expect(mockNavigateTree).toHaveBeenCalledWith("plan-checkpoint-789", { summarize: false });
+  });
+
+  it("plan RETHINK verdict does NOT trigger git reset", async () => {
+    const store = createMockStore();
+    store.updateStep.mockImplementation(async (_id: string, step: number, status: string) =>
+      makeStepResult(step, status),
+    );
+
+    mockedReviewStep.mockResolvedValue({
+      verdict: "RETHINK",
+      review: "Wrong plan",
+      summary: "Rejected",
+    });
+
+    const { toolMap } = await capturePlanRethinkTools(store);
+
+    await toolMap.get("task_update").execute("call-1", { step: 1, status: "in-progress" });
+
+    // Even if baseline is passed, plan RETHINK should NOT git reset
+    await toolMap.get("review_step").execute("call-2", {
+      step: 1,
+      type: "plan",
+      step_name: "Test Step",
+      baseline: "some-sha-that-should-be-ignored",
+    });
+
+    // git reset should NOT be called for plan reviews
+    const gitResetCalls = mockedExecSync.mock.calls.filter(
+      (c) => typeof c[0] === "string" && (c[0] as string).includes("git reset --hard"),
+    );
+    expect(gitResetCalls).toHaveLength(0);
+  });
+
+  it("plan RETHINK verdict resets step status to pending", async () => {
+    const store = createMockStore();
+    store.updateStep.mockImplementation(async (_id: string, step: number, status: string) =>
+      makeStepResult(step, status),
+    );
+
+    mockedReviewStep.mockResolvedValue({
+      verdict: "RETHINK",
+      review: "Try another plan",
+      summary: "Rejected plan",
+    });
+
+    const { toolMap } = await capturePlanRethinkTools(store);
+
+    await toolMap.get("task_update").execute("call-1", { step: 1, status: "in-progress" });
+
+    await toolMap.get("review_step").execute("call-2", {
+      step: 1,
+      type: "plan",
+      step_name: "Test Step",
+    });
+
+    // updateStep should be called with "pending" to reset the step
+    expect(store.updateStep).toHaveBeenCalledWith("KB-050", 1, "pending");
+  });
+
+  it("plan RETHINK re-prompt includes reviewer feedback and plan-specific language", async () => {
+    const store = createMockStore();
+    store.updateStep.mockImplementation(async (_id: string, step: number, status: string) =>
+      makeStepResult(step, status),
+    );
+
+    mockedReviewStep.mockResolvedValue({
+      verdict: "RETHINK",
+      review: "This plan overlooks critical edge cases in error handling",
+      summary: "Insufficient plan",
+    });
+
+    const { toolMap } = await capturePlanRethinkTools(store);
+
+    await toolMap.get("task_update").execute("call-1", { step: 1, status: "in-progress" });
+
+    const result = await toolMap.get("review_step").execute("call-2", {
+      step: 1,
+      type: "plan",
+      step_name: "Test Step",
+    });
+
+    const text = result.content[0].text;
+    expect(text).toContain("RETHINK");
+    expect(text).toContain("Your plan was rejected");
+    expect(text).toContain("This plan overlooks critical edge cases in error handling");
+    expect(text).toContain("Take a different approach to planning this step");
+    expect(text).toContain("Do NOT repeat the rejected strategy");
+  });
+
+  it("plan RETHINK without session checkpoint falls back gracefully", async () => {
+    const store = createMockStore();
+    store.updateStep.mockImplementation(async (_id: string, step: number, status: string) =>
+      makeStepResult(step, status),
+    );
+
+    mockedReviewStep.mockResolvedValue({
+      verdict: "RETHINK",
+      review: "Bad plan",
+      summary: "Rejected",
+    });
+
+    const { toolMap, mockNavigateTree } = await capturePlanRethinkTools(store);
+
+    // Do NOT call task_update for step 2, so no checkpoint exists
+
+    // Call review_step for step 2 — should not crash
+    const result = await toolMap.get("review_step").execute("call-2", {
+      step: 2,
+      type: "plan",
+      step_name: "Test Step",
+    });
+
+    // navigateTree should NOT be called (no checkpoint)
+    expect(mockNavigateTree).not.toHaveBeenCalled();
+
+    // Should still return RETHINK feedback with plan-specific text
+    expect(result.content[0].text).toContain("RETHINK");
+    expect(result.content[0].text).toContain("Your plan was rejected");
+  });
+
+  it("plan RETHINK logs correctly without git reset info", async () => {
+    const store = createMockStore();
+    store.updateStep.mockImplementation(async (_id: string, step: number, status: string) =>
+      makeStepResult(step, status),
+    );
+
+    mockedReviewStep.mockResolvedValue({
+      verdict: "RETHINK",
+      review: "Wrong plan",
+      summary: "Plan rejected",
+    });
+
+    const { toolMap } = await capturePlanRethinkTools(store);
+
+    await toolMap.get("task_update").execute("call-1", { step: 1, status: "in-progress" });
+
+    await toolMap.get("review_step").execute("call-2", {
+      step: 1,
+      type: "plan",
+      step_name: "Test Step",
+    });
+
+    // Verify log entry uses plan-specific message (no git reset reference)
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "KB-050",
+      expect.stringContaining("plan rewound"),
+      "Plan rejected",
     );
   });
 });

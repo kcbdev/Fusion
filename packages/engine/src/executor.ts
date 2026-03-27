@@ -6,7 +6,7 @@ import { findWorktreeUser } from "./merger.js";
 import { generateWorktreeName } from "./worktree-names.js";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import { createKbAgent } from "./pi.js";
-import { reviewStep } from "./reviewer.js";
+import { reviewStep, type ReviewVerdict } from "./reviewer.js";
 import type { ToolDefinition, AgentSession, SessionManager } from "@mariozechner/pi-coding-agent";
 import type { AgentSemaphore } from "./concurrency.js";
 import type { WorktreePool } from "./worktree-pool.js";
@@ -104,8 +104,13 @@ model, read-only access) to independently assess your work.
 
 **Handling verdicts:**
 - **APPROVE** → proceed to next step
-- **REVISE** → read the feedback, fix the issues, commit again, then proceed
-- **RETHINK** → your code changes have been reverted and conversation rewound. Read the feedback carefully and take a fundamentally different approach. Do NOT repeat the rejected strategy.
+- **REVISE (code review)** → **enforced**. You MUST fix the issues, commit again,
+  and re-run \`review_step(type="code")\` before the step can be marked done.
+  \`task_update(status="done")\` will be rejected until the code review passes.
+- **REVISE (plan review)** → advisory. Incorporate the feedback at your discretion
+  and proceed with implementation. No re-review is required.
+- **RETHINK (code review)** → your code changes have been reverted and conversation rewound. Read the feedback carefully and take a fundamentally different approach. Do NOT repeat the rejected strategy.
+- **RETHINK (plan review)** → conversation rewound to before the step (no git reset since no code was written). Read the feedback and take a fundamentally different approach to planning this step.
 
 ## Git discipline
 - Commit after completing each step (not after every file change)
@@ -336,11 +341,11 @@ export class TaskExecutor {
       const stepCheckpoints = new Map<number, string>();
 
       const customTools = [
-        this.createTaskUpdateTool(task.id, sessionRef, stepCheckpoints),
+        this.createTaskUpdateTool(task.id, codeReviewVerdicts, sessionRef, stepCheckpoints),
         this.createTaskLogTool(task.id),
         this.createTaskCreateTool(),
         this.createTaskDoneTool(task.id, () => { taskDone = true; }),
-        this.createReviewStepTool(task.id, worktreePath, detail.prompt, sessionRef, stepCheckpoints),
+        this.createReviewStepTool(task.id, worktreePath, detail.prompt, codeReviewVerdicts, sessionRef, stepCheckpoints),
       ];
 
       const agentLogger = new AgentLogger({
@@ -426,6 +431,7 @@ export class TaskExecutor {
 
   private createTaskUpdateTool(
     taskId: string,
+    codeReviewVerdicts: Map<number, ReviewVerdict>,
     sessionRef: { current: AgentSession | null },
     stepCheckpoints: Map<number, string>,
   ): ToolDefinition {
@@ -440,6 +446,22 @@ export class TaskExecutor {
       parameters: taskUpdateParams,
       execute: async (_id: string, params: Static<typeof taskUpdateParams>) => {
         const { step, status } = params;
+
+        // Enforce code review REVISE: block advancing to "done" when the last
+        // code review for this step returned REVISE. The agent must fix the
+        // issues and call review_step(type="code") again before proceeding.
+        if (status === "done" && codeReviewVerdicts.get(step) === "REVISE") {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `Cannot mark Step ${step} as done — the last code review returned REVISE. ` +
+                `Fix the issues from the code review, commit your changes, and call ` +
+                `review_step(step=${step}, type="code") again. The step can only advance ` +
+                `after the code review passes.`,
+            }],
+            details: {},
+          };
+        }
 
         // Capture session checkpoint when a step starts, so RETHINK can rewind to it
         if (status === "in-progress" && sessionRef.current) {
@@ -551,6 +573,7 @@ export class TaskExecutor {
     taskId: string,
     worktreePath: string,
     promptContent: string,
+    codeReviewVerdicts: Map<number, ReviewVerdict>,
     sessionRef: { current: AgentSession | null },
     stepCheckpoints: Map<number, string>,
   ): ToolDefinition {
@@ -594,24 +617,43 @@ export class TaskExecutor {
           );
           reviewerLog.log(`${taskId}: Step ${step} ${reviewType} → ${result.verdict}`);
 
+          // Track code review verdicts for enforcement. Plan reviews remain
+          // advisory — only code reviews write to the verdict map.
+          if (reviewType === "code") {
+            if (result.verdict === "REVISE") {
+              codeReviewVerdicts.set(step, "REVISE");
+            } else if (result.verdict === "APPROVE") {
+              codeReviewVerdicts.delete(step);
+            }
+          }
+
           let text: string;
           switch (result.verdict) {
             case "APPROVE": text = "APPROVE"; break;
-            case "REVISE": text = `REVISE\n\n${result.review}`; break;
+            case "REVISE":
+              if (reviewType === "code") {
+                text = `REVISE — this step cannot be marked done until the code review passes.\n\n` +
+                  `Fix the issues below, commit your changes, and call review_step(step=${step}, ` +
+                  `type="code", step_name="${step_name}", baseline="<new SHA>") again.\n\n${result.review}`;
+              } else {
+                text = `REVISE\n\n${result.review}`;
+              }
+              break;
             case "RETHINK": {
-              // 1. Git reset to baseline
-              if (baseline) {
+              // For code reviews: git reset to baseline to revert file changes
+              // For plan reviews: skip git reset (no code has been written yet)
+              if (reviewType === "code" && baseline) {
                 try {
                   execSync(`git reset --hard ${baseline}`, { cwd: worktreePath, stdio: "pipe" });
                   executorLog.log(`${taskId}: RETHINK — git reset --hard ${baseline}`);
                 } catch (gitErr: any) {
                   executorLog.error(`${taskId}: RETHINK git reset failed: ${gitErr.message}`);
                 }
-              } else {
+              } else if (reviewType === "code") {
                 executorLog.log(`${taskId}: RETHINK — no baseline SHA, skipping git reset`);
               }
 
-              // 2. Rewind conversation to pre-step checkpoint
+              // Rewind conversation to pre-step checkpoint
               const checkpointId = stepCheckpoints.get(step);
               if (checkpointId && sessionRef.current) {
                 try {
@@ -633,16 +675,24 @@ export class TaskExecutor {
                 executorLog.log(`${taskId}: RETHINK — no session checkpoint for step ${step}, skipping rewind`);
               }
 
-              // 3. Reset step status to pending
+              // Reset step status to pending
               await store.updateStep(taskId, step, "pending");
 
-              await store.logEntry(
-                taskId,
-                `RETHINK: Step ${step} rewound — git reset to ${baseline || "N/A"}, session checkpoint ${checkpointId || "N/A"}`,
-                result.summary,
-              );
-
-              text = `RETHINK\n\nYour previous approach was rejected. Here is why:\n\n${result.review}\n\nTake a different approach. Do NOT repeat the rejected strategy. Re-read the step requirements and find an alternative solution.`;
+              if (reviewType === "plan") {
+                await store.logEntry(
+                  taskId,
+                  `RETHINK: Step ${step} plan rewound — session checkpoint ${checkpointId || "N/A"}`,
+                  result.summary,
+                );
+                text = `RETHINK\n\nYour plan was rejected. Here is why:\n\n${result.review}\n\nTake a different approach to planning this step. Do NOT repeat the rejected strategy.`;
+              } else {
+                await store.logEntry(
+                  taskId,
+                  `RETHINK: Step ${step} rewound — git reset to ${baseline || "N/A"}, session checkpoint ${checkpointId || "N/A"}`,
+                  result.summary,
+                );
+                text = `RETHINK\n\nYour previous approach was rejected. Here is why:\n\n${result.review}\n\nTake a different approach. Do NOT repeat the rejected strategy. Re-read the step requirements and find an alternative solution.`;
+              }
               break;
             }
             default: text = "UNAVAILABLE — reviewer did not produce a usable verdict.";
