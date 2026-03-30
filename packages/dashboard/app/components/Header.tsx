@@ -28,9 +28,9 @@ export function Header({
   return (
     <header className="header">
       <div className="header-left">
-        <img src="/logo.svg" alt="kb logo" className="header-logo" width={24} height={24} />
-        <h1 className="logo">kb</h1>
-        <span className="logo-sub">board</span>
+        <img src="/logo.svg" alt="Fusion logo" className="header-logo" width={24} height={24} />
+        <h1 className="logo">Fusion</h1>
+        <span className="logo-sub">tasks</span>
       </div>
       <div className="header-actions">
         {/* View Toggle */}

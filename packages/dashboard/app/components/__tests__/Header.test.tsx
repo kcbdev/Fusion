@@ -5,7 +5,7 @@ import { Header } from "../Header";
 describe("Header", () => {
   it("renders a logo image with correct src and alt", () => {
     render(<Header />);
-    const logo = screen.getByAltText("kb logo");
+    const logo = screen.getByAltText("Fusion logo");
     expect(logo).toBeDefined();
     expect(logo.tagName).toBe("IMG");
     expect((logo as HTMLImageElement).src).toContain("/logo.svg");
@@ -13,7 +13,7 @@ describe("Header", () => {
 
   it("renders the logo before the h1 element", () => {
     render(<Header />);
-    const logo = screen.getByAltText("kb logo");
+    const logo = screen.getByAltText("Fusion logo");
     const h1 = screen.getByRole("heading", { level: 1 });
     // Logo should be a preceding sibling of the h1
     expect(logo.compareDocumentPosition(h1) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -188,110 +188,26 @@ describe("Header", () => {
     expect(boardBtn.getAttribute("aria-pressed")).toBe("false");
   });
 
-  // ── Theme Toggle ─────────────────────────────────────────────────
-
-  it("renders theme toggle button when onToggleTheme is provided", () => {
-    const onToggleTheme = vi.fn();
-    render(<Header themeMode="dark" onToggleTheme={onToggleTheme} />);
-    const btn = screen.getByTestId("theme-toggle-btn");
-    expect(btn).toBeDefined();
-  });
-
-  it("does not render theme toggle when onToggleTheme is not provided", () => {
-    render(<Header />);
-    const btn = screen.queryByTestId("theme-toggle-btn");
-    expect(btn).toBeNull();
-  });
-
-  it("calls onToggleTheme when theme toggle button is clicked", () => {
-    const onToggleTheme = vi.fn();
-    render(<Header themeMode="dark" onToggleTheme={onToggleTheme} />);
-    const btn = screen.getByTestId("theme-toggle-btn");
-    fireEvent.click(btn);
-    expect(onToggleTheme).toHaveBeenCalledOnce();
-  });
-
-  it("shows Moon icon for dark mode", () => {
-    const onToggleTheme = vi.fn();
-    render(<Header themeMode="dark" onToggleTheme={onToggleTheme} />);
-    const btn = screen.getByTestId("theme-toggle-btn");
-    expect(btn.querySelector("svg")).toBeDefined();
-  });
-
-  it("shows Sun icon for light mode", () => {
-    const onToggleTheme = vi.fn();
-    render(<Header themeMode="light" onToggleTheme={onToggleTheme} />);
-    const btn = screen.getByTestId("theme-toggle-btn");
-    expect(btn.querySelector("svg")).toBeDefined();
-  });
-
-  it("shows Monitor icon for system mode", () => {
-    const onToggleTheme = vi.fn();
-    render(<Header themeMode="system" onToggleTheme={onToggleTheme} />);
-    const btn = screen.getByTestId("theme-toggle-btn");
-    expect(btn.querySelector("svg")).toBeDefined();
-  });
-
-  it("shows correct title for dark mode", () => {
-    const onToggleTheme = vi.fn();
-    render(<Header themeMode="dark" onToggleTheme={onToggleTheme} />);
-    const btn = screen.getByTitle("Toggle theme (Dark)");
-    expect(btn).toBeDefined();
-  });
-
-  it("shows correct title for light mode", () => {
-    const onToggleTheme = vi.fn();
-    render(<Header themeMode="light" onToggleTheme={onToggleTheme} />);
-    const btn = screen.getByTitle("Toggle theme (Light)");
-    expect(btn).toBeDefined();
-  });
-
-  it("shows correct title for system mode", () => {
-    const onToggleTheme = vi.fn();
-    render(<Header themeMode="system" onToggleTheme={onToggleTheme} />);
-    const btn = screen.getByTitle("Toggle theme (System)");
-    expect(btn).toBeDefined();
-  });
-
   // ── Terminal Button ─────────────────────────────────────────────
-  // Terminal button is now always enabled (interactive shell feature)
 
   it("renders terminal button with correct title", () => {
     const onToggle = vi.fn();
-    render(<Header onToggleTerminal={onToggle} inProgressCount={0} />);
+    render(<Header onToggleTerminal={onToggle} />);
     const btn = screen.getByTitle("Open Terminal");
     expect(btn).toBeDefined();
   });
 
   it("calls onToggleTerminal when terminal button is clicked", () => {
     const onToggle = vi.fn();
-    render(<Header onToggleTerminal={onToggle} inProgressCount={1} />);
+    render(<Header onToggleTerminal={onToggle} />);
     const btn = screen.getByTitle("Open Terminal");
     fireEvent.click(btn);
     expect(onToggle).toHaveBeenCalledOnce();
   });
 
-  it("is enabled regardless of in-progress task count", () => {
-    // Terminal is now always accessible as an interactive shell
-    const { rerender } = render(<Header onToggleTerminal={vi.fn()} inProgressCount={0} />);
-    let btn = screen.getByTitle("Open Terminal");
+  it("is enabled", () => {
+    render(<Header onToggleTerminal={vi.fn()} />);
+    const btn = screen.getByTitle("Open Terminal");
     expect((btn as HTMLButtonElement).disabled).toBe(false);
-
-    rerender(<Header onToggleTerminal={vi.fn()} inProgressCount={3} />);
-    btn = screen.getByTitle("Open Terminal");
-    expect((btn as HTMLButtonElement).disabled).toBe(false);
-  });
-
-  it("shows badge when in-progress tasks exist", () => {
-    render(<Header onToggleTerminal={vi.fn()} inProgressCount={3} />);
-    const badge = screen.getByTestId("terminal-badge");
-    expect(badge.textContent).toBe("3");
-  });
-
-  it("does not show badge when no in-progress tasks", () => {
-    render(<Header onToggleTerminal={vi.fn()} inProgressCount={0} />);
-    const badge = screen.queryByTestId("terminal-badge");
-    expect(badge).toBeNull();
   });
 });
-
