@@ -331,3 +331,43 @@ export const VALID_TRANSITIONS: Record<Column, Column[]> = {
   done: ["archived"],
   archived: ["done"],
 };
+
+// ── Planning Mode Types ────────────────────────────────────────────────────
+
+/** Type of planning question presented to the user */
+export type PlanningQuestionType = "text" | "single_select" | "multi_select" | "confirm";
+
+/** A single question in the planning conversation flow */
+export interface PlanningQuestion {
+  id: string;
+  type: PlanningQuestionType;
+  question: string;
+  description?: string;
+  options?: Array<{ id: string; label: string; description?: string }>;
+}
+
+/** The final summary generated after planning conversation completes */
+export interface PlanningSummary {
+  title: string;
+  description: string;
+  suggestedSize: "S" | "M" | "L";
+  suggestedDependencies: string[];
+  keyDeliverables: string[];
+}
+
+/** Response from planning endpoints - either a question or the final summary */
+export type PlanningResponse =
+  | { type: "question"; data: PlanningQuestion }
+  | { type: "complete"; data: PlanningSummary };
+
+/** Planning session state stored in memory */
+export interface PlanningSession {
+  id: string;
+  ip: string;
+  initialPlan: string;
+  history: Array<{ question: PlanningQuestion; response: unknown }>;
+  currentQuestion?: PlanningQuestion;
+  summary?: PlanningSummary;
+  createdAt: Date;
+  updatedAt: Date;
+}

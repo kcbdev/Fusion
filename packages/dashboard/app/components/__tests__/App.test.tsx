@@ -404,3 +404,62 @@ describe("App GitHub import", () => {
     });
   });
 });
+
+describe("App Planning Mode", () => {
+  it("opens Planning Mode modal when plan button is clicked", async () => {
+    render(<App />);
+
+    // Wait for the header to render
+    await waitFor(() => {
+      expect(screen.getByTitle("Create a task with AI planning")).toBeTruthy();
+    });
+
+    // Click the plan button
+    fireEvent.click(screen.getByTitle("Create a task with AI planning"));
+
+    // Planning modal should be visible
+    await waitFor(() => {
+      expect(screen.getByText("Planning Mode")).toBeTruthy();
+    });
+  });
+
+  it("closes Planning Mode modal on close button click", async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle("Create a task with AI planning")).toBeTruthy();
+    });
+
+    // Open the modal
+    fireEvent.click(screen.getByTitle("Create a task with AI planning"));
+    await waitFor(() => {
+      expect(screen.getByText("Planning Mode")).toBeTruthy();
+    });
+
+    // Close the modal using the close button
+    fireEvent.click(screen.getByLabelText("Close"));
+
+    // Modal should be closed
+    await waitFor(() => {
+      expect(screen.queryByText("Transform your idea into a detailed task")).toBeNull();
+    });
+  });
+
+  it("renders planning modal with correct initial state", async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle("Create a task with AI planning")).toBeTruthy();
+    });
+
+    // Open the modal
+    fireEvent.click(screen.getByTitle("Create a task with AI planning"));
+
+    // Initial view should show
+    await waitFor(() => {
+      expect(screen.getByText("Transform your idea into a detailed task")).toBeTruthy();
+      expect(screen.getByPlaceholderText(/e.g., Build a user authentication system with login/)).toBeTruthy();
+      expect(screen.getByText("Start Planning")).toBeTruthy();
+    });
+  });
+});

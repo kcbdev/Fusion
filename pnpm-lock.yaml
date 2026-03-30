@@ -108,6 +108,9 @@ importers:
       '@kb/core':
         specifier: workspace:*
         version: link:../core
+      '@kb/engine':
+        specifier: workspace:*
+        version: link:../engine
       '@types/multer':
         specifier: ^2.1.0
         version: 2.1.0

@@ -1,8 +1,9 @@
-import { Settings, Pause, Play, Square, Download, LayoutGrid, List, Terminal } from "lucide-react";
+import { Settings, Pause, Play, Square, Download, LayoutGrid, List, Terminal, Lightbulb } from "lucide-react";
 
 interface HeaderProps {
   onOpenSettings?: () => void;
   onOpenGitHubImport?: () => void;
+  onOpenPlanning?: () => void;
   onToggleTerminal?: () => void;
   globalPaused?: boolean;
   enginePaused?: boolean;
@@ -15,6 +16,7 @@ interface HeaderProps {
 export function Header({
   onOpenSettings,
   onOpenGitHubImport,
+  onOpenPlanning,
   onToggleTerminal,
   globalPaused,
   enginePaused,
@@ -57,6 +59,15 @@ export function Header({
         {/* Import from GitHub */}
         <button className="btn-icon" onClick={onOpenGitHubImport} title="Import from GitHub">
           <Download size={16} />
+        </button>
+        {/* Plan button - AI-guided task creation */}
+        <button
+          className="btn-icon"
+          onClick={onOpenPlanning}
+          title="Create a task with AI planning"
+          data-testid="planning-btn"
+        >
+          <Lightbulb size={16} />
         </button>
         {/* Terminal button - always available for interactive shell access */}
         <button

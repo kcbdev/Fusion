@@ -1,4 +1,5 @@
 import type { Task, TaskDetail, TaskAttachment, TaskCreateInput, AgentLogEntry, Column, MergeResult, Settings } from "@kb/core";
+import type { PlanningQuestion, PlanningSummary, PlanningResponse } from "@kb/core";
 
 async function api<T = unknown>(path: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -524,5 +525,49 @@ export function saveFileContent(taskId: string, filePath: string, content: strin
   return api<SaveFileResponse>(`/tasks/${taskId}/files/${encodeURIComponent(filePath)}`, {
     method: "POST",
     body: JSON.stringify({ content }),
+  });
+}
+
+// --- Planning Mode API ---
+
+/** Planning session state returned from API */
+export interface PlanningSession {
+  sessionId: string;
+  currentQuestion: PlanningQuestion | null;
+  summary: PlanningSummary | null;
+}
+
+/** Start a new planning session with an initial plan */
+export function startPlanning(initialPlan: string): Promise<PlanningSession> {
+  return api<PlanningSession>("/planning/start", {
+    method: "POST",
+    body: JSON.stringify({ initialPlan }),
+  });
+}
+
+/** Submit a response to the current planning question */
+export function respondToPlanning(
+  sessionId: string,
+  responses: Record<string, unknown>
+): Promise<PlanningSession> {
+  return api<PlanningSession>("/planning/respond", {
+    method: "POST",
+    body: JSON.stringify({ sessionId, responses }),
+  });
+}
+
+/** Cancel an active planning session */
+export function cancelPlanning(sessionId: string): Promise<void> {
+  return api<void>("/planning/cancel", {
+    method: "POST",
+    body: JSON.stringify({ sessionId }),
+  });
+}
+
+/** Create a task from a completed planning session */
+export function createTaskFromPlanning(sessionId: string): Promise<Task> {
+  return api<Task>("/planning/create-task", {
+    method: "POST",
+    body: JSON.stringify({ sessionId }),
   });
 }

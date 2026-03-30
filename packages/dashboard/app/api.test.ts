@@ -733,3 +733,168 @@ describe("Git Management API", () => {
     });
   });
 });
+
+// --- Planning Mode API Tests ---
+
+import { startPlanning, respondToPlanning, cancelPlanning, createTaskFromPlanning } from "./api";
+import type { PlanningQuestion, PlanningSummary } from "@kb/core";
+
+describe("Planning Mode API", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const FAKE_QUESTION: PlanningQuestion = {
+    id: "q-scope",
+    type: "single_select",
+    question: "What is the scope of this plan?",
+    description: "This helps estimate the size and complexity.",
+    options: [
+      { id: "small", label: "Small", description: "Quick implementation" },
+      { id: "large", label: "Large", description: "Complex feature" },
+    ],
+  };
+
+  const FAKE_SUMMARY: PlanningSummary = {
+    title: "Build user authentication",
+    description: "Implement login/logout with JWT tokens",
+    suggestedSize: "M",
+    suggestedDependencies: [],
+    keyDeliverables: ["Login form", "JWT middleware", "Logout endpoint"],
+  };
+
+  describe("startPlanning", () => {
+    it("sends POST with initial plan and returns session", async () => {
+      const response = { sessionId: "plan-123", currentQuestion: FAKE_QUESTION, summary: null };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, response, 201));
+
+      const result = await startPlanning("Build a user auth system");
+
+      expect(result.sessionId).toBe("plan-123");
+      expect(result.currentQuestion).toEqual(FAKE_QUESTION);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/planning/start", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+        body: JSON.stringify({ initialPlan: "Build a user auth system" }),
+      });
+    });
+
+    it("throws on rate limit error", async () => {
+      globalThis.fetch = vi.fn().mockReturnValue(
+        mockFetchResponse(false, { error: "Rate limit exceeded. Maximum 5 planning sessions per hour." }, 429)
+      );
+
+      await expect(startPlanning("Build something")).rejects.toThrow("Rate limit exceeded");
+    });
+
+    it("throws on validation error", async () => {
+      globalThis.fetch = vi.fn().mockReturnValue(
+        mockFetchResponse(false, { error: "initialPlan must be 500 characters or less" }, 400)
+      );
+
+      await expect(startPlanning("a".repeat(600))).rejects.toThrow("500 characters");
+    });
+  });
+
+  describe("respondToPlanning", () => {
+    it("sends POST with responses and returns next question", async () => {
+      const response = { sessionId: "plan-123", currentQuestion: FAKE_QUESTION, summary: null };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, response));
+
+      const result = await respondToPlanning("plan-123", { scope: "small" });
+
+      expect(result.sessionId).toBe("plan-123");
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/planning/respond", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+        body: JSON.stringify({ sessionId: "plan-123", responses: { scope: "small" } }),
+      });
+    });
+
+    it("returns summary when planning is complete", async () => {
+      const response = { sessionId: "plan-123", currentQuestion: null, summary: FAKE_SUMMARY };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, response));
+
+      const result = await respondToPlanning("plan-123", { final: "yes" });
+
+      expect(result.summary).toEqual(FAKE_SUMMARY);
+      expect(result.currentQuestion).toBeNull();
+    });
+
+    it("throws on session not found", async () => {
+      globalThis.fetch = vi.fn().mockReturnValue(
+        mockFetchResponse(false, { error: "Planning session plan-123 not found or expired" }, 404)
+      );
+
+      await expect(respondToPlanning("plan-123", {})).rejects.toThrow("not found");
+    });
+  });
+
+  describe("cancelPlanning", () => {
+    it("sends POST to cancel endpoint", async () => {
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, { success: true }));
+
+      await cancelPlanning("plan-123");
+
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/planning/cancel", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+        body: JSON.stringify({ sessionId: "plan-123" }),
+      });
+    });
+
+    it("throws on session not found", async () => {
+      globalThis.fetch = vi.fn().mockReturnValue(
+        mockFetchResponse(false, { error: "Planning session not found" }, 404)
+      );
+
+      await expect(cancelPlanning("plan-123")).rejects.toThrow("not found");
+    });
+  });
+
+  describe("createTaskFromPlanning", () => {
+    it("sends POST to create-task endpoint and returns task", async () => {
+      const createdTask: Task = {
+        id: "KB-042",
+        title: "Build user authentication",
+        description: "Implement login/logout with JWT tokens",
+        column: "triage",
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, createdTask, 201));
+
+      const result = await createTaskFromPlanning("plan-123");
+
+      expect(result.id).toBe("KB-042");
+      expect(result.column).toBe("triage");
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/planning/create-task", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+        body: JSON.stringify({ sessionId: "plan-123" }),
+      });
+    });
+
+    it("throws when session is not complete", async () => {
+      globalThis.fetch = vi.fn().mockReturnValue(
+        mockFetchResponse(false, { error: "Planning session is not complete" }, 400)
+      );
+
+      await expect(createTaskFromPlanning("plan-123")).rejects.toThrow("not complete");
+    });
+
+    it("throws on session not found", async () => {
+      globalThis.fetch = vi.fn().mockReturnValue(
+        mockFetchResponse(false, { error: "Planning session not found" }, 404)
+      );
+
+      await expect(createTaskFromPlanning("plan-123")).rejects.toThrow("not found");
+    });
+  });
+});

@@ -32,6 +32,7 @@
     "@codemirror/theme-one-dark": "^6.1.2",
     "@codemirror/view": "^6.36.4",
     "@kb/core": "workspace:*",
+    "@kb/engine": "workspace:*",
     "@types/multer": "^2.1.0",
     "express": "^5.1.0",
     "lucide-react": "^1.7.0",

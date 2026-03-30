@@ -152,4 +152,23 @@ describe("Header", () => {
       expect(screen.getByTitle("Start AI engine")).toBeDefined();
     });
   });
+
+  describe("planning button", () => {
+    it("renders planning button with correct title", () => {
+      renderHeader({ onOpenPlanning: vi.fn() });
+      expect(screen.getByTitle("Create a task with AI planning")).toBeDefined();
+    });
+
+    it("calls onOpenPlanning when planning button is clicked", () => {
+      const onOpenPlanning = vi.fn();
+      renderHeader({ onOpenPlanning });
+      fireEvent.click(screen.getByTitle("Create a task with AI planning"));
+      expect(onOpenPlanning).toHaveBeenCalled();
+    });
+
+    it("has correct data-testid for testing", () => {
+      renderHeader({ onOpenPlanning: vi.fn() });
+      expect(screen.getByTestId("planning-btn")).toBeDefined();
+    });
+  });
 });

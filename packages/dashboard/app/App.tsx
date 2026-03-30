@@ -7,6 +7,7 @@ import { ListView } from "./components/ListView";
 import { TaskDetailModal } from "./components/TaskDetailModal";
 import { TerminalModal } from "./components/TerminalModal";
 import { SettingsModal } from "./components/SettingsModal";
+import { PlanningModeModal } from "./components/PlanningModeModal";
 import type { SectionId } from "./components/SettingsModal";
 import { ToastContainer } from "./components/ToastContainer";
 import { GitHubImportModal } from "./components/GitHubImportModal";
@@ -17,6 +18,7 @@ import { useTheme } from "./hooks/useTheme";
 
 function AppInner() {
   const [isCreating, setIsCreating] = useState(false);
+  const [isPlanningOpen, setIsPlanningOpen] = useState(false);
   const [detailTask, setDetailTask] = useState<TaskDetail | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [githubImportOpen, setGitHubImportOpen] = useState(false);
@@ -94,6 +96,14 @@ function AppInner() {
     [createTask],
   );
 
+  // Planning mode handlers
+  const handlePlanningOpen = useCallback(() => setIsPlanningOpen(true), []);
+  const handlePlanningClose = useCallback(() => setIsPlanningOpen(false), []);
+  const handlePlanningTaskCreated = useCallback((task: Task) => {
+    addToast(`Created ${task.id} from planning mode`, "success");
+    setIsPlanningOpen(false);
+  }, [addToast]);
+
   const handleToggleAutoMerge = useCallback(async () => {
     const next = !autoMerge;
     setAutoMerge(next);
@@ -147,6 +157,7 @@ function AppInner() {
       <Header
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenGitHubImport={() => setGitHubImportOpen(true)}
+        onOpenPlanning={handlePlanningOpen}
         onToggleTerminal={handleToggleTerminal}
         globalPaused={globalPaused}
         enginePaused={enginePaused}
@@ -154,8 +165,6 @@ function AppInner() {
         onToggleEnginePause={handleToggleEnginePause}
         view={view}
         onChangeView={handleChangeView}
-        themeMode={themeMode}
-        onToggleTheme={handleToggleTheme}
       />
       {view === "board" ? (
         <Board
@@ -223,12 +232,16 @@ function AppInner() {
         onImport={handleGitHubImport}
         tasks={tasks}
       />
-      {terminalOpen && (
-        <TerminalModal
-          isOpen={terminalOpen}
-          onClose={handleTerminalClose}
-        />
-      )}
+      <PlanningModeModal
+        isOpen={isPlanningOpen}
+        onClose={handlePlanningClose}
+        onTaskCreated={handlePlanningTaskCreated}
+        tasks={tasks}
+      />
+      <TerminalModal
+        isOpen={terminalOpen}
+        onClose={handleTerminalClose}
+      />
       <ToastContainer toasts={toasts} onRemove={removeToast} />
     </>
   );

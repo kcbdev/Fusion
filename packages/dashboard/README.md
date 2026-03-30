@@ -4,6 +4,39 @@ Web-based dashboard for managing kb tasks. Provides a visual kanban board, list 
 
 ## Features
 
+### Planning Mode
+AI-guided interactive planning for creating well-specified tasks from high-level ideas. Click the lightbulb icon in the header to start planning.
+
+**How it works**:
+1. Enter a high-level description of what you want to build (e.g., "Build a user authentication system")
+2. The AI asks clarifying questions (scope, requirements, technology choices)
+3. Answer questions through an interactive UI with multiple question types:
+   - **Text**: Open-ended responses for detailed requirements
+   - **Single Select**: Choose one option from a list (e.g., scope: small/medium/large)
+   - **Multi Select**: Select multiple applicable options (e.g., features to include)
+   - **Confirm**: Yes/No questions for quick decisions
+4. Review the AI-generated summary with:
+   - Refinable title and description
+   - Size estimate (S/M/L)
+   - Suggested dependencies from existing tasks
+   - Key deliverables checklist
+5. Create the task directly from the summary
+
+**Features**:
+- **Rate Limiting**: Maximum 5 planning sessions per hour per IP
+- **Session Persistence**: 30-minute TTL with automatic cleanup
+- **Progress Tracking**: Visual progress indicator showing question number
+- **Back Navigation**: Revisit previous answers during the session
+- **Example Suggestions**: Quick-start chips with common task templates
+- **Dependency Selection**: Toggle existing tasks as dependencies
+- **Keyboard Navigation**: Tab through options, Enter to submit, Escape to close
+
+**API Endpoints**:
+- `POST /api/planning/start` - Begin planning session (`{ initialPlan }`)
+- `POST /api/planning/respond` - Submit response (`{ sessionId, responses }`)
+- `POST /api/planning/cancel` - Cancel session (`{ sessionId }`)
+- `POST /api/planning/create-task` - Create task from summary (`{ sessionId }`)
+
 ### Task Management
 - **Kanban Board**: Drag-and-drop task management across columns (Triage, Todo, In Progress, In Review, Done)
 - **Inline Editing**: Quick-edit task title and description directly on the board for Triage and Todo columns. Double-click a card or use the pencil icon that appears on hover.

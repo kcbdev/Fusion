@@ -5,6 +5,7 @@ import { createApiRoutes } from "./routes.js";
 import type { TaskStore, TaskAttachment } from "@kb/core";
 import type { TaskDetail } from "@kb/core";
 import type { AuthStorageLike, ModelRegistryLike } from "./routes.js";
+import { __resetPlanningState } from "./planning.js";
 
 function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
   return {
@@ -2547,6 +2548,357 @@ describe("Git Management endpoints", () => {
         );
 
         expect([400, 404, 500]).toContain(res.status);
+      });
+    });
+  });
+
+  describe("Planning Mode Routes", () => {
+    beforeEach(() => {
+      // Reset planning state before each test to avoid cross-test contamination
+      __resetPlanningState();
+    });
+
+    describe("POST /planning/start", () => {
+      it("creates a new planning session", async () => {
+        const res = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start",
+          JSON.stringify({ initialPlan: "Build a user auth system" }),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(201);
+        expect(res.body.sessionId).toBeDefined();
+        expect(typeof res.body.sessionId).toBe("string");
+        expect(res.body.firstQuestion).toBeDefined();
+        expect(res.body.firstQuestion.id).toBe("q-scope");
+        expect(res.body.firstQuestion.type).toBe("single_select");
+      });
+
+      it("requires initialPlan in body", async () => {
+        const res = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start",
+          JSON.stringify({}),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain("initialPlan is required");
+      });
+
+      it("rejects initialPlan longer than 500 chars", async () => {
+        const longPlan = "a".repeat(501);
+        const res = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start",
+          JSON.stringify({ initialPlan: longPlan }),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain("500 characters");
+      });
+
+      it("enforces rate limiting (5 sessions per hour per IP)", async () => {
+        // Create 5 sessions (should succeed)
+        for (let i = 0; i < 5; i++) {
+          const res = await REQUEST(
+            buildApp(),
+            "POST",
+            "/api/planning/start",
+            JSON.stringify({ initialPlan: `Plan ${i}` }),
+            { "Content-Type": "application/json" }
+          );
+          expect(res.status).toBe(201);
+        }
+
+        // 6th session should be rate limited
+        const res = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start",
+          JSON.stringify({ initialPlan: "Plan 6" }),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(429);
+        expect(res.body.error).toContain("Rate limit exceeded");
+      });
+    });
+
+    describe("POST /planning/respond", () => {
+      it("processes response and returns next question", async () => {
+        // First create a session
+        const startRes = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start",
+          JSON.stringify({ initialPlan: "Build a user auth system" }),
+          { "Content-Type": "application/json" }
+        );
+        expect(startRes.status).toBe(201);
+        const sessionId = startRes.body.sessionId;
+
+        // Submit a response
+        const res = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/respond",
+          JSON.stringify({ sessionId, responses: { scope: "medium" } }),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(200);
+        expect(res.body.type).toBe("question");
+        expect(res.body.data).toBeDefined();
+      });
+
+      it("returns summary after completing all questions", async () => {
+        // Create a session
+        const startRes = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start",
+          JSON.stringify({ initialPlan: "Build a user auth system" }),
+          { "Content-Type": "application/json" }
+        );
+        const sessionId = startRes.body.sessionId;
+
+        // Submit 3 responses to complete the session
+        await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/respond",
+          JSON.stringify({ sessionId, responses: { scope: "medium" } }),
+          { "Content-Type": "application/json" }
+        );
+
+        await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/respond",
+          JSON.stringify({ sessionId, responses: { requirements: "Must have login" } }),
+          { "Content-Type": "application/json" }
+        );
+
+        const finalRes = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/respond",
+          JSON.stringify({ sessionId, responses: { confirm: true } }),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(finalRes.status).toBe(200);
+        expect(finalRes.body.type).toBe("complete");
+        expect(finalRes.body.data.title).toBeDefined();
+        expect(finalRes.body.data.description).toBeDefined();
+        expect(finalRes.body.data.suggestedSize).toBeDefined();
+        expect(finalRes.body.data.keyDeliverables).toBeInstanceOf(Array);
+      });
+
+      it("returns 404 for invalid session ID", async () => {
+        const res = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/respond",
+          JSON.stringify({ sessionId: "invalid-session-id", responses: {} }),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(404);
+        expect(res.body.error).toContain("not found");
+      });
+
+      it("requires sessionId in body", async () => {
+        const res = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/respond",
+          JSON.stringify({ responses: {} }),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain("sessionId is required");
+      });
+
+      it("requires responses object", async () => {
+        const res = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/respond",
+          JSON.stringify({ sessionId: "some-id" }),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain("responses is required");
+      });
+    });
+
+    describe("POST /planning/cancel", () => {
+      it("cancels an active session", async () => {
+        // Create a session first
+        const startRes = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start",
+          JSON.stringify({ initialPlan: "Build a user auth system" }),
+          { "Content-Type": "application/json" }
+        );
+        const sessionId = startRes.body.sessionId;
+
+        const res = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/cancel",
+          JSON.stringify({ sessionId }),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+      });
+
+      it("returns 404 for non-existent session", async () => {
+        const res = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/cancel",
+          JSON.stringify({ sessionId: "non-existent-id" }),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(404);
+        expect(res.body.error).toContain("not found");
+      });
+
+      it("requires sessionId in body", async () => {
+        const res = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/cancel",
+          JSON.stringify({}),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain("sessionId is required");
+      });
+    });
+
+    describe("POST /planning/create-task", () => {
+      it("creates a task from completed planning session", async () => {
+        // Setup mock store for task creation
+        (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+          id: "KB-042",
+          description: "Build a user auth system",
+          column: "triage",
+          dependencies: [],
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        });
+        (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({});
+        (store.logEntry as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+        // Create a session and complete it
+        const startRes = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start",
+          JSON.stringify({ initialPlan: "Build a user auth system" }),
+          { "Content-Type": "application/json" }
+        );
+        const sessionId = startRes.body.sessionId;
+
+        // Complete the session
+        await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/respond",
+          JSON.stringify({ sessionId, responses: { scope: "medium" } }),
+          { "Content-Type": "application/json" }
+        );
+        await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/respond",
+          JSON.stringify({ sessionId, responses: { requirements: "Must have login" } }),
+          { "Content-Type": "application/json" }
+        );
+        await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/respond",
+          JSON.stringify({ sessionId, responses: { confirm: true } }),
+          { "Content-Type": "application/json" }
+        );
+
+        // Create task from planning
+        const res = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/create-task",
+          JSON.stringify({ sessionId }),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(201);
+        expect(store.createTask).toHaveBeenCalled();
+      });
+
+      it("returns 400 if session is not complete", async () => {
+        // Create a session but don't complete it
+        const startRes = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start",
+          JSON.stringify({ initialPlan: "Build a user auth system" }),
+          { "Content-Type": "application/json" }
+        );
+        const sessionId = startRes.body.sessionId;
+
+        const res = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/create-task",
+          JSON.stringify({ sessionId }),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain("not complete");
+      });
+
+      it("returns 404 for invalid session ID", async () => {
+        const res = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/create-task",
+          JSON.stringify({ sessionId: "invalid-session-id" }),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(404);
+        expect(res.body.error).toContain("not found");
+      });
+
+      it("requires sessionId in body", async () => {
+        const res = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/create-task",
+          JSON.stringify({}),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain("sessionId is required");
       });
     });
   });

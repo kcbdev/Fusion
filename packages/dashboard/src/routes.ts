@@ -1893,6 +1893,156 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     }
   });
 
+  // ── Planning Mode Routes ──────────────────────────────────────────────────
+
+  /**
+   * POST /api/planning/start
+   * Start a new planning session.
+   * Body: { initialPlan: string }
+   * Returns: { sessionId: string, firstQuestion: PlanningQuestion }
+   */
+  router.post("/planning/start", async (req, res) => {
+    try {
+      const { initialPlan } = req.body;
+
+      if (!initialPlan || typeof initialPlan !== "string") {
+        res.status(400).json({ error: "initialPlan is required and must be a string" });
+        return;
+      }
+
+      if (initialPlan.length > 500) {
+        res.status(400).json({ error: "initialPlan must be 500 characters or less" });
+        return;
+      }
+
+      const ip = req.ip || req.socket.remoteAddress || "unknown";
+
+      const { createSession, RateLimitError } = await import("./planning.js");
+      const result = await createSession(ip, initialPlan);
+      res.status(201).json(result);
+    } catch (err: any) {
+      if (err.name === "RateLimitError") {
+        res.status(429).json({ error: err.message });
+      } else {
+        res.status(500).json({ error: err.message || "Failed to start planning session" });
+      }
+    }
+  });
+
+  /**
+   * POST /api/planning/respond
+   * Submit a response to the current planning question.
+   * Body: { sessionId: string, responses: Record<string, unknown> }
+   * Returns: { type: "question" | "complete", data: PlanningQuestion | PlanningSummary }
+   */
+  router.post("/planning/respond", async (req, res) => {
+    try {
+      const { sessionId, responses } = req.body;
+
+      if (!sessionId || typeof sessionId !== "string") {
+        res.status(400).json({ error: "sessionId is required" });
+        return;
+      }
+
+      if (!responses || typeof responses !== "object") {
+        res.status(400).json({ error: "responses is required and must be an object" });
+        return;
+      }
+
+      const { submitResponse, SessionNotFoundError, InvalidSessionStateError } = await import("./planning.js");
+      const result = await submitResponse(sessionId, responses);
+      res.json(result);
+    } catch (err: any) {
+      if (err.name === "SessionNotFoundError") {
+        res.status(404).json({ error: err.message });
+      } else if (err.name === "InvalidSessionStateError") {
+        res.status(400).json({ error: err.message });
+      } else {
+        res.status(500).json({ error: err.message || "Failed to process response" });
+      }
+    }
+  });
+
+  /**
+   * POST /api/planning/cancel
+   * Cancel and cleanup a planning session.
+   * Body: { sessionId: string }
+   */
+  router.post("/planning/cancel", async (req, res) => {
+    try {
+      const { sessionId } = req.body;
+
+      if (!sessionId || typeof sessionId !== "string") {
+        res.status(400).json({ error: "sessionId is required" });
+        return;
+      }
+
+      const { cancelSession, SessionNotFoundError } = await import("./planning.js");
+      await cancelSession(sessionId);
+      res.json({ success: true });
+    } catch (err: any) {
+      if (err.name === "SessionNotFoundError") {
+        res.status(404).json({ error: err.message });
+      } else {
+        res.status(500).json({ error: err.message || "Failed to cancel session" });
+      }
+    }
+  });
+
+  /**
+   * POST /api/planning/create-task
+   * Create a task from a completed planning session.
+   * Body: { sessionId: string }
+   * Returns: Created Task
+   */
+  router.post("/planning/create-task", async (req, res) => {
+    try {
+      const { sessionId } = req.body;
+
+      if (!sessionId || typeof sessionId !== "string") {
+        res.status(400).json({ error: "sessionId is required" });
+        return;
+      }
+
+      const { getSession, getSummary, cleanupSession, SessionNotFoundError } = await import("./planning.js");
+
+      const session = getSession(sessionId);
+      if (!session) {
+        res.status(404).json({ error: `Planning session ${sessionId} not found or expired` });
+        return;
+      }
+
+      const summary = getSummary(sessionId);
+      if (!summary) {
+        res.status(400).json({ error: "Planning session is not complete" });
+        return;
+      }
+
+      // Create the task
+      const task = await store.createTask({
+        title: summary.title,
+        description: summary.description,
+        column: "triage",
+        dependencies: summary.suggestedDependencies.length > 0 ? summary.suggestedDependencies : undefined,
+      });
+
+      // Update task with suggested size if provided
+      if (summary.suggestedSize) {
+        await store.updateTask(task.id, { size: summary.suggestedSize });
+      }
+
+      // Log the planning mode creation
+      await store.logEntry(task.id, "Created via Planning Mode", `Initial plan: ${session.initialPlan.slice(0, 200)}`);
+
+      // Cleanup the session
+      cleanupSession(sessionId);
+
+      res.status(201).json(task);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to create task" });
+    }
+  });
+
   return router;
 }
 
