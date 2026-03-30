@@ -667,7 +667,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         res.status(400).json({ error: "Task is not in a failed state" });
         return;
       }
-      await store.updateTask(req.params.id, { status: undefined });
+      await store.updateTask(req.params.id, { status: undefined, error: undefined });
       await store.logEntry(req.params.id, "Retry requested from dashboard");
       const updated = await store.moveTask(req.params.id, "todo");
       res.json(updated);
