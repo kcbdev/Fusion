@@ -1301,6 +1301,24 @@ body {
 .detail-section {
   margin-top: 16px;
 }
+
+/* Spec tab layout - allows SpecEditor to fill available vertical space */
+.detail-section--spec {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  margin-top: 0;
+}
+
+/* Mobile responsive for spec tab */
+@media (max-width: 768px) {
+  .detail-section--spec {
+    flex: 1;
+    min-height: 0;
+  }
+}
+
 .detail-section h4 {
   font-size: 12px;
   text-transform: uppercase;

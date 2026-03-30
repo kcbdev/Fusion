@@ -2,10 +2,9 @@
 "@dustinbyrne/kb": patch
 ---
 
-Fix SpecEditor layout to fill available modal space
+Fix SpecEditor layout in task detail modal
 
-- Added CSS styles for `.spec-editor` component with flex layout
-- Removed hardcoded `rows={20}` from textarea in favor of CSS-based sizing
-- Toolbar stays fixed at top while content scrolls
-- AI revision section stays at bottom
-- Added responsive styles for mobile viewports
+The SpecEditor's edit view now properly fills the available vertical space
+in the task detail modal. Added flex constraints to the spec tab wrapper
+container so the textarea expands to fill space between the tabs and modal
+bottom, with proper scrolling behavior for long content.

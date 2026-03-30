@@ -476,7 +476,7 @@ export function TaskDetailModal({
               onClose={() => setActiveTab("definition")}
             />
           ) : activeTab === "spec" ? (
-            <div className="detail-section">
+            <div className="detail-section detail-section--spec">
               <SpecEditor
                 content={task.prompt || ""}
                 onSave={handleSaveSpec}
