@@ -7658,7 +7658,7 @@ html .column.drag-over * {
   top: -1px;
   width: 2px;
   height: 10px;
-  background: var(--in-progress);
+  background: var(--text-muted);
   border-radius: 1px;
   z-index: 2;
   transform: translateX(-50%);
