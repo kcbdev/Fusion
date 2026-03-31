@@ -11,12 +11,10 @@ const mockFetchWorkspaces = vi.mocked(api.fetchWorkspaces);
 
 describe("useWorkspaces", () => {
   beforeEach(() => {
-    vi.useFakeTimers();
     mockFetchWorkspaces.mockReset();
   });
 
   afterEach(() => {
-    vi.useRealTimers();
     vi.clearAllMocks();
   });
 
@@ -55,11 +53,12 @@ describe("useWorkspaces", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.workspaces).toEqual([]);
 
-    await vi.advanceTimersByTimeAsync(10000);
+    // Wait for the polling interval (10 seconds) - use real timers
+    await new Promise((resolve) => setTimeout(resolve, 10000));
 
     await waitFor(() => expect(result.current.workspaces).toHaveLength(1));
     expect(mockFetchWorkspaces).toHaveBeenCalledTimes(2);
-  });
+  }, 15000);
 
   it("surfaces fetch errors", async () => {
     mockFetchWorkspaces.mockRejectedValueOnce(new Error("Failed to load workspaces"));
