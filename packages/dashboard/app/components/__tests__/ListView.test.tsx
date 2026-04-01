@@ -1368,10 +1368,9 @@ describe("ListView Quick Entry", () => {
     const mockOnQuickCreate = vi.fn().mockResolvedValue(undefined);
     renderListView({ onQuickCreate: mockOnQuickCreate });
 
-    const input = screen.getByTestId("quick-entry-input");
-    
-    // Focus the input to expand the QuickEntryBox
-    fireEvent.focus(input);
+    // Click the toggle button to expand the QuickEntryBox
+    const toggleButton = screen.getByTestId("quick-entry-toggle");
+    fireEvent.click(toggleButton);
     
     // Model selector button should be visible
     const modelButton = await screen.findByTestId("quick-entry-models-button");
@@ -1382,10 +1381,9 @@ describe("ListView Quick Entry", () => {
     const mockOnQuickCreate = vi.fn().mockResolvedValue(undefined);
     renderListView({ onQuickCreate: mockOnQuickCreate });
 
-    const input = screen.getByTestId("quick-entry-input");
-    
-    // Focus the input to expand the QuickEntryBox
-    fireEvent.focus(input);
+    // Click the toggle button to expand the QuickEntryBox
+    const toggleButton = screen.getByTestId("quick-entry-toggle");
+    fireEvent.click(toggleButton);
     
     // Dependency selector button should be visible
     const depsButton = await screen.findByTestId("quick-entry-deps-button");

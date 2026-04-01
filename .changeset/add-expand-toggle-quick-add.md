@@ -2,10 +2,9 @@
 "@gsxdsm/fusion": patch
 ---
 
-Add expand/collapse toggle button to QuickEntryBox and InlineCreateCard
+Add expand/collapse toggle button to Quick Add views in dashboard
 
-- Both quick task creation components now have a manual toggle button (ChevronDown/ChevronUp)
-- Components no longer auto-expand on focus - users have control over when to see advanced options
+- Replaced auto-expand behavior with manual toggle button in QuickEntryBox (list view) and InlineCreateCard (board view)
+- Users can now click a chevron button to show/hide advanced options (Deps, Models, Plan, Subtask, Refine)
 - Expanded state persists until manually toggled or task is submitted/cancelled
-- Blur no longer collapses the view - consistent UX across list and board views
-- Added CSS styles for collapsed/expanded states and toggle button positioning
+- Provides cleaner default UI while keeping advanced options easily discoverable
