@@ -1830,7 +1830,7 @@ git log --oneline
       "",
       "## Steering Comments",
       "",
-      "The following steering comments were added by the user during execution. Consider adjusting your approach or replanning remaining steps based on this feedback.",
+      "The following comments were added by the user during execution. Consider adjusting your approach or replanning remaining steps based on this feedback.",
       "",
     ];
     for (const comment of recentComments) {

@@ -1675,14 +1675,14 @@ describe("buildExecutionPrompt", () => {
   });
 
   it("includes only the 10 most recent comments", () => {
-    const allComments = Array.from({ length: 15 }, (_, i) => ({
+    const comments = Array.from({ length: 15 }, (_, i) => ({
       id: `${i}`,
       text: `Comment ${i}`,
       createdAt: new Date().toISOString(),
       author: "user",
     }));
 
-    const task = createMockTaskDetail({ comments: allComments });
+    const task = createMockTaskDetail({ comments });
     const result = buildExecutionPrompt(task);
 
     // Should include comments 5-14 (the 10 most recent), not 0-4
