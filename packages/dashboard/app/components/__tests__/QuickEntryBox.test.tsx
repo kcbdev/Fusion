@@ -1036,7 +1036,7 @@ describe("QuickEntryBox", () => {
       });
     });
 
-    it("clicking save button shows success toast", async () => {
+    it("clicking save button creates the task", async () => {
       const { props } = renderQuickEntryBox();
       const textarea = screen.getByTestId("quick-entry-input");
 
@@ -1046,9 +1046,14 @@ describe("QuickEntryBox", () => {
       // Click the save button
       fireEvent.click(screen.getByTestId("save-button"));
 
-      // Success toast should be shown
+      // Task should be created
       await waitFor(() => {
-        expect(props.addToast).toHaveBeenCalledWith("Draft saved", "success");
+        expect(props.onCreate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            description: "Task to save",
+            column: "triage",
+          }),
+        );
       });
     });
 
@@ -1072,7 +1077,7 @@ describe("QuickEntryBox", () => {
       fireEvent.change(textarea, { target: { value: "Task to save" } });
 
       const saveButton = screen.getByTestId("save-button");
-      expect(saveButton.getAttribute("title")).toBe("Save draft to browser storage");
+      expect(saveButton.getAttribute("title")).toBe("Create task");
     });
 
     it("save button prevents textarea blur on mousedown", () => {

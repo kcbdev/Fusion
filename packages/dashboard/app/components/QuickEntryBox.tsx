@@ -395,15 +395,9 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
   }, [description, onSubtaskBreakdown, addToast, resetForm]);
 
   const handleSaveClick = useCallback(() => {
-    const trimmed = description.trim();
-    if (!trimmed) return;
-
-    // Explicitly save to localStorage (even though auto-save already does this)
-    if (typeof window !== "undefined") {
-      localStorage.setItem(STORAGE_KEY, trimmed);
-    }
-    addToast("Draft saved", "success");
-  }, [description, addToast]);
+    // Save button now creates the task (same as Enter key)
+    handleSubmit();
+  }, [handleSubmit]);
 
   const handleRefine = useCallback(async (type: RefinementType) => {
     const trimmed = description.trim();
@@ -639,7 +633,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
                   onMouseDown={(e) => e.preventDefault()}
                   disabled={!description.trim() || isSubmitting}
                   data-testid="save-button"
-                  title="Save draft to browser storage"
+                  title="Create task"
                 >
                   <Save size={12} style={{ verticalAlign: "middle" }} />
                   Save

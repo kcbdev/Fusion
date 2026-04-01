@@ -8,6 +8,7 @@ import { CustomModelDropdown } from "./CustomModelDropdown";
 import { applyPresetToSelection } from "../utils/modelPresets";
 
 const ALLOWED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+const STORAGE_KEY = "kb-inline-create-text";
 
 interface PendingImage {
   file: File;
@@ -64,7 +65,12 @@ export function InlineCreateCard({
   onPlanningMode,
   onSubtaskBreakdown,
 }: InlineCreateCardProps) {
-  const [description, setDescription] = useState("");
+  const [description, setDescription] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem(STORAGE_KEY) || "";
+    }
+    return "";
+  });
   const [dependencies, setDependencies] = useState<string[]>([]);
   const [showDeps, setShowDeps] = useState(false);
   const [depSearch, setDepSearch] = useState("");
@@ -83,6 +89,13 @@ export function InlineCreateCard({
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+
+  // Persist description to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem(STORAGE_KEY, description);
+    }
+  }, [description]);
 
   const loadModels = useCallback(async () => {
     if (availableModels) {
@@ -214,6 +227,14 @@ export function InlineCreateCard({
   useEffect(() => {
     return () => {
       pendingImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
+
+      // Clear localStorage on unmount if there's no description (user abandoned)
+      if (typeof window !== "undefined") {
+        const current = localStorage.getItem(STORAGE_KEY);
+        if (current && current.trim() === "") {
+          localStorage.removeItem(STORAGE_KEY);
+        }
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- cleanup only on unmount
   }, []);
@@ -287,6 +308,11 @@ export function InlineCreateCard({
 
       setSelectedPresetId(undefined);
       addToast(`Created ${task.id}`, "success");
+
+      // Clear localStorage after successful task creation
+      if (typeof window !== "undefined") {
+        localStorage.removeItem(STORAGE_KEY);
+      }
     } catch (err: any) {
       addToast(err.message, "error");
     } finally {
@@ -311,6 +337,10 @@ export function InlineCreateCard({
     async (e: React.KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
+        // Clear localStorage when user explicitly cancels
+        if (typeof window !== "undefined") {
+          localStorage.removeItem(STORAGE_KEY);
+        }
         onCancel();
         return;
       }

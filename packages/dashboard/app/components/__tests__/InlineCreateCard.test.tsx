@@ -90,6 +90,7 @@ function chooseModel(label: "Executor Model" | "Validator Model", optionText: st
 
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.clear();
   vi.mocked(fetchModels).mockResolvedValue(MOCK_MODELS);
   vi.mocked(fetchSettings).mockResolvedValue({
     modelPresets: [],
@@ -534,5 +535,89 @@ describe("InlineCreateCard Plan and Subtask buttons", () => {
 
     // The handler validation exists but can't be triggered via click when disabled
     // The disabled state is the primary UX protection
+  });
+});
+
+describe("InlineCreateCard localStorage persistence", () => {
+  beforeEach(() => {
+    // Clear localStorage before each test
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it("restores description from localStorage on mount", () => {
+    // Pre-populate localStorage
+    localStorage.setItem("kb-inline-create-text", "Saved draft description");
+
+    renderCard();
+    const textarea = screen.getByPlaceholderText("What needs to be done?");
+
+    // Should restore the saved description
+    expect((textarea as HTMLTextAreaElement).value).toBe("Saved draft description");
+  });
+
+  it("updates localStorage when typing", async () => {
+    renderCard();
+    const textarea = screen.getByPlaceholderText("What needs to be done?");
+
+    fireEvent.change(textarea, { target: { value: "Typing this task" } });
+
+    // Wait for the useEffect to run
+    await waitFor(() => {
+      expect(localStorage.getItem("kb-inline-create-text")).toBe("Typing this task");
+    });
+  });
+
+  it("clears localStorage after successful task creation", async () => {
+    const { props } = renderCard();
+    const textarea = screen.getByPlaceholderText("What needs to be done?");
+
+    // Type something to set localStorage
+    fireEvent.change(textarea, { target: { value: "Task to create" } });
+    await waitFor(() => {
+      expect(localStorage.getItem("kb-inline-create-text")).toBe("Task to create");
+    });
+
+    // Submit the task by clicking the Save button
+    fireEvent.click(screen.getByRole("button", { name: /Save/i }));
+
+    await waitFor(() => {
+      expect(props.onSubmit).toHaveBeenCalled();
+    });
+
+    // localStorage should be cleared
+    expect(localStorage.getItem("kb-inline-create-text")).toBeNull();
+  });
+
+  it("clears localStorage when cancelling via Escape key", async () => {
+    const { props } = renderCard();
+    const textarea = screen.getByPlaceholderText("What needs to be done?");
+
+    // Type something to set localStorage
+    fireEvent.change(textarea, { target: { value: "Draft to cancel" } });
+    await waitFor(() => {
+      expect(localStorage.getItem("kb-inline-create-text")).toBe("Draft to cancel");
+    });
+
+    // Press Escape to cancel
+    fireEvent.keyDown(textarea, { key: "Escape" });
+
+    // onCancel should be called
+    await waitFor(() => {
+      expect(props.onCancel).toHaveBeenCalled();
+    });
+
+    // localStorage should be cleared
+    expect(localStorage.getItem("kb-inline-create-text")).toBeNull();
+  });
+
+  it("starts with empty description when localStorage is empty", () => {
+    renderCard();
+    const textarea = screen.getByPlaceholderText("What needs to be done?");
+
+    expect((textarea as HTMLTextAreaElement).value).toBe("");
   });
 });
