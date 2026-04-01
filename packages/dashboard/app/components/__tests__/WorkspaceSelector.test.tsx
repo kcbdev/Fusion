@@ -46,11 +46,11 @@ describe("WorkspaceSelector", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: /KB-200/i }));
+    await user.click(screen.getByRole("button", { name: /FN-200/i }));
 
     expect(screen.getByText("Project Root")).toBeInTheDocument();
     const menu = screen.getByRole("listbox", { name: /select workspace/i });
-    const activeOption = within(menu).getByRole("button", { name: /KB-200 Short title/i });
+    const activeOption = within(menu).getByRole("button", { name: /FN-200 Short title/i });
     expect(activeOption.className).toContain("active");
   });
 
@@ -67,7 +67,7 @@ describe("WorkspaceSelector", () => {
     );
 
     await user.click(screen.getByRole("button", { name: /kb/i }));
-    await user.click(screen.getByRole("button", { name: /KB-123/i }));
+    await user.click(screen.getByRole("button", { name: /FN-123/i }));
 
     expect(onSelect).toHaveBeenCalledWith("FN-123");
     expect(screen.queryByText("Task Worktrees")).not.toBeInTheDocument();

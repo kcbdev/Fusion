@@ -62,6 +62,27 @@ vi.mock("../../hooks/useTasks", () => ({
   }),
 }));
 
+vi.mock("../../hooks/useProjects", () => ({
+  useProjects: () => ({
+    projects: [],
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+    register: vi.fn(),
+    update: vi.fn(),
+    unregister: vi.fn(),
+  }),
+}));
+
+vi.mock("../../hooks/useCurrentProject", () => ({
+  useCurrentProject: () => ({
+    currentProject: { id: "proj_123", name: "Test Project", path: "/test", status: "active", isolationMode: "in-process", createdAt: "", updatedAt: "" },
+    setCurrentProject: vi.fn(),
+    clearCurrentProject: vi.fn(),
+    loading: false,
+  }),
+}));
+
 import { fetchAuthStatus, fetchSettings, fetchTaskDetail, updateSettings } from "../../api";
 
 beforeEach(() => {
@@ -355,18 +376,24 @@ describe("App engine pause (soft pause)", () => {
 
 describe("App view switching", () => {
   it("renders Board view by default", async () => {
+    // Set project mode so board view is available
+    localStorage.setItem("kb-dashboard-view-mode", "project");
+
     render(<App />);
 
     // Wait for the app to render and check that the board is visible
     await waitFor(() => {
-      expect(screen.getByRole("main")).toBeTruthy();
+      expect(document.querySelector(".board")).toBeTruthy();
     });
 
-    // Board should be rendered
-    expect(screen.getByRole("main").className).toContain("board");
+    // Cleanup
+    localStorage.removeItem("kb-dashboard-view-mode");
   });
 
   it("renders ListView when view is switched to list", async () => {
+    // Set project mode so board/list view is available
+    localStorage.setItem("kb-dashboard-view-mode", "project");
+
     render(<App />);
 
     // Wait for the header to render with view toggle
@@ -381,9 +408,15 @@ describe("App view switching", () => {
     await waitFor(() => {
       expect(document.querySelector(".list-view")).toBeTruthy();
     });
+
+    // Cleanup
+    localStorage.removeItem("kb-dashboard-view-mode");
   });
 
   it("switches back to Board view from list view", async () => {
+    // Set project mode so board/list view is available
+    localStorage.setItem("kb-dashboard-view-mode", "project");
+
     render(<App />);
 
     // Wait for the header to render
@@ -402,9 +435,15 @@ describe("App view switching", () => {
     await waitFor(() => {
       expect(document.querySelector(".board")).toBeTruthy();
     });
+
+    // Cleanup
+    localStorage.removeItem("kb-dashboard-view-mode");
   });
 
   it("opens the NewTaskModal from the list view new-task button", async () => {
+    // Set project mode so board/list view is available
+    localStorage.setItem("kb-dashboard-view-mode", "project");
+
     render(<App />);
 
     await waitFor(() => {
@@ -424,11 +463,15 @@ describe("App view switching", () => {
       expect(screen.getByText("New Task")).toBeTruthy();
       expect(screen.getByPlaceholderText("What needs to be done?")).toBeTruthy();
     });
+
+    // Cleanup
+    localStorage.removeItem("kb-dashboard-view-mode");
   });
 
   it("persists view preference to localStorage", async () => {
-    // Clear any previous value
-    localStorage.removeItem("kb-dashboard-view");
+    // Clear any previous value and set project mode
+    localStorage.removeItem("kb-dashboard-task-view");
+    localStorage.setItem("kb-dashboard-view-mode", "project");
 
     render(<App />);
 
@@ -442,13 +485,17 @@ describe("App view switching", () => {
 
     // Should have saved to localStorage
     await waitFor(() => {
-      expect(localStorage.getItem("kb-dashboard-view")).toBe("list");
+      expect(localStorage.getItem("kb-dashboard-task-view")).toBe("list");
     });
+
+    // Cleanup
+    localStorage.removeItem("kb-dashboard-view-mode");
   });
 
   it("initializes view from localStorage if available", async () => {
-    // Set localStorage to list view
-    localStorage.setItem("kb-dashboard-view", "list");
+    // Set localStorage to list view and project mode
+    localStorage.setItem("kb-dashboard-task-view", "list");
+    localStorage.setItem("kb-dashboard-view-mode", "project");
 
     render(<App />);
 
@@ -461,7 +508,8 @@ describe("App view switching", () => {
     expect(screen.getByTitle("List view").className).toContain("active");
 
     // Cleanup
-    localStorage.removeItem("kb-dashboard-view");
+    localStorage.removeItem("kb-dashboard-task-view");
+    localStorage.removeItem("kb-dashboard-view-mode");
   });
 
   it("shows view toggle buttons in header", async () => {

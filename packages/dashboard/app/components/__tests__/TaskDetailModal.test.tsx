@@ -731,7 +731,7 @@ describe("TaskDetailModal", () => {
       expect(container.querySelector(".detail-activity-list")).toBeNull();
     });
 
-    it("can switch between all four tabs", () => {
+    it("can switch between all tabs", () => {
       const { container } = render(
         <TaskDetailModal
           task={makeTask({
@@ -763,14 +763,16 @@ describe("TaskDetailModal", () => {
 
       // Switch to Steering tab
       fireEvent.click(screen.getByText("Steering"));
-      expect(screen.getByText("Steering Comments")).toBeTruthy();
+      // The SteeringTab renders an h4 with "Comments" 
+      expect(container.querySelector("h4")?.textContent).toBe("Comments");
       expect(container.querySelector("[data-testid='agent-log-viewer']")).toBeNull();
 
       // Switch back to Definition tab
       fireEvent.click(screen.getByText("Definition"));
       expect(container.querySelector(".markdown-body")).toBeTruthy();
       expect(container.querySelector(".detail-activity")).toBeNull();
-      expect(screen.queryByText("Steering Comments")).toBeNull();
+      // The Comments heading should not be visible in Definition tab
+      expect(container.querySelector("h4")?.textContent).not.toBe("Comments");
     });
 
     it("switches to Agent Log tab and back", async () => {
@@ -1166,7 +1168,7 @@ describe("TaskDetailModal", () => {
       );
 
       const tabs = container.querySelectorAll(".detail-tab");
-      expect(tabs.length).toBe(6); // Definition, Activity, Agent Log, Steering, Comments, Model
+      expect(tabs.length).toBe(7); // Definition, Activity, Agent Log, Changes, Steering, Comments, Model
       // Tabs should use class-based styling, not inline styles
       expect(tabs[0].classList.contains("detail-tab")).toBe(true);
       expect(tabs[0].classList.contains("detail-tab-active")).toBe(true); // Definition is default active
@@ -1175,6 +1177,7 @@ describe("TaskDetailModal", () => {
       expect(tabs[3].classList.contains("detail-tab-active")).toBe(false);
       expect(tabs[4].classList.contains("detail-tab-active")).toBe(false);
       expect(tabs[5].classList.contains("detail-tab-active")).toBe(false);
+      expect(tabs[6].classList.contains("detail-tab-active")).toBe(false);
       // Verify no inline padding/fontSize (responsive CSS controls this)
       expect((tabs[0] as HTMLElement).style.padding).toBe("");
       expect((tabs[0] as HTMLElement).style.fontSize).toBe("");
@@ -1652,7 +1655,7 @@ describe("TaskDetailModal", () => {
       });
     });
 
-    it("shows all 6 tabs in correct order with comments", () => {
+    it("shows all 7 tabs in correct order with comments", () => {
       const { container } = render(
         <TaskDetailModal
           task={makeTask()}
@@ -1666,13 +1669,14 @@ describe("TaskDetailModal", () => {
       );
 
       const tabs = container.querySelectorAll(".detail-tab");
-      expect(tabs.length).toBe(6);
+      expect(tabs.length).toBe(7);
       expect(tabs[0].textContent).toBe("Definition");
       expect(tabs[1].textContent).toBe("Activity");
       expect(tabs[2].textContent).toBe("Agent Log");
-      expect(tabs[3].textContent).toBe("Steering");
-      expect(tabs[4].textContent).toBe("Comments");
-      expect(tabs[5].textContent).toBe("Model");
+      expect(tabs[3].textContent).toBe("Changes");
+      expect(tabs[4].textContent).toBe("Steering");
+      expect(tabs[5].textContent).toBe("Comments");
+      expect(tabs[6].textContent).toBe("Model");
     });
 
     it("shows empty state and Edit button when no prompt", () => {
