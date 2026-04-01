@@ -529,6 +529,8 @@ export interface GlobalSettings {
    *  and ntfyTopic, notifications include a Click URL that opens the dashboard
    *  directly to the task. Example: "http://localhost:3000" or "https://fusion.example.com" */
   ntfyDashboardHost?: string;
+  /** Whether the first-run setup wizard has been completed. */
+  setupComplete?: boolean;
 }
 
 /**
@@ -876,6 +878,54 @@ export interface ArchivedTaskEntry {
   error?: string;
   /** Files modified during agent execution, captured at task completion time */
   modifiedFiles?: string[];
+}
+
+/** Detected project from filesystem scanning */
+export interface DetectedProject {
+  path: string;
+  name: string;
+  hasDb: boolean;
+}
+
+/** State for the first-run setup wizard UI */
+export interface SetupState {
+  isFirstRun: boolean;
+  hasDetectedProjects: boolean;
+  detectedProjects: DetectedProject[];
+  registeredProjects: RegisteredProject[];
+  recommendedAction: "auto-detect" | "create-new" | "manual-setup";
+}
+
+/** Input type for completing project setup */
+export interface ProjectSetupInput {
+  path: string;
+  name: string;
+  isolationMode?: IsolationMode;
+}
+
+/** Result of setup completion */
+export interface SetupCompletionResult {
+  success: boolean;
+  projects: RegisteredProject[];
+  errors?: Array<{ path: string; error: string }>;
+  nextSteps: string[];
+}
+
+/** Options for migration orchestration */
+export interface MigrationOptions {
+  startPath?: string;
+  maxDepth?: number;
+  autoRegister?: boolean;
+  dryRun?: boolean;
+  onProgress?: (completed: number, total: number, phase: string) => void;
+}
+
+/** Result of migration run */
+export interface MigrationResult {
+  projectsDetected: DetectedProject[];
+  projectsRegistered: RegisteredProject[];
+  projectsSkipped: Array<{ path: string; reason: string }>;
+  errors: Array<{ path: string; error: string }>;
 }
 
 /** Type of planning question presented to the user */
