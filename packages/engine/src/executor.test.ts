@@ -1115,7 +1115,7 @@ describe("TaskExecutor dependency-based worktree creation", () => {
     const conflictingPath = "/tmp/test/.worktrees/sharp-stone";
 
     mockedExecSync.mockImplementation((cmd: any) => {
-      if (typeof cmd === "string" && cmd.includes("git worktree add") && cmd.includes("-b")) {
+      if (cmd === 'git worktree add -b "kb/fn-065" "/tmp/test/.worktrees/swift-falcon"') {
         const err: any = new Error(
           `fatal: 'kb/fn-065' is already used by worktree at '${conflictingPath}'`,
         );
@@ -1127,11 +1127,22 @@ describe("TaskExecutor dependency-based worktree creation", () => {
       if (cmd === `git worktree remove "${conflictingPath}" --force`) {
         throw new Error("remove failed");
       }
+      if (cmd === 'git branch -D "kb/fn-065"') {
+        throw new Error("branch delete failed");
+      }
+      if (cmd === "git worktree list --porcelain") {
+        return Buffer.from(`/tmp/test/.git/worktrees/sharp-stone\n`);
+      }
       return Buffer.from("");
     });
 
     await executor.execute(makeTask({ id: "FN-065" }));
 
+    // After 3 retry attempts, should fail with combined error message
+    expect(store.updateTask).toHaveBeenCalledWith("FN-065", {
+      status: "failed",
+      error: expect.stringContaining("Worktree conflict"),
+    });
     expect(store.updateTask).toHaveBeenCalledWith("FN-065", {
       status: "failed",
       error: expect.stringContaining("automatic cleanup failed"),

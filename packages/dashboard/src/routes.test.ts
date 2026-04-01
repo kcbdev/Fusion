@@ -41,6 +41,18 @@ function createMockGlobalSettingsStore() {
   };
 }
 
+function createMockMissionStore() {
+  return {
+    createSession: vi.fn().mockResolvedValue({ id: "session-1", status: "active" }),
+    getSession: vi.fn().mockResolvedValue({ id: "session-1", status: "active", answers: [] }),
+    updateSession: vi.fn().mockResolvedValue(undefined),
+    addAnswer: vi.fn().mockResolvedValue(undefined),
+    deleteSession: vi.fn().mockResolvedValue(undefined),
+    listSessions: vi.fn().mockResolvedValue([]),
+    generatePlan: vi.fn().mockResolvedValue({ plan: "Test plan", steps: [] }),
+  };
+}
+
 function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
   return {
     getTask: vi.fn(),
@@ -71,24 +83,7 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
     getWorkflowStep: vi.fn(),
     updateWorkflowStep: vi.fn(),
     deleteWorkflowStep: vi.fn(),
-    getMissionStore: vi.fn().mockReturnValue({
-      listMissions: vi.fn().mockReturnValue([]),
-      createMission: vi.fn(),
-      getMissionWithHierarchy: vi.fn(),
-      updateMission: vi.fn(),
-      getMission: vi.fn(),
-      deleteMission: vi.fn(),
-      listMilestonesByMission: vi.fn().mockReturnValue([]),
-      createMilestone: vi.fn(),
-      updateMilestone: vi.fn(),
-      getMilestone: vi.fn(),
-      deleteMilestone: vi.fn(),
-      listTasksByMilestone: vi.fn().mockReturnValue([]),
-      createMissionTask: vi.fn(),
-      updateMissionTask: vi.fn(),
-      getMissionTask: vi.fn(),
-      deleteMissionTask: vi.fn(),
-    }),
+    getMissionStore: vi.fn().mockReturnValue(createMockMissionStore()),
     ...overrides,
   } as unknown as TaskStore;
 }
@@ -3679,15 +3674,10 @@ describe("Git Management endpoints", () => {
   });
 
   beforeEach(() => {
+    // Use the actual project root so git commands work
     store = createMockStore({
-      getRootDir: vi.fn().mockReturnValue(gitRepoDir),
+      getRootDir: vi.fn().mockReturnValue(process.cwd()),
     });
-  });
-
-  afterAll(() => {
-    if (gitTestRoot) {
-      rmSync(gitTestRoot, { recursive: true, force: true });
-    }
   });
 
   function buildApp() {
