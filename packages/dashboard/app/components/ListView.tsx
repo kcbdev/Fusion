@@ -74,6 +74,8 @@ export function ListView({
   onPlanningMode,
   onSubtaskBreakdown,
   onTasksUpdated,
+  projectId,
+  projectName,
 }: ListViewProps) {
   const [sortField, setSortField] = useState<SortField>("id");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");

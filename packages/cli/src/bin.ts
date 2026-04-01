@@ -104,7 +104,7 @@ Usage:
   fn mission create [title] [description...]  Create a new mission
   fn mission list                       List all missions
   fn mission show <id>                  Show mission with hierarchy
-  fn mission delete <id> [--force]      Delete a mission
+  fn mission delete <id> [--force]      Delete mission
   fn mission activate-slice <slice-id>  Activate a pending slice
 
 Options:

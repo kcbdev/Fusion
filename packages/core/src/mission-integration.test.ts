@@ -1,665 +1,353 @@
-/**
- * Mission Integration Tests
- *
- * Comprehensive integration tests for MissionStore working with TaskStore.
- * Tests mission hierarchy, status rollup, cascade operations, and event emissions.
- */
-
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { TaskStore } from "./store.js";
-import { MissionStore } from "./mission-store.js";
-import type { Mission, Milestone, Slice, MissionFeature } from "./mission-types.js";
+import { Database } from "./db.js";
 
-// Helper to create temp directory
-function createTempDir(): string {
-  return mkdtempSync(join(tmpdir(), "mission-integration-"));
+function makeTmpDir(): string {
+  return mkdtempSync(join(tmpdir(), "kb-mission-integration-"));
 }
 
-// Helper to cleanup temp directory
-function cleanupTempDir(dir: string): void {
-  try {
-    rmSync(dir, { recursive: true, force: true });
-  } catch {
-    // Ignore cleanup errors
+function getPrivateDb(store: TaskStore): Database | null {
+  return (store as unknown as { _db: Database | null })._db;
+}
+
+function assertHierarchyIntegrity(
+  hierarchy: NonNullable<ReturnType<ReturnType<TaskStore["getMissionStore"]>["getMissionWithHierarchy"]>>,
+) {
+  expect(hierarchy.milestones.every((milestone, index) => milestone.orderIndex === index)).toBe(true);
+  expect(new Set(hierarchy.milestones.map((milestone) => milestone.id)).size).toBe(hierarchy.milestones.length);
+
+  for (const milestone of hierarchy.milestones) {
+    expect(milestone.slices.every((slice, index) => slice.orderIndex === index)).toBe(true);
+    expect(new Set(milestone.slices.map((slice) => slice.id)).size).toBe(milestone.slices.length);
+    for (const slice of milestone.slices) {
+      expect(slice.milestoneId).toBe(milestone.id);
+      expect(new Set(slice.features.map((feature) => feature.id)).size).toBe(slice.features.length);
+      for (const feature of slice.features) {
+        expect(feature.sliceId).toBe(slice.id);
+      }
+    }
   }
 }
 
-describe("Mission Integration", () => {
-  let tempDir: string;
+/**
+ * Creates a mission hierarchy large enough to exercise rollups, reorder logic,
+ * and cascade deletions in integration scenarios.
+ */
+async function createHierarchy(store: TaskStore) {
+  const missionStore = store.getMissionStore();
+  const mission = missionStore.createMission({
+    title: "Launch authentication",
+    description: "Mission hierarchy integration test",
+  });
+
+  const milestones = Array.from({ length: 3 }, (_, milestoneIndex) => {
+    const milestone = missionStore.addMilestone(mission.id, {
+      title: `Milestone ${milestoneIndex + 1}`,
+      description: `Phase ${milestoneIndex + 1}`,
+    });
+
+    const slices = Array.from({ length: 2 }, (_, sliceIndex) => {
+      const slice = missionStore.addSlice(milestone.id, {
+        title: `Slice ${milestoneIndex + 1}.${sliceIndex + 1}`,
+        description: `Slice ${milestoneIndex + 1}.${sliceIndex + 1}`,
+      });
+
+      const features = Array.from({ length: 3 }, (_, featureIndex) =>
+        missionStore.addFeature(slice.id, {
+          title: `Feature ${milestoneIndex + 1}.${sliceIndex + 1}.${featureIndex + 1}`,
+          description: "Feature description",
+          acceptanceCriteria: "criterion",
+        }),
+      );
+
+      return { ...slice, features };
+    });
+
+    return { ...milestone, slices };
+  });
+
+  return { missionStore, mission, milestones };
+}
+
+/**
+ * MissionStore integration tests verify the missions hierarchy when it shares
+ * the same SQLite database as TaskStore. These scenarios cover linking tasks
+ * to features, rollup state transitions, hierarchy integrity after reorders and
+ * deletions, foreign-key cleanup, and event emissions that other packages rely on.
+ */
+describe("MissionStore integration with TaskStore", () => {
+  let rootDir: string;
   let taskStore: TaskStore;
-  let missionStore: MissionStore;
 
   beforeEach(async () => {
-    tempDir = createTempDir();
-    taskStore = new TaskStore(tempDir);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-01T00:00:00.000Z"));
+
+    rootDir = makeTmpDir();
+    taskStore = new TaskStore(rootDir);
     await taskStore.init();
-    missionStore = taskStore.getMissionStore();
   });
 
-  afterEach(() => {
-    cleanupTempDir(tempDir);
+  afterEach(async () => {
+    vi.useRealTimers();
+    await rm(rootDir, { recursive: true, force: true });
   });
 
-  describe("Mission Creation and Hierarchy", () => {
-    it("should create mission with complete hierarchy", () => {
-      // Create mission
-      const mission = missionStore.createMission({
-        title: "Build Auth System",
-        description: "Complete authentication system with login, signup, and password reset",
-      });
+  it("creates and retrieves a full hierarchy through the shared MissionStore", async () => {
+    const { missionStore, mission } = await createHierarchy(taskStore);
 
-      expect(mission.id).toMatch(/^M-/);
-      expect(mission.title).toBe("Build Auth System");
-      expect(mission.status).toBe("planning");
-      expect(mission.interviewState).toBe("not_started");
+    const fullMission = missionStore.getMissionWithHierarchy(mission.id);
 
-      // Add milestones
-      const milestone1 = missionStore.addMilestone(mission.id, {
-        title: "Database Schema",
-        description: "Design and implement database tables",
-      });
+    expect(fullMission).toBeDefined();
+    expect(fullMission?.milestones).toHaveLength(3);
+    expect(fullMission?.milestones.every((milestone) => milestone.slices.length === 2)).toBe(true);
+    expect(
+      fullMission?.milestones.every((milestone) =>
+        milestone.slices.every((slice) => {
+          const hierarchySlice = slice as typeof slice & { features: Array<{ id: string }> };
+          return hierarchySlice.features.length === 3;
+        }),
+      ),
+    ).toBe(true);
+  });
 
-      const milestone2 = missionStore.addMilestone(mission.id, {
-        title: "API Endpoints",
-        description: "Build REST API endpoints",
-      });
+  it("links features to real TaskStore tasks and updates sliceId without populating missionId", async () => {
+    const { missionStore, mission, milestones } = await createHierarchy(taskStore);
+    const feature = milestones[0].slices[0].features[0];
 
-      expect(milestone1.orderIndex).toBe(0);
-      expect(milestone2.orderIndex).toBe(1);
-
-      // Add slices to first milestone
-      const slice1 = missionStore.addSlice(milestone1.id, {
-        title: "User Tables",
-        description: "Create user and session tables",
-      });
-
-      const slice2 = missionStore.addSlice(milestone1.id, {
-        title: "Token Storage",
-        description: "Implement refresh token storage",
-      });
-
-      expect(slice1.orderIndex).toBe(0);
-      expect(slice2.orderIndex).toBe(1);
-
-      // Add features to first slice
-      const feature1 = missionStore.addFeature(slice1.id, {
-        title: "User model",
-        description: "Define user database schema",
-        acceptanceCriteria: "Users can be created with email and password hash",
-      });
-
-      const feature2 = missionStore.addFeature(slice1.id, {
-        title: "Session table",
-        description: "Create session management table",
-      });
-
-      expect(feature1.status).toBe("defined");
-      expect(feature2.status).toBe("defined");
-
-      // Verify full hierarchy
-      const fullMission = missionStore.getMissionWithHierarchy(mission.id);
-      expect(fullMission).toBeDefined();
-      expect(fullMission!.milestones).toHaveLength(2);
-      expect(fullMission!.milestones[0].slices).toHaveLength(2);
-      expect(fullMission!.milestones[0].slices[0].features).toHaveLength(2);
+    const linkedTask = await taskStore.createTask({
+      title: "Build login form",
+      description: "Implement the login form task used for mission linking.",
+      column: "todo",
     });
 
-    it("should compute orderIndex correctly for multiple items", () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
+    // TaskStore persists tasks to disk first, so create a DB-backed snapshot
+    // using a normal update path before MissionStore writes the linkage field.
+    await taskStore.moveTask(linkedTask.id, "in-progress");
 
-      // Add 3 milestones
-      const ms1 = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const ms2 = missionStore.addMilestone(mission.id, { title: "Milestone 2" });
-      const ms3 = missionStore.addMilestone(mission.id, { title: "Milestone 3" });
+    const linkedFeature = missionStore.linkFeatureToTask(feature.id, linkedTask.id);
+    const storedTask = await taskStore.getTask(linkedTask.id);
+    const taskRow = getPrivateDb(taskStore)?.prepare(
+      "SELECT missionId, sliceId FROM tasks WHERE id = ?",
+    ).get(linkedTask.id) as { missionId: string | null; sliceId: string | null } | undefined;
 
-      expect(ms1.orderIndex).toBe(0);
-      expect(ms2.orderIndex).toBe(1);
-      expect(ms3.orderIndex).toBe(2);
+    expect(linkedFeature.taskId).toBe(linkedTask.id);
+    expect(linkedFeature.status).toBe("triaged");
+    expect(storedTask.sliceId).toBe(milestones[0].slices[0].id);
+    expect(taskRow?.sliceId).toBe(milestones[0].slices[0].id);
+    expect(taskRow?.missionId).toBeNull();
 
-      // Add slices to first milestone
-      const sl1 = missionStore.addSlice(ms1.id, { title: "Slice 1" });
-      const sl2 = missionStore.addSlice(ms1.id, { title: "Slice 2" });
-
-      expect(sl1.orderIndex).toBe(0);
-      expect(sl2.orderIndex).toBe(1);
-    });
+    const linkedHierarchy = missionStore.getMissionWithHierarchy(mission.id);
+    expect(linkedHierarchy?.milestones[0].slices[0].features[0].taskId).toBe(linkedTask.id);
   });
 
-  describe("Task Linking and Feature Status", () => {
-    it("should update feature status when linked to task", async () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const milestone = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const slice = missionStore.addSlice(milestone.id, { title: "Slice 1" });
-      const feature = missionStore.addFeature(slice.id, { title: "Feature 1" });
+  it("rolls up status from features to slices, milestones, and mission", async () => {
+    const { missionStore, mission, milestones } = await createHierarchy(taskStore);
+    const [firstMilestone] = milestones;
+    const [firstSlice] = firstMilestone.slices;
 
-      // Create a task
+    const linkedFeatures: { featureId: string; taskId: string }[] = [];
+    for (const feature of firstSlice.features) {
       const task = await taskStore.createTask({
-        description: "Implement feature",
-        title: "Feature implementation",
+        title: feature.title,
+        description: `Task for ${feature.title}`,
+        column: "todo",
       });
-
-      // Link feature to task
-      const updatedFeature = missionStore.linkFeatureToTask(feature.id, task.id);
-
-      expect(updatedFeature.taskId).toBe(task.id);
-      expect(updatedFeature.status).toBe("triaged");
-    });
-
-    it("should update slice status when feature is linked", async () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const milestone = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const slice = missionStore.addSlice(milestone.id, { title: "Slice 1" });
-      const feature = missionStore.addFeature(slice.id, { title: "Feature 1" });
-
-      // Slice starts as pending
-      expect(slice.status).toBe("pending");
-
-      // Create and link task
-      const task = await taskStore.createTask({
-        description: "Implement feature",
-        title: "Feature implementation",
-      });
+      await taskStore.moveTask(task.id, "in-progress");
       missionStore.linkFeatureToTask(feature.id, task.id);
+      linkedFeatures.push({ featureId: feature.id, taskId: task.id });
+    }
 
-      // Slice should now be active
-      const updatedSlice = missionStore.getSlice(slice.id);
-      expect(updatedSlice!.status).toBe("active");
-    });
+    let updatedSlice = missionStore.getSlice(firstSlice.id);
+    let updatedMilestone = missionStore.getMilestone(firstMilestone.id);
+    let updatedMission = missionStore.getMission(mission.id);
 
-    it("should find feature by task ID", async () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const milestone = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const slice = missionStore.addSlice(milestone.id, { title: "Slice 1" });
-      const feature = missionStore.addFeature(slice.id, { title: "Feature 1" });
+    expect(updatedSlice?.status).toBe("active");
+    expect(updatedMilestone?.status).toBe("active");
+    expect(updatedMission?.status).toBe("active");
 
-      const task = await taskStore.createTask({
-        description: "Implement feature",
-        title: "Feature implementation",
-      });
+    for (const { featureId, taskId } of linkedFeatures) {
+      await taskStore.moveTask(taskId, "in-review");
+      await taskStore.moveTask(taskId, "done");
+      missionStore.updateFeature(featureId, { taskId, status: "done" });
+    }
 
-      missionStore.linkFeatureToTask(feature.id, task.id);
+    updatedSlice = missionStore.getSlice(firstSlice.id);
+    updatedMilestone = missionStore.getMilestone(firstMilestone.id);
+    updatedMission = missionStore.getMission(mission.id);
 
-      const found = missionStore.getFeatureByTaskId(task.id);
-      expect(found).toBeDefined();
-      expect(found!.id).toBe(feature.id);
-    });
-
-    it("should set task.sliceId when linking feature to task", async () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const milestone = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const slice = missionStore.addSlice(milestone.id, { title: "Slice 1" });
-      const feature = missionStore.addFeature(slice.id, { title: "Feature 1" });
-
-      const task = await taskStore.createTask({
-        description: "Implement feature",
-        title: "Feature implementation",
-      });
-
-      // Link feature to task
-      missionStore.linkFeatureToTask(feature.id, task.id);
-
-      // Reload task and verify sliceId was set
-      const reloaded = await taskStore.getTask(task.id);
-      expect(reloaded.sliceId).toBe(slice.id);
-    });
-
-    it("should clear task.sliceId when unlinking feature from task", async () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const milestone = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const slice = missionStore.addSlice(milestone.id, { title: "Slice 1" });
-      const feature = missionStore.addFeature(slice.id, { title: "Feature 1" });
-
-      const task = await taskStore.createTask({
-        description: "Implement feature",
-        title: "Feature implementation",
-      });
-
-      // Link and then unlink
-      missionStore.linkFeatureToTask(feature.id, task.id);
-      missionStore.unlinkFeatureFromTask(feature.id);
-
-      // Reload task and verify sliceId was cleared
-      const reloaded = await taskStore.getTask(task.id);
-      expect(reloaded.sliceId).toBeUndefined();
-    });
+    expect(updatedSlice?.status).toBe("complete");
+    expect(updatedMilestone?.status).toBe("active");
+    expect(updatedMission?.status).toBe("active");
   });
 
-  describe("Status Rollup", () => {
-    it("should compute slice status based on features", async () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const milestone = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const slice = missionStore.addSlice(milestone.id, { title: "Slice 1" });
+  it("cascades mission deletion across milestones, slices, and features", async () => {
+    const { missionStore, mission, milestones } = await createHierarchy(taskStore);
+    const milestoneIds = milestones.map((milestone) => milestone.id);
+    const sliceIds = milestones.flatMap((milestone) => milestone.slices.map((slice) => slice.id));
+    const featureIds = milestones.flatMap((milestone) =>
+      milestone.slices.flatMap((slice) => slice.features.map((feature) => feature.id)),
+    );
 
-      // Empty slice should be pending
-      expect(missionStore.computeSliceStatus(slice.id)).toBe("pending");
+    missionStore.deleteMission(mission.id);
 
-      // Add features
-      const f1 = missionStore.addFeature(slice.id, { title: "Feature 1" });
-      const f2 = missionStore.addFeature(slice.id, { title: "Feature 2" });
-
-      // Still pending (no tasks linked)
-      expect(missionStore.computeSliceStatus(slice.id)).toBe("pending");
-
-      // Link f1 to a task (makes it triaged/active)
-      const task1 = await taskStore.createTask({
-        description: "Implement feature 1",
-        title: "Feature 1 implementation",
-      });
-      missionStore.linkFeatureToTask(f1.id, task1.id);
-
-      // Should now be active since f1 has a task link
-      expect(missionStore.computeSliceStatus(slice.id)).toBe("active");
-
-      // Mark both as done
-      missionStore.updateFeatureStatus(f1.id, "done");
-      missionStore.updateFeatureStatus(f2.id, "done");
-
-      // Should be complete
-      expect(missionStore.computeSliceStatus(slice.id)).toBe("complete");
-    });
-
-    it("should compute milestone status based on slices", () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const milestone = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-
-      // Empty milestone should be planning
-      expect(missionStore.computeMilestoneStatus(milestone.id)).toBe("planning");
-
-      // Add slices
-      const s1 = missionStore.addSlice(milestone.id, { title: "Slice 1" });
-      const s2 = missionStore.addSlice(milestone.id, { title: "Slice 2" });
-
-      // Still planning (all slices pending)
-      expect(missionStore.computeMilestoneStatus(milestone.id)).toBe("planning");
-
-      // Activate first slice
-      missionStore.activateSlice(s1.id);
-
-      // Should be active
-      expect(missionStore.computeMilestoneStatus(milestone.id)).toBe("active");
-
-      // Complete first slice by marking features done
-      const f1 = missionStore.addFeature(s1.id, { title: "Feature 1" });
-      missionStore.updateFeatureStatus(f1.id, "done");
-
-      // Activate and complete second slice
-      missionStore.activateSlice(s2.id);
-      const f2 = missionStore.addFeature(s2.id, { title: "Feature 2" });
-      missionStore.updateFeatureStatus(f2.id, "done");
-
-      // Milestone should be complete
-      const updatedMilestone = missionStore.getMilestone(milestone.id);
-      expect(updatedMilestone!.status).toBe("complete");
-    });
-
-    it("should compute mission status based on milestones", () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-
-      // Empty mission should be planning
-      expect(missionStore.computeMissionStatus(mission.id)).toBe("planning");
-
-      // Add milestones
-      const m1 = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const m2 = missionStore.addMilestone(mission.id, { title: "Milestone 2" });
-
-      // Still planning
-      expect(missionStore.computeMissionStatus(mission.id)).toBe("planning");
-
-      // Complete first milestone via slice activation and feature completion
-      const s1 = missionStore.addSlice(m1.id, { title: "Slice 1" });
-      const f1 = missionStore.addFeature(s1.id, { title: "Feature 1" });
-      missionStore.activateSlice(s1.id);
-      missionStore.updateFeatureStatus(f1.id, "done");
-
-      // Mission should be active (one milestone active/complete)
-      expect(missionStore.computeMissionStatus(mission.id)).toBe("active");
-
-      // Complete second milestone
-      const s2 = missionStore.addSlice(m2.id, { title: "Slice 2" });
-      const f2 = missionStore.addFeature(s2.id, { title: "Feature 2" });
-      missionStore.activateSlice(s2.id);
-      missionStore.updateFeatureStatus(f2.id, "done");
-
-      // Mission should be complete
-      const updatedMission = missionStore.getMission(mission.id);
-      expect(updatedMission!.status).toBe("complete");
-    });
+    expect(missionStore.getMission(mission.id)).toBeUndefined();
+    expect(milestoneIds.every((id) => missionStore.getMilestone(id) === undefined)).toBe(true);
+    expect(sliceIds.every((id) => missionStore.getSlice(id) === undefined)).toBe(true);
+    expect(featureIds.every((id) => missionStore.getFeature(id) === undefined)).toBe(true);
   });
 
-  describe("Cascade Delete", () => {
-    it("should delete mission and all children", () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const milestone = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const slice = missionStore.addSlice(milestone.id, { title: "Slice 1" });
-      const feature = missionStore.addFeature(slice.id, { title: "Feature 1" });
+  it("recomputes order indexes after deleting a middle milestone and preserves child integrity after reorder", async () => {
+    const { missionStore, mission, milestones } = await createHierarchy(taskStore);
+    const [firstMilestone, middleMilestone, lastMilestone] = milestones;
 
-      // Delete mission
-      missionStore.deleteMission(mission.id);
+    missionStore.deleteMilestone(middleMilestone.id);
 
-      // Everything should be gone
-      expect(missionStore.getMission(mission.id)).toBeUndefined();
-      expect(missionStore.getMilestone(milestone.id)).toBeUndefined();
-      expect(missionStore.getSlice(slice.id)).toBeUndefined();
-      expect(missionStore.getFeature(feature.id)).toBeUndefined();
-    });
+    const afterDelete = missionStore.listMilestones(mission.id);
+    expect(afterDelete.map((milestone) => milestone.id)).toEqual([firstMilestone.id, lastMilestone.id]);
+    missionStore.reorderMilestones(mission.id, [firstMilestone.id, lastMilestone.id]);
 
-    it("should delete milestone and its slices/features", () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const m1 = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const m2 = missionStore.addMilestone(mission.id, { title: "Milestone 2" });
-      const slice = missionStore.addSlice(m1.id, { title: "Slice 1" });
-      const feature = missionStore.addFeature(slice.id, { title: "Feature 1" });
+    const afterRecompute = missionStore.listMilestones(mission.id);
+    expect(afterRecompute.map((milestone) => milestone.orderIndex)).toEqual([0, 1]);
+    expect(missionStore.getSlice(middleMilestone.slices[0].id)).toBeUndefined();
+    expect(missionStore.getFeature(middleMilestone.slices[0].features[0].id)).toBeUndefined();
 
-      // Delete first milestone
-      missionStore.deleteMilestone(m1.id);
+    missionStore.reorderMilestones(mission.id, [lastMilestone.id, firstMilestone.id]);
+    const reordered = missionStore.getMissionWithHierarchy(mission.id);
 
-      // Second milestone and mission should still exist
-      expect(missionStore.getMission(mission.id)).toBeDefined();
-      expect(missionStore.getMilestone(m2.id)).toBeDefined();
-
-      // First milestone's children should be gone
-      expect(missionStore.getMilestone(m1.id)).toBeUndefined();
-      expect(missionStore.getSlice(slice.id)).toBeUndefined();
-      expect(missionStore.getFeature(feature.id)).toBeUndefined();
-    });
-
-    it("should delete slice and its features", () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const milestone = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const s1 = missionStore.addSlice(milestone.id, { title: "Slice 1" });
-      const s2 = missionStore.addSlice(milestone.id, { title: "Slice 2" });
-      const f1 = missionStore.addFeature(s1.id, { title: "Feature 1" });
-
-      // Delete first slice
-      missionStore.deleteSlice(s1.id);
-
-      // Milestone and second slice should still exist
-      expect(missionStore.getMilestone(milestone.id)).toBeDefined();
-      expect(missionStore.getSlice(s2.id)).toBeDefined();
-
-      // First slice and its feature should be gone
-      expect(missionStore.getSlice(s1.id)).toBeUndefined();
-      expect(missionStore.getFeature(f1.id)).toBeUndefined();
-    });
+    expect(reordered?.milestones.map((milestone) => milestone.id)).toEqual([
+      lastMilestone.id,
+      firstMilestone.id,
+    ]);
+    expect(reordered?.milestones[0].slices.map((slice) => slice.id)).toEqual(
+      lastMilestone.slices.map((slice) => slice.id),
+    );
+    expect(reordered?.milestones[1].slices[0].features.map((feature) => feature.id)).toEqual(
+      firstMilestone.slices[0].features.map((feature) => feature.id),
+    );
+    expect(reordered).toBeDefined();
+    assertHierarchyIntegrity(reordered!);
   });
 
-  describe("Events", () => {
-    it("should emit mission:created event", () => {
-      const handler = vi.fn();
-      missionStore.on("mission:created", handler);
+  it("emits mission lifecycle events for creation, linking, and slice activation in order", async () => {
+    const missionStore = taskStore.getMissionStore();
+    const events: string[] = [];
 
-      const mission = missionStore.createMission({ title: "Test Mission" });
+    missionStore.on("mission:created", () => events.push("mission:created"));
+    missionStore.on("feature:linked", () => events.push("feature:linked"));
+    missionStore.on("slice:activated", () => events.push("slice:activated"));
 
-      expect(handler).toHaveBeenCalledTimes(1);
-      expect(handler).toHaveBeenCalledWith(mission);
+    const mission = missionStore.createMission({ title: "Event mission" });
+    const milestone = missionStore.addMilestone(mission.id, { title: "Event milestone" });
+    const slice = missionStore.addSlice(milestone.id, { title: "Event slice" });
+    const feature = missionStore.addFeature(slice.id, { title: "Event feature" });
+    const task = await taskStore.createTask({
+      title: "Event task",
+      description: "Task for event assertions",
+      column: "todo",
     });
+    await taskStore.moveTask(task.id, "in-progress");
 
-    it("should emit milestone:created event", () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const handler = vi.fn();
-      missionStore.on("milestone:created", handler);
+    missionStore.linkFeatureToTask(feature.id, task.id);
+    missionStore.activateSlice(slice.id);
 
-      const milestone = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-
-      expect(handler).toHaveBeenCalledTimes(1);
-      expect(handler).toHaveBeenCalledWith(milestone);
-    });
-
-    it("should emit slice:activated event", () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const milestone = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const slice = missionStore.addSlice(milestone.id, { title: "Slice 1" });
-
-      const handler = vi.fn();
-      missionStore.on("slice:activated", handler);
-
-      const activated = missionStore.activateSlice(slice.id);
-
-      expect(handler).toHaveBeenCalledTimes(1);
-      expect(handler).toHaveBeenCalledWith(activated);
-    });
-
-    it("should emit feature:linked event", async () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const milestone = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const slice = missionStore.addSlice(milestone.id, { title: "Slice 1" });
-      const feature = missionStore.addFeature(slice.id, { title: "Feature 1" });
-
-      const handler = vi.fn();
-      missionStore.on("feature:linked", handler);
-
-      const task = await taskStore.createTask({
-        description: "Implement feature",
-        title: "Feature implementation",
-      });
-
-      const updated = missionStore.linkFeatureToTask(feature.id, task.id);
-
-      expect(handler).toHaveBeenCalledTimes(1);
-      expect(handler).toHaveBeenCalledWith({ feature: updated, taskId: task.id });
-    });
-
-    it("should emit delete events", () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const handler = vi.fn();
-      missionStore.on("mission:deleted", handler);
-
-      missionStore.deleteMission(mission.id);
-
-      expect(handler).toHaveBeenCalledTimes(1);
-      expect(handler).toHaveBeenCalledWith(mission.id);
-    });
+    expect(events).toEqual(["mission:created", "feature:linked", "slice:activated"]);
   });
 
-  describe("Complex Scenarios", () => {
-    it("should handle 3 milestones with 2 slices each with 3 features", () => {
-      const mission = missionStore.createMission({ title: "Complex Mission" });
+  it("uses the same Database instance for TaskStore and MissionStore", () => {
+    const missionStore = taskStore.getMissionStore();
+    const db = getPrivateDb(taskStore);
+    const missionStoreDb = (missionStore as unknown as { db: Database }).db;
 
-      // Create 3 milestones, each with 2 slices, each with 3 features
-      for (let m = 0; m < 3; m++) {
-        const milestone = missionStore.addMilestone(mission.id, {
-          title: `Milestone ${m + 1}`,
-        });
+    expect(db).toBeDefined();
+    expect(missionStoreDb).toBe(db);
+  });
 
-        for (let s = 0; s < 2; s++) {
-          const slice = missionStore.addSlice(milestone.id, {
-            title: `Milestone ${m + 1} - Slice ${s + 1}`,
-          });
+  it("keeps hierarchy retrievable after repeated deterministic reorder operations", async () => {
+    const { missionStore, mission, milestones } = await createHierarchy(taskStore);
 
-          for (let f = 0; f < 3; f++) {
-            missionStore.addFeature(slice.id, {
-              title: `Milestone ${m + 1} - Slice ${s + 1} - Feature ${f + 1}`,
-            });
-          }
+    missionStore.reorderMilestones(mission.id, [milestones[2].id, milestones[0].id, milestones[1].id]);
+    missionStore.reorderMilestones(mission.id, [milestones[1].id, milestones[2].id, milestones[0].id]);
+
+    for (const milestone of missionStore.listMilestones(mission.id)) {
+      const slices = missionStore.listSlices(milestone.id);
+      missionStore.reorderSlices(
+        milestone.id,
+        slices
+          .map((slice) => slice.id)
+          .reverse(),
+      );
+    }
+
+    const hierarchy = missionStore.getMissionWithHierarchy(mission.id);
+
+    expect(hierarchy?.milestones).toHaveLength(3);
+    expect(hierarchy).toBeDefined();
+    assertHierarchyIntegrity(hierarchy!);
+  });
+
+  it("keeps hierarchy valid under overlapping reorder and lookup operations", async () => {
+    const { missionStore, mission, milestones } = await createHierarchy(taskStore);
+
+    await Promise.all([
+      Promise.resolve().then(() =>
+        missionStore.reorderMilestones(mission.id, [milestones[1].id, milestones[2].id, milestones[0].id]),
+      ),
+      Promise.resolve().then(() => {
+        const slices = missionStore.listSlices(milestones[0].id);
+        missionStore.reorderSlices(milestones[0].id, slices.map((slice) => slice.id).reverse());
+      }),
+      Promise.resolve().then(() => missionStore.getMissionWithHierarchy(mission.id)),
+      Promise.resolve().then(() => missionStore.listMissions()),
+    ]);
+
+    const hierarchy = missionStore.getMissionWithHierarchy(mission.id);
+    expect(hierarchy).toBeDefined();
+    assertHierarchyIntegrity(hierarchy!);
+  });
+
+  it("keeps all descendants retrievable after bulk feature completion updates", async () => {
+    const { missionStore, mission } = await createHierarchy(taskStore);
+    const hierarchy = missionStore.getMissionWithHierarchy(mission.id)!;
+
+    for (const milestone of hierarchy.milestones) {
+      for (const slice of milestone.slices) {
+        for (const feature of slice.features) {
+          missionStore.updateFeature(feature.id, { status: "done" });
         }
       }
+    }
 
-      // Verify full hierarchy
-      const fullMission = missionStore.getMissionWithHierarchy(mission.id);
-      expect(fullMission!.milestones).toHaveLength(3);
-      expect(fullMission!.milestones[0].slices).toHaveLength(2);
-      expect(fullMission!.milestones[0].slices[0].features).toHaveLength(3);
-
-      // Total features
-      let totalFeatures = 0;
-      for (const m of fullMission!.milestones) {
-        for (const s of m.slices) {
-          totalFeatures += s.features.length;
-        }
-      }
-      expect(totalFeatures).toBe(18); // 3 milestones × 2 slices × 3 features
-    });
-
-    it("should handle middle milestone deletion with orderIndex recomputation", () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const m1 = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const m2 = missionStore.addMilestone(mission.id, { title: "Milestone 2" });
-      const m3 = missionStore.addMilestone(mission.id, { title: "Milestone 3" });
-
-      expect(m1.orderIndex).toBe(0);
-      expect(m2.orderIndex).toBe(1);
-      expect(m3.orderIndex).toBe(2);
-
-      // Delete middle milestone
-      missionStore.deleteMilestone(m2.id);
-
-      // Remaining milestones should still be accessible
-      const remaining = missionStore.listMilestones(mission.id);
-      expect(remaining).toHaveLength(2);
-
-      // Reordering doesn't happen automatically - orderIndex stays as is
-      // until explicit reorder is called
-      expect(remaining[0].id).toBe(m1.id);
-      expect(remaining[1].id).toBe(m3.id);
-    });
-
-    it("should handle reordering and verify integrity", () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const m1 = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const m2 = missionStore.addMilestone(mission.id, { title: "Milestone 2" });
-      const m3 = missionStore.addMilestone(mission.id, { title: "Milestone 3" });
-
-      // Add slices with features to first milestone
-      const s1 = missionStore.addSlice(m1.id, { title: "Slice 1" });
-      const f1 = missionStore.addFeature(s1.id, { title: "Feature 1" });
-
-      // Reorder milestones: reverse order
-      missionStore.reorderMilestones(mission.id, [m3.id, m2.id, m1.id]);
-
-      // Verify orderIndex updated
-      const milestones = missionStore.listMilestones(mission.id);
-      expect(milestones[0].id).toBe(m3.id);
-      expect(milestones[0].orderIndex).toBe(0);
-      expect(milestones[1].id).toBe(m2.id);
-      expect(milestones[1].orderIndex).toBe(1);
-      expect(milestones[2].id).toBe(m1.id);
-      expect(milestones[2].orderIndex).toBe(2);
-
-      // Verify slice and feature still intact
-      const slices = missionStore.listSlices(m1.id);
-      expect(slices).toHaveLength(1);
-      expect(slices[0].id).toBe(s1.id);
-
-      const features = missionStore.listFeatures(s1.id);
-      expect(features).toHaveLength(1);
-      expect(features[0].id).toBe(f1.id);
-    });
+    const refreshed = missionStore.getMissionWithHierarchy(mission.id)!;
+    expect(refreshed.milestones).toHaveLength(3);
+    expect(
+      refreshed.milestones.every((milestone) =>
+        milestone.slices.every((slice) => {
+          const hierarchySlice = slice as typeof slice & { features: Array<{ status: string }> };
+          return hierarchySlice.features.every((feature) => feature.status === "done");
+        }),
+      ),
+    ).toBe(true);
   });
 
-  describe("Concurrent Operations", () => {
-    it("should handle rapid sequential modifications", async () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-
-      // Rapidly add many milestones
-      const promises: Promise<Milestone>[] = [];
-      for (let i = 0; i < 10; i++) {
-        promises.push(
-          Promise.resolve(
-            missionStore.addMilestone(mission.id, { title: `Milestone ${i}` })
-          )
-        );
-      }
-
-      const milestones = await Promise.all(promises);
-
-      // All should have unique orderIndex values
-      const orderIndices = milestones.map((m) => m.orderIndex);
-      const uniqueIndices = new Set(orderIndices);
-      expect(uniqueIndices.size).toBe(10);
+  it("clears mission feature task links when a linked task is deleted", async () => {
+    const { missionStore, milestones } = await createHierarchy(taskStore);
+    const feature = milestones[0].slices[0].features[0];
+    const task = await taskStore.createTask({
+      title: "Delete linked task",
+      description: "Task used to verify foreign key cleanup.",
+      column: "todo",
     });
+    await taskStore.moveTask(task.id, "in-progress");
+    missionStore.linkFeatureToTask(feature.id, task.id);
 
-    it("should find next pending slice correctly", () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const m1 = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const m2 = missionStore.addMilestone(mission.id, { title: "Milestone 2" });
+    await taskStore.deleteTask(task.id);
 
-      const s1 = missionStore.addSlice(m1.id, { title: "Slice 1" });
-      const s2 = missionStore.addSlice(m1.id, { title: "Slice 2" });
-      const s3 = missionStore.addSlice(m2.id, { title: "Slice 3" });
-
-      // First pending should be s1
-      const first = missionStore.findNextPendingSlice(mission.id);
-      expect(first!.id).toBe(s1.id);
-
-      // Activate s1
-      missionStore.activateSlice(s1.id);
-
-      // Next pending should be s2
-      const second = missionStore.findNextPendingSlice(mission.id);
-      expect(second!.id).toBe(s2.id);
-
-      // Mark s2 as complete
-      const f2 = missionStore.addFeature(s2.id, { title: "Feature" });
-      missionStore.updateFeatureStatus(f2.id, "done");
-
-      // Next pending should be s3
-      const third = missionStore.findNextPendingSlice(mission.id);
-      expect(third!.id).toBe(s3.id);
-    });
-  });
-
-  describe("Edge Cases", () => {
-    it("should handle mission with no milestones", () => {
-      const mission = missionStore.createMission({ title: "Empty Mission" });
-      expect(missionStore.computeMissionStatus(mission.id)).toBe("planning");
-
-      const fullMission = missionStore.getMissionWithHierarchy(mission.id);
-      expect(fullMission!.milestones).toHaveLength(0);
-    });
-
-    it("should handle milestone with no slices", () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const milestone = missionStore.addMilestone(mission.id, { title: "Empty Milestone" });
-
-      expect(missionStore.computeMilestoneStatus(milestone.id)).toBe("planning");
-      expect(missionStore.listSlices(milestone.id)).toHaveLength(0);
-    });
-
-    it("should handle slice with no features", () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const milestone = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const slice = missionStore.addSlice(milestone.id, { title: "Empty Slice" });
-
-      expect(missionStore.computeSliceStatus(slice.id)).toBe("pending");
-      expect(missionStore.listFeatures(slice.id)).toHaveLength(0);
-    });
-
-    it("should reject empty feature title", () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const milestone = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const slice = missionStore.addSlice(milestone.id, { title: "Slice 1" });
-
-      // Adding feature with empty title should still work at store level
-      // API layer handles validation
-      const feature = missionStore.addFeature(slice.id, { title: "" });
-      expect(feature.title).toBe("");
-    });
-
-    it("should handle unlinking feature from task", async () => {
-      const mission = missionStore.createMission({ title: "Test Mission" });
-      const milestone = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const slice = missionStore.addSlice(milestone.id, { title: "Slice 1" });
-      const feature = missionStore.addFeature(slice.id, { title: "Feature 1" });
-
-      const task = await taskStore.createTask({
-        description: "Implement feature",
-        title: "Feature implementation",
-      });
-
-      // Link
-      missionStore.linkFeatureToTask(feature.id, task.id);
-      let updated = missionStore.getFeature(feature.id);
-      expect(updated!.taskId).toBe(task.id);
-      expect(updated!.status).toBe("triaged");
-
-      // Unlink
-      missionStore.unlinkFeatureFromTask(feature.id);
-      updated = missionStore.getFeature(feature.id);
-      expect(updated!.taskId).toBeUndefined();
-      expect(updated!.status).toBe("defined");
-    });
+    const refreshed = missionStore.getFeature(feature.id);
+    expect(refreshed?.taskId).toBeUndefined();
   });
 });

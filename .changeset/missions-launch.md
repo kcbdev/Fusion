@@ -23,4 +23,3 @@ The Missions system provides a hierarchical planning structure:
 - Press Cmd/Ctrl+Shift+M in dashboard to open missions
 - Use interview mode for AI-assisted mission planning
 - Link features to tasks for automatic progress tracking
-

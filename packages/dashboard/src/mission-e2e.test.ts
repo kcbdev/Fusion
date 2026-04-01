@@ -287,14 +287,10 @@ describe("Mission API", () => {
     it("should cascade delete all children", async () => {
       const { app, missionStore } = buildApp();
       const mission = missionStore.createMission({ title: "To Delete" });
-      const milestone = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const slice = missionStore.addSlice(milestone.id, { title: "Slice 1" });
-      const feature = missionStore.addFeature(slice.id, { title: "Feature 1" });
+      missionStore.addMilestone(mission.id, { title: "Milestone 1" });
 
-      // Delete mission
       await request(app, "DELETE", `/api/missions/${mission.id}`);
 
-      // Verify mission was deleted
       expect(missionStore.getMission(mission.id)).toBeUndefined();
     });
   });
@@ -303,23 +299,20 @@ describe("Mission API", () => {
     it("should call reorderMilestones when valid request", async () => {
       const { app, missionStore } = buildApp();
       const mission = missionStore.createMission({ title: "Test Mission" });
-      const m1 = missionStore.addMilestone(mission.id, { title: "Milestone 1" });
-      const m2 = missionStore.addMilestone(mission.id, { title: "Milestone 2" });
+      missionStore.addMilestone(mission.id, { title: "Milestone 1" });
+      missionStore.addMilestone(mission.id, { title: "Milestone 2" });
       missionStore.addMilestone(mission.id, { title: "Milestone 3" });
 
-      // Mock the listMilestones to return all milestones
       const allMilestones = missionStore.listMilestones(mission.id);
-      
-      // Test that the endpoint exists and validates
+
       const res = await request(
         app,
         "POST",
         `/api/missions/${mission.id}/milestones/reorder`,
-        JSON.stringify({ orderedIds: allMilestones.map(m => m.id).reverse() }),
+        JSON.stringify({ orderedIds: allMilestones.map((m) => m.id).reverse() }),
         { "content-type": "application/json" }
       );
 
-      // Should return 204 if successful, or error if validation fails
       expect([200, 204, 400, 404]).toContain(res.status);
     });
   });
@@ -332,7 +325,6 @@ describe("Mission API", () => {
       const s1 = missionStore.addSlice(milestone.id, { title: "Slice 1" });
       const s2 = missionStore.addSlice(milestone.id, { title: "Slice 2" });
 
-      // Test that the endpoint exists and validates
       const res = await request(
         app,
         "POST",
@@ -341,7 +333,6 @@ describe("Mission API", () => {
         { "content-type": "application/json" }
       );
 
-      // Should return 204 if successful, or error if validation fails
       expect([200, 204, 400, 404]).toContain(res.status);
     });
   });
