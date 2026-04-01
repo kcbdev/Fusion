@@ -41,6 +41,8 @@ if (isBunBinary) {
 const { runDashboard } = await import("./commands/dashboard.js");
 const { runTaskCreate, runTaskList, runTaskMove, runTaskMerge, runTaskUpdate, runTaskLog, runTaskLogs, runTaskShow, runTaskAttach, runTaskPause, runTaskUnpause, runTaskImportFromGitHub, runTaskDuplicate, runTaskArchive, runTaskUnarchive, runTaskRefine, runTaskPlan, runTaskDelete, runTaskRetry, runTaskComment, runTaskComments, runTaskSteer, runTaskPrCreate } = await import("./commands/task.js");
 const { runSettingsShow, runSettingsSet } = await import("./commands/settings.js");
+const { runSettingsExport } = await import("./commands/settings-export.js");
+const { runSettingsImport } = await import("./commands/settings-import.js");
 const { runGitStatus, runGitFetch, runGitPull, runGitPush } = await import("./commands/git.js");
 const { runBackupCreate, runBackupList, runBackupRestore, runBackupCleanup } = await import("./commands/backup.js");
 
@@ -79,6 +81,8 @@ Usage:
   fn task import <owner/repo> [opts]  Import GitHub issues as tasks
   fn settings                          Show current Fusion configuration
   fn settings set <key> <value>        Update a configuration setting
+  fn settings export [opts]              Export settings to a JSON file
+  fn settings import <file> [opts]       Import settings from a JSON file
 
   fn git status              Show current branch, commit, dirty state, ahead/behind
   fn git push                Push current branch
@@ -434,8 +438,43 @@ async function main() {
           await runSettingsSet(key, value);
           break;
         }
+        if (subcommand === "export") {
+          // Parse export options
+          const scopeIdx = args.indexOf("--scope");
+          const scope = scopeIdx !== -1 && scopeIdx + 1 < args.length
+            ? args[scopeIdx + 1] as "global" | "project" | "both"
+            : "both";
+          
+          const outputIdx = args.indexOf("--output");
+          const output = outputIdx !== -1 && outputIdx + 1 < args.length
+            ? args[outputIdx + 1]
+            : undefined;
+
+          await runSettingsExport({ scope, output });
+          break;
+        }
+        if (subcommand === "import") {
+          const file = args[2];
+          if (!file) {
+            console.error("Usage: fn settings import <file> [--scope global|project|both] [--merge] [--yes]");
+            console.error("Example: fn settings import kb-settings-2026-03-31.json --yes");
+            process.exit(1);
+          }
+
+          // Parse import options
+          const scopeIdx = args.indexOf("--scope");
+          const scope = scopeIdx !== -1 && scopeIdx + 1 < args.length
+            ? args[scopeIdx + 1] as "global" | "project" | "both"
+            : "both";
+
+          const merge = args.includes("--merge");
+          const yes = args.includes("--yes");
+
+          await runSettingsImport(file, { scope, merge, yes });
+          break;
+        }
         console.error(`Unknown settings subcommand: ${subcommand}`);
-        console.error("Try: fn settings | fn settings set <key> <value>");
+        console.error("Try: fn settings | fn settings set <key> <value> | fn settings export | fn settings import <file>");
         process.exit(1);
       }
 

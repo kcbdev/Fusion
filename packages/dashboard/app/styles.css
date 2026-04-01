@@ -969,6 +969,28 @@ body {
   background: rgba(0, 0, 0, 0.05);
 }
 
+.modal-actions-left {
+  display: flex;
+  gap: 10px;
+  margin-right: auto;
+}
+
+.modal-actions-right {
+  display: flex;
+  gap: 10px;
+}
+
+.import-preview-list {
+  margin: 8px 0;
+  padding-left: 20px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.import-preview-list li {
+  margin: 4px 0;
+}
+
 /* === Forms === */
 .form-group {
   padding: 0 var(--space-xl);

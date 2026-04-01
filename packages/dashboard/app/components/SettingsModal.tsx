@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { THINKING_LEVELS, GLOBAL_SETTINGS_KEYS, PROJECT_SETTINGS_KEYS } from "@fusion/core";
 import type { Settings, GlobalSettings, ThemeMode, ColorTheme, ModelPreset } from "@fusion/core";
-import { fetchSettings, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, fetchModels, testNtfyNotification, fetchBackups, createBackup } from "../api";
-import type { AuthProvider, ModelInfo, BackupListResponse } from "../api";
+import { fetchSettings, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, fetchModels, testNtfyNotification, fetchBackups, createBackup, exportSettings, importSettings } from "../api";
+import type { AuthProvider, ModelInfo, BackupListResponse, SettingsExportData } from "../api";
 import type { ToastType } from "../hooks/useToast";
 import { ThemeSelector } from "./ThemeSelector";
 import { CustomModelDropdown } from "./CustomModelDropdown";
@@ -97,6 +97,15 @@ export function SettingsModal({
   // Backup state
   const [backupInfo, setBackupInfo] = useState<BackupListResponse | null>(null);
   const [backupLoading, setBackupLoading] = useState(false);
+
+  // Import/Export state
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<SettingsExportData | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importScope, setImportScope] = useState<'global' | 'project' | 'both'>('both');
+  const [importMerge, setImportMerge] = useState(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchSettings()
@@ -239,6 +248,80 @@ export function SettingsModal({
       setBackupLoading(false);
     }
   }, [addToast]);
+
+  // Export/Import handlers
+  const handleExport = useCallback(async () => {
+    try {
+      // Default scope based on active section
+      const scope = activeSectionScope === "global" ? "global" : 
+                    activeSectionScope === "project" ? "project" : "both";
+      const data = await exportSettings(scope);
+      
+      // Create and download the JSON file
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const filename = `kb-settings-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}.json`;
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      const scopeLabel = scope === "global" ? "global" : scope === "project" ? "project" : "all";
+      addToast(`Settings exported (${scopeLabel} scope)`, "success");
+    } catch (err: any) {
+      addToast(err.message || "Failed to export settings", "error");
+    }
+  }, [addToast, activeSectionScope]);
+
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setImportFile(file);
+    setImportLoading(true);
+    
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text) as SettingsExportData;
+      setImportPreview(data);
+      setImportDialogOpen(true);
+    } catch (err: any) {
+      addToast(`Invalid JSON file: ${err.message}`, "error");
+      setImportFile(null);
+    } finally {
+      setImportLoading(false);
+    }
+  }, [addToast]);
+
+  const handleImport = useCallback(async () => {
+    if (!importPreview) return;
+    
+    setImportLoading(true);
+    try {
+      const result = await importSettings(importPreview, { scope: importScope, merge: importMerge });
+      if (result.success) {
+        const parts = [];
+        if (result.globalCount > 0) parts.push(`${result.globalCount} global`);
+        if (result.projectCount > 0) parts.push(`${result.projectCount} project`);
+        addToast(`Imported ${parts.join(", ")} setting(s)`, "success");
+        setImportDialogOpen(false);
+        setImportPreview(null);
+        setImportFile(null);
+        // Refresh settings to show imported values
+        const refreshed = await fetchSettings();
+        setForm(refreshed);
+      } else {
+        addToast(result.error || "Import failed", "error");
+      }
+    } catch (err: any) {
+      addToast(err.message || "Failed to import settings", "error");
+    } finally {
+      setImportLoading(false);
+    }
+  }, [addToast, importPreview, importScope, importMerge]);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -1284,14 +1367,123 @@ export function SettingsModal({
           </div>
         )}
         <div className="modal-actions">
-          <button className="btn btn-sm" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={loading}>
-            Save
-          </button>
+          <div className="modal-actions-left">
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={handleExport}
+              title="Export settings to JSON file"
+            >
+              Export
+            </button>
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept=".json,application/json"
+              style={{ display: "none" }}
+              onChange={handleFileSelect}
+            />
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importLoading}
+              title="Import settings from JSON file"
+            >
+              {importLoading ? "Loading…" : "Import"}
+            </button>
+          </div>
+          <div className="modal-actions-right">
+            <button className="btn btn-sm" onClick={onClose}>
+              Cancel
+            </button>
+            <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={loading}>
+              Save
+            </button>
+          </div>
         </div>
       </div>
+      
+      {/* Import Confirmation Dialog */}
+      {importDialogOpen && importPreview && (
+        <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && setImportDialogOpen(false)}>
+          <div className="modal modal-md">
+            <div className="modal-header">
+              <h3>Import Settings</h3>
+              <button className="modal-close" onClick={() => setImportDialogOpen(false)}>
+                &times;
+              </button>
+            </div>
+            <div className="modal-body">
+              <p>Review the settings to be imported:</p>
+              
+              {importPreview.global && Object.keys(importPreview.global).length > 0 && (
+                <div className="form-group">
+                  <strong>Global Settings:</strong>
+                  <ul className="import-preview-list">
+                    {Object.entries(importPreview.global)
+                      .filter(([, v]) => v !== undefined)
+                      .map(([key]) => (
+                        <li key={key}>{key}</li>
+                      ))}
+                  </ul>
+                </div>
+              )}
+              
+              {importPreview.project && Object.keys(importPreview.project).length > 0 && (
+                <div className="form-group">
+                  <strong>Project Settings:</strong>
+                  <ul className="import-preview-list">
+                    {Object.entries(importPreview.project)
+                      .filter(([, v]) => v !== undefined)
+                      .map(([key]) => (
+                        <li key={key}>{key}</li>
+                      ))}
+                  </ul>
+                </div>
+              )}
+              
+              <div className="form-group">
+                <label htmlFor="import-scope">Import Scope:</label>
+                <select
+                  id="import-scope"
+                  value={importScope}
+                  onChange={(e) => setImportScope(e.target.value as 'global' | 'project' | 'both')}
+                >
+                  <option value="both">Both global and project settings</option>
+                  <option value="global">Global settings only</option>
+                  <option value="project">Project settings only</option>
+                </select>
+              </div>
+              
+              <div className="form-group">
+                <label htmlFor="import-merge" className="checkbox-label">
+                  <input
+                    id="import-merge"
+                    type="checkbox"
+                    checked={importMerge}
+                    onChange={(e) => setImportMerge(e.target.checked)}
+                  />
+                  Merge with existing settings (recommended)
+                </label>
+                <small>If unchecked, existing settings will be replaced with imported values.</small>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-sm" onClick={() => setImportDialogOpen(false)}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={handleImport}
+                disabled={importLoading}
+              >
+                {importLoading ? "Importing…" : "Confirm Import"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -3,7 +3,7 @@ import multer from "multer";
 import { createReadStream, existsSync } from "node:fs";
 import { execSync } from "node:child_process";
 import type { TaskStore, Column, MergeResult, ScheduleType, ActivityEventType, ModelPreset, AutomationStep } from "@fusion/core";
-import { COLUMNS, VALID_TRANSITIONS, GLOBAL_SETTINGS_KEYS, type BatchStatusEntry, type BatchStatusResponse, type BatchStatusResult, type IssueInfo, type PrInfo, isGhAuthenticated, AUTOMATION_PRESETS, AutomationStore, validateBackupSchedule, validateBackupRetention, validateBackupDir, syncBackupAutomation } from "@fusion/core";
+import { COLUMNS, VALID_TRANSITIONS, GLOBAL_SETTINGS_KEYS, type BatchStatusEntry, type BatchStatusResponse, type BatchStatusResult, type IssueInfo, type PrInfo, isGhAuthenticated, AUTOMATION_PRESETS, AutomationStore, validateBackupSchedule, validateBackupRetention, validateBackupDir, syncBackupAutomation, exportSettings, importSettings, validateImportData } from "@fusion/core";
 import type { ServerOptions } from "./server.js";
 import { GitHubClient, getCurrentGitHubRepo, parseBadgeUrl } from "./github.js";
 import { githubRateLimiter } from "./github-poll.js";
@@ -1238,6 +1238,71 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message ?? "Failed to send test notification" });
+    }
+  });
+
+  // ── Settings Export/Import Routes ─────────────────────────────────
+
+  /**
+   * GET /api/settings/export
+   * Export settings as JSON for backup or migration.
+   * Query params: ?scope=global|project|both (default: both)
+   * Returns: SettingsExportData structure
+   */
+  router.get("/settings/export", async (req, res) => {
+    try {
+      const scopeParam = req.query.scope as string | undefined;
+      const scope = scopeParam === "global" || scopeParam === "project" || scopeParam === "both"
+        ? scopeParam
+        : "both";
+
+      const exportData = await exportSettings(store, { scope });
+      res.json(exportData);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message ?? "Failed to export settings" });
+    }
+  });
+
+  /**
+   * POST /api/settings/import
+   * Import settings from JSON data.
+   * Body: { data: SettingsExportData, scope?: 'global'|'project'|'both', merge?: boolean }
+   * Returns: { success: true, globalCount: number, projectCount: number }
+   */
+  router.post("/settings/import", async (req, res) => {
+    try {
+      const { data, scope = "both", merge = true } = req.body;
+
+      // Validate the import data
+      const validationErrors = validateImportData(data);
+      if (validationErrors.length > 0) {
+        res.status(400).json({
+          success: false,
+          error: `Validation failed: ${validationErrors.join("; ")}`,
+        });
+        return;
+      }
+
+      // Perform the import
+      const result = await importSettings(store, data, { scope, merge });
+
+      if (!result.success) {
+        res.status(500).json({
+          success: false,
+          error: result.error ?? "Import failed",
+          globalCount: result.globalCount,
+          projectCount: result.projectCount,
+        });
+        return;
+      }
+
+      res.json({
+        success: true,
+        globalCount: result.globalCount,
+        projectCount: result.projectCount,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message ?? "Failed to import settings" });
     }
   });
 

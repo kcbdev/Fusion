@@ -1599,3 +1599,43 @@ export function fetchBackups(): Promise<BackupListResponse> {
 export function createBackup(): Promise<BackupCreateResponse> {
   return api<BackupCreateResponse>("/backups", { method: "POST" });
 }
+
+// --- Settings Export/Import API ---
+
+/** Exported settings data structure */
+export interface SettingsExportData {
+  version: 1;
+  exportedAt: string;
+  source?: string;
+  global?: GlobalSettings;
+  project?: Partial<ProjectSettings>;
+}
+
+/** Result of importing settings */
+export interface SettingsImportResponse {
+  success: boolean;
+  globalCount: number;
+  projectCount: number;
+  error?: string;
+}
+
+/** Export settings as JSON */
+export function exportSettings(scope?: 'global' | 'project' | 'both'): Promise<SettingsExportData> {
+  const query = scope ? `?scope=${scope}` : "";
+  return api<SettingsExportData>(`/settings/export${query}`);
+}
+
+/** Import settings from JSON data */
+export function importSettings(
+  data: SettingsExportData,
+  options?: { scope?: 'global' | 'project' | 'both'; merge?: boolean }
+): Promise<SettingsImportResponse> {
+  return api<SettingsImportResponse>("/settings/import", {
+    method: "POST",
+    body: JSON.stringify({
+      data,
+      scope: options?.scope ?? "both",
+      merge: options?.merge ?? true,
+    }),
+  });
+}

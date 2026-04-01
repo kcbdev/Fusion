@@ -37,3 +37,17 @@ export {
   BACKUP_SCHEDULE_NAME,
 } from "./backup.js";
 export type { BackupInfo, BackupOptions } from "./backup.js";
+export {
+  exportSettings,
+  importSettings,
+  validateImportData,
+  generateExportFilename,
+  readExportFile,
+  writeExportFile,
+} from "./settings-export.js";
+export type {
+  SettingsExportData,
+  ExportSettingsOptions,
+  ImportSettingsOptions,
+  ImportResult,
+} from "./settings-export.js";
