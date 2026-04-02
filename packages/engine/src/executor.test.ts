@@ -51,6 +51,9 @@ vi.mock("node:child_process", () => ({
 vi.mock("node:fs", () => ({
   existsSync: vi.fn().mockReturnValue(true),
 }));
+vi.mock("./rate-limit-retry.js", () => ({
+  withRateLimitRetry: (fn: () => Promise<any>) => fn(),
+}));
 
 import { TaskExecutor, buildExecutionPrompt } from "./executor.js";
 import { createKbAgent } from "./pi.js";

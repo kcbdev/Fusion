@@ -22,6 +22,7 @@ import {
   type UsageLimitPauser,
 } from "./usage-limit-detector.js";
 import { isTransientError } from "./transient-error-detector.js";
+import { withRateLimitRetry } from "./rate-limit-retry.js";
 
 export const TRIAGE_SYSTEM_PROMPT = `You are a task specification agent for "kb", an AI-orchestrated task board.
 
@@ -640,10 +641,18 @@ export class TriageProcessor {
         }
       };
 
+      const retryableWork = () => withRateLimitRetry(agentWork, {
+        onRetry: (attempt, delayMs, error) => {
+          const delaySec = Math.round(delayMs / 1000);
+          triageLog.warn(`⏳ ${task.id} rate limited — retry ${attempt} in ${delaySec}s: ${error.message}`);
+          this.store.logEntry(task.id, `Rate limited — retry ${attempt} in ${delaySec}s`).catch(() => {});
+        },
+      });
+
       if (this.options.semaphore) {
-        await this.options.semaphore.run(agentWork, PRIORITY_SPECIFY);
+        await this.options.semaphore.run(retryableWork, PRIORITY_SPECIFY);
       } else {
-        await agentWork();
+        await retryableWork();
       }
     } catch (err: any) {
       // Race condition: task was deleted (e.g. as a duplicate) between listTasks()

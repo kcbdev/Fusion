@@ -6,6 +6,7 @@ import type { WorktreePool } from "./worktree-pool.js";
 import { AgentLogger } from "./agent-logger.js";
 import { mergerLog } from "./logger.js";
 import { isUsageLimitError, checkSessionError, type UsageLimitPauser } from "./usage-limit-detector.js";
+import { withRateLimitRetry } from "./rate-limit-retry.js";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
@@ -1153,9 +1154,15 @@ async function runAiAgentForCommit(params: AiAgentParams): Promise<{ success: bo
       simplifiedContext,
       buildCommand,
     });
-    await session.prompt(prompt);
-
-    checkSessionError(session);
+    await withRateLimitRetry(async () => {
+      await session.prompt(prompt);
+      checkSessionError(session);
+    }, {
+      onRetry: (attempt, delayMs, error) => {
+        const delaySec = Math.round(delayMs / 1000);
+        mergerLog.warn(`⏳ ${taskId} rate limited — retry ${attempt} in ${delaySec}s: ${error.message}`);
+      },
+    });
 
     // Check if build failed
     if (buildFailed) {

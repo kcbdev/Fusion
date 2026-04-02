@@ -14,6 +14,7 @@ import { AgentLogger } from "./agent-logger.js";
 import { executorLog, reviewerLog } from "./logger.js";
 import { isUsageLimitError, checkSessionError, type UsageLimitPauser } from "./usage-limit-detector.js";
 import { isTransientError } from "./transient-error-detector.js";
+import { withRateLimitRetry } from "./rate-limit-retry.js";
 import type { StuckTaskDetector } from "./stuck-task-detector.js";
 
 // Re-export for backward compatibility (tests import from executor.ts)
@@ -653,10 +654,18 @@ export class TaskExecutor {
         }
       };
 
+      const retryableWork = () => withRateLimitRetry(agentWork, {
+        onRetry: (attempt, delayMs, error) => {
+          const delaySec = Math.round(delayMs / 1000);
+          executorLog.warn(`⏳ ${task.id} rate limited — retry ${attempt} in ${delaySec}s: ${error.message}`);
+          this.store.logEntry(task.id, `Rate limited — retry ${attempt} in ${delaySec}s`).catch(() => {});
+        },
+      });
+
       if (this.options.semaphore) {
-        await this.options.semaphore.run(agentWork, PRIORITY_EXECUTE);
+        await this.options.semaphore.run(retryableWork, PRIORITY_EXECUTE);
       } else {
-        await agentWork();
+        await retryableWork();
       }
     } catch (err: any) {
       if (this.depAborted.has(task.id)) {

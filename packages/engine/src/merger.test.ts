@@ -14,6 +14,10 @@ vi.mock("node:fs", () => ({
   readFileSync: vi.fn(),
 }));
 
+vi.mock("./rate-limit-retry.js", () => ({
+  withRateLimitRetry: (fn: () => Promise<any>) => fn(),
+}));
+
 import {
   aiMergeTask,
   findWorktreeUser,
