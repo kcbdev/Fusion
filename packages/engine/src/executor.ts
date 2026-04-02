@@ -1941,7 +1941,7 @@ Treat a non-zero exit code as a blocking failure. Do not claim success without a
  * Format a comment for injection into a running agent session.
  * Used for real-time steering during task execution.
  */
-function formatCommentForInjection(comment: import("@fusion/core").TaskComment): string {
+function formatCommentForInjection(comment: import("@fusion/core").SteeringComment): string {
   const timestamp = formatTimestamp(comment.createdAt);
   return `📣 **New feedback** — ${timestamp} (${comment.author}):\n\n${comment.text}\n\nPlease adjust your approach based on this feedback.`;
 }

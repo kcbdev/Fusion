@@ -183,6 +183,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       steps: fromJson<import("./types.js").TaskStep[]>(row.steps) || [],
       log: fromJson<import("./types.js").TaskLogEntry[]>(row.log) || [],
       attachments: (() => { const a = fromJson<TaskAttachment[]>(row.attachments); return a && a.length > 0 ? a : undefined; })(),
+      steeringComments: (() => {
+        const sc = fromJson<import("./types.js").SteeringComment[]>(row.steeringComments);
+        return sc && sc.length > 0 ? sc : undefined;
+      })(),
       comments: (() => {
         // Merge legacy steeringComments and comments into unified comments field
         const legacySteering = fromJson<Array<{ id: string; text: string; createdAt: string; author: string }>>(row.steeringComments) || [];
@@ -2023,11 +2027,40 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   /**
    * Add a steering comment to a task.
    * Steering comments are injected into the AI execution context.
-   * @deprecated Use addComment instead - comments are now unified
+   * They are stored in BOTH `comments` (for unified UI display) and
+   * `steeringComments` (for executor real-time injection).
+   * Unlike regular comments, steering comments never trigger auto-refinement.
    */
   async addSteeringComment(id: string, text: string, author: "user" | "agent" = "user"): Promise<Task> {
-    // Delegates to addComment for unified comment storage
-    return this.addComment(id, text, author);
+    // Write to unified comments (skip refinement — steering is for agent injection, not follow-up tasks)
+    const task = await this.addComment(id, text, author, { skipRefinement: true });
+
+    // Also write to steeringComments so the executor's real-time injection listener can detect new entries
+    const updated = await this.withTaskLock(id, async () => {
+      const dir = this.taskDir(id);
+      const currentTask = await this.readTaskJson(dir);
+
+      const steeringComment: import("./types.js").SteeringComment = {
+        id: task.comments![task.comments!.length - 1].id,
+        text,
+        createdAt: new Date().toISOString(),
+        author,
+      };
+
+      if (!currentTask.steeringComments) {
+        currentTask.steeringComments = [];
+      }
+      currentTask.steeringComments.push(steeringComment);
+      currentTask.updatedAt = new Date().toISOString();
+
+      await this.atomicWriteTaskJson(dir, currentTask);
+      if (this.watcher) this.taskCache.set(id, { ...currentTask });
+
+      this.emit("task:updated", currentTask);
+      return currentTask;
+    });
+
+    return updated;
   }
 
   async updateTaskComment(id: string, commentId: string, text: string): Promise<Task> {
@@ -2096,6 +2129,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     id: string,
     text: string,
     author: string = "user",
+    options?: { skipRefinement?: boolean },
   ): Promise<Task> {
     // Phase 1: Add comment under lock
     const task = await this.withTaskLock(id, async () => {
@@ -2137,7 +2171,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     // Phase 2: Auto-refinement OUTSIDE the lock (to avoid lock contention)
     // Only create refinement for user comments on done tasks
-    if (task.column === "done" && author === "user") {
+    // Steering comments skip refinement — they are injected into the agent stream instead
+    if (task.column === "done" && author === "user" && !options?.skipRefinement) {
       try {
         await this.refineTask(id, text);
       } catch {

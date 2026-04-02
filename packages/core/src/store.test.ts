@@ -1934,6 +1934,65 @@ Task with acceptance criteria
       expect(updated.comments).toHaveLength(1);
       expect(updated.comments![0].text).toBe("   ");
     });
+
+    it("addSteeringComment on done task does NOT create a refinement task", async () => {
+      const task = await store.createTask({ description: "Original task" });
+      await store.moveTask(task.id, "todo");
+      await store.moveTask(task.id, "in-progress");
+      await store.moveTask(task.id, "in-review");
+      await store.moveTask(task.id, "done");
+
+      const allTasksBefore = await store.listTasks();
+
+      await store.addSteeringComment(task.id, "Please handle the edge case");
+
+      const allTasksAfter = await store.listTasks();
+      // No refinement task should be created
+      expect(allTasksAfter).toHaveLength(allTasksBefore.length);
+    });
+
+    it("addSteeringComment writes to both comments and steeringComments", async () => {
+      const task = await createTestTask();
+
+      const updated = await store.addSteeringComment(task.id, "Focus on error handling");
+
+      // Should appear in unified comments (for UI display)
+      expect(updated.comments).toBeDefined();
+      expect(updated.comments!.some(c => c.text === "Focus on error handling")).toBe(true);
+
+      // Should appear in steeringComments (for executor injection)
+      expect(updated.steeringComments).toBeDefined();
+      expect(updated.steeringComments!.some(c => c.text === "Focus on error handling")).toBe(true);
+    });
+
+    it("addSteeringComment steeringComments persist through round-trip", async () => {
+      const task = await createTestTask();
+
+      await store.addSteeringComment(task.id, "Focus on error handling");
+
+      const fetched = await store.getTask(task.id);
+      expect(fetched.steeringComments).toBeDefined();
+      expect(fetched.steeringComments!).toHaveLength(1);
+      expect(fetched.steeringComments![0].text).toBe("Focus on error handling");
+    });
+
+    it("regular addComment on done task still creates refinement", async () => {
+      const task = await store.createTask({ description: "Original task" });
+      await store.moveTask(task.id, "todo");
+      await store.moveTask(task.id, "in-progress");
+      await store.moveTask(task.id, "in-review");
+      await store.moveTask(task.id, "done");
+
+      const allTasksBefore = await store.listTasks();
+
+      await store.addComment(task.id, "Need to fix edge case");
+
+      const allTasksAfter = await store.listTasks();
+      expect(allTasksAfter).toHaveLength(allTasksBefore.length + 1);
+
+      const refinement = allTasksAfter.find((t) => t.id !== task.id && t.title?.includes("Refinement"));
+      expect(refinement).toBeDefined();
+    });
   });
 
   describe("task comments and merge details types", () => {
