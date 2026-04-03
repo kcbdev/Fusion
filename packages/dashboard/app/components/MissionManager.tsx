@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   X,
   Plus,
@@ -597,29 +597,67 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
     }
   }, [handleSaveFeature]);
 
+  // Ref for focus management
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  // Escape key handling
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal-content mission-manager-modal">
+    <div
+      className="modal-overlay open"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+      data-testid="mission-manager-overlay"
+    >
+      <div
+        ref={modalRef}
+        className="mission-manager-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Mission Manager"
+        data-testid="mission-manager-dialog"
+      >
         <div className="modal-header">
           <div className="modal-title-row">
             {selectedMission ? (
-              <button className="icon-btn" onClick={handleBackToList} title="Back to missions">
+              <button
+                className="icon-btn"
+                onClick={handleBackToList}
+                title="Back to missions"
+                aria-label="Back to missions list"
+                data-testid="mission-back-btn"
+              >
                 <ChevronLeft size={20} />
               </button>
             ) : null}
             <h2>
               <Target size={20} />
-              Missions
+              {selectedMission ? selectedMission.title : "Missions"}
             </h2>
           </div>
-          <button className="icon-btn" onClick={onClose} title="Close">
+          <button
+            className="icon-btn"
+            onClick={onClose}
+            title="Close"
+            aria-label="Close Mission Manager"
+            data-testid="mission-close-btn"
+          >
             <X size={20} />
           </button>
         </div>
 
-        <div className="modal-body mission-manager-body">
+        <div className="mission-manager-body">
           {loading ? (
             <div className="loading-state">
               <Loader2 size={24} className="spinner" />

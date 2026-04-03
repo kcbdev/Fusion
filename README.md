@@ -81,7 +81,7 @@ fn mission delete M-001 [--force]                                        # Delet
 fn mission activate-slice SL-001                                          # Manually activate slice
 ```
 
-**Dashboard:** Press `Cmd/Ctrl+Shift+M` to open the Mission List, then create missions, add milestones, slices, and features. Link features to tasks for automatic progress tracking.
+**Dashboard:** Click the Target icon in the dashboard header to open the Mission Manager, then create missions, add milestones, slices, and features. Link features to tasks for automatic progress tracking. On mobile devices, the Mission Manager opens as a full-screen overlay with touch-friendly controls and stacked hierarchy cards.
 
 ## Quick Start
 
