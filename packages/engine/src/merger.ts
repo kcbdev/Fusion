@@ -92,6 +92,156 @@ function matchGlob(path: string, pattern: string): boolean {
   return regex.test(fileName) || regex.test(path);
 }
 
+// ── Pre-merge diffstat scope validation ──────────────────────────────
+
+interface DiffFileEntry {
+  file: string;
+  insertions: number;
+  deletions: number;
+}
+
+interface DiffScopeResult {
+  warnings: string[];
+  outOfScopeFiles: string[];
+  largeOutOfScopeDeletions: { file: string; deletions: number }[];
+}
+
+/**
+ * Parse git `--stat` output into per-file insertion/deletion counts.
+ *
+ * Example line: ` packages/core/src/types.ts | 9 ++--`
+ * Binary line:  ` some/image.png            | Bin 0 -> 1234 bytes`
+ */
+export function parseDiffStat(diffStat: string): DiffFileEntry[] {
+  const entries: DiffFileEntry[] = [];
+  for (const line of diffStat.split("\n")) {
+    // Skip the summary line ("5 files changed, 10 insertions(+), 3 deletions(-)")
+    if (line.includes("files changed") || line.includes("file changed")) continue;
+    // Match: " path/to/file | 42 +++---" or " path/to/file | Bin ..."
+    const match = line.match(/^\s*(.+?)\s+\|\s+(\d+)\s+(\+*)(-*)\s*$/);
+    if (!match) continue;
+    const file = match[1].trim();
+    const plusses = match[3].length;
+    const minuses = match[4].length;
+    // The number is total changes; +/- chars show the ratio
+    const total = parseInt(match[2], 10);
+    if (total === 0) continue;
+    const ratio = plusses + minuses > 0 ? plusses / (plusses + minuses) : 0.5;
+    entries.push({
+      file,
+      insertions: Math.round(total * ratio),
+      deletions: Math.round(total * (1 - ratio)),
+    });
+  }
+  return entries;
+}
+
+/**
+ * Extract the `## File Scope` section from a PROMPT.md string.
+ * Returns an array of file/glob patterns (lines starting with `- \``).
+ */
+export function extractFileScope(promptContent: string): string[] {
+  const lines = promptContent.split("\n");
+  const patterns: string[] = [];
+  let inScope = false;
+  for (const line of lines) {
+    if (/^##\s+File Scope/.test(line)) {
+      inScope = true;
+      continue;
+    }
+    if (inScope && /^##\s/.test(line)) break; // next section
+    if (inScope) {
+      // Match "- `path/to/file`" or "- path/to/file"
+      const m = line.match(/^-\s+`?([^`\s]+)`?\s*(?:\(.*\))?\s*$/);
+      if (m) patterns.push(m[1]);
+    }
+  }
+  return patterns;
+}
+
+/**
+ * Check whether a file path matches any of the declared scope patterns.
+ * Reuses the existing `matchGlob` helper. Also matches if the file is
+ * inside a directory that's in scope (e.g., scope has `src/utils/*` and
+ * file is `src/utils/helpers.ts`).
+ */
+function matchesScope(filePath: string, scopePatterns: string[]): boolean {
+  for (const pattern of scopePatterns) {
+    if (matchGlob(filePath, pattern)) return true;
+    // Directory match: if pattern ends with /* or /**, check prefix
+    const dirPattern = pattern.replace(/\/\*+$/, "");
+    if (dirPattern !== pattern && filePath.startsWith(dirPattern + "/")) return true;
+    // Exact directory match: scope says `src/foo/` and file is inside it
+    if (pattern.endsWith("/") && filePath.startsWith(pattern)) return true;
+    // Also match if both share the same directory
+    const patternDir = pattern.lastIndexOf("/") >= 0 ? pattern.slice(0, pattern.lastIndexOf("/")) : "";
+    const fileDir = filePath.lastIndexOf("/") >= 0 ? filePath.slice(0, filePath.lastIndexOf("/")) : "";
+    if (patternDir && fileDir === patternDir) return true;
+  }
+  return false;
+}
+
+/**
+ * Validate that the diff stays within the task's declared File Scope.
+ * Returns warnings for out-of-scope changes, especially large deletions.
+ * This is a soft guardrail — warnings are logged but do not block merge.
+ */
+export async function validateDiffScope(
+  store: TaskStore,
+  taskId: string,
+  diffStat: string,
+): Promise<DiffScopeResult> {
+  const result: DiffScopeResult = { warnings: [], outOfScopeFiles: [], largeOutOfScopeDeletions: [] };
+
+  // Parse the diffstat
+  const entries = parseDiffStat(diffStat);
+  if (entries.length === 0) return result;
+
+  // Read the task's PROMPT.md for file scope
+  let promptContent = "";
+  try {
+    const task = await store.getTask(taskId);
+    promptContent = task.prompt || "";
+  } catch {
+    return result; // can't validate without prompt
+  }
+
+  const scopePatterns = extractFileScope(promptContent);
+  if (scopePatterns.length === 0) return result; // no scope declared, skip
+
+  // Check each changed file
+  for (const entry of entries) {
+    // Skip changeset files — always allowed
+    if (entry.file.startsWith(".changeset/")) continue;
+
+    if (!matchesScope(entry.file, scopePatterns)) {
+      result.outOfScopeFiles.push(entry.file);
+
+      // Flag large deletions outside scope (>50 net deletions or 100% deletions)
+      const netDeletions = entry.deletions - entry.insertions;
+      if (netDeletions > 50 || (entry.deletions > 0 && entry.insertions === 0)) {
+        result.largeOutOfScopeDeletions.push({ file: entry.file, deletions: entry.deletions });
+      }
+    }
+  }
+
+  // Build warnings
+  if (result.largeOutOfScopeDeletions.length > 0) {
+    const files = result.largeOutOfScopeDeletions
+      .map((d) => `${d.file} (${d.deletions} deletions)`)
+      .join(", ");
+    result.warnings.push(
+      `⚠ SCOPE WARNING: Large deletions outside File Scope: ${files}`,
+    );
+  } else if (result.outOfScopeFiles.length > 3) {
+    result.warnings.push(
+      `⚠ SCOPE WARNING: ${result.outOfScopeFiles.length} files changed outside declared File Scope`,
+    );
+  }
+
+  return result;
+}
+
 /**
  * Get list of conflicted files from git.
  * Runs `git diff --name-only --diff-filter=U` and returns array of file paths.
@@ -607,6 +757,17 @@ export async function aiMergeTask(
     }).trim();
   } catch {
     diffStat = "(unable to read diff)";
+  }
+
+  // 4b. Validate diff scope against task's declared File Scope
+  try {
+    const scopeResult = await validateDiffScope(store, taskId, diffStat);
+    for (const warning of scopeResult.warnings) {
+      mergerLog.warn(`${taskId}: ${warning}`);
+      await store.logEntry(taskId, warning);
+    }
+  } catch {
+    // Scope validation is best-effort — never block merge on validation failure
   }
 
   // 5. Execute merge with retry logic

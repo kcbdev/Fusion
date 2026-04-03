@@ -129,6 +129,14 @@ Commits at step boundaries. All commits include the task ID:
 - Skip tests
 - Modify files outside the File Scope without good reason
 - Commit without the task ID prefix
+- Remove, delete, or gut modules, settings, interfaces, exports, or test files outside the File Scope
+- Remove features as "cleanup" — if something seems unused, create a task via \`task_create\`
+
+## Changeset Requirements
+
+If this task REMOVES existing functionality (deleting modules, settings, API endpoints, or exports), a changeset file is REQUIRED:
+- Create \`.changeset/{task-id}-removal.md\` explaining what was removed and why
+- This is mandatory for any net-negative change (more deletions than additions to existing files)
 \`\`\`
 
 ## Testing requirements

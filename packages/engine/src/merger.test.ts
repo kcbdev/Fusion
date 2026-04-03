@@ -39,6 +39,9 @@ import {
   resolveTrivialWhitespace,
   LOCKFILE_PATTERNS,
   GENERATED_PATTERNS,
+  parseDiffStat,
+  extractFileScope,
+  validateDiffScope,
   type ConflictCategory,
 } from "./merger.js";
 import { createKbAgent } from "./pi.js";
@@ -1958,5 +1961,174 @@ describe("aiMergeTask — build verification", () => {
 
     expect(result.merged).toBe(true);
     expect(store.moveTask).toHaveBeenCalledWith("FN-050", "done");
+  });
+});
+
+// ── Pre-merge diffstat scope validation tests ────────────────────────
+
+describe("parseDiffStat", () => {
+  it("parses standard diffstat output", () => {
+    const stat = [
+      " packages/core/src/types.ts         | 9 ++--",
+      " packages/engine/src/notifier.ts     | 46 +-----",
+      " 2 files changed, 10 insertions(+), 45 deletions(-)",
+    ].join("\n");
+
+    const entries = parseDiffStat(stat);
+    expect(entries).toHaveLength(2);
+    expect(entries[0].file).toBe("packages/core/src/types.ts");
+    // Rounding may shift total by ±1, so check approximate range
+    expect(entries[0].insertions + entries[0].deletions).toBeGreaterThanOrEqual(9);
+    expect(entries[0].insertions + entries[0].deletions).toBeLessThanOrEqual(10);
+    expect(entries[1].file).toBe("packages/engine/src/notifier.ts");
+    expect(entries[1].deletions).toBeGreaterThan(entries[1].insertions);
+  });
+
+  it("handles pure-deletion lines", () => {
+    const stat = " packages/engine/src/usage.ts | 527 ---";
+    const entries = parseDiffStat(stat);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].insertions).toBe(0);
+    expect(entries[0].deletions).toBe(527);
+  });
+
+  it("handles pure-insertion lines", () => {
+    const stat = " packages/engine/src/new.ts | 100 +++";
+    const entries = parseDiffStat(stat);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].insertions).toBe(100);
+    expect(entries[0].deletions).toBe(0);
+  });
+
+  it("returns empty for unreadable stat", () => {
+    expect(parseDiffStat("(unable to read diff)")).toEqual([]);
+    expect(parseDiffStat("")).toEqual([]);
+  });
+
+  it("skips summary line", () => {
+    const stat = " 1 file changed, 5 insertions(+)";
+    expect(parseDiffStat(stat)).toEqual([]);
+  });
+});
+
+describe("extractFileScope", () => {
+  it("extracts file patterns from PROMPT.md", () => {
+    const prompt = [
+      "# Task: FN-100 - Add feature",
+      "",
+      "## File Scope",
+      "",
+      "- `packages/core/src/types.ts`",
+      "- `packages/engine/src/notifier.ts`",
+      "- `packages/dashboard/app/components/*`",
+      "",
+      "## Steps",
+      "",
+      "### Step 1: Do things",
+    ].join("\n");
+
+    const scope = extractFileScope(prompt);
+    expect(scope).toEqual([
+      "packages/core/src/types.ts",
+      "packages/engine/src/notifier.ts",
+      "packages/dashboard/app/components/*",
+    ]);
+  });
+
+  it("handles patterns with artifact annotations", () => {
+    const prompt = [
+      "## File Scope",
+      "",
+      "- `src/foo.ts` (new)",
+      "- `src/bar.ts` (modified)",
+      "",
+      "## Steps",
+    ].join("\n");
+
+    const scope = extractFileScope(prompt);
+    expect(scope).toEqual(["src/foo.ts", "src/bar.ts"]);
+  });
+
+  it("returns empty for missing File Scope section", () => {
+    const prompt = "# Task\n\n## Steps\n### Step 1\n";
+    expect(extractFileScope(prompt)).toEqual([]);
+  });
+});
+
+describe("validateDiffScope", () => {
+  it("returns warnings for large deletions outside scope", async () => {
+    const store = {
+      getTask: vi.fn().mockResolvedValue({
+        prompt: [
+          "## File Scope",
+          "",
+          "- `packages/dashboard/app/components/Header.tsx`",
+          "",
+          "## Steps",
+        ].join("\n"),
+      }),
+      logEntry: vi.fn(),
+    } as unknown as TaskStore;
+
+    const diffStat = [
+      " packages/dashboard/app/components/Header.tsx | 20 ++--",
+      " packages/engine/src/usage.ts                 | 527 ---",
+      " packages/engine/src/usage.test.ts            | 524 ---",
+      " 3 files changed, 5 insertions(+), 1066 deletions(-)",
+    ].join("\n");
+
+    const result = await validateDiffScope(store, "FN-100", diffStat);
+    expect(result.outOfScopeFiles).toContain("packages/engine/src/usage.ts");
+    expect(result.outOfScopeFiles).toContain("packages/engine/src/usage.test.ts");
+    expect(result.largeOutOfScopeDeletions).toHaveLength(2);
+    expect(result.warnings.length).toBeGreaterThan(0);
+    expect(result.warnings[0]).toContain("SCOPE WARNING");
+  });
+
+  it("allows changeset files outside scope", async () => {
+    const store = {
+      getTask: vi.fn().mockResolvedValue({
+        prompt: "## File Scope\n\n- `src/foo.ts`\n\n## Steps",
+      }),
+    } as unknown as TaskStore;
+
+    const diffStat = [
+      " src/foo.ts                          | 10 +++",
+      " .changeset/my-change.md             | 5 +++",
+      " 2 files changed, 15 insertions(+)",
+    ].join("\n");
+
+    const result = await validateDiffScope(store, "FN-100", diffStat);
+    expect(result.outOfScopeFiles).not.toContain(".changeset/my-change.md");
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it("returns empty result when no scope is declared", async () => {
+    const store = {
+      getTask: vi.fn().mockResolvedValue({
+        prompt: "# Task\n\n## Steps\n",
+      }),
+    } as unknown as TaskStore;
+
+    const result = await validateDiffScope(store, "FN-100", " foo.ts | 500 ---");
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it("does not warn for in-scope changes", async () => {
+    const store = {
+      getTask: vi.fn().mockResolvedValue({
+        prompt: "## File Scope\n\n- `packages/engine/src/*`\n\n## Steps",
+      }),
+    } as unknown as TaskStore;
+
+    const diffStat = [
+      " packages/engine/src/executor.ts | 50 +++---",
+      " packages/engine/src/triage.ts   | 30 +++---",
+      " 2 files changed, 40 insertions(+), 40 deletions(-)",
+    ].join("\n");
+
+    const result = await validateDiffScope(store, "FN-100", diffStat);
+    expect(result.outOfScopeFiles).toHaveLength(0);
+    expect(result.warnings).toHaveLength(0);
   });
 });

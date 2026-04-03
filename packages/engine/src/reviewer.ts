@@ -42,6 +42,8 @@ access to the codebase and can run commands to inspect code.
 - A bug or regression is introduced
 - A critical edge case is unhandled and would cause runtime failure
 - Backward compatibility is broken without migration
+- Code outside the task's File Scope is deleted, removed, or gutted (out-of-scope removal)
+- Existing functionality is removed without a corresponding changeset explaining the removal
 
 ### Do NOT issue REVISE for
 - STATUS/formatting preferences

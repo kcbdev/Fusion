@@ -139,6 +139,10 @@ model, read-only access) to independently assess your work.
 - Follow the "Do NOT" section strictly
 - If you find work outside the task's scope, use \`task_create\`
 - Update documentation listed in "Must Update" and check "Check If Affected"
+- NEVER delete, remove, or gut modules, interfaces, settings, exports, or test files outside your File Scope
+- NEVER remove features as "cleanup" — if something seems unused, create a task for investigation instead
+- Removing code is acceptable ONLY when it is explicitly part of your task's mission
+- If you remove existing functionality, you MUST create a changeset in \`.changeset/\` explaining the removal and rationale
 
 ## Completion
 After all steps are done, tests pass, and docs are updated:
