@@ -110,69 +110,101 @@ describe("build-exe", () => {
         cwd: dir,
         stdio: ["ignore", "pipe", "pipe"],
       });
-      
-      // Wait for server to be ready
+
+      if (!child.stdout || !child.stderr) {
+        throw new Error("Dashboard process stdio was not piped");
+      }
+
+      // ── Deterministic startup probe ────────────────────────────────
+      //
+      // Three possible outcomes:
+      //   "ready"              — startup banner detected, proceed to PTY test
+      //   "sqlite-unsupported" — known Bun node:sqlite limitation, skip test
+      //   (reject)             — unexpected early exit, fail with diagnostics
+      //
+      // Uses 'close' (not 'exit') to guarantee all stdio data has been
+      // consumed before evaluating the outcome. This prevents the race
+      // where exit fires before stderr delivers the sqlite error message.
+      //
       let startupOutput = "";
-      let sqliteUnsupported = false;
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          child!.kill("SIGTERM");
-          reject(new Error(`Server startup timeout\n${startupOutput}`));
-        }, 10_000);
+      let settled = false;
 
-        const onStdout = (d: Buffer) => {
-          startupOutput += d.toString();
-          if (startupOutput.includes("kb board") && startupOutput.includes(`→ http://localhost:${port}`)) {
-            clearTimeout(timeout);
-            resolve();
-          }
-        };
+      const outcome = await new Promise<"ready" | "sqlite-unsupported">(
+        (resolve, reject) => {
+          const SQLITE_ERROR = "No such built-in module: node:sqlite";
 
-        const onStderr = (d: Buffer) => {
-          startupOutput += d.toString();
-          if (startupOutput.includes("No such built-in module: node:sqlite")) {
-            sqliteUnsupported = true;
-            clearTimeout(timeout);
+          const timeout = setTimeout(() => {
+            if (settled) return;
+            settled = true;
             child!.kill("SIGTERM");
-            resolve();
-          }
-        };
+            reject(
+              new Error(`Server startup timeout\nOutput:\n${startupOutput}`),
+            );
+          }, 10_000);
 
-        if (!child) {
-          clearTimeout(timeout);
-          reject(new Error("Dashboard process failed to start"));
-          return;
-        }
-
-        if (!child.stdout || !child.stderr) {
-          clearTimeout(timeout);
-          reject(new Error("Dashboard process stdio was not piped"));
-          return;
-        }
-
-        child.stdout.on("data", onStdout);
-        child.stderr.on("data", onStderr);
-
-        child.on("error", reject);
-        child.on("exit", () => {
-          if (startupOutput.includes("No such built-in module: node:sqlite")) {
-            sqliteUnsupported = true;
+          const settle = (
+            result: "ready" | "sqlite-unsupported" | Error,
+          ) => {
+            if (settled) return;
+            settled = true;
             clearTimeout(timeout);
-            resolve();
-            return;
-          }
-          if (!startupOutput.includes("kb board")) {
-            clearTimeout(timeout);
-            reject(new Error(`Dashboard exited before becoming ready\n${startupOutput}`));
-          }
-        });
-      });
+            if (result instanceof Error) {
+              reject(result);
+            } else if (result === "sqlite-unsupported") {
+              child!.kill("SIGTERM");
+              resolve(result);
+            } else {
+              resolve(result);
+            }
+          };
 
-      if (sqliteUnsupported || child.exitCode !== null) {
+          child!.stdout!.on("data", (d: Buffer) => {
+            startupOutput += d.toString();
+            if (
+              startupOutput.includes("kb board") &&
+              startupOutput.includes(`→ http://localhost:${port}`)
+            ) {
+              settle("ready");
+            }
+          });
+
+          child!.stderr!.on("data", (d: Buffer) => {
+            startupOutput += d.toString();
+            if (startupOutput.includes(SQLITE_ERROR)) {
+              settle("sqlite-unsupported");
+            }
+          });
+
+          // 'close' fires after all stdio streams are drained, so
+          // startupOutput is guaranteed to be complete here.
+          child!.on("close", (code) => {
+            if (startupOutput.includes(SQLITE_ERROR)) {
+              settle("sqlite-unsupported");
+              return;
+            }
+            settle(
+              new Error(
+                `Dashboard exited unexpectedly (code=${code})\nOutput:\n${startupOutput}`,
+              ),
+            );
+          });
+
+          child!.on("error", (err) => {
+            settle(
+              new Error(
+                `Dashboard process error: ${err.message}\nOutput:\n${startupOutput}`,
+              ),
+            );
+          });
+        },
+      );
+
+      // Known Bun limitation: skip the rest of the test
+      if (outcome === "sqlite-unsupported") {
         return;
       }
       
-      // Test PTY session creation endpoint
+      // outcome === "ready" — verify PTY session creation endpoint
       let response: Response | undefined;
       let lastError: unknown;
       for (let attempt = 0; attempt < 20; attempt++) {
@@ -196,10 +228,10 @@ describe("build-exe", () => {
             return;
           }
           if (!codes.includes("ECONNREFUSED")) {
-            throw new Error(`PTY endpoint request failed after startup\n${startupOutput}\n${String(error)}`);
+            throw new Error(`PTY endpoint request failed after startup\n${String(error)}`);
           }
           if (child?.exitCode !== null) {
-            throw new Error(`Dashboard exited before PTY endpoint became available\n${startupOutput}`);
+            throw new Error(`Dashboard exited before PTY endpoint became available`);
           }
           await new Promise((r) => setTimeout(r, 100));
         }
@@ -209,7 +241,7 @@ describe("build-exe", () => {
         throw lastError;
       }
       if (!response) {
-        throw new Error(`PTY endpoint did not respond after retries\n${startupOutput}`);
+        throw new Error(`PTY endpoint did not respond after retries`);
       }
       
       // Accept either success (201) or service unavailable (503 when PTY not available)

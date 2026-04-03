@@ -160,3 +160,19 @@ When the dashboard starts from a Bun-compiled binary, it attempts to set up nati
 If all resolution methods fail, terminal creation gracefully returns `null`, which the HTTP layer converts to a 503 Service Unavailable response.
 
 **Cross-compilation:** Native assets are staged per-platform during build. When cross-compiling, only the target platform's assets are included. PTY functionality requires running on a platform with matching native assets.
+
+### Known Bun `node:sqlite` Limitation
+
+Bun-compiled standalone binaries may encounter a `No such built-in module: node:sqlite` error at startup. This happens because Bun's compiler does not include the full `node:sqlite` built-in module in all compilation targets.
+
+**Impact:** When this error occurs, the binary exits immediately. This affects any command that initializes the SQLite-backed task store, including `dashboard`, `task list`, and `task create`. Commands that don't need the store (like `--help`) continue to work.
+
+**Detection:** The startup validation test suite treats this specific error as an expected limitation — it is not misinterpreted as a generic dashboard startup failure. The test probe distinguishes between:
+
+| Outcome | Behavior |
+|---------|----------|
+| Startup banner detected | Full test proceeds (PTY endpoint verification) |
+| `node:sqlite` error in output | Test skips cleanly (known Bun limitation) |
+| Other early exit | Test fails with diagnostic output |
+
+Only the exact `node:sqlite` built-in module error is handled specially. Any other exit or crash during startup is treated as a real regression and fails the test with full process output for debugging.
