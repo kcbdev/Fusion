@@ -816,7 +816,7 @@ describe("Header", () => {
       const { container } = render(
         <MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />
       );
-      const overlay = container.querySelector(".modal-overlay");
+      const overlay = container.querySelector(".mission-manager-overlay");
       expect(overlay).not.toBeNull();
       expect(overlay!.className).toContain("open");
     } finally {

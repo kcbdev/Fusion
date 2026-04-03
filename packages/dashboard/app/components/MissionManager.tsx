@@ -60,7 +60,7 @@ interface MissionManagerProps {
   availableTasks?: Array<{ id: string; title?: string }>;
 }
 
-// Status badge colors
+// Status badge colors — use CSS custom-property-compatible tokens
 const missionStatusColors: Record<MissionStatus, { bg: string; text: string }> = {
   planning: { bg: "rgba(234, 179, 8, 0.15)", text: "#eab308" },
   active: { bg: "rgba(34, 197, 94, 0.15)", text: "#22c55e" },
@@ -616,66 +616,68 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
 
   return (
     <div
-      className="modal-overlay open"
+      className="mission-manager-overlay open"
       onClick={(e) => e.target === e.currentTarget && onClose()}
       data-testid="mission-manager-overlay"
     >
       <div
         ref={modalRef}
-        className="mission-manager-modal"
+        className="mission-manager"
         role="dialog"
         aria-modal="true"
         aria-label="Mission Manager"
         data-testid="mission-manager-dialog"
       >
-        <div className="modal-header">
-          <div className="modal-title-row">
+        {/* ── Header ── */}
+        <div className="mission-manager__header">
+          <div className="mission-manager__header-title">
             {selectedMission ? (
               <button
-                className="icon-btn"
+                className="mission-manager__back-btn"
                 onClick={handleBackToList}
                 title="Back to missions"
                 aria-label="Back to missions list"
                 data-testid="mission-back-btn"
               >
-                <ChevronLeft size={20} />
+                <ChevronLeft size={18} />
               </button>
             ) : null}
-            <h2>
-              <Target size={20} />
+            <Target size={18} className="mission-manager__header-icon" />
+            <h2 className="mission-manager__title">
               {selectedMission ? selectedMission.title : "Missions"}
             </h2>
           </div>
           <button
-            className="icon-btn"
+            className="modal-close"
             onClick={onClose}
             title="Close"
             aria-label="Close Mission Manager"
             data-testid="mission-close-btn"
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
-        <div className="mission-manager-body">
+        {/* ── Body ── */}
+        <div className="mission-manager__body">
           {loading ? (
-            <div className="loading-state">
+            <div className="mission-manager__loading">
               <Loader2 size={24} className="spinner" />
               <span>Loading missions...</span>
             </div>
           ) : detailLoading ? (
-            <div className="loading-state">
+            <div className="mission-manager__loading">
               <Loader2 size={24} className="spinner" />
               <span>Loading mission details...</span>
             </div>
           ) : selectedMission ? (
-            // Mission detail view
-            <div className="mission-detail-view">
-              <div className="mission-detail-header">
-                <div className="mission-detail-title">
-                  <h3>{selectedMission.title}</h3>
+            /* ── Detail View ── */
+            <div className="mission-detail">
+              <div className="mission-detail__header">
+                <div className="mission-detail__title-row">
+                  <h3 className="mission-detail__title">{selectedMission.title}</h3>
                   <span
-                    className="status-badge"
+                    className="mission-status-badge"
                     style={{
                       backgroundColor: missionStatusColors[selectedMission.status].bg,
                       color: missionStatusColors[selectedMission.status].text,
@@ -685,31 +687,31 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                   </span>
                 </div>
                 {selectedMission.description && (
-                  <p className="mission-description">{selectedMission.description}</p>
+                  <p className="mission-detail__description">{selectedMission.description}</p>
                 )}
-                <div className="mission-meta">
+                <div className="mission-detail__meta">
                   {selectedMission.autoAdvance && (
-                    <span className="meta-badge">
+                    <span className="mission-detail__meta-badge">
                       <Play size={12} /> Auto-advance
                     </span>
                   )}
-                  <span className="meta-info">
+                  <span className="mission-detail__meta-info">
                     {selectedMission.milestones.length} milestones
                   </span>
                 </div>
               </div>
 
-              <div className="milestone-list">
+              <div className="mission-detail__milestones">
                 {selectedMission.milestones.map((milestone) => (
-                  <div key={milestone.id} className="milestone-item">
-                    <div className="milestone-header" onClick={() => toggleMilestoneExpanded(milestone.id)}>
-                      <button className="expand-btn">
+                  <div key={milestone.id} className="mission-milestone">
+                    <div className="mission-milestone__header" onClick={() => toggleMilestoneExpanded(milestone.id)}>
+                      <button className="mission-milestone__expand">
                         {expandedMilestones.has(milestone.id) ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                       </button>
-                      <Layers size={16} />
-                      <span className="milestone-title">{milestone.title}</span>
+                      <Layers size={16} className="mission-milestone__icon" />
+                      <span className="mission-milestone__title">{milestone.title}</span>
                       <span
-                        className="status-badge small"
+                        className="mission-status-badge mission-status-badge--sm"
                         style={{
                           backgroundColor: milestoneStatusColors[milestone.status].bg,
                           color: milestoneStatusColors[milestone.status].text,
@@ -717,34 +719,25 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                       >
                         {milestone.status}
                       </span>
-                      <span className="item-count">{milestone.slices.length} slices</span>
-                      <div className="item-actions">
+                      <span className="mission-milestone__count">{milestone.slices.length} slices</span>
+                      <div className="mission-milestone__actions" onClick={(e) => e.stopPropagation()}>
                         <button
-                          className="icon-btn small"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleCreateSlice(milestone.id);
-                          }}
+                          className="mission-icon-btn"
+                          onClick={() => handleCreateSlice(milestone.id)}
                           title="Add slice"
                         >
                           <Plus size={14} />
                         </button>
                         <button
-                          className="icon-btn small"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleEditMilestone(milestone);
-                          }}
+                          className="mission-icon-btn"
+                          onClick={() => handleEditMilestone(milestone)}
                           title="Edit milestone"
                         >
                           <Pencil size={14} />
                         </button>
                         <button
-                          className="icon-btn small danger"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteConfirmId({ type: "milestone", id: milestone.id });
-                          }}
+                          className="mission-icon-btn mission-icon-btn--danger"
+                          onClick={() => setDeleteConfirmId({ type: "milestone", id: milestone.id })}
                           title="Delete milestone"
                         >
                           <Trash2 size={14} />
@@ -753,10 +746,10 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                     </div>
 
                     {expandedMilestones.has(milestone.id) && (
-                      <div className="milestone-content">
-                        {/* Create milestone form */}
+                      <div className="mission-milestone__body">
+                        {/* Create milestone form (inline edit) */}
                         {(isCreatingMilestone || editingMilestoneId === milestone.id) && (
-                          <div className="inline-form">
+                          <div className="mission-form-card">
                             <input
                               type="text"
                               placeholder="Milestone title"
@@ -771,12 +764,12 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                               onChange={(e) => setMilestoneForm({ ...milestoneForm, description: e.target.value })}
                               rows={2}
                             />
-                            <div className="form-actions">
-                              <button className="btn btn-primary" onClick={handleSaveMilestone} disabled={saving}>
+                            <div className="mission-form-card__actions">
+                              <button className="mission-btn mission-btn--primary" onClick={handleSaveMilestone} disabled={saving}>
                                 {saving ? <Loader2 size={14} className="spinner" /> : <Check size={14} />}
                                 {editingMilestoneId ? "Update" : "Create"}
                               </button>
-                              <button className="btn btn-ghost" onClick={handleCancelMilestone}>
+                              <button className="mission-btn mission-btn--ghost" onClick={handleCancelMilestone}>
                                 Cancel
                               </button>
                             </div>
@@ -784,17 +777,17 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                         )}
 
                         {/* Slices */}
-                        <div className="slice-list">
+                        <div className="mission-slices">
                           {milestone.slices.map((slice) => (
-                            <div key={slice.id} className="slice-item">
-                              <div className="slice-header" onClick={() => toggleSliceExpanded(slice.id)}>
-                                <button className="expand-btn">
+                            <div key={slice.id} className="mission-slice">
+                              <div className="mission-slice__header" onClick={() => toggleSliceExpanded(slice.id)}>
+                                <button className="mission-slice__expand">
                                   {expandedSlices.has(slice.id) ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                                 </button>
-                                <Package size={16} />
-                                <span className="slice-title">{slice.title}</span>
+                                <Package size={16} className="mission-slice__icon" />
+                                <span className="mission-slice__title">{slice.title}</span>
                                 <span
-                                  className="status-badge small"
+                                  className="mission-status-badge mission-status-badge--sm"
                                   style={{
                                     backgroundColor: sliceStatusColors[slice.status].bg,
                                     color: sliceStatusColors[slice.status].text,
@@ -802,46 +795,34 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                                 >
                                   {slice.status}
                                 </span>
-                                <span className="item-count">{slice.features?.length || 0} features</span>
-                                <div className="item-actions">
+                                <span className="mission-slice__count">{slice.features?.length || 0} features</span>
+                                <div className="mission-slice__actions" onClick={(e) => e.stopPropagation()}>
                                   {slice.status === "pending" && (
                                     <button
-                                      className="icon-btn small success"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleActivateSlice(slice.id);
-                                      }}
+                                      className="mission-icon-btn mission-icon-btn--success"
+                                      onClick={() => handleActivateSlice(slice.id)}
                                       title="Activate slice"
                                     >
                                       <Play size={14} />
                                     </button>
                                   )}
                                   <button
-                                    className="icon-btn small"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleCreateFeature(slice.id);
-                                    }}
+                                    className="mission-icon-btn"
+                                    onClick={() => handleCreateFeature(slice.id)}
                                     title="Add feature"
                                   >
                                     <Plus size={14} />
                                   </button>
                                   <button
-                                    className="icon-btn small"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleEditSlice(slice);
-                                    }}
+                                    className="mission-icon-btn"
+                                    onClick={() => handleEditSlice(slice)}
                                     title="Edit slice"
                                   >
                                     <Pencil size={14} />
                                   </button>
                                   <button
-                                    className="icon-btn small danger"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setDeleteConfirmId({ type: "slice", id: slice.id });
-                                    }}
+                                    className="mission-icon-btn mission-icon-btn--danger"
+                                    onClick={() => setDeleteConfirmId({ type: "slice", id: slice.id })}
                                     title="Delete slice"
                                   >
                                     <Trash2 size={14} />
@@ -850,10 +831,10 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                               </div>
 
                               {expandedSlices.has(slice.id) && (
-                                <div className="slice-content">
+                                <div className="mission-slice__body">
                                   {/* Create slice form */}
                                   {(isCreatingSlice && selectedMilestoneIdForNewSlice === milestone.id && !editingSliceId) && (
-                                    <div className="inline-form">
+                                    <div className="mission-form-card">
                                       <input
                                         type="text"
                                         placeholder="Slice title"
@@ -868,12 +849,12 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                                         onChange={(e) => setSliceForm({ ...sliceForm, description: e.target.value })}
                                         rows={2}
                                       />
-                                      <div className="form-actions">
-                                        <button className="btn btn-primary" onClick={handleSaveSlice} disabled={saving}>
+                                      <div className="mission-form-card__actions">
+                                        <button className="mission-btn mission-btn--primary" onClick={handleSaveSlice} disabled={saving}>
                                           {saving ? <Loader2 size={14} className="spinner" /> : <Check size={14} />}
                                           Create
                                         </button>
-                                        <button className="btn btn-ghost" onClick={handleCancelSlice}>
+                                        <button className="mission-btn mission-btn--ghost" onClick={handleCancelSlice}>
                                           Cancel
                                         </button>
                                       </div>
@@ -882,7 +863,7 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
 
                                   {/* Edit slice form */}
                                   {editingSliceId === slice.id && (
-                                    <div className="inline-form">
+                                    <div className="mission-form-card">
                                       <input
                                         type="text"
                                         placeholder="Slice title"
@@ -905,12 +886,12 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                                         <option value="active">Active</option>
                                         <option value="complete">Complete</option>
                                       </select>
-                                      <div className="form-actions">
-                                        <button className="btn btn-primary" onClick={handleSaveSlice} disabled={saving}>
+                                      <div className="mission-form-card__actions">
+                                        <button className="mission-btn mission-btn--primary" onClick={handleSaveSlice} disabled={saving}>
                                           {saving ? <Loader2 size={14} className="spinner" /> : <Check size={14} />}
                                           Update
                                         </button>
-                                        <button className="btn btn-ghost" onClick={handleCancelSlice}>
+                                        <button className="mission-btn mission-btn--ghost" onClick={handleCancelSlice}>
                                           Cancel
                                         </button>
                                       </div>
@@ -918,14 +899,14 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                                   )}
 
                                   {/* Features */}
-                                  <div className="feature-list">
+                                  <div className="mission-features">
                                     {slice.features?.map((feature) => (
-                                      <div key={feature.id} className="feature-item">
-                                        <div className="feature-header">
-                                          <Box size={14} />
-                                          <span className="feature-title">{feature.title}</span>
+                                      <div key={feature.id} className="mission-feature">
+                                        <div className="mission-feature__header">
+                                          <Box size={14} className="mission-feature__icon" />
+                                          <span className="mission-feature__title">{feature.title}</span>
                                           <span
-                                            className="status-badge small"
+                                            className="mission-status-badge mission-status-badge--sm"
                                             style={{
                                               backgroundColor: featureStatusColors[feature.status].bg,
                                               color: featureStatusColors[feature.status].text,
@@ -935,17 +916,17 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                                           </span>
                                           {feature.taskId && (
                                             <span
-                                              className="task-link-badge"
+                                              className="mission-feature__task-link"
                                               onClick={() => onSelectTask?.(feature.taskId!)}
                                               title="Click to view task"
                                             >
                                               {feature.taskId}
                                             </span>
                                           )}
-                                          <div className="item-actions">
+                                          <div className="mission-feature__actions">
                                             {feature.taskId ? (
                                               <button
-                                                className="icon-btn small"
+                                                className="mission-icon-btn"
                                                 onClick={() => handleUnlinkTask(feature.id)}
                                                 title="Unlink task"
                                               >
@@ -953,7 +934,7 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                                               </button>
                                             ) : (
                                               <button
-                                                className="icon-btn small"
+                                                className="mission-icon-btn"
                                                 onClick={() => setLinkTaskFeatureId(feature.id)}
                                                 title="Link to task"
                                               >
@@ -961,14 +942,14 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                                               </button>
                                             )}
                                             <button
-                                              className="icon-btn small"
+                                              className="mission-icon-btn"
                                               onClick={() => handleEditFeature(feature)}
                                               title="Edit feature"
                                             >
                                               <Pencil size={14} />
                                             </button>
                                             <button
-                                              className="icon-btn small danger"
+                                              className="mission-icon-btn mission-icon-btn--danger"
                                               onClick={() => setDeleteConfirmId({ type: "feature", id: feature.id })}
                                               title="Delete feature"
                                             >
@@ -978,17 +959,17 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                                         </div>
 
                                         {feature.description && (
-                                          <p className="feature-description">{feature.description}</p>
+                                          <p className="mission-feature__description">{feature.description}</p>
                                         )}
                                         {feature.acceptanceCriteria && (
-                                          <p className="feature-criteria">
+                                          <p className="mission-feature__criteria">
                                             <strong>Acceptance:</strong> {feature.acceptanceCriteria}
                                           </p>
                                         )}
 
                                         {/* Edit feature form */}
                                         {editingFeatureId === feature.id && (
-                                          <div className="inline-form">
+                                          <div className="mission-form-card">
                                             <input
                                               type="text"
                                               placeholder="Feature title"
@@ -1018,12 +999,12 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                                               <option value="in-progress">In Progress</option>
                                               <option value="done">Done</option>
                                             </select>
-                                            <div className="form-actions">
-                                              <button className="btn btn-primary" onClick={handleSaveFeature} disabled={saving}>
+                                            <div className="mission-form-card__actions">
+                                              <button className="mission-btn mission-btn--primary" onClick={handleSaveFeature} disabled={saving}>
                                                 {saving ? <Loader2 size={14} className="spinner" /> : <Check size={14} />}
                                                 Update
                                               </button>
-                                              <button className="btn btn-ghost" onClick={handleCancelFeature}>
+                                              <button className="mission-btn mission-btn--ghost" onClick={handleCancelFeature}>
                                                 Cancel
                                               </button>
                                             </div>
@@ -1034,7 +1015,7 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
 
                                     {/* Create feature form */}
                                     {isCreatingFeature && selectedSliceIdForNewFeature === slice.id && (
-                                      <div className="inline-form">
+                                      <div className="mission-form-card">
                                         <input
                                           type="text"
                                           placeholder="Feature title"
@@ -1055,12 +1036,12 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                                           onChange={(e) => setFeatureForm({ ...featureForm, acceptanceCriteria: e.target.value })}
                                           rows={2}
                                         />
-                                        <div className="form-actions">
-                                          <button className="btn btn-primary" onClick={handleSaveFeature} disabled={saving}>
+                                        <div className="mission-form-card__actions">
+                                          <button className="mission-btn mission-btn--primary" onClick={handleSaveFeature} disabled={saving}>
                                             {saving ? <Loader2 size={14} className="spinner" /> : <Check size={14} />}
                                             Create
                                           </button>
-                                          <button className="btn btn-ghost" onClick={handleCancelFeature}>
+                                          <button className="mission-btn mission-btn--ghost" onClick={handleCancelFeature}>
                                             Cancel
                                           </button>
                                         </div>
@@ -1073,7 +1054,7 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                           ))}
 
                           {milestone.slices.length === 0 && !isCreatingSlice && (
-                            <div className="empty-state">
+                            <div className="mission-manager__empty">
                               <Package size={16} />
                               <span>No slices yet</span>
                             </div>
@@ -1086,7 +1067,7 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
 
                 {/* Create milestone button/form */}
                 {selectedMission && !isCreatingMilestone && editingMilestoneId === null && (
-                  <button className="add-item-btn" onClick={handleCreateMilestone}>
+                  <button className="mission-add-btn" onClick={handleCreateMilestone}>
                     <Plus size={16} />
                     Add Milestone
                   </button>
@@ -1094,7 +1075,7 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
 
                 {/* Global create milestone form */}
                 {isCreatingMilestone && editingMilestoneId === null && (
-                  <div className="inline-form">
+                  <div className="mission-form-card">
                     <input
                       type="text"
                       placeholder="Milestone title"
@@ -1109,12 +1090,12 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                       onChange={(e) => setMilestoneForm({ ...milestoneForm, description: e.target.value })}
                       rows={2}
                     />
-                    <div className="form-actions">
-                      <button className="btn btn-primary" onClick={handleSaveMilestone} disabled={saving}>
+                    <div className="mission-form-card__actions">
+                      <button className="mission-btn mission-btn--primary" onClick={handleSaveMilestone} disabled={saving}>
                         {saving ? <Loader2 size={14} className="spinner" /> : <Check size={14} />}
                         Create
                       </button>
-                      <button className="btn btn-ghost" onClick={handleCancelMilestone}>
+                      <button className="mission-btn mission-btn--ghost" onClick={handleCancelMilestone}>
                         Cancel
                       </button>
                     </div>
@@ -1122,7 +1103,7 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                 )}
 
                 {selectedMission.milestones.length === 0 && !isCreatingMilestone && (
-                  <div className="empty-state">
+                  <div className="mission-manager__empty">
                     <Layers size={24} />
                     <span>No milestones yet. Add one to get started.</span>
                   </div>
@@ -1130,11 +1111,11 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
               </div>
             </div>
           ) : (
-            // Mission list view
-            <div className="mission-list-view">
+            /* ── List View ── */
+            <div className="mission-list">
               {/* Create mission form */}
               {isCreatingMission && (
-                <div className="inline-form">
+                <div className="mission-form-card">
                   <input
                     type="text"
                     placeholder="Mission title"
@@ -1149,12 +1130,12 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                     onChange={(e) => setMissionForm({ ...missionForm, description: e.target.value })}
                     rows={2}
                   />
-                  <div className="form-actions">
-                    <button className="btn btn-primary" onClick={handleSaveMission} disabled={saving}>
+                  <div className="mission-form-card__actions">
+                    <button className="mission-btn mission-btn--primary" onClick={handleSaveMission} disabled={saving}>
                       {saving ? <Loader2 size={14} className="spinner" /> : <Check size={14} />}
                       Create
                     </button>
-                    <button className="btn btn-ghost" onClick={handleCancelMission}>
+                    <button className="mission-btn mission-btn--ghost" onClick={handleCancelMission}>
                       Cancel
                     </button>
                   </div>
@@ -1171,15 +1152,15 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                 return (
                 <div
                   key={m.id}
-                  className={`mission-item ${isSelected ? "selected" : ""}`}
+                  className={`mission-list__item ${isSelected ? "mission-list__item--selected" : ""}`}
                   onClick={() => handleSelectMission(mission)}
                 >
-                  <div className="mission-item-content">
-                    <div className="mission-item-header">
-                      <Target size={16} />
-                      <span className="mission-item-title">{m.title}</span>
+                  <div className="mission-list__item-content">
+                    <div className="mission-list__item-header">
+                      <Target size={16} className="mission-list__item-icon" />
+                      <span className="mission-list__item-title">{m.title}</span>
                       <span
-                        className="status-badge small"
+                        className="mission-status-badge mission-status-badge--sm"
                         style={{
                           backgroundColor: statusColors.bg,
                           color: statusColors.text,
@@ -1189,19 +1170,19 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                       </span>
                     </div>
                     {m.description && (
-                      <p className="mission-item-description">{m.description}</p>
+                      <p className="mission-list__item-description">{m.description}</p>
                     )}
                   </div>
-                  <div className="mission-item-actions" onClick={(e) => e.stopPropagation()}>
+                  <div className="mission-list__item-actions" onClick={(e) => e.stopPropagation()}>
                     <button
-                      className="icon-btn small"
+                      className="mission-icon-btn"
                       onClick={() => handleEditMission(mission)}
                       title="Edit mission"
                     >
                       <Pencil size={14} />
                     </button>
                     <button
-                      className="icon-btn small danger"
+                      className="mission-icon-btn mission-icon-btn--danger"
                       onClick={() => setDeleteConfirmId({ type: "mission", id: m.id })}
                       title="Delete mission"
                     >
@@ -1209,12 +1190,12 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                     </button>
                   </div>
                 </div>
-              );
+                );
               })}
 
               {/* Edit mission form */}
               {editingMissionId && (
-                <div className="inline-form">
+                <div className="mission-form-card">
                   <input
                     type="text"
                     placeholder="Mission title"
@@ -1229,7 +1210,7 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                     onChange={(e) => setMissionForm({ ...missionForm, description: e.target.value })}
                     rows={2}
                   />
-                  <div className="form-row">
+                  <div className="mission-form-card__row">
                     <select
                       value={missionForm.status}
                       onChange={(e) => setMissionForm({ ...missionForm, status: e.target.value as MissionStatus })}
@@ -1240,7 +1221,7 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                       <option value="complete">Complete</option>
                       <option value="archived">Archived</option>
                     </select>
-                    <label className="checkbox-label">
+                    <label className="mission-checkbox">
                       <input
                         type="checkbox"
                         checked={missionForm.autoAdvance}
@@ -1249,12 +1230,12 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
                       Auto-advance slices
                     </label>
                   </div>
-                  <div className="form-actions">
-                    <button className="btn btn-primary" onClick={handleSaveMission} disabled={saving}>
+                  <div className="mission-form-card__actions">
+                    <button className="mission-btn mission-btn--primary" onClick={handleSaveMission} disabled={saving}>
                       {saving ? <Loader2 size={14} className="spinner" /> : <Check size={14} />}
                       Update
                     </button>
-                    <button className="btn btn-ghost" onClick={handleCancelMission}>
+                    <button className="mission-btn mission-btn--ghost" onClick={handleCancelMission}>
                       Cancel
                     </button>
                   </div>
@@ -1262,14 +1243,14 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
               )}
 
               {missions.length === 0 && !isCreatingMission && (
-                <div className="empty-state">
+                <div className="mission-manager__empty mission-manager__empty--large">
                   <Target size={32} />
                   <span>No missions yet. Create one to start planning.</span>
                 </div>
               )}
 
               {!isCreatingMission && (
-                <button className="add-item-btn" onClick={handleCreateMission}>
+                <button className="mission-add-btn" onClick={handleCreateMission}>
                   <Plus size={16} />
                   New Mission
                 </button>
@@ -1278,70 +1259,74 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
           )}
         </div>
 
-        {/* Delete confirmation dialog */}
+        {/* ── Delete confirmation panel ── */}
         {deleteConfirmId && (
-          <div className="confirm-dialog">
-            <p>
-              Delete this {deleteConfirmId.type}? This cannot be undone.
-            </p>
-            <div className="form-actions">
-              <button
-                className="btn btn-danger"
-                onClick={async () => {
-                  if (deleteConfirmId.type === "mission") {
-                    await handleDeleteMission(deleteConfirmId.id);
-                  } else if (deleteConfirmId.type === "milestone") {
-                    await handleDeleteMilestone(deleteConfirmId.id);
-                  } else if (deleteConfirmId.type === "slice") {
-                    await handleDeleteSlice(deleteConfirmId.id);
-                  } else if (deleteConfirmId.type === "feature") {
-                    await handleDeleteFeature(deleteConfirmId.id);
-                  }
-                }}
-              >
-                Delete
-              </button>
-              <button className="btn btn-ghost" onClick={() => setDeleteConfirmId(null)}>
-                Cancel
-              </button>
+          <div className="mission-confirm-panel">
+            <div className="mission-confirm-panel__content">
+              <p>
+                Delete this {deleteConfirmId.type}? This cannot be undone.
+              </p>
+              <div className="mission-confirm-panel__actions">
+                <button
+                  className="mission-btn mission-btn--danger"
+                  onClick={async () => {
+                    if (deleteConfirmId.type === "mission") {
+                      await handleDeleteMission(deleteConfirmId.id);
+                    } else if (deleteConfirmId.type === "milestone") {
+                      await handleDeleteMilestone(deleteConfirmId.id);
+                    } else if (deleteConfirmId.type === "slice") {
+                      await handleDeleteSlice(deleteConfirmId.id);
+                    } else if (deleteConfirmId.type === "feature") {
+                      await handleDeleteFeature(deleteConfirmId.id);
+                    }
+                  }}
+                >
+                  Delete
+                </button>
+                <button className="mission-btn mission-btn--ghost" onClick={() => setDeleteConfirmId(null)}>
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
         )}
 
-        {/* Link task dialog */}
+        {/* ── Link task panel ── */}
         {linkTaskFeatureId && (
-          <div className="confirm-dialog">
-            <p>Link feature to task:</p>
-            <input
-              type="text"
-              placeholder="Task ID (e.g., FN-001)"
-              value={selectedTaskId}
-              onChange={(e) => setSelectedTaskId(e.target.value)}
-              autoFocus
-            />
-            {availableTasks.length > 0 && (
-              <div className="task-suggestions">
-                <small>Or select:</small>
-                <div className="task-suggestion-list">
-                  {availableTasks.slice(0, 5).map((task) => (
-                    <button
-                      key={task.id}
-                      className="task-suggestion-btn"
-                      onClick={() => setSelectedTaskId(task.id)}
-                    >
-                      {task.id}: {task.title || "Untitled"}
-                    </button>
-                  ))}
+          <div className="mission-confirm-panel">
+            <div className="mission-confirm-panel__content">
+              <p>Link feature to task:</p>
+              <input
+                type="text"
+                placeholder="Task ID (e.g., FN-001)"
+                value={selectedTaskId}
+                onChange={(e) => setSelectedTaskId(e.target.value)}
+                autoFocus
+              />
+              {availableTasks.length > 0 && (
+                <div className="mission-task-suggestions">
+                  <small>Or select:</small>
+                  <div className="mission-task-suggestions__list">
+                    {availableTasks.slice(0, 5).map((task) => (
+                      <button
+                        key={task.id}
+                        className="mission-task-suggestions__item"
+                        onClick={() => setSelectedTaskId(task.id)}
+                      >
+                        {task.id}: {task.title || "Untitled"}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+              )}
+              <div className="mission-confirm-panel__actions">
+                <button className="mission-btn mission-btn--primary" onClick={handleLinkTask}>
+                  Link
+                </button>
+                <button className="mission-btn mission-btn--ghost" onClick={() => { setLinkTaskFeatureId(null); setSelectedTaskId(""); }}>
+                  Cancel
+                </button>
               </div>
-            )}
-            <div className="form-actions">
-              <button className="btn btn-primary" onClick={handleLinkTask}>
-                Link
-              </button>
-              <button className="btn btn-ghost" onClick={() => { setLinkTaskFeatureId(null); setSelectedTaskId(""); }}>
-                Cancel
-              </button>
             </div>
           </div>
         )}
