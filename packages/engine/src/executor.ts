@@ -640,9 +640,14 @@ export class TaskExecutor {
             return;
           }
 
-          // If paused during execution, don't move to in-review
+          // If paused during execution, move to todo so the scheduler can resume
+          // after unpause. This path fires when session.dispose() causes the
+          // prompt to resolve gracefully instead of throwing.
           if (this.pausedAborted.has(task.id)) {
             this.pausedAborted.delete(task.id);
+            executorLog.log(`${task.id} paused (graceful session exit) — moving to todo`);
+            await this.store.logEntry(task.id, "Execution paused — agent terminated, moved to todo");
+            await this.store.moveTask(task.id, "todo");
             return;
           }
 

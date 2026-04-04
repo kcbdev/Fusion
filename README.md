@@ -750,6 +750,10 @@ Automatically resolves:
 ```
 Terminates and retries tasks with no agent activity for the specified duration (10 minutes in this example).
 
+**Pause Behavior for In-Progress Tasks:**
+
+Pausing a task that is currently executing will immediately terminate the agent session and move the task back to `todo`. When the task is later unpaused, the scheduler picks it up and resumes execution from where it left off (step progress is preserved). The task is never left stranded in `in-progress` after a pause — both the error-throwing and graceful session exit paths move it to `todo`. Paused tasks are never marked as `failed`.
+
 **Push Notifications (ntfy.sh):**
 ```json
 {

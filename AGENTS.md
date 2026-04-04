@@ -785,7 +785,7 @@ Timeout in milliseconds for detecting stuck tasks. When a task's agent session s
 - Activity is tracked on text deltas, tool calls, tool results, and step status updates
 - Recovery preserves step progress — the task resumes from the current step, not from scratch
 - When the timeout value is changed (e.g., reduced from 30 to 10 minutes), the system immediately checks for stuck tasks under the new timer rather than waiting for the next 30-second poll cycle
-- Paused tasks are automatically untracked from monitoring
+- Paused tasks are automatically untracked from monitoring — when an in-progress task is paused, the executor terminates the agent session and moves the task to `todo` (the stuck-task detector is not involved in pause recovery)
 - The timeout is read from settings on every poll cycle, so changes take effect immediately
 - When the timeout value is changed (e.g., reduced from 30 to 10 minutes), the system immediately checks for stuck tasks under the new timer rather than waiting for the next poll cycle
 

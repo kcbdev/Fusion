@@ -2033,6 +2033,104 @@ describe("TaskExecutor pause behavior", () => {
 
     // Should NOT move to in-review (paused tasks skip that logic)
     expect(store.moveTask).not.toHaveBeenCalledWith("FN-001", "in-review");
+    // Should move to todo instead (regression: was stranding in in-progress)
+    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo");
+    expect(store.updateTask).not.toHaveBeenCalledWith("FN-001", { status: "failed" });
+  });
+
+  it("moves paused task to todo when session ends gracefully (regression for FN-827)", async () => {
+    const store = createMockStore();
+    const disposeFn = vi.fn();
+
+    mockedCreateHaiAgent.mockImplementation(async () => {
+      return {
+        session: {
+          prompt: vi.fn().mockImplementation(async () => {
+            // Simulate pause during execution — session ends gracefully (no throw)
+            store._trigger("task:updated", { id: "FN-805", paused: true, column: "in-progress" });
+            // No error thrown — this is the "graceful exit" path
+          }),
+          dispose: disposeFn,
+        },
+      } as any;
+    });
+
+    const stuckTaskDetector = { trackTask: vi.fn(), untrackTask: vi.fn(), recordActivity: vi.fn() } as any;
+
+    const executor = new TaskExecutor(store, "/tmp/test", { stuckTaskDetector });
+    await executor.execute({
+      id: "FN-805",
+      title: "Stranded task",
+      description: "A task that was paused and stranded",
+      column: "in-progress",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    // The critical fix: task must end in todo, not stranded in in-progress
+    expect(store.moveTask).toHaveBeenCalledWith("FN-805", "todo");
+    // Should NOT be marked as failed
+    expect(store.updateTask).not.toHaveBeenCalledWith("FN-805", expect.objectContaining({ status: "failed" }));
+    // Should log the pause event
+    expect(store.logEntry).toHaveBeenCalledWith("FN-805", expect.stringContaining("Execution paused"));
+    // Session should be disposed
+    expect(disposeFn).toHaveBeenCalled();
+    // Stuck detector should have untracked the task
+    expect(stuckTaskDetector.untrackTask).toHaveBeenCalledWith("FN-805");
+  });
+
+  it("handles rapid pause→unpause without duplicate executor runs", async () => {
+    const store = createMockStore();
+    const disposeFn = vi.fn();
+    let promptCallCount = 0;
+
+    mockedCreateHaiAgent.mockImplementation(async () => {
+      return {
+        session: {
+          prompt: vi.fn().mockImplementation(async () => {
+            promptCallCount++;
+            // Simulate pause during execution
+            store._trigger("task:updated", { id: "FN-001", paused: true, column: "in-progress" });
+            // Simulate rapid unpause while executor is still handling the pause
+            store._trigger("task:updated", { id: "FN-001", paused: undefined, column: "in-progress" });
+            // Session ends gracefully (no throw)
+          }),
+          dispose: disposeFn,
+        },
+      } as any;
+    });
+
+    const executor = new TaskExecutor(store, "/tmp/test");
+    await executor.execute({
+      id: "FN-001",
+      title: "Rapid pause/unpause",
+      description: "Test rapid pause then unpause",
+      column: "in-progress",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    // The task should still be moved to todo exactly once (the pause took effect)
+    // Even if unpause happened rapidly, the session was already disposed
+    const todoCalls = store.moveTask.mock.calls.filter(
+      (call: any[]) => call[0] === "FN-001" && call[1] === "todo",
+    );
+    expect(todoCalls.length).toBe(1);
+    // Should NOT have duplicate in-review calls
+    const inReviewCalls = store.moveTask.mock.calls.filter(
+      (call: any[]) => call[0] === "FN-001" && call[1] === "in-review",
+    );
+    expect(inReviewCalls.length).toBe(0);
+    // Agent should only have been prompted once
+    expect(promptCallCount).toBe(1);
   });
 
   it("skips paused tasks during resumeOrphaned", async () => {
