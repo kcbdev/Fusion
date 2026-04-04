@@ -511,6 +511,36 @@ describe("GET /api/tasks/:id/file-diffs", () => {
     expect(paths.sort()).toEqual(["src/d.ts", "src/e.ts"]);
   });
 
+  it("filters out files with empty diffs (mode-only changes, binary files)", async () => {
+    const store = new MockStore();
+    store.addTask(createTask({ baseBranch: "main", baseCommitSha: "taskbase456" }));
+
+    mockExecSync.mockImplementation((command) => {
+      const cmd = String(command);
+      if (cmd === "git merge-base --is-ancestor taskbase456 HEAD") {
+        return "" as any;
+      }
+      // git reports the file as modified
+      if (cmd === "git diff --name-status taskbase456..HEAD") {
+        return "M\tsrc/mode-only.txt\n" as any;
+      }
+      if (cmd === "git diff --name-status") {
+        return "" as any;
+      }
+      // but the diff is empty (mode-only change)
+      if (cmd === 'git diff taskbase456..HEAD -- "src/mode-only.txt"') {
+        return "" as any;
+      }
+      throw new Error(`Unexpected command: ${cmd}`);
+    });
+
+    const response = await requestFileDiffs(store);
+
+    expect(response.status).toBe(200);
+    // File should be filtered out because diff is empty
+    expect(response.body).toHaveLength(0);
+  });
+
   it("agrees with session-files under task-scoped base resolution", async () => {
     const store = new MockStore();
     // Both routes should produce the same file list when baseCommitSha is valid

@@ -7577,7 +7577,7 @@ Output ONLY the prompt text (no markdown, no explanations).`;
       // against the resolved merge-base.
       const diffRange = diffBase ? `${diffBase}..HEAD` : "HEAD";
 
-      const files = Array.from(fileMap.entries()).map(([filePath, { statusCode, oldPath }]) => {
+      const files = Array.from(fileMap.entries()).flatMap(([filePath, { statusCode, oldPath }]) => {
         let status: "added" | "modified" | "deleted" | "renamed" = "modified";
 
         if (statusCode.startsWith("A")) {
@@ -7599,7 +7599,12 @@ Output ONLY the prompt text (no markdown, no explanations).`;
           diff = "";
         }
 
-        return oldPath ? { path: filePath, status, diff, oldPath } : { path: filePath, status, diff };
+        // Filter out files with empty diffs (mode-only changes, binary files, etc.)
+        if (!diff) {
+          return [];
+        }
+
+        return oldPath ? [{ path: filePath, status, diff, oldPath }] : [{ path: filePath, status, diff }];
       });
 
       fileDiffsCache.set(task.id, {
