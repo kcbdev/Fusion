@@ -12273,6 +12273,111 @@ html .column.drag-over * {
   border-color: #dc2626;
 }
 
+/* ── Activity Log — Mobile (≤ 768px) ─────────────────────────────── */
+
+@media (max-width: 768px) {
+  /* Header: stack title above actions */
+  .activity-log-header {
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    padding: var(--space-md) var(--space-lg);
+  }
+
+  .activity-log-title {
+    flex: 1 1 auto;
+  }
+
+  .activity-log-actions {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+  }
+
+  /* Filter containers fill available width */
+  .activity-log-filter,
+  .activity-log-filter--project {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .activity-log-filter-select {
+    width: 100%;
+  }
+
+  /* Action buttons stay inline but shrink */
+  .activity-log-refresh,
+  .activity-log-clear,
+  .activity-log-close {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+  }
+
+  /* Active filters bar wraps on small screens */
+  .activity-log-active-filters {
+    flex-wrap: wrap;
+    padding: var(--space-sm) var(--space-lg);
+    gap: var(--space-xs);
+  }
+
+  .activity-log-clear-filters {
+    margin-left: 0;
+  }
+
+  /* Content area tighter padding */
+  .activity-log-content {
+    padding: var(--space-md) var(--space-lg);
+    min-height: 200px;
+  }
+
+  /* Entries: allow content to wrap freely */
+  .activity-log-entry {
+    gap: var(--space-sm);
+    padding: var(--space-sm);
+  }
+
+  .activity-log-entry-icon {
+    width: 24px;
+    height: 24px;
+  }
+
+  .activity-log-entry-header {
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+  }
+
+  .activity-log-entry-details {
+    flex-wrap: wrap;
+    word-break: break-word;
+  }
+
+  .activity-log-entry-text {
+    word-break: break-word;
+  }
+
+  /* Empty state compact */
+  .activity-log-empty {
+    padding: var(--space-xl) var(--space-lg);
+  }
+
+  /* Confirmation dialog fills more of the viewport */
+  .activity-log-confirm-dialog {
+    max-width: calc(100vw - 32px);
+    margin: 0 var(--space-lg);
+  }
+
+  .activity-log-confirm-actions {
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .activity-log-confirm-cancel,
+  .activity-log-confirm-clear {
+    width: 100%;
+    text-align: center;
+  }
+}
+
 /* ══════════════════════════════════════════════════════════════════
    GIT MANAGER MODAL
    ══════════════════════════════════════════════════════════════════ */

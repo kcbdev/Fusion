@@ -1,0 +1,99 @@
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "fs";
+import { resolve } from "path";
+
+/**
+ * Stylesheet regression test for Activity Log mobile layout.
+ *
+ * Parses `packages/dashboard/app/styles.css` and asserts that an
+ * `@media (max-width: 768px)` block contains Activity Log mobile rules
+ * for stacked/wrapped controls and entry layout. These selectors must
+ * remain inside a mobile media query so the Activity Log renders
+ * correctly on narrow screens.
+ */
+
+describe("activity-log-mobile-layout.css", () => {
+  const cssPath = resolve(__dirname, "../styles.css");
+  const cssContent = readFileSync(cssPath, "utf-8");
+
+  /** Extract all content inside @media (max-width: 768px) blocks. */
+  function extractMobileMediaBlocks(content: string): string {
+    const blocks: string[] = [];
+    const regex = /@media\s*\(\s*max-width:\s*768px\s*\)\s*\{/g;
+    let match;
+
+    while ((match = regex.exec(content)) !== null) {
+      const startIdx = match.index + match[0].length;
+      let braceCount = 1;
+      let endIdx = startIdx;
+      while (braceCount > 0 && endIdx < content.length) {
+        if (content[endIdx] === "{") braceCount++;
+        if (content[endIdx] === "}") braceCount--;
+        endIdx++;
+      }
+      if (braceCount === 0) {
+        blocks.push(content.slice(startIdx, endIdx - 1));
+      }
+    }
+    return blocks.join("\n");
+  }
+
+  const mobileCss = extractMobileMediaBlocks(cssContent);
+
+  // ── Modal header / actions ──────────────────────────────────────────
+
+  it("has mobile rule for activity-log-header to wrap on narrow screens", () => {
+    expect(mobileCss).toMatch(/\.activity-log-header\s*\{[^}]*flex-wrap:\s*wrap/);
+  });
+
+  it("has mobile rule for activity-log-actions to wrap and fill full width", () => {
+    expect(mobileCss).toMatch(/\.activity-log-actions\s*\{[^}]*flex-wrap:\s*wrap/);
+    expect(mobileCss).toMatch(/\.activity-log-actions\s*\{[^}]*flex:\s*1\s+1\s+100%/);
+  });
+
+  // ── Filter controls ─────────────────────────────────────────────────
+
+  it("has mobile rule for filter containers to fill available width", () => {
+    expect(mobileCss).toMatch(/\.activity-log-filter/);
+    expect(mobileCss).toMatch(/\.activity-log-filter--project/);
+  });
+
+  it("has mobile rule for filter selects to fill width", () => {
+    expect(mobileCss).toMatch(/\.activity-log-filter-select\s*\{[^}]*width:\s*100%/);
+  });
+
+  // ── Active filters bar ──────────────────────────────────────────────
+
+  it("has mobile rule for active-filters bar to wrap", () => {
+    expect(mobileCss).toMatch(/\.activity-log-active-filters\s*\{[^}]*flex-wrap:\s*wrap/);
+  });
+
+  it("resets clear-filters margin-left on mobile so it doesn't force right", () => {
+    expect(mobileCss).toMatch(/\.activity-log-clear-filters\s*\{[^}]*margin-left:\s*0/);
+  });
+
+  // ── Entry layout ────────────────────────────────────────────────────
+
+  it("has mobile rule for entry details to wrap with word-break", () => {
+    expect(mobileCss).toMatch(/\.activity-log-entry-details\s*\{[^}]*word-break:\s*break-word/);
+  });
+
+  it("has mobile rule for entry text to break words", () => {
+    expect(mobileCss).toMatch(/\.activity-log-entry-text\s*\{[^}]*word-break:\s*break-word/);
+  });
+
+  it("has mobile rule for entry headers to wrap", () => {
+    expect(mobileCss).toMatch(/\.activity-log-entry-header\s*\{[^}]*flex-wrap:\s*wrap/);
+  });
+
+  // ── Confirmation dialog ─────────────────────────────────────────────
+
+  it("has mobile rule for confirm actions to stack vertically", () => {
+    expect(mobileCss).toMatch(/\.activity-log-confirm-actions\s*\{[^}]*flex-direction:\s*column/);
+  });
+
+  it("has mobile rule for confirm buttons to fill width", () => {
+    expect(mobileCss).toMatch(/\.activity-log-confirm-cancel[^}]*width:\s*100%/);
+    expect(mobileCss).toMatch(/\.activity-log-confirm-clear[^}]*width:\s*100%/);
+  });
+});

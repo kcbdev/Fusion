@@ -381,4 +381,107 @@ describe("ActivityLogModal", () => {
       expect(screen.getByText(/No activity matches the current filters/)).toBeTruthy();
     });
   });
+
+  // ── Responsive Layout Regression Tests ───────────────────────────
+
+  it("renders all mobile-responsive CSS classes on the modal structure", async () => {
+    const { container } = render(
+      <ActivityLogModal
+        isOpen={true}
+        onClose={mockOnClose}
+        tasks={mockTasks}
+        onOpenTaskDetail={mockOnOpenTaskDetail}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("activity-log-modal")).toBeTruthy();
+    });
+
+    // Verify key structural classes that the mobile CSS targets
+    const modal = container.querySelector(".activity-log-modal");
+    expect(modal).toBeTruthy();
+    expect(modal!.querySelector(".activity-log-header")).toBeTruthy();
+    expect(modal!.querySelector(".activity-log-title")).toBeTruthy();
+    expect(modal!.querySelector(".activity-log-actions")).toBeTruthy();
+    expect(modal!.querySelector(".activity-log-content")).toBeTruthy();
+    expect(modal!.querySelector(".activity-log-list")).toBeTruthy();
+    expect(modal!.querySelector(".activity-log-entry")).toBeTruthy();
+  });
+
+  it("renders entry header and details within each entry for mobile reflow", async () => {
+    const { container } = render(
+      <ActivityLogModal
+        isOpen={true}
+        onClose={mockOnClose}
+        tasks={mockTasks}
+        onOpenTaskDetail={mockOnOpenTaskDetail}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("activity-entry")).toHaveLength(3);
+    });
+
+    // Each entry should have the inner structure that mobile CSS reflows
+    const entries = container.querySelectorAll(".activity-log-entry");
+    for (const entry of entries) {
+      expect(entry.querySelector(".activity-log-entry-icon")).toBeTruthy();
+      expect(entry.querySelector(".activity-log-entry-content")).toBeTruthy();
+      expect(entry.querySelector(".activity-log-entry-header")).toBeTruthy();
+      expect(entry.querySelector(".activity-log-entry-type")).toBeTruthy();
+      expect(entry.querySelector(".activity-log-entry-time")).toBeTruthy();
+      expect(entry.querySelector(".activity-log-entry-details")).toBeTruthy();
+    }
+  });
+
+  it("renders active-filters bar with correct classes when filter is active", async () => {
+    render(
+      <ActivityLogModal
+        isOpen={true}
+        onClose={mockOnClose}
+        tasks={mockTasks}
+        onOpenTaskDetail={mockOnOpenTaskDetail}
+      />
+    );
+
+    // Apply a type filter to show the active-filters bar
+    const filterSelect = await screen.findByTestId("activity-filter");
+    fireEvent.change(filterSelect, { target: { value: "task:created" } });
+
+    await waitFor(() => {
+      const activeFilters = document.querySelector(".activity-log-active-filters");
+      expect(activeFilters).toBeTruthy();
+      expect(activeFilters!.querySelector(".activity-log-filter-label")).toBeTruthy();
+      expect(activeFilters!.querySelector(".activity-log-filter-badge")).toBeTruthy();
+      expect(activeFilters!.querySelector(".activity-log-clear-filters")).toBeTruthy();
+    });
+  });
+
+  it("renders clear-confirmation dialog with stacked action classes", async () => {
+    render(
+      <ActivityLogModal
+        isOpen={true}
+        onClose={mockOnClose}
+        tasks={mockTasks}
+        onOpenTaskDetail={mockOnOpenTaskDetail}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("activity-clear")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId("activity-clear"));
+
+    // Confirm dialog has the structure that mobile CSS stacks
+    const overlay = document.querySelector(".activity-log-confirm-overlay");
+    expect(overlay).toBeTruthy();
+    const dialog = overlay!.querySelector(".activity-log-confirm-dialog");
+    expect(dialog).toBeTruthy();
+    const actions = dialog!.querySelector(".activity-log-confirm-actions");
+    expect(actions).toBeTruthy();
+    expect(actions!.querySelector(".activity-log-confirm-cancel")).toBeTruthy();
+    expect(actions!.querySelector(".activity-log-confirm-clear")).toBeTruthy();
+  });
 });
