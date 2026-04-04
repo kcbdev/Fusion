@@ -321,4 +321,185 @@ describe("MissionManager", () => {
       expect(screen.getByText("User model")).toBeDefined();
     });
   });
+
+  // ── Regression: Generated mission ID format in edit/delete flows ──────────
+  //
+  // MissionStore generates IDs like M-LZ7DN0-A2B5 (base36 timestamp + random).
+  // The MissionManager must successfully edit and delete missions with these IDs
+  // without surfacing "invalid ID format" errors.
+  describe("generated mission ID format regression", () => {
+    // Use realistic generated-style IDs matching what MissionStore produces
+    const generatedMissionId = "M-LZ7DN0-A2B5";
+    const generatedMilestoneId = "MS-M3N8QR-C9F1";
+    const generatedSliceId = "SL-P4T2WX-D5E8";
+    const generatedFeatureId = "F-J6K9AB-G7H3";
+
+    const generatedMockMissions = [
+      {
+        id: generatedMissionId,
+        title: "Generated Mission",
+        description: "Mission with realistic generated ID",
+        status: "planning",
+        autoAdvance: false,
+        milestones: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    ];
+
+    const generatedMockDetail = {
+      id: generatedMissionId,
+      title: "Generated Mission",
+      description: "Mission with realistic generated ID",
+      status: "planning",
+      autoAdvance: false,
+      milestones: [
+        {
+          id: generatedMilestoneId,
+          title: "Generated Milestone",
+          description: "Milestone with generated ID",
+          status: "planning",
+          dependencies: [] as string[],
+          slices: [
+            {
+              id: generatedSliceId,
+              title: "Generated Slice",
+              description: "Slice with generated ID",
+              status: "pending",
+              features: [
+                {
+                  id: generatedFeatureId,
+                  title: "Generated Feature",
+                  description: "Feature with generated ID",
+                  acceptanceCriteria: "Works correctly",
+                  status: "defined",
+                  taskId: null,
+                  sliceId: generatedSliceId,
+                  missionId: generatedMissionId,
+                },
+              ],
+              milestoneId: generatedMilestoneId,
+              missionId: generatedMissionId,
+            },
+          ],
+          missionId: generatedMissionId,
+        },
+      ],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    it("renders missions with generated IDs in the list", async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(mockApiResponse(generatedMockMissions));
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Generated Mission")).toBeDefined();
+      });
+    });
+
+    it("navigates to detail view for a mission with generated ID", async () => {
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return Promise.resolve(mockApiResponse(generatedMockMissions));
+        }
+        return Promise.resolve(mockApiResponse(generatedMockDetail));
+      });
+
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Generated Mission")).toBeDefined();
+      });
+      fireEvent.click(screen.getByText("Generated Mission"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Generated Milestone")).toBeDefined();
+        expect(screen.getByText("Generated Slice")).toBeDefined();
+        expect(screen.getByText("Generated Feature")).toBeDefined();
+      });
+    });
+
+    it("edits a mission with generated ID without error", async () => {
+      const addToast = vi.fn();
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation((_url: string) => {
+        callCount++;
+        if (callCount <= 1) {
+          // Initial list load
+          return Promise.resolve(mockApiResponse(generatedMockMissions));
+        }
+        if (_url && _url.includes("/api/missions/" + generatedMissionId) && !_url.includes("milestones")) {
+          // Detail or PATCH for the generated ID mission
+          if (_url.includes("/api/missions/" + generatedMissionId) && callCount > 2) {
+            // PATCH response — return updated mission
+            return Promise.resolve(mockApiResponse({
+              ...generatedMockDetail,
+              title: "Updated Generated Mission",
+              status: "active",
+            }));
+          }
+          return Promise.resolve(mockApiResponse(generatedMockDetail));
+        }
+        return Promise.resolve(mockApiResponse(generatedMockMissions));
+      });
+
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={addToast} />);
+
+      // Wait for list, click to enter detail
+      await waitFor(() => {
+        expect(screen.getByText("Generated Mission")).toBeDefined();
+      });
+      fireEvent.click(screen.getByText("Generated Mission"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Generated Milestone")).toBeDefined();
+      });
+    });
+
+    it("deletes a mission with generated ID without surfacing invalid-ID error", async () => {
+      const addToast = vi.fn();
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation((_url: string, options?: RequestInit) => {
+        callCount++;
+        // DELETE request — return 204 empty
+        if (options?.method === "DELETE") {
+          return Promise.resolve({
+            ok: true,
+            headers: new Headers(),
+            text: () => Promise.resolve(""),
+          });
+        }
+        // Initial list load and subsequent reloads
+        return Promise.resolve(mockApiResponse(generatedMockMissions));
+      });
+
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={addToast} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Generated Mission")).toBeDefined();
+      });
+
+      // Click the delete button for the mission (uses title attribute)
+      const deleteButton = screen.getByTitle("Delete mission");
+      fireEvent.click(deleteButton);
+
+      // After clicking delete, a confirmation dialog should appear
+      await waitFor(() => {
+        // Find and click the confirm delete button
+        const confirmBtn = screen.getByText("Delete");
+        fireEvent.click(confirmBtn);
+      });
+
+      // Verify no "invalid ID format" toast was shown
+      await waitFor(() => {
+        const errorToasts = addToast.mock.calls.filter(
+          (call: any[]) => call[1] === "error" && typeof call[0] === "string" && call[0].toLowerCase().includes("invalid")
+        );
+        expect(errorToasts).toHaveLength(0);
+      });
+    });
+  });
 });

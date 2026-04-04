@@ -46,19 +46,21 @@ function validateUuid(id: string): boolean {
 }
 
 function validateMissionId(id: string): boolean {
-  return /^M-\d+$/.test(id);
+  // Accept generated format: M-{base36timestamp}-{random} (e.g. M-LZ7DN0-A2B5)
+  // and legacy numeric format: M-{digits} (e.g. M-001)
+  return /^M-[A-Z0-9]+(?:-[A-Z0-9]+)*$/i.test(id);
 }
 
 function validateMilestoneId(id: string): boolean {
-  return /^MS-\d+$/.test(id);
+  return /^MS-[A-Z0-9]+(?:-[A-Z0-9]+)*$/i.test(id);
 }
 
 function validateSliceId(id: string): boolean {
-  return /^SL-\d+$/.test(id);
+  return /^SL-[A-Z0-9]+(?:-[A-Z0-9]+)*$/i.test(id);
 }
 
 function validateFeatureId(id: string): boolean {
-  return /^F-\d+$/.test(id);
+  return /^F-[A-Z0-9]+(?:-[A-Z0-9]+)*$/i.test(id);
 }
 
 function validateTitle(title: unknown): string {

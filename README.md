@@ -76,9 +76,9 @@ Status flows automatically: when features are linked to tasks and completed, sli
 ```bash
 fn mission create "Build Auth System" "Complete auth with login, signup"  # Create mission
 fn mission list                                                           # List all missions
-fn mission show M-001                                                     # Show mission hierarchy
-fn mission delete M-001 [--force]                                        # Delete mission
-fn mission activate-slice SL-001                                          # Manually activate slice
+fn mission show M-LZ7DN0-A2B5                                             # Show mission hierarchy
+fn mission delete M-LZ7DN0-A2B5 [--force]                                # Delete mission
+fn mission activate-slice SL-P4T2WX-D5E8                                  # Manually activate slice
 ```
 
 **Dashboard:** Click the Target icon in the dashboard header to open the Mission Manager, then create missions, add milestones, slices, and features. Link features to tasks for automatic progress tracking. On mobile devices, the Mission Manager opens as a full-screen overlay with touch-friendly controls and stacked hierarchy cards.

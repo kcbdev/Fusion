@@ -38,7 +38,7 @@ export type InterviewState = (typeof INTERVIEW_STATES)[number];
  * Missions contain milestones that break down the work into phases.
  */
 export interface Mission {
-  /** Unique identifier (e.g., "M-001") */
+  /** Unique identifier (e.g., "M-LZ7DN0-A2B5") */
   id: string;
   /** Display name of the mission */
   title: string;
@@ -61,7 +61,7 @@ export interface Mission {
  * Milestones contain slices that represent work units to be executed.
  */
 export interface Milestone {
-  /** Unique identifier (e.g., "MS-001") */
+  /** Unique identifier (e.g., "MS-M3N8QR-C9F1") */
   id: string;
   /** Parent mission ID */
   missionId: string;
@@ -88,7 +88,7 @@ export interface Milestone {
  * Slices can be activated for implementation, linking to kb tasks.
  */
 export interface Slice {
-  /** Unique identifier (e.g., "SL-001") */
+  /** Unique identifier (e.g., "SL-P4T2WX-D5E8") */
   id: string;
   /** Parent milestone ID */
   milestoneId: string;
@@ -113,7 +113,7 @@ export interface Slice {
  * Features can be linked to kb Tasks for implementation.
  */
 export interface MissionFeature {
-  /** Unique identifier (e.g., "F-001") */
+  /** Unique identifier (e.g., "F-J6K9AB-G7H3") */
   id: string;
   /** Parent slice ID */
   sliceId: string;

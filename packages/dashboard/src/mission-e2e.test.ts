@@ -32,6 +32,8 @@ function createMockMissionStore() {
   let sliceCounter = 1;
   let featureCounter = 1;
 
+  // Generate IDs matching the real MissionStore format:
+  // prefix + base36(timestamp) + "-" + random alphanumeric suffix
   const generateMissionId = () => `M-${missionCounter++}`;
   const generateMilestoneId = () => `MS-${milestoneCounter++}`;
   const generateSliceId = () => `SL-${sliceCounter++}`;
@@ -563,6 +565,121 @@ describe("Mission API", () => {
         { "content-type": "application/json" }
       );
       expect(res.status).toBe(501);
+    });
+  });
+
+  // ── Regression: Generated ID format acceptance ─────────────────────────
+  //
+  // MissionStore.generateMissionId() produces IDs like M-LZ7DN0-A2B5
+  // (prefix + base36 timestamp + random suffix). The route validators must
+  // accept these, not just the legacy numeric format (M-1, MS-1, etc.).
+  describe("Generated ID format regression", () => {
+    // Realistic IDs matching what MissionStore generates
+    const generatedMissionId = "M-LZ7DN0-A2B5";
+    const generatedMilestoneId = "MS-M3N8QR-C9F1";
+    const generatedSliceId = "SL-P4T2WX-D5E8";
+    const generatedFeatureId = "F-J6K9AB-G7H3";
+
+    it("should accept generated mission ID on GET", async () => {
+      const { app, missionStore } = buildApp();
+      const mission = missionStore.createMission({ title: "Generated ID Mission" });
+
+      const res = await get(app, `/api/missions/${mission.id}`);
+      expect(res.status).toBe(200);
+      expect(res.body.id).toBe(mission.id);
+    });
+
+    it("should accept generated mission ID on PATCH", async () => {
+      const { app, missionStore } = buildApp();
+      const mission = missionStore.createMission({ title: "Generated ID Mission" });
+
+      const res = await request(
+        app,
+        "PATCH",
+        `/api/missions/${mission.id}`,
+        JSON.stringify({ title: "Updated Title" }),
+        { "content-type": "application/json" }
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.title).toBe("Updated Title");
+    });
+
+    it("should accept generated mission ID on DELETE", async () => {
+      const { app, missionStore } = buildApp();
+      const mission = missionStore.createMission({ title: "Generated ID Mission" });
+
+      const res = await request(app, "DELETE", `/api/missions/${mission.id}`);
+      expect(res.status).toBe(204);
+    });
+
+    it("should accept generated milestone ID on GET (returns 404, not 400)", async () => {
+      const { app } = buildApp();
+      const res = await get(app, `/api/missions/milestones/${generatedMilestoneId}`);
+      // 404 = entity not found (valid ID format), NOT 400 (invalid format)
+      expect(res.status).toBe(404);
+    });
+
+    it("should accept generated milestone ID on DELETE (returns 404, not 400)", async () => {
+      const { app } = buildApp();
+      const res = await request(app, "DELETE", `/api/missions/milestones/${generatedMilestoneId}`);
+      expect(res.status).toBe(404);
+    });
+
+    it("should accept generated slice ID on GET (returns 404, not 400)", async () => {
+      const { app } = buildApp();
+      const res = await get(app, `/api/missions/slices/${generatedSliceId}`);
+      expect(res.status).toBe(404);
+    });
+
+    it("should accept generated slice ID on DELETE (returns 404, not 400)", async () => {
+      const { app } = buildApp();
+      const res = await request(app, "DELETE", `/api/missions/slices/${generatedSliceId}`);
+      expect(res.status).toBe(404);
+    });
+
+    it("should accept generated slice ID on activate (returns 404, not 400)", async () => {
+      const { app } = buildApp();
+      const res = await request(app, "POST", `/api/missions/slices/${generatedSliceId}/activate`);
+      expect(res.status).toBe(404);
+    });
+
+    it("should accept generated feature ID on GET (returns 404, not 400)", async () => {
+      const { app } = buildApp();
+      const res = await get(app, `/api/missions/features/${generatedFeatureId}`);
+      expect(res.status).toBe(404);
+    });
+
+    it("should accept generated feature ID on DELETE (returns 404, not 400)", async () => {
+      const { app } = buildApp();
+      const res = await request(app, "DELETE", `/api/missions/features/${generatedFeatureId}`);
+      expect(res.status).toBe(404);
+    });
+
+    it("should still reject obviously malformed IDs", async () => {
+      const { app } = buildApp();
+      // IDs that don't match any prefix pattern
+      const res = await get(app, "/api/missions/invalid-id");
+      expect(res.status).toBe(400);
+    });
+
+    it("should still reject IDs with wrong prefix", async () => {
+      const { app } = buildApp();
+      // Milestone ID used where mission ID expected
+      const res = await get(app, `/api/missions/${generatedMilestoneId}`);
+      expect(res.status).toBe(400);
+    });
+
+    it("should accept generated feature ID on link-task (returns 404, not 400)", async () => {
+      const { app } = buildApp();
+      const res = await request(
+        app,
+        "POST",
+        `/api/missions/features/${generatedFeatureId}/link-task`,
+        JSON.stringify({ taskId: "FN-001" }),
+        { "content-type": "application/json" }
+      );
+      expect(res.status).toBe(404);
     });
   });
 });
