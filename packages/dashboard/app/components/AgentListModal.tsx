@@ -203,7 +203,7 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
           </div>
         </div>
 
-        <div className="modal-content">
+        <div className="modal-content agent-modal-content">
           {/* Filter and Create Bar */}
           <div className="agent-controls">
             <div className="agent-state-filter">
@@ -609,21 +609,36 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
           --text-secondary: var(--text-muted, #8b949e);
         }
 
+        /* === Modal shell === */
         .modal--wide {
           width: 90vw;
           max-width: 900px;
           max-height: 80vh;
         }
 
-        .modal-content {
-          padding: 20px;
+        .modal-title {
+          display: flex;
+          align-items: center;
+          gap: var(--space-sm, 8px);
+          font-size: 15px;
+          font-weight: 600;
+          letter-spacing: 0.3px;
+          margin: 0;
+        }
+
+        /* === Content area === */
+        .agent-modal-content {
+          padding: var(--space-xl, 24px) 20px;
           overflow-y: auto;
         }
 
+        /* === Controls bar === */
         .agent-controls {
           display: flex;
-          gap: 12px;
-          margin-bottom: 16px;
+          align-items: center;
+          justify-content: space-between;
+          gap: var(--space-md, 12px);
+          margin-bottom: var(--space-lg, 16px);
         }
 
         .agent-state-filter {
@@ -660,17 +675,21 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
           padding-right: 4px;
         }
 
+        /* === Create form === */
         .agent-create-form {
           display: flex;
-          gap: 12px;
-          margin-bottom: 16px;
-          padding: 16px;
+          gap: var(--space-md, 12px);
+          align-items: center;
+          margin-bottom: var(--space-lg, 16px);
+          padding: var(--space-lg, 16px);
           background: var(--bg-secondary);
-          border-radius: var(--radius-sm);
+          border: 1px solid var(--border);
+          border-radius: var(--radius-md, 8px);
         }
 
         .agent-create-form .input {
           flex: 1;
+          min-width: 0;
           background: var(--surface);
           color: var(--text);
           border: 1px solid var(--border);
@@ -709,39 +728,47 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
           box-shadow: var(--focus-ring);
         }
 
+        /* === Agent list (default view) === */
         .agent-list {
           display: flex;
           flex-direction: column;
-          gap: 12px;
+          gap: var(--space-md, 12px);
         }
 
+        /* === Agent board (grid view) === */
         .agent-board {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-          gap: 16px;
+          grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+          gap: var(--space-lg, 16px);
         }
 
+        /* === Board cards === */
         .agent-board-card {
           display: flex;
           flex-direction: column;
-          gap: 8px;
-          padding: 12px;
-          background: var(--bg-primary);
+          gap: var(--space-sm, 8px);
+          padding: var(--space-lg, 16px);
+          background: var(--surface, var(--bg-primary));
           border: 1px solid var(--border);
           border-top-width: 3px;
-          border-radius: 8px;
-          transition: background var(--transition-fast), border-color var(--transition-fast);
+          border-radius: var(--radius-md, 8px);
+          transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
         }
 
         .agent-board-card:hover {
           background: var(--card-hover);
           border-color: var(--text-muted);
+          box-shadow: var(--shadow-sm);
+        }
+
+        .agent-board-card:focus-within {
+          box-shadow: var(--focus-ring);
         }
 
         .agent-board-header {
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: var(--space-sm, 8px);
         }
 
         .agent-board-icon {
@@ -753,8 +780,9 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
           font-size: 10px;
           font-weight: 600;
           text-transform: uppercase;
+          letter-spacing: 0.5px;
           padding: 2px 6px;
-          border-radius: 4px;
+          border-radius: var(--radius-sm);
           margin-left: auto;
         }
 
@@ -766,6 +794,7 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
         .agent-board-name {
           font-weight: 600;
           font-size: 14px;
+          line-height: 1.3;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
@@ -775,13 +804,14 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
           font-size: 11px;
           font-family: var(--font-mono);
           color: var(--text-secondary);
+          line-height: 1.3;
         }
 
         .agent-board-actions {
           display: flex;
           gap: 6px;
-          margin-top: 4px;
-          padding-top: 8px;
+          margin-top: var(--space-xs, 4px);
+          padding-top: var(--space-sm, 8px);
           border-top: 1px solid var(--border);
         }
 
@@ -790,37 +820,57 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
           justify-content: center;
         }
 
+        /* === Empty state === */
         .agent-empty {
           display: flex;
           flex-direction: column;
           align-items: center;
-          padding: 48px;
+          gap: var(--space-sm, 8px);
+          padding: 48px 20px;
           color: var(--text-secondary);
+          text-align: center;
         }
 
+        .agent-empty p {
+          margin: 0;
+        }
+
+        /* === List cards === */
         .agent-card {
           border: 1px solid var(--border);
           border-left-width: 4px;
-          border-radius: 8px;
-          padding: 16px;
-          background: var(--bg-primary);
+          border-radius: var(--radius-md, 8px);
+          padding: var(--space-lg, 16px);
+          background: var(--surface, var(--bg-primary));
+          transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+        }
+
+        .agent-card:hover {
+          background: var(--card-hover);
+        }
+
+        .agent-card:focus-within {
+          box-shadow: var(--focus-ring);
         }
 
         .agent-card-header {
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
-          margin-bottom: 12px;
+          gap: var(--space-md, 12px);
+          margin-bottom: var(--space-md, 12px);
         }
 
         .agent-info {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: var(--space-md, 12px);
+          min-width: 0;
         }
 
         .agent-icon {
           font-size: 24px;
+          flex-shrink: 0;
         }
 
         .agent-icon--clickable {
@@ -837,7 +887,7 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
         .agent-icon--clickable:focus {
           outline: 2px solid var(--accent, #58a6ff);
           outline-offset: 2px;
-          border-radius: 4px;
+          border-radius: var(--radius-sm);
         }
 
         .agent-role-select {
@@ -851,46 +901,68 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
         .agent-meta {
           display: flex;
           flex-direction: column;
+          gap: 2px;
+          min-width: 0;
         }
 
         .agent-name {
           font-weight: 600;
-          font-size: 16px;
+          font-size: 15px;
+          line-height: 1.3;
         }
 
         .agent-id {
           font-size: 12px;
           font-family: var(--font-mono);
+          line-height: 1.3;
         }
 
         .agent-badges {
           display: flex;
-          gap: 8px;
+          gap: var(--space-sm, 8px);
           flex-wrap: wrap;
+          align-items: center;
+          flex-shrink: 0;
+        }
+
+        .agent-badges .badge {
+          white-space: nowrap;
         }
 
         .agent-card-body {
           display: flex;
           flex-direction: column;
           gap: 4px;
-          margin-bottom: 12px;
-          padding: 8px;
+          margin-bottom: var(--space-md, 12px);
+          padding: var(--space-sm, 8px);
           background: var(--bg-secondary);
-          border-radius: 4px;
+          border-radius: var(--radius-sm);
           font-size: 13px;
+          line-height: 1.4;
         }
 
         .agent-task,
         .agent-heartbeat {
           display: flex;
-          gap: 8px;
+          gap: var(--space-sm, 8px);
+          align-items: baseline;
         }
 
         .agent-card-actions {
           display: flex;
-          gap: 8px;
+          gap: var(--space-sm, 8px);
+          flex-wrap: wrap;
         }
 
+        .agent-card-actions .btn {
+          transition: transform var(--transition-fast);
+        }
+
+        .agent-card-actions .btn:active {
+          transform: scale(0.97);
+        }
+
+        /* === Utility === */
         .spin {
           animation: spin 1s linear infinite;
         }
@@ -902,6 +974,82 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
 
         .text-secondary {
           color: var(--text-secondary);
+        }
+
+        /* === Responsive: tablet (<=768px) === */
+        @media (max-width: 768px) {
+          .modal--wide {
+            width: 100%;
+            max-width: 100%;
+            max-height: 100vh;
+            max-height: 100dvh;
+            border-radius: 0;
+          }
+
+          .agent-modal-content {
+            padding: var(--space-lg, 16px) var(--space-lg, 16px);
+          }
+
+          /* Header actions wrap safely */
+          .modal-header .modal-actions {
+            flex-wrap: wrap;
+            gap: var(--space-xs, 4px);
+          }
+
+          /* Board goes to 2-column max */
+          .agent-board {
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: var(--space-md, 12px);
+          }
+
+          /* List cards stack badges under info */
+          .agent-card-header {
+            flex-direction: column;
+            gap: var(--space-sm, 8px);
+          }
+
+          .agent-badges {
+            flex-shrink: initial;
+          }
+
+          /* Reduce card body padding on mobile */
+          .agent-empty {
+            padding: var(--space-xl, 24px) var(--space-lg, 16px);
+          }
+        }
+
+        /* === Responsive: narrow (<=640px) === */
+        @media (max-width: 640px) {
+          /* Controls stack vertically */
+          .agent-controls {
+            flex-direction: column;
+            align-items: stretch;
+          }
+
+          /* Create form stacks fields */
+          .agent-create-form {
+            flex-direction: column;
+            align-items: stretch;
+          }
+
+          .agent-create-form .select {
+            width: 100%;
+          }
+
+          /* Board goes to single-column */
+          .agent-board {
+            grid-template-columns: 1fr;
+          }
+
+          /* Card actions wrap without overflow */
+          .agent-card-actions {
+            flex-wrap: wrap;
+          }
+
+          .agent-card-actions .btn {
+            flex: 1;
+            min-width: 0;
+          }
         }
       `}</style>
     </div>

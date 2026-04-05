@@ -1114,4 +1114,230 @@ describe("AgentListModal", () => {
       });
     });
   });
+
+  describe("modal styling and layout hooks", () => {
+    it("uses modal--wide sizing class on the modal container", async () => {
+      render(
+        <AgentListModal
+          isOpen={true}
+          onClose={mockOnClose}
+          addToast={mockAddToast}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Agents")).toBeTruthy();
+      });
+
+      // Modal uses the wide variant
+      const modal = document.querySelector(".modal.modal--wide");
+      expect(modal).toBeTruthy();
+    });
+
+    it("renders modal-title element for header consistency", async () => {
+      render(
+        <AgentListModal
+          isOpen={true}
+          onClose={mockOnClose}
+          addToast={mockAddToast}
+        />
+      );
+
+      await waitFor(() => {
+        const title = document.querySelector(".modal-title");
+        expect(title).toBeTruthy();
+        expect(title?.textContent).toContain("Agents");
+      });
+    });
+
+    it("renders content area with agent-modal-content class", async () => {
+      render(
+        <AgentListModal
+          isOpen={true}
+          onClose={mockOnClose}
+          addToast={mockAddToast}
+        />
+      );
+
+      await waitFor(() => {
+        const content = document.querySelector(".agent-modal-content");
+        expect(content).toBeTruthy();
+      });
+    });
+
+    it("board/list toggle still switches containers after styling changes", async () => {
+      render(
+        <AgentListModal
+          isOpen={true}
+          onClose={mockOnClose}
+          addToast={mockAddToast}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Agents")).toBeTruthy();
+      });
+
+      // Default is list
+      expect(document.querySelector(".agent-list")).toBeTruthy();
+      expect(document.querySelector(".agent-board")).toBeFalsy();
+
+      // Switch to board
+      fireEvent.click(screen.getByTitle("Board view"));
+
+      await waitFor(() => {
+        expect(document.querySelector(".agent-board")).toBeTruthy();
+      });
+      expect(document.querySelector(".agent-list")).toBeFalsy();
+
+      // Switch back to list
+      fireEvent.click(screen.getByTitle("List view"));
+
+      await waitFor(() => {
+        expect(document.querySelector(".agent-list")).toBeTruthy();
+      });
+      expect(document.querySelector(".agent-board")).toBeFalsy();
+    });
+
+    it("controls bar has wrapper classes that allow responsive stacking", async () => {
+      render(
+        <AgentListModal
+          isOpen={true}
+          onClose={mockOnClose}
+          addToast={mockAddToast}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Agents")).toBeTruthy();
+      });
+
+      // Controls container exists
+      const controls = document.querySelector(".agent-controls");
+      expect(controls).toBeTruthy();
+
+      // Filter container exists with its wrapper class
+      const filter = document.querySelector(".agent-state-filter");
+      expect(filter).toBeTruthy();
+    });
+
+    it("create form retains stackable wrapper class", async () => {
+      render(
+        <AgentListModal
+          isOpen={true}
+          onClose={mockOnClose}
+          addToast={mockAddToast}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("New Agent")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByText("New Agent"));
+
+      // Create form has its class
+      const form = document.querySelector(".agent-create-form");
+      expect(form).toBeTruthy();
+
+      // Input and select are present inside the form
+      const input = form?.querySelector(".input");
+      const select = form?.querySelector(".select");
+      expect(input).toBeTruthy();
+      expect(select).toBeTruthy();
+    });
+
+    it("cards have hover transition affordances in CSS", async () => {
+      render(
+        <AgentListModal
+          isOpen={true}
+          onClose={mockOnClose}
+          addToast={mockAddToast}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Agents")).toBeTruthy();
+      });
+
+      const styleElements = document.querySelectorAll("style");
+      let foundCardHover = false;
+      let foundBoardCardHover = false;
+      styleElements.forEach(styleEl => {
+        const css = styleEl.textContent ?? "";
+        if (css.includes(".agent-card:hover")) {
+          foundCardHover = true;
+          // Should transition background
+          expect(css).toContain("transition:");
+        }
+        if (css.includes(".agent-board-card:hover")) {
+          foundBoardCardHover = true;
+        }
+      });
+      expect(foundCardHover).toBe(true);
+      expect(foundBoardCardHover).toBe(true);
+    });
+
+    it("CSS includes responsive media queries for mobile", async () => {
+      render(
+        <AgentListModal
+          isOpen={true}
+          onClose={mockOnClose}
+          addToast={mockAddToast}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Agents")).toBeTruthy();
+      });
+
+      const styleElements = document.querySelectorAll("style");
+      const allCss = Array.from(styleElements).map(el => el.textContent ?? "").join("");
+
+      // Should have responsive breakpoints
+      expect(allCss).toContain("@media (max-width: 768px)");
+      expect(allCss).toContain("@media (max-width: 640px)");
+
+      // 768px: board grid narrows
+      expect(allCss).toContain("grid-template-columns: repeat(auto-fill, minmax(160px, 1fr))");
+
+      // 640px: controls and create form stack
+      expect(allCss).toContain(".agent-controls");
+      expect(allCss).toContain(".agent-create-form");
+
+      // 640px: board goes single-column
+      expect(allCss).toContain("grid-template-columns: 1fr");
+    });
+
+    it("no regressions in open/close behavior after styling changes", async () => {
+      const { unmount } = render(
+        <AgentListModal
+          isOpen={true}
+          onClose={mockOnClose}
+          addToast={mockAddToast}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Agents")).toBeTruthy();
+      });
+
+      // Close via close button
+      fireEvent.click(screen.getByTitle("Close"));
+      expect(mockOnClose).toHaveBeenCalledTimes(1);
+
+      // Unmount and verify closed state works
+      unmount();
+
+      const { container } = render(
+        <AgentListModal
+          isOpen={false}
+          onClose={mockOnClose}
+          addToast={mockAddToast}
+        />
+      );
+
+      expect(container.firstChild).toBeNull();
+    });
+  });
 });

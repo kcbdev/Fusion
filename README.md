@@ -230,6 +230,7 @@ Real-time kanban board at `localhost:4040`:
 - Click cards for detail view with move/delete actions
 - Server-Sent Events for live updates across tabs
 - Fixed executor status bar at the bottom of the viewport stays clear of scrollable board, list, and agents content on both desktop and mobile
+- **Agents modal** — Board/list management for agents with responsive styling, view toggle, and role editing. The modal adapts across desktop, tablet (≤768px), and mobile (≤640px) widths. Board/list management UX remains the same; presentation is improved
 
 ### AI Engine
 
