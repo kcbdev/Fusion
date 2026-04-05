@@ -1,4 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { EventEmitter } from "node:events";
+import type { Task } from "@fusion/core";
+import { request } from "../test-request.js";
+import { createServer } from "../server.js";
+
+// Mock node:fs for route handler tests that check path existence
+vi.mock("node:fs", async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  return {
+    ...actual,
+    existsSync: vi.fn().mockReturnValue(true),
+  };
+});
 
 // Mock CentralCore before importing routes
 const mockListProjects = vi.fn().mockResolvedValue([]);
@@ -7,14 +20,14 @@ const mockRegisterProject = vi.fn().mockResolvedValue({
   id: "proj_test123",
   name: "Test Project",
   path: "/test/path",
-  status: "active",
+  status: "initializing",
   isolationMode: "in-process",
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
 });
 const mockUpdateProject = vi.fn().mockResolvedValue({
   id: "proj_test123",
-  name: "Updated Project",
+  name: "Test Project",
   path: "/test/path",
   status: "active",
   isolationMode: "in-process",
@@ -431,5 +444,89 @@ describe("Project Routes API Functions", () => {
       const url: string = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0];
       expect(url).not.toContain("projectId");
     });
+  });
+});
+
+// ── Route Handler Tests ──────────────────────────────────────────────────────
+// These test the actual route handler (POST /api/projects) to verify that
+// projects are activated after registration.
+
+class MockStoreForRoutes extends EventEmitter {
+  getRootDir(): string {
+    return "/tmp/fn-944";
+  }
+
+  getDatabase() {
+    return {
+      exec: vi.fn(),
+      prepare: vi.fn().mockReturnValue({ run: vi.fn().mockReturnValue({ changes: 0 }), get: vi.fn(), all: vi.fn().mockReturnValue([]) }),
+    };
+  }
+
+  getMissionStore() {
+    return {
+      listMissions: vi.fn().mockResolvedValue([]),
+      createMission: vi.fn(),
+      getMission: vi.fn(),
+      updateMission: vi.fn(),
+      deleteMission: vi.fn(),
+      listTemplates: vi.fn().mockResolvedValue([]),
+      createTemplate: vi.fn(),
+      getTemplate: vi.fn(),
+      updateTemplate: vi.fn(),
+      deleteTemplate: vi.fn(),
+      instantiateMission: vi.fn(),
+    };
+  }
+
+  async listTasks(): Promise<Task[]> {
+    return [];
+  }
+}
+
+describe("POST /api/projects route handler", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Reset mocks to default values for route handler tests
+    mockRegisterProject.mockResolvedValue({
+      id: "proj_test123",
+      name: "Test Project",
+      path: "/test/path",
+      status: "initializing",
+      isolationMode: "in-process",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    mockUpdateProject.mockResolvedValue({
+      id: "proj_test123",
+      name: "Test Project",
+      path: "/test/path",
+      status: "active",
+      isolationMode: "in-process",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+  });
+
+  it("calls updateProject with status 'active' after registration", async () => {
+    const store = new MockStoreForRoutes();
+    const app = createServer(store as any);
+
+    const res = await request(
+      app,
+      "POST",
+      "/api/projects",
+      JSON.stringify({ name: "Test Project", path: "/test/path" }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(mockRegisterProject).toHaveBeenCalledWith({
+      name: "Test Project",
+      path: "/test/path",
+      isolationMode: "in-process",
+    });
+    expect(mockUpdateProject).toHaveBeenCalledWith("proj_test123", { status: "active" });
+    expect((res.body as any).status).toBe("active");
   });
 });

@@ -6949,10 +6949,13 @@ Output ONLY the prompt text (no markdown, no explanations).`;
         path: path.trim(),
         isolationMode,
       });
+
+      // Activate the project (registration sets it to 'initializing')
+      const activeProject = await central.updateProject(project.id, { status: "active" });
       
       await central.close();
       
-      res.status(201).json({ ...project, _meta: { hasFusionDir: hasFusionDir ? undefined : false } });
+      res.status(201).json({ ...activeProject, _meta: { hasFusionDir: hasFusionDir ? undefined : false } });
     } catch (err: any) {
       const status = err.message?.includes("already registered") ? 409 
         : err.message?.includes("Duplicate path") ? 409
