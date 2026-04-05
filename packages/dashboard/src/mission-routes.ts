@@ -879,7 +879,7 @@ export function createMissionRouter(store: TaskStore): Router {
       }
 
       try {
-        const slice = missionStore.activateSlice(sliceId);
+        const slice = await missionStore.activateSlice(sliceId);
         res.json(slice);
       } catch (err: any) {
         if (err.message?.includes("not found")) {

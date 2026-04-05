@@ -1446,7 +1446,7 @@ export default function kbExtension(pi: ExtensionAPI) {
         };
       }
 
-      const activated = missionStore.activateSlice(params.id);
+      const activated = await missionStore.activateSlice(params.id);
 
       return {
         content: [

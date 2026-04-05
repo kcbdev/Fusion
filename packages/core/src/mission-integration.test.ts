@@ -294,7 +294,7 @@ describe("MissionStore integration with TaskStore", () => {
     await taskStore.moveTask(task.id, "in-progress");
 
     missionStore.linkFeatureToTask(feature.id, task.id);
-    missionStore.activateSlice(slice.id);
+    await missionStore.activateSlice(slice.id);
 
     expect(events).toEqual(["mission:created", "feature:linked", "slice:activated"]);
   });

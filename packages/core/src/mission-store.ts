@@ -716,17 +716,39 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
   /**
    * Activate a slice for implementation.
    * Sets status to "active" and records activation time.
+   * When the parent mission has `autoAdvance: true`, all "defined" features
+   * in the slice are automatically triaged (converted to tasks and linked).
    *
    * @param id - Slice ID
    * @returns The activated slice
    * @throws Error if slice not found
    */
-  activateSlice(id: string): Slice {
+  async activateSlice(id: string): Promise<Slice> {
+    const slice = this.getSlice(id);
+    if (!slice) {
+      throw new Error(`Slice ${id} not found`);
+    }
+
+    const milestone = this.getMilestone(slice.milestoneId);
+    const mission = milestone ? this.getMission(milestone.missionId) : undefined;
+
+    const shouldAutoTriage = mission?.autoAdvance === true;
+
     const now = new Date().toISOString();
     const updated = this.updateSlice(id, {
       status: "active",
       activatedAt: now,
     });
+
+    // Auto-triage features if autoAdvance is enabled
+    if (shouldAutoTriage) {
+      try {
+        await this.triageSlice(id);
+      } catch (err) {
+        // Log but don't fail — triage failures shouldn't block slice activation
+        console.error(`[MissionStore] Auto-triage failed for slice ${id}:`, err);
+      }
+    }
 
     this.emit("slice:activated", updated);
     return updated;

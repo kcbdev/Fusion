@@ -262,7 +262,7 @@ export async function runMissionActivateSlice(id: string, projectName?: string) 
     process.exit(1);
   }
 
-  const activated = missionStore.activateSlice(id);
+  const activated = await missionStore.activateSlice(id);
   console.log();
   console.log(`  ✓ Activated ${activated.id}: "${activated.title}"`);
   console.log(`    Status: ${SLICE_STATUS_LABELS[activated.status]}`);

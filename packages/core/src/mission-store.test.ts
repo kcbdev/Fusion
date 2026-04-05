@@ -385,25 +385,25 @@ describe("MissionStore", () => {
       expect(retrieved).toBeUndefined();
     });
 
-    it("activates a slice", () => {
+    it("activates a slice", async () => {
       const mission = store.createMission({ title: "Mission" });
       const milestone = store.addMilestone(mission.id, { title: "Milestone" });
       const slice = store.addSlice(milestone.id, { title: "To Activate" });
 
-      const activated = store.activateSlice(slice.id);
+      const activated = await store.activateSlice(slice.id);
 
       expect(activated.status).toBe("active");
       expect(activated.activatedAt).toBeTruthy();
     });
 
-    it("emits slice:activated event", () => {
+    it("emits slice:activated event", async () => {
       const handler = vi.fn();
       store.on("slice:activated", handler);
 
       const mission = store.createMission({ title: "Mission" });
       const milestone = store.addMilestone(mission.id, { title: "Milestone" });
       const slice = store.addSlice(milestone.id, { title: "Test" });
-      const activated = store.activateSlice(slice.id);
+      const activated = await store.activateSlice(slice.id);
 
       expect(handler).toHaveBeenCalledTimes(1);
       expect(handler).toHaveBeenCalledWith(activated);
@@ -863,7 +863,7 @@ describe("MissionStore", () => {
       expect(deleted).toHaveBeenCalledTimes(1);
     });
 
-    it("emits all slice lifecycle events", () => {
+    it("emits all slice lifecycle events", async () => {
       const created = vi.fn();
       const updated = vi.fn();
       const deleted = vi.fn();
@@ -877,7 +877,7 @@ describe("MissionStore", () => {
       const mission = store.createMission({ title: "Mission" });
       const milestone = store.addMilestone(mission.id, { title: "Milestone" });
       const slice = store.addSlice(milestone.id, { title: "Test" });
-      store.activateSlice(slice.id);
+      await store.activateSlice(slice.id);
       store.deleteSlice(slice.id);
 
       expect(created).toHaveBeenCalledTimes(1);
@@ -1145,6 +1145,155 @@ describe("MissionStore", () => {
 
       const triaged = await msWithTs.triageSlice(slice.id);
       expect(triaged).toEqual([]);
+    });
+  });
+
+  // ── Auto-Triage on Slice Activation Tests ─────────────────────────────
+
+  describe("activateSlice with autoAdvance", () => {
+    /** Helper to create a MissionStore with a real TaskStore reference */
+    async function createStoreWithTaskStore(): Promise<{
+      ts: import("./store.js").TaskStore;
+      ms: MissionStore;
+    }> {
+      const { TaskStore } = await import("./store.js");
+      const ts = new TaskStore(kbDir);
+      const ms = ts.getMissionStore();
+      return { ts, ms };
+    }
+
+    it("triages features when autoAdvance is true", async () => {
+      const { ts, ms } = await createStoreWithTaskStore();
+
+      const mission = ms.createMission({ title: "Mission" });
+      ms.updateMission(mission.id, { autoAdvance: true });
+      const milestone = ms.addMilestone(mission.id, { title: "Milestone" });
+      const slice = ms.addSlice(milestone.id, { title: "Slice" });
+      const f1 = ms.addFeature(slice.id, { title: "Feature 1" });
+      const f2 = ms.addFeature(slice.id, { title: "Feature 2" });
+
+      const activated = await ms.activateSlice(slice.id);
+
+      // Slice should be active
+      expect(activated.status).toBe("active");
+      expect(activated.activatedAt).toBeTruthy();
+
+      // Both features should be triaged with tasks
+      const updatedF1 = ms.getFeature(f1.id)!;
+      const updatedF2 = ms.getFeature(f2.id)!;
+      expect(updatedF1.status).toBe("triaged");
+      expect(updatedF1.taskId).toBeTruthy();
+      expect(updatedF2.status).toBe("triaged");
+      expect(updatedF2.taskId).toBeTruthy();
+
+      // Tasks should exist and be linked to the slice/mission
+      const task1 = await ts.getTask(updatedF1.taskId!);
+      const task2 = await ts.getTask(updatedF2.taskId!);
+      expect(task1).toBeDefined();
+      expect(task1!.sliceId).toBe(slice.id);
+      expect(task1!.missionId).toBe(mission.id);
+      expect(task2).toBeDefined();
+      expect(task2!.sliceId).toBe(slice.id);
+      expect(task2!.missionId).toBe(mission.id);
+    });
+
+    it("does not triage features when autoAdvance is false", async () => {
+      const { ms } = await createStoreWithTaskStore();
+
+      const mission = ms.createMission({ title: "Mission" });
+      // autoAdvance defaults to false
+      const milestone = ms.addMilestone(mission.id, { title: "Milestone" });
+      const slice = ms.addSlice(milestone.id, { title: "Slice" });
+      const f1 = ms.addFeature(slice.id, { title: "Feature 1" });
+
+      const activated = await ms.activateSlice(slice.id);
+
+      // Slice should be active
+      expect(activated.status).toBe("active");
+
+      // Feature should still be "defined" — not triaged
+      const updatedF1 = ms.getFeature(f1.id)!;
+      expect(updatedF1.status).toBe("defined");
+      expect(updatedF1.taskId).toBeUndefined();
+    });
+
+    it("does not triage features when autoAdvance is unset", async () => {
+      const { ms } = await createStoreWithTaskStore();
+
+      const mission = ms.createMission({ title: "Mission" });
+      const milestone = ms.addMilestone(mission.id, { title: "Milestone" });
+      const slice = ms.addSlice(milestone.id, { title: "Slice" });
+      const feature = ms.addFeature(slice.id, { title: "Feature" });
+
+      const activated = await ms.activateSlice(slice.id);
+
+      expect(activated.status).toBe("active");
+      const updatedFeature = ms.getFeature(feature.id)!;
+      expect(updatedFeature.status).toBe("defined");
+    });
+
+    it("skips already-triaged features during auto-triage", async () => {
+      const { ms } = await createStoreWithTaskStore();
+
+      const mission = ms.createMission({ title: "Mission" });
+      ms.updateMission(mission.id, { autoAdvance: true });
+      const milestone = ms.addMilestone(mission.id, { title: "Milestone" });
+      const slice = ms.addSlice(milestone.id, { title: "Slice" });
+      const f1 = ms.addFeature(slice.id, { title: "Feature 1" });
+      const f2 = ms.addFeature(slice.id, { title: "Feature 2" });
+
+      // Manually triage f1 first
+      await ms.triageFeature(f1.id);
+      const f1TaskId = ms.getFeature(f1.id)!.taskId;
+      expect(f1TaskId).toBeTruthy();
+
+      // Activate the slice — should only triage f2
+      const activated = await ms.activateSlice(slice.id);
+
+      expect(activated.status).toBe("active");
+
+      // f1 should keep its existing taskId
+      const updatedF1 = ms.getFeature(f1.id)!;
+      expect(updatedF1.taskId).toBe(f1TaskId);
+
+      // f2 should now be triaged
+      const updatedF2 = ms.getFeature(f2.id)!;
+      expect(updatedF2.status).toBe("triaged");
+      expect(updatedF2.taskId).toBeTruthy();
+    });
+
+    it("still activates slice even if triage fails", async () => {
+      const { ms } = await createStoreWithTaskStore();
+
+      const mission = ms.createMission({ title: "Mission" });
+      ms.updateMission(mission.id, { autoAdvance: true });
+      const milestone = ms.addMilestone(mission.id, { title: "Milestone" });
+      const slice = ms.addSlice(milestone.id, { title: "Slice" });
+      const feature = ms.addFeature(slice.id, { title: "Feature" });
+
+      // Sabotage the TaskStore by removing it to trigger a triage error
+      // The MissionStore was created via TaskStore, so taskStore is available.
+      // To make triage fail, we'll delete the task from the DB after it's created.
+      // Instead, let's use a MissionStore WITHOUT a TaskStore but with autoAdvance.
+      const storeNoTs = new MissionStore(kbDir, db);
+
+      const mission2 = storeNoTs.createMission({ title: "Mission 2" });
+      storeNoTs.updateMission(mission2.id, { autoAdvance: true });
+      const milestone2 = storeNoTs.addMilestone(mission2.id, { title: "Milestone 2" });
+      const slice2 = storeNoTs.addSlice(milestone2.id, { title: "Slice 2" });
+      storeNoTs.addFeature(slice2.id, { title: "Feature" });
+
+      // activateSlice should still succeed even though triageSlice will throw
+      const activated = await storeNoTs.activateSlice(slice2.id);
+
+      expect(activated.status).toBe("active");
+      expect(activated.activatedAt).toBeTruthy();
+    });
+
+    it("throws meaningful error when slice not found", async () => {
+      await expect(store.activateSlice("SL-NONEXISTENT")).rejects.toThrow(
+        "Slice SL-NONEXISTENT not found",
+      );
     });
   });
 });

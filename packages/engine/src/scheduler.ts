@@ -743,7 +743,7 @@ export class Scheduler {
           continue;
         }
 
-        const activated = missionStore.activateSlice(pendingSlice.id);
+        const activated = await missionStore.activateSlice(pendingSlice.id);
         schedulerLog.log(`Activated slice ${activated.id} for mission ${missionId}`);
         return activated;
       }
