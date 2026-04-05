@@ -1955,7 +1955,7 @@ function RemotesPanel({
                       disabled={remoteActionLoading !== null}
                       title="Rename remote"
                     >
-                      <GitBranchIcon size={12} />
+                      <GitBranchIcon size={12} color="var(--text-muted)" />
                     </button>
                   </div>
                 )}
@@ -2009,7 +2009,7 @@ function RemotesPanel({
                         disabled={remoteActionLoading !== null}
                         title="Edit URL"
                       >
-                        <FileEdit size={12} />
+                        <FileEdit size={12} color="var(--text-muted)" />
                       </button>
                     </div>
                   )}

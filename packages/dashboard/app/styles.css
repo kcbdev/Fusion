@@ -328,6 +328,9 @@ body {
     color var(--transition-fast),
     background var(--transition-fast);
 }
+.btn-icon svg {
+  stroke: currentColor;
+}
 .btn-icon:hover {
   color: var(--text);
   background: var(--border);
