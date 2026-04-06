@@ -19909,6 +19909,7 @@ html .column.drag-over * {
   border-radius: var(--radius-lg);
   width: 100%;
   max-width: 520px;
+  max-height: calc(100vh - 40px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -20101,6 +20102,8 @@ html .column.drag-over * {
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: var(--space-sm);
   margin-bottom: var(--space-lg);
+  max-height: 400px;
+  overflow-y: auto;
 }
 
 .agent-preset-card {
