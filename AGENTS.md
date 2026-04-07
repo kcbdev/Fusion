@@ -1152,17 +1152,19 @@ Per-task model overrides are stored in the task's `task.json`:
   "validatorModelProvider": "openai",
   "validatorModelId": "gpt-4o",
   "planningModelProvider": "google",
-  "planningModelId": "gemini-2.5-pro"
+  "planningModelId": "gemini-2.5-pro",
+  "thinkingLevel": "high"
 }
 ```
 
-To clear overrides, select "Use default" for both fields and save.
+To clear overrides, select "Use default" for both fields and save. To reset thinking level, select "Off (default)".
 
 ### Engine Behavior
 
 - **Executor**: When both `modelProvider` and `modelId` are set on a task, the executor uses those instead of global settings when creating the agent session.
 - **Reviewer**: When both `validatorModelProvider` and `validatorModelId` are set, the reviewer uses those instead of global settings. The validator model is passed via `ReviewOptions` to `reviewStep()`.
 - **Planning**: When both `planningModelProvider` and `planningModelId` are set, the triage agent uses those instead of global settings for task specification.
+- **Thinking Level**: When `thinkingLevel` is set to a value other than `"off"`, the executor uses that reasoning effort level instead of the global default. Configurable from the Model tab in the task detail modal and during task creation. Valid values: `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`.
 
 ### Limitations
 

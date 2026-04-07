@@ -33,6 +33,8 @@ export interface TaskFormProps {
   onValidatorModelChange: (value: string) => void;
   planningModel?: string;
   onPlanningModelChange?: (value: string) => void;
+  thinkingLevel?: string;
+  onThinkingLevelChange?: (value: string) => void;
   presetMode: "default" | "preset" | "custom";
   onPresetModeChange: (mode: "default" | "preset" | "custom") => void;
   selectedPresetId: string;
@@ -75,6 +77,8 @@ export function TaskForm({
   onValidatorModelChange,
   planningModel,
   onPlanningModelChange,
+  thinkingLevel,
+  onThinkingLevelChange,
   presetMode,
   onPresetModeChange,
   selectedPresetId,
@@ -664,6 +668,23 @@ export function TaskForm({
                   favoriteModels={favoriteModels}
                   onToggleModelFavorite={handleToggleModelFavorite}
                 />
+              </div>
+            )}
+            {onThinkingLevelChange && (
+              <div className="model-select-row">
+                <label htmlFor="thinking-level" className="model-select-label">Thinking</label>
+                <select
+                  id="thinking-level"
+                  value={thinkingLevel || "off"}
+                  onChange={(e) => onThinkingLevelChange(e.target.value)}
+                  disabled={disabled || presetMode === "preset"}
+                >
+                  <option value="off">Off (default)</option>
+                  <option value="minimal">Minimal</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
               </div>
             )}
           </>

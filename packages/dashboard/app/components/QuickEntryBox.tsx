@@ -342,6 +342,8 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
         modelId: hasExecutorOverride ? executorModelId : undefined,
         validatorModelProvider: hasValidatorOverride ? validatorProvider : undefined,
         validatorModelId: hasValidatorOverride ? validatorModelId : undefined,
+        planningModelProvider: hasPlanningOverride ? planningProvider : undefined,
+        planningModelId: hasPlanningOverride ? planningModelId : undefined,
       });
       // Clear input for rapid entry
       resetForm();
@@ -363,6 +365,9 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     hasValidatorOverride,
     validatorProvider,
     validatorModelId,
+    hasPlanningOverride,
+    planningProvider,
+    planningModelId,
     addToast,
     resetForm,
   ]);

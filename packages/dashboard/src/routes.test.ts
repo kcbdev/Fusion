@@ -489,6 +489,88 @@ describe("POST /tasks", () => {
     expect(res.body.error).toContain("breakIntoSubtasks must be a boolean");
     expect(store.createTask).not.toHaveBeenCalled();
   });
+
+  it("forwards thinkingLevel when provided", async () => {
+    const createdTask = {
+      ...FAKE_TASK_DETAIL,
+      column: "triage",
+      thinkingLevel: "high",
+    };
+    (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValue(createdTask);
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/tasks",
+      JSON.stringify({
+        description: "Deep reasoning task",
+        thinkingLevel: "high",
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(store.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: "Deep reasoning task",
+        thinkingLevel: "high",
+      }),
+      expect.objectContaining({
+        settings: { autoSummarizeTitles: undefined },
+      }),
+    );
+  });
+
+  it("returns 400 for invalid thinkingLevel value", async () => {
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/tasks",
+      JSON.stringify({
+        description: "Bad thinking level",
+        thinkingLevel: "ultra",
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("thinkingLevel must be one of");
+    expect(store.createTask).not.toHaveBeenCalled();
+  });
+
+  it("forwards planningModelProvider and planningModelId when provided", async () => {
+    const createdTask = {
+      ...FAKE_TASK_DETAIL,
+      column: "triage",
+      planningModelProvider: "google",
+      planningModelId: "gemini-2.5-pro",
+    };
+    (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValue(createdTask);
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/tasks",
+      JSON.stringify({
+        description: "Use planning model",
+        planningModelProvider: "google",
+        planningModelId: "gemini-2.5-pro",
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(store.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: "Use planning model",
+        planningModelProvider: "google",
+        planningModelId: "gemini-2.5-pro",
+      }),
+      expect.objectContaining({
+        settings: { autoSummarizeTitles: undefined },
+      }),
+    );
+  });
 });
 
 describe("POST /subtasks/*", () => {
@@ -1412,6 +1494,7 @@ describe("PATCH /tasks/:id", () => {
       validatorModelId: null,
       planningModelProvider: null,
       planningModelId: null,
+      thinkingLevel: undefined,
     });
     expect(res.body.dependencies).toEqual(["FN-002"]);
   });
@@ -1436,6 +1519,7 @@ describe("PATCH /tasks/:id", () => {
       validatorModelId: null,
       planningModelProvider: null,
       planningModelId: null,
+      thinkingLevel: undefined,
     });
   });
 
@@ -1470,6 +1554,7 @@ describe("PATCH /tasks/:id", () => {
       validatorModelId: "gpt-4o",
       planningModelProvider: null,
       planningModelId: null,
+      thinkingLevel: undefined,
     });
   });
 
@@ -1522,6 +1607,7 @@ describe("PATCH /tasks/:id", () => {
       validatorModelId: null,
       planningModelProvider: null,
       planningModelId: null,
+      thinkingLevel: undefined,
     });
   });
 
@@ -1530,6 +1616,7 @@ describe("PATCH /tasks/:id", () => {
       ...FAKE_TASK_DETAIL,
       planningModelProvider: "google",
       planningModelId: "gemini-2.5-pro",
+      thinkingLevel: undefined,
     });
 
     const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({
@@ -1552,6 +1639,7 @@ describe("PATCH /tasks/:id", () => {
       validatorModelId: null,
       planningModelProvider: "google",
       planningModelId: "gemini-2.5-pro",
+      thinkingLevel: undefined,
     });
   });
 
@@ -1604,6 +1692,7 @@ describe("PATCH /tasks/:id", () => {
       validatorModelId: null,
       planningModelProvider: null,
       planningModelId: null,
+      thinkingLevel: undefined,
     });
   });
 
@@ -1632,6 +1721,7 @@ describe("PATCH /tasks/:id", () => {
       validatorModelId: null,
       planningModelProvider: null,
       planningModelId: null,
+      thinkingLevel: undefined,
     });
   });
 
@@ -1645,7 +1735,77 @@ describe("PATCH /tasks/:id", () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toContain("enabledWorkflowSteps must be an array of strings");
   });
+
+  it("forwards thinkingLevel to store.updateTask", async () => {
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...FAKE_TASK_DETAIL,
+      thinkingLevel: "high",
+    });
+
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({
+      thinkingLevel: "high",
+    }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+      title: undefined,
+      description: undefined,
+      prompt: undefined,
+      dependencies: undefined,
+      enabledWorkflowSteps: undefined,
+      modelProvider: null,
+      modelId: null,
+      validatorModelProvider: null,
+      validatorModelId: null,
+      planningModelProvider: null,
+      planningModelId: null,
+      thinkingLevel: "high",
+    });
+  });
+
+  it("accepts null to clear thinkingLevel via PATCH", async () => {
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...FAKE_TASK_DETAIL,
+      thinkingLevel: undefined,
+    });
+
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({
+      thinkingLevel: null,
+    }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+      title: undefined,
+      description: undefined,
+      prompt: undefined,
+      dependencies: undefined,
+      enabledWorkflowSteps: undefined,
+      modelProvider: null,
+      modelId: null,
+      validatorModelProvider: null,
+      validatorModelId: null,
+      planningModelProvider: null,
+      planningModelId: null,
+      thinkingLevel: null,
+    });
+  });
+
+  it("returns 400 for invalid thinkingLevel value via PATCH", async () => {
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({
+      thinkingLevel: "invalid",
+    }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("thinkingLevel must be one of");
+  });
 });
+
 
 describe("Attachment routes", () => {
   const FAKE_ATTACHMENT: TaskAttachment = {

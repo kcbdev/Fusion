@@ -219,6 +219,9 @@ vi.mock("@fusion/engine", async (importOriginal) => {
       start: vi.fn(),
       stop: vi.fn(),
     })),
+    createAiPromptExecutor: vi.fn().mockResolvedValue({
+      execute: vi.fn().mockResolvedValue(undefined),
+    }),
     SelfHealingManager: vi.fn().mockImplementation((_store: unknown, opts: unknown) => {
       capturedSelfHealingOpts = opts as Record<string, unknown>;
       return {

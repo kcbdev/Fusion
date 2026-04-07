@@ -22,6 +22,8 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [executorModel, setExecutorModel] = useState("");
   const [validatorModel, setValidatorModel] = useState("");
+  const [planningModel, setPlanningModel] = useState("");
+  const [thinkingLevel, setThinkingLevel] = useState<string>("off");
   const [selectedPresetId, setSelectedPresetId] = useState<string>("");
   const [presetMode, setPresetMode] = useState<"default" | "preset" | "custom">("default");
   const [hasDirtyState, setHasDirtyState] = useState(false);
@@ -42,15 +44,17 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
 
   // Track dirty state
   useEffect(() => {
-    const isDirty = 
+    const isDirty =
       description.trim() !== "" ||
       dependencies.length > 0 ||
       pendingImages.length > 0 ||
       executorModel !== "" ||
       validatorModel !== "" ||
+      planningModel !== "" ||
+      thinkingLevel !== "off" ||
       selectedWorkflowSteps.length > 0;
     setHasDirtyState(isDirty);
-  }, [description, dependencies, pendingImages, executorModel, validatorModel, selectedWorkflowSteps]);
+  }, [description, dependencies, pendingImages, executorModel, validatorModel, planningModel, thinkingLevel, selectedWorkflowSteps]);
 
   const handleClose = useCallback(() => {
     if (hasDirtyState) {
@@ -64,6 +68,8 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
     setDependencies([]);
     setExecutorModel("");
     setValidatorModel("");
+    setPlanningModel("");
+    setThinkingLevel("off");
     setSelectedPresetId("");
     setPresetMode("default");
     setSelectedWorkflowSteps([]);
@@ -80,6 +86,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
     try {
       const executorSlashIdx = executorModel.indexOf("/");
       const validatorSlashIdx = validatorModel.indexOf("/");
+      const planningSlashIdx = planningModel.indexOf("/");
 
       const task = await onCreateTask({
         title: undefined,
@@ -94,6 +101,9 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
         modelId: executorModel && executorSlashIdx !== -1 ? executorModel.slice(executorSlashIdx + 1) : undefined,
         validatorModelProvider: validatorModel && validatorSlashIdx !== -1 ? validatorModel.slice(0, validatorSlashIdx) : undefined,
         validatorModelId: validatorModel && validatorSlashIdx !== -1 ? validatorModel.slice(validatorSlashIdx + 1) : undefined,
+        planningModelProvider: planningModel && planningSlashIdx !== -1 ? planningModel.slice(0, planningSlashIdx) : undefined,
+        planningModelId: planningModel && planningSlashIdx !== -1 ? planningModel.slice(planningSlashIdx + 1) : undefined,
+        thinkingLevel: thinkingLevel !== "off" ? thinkingLevel as "minimal" | "low" | "medium" | "high" : undefined,
       });
 
       // Upload pending images as attachments
@@ -118,6 +128,8 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       setDependencies([]);
       setExecutorModel("");
       setValidatorModel("");
+      setPlanningModel("");
+      setThinkingLevel("off");
       setSelectedPresetId("");
       setPresetMode("default");
       setSelectedWorkflowSteps([]);
@@ -130,7 +142,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
     } finally {
       setIsSubmitting(false);
     }
-  }, [description, dependencies, pendingImages, executorModel, validatorModel, isSubmitting, onCreateTask, addToast, onClose, projectId, presetMode, selectedPresetId, selectedWorkflowSteps, workflowStepsExplicitlySet]);
+  }, [description, dependencies, pendingImages, executorModel, validatorModel, planningModel, thinkingLevel, isSubmitting, onCreateTask, addToast, onClose, projectId, presetMode, selectedPresetId, selectedWorkflowSteps, workflowStepsExplicitlySet]);
 
   // Handle keyboard shortcuts
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -183,6 +195,10 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
             onPlanningMode={onPlanningMode}
             onSubtaskBreakdown={onSubtaskBreakdown}
             onClose={handleClose}
+            planningModel={planningModel}
+            onPlanningModelChange={setPlanningModel}
+            thinkingLevel={thinkingLevel}
+            onThinkingLevelChange={setThinkingLevel}
           />
         </div>
 

@@ -1330,6 +1330,44 @@ describe("TaskStore", () => {
       expect(updated.missionId).toBe("M-789");
       expect(updated.sliceId).toBe("SL-789");
     });
+
+    it("sets thinkingLevel via createTask and updateTask", async () => {
+      const created = await store.createTask({
+        description: "Task with thinking level",
+        thinkingLevel: "high",
+      });
+      expect(created.thinkingLevel).toBe("high");
+
+      const persisted = await store.getTask(created.id);
+      expect(persisted.thinkingLevel).toBe("high");
+
+      const updated = await store.updateTask(created.id, { thinkingLevel: "low" });
+      expect(updated.thinkingLevel).toBe("low");
+
+      const reloaded = await store.getTask(created.id);
+      expect(reloaded.thinkingLevel).toBe("low");
+    });
+
+    it("clears thinkingLevel via null in updateTask", async () => {
+      const task = await store.createTask({
+        description: "Task with thinking level",
+        thinkingLevel: "medium",
+      });
+      expect(task.thinkingLevel).toBe("medium");
+
+      const updated = await store.updateTask(task.id, { thinkingLevel: null });
+      expect(updated.thinkingLevel).toBeUndefined();
+    });
+
+    it("preserves thinkingLevel when updating unrelated fields", async () => {
+      const task = await store.createTask({
+        description: "Task with thinking level",
+        thinkingLevel: "high",
+      });
+      const updated = await store.updateTask(task.id, { title: "Updated title" });
+      expect(updated.thinkingLevel).toBe("high");
+      expect(updated.title).toBe("Updated title");
+    });
   });
 
   describe("updateTask — PROMPT.md regeneration", () => {

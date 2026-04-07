@@ -1721,6 +1721,9 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         modelId,
         validatorModelProvider,
         validatorModelId,
+        planningModelProvider,
+        planningModelId,
+        thinkingLevel,
       } = req.body;
       if (!description || typeof description !== "string") {
         res.status(400).json({ error: "description is required" });
@@ -1735,9 +1738,19 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const validatedModelId = validateOptionalModelField(modelId, "modelId");
       const validatedValidatorModelProvider = validateOptionalModelField(validatorModelProvider, "validatorModelProvider");
       const validatedValidatorModelId = validateOptionalModelField(validatorModelId, "validatorModelId");
+      const validatedPlanningModelProvider = validateOptionalModelField(planningModelProvider, "planningModelProvider");
+      const validatedPlanningModelId = validateOptionalModelField(planningModelId, "planningModelId");
+
+      // Validate thinkingLevel if provided
+      const validThinkingLevels = ["off", "minimal", "low", "medium", "high"];
+      if (thinkingLevel !== undefined && thinkingLevel !== null && !validThinkingLevels.includes(thinkingLevel)) {
+        res.status(400).json({ error: `thinkingLevel must be one of: ${validThinkingLevels.join(", ")}` });
+        return;
+      }
 
       const executorModel = normalizeModelSelectionPair(validatedModelProvider, validatedModelId);
       const validatorModel = normalizeModelSelectionPair(validatedValidatorModelProvider, validatedValidatorModelId);
+      const planningModel = normalizeModelSelectionPair(validatedPlanningModelProvider, validatedPlanningModelId);
 
       // Validate enabledWorkflowSteps if provided
       if (enabledWorkflowSteps !== undefined) {
@@ -1791,6 +1804,9 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
           modelId: executorModel.modelId,
           validatorModelProvider: validatorModel.provider,
           validatorModelId: validatorModel.modelId,
+          planningModelProvider: planningModel.provider,
+          planningModelId: planningModel.modelId,
+          thinkingLevel: thinkingLevel || undefined,
           summarize,
         },
         { onSummarize, settings: { autoSummarizeTitles: settings.autoSummarizeTitles } }
@@ -2546,7 +2562,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   router.patch("/tasks/:id", async (req, res) => {
     try {
       const scopedStore = await getScopedStore(req);
-      const { title, description, prompt, dependencies, enabledWorkflowSteps, modelProvider, modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId } = req.body;
+      const { title, description, prompt, dependencies, enabledWorkflowSteps, modelProvider, modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, thinkingLevel } = req.body;
 
       // Validate model fields are strings or undefined/null
       const validateModelField = (value: unknown, name: string): string | null | undefined => {
@@ -2563,6 +2579,12 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const validatedValidatorModelId = validateModelField(validatorModelId, "validatorModelId");
       const validatedPlanningModelProvider = validateModelField(planningModelProvider, "planningModelProvider");
       const validatedPlanningModelId = validateModelField(planningModelId, "planningModelId");
+
+      // Validate thinkingLevel if provided
+      const validThinkingLevels = ["off", "minimal", "low", "medium", "high"];
+      if (thinkingLevel !== undefined && thinkingLevel !== null && !validThinkingLevels.includes(thinkingLevel)) {
+        throw new Error(`thinkingLevel must be one of: ${validThinkingLevels.join(", ")}`);
+      }
 
       if (enabledWorkflowSteps !== undefined) {
         if (!Array.isArray(enabledWorkflowSteps) || !enabledWorkflowSteps.every((id: unknown) => typeof id === "string")) {
@@ -2582,10 +2604,11 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         validatorModelId: validatedValidatorModelId,
         planningModelProvider: validatedPlanningModelProvider,
         planningModelId: validatedPlanningModelId,
+        thinkingLevel: thinkingLevel === null ? null : thinkingLevel,
       });
       res.json(task);
     } catch (err: any) {
-      const status = err.message?.includes("must be a string") || err.message?.includes("must be an array of strings") ? 400 : 500;
+      const status = err.message?.includes("must be a string") || err.message?.includes("must be an array of strings") || err.message?.includes("thinkingLevel must be one of") ? 400 : 500;
       res.status(status).json({ error: err.message });
     }
   });

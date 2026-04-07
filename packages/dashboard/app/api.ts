@@ -126,6 +126,9 @@ export function createTask(input: TaskCreateInput, projectId?: string): Promise<
     modelId,
     validatorModelProvider,
     validatorModelId,
+    planningModelProvider,
+    planningModelId,
+    thinkingLevel,
   } = input;
 
   return api<Task>(withProjectId("/tasks", projectId), {
@@ -142,11 +145,14 @@ export function createTask(input: TaskCreateInput, projectId?: string): Promise<
       modelId,
       validatorModelProvider,
       validatorModelId,
+      planningModelProvider,
+      planningModelId,
+      thinkingLevel,
     }),
   });
 }
 
-export function updateTask(id: string, updates: { title?: string; description?: string; prompt?: string; dependencies?: string[]; enabledWorkflowSteps?: string[]; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null }, projectId?: string): Promise<Task> {
+export function updateTask(id: string, updates: { title?: string; description?: string; prompt?: string; dependencies?: string[]; enabledWorkflowSteps?: string[]; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null }, projectId?: string): Promise<Task> {
   return api<Task>(withProjectId(`/tasks/${id}`, projectId), {
     method: "PATCH",
     body: JSON.stringify(updates),

@@ -91,7 +91,9 @@ export function ModelSelectorTab({ task, addToast }: ModelSelectorTabProps) {
   const [savedValidator, setSavedValidator] = useState<ModelSelection>(() => getValidatorSelection(task));
   const [selectedPlanning, setSelectedPlanning] = useState<ModelSelection>(() => getPlanningSelection(task));
   const [savedPlanning, setSavedPlanning] = useState<ModelSelection>(() => getPlanningSelection(task));
-  const [savingTarget, setSavingTarget] = useState<"executor" | "validator" | "planning" | null>(null);
+  const [selectedThinking, setSelectedThinking] = useState<string>(() => task.thinkingLevel ?? "off");
+  const [savedThinking, setSavedThinking] = useState<string>(() => task.thinkingLevel ?? "off");
+  const [savingTarget, setSavingTarget] = useState<"executor" | "validator" | "planning" | "thinking" | null>(null);
 
   const activeTaskIdRef = useRef(task.id);
 
@@ -164,8 +166,11 @@ export function ModelSelectorTab({ task, addToast }: ModelSelectorTabProps) {
     setSavedValidator(nextValidator);
     setSelectedPlanning(nextPlanning);
     setSavedPlanning(nextPlanning);
+    const nextThinking = task.thinkingLevel ?? "off";
+    setSelectedThinking(nextThinking);
+    setSavedThinking(nextThinking);
     setSavingTarget(null);
-  }, [task.id, task.modelProvider, task.modelId, task.validatorModelProvider, task.validatorModelId, task.planningModelProvider, task.planningModelId]);
+  }, [task.id, task.modelProvider, task.modelId, task.validatorModelProvider, task.validatorModelId, task.planningModelProvider, task.planningModelId, task.thinkingLevel]);
 
   const executorValue = useMemo(() => getDropdownValue(selectedExecutor), [selectedExecutor]);
   const validatorValue = useMemo(() => getDropdownValue(selectedValidator), [selectedValidator]);
@@ -293,6 +298,49 @@ export function ModelSelectorTab({ task, addToast }: ModelSelectorTabProps) {
     [savedPlanning, saveSelection],
   );
 
+  const handleThinkingChange = useCallback(
+    async (value: string) => {
+      const requestTaskId = task.id;
+      const previousThinking = savedThinking;
+
+      setSelectedThinking(value);
+      setSavingTarget("thinking");
+
+      try {
+        const updatedTask = await updateTask(requestTaskId, {
+          thinkingLevel: value === "off" ? null : value,
+        });
+
+        if (activeTaskIdRef.current !== requestTaskId) {
+          return;
+        }
+
+        const nextThinking = updatedTask.thinkingLevel ?? "off";
+        setSavedThinking(nextThinking);
+        setSelectedThinking(nextThinking);
+
+        addToast(
+          nextThinking === "off"
+            ? "Thinking level set to default (off)"
+            : `Thinking level set to ${nextThinking}`,
+          "success",
+        );
+      } catch (err: any) {
+        if (activeTaskIdRef.current !== requestTaskId) {
+          return;
+        }
+
+        setSelectedThinking(previousThinking);
+        addToast(err.message || "Failed to save thinking level", "error");
+      } finally {
+        if (activeTaskIdRef.current === requestTaskId) {
+          setSavingTarget(null);
+        }
+      }
+    },
+    [task.id, savedThinking, addToast],
+  );
+
   const executorUsingDefault = !savedExecutor.provider && !savedExecutor.modelId;
   const validatorUsingDefault = !savedValidator.provider && !savedValidator.modelId;
   const planningUsingDefault = !savedPlanning.provider && !savedPlanning.modelId;
@@ -418,8 +466,35 @@ export function ModelSelectorTab({ task, addToast }: ModelSelectorTabProps) {
             <small>The AI model used for task specification (triage phase).</small>
           </div>
 
+          <div className="form-group">
+            <label htmlFor="thinkingLevel">Thinking Level</label>
+            <div className="model-selector-current">
+              {savedThinking === "off" ? (
+                <span className="model-badge model-badge-default">Using default (off)</span>
+              ) : (
+                <span className="model-badge model-badge-custom">
+                  {savedThinking}
+                </span>
+              )}
+            </div>
+            <select
+              id="thinkingLevel"
+              value={selectedThinking}
+              onChange={(e) => handleThinkingChange(e.target.value)}
+              disabled={isSaving}
+              className="thinking-level-select"
+            >
+              <option value="off">Off (default)</option>
+              <option value="minimal">Minimal</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+            <small>Controls the reasoning effort for the AI agent. Higher levels use more tokens.</small>
+          </div>
+
           <div className="model-selector-status">
-            {executorUsingDefault && validatorUsingDefault && planningUsingDefault
+            {executorUsingDefault && validatorUsingDefault && planningUsingDefault && savedThinking === "off"
               ? "Using global default models."
               : "Model settings are up to date."}
           </div>

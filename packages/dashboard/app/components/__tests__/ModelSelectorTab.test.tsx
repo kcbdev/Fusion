@@ -867,4 +867,90 @@ describe("ModelSelectorTab", () => {
       });
     });
   });
+
+  describe("thinkingLevel selector", () => {
+    it("renders thinking level selector with default 'off'", async () => {
+      render(<ModelSelectorTab task={FAKE_TASK} addToast={mockAddToast} />);
+
+      await waitForSelectors();
+
+      const select = screen.getByLabelText("Thinking Level");
+      expect(select).toBeInTheDocument();
+      expect((select as HTMLSelectElement).value).toBe("off");
+    });
+
+    it("renders current thinking level from task", async () => {
+      const taskWithThinking = { ...FAKE_TASK, thinkingLevel: "high" as const };
+      render(<ModelSelectorTab task={taskWithThinking} addToast={mockAddToast} />);
+
+      await waitForSelectors();
+
+      const select = screen.getByLabelText("Thinking Level");
+      expect((select as HTMLSelectElement).value).toBe("high");
+    });
+
+    it("saves thinking level when changed", async () => {
+      mockUpdateTask.mockImplementation(async (_id: string, updates: Record<string, unknown>) => ({
+        ...FAKE_TASK,
+        ...updates,
+      }));
+
+      const user = userEvent.setup();
+      render(<ModelSelectorTab task={FAKE_TASK} addToast={mockAddToast} />);
+
+      await waitForSelectors();
+
+      await user.selectOptions(screen.getByLabelText("Thinking Level"), "high");
+
+      await waitFor(() => {
+        expect(mockUpdateTask).toHaveBeenCalledWith("FN-001", {
+          thinkingLevel: "high",
+        });
+      });
+
+      await waitFor(() => {
+        expect(mockAddToast).toHaveBeenCalledWith(
+          "Thinking level set to high",
+          "success",
+        );
+      });
+    });
+
+    it("shows 'set to default' toast when clearing thinking level", async () => {
+      const taskWithThinking = { ...FAKE_TASK, thinkingLevel: "high" as const };
+      mockUpdateTask.mockImplementation(async (_id: string, updates: Record<string, unknown>) => ({
+        ...FAKE_TASK,
+        ...updates,
+      }));
+
+      const user = userEvent.setup();
+      render(<ModelSelectorTab task={taskWithThinking} addToast={mockAddToast} />);
+
+      await waitForSelectors();
+
+      await user.selectOptions(screen.getByLabelText("Thinking Level"), "off");
+
+      await waitFor(() => {
+        expect(mockUpdateTask).toHaveBeenCalledWith("FN-001", {
+          thinkingLevel: null,
+        });
+      });
+
+      await waitFor(() => {
+        expect(mockAddToast).toHaveBeenCalledWith(
+          "Thinking level set to default (off)",
+          "success",
+        );
+      });
+    });
+
+    it("shows thinking level badge for non-default values", async () => {
+      const taskWithThinking = { ...FAKE_TASK, thinkingLevel: "medium" as const };
+      render(<ModelSelectorTab task={taskWithThinking} addToast={mockAddToast} />);
+
+      await waitForSelectors();
+
+      expect(screen.getByText("medium")).toBeInTheDocument();
+    });
+  });
 });
