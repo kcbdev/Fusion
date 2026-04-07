@@ -17,7 +17,7 @@
  * - onTerminated: Called when an unresponsive agent is terminated
  */
 
-import type { AgentStore, AgentHeartbeatRun, HeartbeatInvocationSource, TaskStore, TaskDetail } from "@fusion/core";
+import type { AgentStore, AgentHeartbeatRun, HeartbeatInvocationSource, AgentHeartbeatConfig, TaskStore, TaskDetail } from "@fusion/core";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import { createTaskCreateTool, createTaskLogTool, taskCreateParams } from "./agent-tools.js";
@@ -776,5 +776,229 @@ export class HeartbeatMonitor {
 
     // Notify callback
     this.onTerminated?.(tracked.agentId);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// HeartbeatTriggerScheduler — timer, assignment, and on-demand triggers
+// ─────────────────────────────────────────────────────────────────────────
+
+/** Structured context passed when a trigger fires. */
+export interface WakeContext {
+  /** Optional task ID associated with this trigger */
+  taskId?: string;
+  /** Why the agent was woken */
+  wakeReason: string;
+  /** Detail about the specific trigger */
+  triggerDetail: string;
+  /** Additional context (intervalMs, etc.) */
+  [key: string]: unknown;
+}
+
+/** Callback invoked when a trigger fires. */
+export type TriggerCallback = (
+  agentId: string,
+  source: HeartbeatInvocationSource,
+  context: WakeContext,
+) => Promise<void>;
+
+/** Per-agent timer state */
+interface AgentTimer {
+  intervalMs: number;
+  handle: ReturnType<typeof setInterval>;
+}
+
+/**
+ * HeartbeatTriggerScheduler manages timer-based heartbeat triggers for agents.
+ *
+ * Each agent can be registered with a heartbeat config that specifies
+ * the timer interval. When the timer fires, the scheduler invokes the
+ * provided callback with the appropriate source and context.
+ *
+ * The scheduler respects:
+ * - `enabled`: Skip registration if false
+ * - `heartbeatIntervalMs`: Timer interval (undefined = no timer)
+ * - `maxConcurrentRuns`: Skip tick if agent already has an active run
+ *
+ * Usage:
+ * ```typescript
+ * const scheduler = new HeartbeatTriggerScheduler(agentStore, async (agentId, source, ctx) => {
+ *   await heartbeatMonitor.startRun(agentId, { source, triggerDetail: ctx.triggerDetail, contextSnapshot: { ...ctx } });
+ * });
+ * scheduler.registerAgent("agent-123", { heartbeatIntervalMs: 30000, enabled: true });
+ * scheduler.start();
+ * ```
+ */
+export class HeartbeatTriggerScheduler {
+  private store: AgentStore;
+  private callback: TriggerCallback;
+  private timers: Map<string, AgentTimer> = new Map();
+  private running = false;
+  private assignedListener: ((agent: import("@fusion/core").Agent, taskId: string) => void) | null = null;
+
+  constructor(store: AgentStore, callback: TriggerCallback) {
+    this.store = store;
+    this.callback = callback;
+  }
+
+  /**
+   * Start the scheduler. Enables assignment watching.
+   * Individual agents must be registered separately via registerAgent().
+   */
+  start(): void {
+    if (this.running) return;
+    this.running = true;
+    this.watchAssignments();
+    heartbeatLog.log("HeartbeatTriggerScheduler started");
+  }
+
+  /**
+   * Stop the scheduler and clear all timers.
+   */
+  stop(): void {
+    if (!this.running) return;
+    this.running = false;
+
+    // Unwatch assignments
+    this.unwatchAssignments();
+
+    // Clear all timers
+    for (const [agentId, timer] of this.timers) {
+      clearInterval(timer.handle);
+      heartbeatLog.log(`Cleared timer for ${agentId}`);
+    }
+    this.timers.clear();
+
+    heartbeatLog.log("HeartbeatTriggerScheduler stopped");
+  }
+
+  /**
+   * Check if the scheduler is running.
+   */
+  isActive(): boolean {
+    return this.running;
+  }
+
+  /**
+   * Register an agent for timer-based heartbeat triggers.
+   * @param agentId - The agent ID
+   * @param config - Per-agent heartbeat config
+   */
+  registerAgent(agentId: string, config: AgentHeartbeatConfig): void {
+    // Skip if not enabled
+    if (config.enabled === false) {
+      heartbeatLog.log(`Skipping timer registration for ${agentId} (disabled)`);
+      return;
+    }
+
+    // Skip if no interval configured
+    const intervalMs = config.heartbeatIntervalMs;
+    if (!intervalMs || typeof intervalMs !== "number" || intervalMs <= 0) {
+      heartbeatLog.log(`Skipping timer registration for ${agentId} (no interval)`);
+      return;
+    }
+
+    // Clear existing timer if re-registering
+    this.unregisterAgent(agentId);
+
+    const maxConcurrent = config.maxConcurrentRuns ?? 1;
+
+    const handle = setInterval(() => {
+      void this.onTimerTick(agentId, intervalMs, maxConcurrent);
+    }, intervalMs);
+
+    this.timers.set(agentId, { intervalMs, handle });
+    heartbeatLog.log(`Registered timer for ${agentId} (every ${intervalMs}ms)`);
+  }
+
+  /**
+   * Unregister an agent, clearing its timer.
+   * @param agentId - The agent ID
+   */
+  unregisterAgent(agentId: string): void {
+    const timer = this.timers.get(agentId);
+    if (timer) {
+      clearInterval(timer.handle);
+      this.timers.delete(agentId);
+      heartbeatLog.log(`Unregistered timer for ${agentId}`);
+    }
+  }
+
+  /**
+   * Get the set of currently registered agent IDs.
+   * Useful for testing.
+   */
+  getRegisteredAgents(): string[] {
+    return Array.from(this.timers.keys());
+  }
+
+  /**
+   * Subscribe to agent:assigned events on the AgentStore.
+   * When a task is assigned to an agent, the trigger callback fires
+   * with source "assignment" and the task ID in the context.
+   */
+  watchAssignments(): void {
+    if (this.assignedListener) return; // Already watching
+
+    this.assignedListener = async (agent, taskId) => {
+      if (!this.running) return;
+
+      try {
+        // Guard: skip if agent already has an active run
+        const activeRun = await this.store.getActiveHeartbeatRun(agent.id);
+        if (activeRun) {
+          heartbeatLog.log(`Assignment trigger skipped for ${agent.id} (active run)`);
+          return;
+        }
+
+        heartbeatLog.log(`Assignment trigger for ${agent.id} (task: ${taskId})`);
+        await this.callback(agent.id, "assignment", {
+          taskId,
+          wakeReason: "assignment",
+          triggerDetail: "task-assigned",
+        });
+      } catch (err) {
+        heartbeatLog.error(`Assignment trigger error for ${agent.id}: ${err instanceof Error ? err.message : err}`);
+      }
+    };
+
+    this.store.on("agent:assigned", this.assignedListener);
+    heartbeatLog.log("Watching agent:assigned events");
+  }
+
+  /**
+   * Unsubscribe from agent:assigned events.
+   */
+  unwatchAssignments(): void {
+    if (this.assignedListener) {
+      this.store.off("agent:assigned", this.assignedListener);
+      this.assignedListener = null;
+      heartbeatLog.log("Stopped watching agent:assigned events");
+    }
+  }
+
+  /**
+   * Handle a timer tick for an agent.
+   * Checks for active runs before invoking the callback.
+   */
+  private async onTimerTick(agentId: string, intervalMs: number, maxConcurrent: number): Promise<void> {
+    if (!this.running) return;
+
+    try {
+      // Check for active runs
+      const activeRun = await this.store.getActiveHeartbeatRun(agentId);
+      if (activeRun) {
+        heartbeatLog.log(`Timer tick skipped for ${agentId} (active run)`);
+        return;
+      }
+
+      await this.callback(agentId, "timer", {
+        wakeReason: "timer",
+        triggerDetail: "scheduled",
+        intervalMs,
+      });
+    } catch (err) {
+      heartbeatLog.error(`Timer tick error for ${agentId}: ${err instanceof Error ? err.message : err}`);
+    }
   }
 }

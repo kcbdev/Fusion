@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { HeartbeatMonitor, type AgentSession, type HeartbeatExecutionOptions, HEARTBEAT_SYSTEM_PROMPT } from "./agent-heartbeat.js";
+import { HeartbeatMonitor, HeartbeatTriggerScheduler, type AgentSession, type HeartbeatExecutionOptions, HEARTBEAT_SYSTEM_PROMPT } from "./agent-heartbeat.js";
 import type { AgentStore, AgentHeartbeatRun, TaskStore, TaskDetail, Agent } from "@fusion/core";
 
 // Mock logger to suppress noise in test output
@@ -1589,6 +1589,282 @@ describe("HeartbeatMonitor", () => {
       await monitor.completeRun("agent-001", "run-clear-002", { status: "completed" });
       savedRun = savedRuns.get("run-clear-002");
       expect((savedRun!.resultJson as any)?.tasksCreated).toBeUndefined();
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// HeartbeatTriggerScheduler tests
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("HeartbeatTriggerScheduler", () => {
+  let store: AgentStore;
+  let callback: ReturnType<typeof vi.fn>;
+  let scheduler: import("./agent-heartbeat.js").HeartbeatTriggerScheduler;
+
+  beforeEach(() => {
+    callback = vi.fn().mockResolvedValue(undefined);
+    store = {
+      getActiveHeartbeatRun: vi.fn().mockResolvedValue(null),
+      on: vi.fn(),
+      off: vi.fn(),
+    } as unknown as AgentStore;
+  });
+
+  afterEach(() => {
+    scheduler?.stop();
+    vi.useRealTimers();
+  });
+
+  describe("constructor and lifecycle", () => {
+    it("starts and stops cleanly", () => {
+      scheduler = new HeartbeatTriggerScheduler(store, callback);
+      expect(scheduler.isActive()).toBe(false);
+
+      scheduler.start();
+      expect(scheduler.isActive()).toBe(true);
+
+      scheduler.stop();
+      expect(scheduler.isActive()).toBe(false);
+    });
+
+    it("start is idempotent", () => {
+      scheduler = new HeartbeatTriggerScheduler(store, callback);
+      scheduler.start();
+      scheduler.start(); // second call should be no-op
+      expect(scheduler.isActive()).toBe(true);
+    });
+
+    it("stop is idempotent", () => {
+      scheduler = new HeartbeatTriggerScheduler(store, callback);
+      scheduler.start();
+      scheduler.stop();
+      scheduler.stop(); // second call should be no-op
+      expect(scheduler.isActive()).toBe(false);
+    });
+  });
+
+  describe("registerAgent", () => {
+    beforeEach(() => {
+      scheduler = new HeartbeatTriggerScheduler(store, callback);
+      scheduler.start();
+    });
+
+    it("registers an agent with timer", () => {
+      scheduler.registerAgent("agent-001", { heartbeatIntervalMs: 10000 });
+      expect(scheduler.getRegisteredAgents()).toContain("agent-001");
+    });
+
+    it("skips registration when enabled is false", () => {
+      scheduler.registerAgent("agent-001", { heartbeatIntervalMs: 10000, enabled: false });
+      expect(scheduler.getRegisteredAgents()).not.toContain("agent-001");
+    });
+
+    it("skips registration when intervalMs is undefined", () => {
+      scheduler.registerAgent("agent-001", {});
+      expect(scheduler.getRegisteredAgents()).not.toContain("agent-001");
+    });
+
+    it("skips registration when intervalMs is 0", () => {
+      scheduler.registerAgent("agent-001", { heartbeatIntervalMs: 0 });
+      expect(scheduler.getRegisteredAgents()).not.toContain("agent-001");
+    });
+
+    it("clears previous timer when re-registering", () => {
+      scheduler.registerAgent("agent-001", { heartbeatIntervalMs: 10000 });
+      scheduler.registerAgent("agent-001", { heartbeatIntervalMs: 20000 });
+      expect(scheduler.getRegisteredAgents()).toHaveLength(1);
+      expect(scheduler.getRegisteredAgents()).toContain("agent-001");
+    });
+  });
+
+  describe("unregisterAgent", () => {
+    beforeEach(() => {
+      scheduler = new HeartbeatTriggerScheduler(store, callback);
+      scheduler.start();
+    });
+
+    it("removes a registered agent", () => {
+      scheduler.registerAgent("agent-001", { heartbeatIntervalMs: 10000 });
+      expect(scheduler.getRegisteredAgents()).toContain("agent-001");
+
+      scheduler.unregisterAgent("agent-001");
+      expect(scheduler.getRegisteredAgents()).not.toContain("agent-001");
+    });
+
+    it("is no-op for unregistered agent", () => {
+      scheduler.unregisterAgent("agent-999");
+      expect(scheduler.getRegisteredAgents()).toHaveLength(0);
+    });
+  });
+
+  describe("timer triggers", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      scheduler = new HeartbeatTriggerScheduler(store, callback);
+      scheduler.start();
+    });
+
+    it("fires callback at the configured interval", async () => {
+      scheduler.registerAgent("agent-001", { heartbeatIntervalMs: 5000 });
+
+      // Advance by one interval and let async callbacks settle
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(callback).toHaveBeenCalledOnce();
+      expect(callback).toHaveBeenCalledWith("agent-001", "timer", {
+        wakeReason: "timer",
+        triggerDetail: "scheduled",
+        intervalMs: 5000,
+      });
+    });
+
+    it("fires multiple times for multiple intervals", async () => {
+      scheduler.registerAgent("agent-001", { heartbeatIntervalMs: 5000 });
+
+      await vi.advanceTimersByTimeAsync(15000);
+      expect(callback).toHaveBeenCalledTimes(3);
+    });
+
+    it("does not fire after stop", async () => {
+      scheduler.registerAgent("agent-001", { heartbeatIntervalMs: 5000 });
+
+      scheduler.stop();
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(callback).not.toHaveBeenCalled();
+    });
+
+    it("does not fire after unregister", async () => {
+      scheduler.registerAgent("agent-001", { heartbeatIntervalMs: 5000 });
+
+      scheduler.unregisterAgent("agent-001");
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(callback).not.toHaveBeenCalled();
+    });
+
+    it("skips tick when agent has active run", async () => {
+      (store.getActiveHeartbeatRun as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: "run-active",
+        status: "active",
+      });
+
+      scheduler.registerAgent("agent-001", { heartbeatIntervalMs: 5000 });
+
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(callback).not.toHaveBeenCalled();
+    });
+
+    it("respects maxConcurrentRuns from config", async () => {
+      // Agent with active run should be skipped
+      (store.getActiveHeartbeatRun as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: "run-active",
+        status: "active",
+      });
+
+      scheduler.registerAgent("agent-001", {
+        heartbeatIntervalMs: 5000,
+        maxConcurrentRuns: 1,
+      });
+
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(callback).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("stop clears all timers", () => {
+    it("clears all registered timers on stop", () => {
+      vi.useFakeTimers();
+
+      scheduler = new HeartbeatTriggerScheduler(store, callback);
+      scheduler.start();
+      scheduler.registerAgent("agent-001", { heartbeatIntervalMs: 5000 });
+      scheduler.registerAgent("agent-002", { heartbeatIntervalMs: 10000 });
+
+      expect(scheduler.getRegisteredAgents()).toHaveLength(2);
+
+      scheduler.stop();
+      expect(scheduler.getRegisteredAgents()).toHaveLength(0);
+
+      vi.advanceTimersByTime(20000);
+      expect(callback).not.toHaveBeenCalled();
+
+      vi.useRealTimers();
+    });
+  });
+
+  describe("assignment watching", () => {
+    let eventStore: AgentStore;
+
+    beforeEach(async () => {
+      vi.useRealTimers(); // Ensure real timers for these tests
+
+      // Create a real AgentStore (which extends EventEmitter) so we can emit events
+      const { AgentStore: AgentStoreClass } = await import("@fusion/core");
+      eventStore = new AgentStoreClass({ rootDir: `.fusion-test-assign-${Date.now()}` }) as AgentStore;
+      // Override getActiveHeartbeatRun to return null (no active run)
+      (eventStore as any).getActiveHeartbeatRun = vi.fn().mockResolvedValue(null);
+
+      scheduler = new HeartbeatTriggerScheduler(eventStore, callback);
+      scheduler.start();
+    });
+
+    afterEach(async () => {
+      scheduler?.stop();
+      const { rm } = await import("node:fs/promises");
+      await rm((eventStore as any).rootDir, { recursive: true, force: true }).catch(() => {});
+    });
+
+    it("triggers callback on agent:assigned event", async () => {
+      const agent = { id: "agent-test", name: "Test", taskId: "FN-001" } as import("@fusion/core").Agent;
+
+      eventStore.emit("agent:assigned", agent, "FN-001");
+
+      // Wait for async event handler
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(callback).toHaveBeenCalledOnce();
+      expect(callback).toHaveBeenCalledWith("agent-test", "assignment", {
+        taskId: "FN-001",
+        wakeReason: "assignment",
+        triggerDetail: "task-assigned",
+      });
+    });
+
+    it("does NOT trigger when stopped", async () => {
+      scheduler.stop();
+
+      const agent = { id: "agent-test", name: "Test" } as import("@fusion/core").Agent;
+      eventStore.emit("agent:assigned", agent, "FN-002");
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(callback).not.toHaveBeenCalled();
+    });
+
+    it("skips trigger when agent has active run", async () => {
+      (eventStore.getActiveHeartbeatRun as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: "run-active",
+        status: "active",
+      });
+
+      const agent = { id: "agent-test", name: "Test" } as import("@fusion/core").Agent;
+      eventStore.emit("agent:assigned", agent, "FN-003");
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(callback).not.toHaveBeenCalled();
+    });
+
+    it("cleans up listener on unwatch", async () => {
+      scheduler.unwatchAssignments();
+
+      const agent = { id: "agent-test", name: "Test" } as import("@fusion/core").Agent;
+      eventStore.emit("agent:assigned", agent, "FN-004");
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(callback).not.toHaveBeenCalled();
     });
   });
 });

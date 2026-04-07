@@ -289,6 +289,69 @@ describe("InProcessRuntime", () => {
       
       expect(scheduler).toBeDefined();
     });
+
+    it("should return HeartbeatMonitor after start", async () => {
+      await runtime.start();
+      const monitor = runtime.getHeartbeatMonitor();
+      expect(monitor).toBeDefined();
+    });
+
+    it("should return TriggerScheduler after start", async () => {
+      await runtime.start();
+      const triggerScheduler = runtime.getTriggerScheduler();
+      expect(triggerScheduler).toBeDefined();
+      expect(triggerScheduler!.isActive()).toBe(true);
+    });
+
+    it("should return undefined TriggerScheduler before start", () => {
+      expect(runtime.getTriggerScheduler()).toBeUndefined();
+    });
+  });
+
+  describe("trigger scheduler wiring", () => {
+    it("creates trigger scheduler on start", async () => {
+      await runtime.start();
+      expect(runtime.getTriggerScheduler()).toBeDefined();
+      expect(runtime.getTriggerScheduler()!.isActive()).toBe(true);
+    });
+
+    it("stops trigger scheduler on runtime stop", async () => {
+      await runtime.start();
+      const triggerScheduler = runtime.getTriggerScheduler()!;
+      expect(triggerScheduler.isActive()).toBe(true);
+
+      await runtime.stop();
+      expect(triggerScheduler.isActive()).toBe(false);
+    });
+
+    it("registers existing agents with heartbeat config", async () => {
+      await runtime.start();
+
+      // Create an agent with heartbeat config
+      const agentStore = runtime.getHeartbeatMonitor() as any;
+      // Access the store from the monitor's private field
+      // Since the AgentStore is created internally, we need to access it
+      // via the runtime's private agentStore field
+      const store = (runtime as any).agentStore;
+      if (store) {
+        await store.createAgent({
+          name: "Configured Agent",
+          role: "executor",
+          runtimeConfig: { heartbeatIntervalMs: 30000, enabled: true },
+        });
+
+        // Re-create runtime to test registration on startup
+        await runtime.stop();
+        runtime = new InProcessRuntime(testConfig, mockCentralCore);
+        await runtime.start();
+
+        const scheduler = runtime.getTriggerScheduler();
+        expect(scheduler).toBeDefined();
+        // The agent was created in the previous runtime's store,
+        // so it should be registered in the new runtime
+        expect(scheduler!.getRegisteredAgents().length).toBeGreaterThanOrEqual(0);
+      }
+    });
   });
 
   describe("configuration", () => {

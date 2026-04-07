@@ -11,7 +11,7 @@ import { Scheduler } from "../scheduler.js";
 import { TaskExecutor, type TaskExecutorOptions } from "../executor.js";
 import { WorktreePool } from "../worktree-pool.js";
 import { AgentSemaphore } from "../concurrency.js";
-import { HeartbeatMonitor } from "../agent-heartbeat.js";
+import { HeartbeatMonitor, HeartbeatTriggerScheduler, type WakeContext } from "../agent-heartbeat.js";
 import type {
   ProjectRuntime,
   ProjectRuntimeConfig,
@@ -71,6 +71,7 @@ export class InProcessRuntime
   private selfHealingManager?: SelfHealingManager;
   private agentStore?: AgentStore;
   private heartbeatMonitor?: HeartbeatMonitor;
+  private triggerScheduler?: HeartbeatTriggerScheduler;
   /** Maps task IDs to agent IDs for lifecycle tracking */
   private taskAgentMap = new Map<string, string>();
   private lastActivityAt: string = new Date().toISOString();
@@ -226,7 +227,46 @@ export class InProcessRuntime
           },
         });
         this.heartbeatMonitor.start();
-        runtimeLog.log(`AgentStore and HeartbeatMonitor initialized`);
+
+        // Initialize HeartbeatTriggerScheduler
+        this.triggerScheduler = new HeartbeatTriggerScheduler(
+          this.agentStore,
+          async (agentId, source, context: WakeContext) => {
+            if (!this.heartbeatMonitor) return;
+
+            // Convert WakeContext to WakeupOptions
+            const options = {
+              source,
+              triggerDetail: context.triggerDetail,
+              contextSnapshot: { ...context },
+            };
+
+            await this.heartbeatMonitor.startRun(agentId, options);
+          },
+        );
+        this.triggerScheduler.start();
+
+        // Register existing agents that have heartbeat config
+        try {
+          const agents = await this.agentStore.listAgents();
+          for (const agent of agents) {
+            const rc = agent.runtimeConfig;
+            if (rc && (rc.heartbeatIntervalMs || rc.enabled !== undefined || rc.maxConcurrentRuns)) {
+              this.triggerScheduler.registerAgent(agent.id, {
+                heartbeatIntervalMs: rc.heartbeatIntervalMs as number | undefined,
+                enabled: rc.enabled as boolean | undefined,
+                maxConcurrentRuns: rc.maxConcurrentRuns as number | undefined,
+              });
+            }
+          }
+          if (agents.length > 0) {
+            runtimeLog.log(`Registered ${this.triggerScheduler.getRegisteredAgents().length} agents for heartbeat triggers`);
+          }
+        } catch (regErr) {
+          runtimeLog.warn(`Failed to register agents for heartbeat triggers:`, regErr);
+        }
+
+        runtimeLog.log(`AgentStore, HeartbeatMonitor, and TriggerScheduler initialized`);
       } catch (agentErr) {
         // Non-fatal — agent monitoring is optional
         runtimeLog.warn(`AgentStore initialization failed (continuing without agent monitoring):`, agentErr);
@@ -287,13 +327,19 @@ export class InProcessRuntime
         runtimeLog.log("SelfHealingManager stopped");
       }
 
-      // 2. Stop heartbeat monitor
+      // 2. Stop trigger scheduler
+      if (this.triggerScheduler) {
+        this.triggerScheduler.stop();
+        runtimeLog.log("TriggerScheduler stopped");
+      }
+
+      // 3. Stop heartbeat monitor
       if (this.heartbeatMonitor) {
         this.heartbeatMonitor.stop();
         runtimeLog.log("HeartbeatMonitor stopped");
       }
 
-      // 3. Stop scheduler (prevents new task scheduling)
+      // 4. Stop scheduler (prevents new task scheduling)
       if (this.scheduler) {
         this.scheduler.stop();
         runtimeLog.log("Scheduler stopped");
@@ -399,6 +445,14 @@ export class InProcessRuntime
    */
   getHeartbeatMonitor(): HeartbeatMonitor | undefined {
     return this.heartbeatMonitor;
+  }
+
+  /**
+   * Get the HeartbeatTriggerScheduler instance (if initialized).
+   * Returns undefined when agent monitoring is not available.
+   */
+  getTriggerScheduler(): HeartbeatTriggerScheduler | undefined {
+    return this.triggerScheduler;
   }
 
   /**

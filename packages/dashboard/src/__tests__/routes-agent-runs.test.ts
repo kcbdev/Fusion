@@ -12,6 +12,7 @@ const mockGetRunDetail = vi.fn();
 const mockRecordHeartbeat = vi.fn();
 const mockUpdateAgentState = vi.fn();
 const mockListAgents = vi.fn().mockResolvedValue([]);
+const mockGetActiveHeartbeatRun = vi.fn().mockResolvedValue(null);
 
 vi.mock("@fusion/core", () => {
   return {
@@ -24,6 +25,7 @@ vi.mock("@fusion/core", () => {
       recordHeartbeat = mockRecordHeartbeat;
       updateAgentState = mockUpdateAgentState;
       listAgents = mockListAgents;
+      getActiveHeartbeatRun = mockGetActiveHeartbeatRun;
     },
   };
 });
@@ -74,6 +76,7 @@ describe("Agent runs routes (without HeartbeatMonitor)", () => {
     vi.clearAllMocks();
     mockInit.mockResolvedValue(undefined);
     mockListAgents.mockResolvedValue([]);
+    mockGetActiveHeartbeatRun.mockResolvedValue(null);
 
     store = new MockStore();
     const { createServer } = await import("../server.js");
@@ -266,6 +269,7 @@ describe("Agent runs routes (with HeartbeatMonitor)", () => {
     vi.clearAllMocks();
     mockInit.mockResolvedValue(undefined);
     mockListAgents.mockResolvedValue([]);
+    mockGetActiveHeartbeatRun.mockResolvedValue(null);
 
     mockStartRun = vi.fn();
     mockExecuteHeartbeat = vi.fn();
@@ -302,12 +306,17 @@ describe("Agent runs routes (with HeartbeatMonitor)", () => {
       expect(mockStartRun).toHaveBeenCalledWith("agent-001", {
         source: "on_demand",
         triggerDetail: "Triggered from dashboard",
+        contextSnapshot: {
+          wakeReason: "on_demand",
+          triggerDetail: "Triggered from dashboard",
+        },
       });
       // executeHeartbeat should be called fire-and-forget
       expect(mockExecuteHeartbeat).toHaveBeenCalledWith({
         agentId: "agent-001",
         source: "on_demand",
         triggerDetail: "Triggered from dashboard",
+        taskId: undefined,
       });
     });
 
@@ -327,6 +336,10 @@ describe("Agent runs routes (with HeartbeatMonitor)", () => {
       expect(mockStartRun).toHaveBeenCalledWith("agent-001", {
         source: "timer",
         triggerDetail: "Scheduled run",
+        contextSnapshot: {
+          wakeReason: "timer",
+          triggerDetail: "Scheduled run",
+        },
       });
     });
   });

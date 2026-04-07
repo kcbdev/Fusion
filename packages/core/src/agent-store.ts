@@ -39,6 +39,8 @@ export interface AgentStoreEvents {
   "agent:heartbeat": (agentId: string, event: AgentHeartbeatEvent) => void;
   /** Emitted when an agent state changes */
   "agent:stateChanged": (agentId: string, from: AgentState, to: AgentState) => void;
+  /** Emitted when a task is assigned to an agent (taskId is non-empty) */
+  "agent:assigned": (agent: Agent, taskId: string) => void;
 }
 
 type TypedEventEmitter<Events extends Record<string, unknown[]>> = {
@@ -292,6 +294,11 @@ export class AgentStore extends EventEmitter {
 
       await this.writeAgent(updated);
       this.emit("agent:updated", updated);
+
+      // Emit agent:assigned only when assigning a task (not when clearing)
+      if (taskId !== undefined) {
+        this.emit("agent:assigned", updated, taskId);
+      }
 
       return updated;
     });

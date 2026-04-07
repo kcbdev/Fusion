@@ -7263,25 +7263,49 @@ Output ONLY the prompt text (no markdown, no explanations).`;
   /**
    * POST /api/agents/:id/runs
    * Manually start a heartbeat run for an agent.
-   * Body: { source?: HeartbeatInvocationSource, triggerDetail?: string }
+   * Body: { source?: HeartbeatInvocationSource, triggerDetail?: string, taskId?: string }
    *
    * When HeartbeatMonitor is available, delegates to startRun() which enriches
    * the run with execution context, transitions the agent to "running", and
    * fires the onRunStarted event. The route returns the run immediately with
    * "active" status while execution continues in the background via
    * executeHeartbeat() fire-and-forget.
+   *
+   * Returns 409 Conflict if the agent already has an active run.
    */
   router.post("/agents/:id/runs", async (req, res) => {
     try {
-      const { source, triggerDetail } = req.body || {};
+      const { source, triggerDetail, taskId } = req.body || {};
       const invocationSource = source ?? "on_demand";
       const trigger = triggerDetail ?? "Triggered from dashboard";
 
+      // Build structured wake context
+      const contextSnapshot: Record<string, unknown> = {
+        wakeReason: invocationSource,
+        triggerDetail: trigger,
+      };
+      if (taskId) {
+        contextSnapshot.taskId = taskId;
+      }
+
       if (hasHeartbeatExecutor && heartbeatMonitor) {
+        // Check for existing active run
+        const scopedStore = await getScopedStore(req);
+        const { AgentStore: AgentStoreClass } = await import("@fusion/core");
+        const agentStore = new AgentStoreClass({ rootDir: scopedStore.getFusionDir() });
+        await agentStore.init();
+
+        const activeRun = await agentStore.getActiveHeartbeatRun(req.params.id);
+        if (activeRun) {
+          res.status(409).json({ error: "Agent already has an active run", runId: activeRun.id });
+          return;
+        }
+
         // Delegate to HeartbeatMonitor for enriched run creation
         const run = await heartbeatMonitor.startRun(req.params.id, {
           source: invocationSource,
           triggerDetail: trigger,
+          contextSnapshot,
         });
 
         // Fire-and-forget execution in the background
@@ -7289,6 +7313,7 @@ Output ONLY the prompt text (no markdown, no explanations).`;
           agentId: req.params.id,
           source: invocationSource,
           triggerDetail: trigger,
+          taskId,
         }).catch((err: any) => {
           console.error(`[heartbeat] Background execution failed for ${req.params.id}:`, err.message);
         });
@@ -7301,13 +7326,19 @@ Output ONLY the prompt text (no markdown, no explanations).`;
         const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
         await agentStore.init();
 
+        // Check for existing active run
+        const activeRun = await agentStore.getActiveHeartbeatRun(req.params.id);
+        if (activeRun) {
+          res.status(409).json({ error: "Agent already has an active run", runId: activeRun.id });
+          return;
+        }
+
         const run = await agentStore.startHeartbeatRun(req.params.id);
 
-        // Enrich with invocation source and trigger detail
+        // Enrich with invocation source, trigger detail, and context snapshot
         (run as any).invocationSource = invocationSource;
-        if (triggerDetail) {
-          (run as any).triggerDetail = triggerDetail;
-        }
+        (run as any).triggerDetail = triggerDetail;
+        (run as any).contextSnapshot = contextSnapshot;
 
         await agentStore.saveRun(run);
         res.status(201).json(run);

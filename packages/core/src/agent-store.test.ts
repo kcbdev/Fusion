@@ -511,6 +511,32 @@ describe("AgentStore", () => {
       expect(updatedAgent.taskId).toBe("KB-002");
     });
 
+    it("emits 'agent:assigned' event when assigning a task", async () => {
+      const agent = await store.createAgent({ name: "AssignEvent", role: "executor" });
+      const handler = vi.fn();
+      store.on("agent:assigned", handler);
+
+      await store.assignTask(agent.id, "KB-003");
+
+      expect(handler).toHaveBeenCalledOnce();
+      const [updatedAgent, taskId] = handler.mock.calls[0];
+      expect(updatedAgent.id).toBe(agent.id);
+      expect(updatedAgent.taskId).toBe("KB-003");
+      expect(taskId).toBe("KB-003");
+    });
+
+    it("does NOT emit 'agent:assigned' when clearing taskId", async () => {
+      const agent = await store.createAgent({ name: "UnassignEvent", role: "executor" });
+      await store.assignTask(agent.id, "KB-004");
+
+      const handler = vi.fn();
+      store.on("agent:assigned", handler);
+
+      await store.assignTask(agent.id, undefined);
+
+      expect(handler).not.toHaveBeenCalled();
+    });
+
     it("throws for non-existent agent", async () => {
       await expect(
         store.assignTask("agent-missing", "KB-001")

@@ -640,7 +640,8 @@ Each agent can override the global heartbeat monitoring settings via `runtimeCon
 
 | Key | Default | Min | Description |
 |-----|---------|-----|-------------|
-| `heartbeatIntervalMs` | 30000 | 1000 | How often heartbeats are checked |
+| `enabled` | true | — | Whether heartbeat triggers are enabled for this agent |
+| `heartbeatIntervalMs` | 30000 | 1000 | How often heartbeats are checked / timer trigger interval |
 | `heartbeatTimeoutMs` | 60000 | 5000 | Time without heartbeat before agent is considered unresponsive |
 | `maxConcurrentRuns` | 1 | 1 | Max concurrent heartbeat runs per agent |
 
@@ -660,6 +661,50 @@ The agent detail ConfigTab includes a "Heartbeat Settings" section where users c
 
 - `HeartbeatMonitor.getAgentHeartbeatConfig(agentId)` — Returns the resolved config for an agent
 - `AgentStore.getCachedAgent(agentId)` — Synchronous agent read for hot paths
+
+## Heartbeat Trigger Scheduling
+
+The `HeartbeatTriggerScheduler` class (exported from `@fusion/engine`) manages three trigger mechanisms that wake agents via heartbeat runs:
+
+### Trigger Types
+
+| Trigger | Source | Description |
+|---------|--------|-------------|
+| **Timer** | `"timer"` | Periodic wakeup based on `AgentHeartbeatConfig.heartbeatIntervalMs` |
+| **Assignment** | `"assignment"` | Automatic wakeup when a task is assigned to the agent |
+| **On-demand** | `"on_demand"` | Manual trigger via `POST /api/agents/:id/runs` |
+
+### WakeContext
+
+Each trigger passes a structured `WakeContext` to the execution path:
+
+```typescript
+interface WakeContext {
+  taskId?: string;       // Optional task ID (present for assignment triggers)
+  wakeReason: string;    // Why the agent was woken
+  triggerDetail: string; // Detail about the specific trigger
+  [key: string]: unknown; // Additional context
+}
+```
+
+### How It Works
+
+1. `HeartbeatTriggerScheduler` is created and started by `InProcessRuntime` during initialization
+2. Timer triggers: Agents with `heartbeatIntervalMs` configured get periodic `setInterval`-based wakeups
+3. Assignment triggers: The scheduler subscribes to `agent:assigned` events from `AgentStore`
+4. On-demand triggers: The `POST /api/agents/:id/runs` route creates runs with wake context
+5. All triggers respect `maxConcurrentRuns` — skipped if the agent already has an active run
+6. On runtime stop, all timers are cleared and event listeners are removed
+
+### AgentStore Events
+
+- `"agent:assigned"` — Emitted by `AgentStore.assignTask()` when a non-empty taskId is assigned. Signature: `(agent: Agent, taskId: string) => void`
+
+### InProcessRuntime Integration
+
+- `InProcessRuntime.start()` creates the trigger scheduler, starts it, and registers existing agents with heartbeat configs
+- `InProcessRuntime.stop()` stops the trigger scheduler before stopping the HeartbeatMonitor
+- `InProcessRuntime.getTriggerScheduler()` — Returns the scheduler instance for testing access
 
 ## Dashboard Task Creation
 

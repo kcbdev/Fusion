@@ -7868,6 +7868,52 @@ describe("POST /api/agents/:id/runs", () => {
 
     expect(res.status).toBe(500);
   });
+
+  it("accepts taskId in body and includes it in contextSnapshot", async () => {
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      `/api/agents/${agentId}/runs`,
+      JSON.stringify({ source: "on_demand", triggerDetail: "manual", taskId: "FN-001" }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(res.body.contextSnapshot).toMatchObject({
+      wakeReason: "on_demand",
+      triggerDetail: "manual",
+      taskId: "FN-001",
+    });
+  });
+
+  it("includes wake context without taskId when not provided", async () => {
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      `/api/agents/${agentId}/runs`,
+      JSON.stringify({ source: "timer", triggerDetail: "scheduled" }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(res.body.contextSnapshot).toMatchObject({
+      wakeReason: "timer",
+      triggerDetail: "scheduled",
+    });
+    expect(res.body.contextSnapshot.taskId).toBeUndefined();
+  });
+
+  it("returns 409 when agent already has an active run", async () => {
+    // Create first run
+    const res1 = await REQUEST(buildApp(), "POST", `/api/agents/${agentId}/runs`);
+    expect(res1.status).toBe(201);
+
+    // Try to create second run — should conflict
+    const res2 = await REQUEST(buildApp(), "POST", `/api/agents/${agentId}/runs`);
+    expect(res2.status).toBe(409);
+    expect(res2.body.error).toContain("active run");
+    expect(res2.body.runId).toBeTruthy();
+  });
 });
 
 describe("GET /api/agents/:id/runs/:runId/logs", () => {
