@@ -126,6 +126,12 @@ class HealthMonitor {
  * - Graceful shutdown with configurable timeout
  * - Event forwarding from child process to host listeners
  *
+ * Timer/generation safety pattern:
+ * - Every delayed callback (SIGKILL fallback, restart backoff) is tracked in a field.
+ * - Timers are cleared during shutdown and before replacement to avoid stacked callbacks.
+ * - Each spawned child increments a monotonic generation counter captured by callbacks.
+ *   If a callback's captured generation no longer matches, it bails as stale.
+ *
  * @example
  * ```typescript
  * const config: ProjectRuntimeConfig = {
@@ -153,6 +159,15 @@ export class ChildProcessRuntime
   private child: ChildProcess | null = null;
   private ipcHost: IpcHost | null = null;
   private healthMonitor: HealthMonitor;
+  /**
+   * Monotonic child-process generation.
+   *
+   * Incremented before every spawn so delayed callbacks can invalidate themselves
+   * if they were scheduled against an older process generation.
+   */
+  private generation = 0;
+  private sigkillTimer: ReturnType<typeof setTimeout> | null = null;
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
   private lastMetrics: RuntimeMetrics = {
     inFlightTasks: 0,
     activeAgents: 0,
@@ -219,6 +234,8 @@ export class ChildProcessRuntime
   private async spawnChild(): Promise<void> {
     // Determine worker entry point
     const workerPath = this.getWorkerPath();
+
+    this.generation += 1;
 
     runtimeLog.log(`Forking child process: ${workerPath}`);
 
@@ -321,6 +338,9 @@ export class ChildProcessRuntime
     this.setStatus("stopping");
     runtimeLog.log(`Stopping ChildProcessRuntime for project ${this.config.projectId}`);
 
+    // Cancel all pending timers (SIGKILL timeout, restart backoff)
+    this.clearAllTimers();
+
     // Stop health monitoring
     this.healthMonitor.stop();
 
@@ -345,12 +365,23 @@ export class ChildProcessRuntime
    * Kill the child process forcefully.
    */
   private killChild(): void {
+    if (this.sigkillTimer !== null) {
+      clearTimeout(this.sigkillTimer);
+      this.sigkillTimer = null;
+    }
+
     if (this.child && !this.child.killed) {
       runtimeLog.log("Killing child process");
       this.child.kill("SIGTERM");
 
-      // Force kill after 5 seconds if still running
-      setTimeout(() => {
+      const gen = this.generation;
+      this.sigkillTimer = setTimeout(() => {
+        this.sigkillTimer = null;
+
+        if (this.generation !== gen) {
+          return;
+        }
+
         if (this.child && !this.child.killed) {
           runtimeLog.warn("Force killing child process");
           this.child.kill("SIGKILL");
@@ -360,6 +391,24 @@ export class ChildProcessRuntime
 
     this.child = null;
     this.ipcHost = null;
+  }
+
+  /**
+   * Clears all delayed lifecycle timers.
+   *
+   * This is called during shutdown and before replacing pending callbacks so
+   * stale SIGKILL/restart timers cannot fire against newer runtime state.
+   */
+  private clearAllTimers(): void {
+    if (this.sigkillTimer !== null) {
+      clearTimeout(this.sigkillTimer);
+      this.sigkillTimer = null;
+    }
+
+    if (this.restartTimer !== null) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
   }
 
   /**
@@ -436,6 +485,11 @@ export class ChildProcessRuntime
   private handleUnhealthy(): void {
     const maxRestarts = 3;
 
+    if (this.restartTimer !== null) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
+
     if (this.healthMonitor.getRestartAttempts() >= maxRestarts) {
       runtimeLog.error(`Max restart attempts (${maxRestarts}) reached, transitioning to errored`);
       this.setStatus("errored");
@@ -448,7 +502,18 @@ export class ChildProcessRuntime
 
     runtimeLog.log(`Attempting restart ${this.healthMonitor.getRestartAttempts()}/${maxRestarts} after ${delay}ms`);
 
-    setTimeout(async () => {
+    const gen = this.generation;
+    this.restartTimer = setTimeout(async () => {
+      this.restartTimer = null;
+
+      if (this.generation !== gen) {
+        return;
+      }
+
+      if (this.status === "stopping" || this.status === "stopped") {
+        return;
+      }
+
       try {
         this.killChild();
         await this.spawnChild();
