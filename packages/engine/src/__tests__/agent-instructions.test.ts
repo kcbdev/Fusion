@@ -2,8 +2,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { Agent } from "@fusion/core";
-import { resolveAgentInstructions, buildSystemPromptWithInstructions } from "../agent-instructions.js";
+import type { Agent, AgentRating, AgentRatingSummary, AgentStore } from "@fusion/core";
+import {
+  resolveAgentInstructions,
+  resolveAgentInstructionsWithRatings,
+  buildSystemPromptWithInstructions,
+} from "../agent-instructions.js";
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -16,6 +20,29 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     metadata: {},
     ...overrides,
   } as Agent;
+}
+
+function makeRating(overrides: Partial<AgentRating> = {}): AgentRating {
+  return {
+    id: "rating-1",
+    agentId: "agent-test",
+    raterType: "user",
+    score: 4,
+    createdAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+function makeRatingSummary(overrides: Partial<AgentRatingSummary> = {}): AgentRatingSummary {
+  return {
+    agentId: "agent-test",
+    averageScore: 4,
+    totalRatings: 1,
+    categoryAverages: {},
+    recentRatings: [makeRating()],
+    trend: "stable",
+    ...overrides,
+  };
 }
 
 describe("resolveAgentInstructions", () => {
@@ -176,6 +203,206 @@ describe("resolveAgentInstructions", () => {
     const result = await resolveAgentInstructions(agent, testDir);
 
     expect(result.length).toBe(50000);
+  });
+});
+
+describe("resolveAgentInstructions with rating summary", () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = await mkdtemp(join(tmpdir(), "agent-instr-ratings-"));
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+  });
+
+  it("adds a performance feedback section when ratings exist", async () => {
+    const agent = makeAgent({ instructionsText: "Follow the task prompt." });
+    const summary = makeRatingSummary({
+      averageScore: 4.26,
+      totalRatings: 4,
+      trend: "improving",
+      categoryAverages: { quality: 4.5, speed: 3.75 },
+      recentRatings: [
+        makeRating({ id: "r1", score: 5, comment: "Great debugging discipline" }),
+        makeRating({ id: "r2", score: 4, comment: "Could communicate blockers sooner" }),
+      ],
+    });
+
+    const result = await resolveAgentInstructions(agent, testDir, summary);
+
+    expect(result).toContain("Follow the task prompt.");
+    expect(result).toContain("## Performance Feedback");
+    expect(result).toContain("- Average score: 4.3");
+    expect(result).toContain("- Trend: 📈 improving");
+    expect(result).toContain("- Category breakdown:");
+    expect(result).toContain("  - quality: 4.5");
+    expect(result).toContain("  - speed: 3.8");
+    expect(result).toContain('  - "Great debugging discipline" (score: 5.0)');
+    expect(result).toContain('  - "Could communicate blockers sooner" (score: 4.0)');
+  });
+
+  it("shows the correct trend indicator for all trend states", async () => {
+    const agent = makeAgent({ instructionsText: "Base instructions" });
+    const trends: Array<[AgentRatingSummary["trend"], string]> = [
+      ["improving", "📈 improving"],
+      ["declining", "📉 declining"],
+      ["stable", "➡️ stable"],
+      ["insufficient-data", "❓ insufficient-data"],
+    ];
+
+    for (const [trend, expected] of trends) {
+      const result = await resolveAgentInstructions(
+        agent,
+        testDir,
+        makeRatingSummary({ trend, totalRatings: 10 }),
+      );
+      expect(result).toContain(`- Trend: ${expected}`);
+    }
+  });
+
+  it("limits recent feedback to 3 comments and skips unrated comments", async () => {
+    const agent = makeAgent();
+    const summary = makeRatingSummary({
+      totalRatings: 8,
+      recentRatings: [
+        makeRating({ id: "r1", score: 5, comment: "Most recent note" }),
+        makeRating({ id: "r2", score: 4, comment: "Second note" }),
+        makeRating({ id: "r3", score: 3 }),
+        makeRating({ id: "r4", score: 2, comment: "Third note" }),
+        makeRating({ id: "r5", score: 1, comment: "Should be trimmed" }),
+      ],
+    });
+
+    const result = await resolveAgentInstructions(agent, testDir, summary);
+
+    expect(result).toContain("- Recent feedback:");
+    expect(result).toContain('  - "Most recent note" (score: 5.0)');
+    expect(result).toContain('  - "Second note" (score: 4.0)');
+    expect(result).toContain('  - "Third note" (score: 2.0)');
+    expect(result).not.toContain("Should be trimmed");
+  });
+
+  it("omits category breakdown when category averages are empty", async () => {
+    const result = await resolveAgentInstructions(
+      makeAgent({ instructionsText: "Do work" }),
+      testDir,
+      makeRatingSummary({ totalRatings: 2, categoryAverages: {} }),
+    );
+
+    expect(result).not.toContain("- Category breakdown:");
+  });
+
+  it("does not add performance feedback when totalRatings is zero", async () => {
+    const result = await resolveAgentInstructions(
+      makeAgent({ instructionsText: "Do work" }),
+      testDir,
+      makeRatingSummary({ totalRatings: 0 }),
+    );
+
+    expect(result).toBe("Do work");
+    expect(result).not.toContain("## Performance Feedback");
+  });
+
+  it("does not add performance feedback when rating summary is undefined", async () => {
+    const result = await resolveAgentInstructions(
+      makeAgent({ instructionsText: "Do work" }),
+      testDir,
+      undefined,
+    );
+
+    expect(result).toBe("Do work");
+    expect(result).not.toContain("## Performance Feedback");
+  });
+});
+
+describe("resolveAgentInstructionsWithRatings", () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = await mkdtemp(join(tmpdir(), "agent-instr-with-ratings-"));
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+  });
+
+  it("returns empty string for null agent", async () => {
+    const store = {
+      getRatingSummary: vi.fn(),
+    } as unknown as AgentStore;
+
+    const result = await resolveAgentInstructionsWithRatings(null, testDir, store);
+
+    expect(result).toBe("");
+    expect(store.getRatingSummary).not.toHaveBeenCalled();
+  });
+
+  it("returns base instructions when no agent store is provided", async () => {
+    const result = await resolveAgentInstructionsWithRatings(
+      makeAgent({ instructionsText: "Inline instructions" }),
+      testDir,
+      undefined,
+    );
+
+    expect(result).toBe("Inline instructions");
+  });
+
+  it("injects performance feedback when store returns ratings", async () => {
+    const store = {
+      getRatingSummary: vi.fn().mockResolvedValue(
+        makeRatingSummary({
+          averageScore: 3.333,
+          totalRatings: 3,
+          trend: "stable",
+          categoryAverages: { codeQuality: 4.95 },
+          recentRatings: [makeRating({ score: 4, comment: "Solid implementation" })],
+        }),
+      ),
+    } as unknown as AgentStore;
+
+    const result = await resolveAgentInstructionsWithRatings(
+      makeAgent({ instructionsText: "Inline instructions" }),
+      testDir,
+      store,
+    );
+
+    expect(store.getRatingSummary).toHaveBeenCalledWith("agent-test");
+    expect(result).toContain("Inline instructions");
+    expect(result).toContain("## Performance Feedback");
+    expect(result).toContain("- Average score: 3.3");
+    expect(result).toContain("  - codeQuality: 5.0");
+  });
+
+  it("falls back to base instructions when rating lookup fails", async () => {
+    const store = {
+      getRatingSummary: vi.fn().mockRejectedValue(new Error("db unavailable")),
+    } as unknown as AgentStore;
+
+    const result = await resolveAgentInstructionsWithRatings(
+      makeAgent({ instructionsText: "Fallback instructions" }),
+      testDir,
+      store,
+    );
+
+    expect(store.getRatingSummary).toHaveBeenCalledWith("agent-test");
+    expect(result).toBe("Fallback instructions");
+  });
+
+  it("does not query ratings when agent id is empty", async () => {
+    const store = {
+      getRatingSummary: vi.fn(),
+    } as unknown as AgentStore;
+
+    const result = await resolveAgentInstructionsWithRatings(
+      makeAgent({ id: "", instructionsText: "Fallback instructions" }),
+      testDir,
+      store,
+    );
+
+    expect(store.getRatingSummary).not.toHaveBeenCalled();
+    expect(result).toBe("Fallback instructions");
   });
 });
 

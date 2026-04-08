@@ -581,7 +581,12 @@ export class TaskExecutor {
       const agents = await this.options.agentStore.listAgents({ role: role as AgentCapability });
       for (const agent of agents) {
         if (agent.instructionsText || agent.instructionsPath) {
-          return await resolveAgentInstructions(agent, this.rootDir);
+          try {
+            const ratingSummary = await this.options.agentStore.getRatingSummary(agent.id);
+            return await resolveAgentInstructions(agent, this.rootDir, ratingSummary);
+          } catch {
+            return await resolveAgentInstructions(agent, this.rootDir);
+          }
         }
       }
     } catch {

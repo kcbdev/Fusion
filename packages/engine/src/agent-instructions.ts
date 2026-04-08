@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve, relative, normalize, sep } from "node:path";
-import type { Agent } from "@fusion/core";
+import type { Agent, AgentRatingSummary, AgentStore } from "@fusion/core";
 
 const MAX_INSTRUCTIONS_PATH_LENGTH = 500;
 const MAX_INSTRUCTIONS_TEXT_LENGTH = 50_000;
@@ -63,6 +63,50 @@ function resolveValidatedInstructionsPath(rawPath: string, rootDir: string, agen
   return resolvedPath;
 }
 
+function getTrendLabel(trend: AgentRatingSummary["trend"]): string {
+  switch (trend) {
+    case "improving":
+      return "📈 improving";
+    case "declining":
+      return "📉 declining";
+    case "stable":
+      return "➡️ stable";
+    case "insufficient-data":
+    default:
+      return "❓ insufficient-data";
+  }
+}
+
+function formatPerformanceFeedbackSection(ratingSummary: AgentRatingSummary): string {
+  const lines: string[] = [
+    "## Performance Feedback",
+    "",
+    `- Average score: ${ratingSummary.averageScore.toFixed(1)}`,
+    `- Trend: ${getTrendLabel(ratingSummary.trend)}`,
+  ];
+
+  const categoryEntries = Object.entries(ratingSummary.categoryAverages);
+  if (categoryEntries.length > 0) {
+    lines.push("- Category breakdown:");
+    for (const [category, average] of categoryEntries.sort(([a], [b]) => a.localeCompare(b))) {
+      lines.push(`  - ${category}: ${average.toFixed(1)}`);
+    }
+  }
+
+  const recentComments = ratingSummary.recentRatings
+    .filter((rating) => typeof rating.comment === "string" && rating.comment.trim().length > 0)
+    .slice(0, 3);
+
+  if (recentComments.length > 0) {
+    lines.push("- Recent feedback:");
+    for (const rating of recentComments) {
+      lines.push(`  - \"${rating.comment?.trim()}\" (score: ${rating.score.toFixed(1)})`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 /**
  * Resolve custom instructions for an agent by combining inline text and/or
  * file-based instructions.
@@ -74,6 +118,7 @@ function resolveValidatedInstructionsPath(rawPath: string, rootDir: string, agen
 export async function resolveAgentInstructions(
   agent: Agent | null | undefined,
   rootDir: string,
+  ratingSummary?: AgentRatingSummary,
 ): Promise<string> {
   if (!agent) return "";
 
@@ -125,7 +170,38 @@ export async function resolveAgentInstructions(
     }
   }
 
+  if (ratingSummary && ratingSummary.totalRatings > 0) {
+    parts.push(formatPerformanceFeedbackSection(ratingSummary));
+  }
+
   return parts.join("\n\n");
+}
+
+/**
+ * Resolve agent instructions and include performance ratings when available.
+ * Falls back gracefully to base instructions if ratings lookup fails.
+ */
+export async function resolveAgentInstructionsWithRatings(
+  agent: Agent | null | undefined,
+  rootDir: string,
+  agentStore: AgentStore | undefined,
+): Promise<string> {
+  if (!agent) {
+    return "";
+  }
+
+  const baseInstructions = await resolveAgentInstructions(agent, rootDir);
+
+  if (!agentStore || !agent.id) {
+    return baseInstructions;
+  }
+
+  try {
+    const ratingSummary = await agentStore.getRatingSummary(agent.id);
+    return await resolveAgentInstructions(agent, rootDir, ratingSummary);
+  } catch {
+    return baseInstructions;
+  }
 }
 
 /**
