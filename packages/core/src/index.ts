@@ -228,3 +228,37 @@ export {
   mapRoleToCapability,
   CompaniesShParseError,
 } from "./companies-sh-parser.js";
+
+// ── Agent Companies Types ──────────────────────────────────
+
+export type {
+  AgentCompaniesPackage,
+  AgentCompaniesKind,
+  AgentCompaniesSchema,
+  AgentCompaniesFrontmatter,
+  AgentCompaniesImportResult,
+  CompanyManifest,
+  TeamManifest,
+  AgentManifest,
+  ProjectManifest,
+  SkillManifest,
+  TaskManifest,
+  SourceReference,
+} from "./agent-companies-types.js";
+
+// ── Agent Companies Parser ────────────────────────────────
+
+export {
+  parseYamlFrontmatter,
+  parseCompanyManifest,
+  parseTeamManifest,
+  parseAgentManifest,
+  parseProjectManifest,
+  parseTaskManifest,
+  parseSkillManifest,
+  parseCompanyDirectory,
+  parseCompanyArchive,
+  agentManifestToAgentCreateInput,
+  convertAgentCompanies,
+  AgentCompaniesParseError,
+} from "./agent-companies-parser.js";
