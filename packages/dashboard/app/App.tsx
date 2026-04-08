@@ -26,12 +26,14 @@ import { WorkflowStepManager } from "./components/WorkflowStepManager";
 import { MissionManager } from "./components/MissionManager";
 import { AgentListModal } from "./components/AgentListModal";
 import { AgentsView } from "./components/AgentsView";
+import { NodesView } from "./components/NodesView";
 import { MailboxModal } from "./components/MailboxModal";
 import { ScriptsModal } from "./components/ScriptsModal";
 import { ExecutorStatusBar } from "./components/ExecutorStatusBar";
 import { useBackgroundSessions } from "./hooks/useBackgroundSessions";
 import { useTasks } from "./hooks/useTasks";
 import { useProjects } from "./hooks/useProjects";
+import { useNodes } from "./hooks/useNodes";
 import { useCurrentProject } from "./hooks/useCurrentProject";
 import { ToastProvider, useToast } from "./hooks/useToast";
 import { useTheme } from "./hooks/useTheme";
@@ -44,6 +46,7 @@ function AppInner() {
   
   // Project management hooks - MUST be called before any conditional logic
   const { projects, loading: projectsLoading, error: projectsError, refresh: refreshProjects, register: registerProject, update: updateProjectHook, unregister: unregisterProjectHook } = useProjects();
+  const { nodes } = useNodes();
   const { currentProject, setCurrentProject, clearCurrentProject, loading: currentProjectLoading } = useCurrentProject(projects);
   
   // Tasks hook with project context
@@ -97,6 +100,7 @@ function AppInner() {
   const [workflowStepsOpen, setWorkflowStepsOpen] = useState(false);
   const [missionsOpen, setMissionsOpen] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(false);
+  const [nodesOpen, setNodesOpen] = useState(false);
   const [scriptsOpen, setScriptsOpen] = useState(false);
   const [planningResumeSessionId, setPlanningResumeSessionId] = useState<string | undefined>(undefined);
   const [subtaskResumeSessionId, setSubtaskResumeSessionId] = useState<string | undefined>(undefined);
@@ -562,6 +566,14 @@ function AppInner() {
   // Agent handlers
   const handleCloseAgents = useCallback(() => setAgentsOpen(false), []);
 
+  // Node management view handlers
+  const handleOpenNodes = useCallback(() => {
+    setNodesOpen((prev) => !prev);
+  }, []);
+  const handleCloseNodes = useCallback(() => {
+    setNodesOpen(false);
+  }, []);
+
   // Scripts handlers
   const handleOpenScripts = useCallback(() => setScriptsOpen(true), []);
   const handleCloseScripts = useCallback(() => setScriptsOpen(false), []);
@@ -585,6 +597,17 @@ function AppInner() {
 
   // Render main content based on view mode
   const renderMainContent = () => {
+    if (nodesOpen) {
+      return (
+        <div className="nodes-management-overlay">
+          <div className="nodes-management-overlay__header">
+            <button className="btn btn-sm" onClick={handleCloseNodes}>Close Nodes</button>
+          </div>
+          <NodesView addToast={addToast} />
+        </div>
+      );
+    }
+
     if (viewMode === "overview") {
       return (
         <ProjectOverview
@@ -595,6 +618,7 @@ function AppInner() {
           onPauseProject={handlePauseProject}
           onResumeProject={handleResumeProject}
           onRemoveProject={handleRemoveProject}
+          nodes={nodes}
         />
       );
     }
@@ -674,6 +698,7 @@ function AppInner() {
         mailboxUnreadCount={mailboxUnreadCount}
         onOpenSchedules={handleOpenSchedules}
         onOpenGitManager={handleOpenGitManager}
+        onOpenNodes={handleOpenNodes}
         onOpenWorkflowSteps={() => setWorkflowStepsOpen(true)}
         onOpenMissions={viewMode === "project" && currentProject ? () => setMissionsOpen(true) : undefined}
         onOpenScripts={handleOpenScripts}
@@ -700,7 +725,7 @@ function AppInner() {
       >
         {renderMainContent()}
       </div>
-      {viewMode === "project" && currentProject && (
+      {viewMode === "project" && currentProject && !nodesOpen && (
         <ExecutorStatusBar
           tasks={tasks}
           projectId={currentProject.id}

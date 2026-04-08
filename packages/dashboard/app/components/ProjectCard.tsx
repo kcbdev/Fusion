@@ -1,6 +1,7 @@
 import { memo, useCallback } from "react";
 import { Play, Pause, AlertCircle, Loader2, MoreHorizontal, Trash2, Folder, ArrowRight } from "lucide-react";
 import type { RegisteredProject, ProjectHealth, ProjectStatus } from "@fusion/core";
+import type { NodeInfo } from "../api";
 
 export interface ProjectCardProps {
   project: RegisteredProject;
@@ -9,6 +10,7 @@ export interface ProjectCardProps {
   onPause: (project: RegisteredProject) => void;
   onResume: (project: RegisteredProject) => void;
   onRemove: (project: RegisteredProject) => void;
+  node?: NodeInfo;
   isLoading?: boolean;
 }
 
@@ -57,12 +59,26 @@ function areProjectCardPropsEqual(previous: ProjectCardProps, next: ProjectCardP
   if (!prevHealth && !nextHealth) return true;
   if (!prevHealth || !nextHealth) return false;
   
+  if (
+    prevHealth.activeTaskCount !== nextHealth.activeTaskCount ||
+    prevHealth.inFlightAgentCount !== nextHealth.inFlightAgentCount ||
+    prevHealth.totalTasksCompleted !== nextHealth.totalTasksCompleted ||
+    prevHealth.totalTasksFailed !== nextHealth.totalTasksFailed ||
+    prevHealth.status !== nextHealth.status
+  ) {
+    return false;
+  }
+
+  const prevNode = previous.node;
+  const nextNode = next.node;
+  if (!prevNode && !nextNode) return true;
+  if (!prevNode || !nextNode) return false;
+
   return (
-    prevHealth.activeTaskCount === nextHealth.activeTaskCount &&
-    prevHealth.inFlightAgentCount === nextHealth.inFlightAgentCount &&
-    prevHealth.totalTasksCompleted === nextHealth.totalTasksCompleted &&
-    prevHealth.totalTasksFailed === nextHealth.totalTasksFailed &&
-    prevHealth.status === nextHealth.status
+    prevNode.id === nextNode.id
+    && prevNode.name === nextNode.name
+    && prevNode.status === nextNode.status
+    && prevNode.type === nextNode.type
   );
 }
 
@@ -73,6 +89,7 @@ function ProjectCardInner({
   onPause,
   onResume,
   onRemove,
+  node,
   isLoading = false,
 }: ProjectCardProps) {
   const statusConfig = STATUS_CONFIG[project.status];
@@ -123,6 +140,11 @@ function ProjectCardInner({
           <h3 className="project-card-name" title={project.name}>
             {project.name}
           </h3>
+          {node && (
+            <span className="node-badge" title={`Assigned node: ${node.name}`}>
+              on: {node.name}
+            </span>
+          )}
           <span className="project-card-path" title={project.path}>
             {truncatePath(project.path)}
           </span>

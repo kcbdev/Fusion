@@ -21,6 +21,8 @@ import type {
   Message,
   MessageType,
   ParticipantType,
+  NodeConfig,
+  NodeStatus,
 } from "@fusion/core";
 import type { PlanningQuestion, PlanningSummary, PlanningResponse } from "@fusion/core";
 import type { ScheduledTask, ScheduledTaskCreateInput, ScheduledTaskUpdateInput, AutomationRunResult, AutomationStep } from "@fusion/core";
@@ -2193,15 +2195,16 @@ export interface ProjectCreateInput {
 
 /** Node information returned by node endpoints */
 export interface NodeInfo {
-  id: string;
-  name: string;
-  type: "local" | "remote";
-  url?: string;
-  status: "online" | "offline" | "connecting" | "error";
+  id: NodeConfig["id"];
+  name: NodeConfig["name"];
+  type: NodeConfig["type"];
+  url?: NodeConfig["url"];
+  apiKey?: NodeConfig["apiKey"];
+  status: NodeStatus;
   capabilities?: string[];
-  maxConcurrent: number;
-  createdAt: string;
-  updatedAt: string;
+  maxConcurrent: NodeConfig["maxConcurrent"];
+  createdAt: NodeConfig["createdAt"];
+  updatedAt: NodeConfig["updatedAt"];
 }
 
 /** Input for creating a new node */
@@ -2211,6 +2214,30 @@ export interface NodeCreateInput {
   url?: string;
   apiKey?: string;
   maxConcurrent?: number;
+}
+
+/** Input for updating an existing node */
+export type NodeUpdateInput = Partial<Pick<NodeCreateInput, "name" | "type" | "url" | "apiKey" | "maxConcurrent">> & {
+  status?: NodeStatus;
+  capabilities?: string[];
+};
+
+/** Result from a node health check */
+export interface NodeHealthCheckResult {
+  nodeId: string;
+  status: NodeStatus;
+  responseTimeMs?: number;
+  error?: string;
+  checkedAt: string;
+}
+
+/** Runtime metrics for a node */
+export interface NodeMetrics {
+  nodeId: string;
+  activeTaskCount: number;
+  inFlightAgentCount: number;
+  uptimeMs: number;
+  lastActivityAt?: string;
 }
 
 /** Options for fetching activity feed */
@@ -2295,7 +2322,7 @@ export function fetchNode(id: string): Promise<NodeInfo> {
 }
 
 /** Update an existing node */
-export function updateNode(id: string, updates: Partial<NodeInfo>): Promise<NodeInfo> {
+export function updateNode(id: string, updates: NodeUpdateInput): Promise<NodeInfo> {
   return api<NodeInfo>(`/nodes/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: JSON.stringify(updates),
@@ -2310,15 +2337,30 @@ export function unregisterNode(id: string): Promise<void> {
 }
 
 /** Trigger a node health check */
-export function checkNodeHealth(id: string): Promise<{ status: string }> {
-  return api<{ status: string }>(`/nodes/${encodeURIComponent(id)}/health-check`, {
+export async function checkNodeHealth(id: string): Promise<NodeHealthCheckResult> {
+  const result = await api<Partial<NodeHealthCheckResult> & { status: NodeStatus }>(`/nodes/${encodeURIComponent(id)}/health-check`, {
     method: "POST",
   });
+
+  return {
+    nodeId: result.nodeId ?? id,
+    status: result.status,
+    responseTimeMs: result.responseTimeMs,
+    error: result.error,
+    checkedAt: result.checkedAt ?? new Date().toISOString(),
+  };
 }
 
 /** Fetch runtime metrics for a node */
-export function fetchNodeMetrics(id: string): Promise<Record<string, unknown>> {
-  return api<Record<string, unknown>>(`/nodes/${encodeURIComponent(id)}/metrics`);
+export async function fetchNodeMetrics(id: string): Promise<NodeMetrics> {
+  const metrics = await api<Partial<NodeMetrics> & { activeTasks?: number }>(`/nodes/${encodeURIComponent(id)}/metrics`);
+  return {
+    nodeId: metrics.nodeId ?? id,
+    activeTaskCount: metrics.activeTaskCount ?? metrics.activeTasks ?? 0,
+    inFlightAgentCount: metrics.inFlightAgentCount ?? 0,
+    uptimeMs: metrics.uptimeMs ?? 0,
+    lastActivityAt: metrics.lastActivityAt,
+  };
 }
 
 /** Browse directory entries for the directory picker */

@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { Plus, LayoutGrid, Filter, ArrowUpDown, Activity, CheckCircle, AlertCircle, Folder, Inbox } from "lucide-react";
-import type { ProjectInfo, ProjectHealth } from "../api";
+import type { ProjectInfo, ProjectHealth, NodeInfo } from "../api";
 import type { ProjectStatus } from "@fusion/core";
 import { ProjectCard } from "./ProjectCard";
 import { ProjectGridSkeleton } from "./ProjectGridSkeleton";
@@ -15,6 +15,7 @@ export interface ProjectOverviewProps {
   onResumeProject: (project: ProjectInfo) => void;
   onRemoveProject: (project: ProjectInfo) => void;
   onViewAllProjects?: () => void;
+  nodes?: NodeInfo[];
 }
 
 type FilterTab = "all" | "active" | "paused" | "errored";
@@ -43,6 +44,7 @@ export function ProjectOverview({
   onPauseProject,
   onResumeProject,
   onRemoveProject,
+  nodes = [],
 }: ProjectOverviewProps) {
   const [activeFilter, setActiveFilter] = useState<FilterTab>("all");
   const [sortBy, setSortBy] = useState<SortOption>("activity");
@@ -327,17 +329,21 @@ export function ProjectOverview({
 
       {/* Project grid */}
       <div className="project-grid">
-        {sortedProjects.map(({ project, health }) => (
-          <ProjectCard
-            key={project.id}
-            project={project}
-            health={health}
-            onSelect={handleSelectProject}
-            onPause={onPauseProject}
-            onResume={onResumeProject}
-            onRemove={onRemoveProject}
-          />
-        ))}
+        {sortedProjects.map(({ project, health }) => {
+          const projectNode = nodes.find((node) => node.id === project.nodeId);
+          return (
+            <ProjectCard
+              key={project.id}
+              project={project}
+              health={health}
+              node={projectNode}
+              onSelect={handleSelectProject}
+              onPause={onPauseProject}
+              onResume={onResumeProject}
+              onRemove={onRemoveProject}
+            />
+          );
+        })}
       </div>
 
       {/* No results state */}

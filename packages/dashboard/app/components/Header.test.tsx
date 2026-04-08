@@ -644,6 +644,28 @@ describe("Header", () => {
     });
   });
 
+  describe("nodes button", () => {
+    it("renders Nodes button on desktop when handler is provided", () => {
+      renderHeader({ onOpenNodes: vi.fn() }, "desktop");
+      expect(screen.getByTitle("Nodes")).toBeDefined();
+    });
+
+    it("calls onOpenNodes when Nodes button is clicked", () => {
+      const onOpenNodes = vi.fn();
+      renderHeader({ onOpenNodes }, "desktop");
+      fireEvent.click(screen.getByTitle("Nodes"));
+      expect(onOpenNodes).toHaveBeenCalled();
+    });
+
+    it("shows Nodes action in mobile overflow menu", () => {
+      const onOpenNodes = vi.fn();
+      renderHeader({ onOpenNodes }, "mobile");
+      fireEvent.click(screen.getByTitle("More header actions"));
+      fireEvent.click(screen.getByTestId("overflow-nodes-btn"));
+      expect(onOpenNodes).toHaveBeenCalled();
+    });
+  });
+
   describe("search functionality", () => {
     it("does not render search input when onSearchChange is not provided", () => {
       renderHeader({ view: "board" });

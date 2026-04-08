@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Settings, Pause, Play, Square, LayoutGrid, List, Terminal, Lightbulb, Search, X, Activity, MoreHorizontal, Clock, Folder, History, GitBranch, Workflow, Bot, ChevronLeft, Target, ChevronRight, FileCode, Loader2, Grid3X3, Mail } from "lucide-react";
+import { Settings, Pause, Play, Square, LayoutGrid, List, Terminal, Lightbulb, Search, X, Activity, MoreHorizontal, Clock, Folder, History, GitBranch, Server, Workflow, Bot, ChevronLeft, Target, ChevronRight, FileCode, Loader2, Grid3X3, Mail } from "lucide-react";
 import type { ProjectInfo } from "../api";
 import { fetchScripts } from "../api";
 import { ProjectSelector } from "./ProjectSelector";
@@ -36,6 +36,7 @@ export interface HeaderProps {
   mailboxUnreadCount?: number;
   onOpenSchedules?: () => void;
   onOpenGitManager?: () => void;
+  onOpenNodes?: () => void;
   onOpenWorkflowSteps?: () => void;
   onOpenMissions?: () => void;
   onOpenScripts?: () => void;
@@ -111,6 +112,7 @@ export function Header({
   mailboxUnreadCount = 0,
   onOpenSchedules,
   onOpenGitManager,
+  onOpenNodes,
   onOpenWorkflowSteps,
   onOpenMissions,
   onOpenScripts,
@@ -516,6 +518,18 @@ export function Header({
           </button>
         )}
 
+        {/* Nodes button - desktop only (moved to overflow on mobile/tablet) */}
+        {!isCompact && onOpenNodes && (
+          <button
+            className="btn-icon"
+            onClick={onOpenNodes}
+            title="Nodes"
+            data-testid="nodes-btn"
+          >
+            <Server size={16} />
+          </button>
+        )}
+
         {/* Workflow Steps - desktop only (moved to overflow on mobile/tablet) */}
         {!isCompact && onOpenWorkflowSteps && (
           <button
@@ -646,6 +660,18 @@ export function Header({
               >
                 <GitBranch size={16} />
                 <span>Git Manager</span>
+              </button>
+            )}
+            {/* Nodes - in overflow on mobile */}
+            {onOpenNodes && (
+              <button
+                className="mobile-overflow-item"
+                onClick={() => handleOverflowAction(onOpenNodes)}
+                role="menuitem"
+                data-testid="overflow-nodes-btn"
+              >
+                <Server size={16} />
+                <span>Nodes</span>
               </button>
             )}
             <button
