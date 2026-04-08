@@ -59,7 +59,7 @@ export function fromJson<T>(json: string | null | undefined): T | undefined {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 14;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -451,9 +451,6 @@ export class Database {
       });
     }
 
-    // Future migrations go here:
-    // if (version < 14) { this.applyMigration(14, () => { ... }); }
-
     if (version < 10) {
       this.applyMigration(10, () => {
         this.addColumnIfMissing("missions", "autopilotEnabled", "INTEGER DEFAULT 0");
@@ -496,6 +493,27 @@ export class Database {
       this.applyMigration(13, () => {
         this.addColumnIfMissing("tasks", "assignedAgentId", "TEXT");
         this.db.exec(`CREATE INDEX IF NOT EXISTS idxTasksAssignedAgentId ON tasks(assignedAgentId)`);
+      });
+    }
+
+    if (version < 14) {
+      this.applyMigration(14, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS agentRatings (
+            id TEXT PRIMARY KEY,
+            agentId TEXT NOT NULL,
+            raterType TEXT NOT NULL,
+            raterId TEXT,
+            score INTEGER NOT NULL CHECK(score BETWEEN 1 AND 5),
+            category TEXT,
+            comment TEXT,
+            runId TEXT,
+            taskId TEXT,
+            createdAt TEXT NOT NULL
+          )
+        `);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxAgentRatingsAgentId ON agentRatings(agentId)`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxAgentRatingsCreatedAt ON agentRatings(createdAt)`);
       });
     }
   }

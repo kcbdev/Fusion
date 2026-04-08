@@ -35,9 +35,13 @@ import type {
   AgentAccessState,
   OrgTreeNode,
   InstructionsBundleConfig,
+  AgentRating,
+  AgentRatingSummary,
+  AgentRatingInput,
 } from "./types.js";
 import { AGENT_VALID_TRANSITIONS, agentToConfigSnapshot, diffConfigSnapshots } from "./types.js";
 import { computeAccessState } from "./agent-permissions.js";
+import { Database } from "./db.js";
 
 /** Events emitted by AgentStore */
 export interface AgentStoreEvents {
@@ -55,6 +59,8 @@ export interface AgentStoreEvents {
   "agent:configRevision": (agentId: string, revision: AgentConfigRevision) => void;
   /** Emitted when a task is assigned to an agent (taskId is non-empty) */
   "agent:assigned": (agent: Agent, taskId: string) => void;
+  /** Emitted when a rating is added */
+  "rating:added": (rating: AgentRating) => void;
 }
 
 type TypedEventEmitter<Events extends Record<string, unknown[]>> = {
@@ -108,6 +114,7 @@ export class AgentStore extends EventEmitter {
   private rootDir: string;
   private agentsDir: string;
   private locks: Map<string, AgentLock> = new Map();
+  private _db: Database | null = null;
 
   constructor(options: AgentStoreOptions = {}) {
     super();
@@ -115,11 +122,20 @@ export class AgentStore extends EventEmitter {
     this.agentsDir = join(this.rootDir, "agents");
   }
 
+  private get db(): Database {
+    if (!this._db) {
+      this._db = new Database(this.rootDir);
+      this._db.init();
+    }
+    return this._db;
+  }
+
   /**
    * Initialize the store by creating necessary directories.
    * Should be called before other operations.
    */
   async init(): Promise<void> {
+    const _ = this.db;
     await mkdir(this.agentsDir, { recursive: true });
   }
 
@@ -217,6 +233,146 @@ export class AgentStore extends EventEmitter {
       activeRun: activeRun ?? undefined,
       completedRuns,
     };
+  }
+
+  private mapRatingRow(row: any): AgentRating {
+    return {
+      id: row.id,
+      agentId: row.agentId,
+      raterType: row.raterType,
+      raterId: row.raterId ?? undefined,
+      score: row.score,
+      category: row.category ?? undefined,
+      comment: row.comment ?? undefined,
+      runId: row.runId ?? undefined,
+      taskId: row.taskId ?? undefined,
+      createdAt: row.createdAt,
+    };
+  }
+
+  async addRating(agentId: string, input: AgentRatingInput): Promise<AgentRating> {
+    if (input.score < 1 || input.score > 5) {
+      throw new Error("Rating score must be between 1 and 5");
+    }
+
+    const rating: AgentRating = {
+      id: `rating-${randomUUID().slice(0, 8)}`,
+      agentId,
+      raterType: input.raterType,
+      raterId: input.raterId,
+      score: input.score,
+      category: input.category,
+      comment: input.comment,
+      runId: input.runId,
+      taskId: input.taskId,
+      createdAt: new Date().toISOString(),
+    };
+
+    this.db.prepare(`
+      INSERT INTO agentRatings (id, agentId, raterType, raterId, score, category, comment, runId, taskId, createdAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      rating.id,
+      rating.agentId,
+      rating.raterType,
+      rating.raterId ?? null,
+      rating.score,
+      rating.category ?? null,
+      rating.comment ?? null,
+      rating.runId ?? null,
+      rating.taskId ?? null,
+      rating.createdAt,
+    );
+
+    this.db.bumpLastModified();
+    this.emit("rating:added", rating);
+
+    return rating;
+  }
+
+  async getRatings(agentId: string, options?: { limit?: number; category?: string }): Promise<AgentRating[]> {
+    const params: Array<string | number> = [agentId];
+    let query = "SELECT * FROM agentRatings WHERE agentId = ?";
+
+    if (options?.category !== undefined) {
+      query += " AND category = ?";
+      params.push(options.category);
+    }
+
+    query += " ORDER BY createdAt DESC";
+
+    if (options?.limit !== undefined) {
+      query += " LIMIT ?";
+      params.push(options.limit);
+    }
+
+    const rows = this.db.prepare(query).all(...params);
+    return rows.map((row) => this.mapRatingRow(row));
+  }
+
+  async getRatingSummary(agentId: string): Promise<AgentRatingSummary> {
+    const ratings = await this.getRatings(agentId);
+
+    if (ratings.length === 0) {
+      return {
+        agentId,
+        averageScore: 0,
+        totalRatings: 0,
+        categoryAverages: {},
+        recentRatings: [],
+        trend: "insufficient-data",
+      };
+    }
+
+    const averageScore = Math.round((ratings.reduce((sum, rating) => sum + rating.score, 0) / ratings.length) * 100) / 100;
+
+    const categoryBuckets = new Map<string, { total: number; count: number }>();
+    for (const rating of ratings) {
+      if (rating.category === undefined) {
+        continue;
+      }
+      const existing = categoryBuckets.get(rating.category) ?? { total: 0, count: 0 };
+      existing.total += rating.score;
+      existing.count += 1;
+      categoryBuckets.set(rating.category, existing);
+    }
+
+    const categoryAverages: Record<string, number> = {};
+    for (const [category, bucket] of categoryBuckets) {
+      categoryAverages[category] = Math.round((bucket.total / bucket.count) * 100) / 100;
+    }
+
+    const recentRatings = ratings.slice(0, 10);
+
+    let trend: AgentRatingSummary["trend"] = "insufficient-data";
+    if (ratings.length >= 10) {
+      const recentWindow = ratings.slice(0, 5);
+      const previousWindow = ratings.slice(5, 10);
+      const recentAvg = recentWindow.reduce((sum, rating) => sum + rating.score, 0) / recentWindow.length;
+      const previousAvg = previousWindow.reduce((sum, rating) => sum + rating.score, 0) / previousWindow.length;
+
+      if (Math.abs(recentAvg - previousAvg) <= 0.01) {
+        trend = "stable";
+      } else if (recentAvg > previousAvg) {
+        trend = "improving";
+      } else {
+        trend = "declining";
+      }
+    }
+
+    return {
+      agentId,
+      averageScore,
+      totalRatings: ratings.length,
+      categoryAverages,
+      recentRatings,
+      trend,
+    };
+  }
+
+  async deleteRating(ratingId: string): Promise<void> {
+    this.db.prepare("DELETE FROM agentRatings WHERE id = ?").run(ratingId);
+    this.db.bumpLastModified();
   }
 
   /**

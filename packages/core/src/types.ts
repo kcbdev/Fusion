@@ -1728,6 +1728,41 @@ export interface AgentTaskSession {
   updatedAt: string;
 }
 
+/** A single performance rating for an agent */
+export interface AgentRating {
+  id: string;
+  agentId: string;
+  raterType: "user" | "agent" | "system";
+  raterId?: string;
+  score: number;
+  category?: string;
+  comment?: string;
+  runId?: string;
+  taskId?: string;
+  createdAt: string;
+}
+
+/** Aggregated rating statistics for an agent */
+export interface AgentRatingSummary {
+  agentId: string;
+  averageScore: number;
+  totalRatings: number;
+  categoryAverages: Record<string, number>;
+  recentRatings: AgentRating[];
+  trend: "improving" | "declining" | "stable" | "insufficient-data";
+}
+
+/** Input payload for creating an agent rating */
+export interface AgentRatingInput {
+  raterType: "user" | "agent" | "system";
+  raterId?: string;
+  score: number;
+  category?: string;
+  comment?: string;
+  runId?: string;
+  taskId?: string;
+}
+
 /** Trackable configuration fields for revision history.
  *  Excludes budget-related items, state, taskId, token counts, and timestamps. */
 export interface AgentConfigSnapshot {

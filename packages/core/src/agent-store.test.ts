@@ -1311,6 +1311,196 @@ describe("AgentStore", () => {
     });
   });
 
+  describe("rating methods", () => {
+    const addSequencedRatings = async (
+      agentId: string,
+      scores: number[],
+      inputOverrides?: Partial<{ category: string; comment: string; runId: string; taskId: string; raterId: string }>,
+    ) => {
+      vi.useFakeTimers();
+      const base = new Date("2026-01-01T00:00:00.000Z").getTime();
+
+      try {
+        const ratings = [];
+        for (let i = 0; i < scores.length; i++) {
+          vi.setSystemTime(new Date(base + i * 1000));
+          ratings.push(
+            await store.addRating(agentId, {
+              raterType: "user",
+              score: scores[i],
+              ...inputOverrides,
+            }),
+          );
+        }
+        return ratings;
+      } finally {
+        vi.useRealTimers();
+      }
+    };
+
+    it("addRating creates a rating and emits rating:added", async () => {
+      const agent = await store.createAgent({ name: "Rated Agent", role: "executor" });
+      const handler = vi.fn();
+      store.on("rating:added", handler);
+
+      const rating = await store.addRating(agent.id, {
+        raterType: "user",
+        score: 5,
+        comment: "Great run",
+      });
+
+      expect(rating.id).toMatch(/^rating-[a-f0-9]{8}$/);
+      expect(rating.agentId).toBe(agent.id);
+      expect(rating.raterType).toBe("user");
+      expect(rating.score).toBe(5);
+      expect(rating.comment).toBe("Great run");
+      expect(new Date(rating.createdAt).getTime()).not.toBeNaN();
+      expect(handler).toHaveBeenCalledOnce();
+      expect(handler).toHaveBeenCalledWith(rating);
+    });
+
+    it("addRating rejects scores outside 1..5", async () => {
+      const agent = await store.createAgent({ name: "Validator", role: "reviewer" });
+
+      await expect(
+        store.addRating(agent.id, { raterType: "system", score: 0 }),
+      ).rejects.toThrow("Rating score must be between 1 and 5");
+
+      await expect(
+        store.addRating(agent.id, { raterType: "system", score: 6 }),
+      ).rejects.toThrow("Rating score must be between 1 and 5");
+    });
+
+    it("addRating stores all optional fields", async () => {
+      const agent = await store.createAgent({ name: "Optional Fields", role: "executor" });
+
+      const rating = await store.addRating(agent.id, {
+        raterType: "agent",
+        raterId: "agent-rater",
+        score: 4,
+        category: "quality",
+        comment: "Strong implementation",
+        runId: "run-123",
+        taskId: "FN-1000",
+      });
+
+      expect(rating.raterId).toBe("agent-rater");
+      expect(rating.category).toBe("quality");
+      expect(rating.comment).toBe("Strong implementation");
+      expect(rating.runId).toBe("run-123");
+      expect(rating.taskId).toBe("FN-1000");
+    });
+
+    it("getRatings returns ratings ordered by createdAt desc", async () => {
+      const agent = await store.createAgent({ name: "Order Agent", role: "executor" });
+      const created = await addSequencedRatings(agent.id, [2, 3, 5]);
+
+      const ratings = await store.getRatings(agent.id);
+
+      expect(ratings.map((rating) => rating.id)).toEqual([
+        created[2].id,
+        created[1].id,
+        created[0].id,
+      ]);
+    });
+
+    it("getRatings applies category filter", async () => {
+      const agent = await store.createAgent({ name: "Category Agent", role: "executor" });
+      await store.addRating(agent.id, { raterType: "user", score: 4, category: "quality" });
+      await store.addRating(agent.id, { raterType: "user", score: 2, category: "speed" });
+      await store.addRating(agent.id, { raterType: "user", score: 5, category: "quality" });
+
+      const ratings = await store.getRatings(agent.id, { category: "quality" });
+
+      expect(ratings).toHaveLength(2);
+      expect(ratings.every((rating) => rating.category === "quality")).toBe(true);
+    });
+
+    it("getRatings respects the limit option", async () => {
+      const agent = await store.createAgent({ name: "Limit Agent", role: "executor" });
+      await addSequencedRatings(agent.id, [1, 2, 3, 4]);
+
+      const ratings = await store.getRatings(agent.id, { limit: 2 });
+
+      expect(ratings).toHaveLength(2);
+      expect(ratings[0].score).toBe(4);
+      expect(ratings[1].score).toBe(3);
+    });
+
+    it("getRatingSummary returns an empty summary when no ratings exist", async () => {
+      const agent = await store.createAgent({ name: "Empty Summary", role: "executor" });
+
+      const summary = await store.getRatingSummary(agent.id);
+
+      expect(summary).toEqual({
+        agentId: agent.id,
+        averageScore: 0,
+        totalRatings: 0,
+        categoryAverages: {},
+        recentRatings: [],
+        trend: "insufficient-data",
+      });
+    });
+
+    it("getRatingSummary computes averages and categoryAverages", async () => {
+      const agent = await store.createAgent({ name: "Summary Agent", role: "executor" });
+      await addSequencedRatings(agent.id, [5], { category: "quality" });
+      await addSequencedRatings(agent.id, [3], { category: "quality" });
+      await addSequencedRatings(agent.id, [4], { category: "speed" });
+      await addSequencedRatings(agent.id, [2]);
+
+      const summary = await store.getRatingSummary(agent.id);
+
+      expect(summary.averageScore).toBe(3.5);
+      expect(summary.totalRatings).toBe(4);
+      expect(summary.categoryAverages).toEqual({
+        quality: 4,
+        speed: 4,
+      });
+      expect(summary.recentRatings).toHaveLength(4);
+      expect(summary.trend).toBe("insufficient-data");
+    });
+
+    it("getRatingSummary trend is improving when recent average is higher", async () => {
+      const agent = await store.createAgent({ name: "Improving Agent", role: "executor" });
+      await addSequencedRatings(agent.id, [1, 1, 2, 2, 2, 4, 4, 5, 5, 5]);
+
+      const summary = await store.getRatingSummary(agent.id);
+
+      expect(summary.trend).toBe("improving");
+    });
+
+    it("getRatingSummary trend is declining when recent average is lower", async () => {
+      const agent = await store.createAgent({ name: "Declining Agent", role: "executor" });
+      await addSequencedRatings(agent.id, [5, 5, 4, 4, 4, 2, 2, 1, 1, 1]);
+
+      const summary = await store.getRatingSummary(agent.id);
+
+      expect(summary.trend).toBe("declining");
+    });
+
+    it("getRatingSummary trend is stable when windows are approximately equal", async () => {
+      const agent = await store.createAgent({ name: "Stable Agent", role: "executor" });
+      await addSequencedRatings(agent.id, [3, 3, 3, 3, 3, 3, 3, 3, 3, 3]);
+
+      const summary = await store.getRatingSummary(agent.id);
+
+      expect(summary.trend).toBe("stable");
+    });
+
+    it("deleteRating removes the rating", async () => {
+      const agent = await store.createAgent({ name: "Delete Agent", role: "executor" });
+      const first = await store.addRating(agent.id, { raterType: "user", score: 4 });
+      await store.addRating(agent.id, { raterType: "user", score: 5 });
+
+      await store.deleteRating(first.id);
+
+      const ratings = await store.getRatings(agent.id);
+      expect(ratings).toHaveLength(1);
+      expect(ratings[0].id).not.toBe(first.id);
+    });
+  });
+
   // ── heartbeat lifecycle via updateAgentState ──────────────────────
 
   describe("heartbeat lifecycle via updateAgentState", () => {
