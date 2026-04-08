@@ -184,6 +184,19 @@ describe("PlanningModeModal", () => {
       expect(screen.queryByText("Planning Mode")).toBeNull();
     });
 
+    it("hides send to background button in initial state", () => {
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          tasks={mockTasks}
+        />
+      );
+
+      expect(screen.queryByLabelText("Send to background")).toBeNull();
+    });
+
     it("enables start button when text is entered", () => {
       render(
         <PlanningModeModal
@@ -1264,6 +1277,39 @@ describe("PlanningModeModal", () => {
       expect(confirmSpy).not.toHaveBeenCalled();
       expect(mockCancelPlanning).not.toHaveBeenCalled();
       expect(mockOnClose).toHaveBeenCalled();
+    });
+
+    it("sends active session to background without canceling", async () => {
+      const closeSpy = vi.fn();
+
+      mockConnectPlanningStream.mockImplementationOnce(() => ({
+        close: closeSpy,
+        isConnected: vi.fn().mockReturnValue(true),
+      }));
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          tasks={mockTasks}
+        />
+      );
+
+      fireEvent.change(screen.getByPlaceholderText(/e.g., Build a user authentication/), {
+        target: { value: "Build auth system" },
+      });
+      fireEvent.click(screen.getByText("Start Planning"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Generating next question...")).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByLabelText("Send to background"));
+
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+      expect(mockCancelPlanning).not.toHaveBeenCalled();
+      expect(mockOnClose).toHaveBeenCalledTimes(1);
     });
 
     it("disconnects SSE stream on close", async () => {

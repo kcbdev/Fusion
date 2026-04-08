@@ -2547,6 +2547,28 @@ body {
   border-radius: var(--radius-sm);
 }
 
+.modal-send-to-background {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.modal-send-to-background:hover {
+  color: var(--text-primary);
+}
+
+.modal-send-to-background:focus-visible {
+  box-shadow: var(--focus-ring-strong);
+  outline: none;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;

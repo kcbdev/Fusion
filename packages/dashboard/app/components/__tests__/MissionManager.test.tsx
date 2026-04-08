@@ -2,6 +2,20 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MissionManager } from "../MissionManager";
 
+const mockFetchAiSession = vi.fn();
+const mockCancelMissionInterview = vi.fn();
+const mockConnectMissionInterviewStream = vi.fn();
+
+vi.mock("../../api", async () => {
+  const actual = await vi.importActual<typeof import("../../api")>("../../api");
+  return {
+    ...actual,
+    fetchAiSession: (...args: any[]) => mockFetchAiSession(...args),
+    cancelMissionInterview: (...args: any[]) => mockCancelMissionInterview(...args),
+    connectMissionInterviewStream: (...args: any[]) => mockConnectMissionInterviewStream(...args),
+  };
+});
+
 // Mock data
 const mockMissions = [
   {
@@ -109,6 +123,15 @@ describe("MissionManager", () => {
 
   beforeEach(() => {
     originalFetch = globalThis.fetch;
+    mockFetchAiSession.mockReset();
+    mockCancelMissionInterview.mockReset();
+    mockConnectMissionInterviewStream.mockReset();
+    mockFetchAiSession.mockResolvedValue(null);
+    mockCancelMissionInterview.mockResolvedValue(undefined);
+    mockConnectMissionInterviewStream.mockReturnValue({
+      close: vi.fn(),
+      isConnected: () => true,
+    });
   });
 
   afterEach(() => {
@@ -343,6 +366,72 @@ describe("MissionManager", () => {
 
     await waitFor(() => {
       expect(screen.getByText("New Mission")).toBeDefined();
+    });
+  });
+
+  it("hides send to background button when mission interview is in initial state", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(mockApiResponse([]));
+
+    render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Plan with AI")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Plan with AI"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Plan Mission with AI")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByLabelText("Send to background")).not.toBeInTheDocument();
+  });
+
+  it("sends mission interview to background without canceling the session", async () => {
+    const closeSpy = vi.fn();
+    mockConnectMissionInterviewStream.mockReturnValueOnce({
+      close: closeSpy,
+      isConnected: () => true,
+    });
+    mockFetchAiSession.mockResolvedValueOnce({
+      id: "session-bg-1",
+      type: "mission_interview",
+      status: "generating",
+      title: "Background mission",
+      inputPayload: JSON.stringify({ missionTitle: "Background mission" }),
+      conversationHistory: "[]",
+      currentQuestion: null,
+      result: null,
+      thinkingOutput: "",
+      error: null,
+      projectId: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    globalThis.fetch = createFetchMock();
+
+    render(
+      <MissionManager
+        isOpen={true}
+        onClose={vi.fn()}
+        addToast={vi.fn()}
+        resumeSessionId="session-bg-1"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Plan Mission with AI")).toBeInTheDocument();
+      expect(screen.getByText("Preparing next question...")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText("Send to background"));
+
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+    expect(mockCancelMissionInterview).not.toHaveBeenCalled();
+
+    await waitFor(() => {
+      expect(screen.queryByText("Plan Mission with AI")).not.toBeInTheDocument();
     });
   });
 

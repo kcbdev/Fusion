@@ -70,6 +70,19 @@ describe("SubtaskBreakdownModal", () => {
     expect(await screen.findByText("AI is generating subtasks...")).toBeInTheDocument();
   });
 
+  it("hides send to background button in initial state", () => {
+    render(
+      <SubtaskBreakdownModal
+        isOpen={true}
+        onClose={onClose}
+        initialDescription=""
+        onTasksCreated={onTasksCreated}
+      />,
+    );
+
+    expect(screen.queryByLabelText("Send to background")).not.toBeInTheDocument();
+  });
+
   it("renders editable subtasks when stream returns items", async () => {
     renderModal();
     await waitFor(() => expect(streamHandlers).toBeDefined());
@@ -179,6 +192,24 @@ describe("SubtaskBreakdownModal", () => {
     await waitFor(() => expect(mockCreateTasksFromBreakdown).toHaveBeenCalled());
     expect(onTasksCreated).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("sends active breakdown session to background without canceling", async () => {
+    const closeSpy = vi.fn();
+    mockConnectSubtaskStream.mockImplementationOnce((_sessionId, _projectId, handlers) => {
+      streamHandlers = handlers;
+      return { close: closeSpy, isConnected: () => true };
+    });
+
+    renderModal();
+    await waitFor(() => expect(mockStartSubtaskBreakdown).toHaveBeenCalled());
+    await screen.findByText("AI is generating subtasks...");
+
+    fireEvent.click(screen.getByLabelText("Send to background"));
+
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+    expect(mockCancelSubtaskBreakdown).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("cancel closes modal", async () => {

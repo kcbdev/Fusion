@@ -13,7 +13,7 @@ import {
   getSubtaskDescription,
   clearSubtaskDescription,
 } from "../hooks/modalPersistence";
-import { CheckCircle, Loader2, ListTree, Plus, Trash2, X, GripVertical, ArrowUp, ArrowDown } from "lucide-react";
+import { CheckCircle, Loader2, ListTree, Plus, Trash2, X, GripVertical, ArrowUp, ArrowDown, Minimize2 } from "lucide-react";
 
 interface SubtaskBreakdownModalProps {
   isOpen: boolean;
@@ -91,6 +91,8 @@ export function SubtaskBreakdownModal({ isOpen, onClose, initialDescription, onT
     return hasDependencyCycle(subtasks);
   }, [subtasks]);
 
+  const showSendToBackgroundButton = view.type === "generating" || view.type === "editing";
+
   const resetState = useCallback(() => {
     // Save to localStorage before cleanup (preserve for re-entry)
     if (localDescription) {
@@ -107,6 +109,12 @@ export function SubtaskBreakdownModal({ isOpen, onClose, initialDescription, onT
     setDirty(false);
     autoStartedRef.current = false;
   }, [localDescription]);
+
+  const handleSendToBackground = useCallback(() => {
+    streamRef.current?.close();
+    streamRef.current = null;
+    onClose();
+  }, [onClose]);
 
   const handleClose = useCallback(async () => {
     if ((dirty || view.type === "editing" || view.type === "creating") && !confirm("Close subtask breakdown? Unsaved changes will be lost.")) {
@@ -367,9 +375,21 @@ export function SubtaskBreakdownModal({ isOpen, onClose, initialDescription, onT
             <ListTree size={20} style={{ color: "var(--triage)" }} />
             <h3>Subtask Breakdown</h3>
           </div>
-          <button className="modal-close" onClick={() => void handleClose()} aria-label="Close">
-            <X size={20} />
-          </button>
+          <div className="modal-header-actions">
+            {showSendToBackgroundButton && (
+              <button
+                className="modal-send-to-background"
+                onClick={handleSendToBackground}
+                title="Send to background"
+                aria-label="Send to background"
+              >
+                <Minimize2 size={16} />
+              </button>
+            )}
+            <button className="modal-close" onClick={() => void handleClose()} aria-label="Close">
+              <X size={20} />
+            </button>
+          </div>
         </div>
 
         <div className="planning-modal-body">

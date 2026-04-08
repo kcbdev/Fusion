@@ -18,7 +18,7 @@ import {
   getPlanningDescription,
   clearPlanningDescription,
 } from "../hooks/modalPersistence";
-import { Lightbulb, X, Loader2, CheckCircle, ArrowLeft, ArrowRight, Sparkles, ListTree, GripVertical, ArrowUp, ArrowDown, Plus, Trash2 } from "lucide-react";
+import { Lightbulb, X, Loader2, CheckCircle, ArrowLeft, ArrowRight, Sparkles, ListTree, GripVertical, ArrowUp, ArrowDown, Plus, Trash2, Minimize2 } from "lucide-react";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 
 interface PlanningModeModalProps {
@@ -335,6 +335,12 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [isOpen]);
 
+  const handleSendToBackground = useCallback(() => {
+    streamConnectionRef.current?.close();
+    streamConnectionRef.current = null;
+    onClose();
+  }, [onClose]);
+
   const handleCancel = useCallback(() => {
     // Save to localStorage BEFORE any cleanup (preserve for re-entry)
     if (initialPlan) {
@@ -482,6 +488,9 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     return 3;
   };
 
+  const showSendToBackgroundButton =
+    view.type === "loading" || view.type === "question" || view.type === "summary";
+
   if (!isOpen) return null;
 
   return (
@@ -492,9 +501,21 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
             <Lightbulb size={20} style={{ color: "var(--triage)" }} />
             <h3>Planning Mode</h3>
           </div>
-          <button className="modal-close" onClick={handleCancel} aria-label="Close">
-            <X size={20} />
-          </button>
+          <div className="modal-header-actions">
+            {showSendToBackgroundButton && (
+              <button
+                className="modal-send-to-background"
+                onClick={handleSendToBackground}
+                title="Send to background"
+                aria-label="Send to background"
+              >
+                <Minimize2 size={16} />
+              </button>
+            )}
+            <button className="modal-close" onClick={handleCancel} aria-label="Close">
+              <X size={20} />
+            </button>
+          </div>
         </div>
 
         <div className="planning-modal-body">
