@@ -8,10 +8,12 @@ import * as path from "path";
 
 const agentsViewPath = path.join(__dirname, "../components/AgentsView.tsx");
 const agentDetailViewPath = path.join(__dirname, "../components/AgentDetailView.tsx");
+const agentRunHistoryPath = path.join(__dirname, "../components/AgentRunHistory.tsx");
 const apiPath = path.join(__dirname, "../api.ts");
 
 const agentsViewContent = fs.readFileSync(agentsViewPath, "utf-8");
 const agentDetailViewContent = fs.readFileSync(agentDetailViewPath, "utf-8");
+const agentRunHistoryContent = fs.readFileSync(agentRunHistoryPath, "utf-8");
 const apiContent = fs.readFileSync(apiPath, "utf-8");
 
 describe("Agent runs UI — static analysis", () => {
@@ -20,6 +22,11 @@ describe("Agent runs UI — static analysis", () => {
       expect(apiContent).toMatch(/startAgentRun\s*\(\s*agentId.*projectId\?/s);
       expect(apiContent).toMatch(/options\?\.\s*source/);
       expect(apiContent).toMatch(/options\?\.\s*triggerDetail/);
+    });
+
+    it("exports stopAgentRun function", () => {
+      expect(apiContent).toMatch(/export function stopAgentRun\s*\(/);
+      expect(apiContent).toMatch(/\/runs\/stop/);
     });
 
     it("exports HeartbeatInvocationSource type", () => {
@@ -120,6 +127,27 @@ describe("Agent runs UI — static analysis", () => {
 
     it("has no-runs empty state", () => {
       expect(agentDetailViewContent).toContain("No runs yet");
+    });
+
+    it("wires a stop run handler", () => {
+      expect(agentDetailViewContent).toMatch(/handleStopRun|handleStop/);
+      expect(agentDetailViewContent).toMatch(/confirm\("Stop the active run\?/);
+    });
+
+    it("references stopAgentRun and stop button copy", () => {
+      expect(agentDetailViewContent).toContain("stopAgentRun");
+      expect(agentDetailViewContent).toMatch(/Stop Run|Stop active run/);
+    });
+  });
+
+  describe("AgentRunHistory", () => {
+    it("imports stopAgentRun", () => {
+      expect(agentRunHistoryContent).toMatch(/import\s*\{[^}]*stopAgentRun[^}]*\}\s*from\s*"\.\.\/api"/);
+    });
+
+    it("renders stop control for active runs", () => {
+      expect(agentRunHistoryContent).toMatch(/run\.status === "active"/);
+      expect(agentRunHistoryContent).toMatch(/Stop this run\?/);
     });
   });
 });

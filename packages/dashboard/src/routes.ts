@@ -8756,6 +8756,62 @@ Output ONLY the prompt text (no markdown, no explanations).`;
   });
 
   /**
+   * POST /api/agents/:id/runs/stop
+   * Stop the currently active heartbeat run for an agent.
+   */
+  router.post("/agents/:id/runs/stop", async (req, res) => {
+    try {
+      const scopedStore = await getScopedStore(req);
+      const { AgentStore } = await import("@fusion/core");
+      const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
+      await agentStore.init();
+
+      const agent = await agentStore.getAgent(req.params.id);
+      if (!agent) {
+        throw notFound("Agent not found");
+      }
+
+      const activeRun = await agentStore.getActiveHeartbeatRun(req.params.id);
+      if (!activeRun) {
+        res.status(200).json({ ok: true, message: "No active run" });
+        return;
+      }
+
+      if (hasHeartbeatExecutor && heartbeatMonitor) {
+        await heartbeatMonitor.stopRun(req.params.id);
+      } else {
+        const existingRun = await agentStore.getRunDetail(req.params.id, activeRun.id);
+        if (existingRun) {
+          await agentStore.saveRun({
+            ...existingRun,
+            endedAt: new Date().toISOString(),
+            status: "terminated",
+            stderrExcerpt: existingRun.stderrExcerpt ?? "Run stopped by user",
+          });
+        }
+
+        await agentStore.endHeartbeatRun(activeRun.id, "terminated");
+
+        try {
+          await agentStore.updateAgentState(req.params.id, "active");
+        } catch {
+          // Best effort to restore an idle/active state for follow-up runs.
+        }
+      }
+
+      res.status(200).json({ ok: true, runId: activeRun.id });
+    } catch (err: any) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      if (err.message?.includes("not found")) {
+        throw notFound(err.message);
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  /**
    * GET /api/agents/:id/runs/:runId
    * Get detail for a specific agent run.
    */

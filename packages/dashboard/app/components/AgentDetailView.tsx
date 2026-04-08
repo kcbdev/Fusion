@@ -6,7 +6,7 @@ import {
   ChevronDown, ChevronRight
 } from "lucide-react";
 import type { AgentDetail, AgentState, AgentHeartbeatRun } from "../api";
-import { fetchAgent, updateAgent, updateAgentState, deleteAgent, fetchAgentLogs, fetchAgentRunLogs, fetchAgentChildren, fetchAgentRuns, fetchAgentRunDetail, startAgentRun, updateAgentInstructions, updateAgentSoul, updateAgentMemory, fetchAgentTasks, fetchChainOfCommand } from "../api";
+import { fetchAgent, updateAgent, updateAgentState, deleteAgent, fetchAgentLogs, fetchAgentRunLogs, fetchAgentChildren, fetchAgentRuns, fetchAgentRunDetail, startAgentRun, stopAgentRun, updateAgentInstructions, updateAgentSoul, updateAgentMemory, fetchAgentTasks, fetchChainOfCommand } from "../api";
 import type { Agent } from "../api";
 import type { AgentLogEntry, Task } from "@fusion/core";
 import { AgentLogViewer } from "./AgentLogViewer";
@@ -877,6 +877,21 @@ function RunsTab({
     }
   };
 
+  const handleStopRun = async () => {
+    if (!confirm("Stop the active run? The agent's work will be interrupted.")) {
+      return;
+    }
+
+    try {
+      await stopAgentRun(agentId, projectId);
+      addToast("Run stopped", "success");
+      setIsLoadingRuns(true);
+      void loadRuns();
+    } catch (err: any) {
+      addToast(`Failed to stop run: ${err.message}`, "error");
+    }
+  };
+
   const canRunHeartbeat = agentState === "active" || agentState === "idle";
 
   if (isLoadingRuns && runs.length === 0) {
@@ -973,6 +988,19 @@ function RunsTab({
                 <span className="badge" style={{ fontSize: "10px", padding: "1px 6px" }}>
                   {run.invocationSource}
                 </span>
+              )}
+              {isActive && (
+                <button
+                  className="btn btn--sm btn--danger"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    void handleStopRun();
+                  }}
+                  aria-label="Stop active run"
+                >
+                  <Square size={12} /> Stop
+                </button>
               )}
               <span className={cn("run-status", run.status)}>
                 <StatusIcon size={14} className={statusInfo.color} style={run.status === "active" ? { color: statusInfo.color } : undefined} />
@@ -1147,13 +1175,24 @@ function RunsTab({
             {runs.length} run{runs.length !== 1 ? "s" : ""}
             {hasActiveRun && <span className="run-live-indicator" style={{ marginLeft: "8px" }}><span className="live-dot" />Live</span>}
           </span>
-          <button
-            className="btn btn--sm btn--primary"
-            onClick={() => void handleRunHeartbeat()}
-            aria-label={`Run heartbeat for ${agentName ?? agentId}`}
-          >
-            <Activity size={14} /> Run Heartbeat
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            {hasActiveRun && (
+              <button
+                className="btn btn--sm btn--danger"
+                onClick={() => void handleStopRun()}
+                aria-label={`Stop active run for ${agentName ?? agentId}`}
+              >
+                <Square size={14} /> Stop Run
+              </button>
+            )}
+            <button
+              className="btn btn--sm btn--primary"
+              onClick={() => void handleRunHeartbeat()}
+              aria-label={`Run heartbeat for ${agentName ?? agentId}`}
+            >
+              <Activity size={14} /> Run Heartbeat
+            </button>
+          </div>
         </div>
       )}
       {activeRuns.map((run, i) => renderRunCard(run, i, true))}

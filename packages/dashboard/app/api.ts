@@ -2110,6 +2110,19 @@ export function startAgentRun(
   });
 }
 
+/** Stop an active heartbeat run for an agent */
+export function stopAgentRun(
+  agentId: string,
+  projectId?: string,
+): Promise<{ ok: boolean; runId?: string; message?: string }> {
+  return api<{ ok: boolean; runId?: string; message?: string }>(
+    withProjectId(`/agents/${encodeURIComponent(agentId)}/runs/stop`, projectId),
+    {
+      method: "POST",
+    },
+  );
+}
+
 /** Fetch aggregate agent stats */
 export function fetchAgentStats(projectId?: string): Promise<AgentStats> {
   return api<AgentStats>(withProjectId("/agents/stats", projectId));

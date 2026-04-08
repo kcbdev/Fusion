@@ -390,6 +390,72 @@ export class HeartbeatMonitor {
   }
 
   /**
+   * Stop an active heartbeat run for an agent.
+   *
+   * If an in-memory tracked session exists, dispose it and complete the run as terminated.
+   * If no tracked session exists, fall back to persisted active-run state and terminate that run record.
+   *
+   * No-op when no active run exists.
+   */
+  async stopRun(agentId: string): Promise<void> {
+    const tracked = this.trackedAgents.get(agentId);
+
+    if (tracked) {
+      heartbeatLog.log(`Stopping tracked run ${tracked.runId} for ${agentId}`);
+
+      try {
+        tracked.session.dispose();
+      } catch (error) {
+        heartbeatLog.warn(`Failed to dispose tracked session while stopping run for ${agentId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+
+      this.untrackAgent(agentId);
+
+      await this.completeRun(agentId, tracked.runId, {
+        status: "terminated",
+        stderrExcerpt: "Run stopped by user",
+      });
+
+      try {
+        await this.store.updateAgentState(agentId, "active");
+      } catch {
+        // Best effort — if already active or transition is currently invalid, ignore.
+      }
+
+      this.clearRunState(agentId);
+      return;
+    }
+
+    const activeRun = await this.store.getActiveHeartbeatRun(agentId);
+    if (!activeRun) {
+      this.clearRunState(agentId);
+      return;
+    }
+
+    heartbeatLog.log(`Stopping persisted run ${activeRun.id} for ${agentId} (no tracked session)`);
+
+    const existingRun = await this.store.getRunDetail(agentId, activeRun.id);
+    if (existingRun) {
+      await this.store.saveRun({
+        ...existingRun,
+        endedAt: new Date().toISOString(),
+        status: "terminated",
+        stderrExcerpt: existingRun.stderrExcerpt ?? "Run stopped by user",
+      });
+    }
+
+    await this.store.endHeartbeatRun(activeRun.id, "terminated");
+
+    try {
+      await this.store.updateAgentState(agentId, "active");
+    } catch {
+      // Best effort — if the state cannot be transitioned right now, don't fail stop semantics.
+    }
+
+    this.clearRunState(agentId);
+  }
+
+  /**
    * Remove an agent from monitoring.
    * Does NOT end the heartbeat run - caller's responsibility.
    * @param agentId - The agent ID

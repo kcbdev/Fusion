@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { CheckCircle, XCircle, Loader2, Square, Clock } from "lucide-react";
 import type { AgentHeartbeatRun } from "../api";
-import { fetchAgentRuns } from "../api";
+import { fetchAgentRuns, stopAgentRun } from "../api";
 
 interface AgentRunHistoryProps {
   agentId: string;
@@ -21,13 +21,34 @@ export function AgentRunHistory({ agentId, projectId, onRunClick }: AgentRunHist
   const [runs, setRuns] = useState<AgentHeartbeatRun[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
+  const loadRuns = useCallback(async () => {
     setIsLoading(true);
-    fetchAgentRuns(agentId, 50, projectId)
-      .then(setRuns)
-      .catch(() => setRuns([]))
-      .finally(() => setIsLoading(false));
+    try {
+      const data = await fetchAgentRuns(agentId, 50, projectId);
+      setRuns(data);
+    } catch {
+      setRuns([]);
+    } finally {
+      setIsLoading(false);
+    }
   }, [agentId, projectId]);
+
+  useEffect(() => {
+    void loadRuns();
+  }, [loadRuns]);
+
+  const handleStop = useCallback(async () => {
+    if (!confirm("Stop this run?")) {
+      return;
+    }
+
+    try {
+      await stopAgentRun(agentId, projectId);
+      await loadRuns();
+    } catch {
+      // No-op: keep history view usable even if stop fails.
+    }
+  }, [agentId, projectId, loadRuns]);
 
   if (isLoading) {
     return <div className="agent-run-loading"><Loader2 className="animate-spin" size={20} /> Loading runs...</div>;
@@ -80,6 +101,20 @@ export function AgentRunHistory({ agentId, projectId, onRunClick }: AgentRunHist
                 <span className="badge text-secondary">{run.triggerDetail}</span>
               )}
             </div>
+            {run.status === "active" && (
+              <button
+                className="btn btn--sm btn--danger"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  void handleStop();
+                }}
+                aria-label="Stop run"
+                style={{ marginLeft: "8px" }}
+              >
+                <Square size={12} /> Stop
+              </button>
+            )}
           </div>
         );
       })}

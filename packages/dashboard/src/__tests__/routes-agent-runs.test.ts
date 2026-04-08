@@ -11,6 +11,8 @@ const mockGetRecentRuns = vi.fn();
 const mockGetRunDetail = vi.fn();
 const mockRecordHeartbeat = vi.fn();
 const mockUpdateAgentState = vi.fn();
+const mockGetAgent = vi.fn();
+const mockEndHeartbeatRun = vi.fn();
 const mockListAgents = vi.fn().mockResolvedValue([]);
 const mockGetActiveHeartbeatRun = vi.fn().mockResolvedValue(null);
 
@@ -24,6 +26,8 @@ vi.mock("@fusion/core", () => {
       getRunDetail = mockGetRunDetail;
       recordHeartbeat = mockRecordHeartbeat;
       updateAgentState = mockUpdateAgentState;
+      getAgent = mockGetAgent;
+      endHeartbeatRun = mockEndHeartbeatRun;
       listAgents = mockListAgents;
       getActiveHeartbeatRun = mockGetActiveHeartbeatRun;
     },
@@ -76,6 +80,8 @@ describe("Agent runs routes (without HeartbeatMonitor)", () => {
     vi.clearAllMocks();
     mockInit.mockResolvedValue(undefined);
     mockListAgents.mockResolvedValue([]);
+    mockGetAgent.mockResolvedValue({ id: "agent-001", state: "running" });
+    mockEndHeartbeatRun.mockResolvedValue(undefined);
     mockGetActiveHeartbeatRun.mockResolvedValue(null);
 
     store = new MockStore();
@@ -136,6 +142,88 @@ describe("Agent runs routes (without HeartbeatMonitor)", () => {
 
       expect(response.status).toBe(404);
       expect((response.body as any).error).toContain("not found");
+    });
+  });
+
+  describe("POST /api/agents/:id/runs/stop", () => {
+    it("returns 200 with runId when a run is stopped", async () => {
+      const activeRun = createMockRun({ id: "run-001" });
+      mockGetActiveHeartbeatRun.mockResolvedValue(activeRun);
+      mockGetRunDetail.mockResolvedValue(activeRun);
+      mockSaveRun.mockResolvedValue(undefined);
+      mockEndHeartbeatRun.mockResolvedValue(undefined);
+      mockUpdateAgentState.mockResolvedValue({ id: "agent-001", state: "active" });
+
+      const response = await request(
+        app,
+        "POST",
+        "/api/agents/agent-001/runs/stop",
+        JSON.stringify({}),
+        { "content-type": "application/json" },
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ ok: true, runId: "run-001" });
+      expect(mockSaveRun).toHaveBeenCalledWith(expect.objectContaining({
+        id: "run-001",
+        status: "terminated",
+        endedAt: expect.any(String),
+      }));
+      expect(mockEndHeartbeatRun).toHaveBeenCalledWith("run-001", "terminated");
+      expect(mockUpdateAgentState).toHaveBeenCalledWith("agent-001", "active");
+    });
+
+    it("returns 200 with no active run message when no run exists", async () => {
+      mockGetActiveHeartbeatRun.mockResolvedValue(null);
+
+      const response = await request(
+        app,
+        "POST",
+        "/api/agents/agent-001/runs/stop",
+        JSON.stringify({}),
+        { "content-type": "application/json" },
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ ok: true, message: "No active run" });
+      expect(mockSaveRun).not.toHaveBeenCalled();
+      expect(mockEndHeartbeatRun).not.toHaveBeenCalled();
+    });
+
+    it("returns 404 when agent not found", async () => {
+      mockGetAgent.mockResolvedValue(null);
+
+      const response = await request(
+        app,
+        "POST",
+        "/api/agents/agent-404/runs/stop",
+        JSON.stringify({}),
+        { "content-type": "application/json" },
+      );
+
+      expect(response.status).toBe(404);
+      expect((response.body as any).error).toContain("Agent not found");
+    });
+
+    it("falls back to direct AgentStore termination when HeartbeatMonitor is unavailable", async () => {
+      const activeRun = createMockRun({ id: "run-002" });
+      mockGetActiveHeartbeatRun.mockResolvedValue(activeRun);
+      mockGetRunDetail.mockResolvedValue(activeRun);
+      mockSaveRun.mockResolvedValue(undefined);
+      mockEndHeartbeatRun.mockResolvedValue(undefined);
+      mockUpdateAgentState.mockResolvedValue({ id: "agent-001", state: "active" });
+
+      await request(
+        app,
+        "POST",
+        "/api/agents/agent-001/runs/stop",
+        JSON.stringify({}),
+        { "content-type": "application/json" },
+      );
+
+      expect(mockSaveRun).toHaveBeenCalled();
+      expect(mockEndHeartbeatRun).toHaveBeenCalledWith("run-002", "terminated");
+      expect(mockUpdateAgentState).toHaveBeenCalledWith("agent-001", "active");
     });
   });
 
@@ -263,20 +351,25 @@ describe("Agent runs routes (with HeartbeatMonitor)", () => {
   let store: MockStore;
   let app: ReturnType<typeof import("../server.js").createServer>;
   let mockExecuteHeartbeat: ReturnType<typeof vi.fn>;
+  let mockStopRun: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.clearAllMocks();
     mockInit.mockResolvedValue(undefined);
     mockListAgents.mockResolvedValue([]);
+    mockGetAgent.mockResolvedValue({ id: "agent-001", state: "running" });
+    mockEndHeartbeatRun.mockResolvedValue(undefined);
     mockGetActiveHeartbeatRun.mockResolvedValue(null);
 
     mockExecuteHeartbeat = vi.fn();
+    mockStopRun = vi.fn();
 
     store = new MockStore();
     const { createServer } = await import("../server.js");
     app = createServer(store as any, {
       heartbeatMonitor: {
         executeHeartbeat: mockExecuteHeartbeat,
+        stopRun: mockStopRun,
       },
     });
   });
@@ -333,6 +426,28 @@ describe("Agent runs routes (with HeartbeatMonitor)", () => {
           triggerDetail: "Scheduled run",
         },
       });
+    });
+  });
+
+  describe("POST /api/agents/:id/runs/stop", () => {
+    it("calls heartbeatMonitor.stopRun when monitor is available", async () => {
+      const activeRun = createMockRun({ id: "run-xyz" });
+      mockGetActiveHeartbeatRun.mockResolvedValue(activeRun);
+      mockStopRun.mockResolvedValue(undefined);
+
+      const response = await request(
+        app,
+        "POST",
+        "/api/agents/agent-001/runs/stop",
+        JSON.stringify({}),
+        { "content-type": "application/json" },
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ ok: true, runId: "run-xyz" });
+      expect(mockStopRun).toHaveBeenCalledWith("agent-001");
+      expect(mockSaveRun).not.toHaveBeenCalled();
+      expect(mockEndHeartbeatRun).not.toHaveBeenCalled();
     });
   });
 
