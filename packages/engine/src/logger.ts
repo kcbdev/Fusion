@@ -88,3 +88,6 @@ export const remoteNodeLog = createLogger("remote-node");
 
 /** Logger for periodic node health monitor subsystem. */
 export const nodeHealthMonitorLog = createLogger("node-health-monitor");
+
+/** Logger for the peer exchange (gossip) subsystem. */
+export const peerExchangeLog = createLogger("peer-exchange");

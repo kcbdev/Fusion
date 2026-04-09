@@ -1549,6 +1549,52 @@ export interface MeshDiscovery {
   discoveryVersion: number;
 }
 
+/** Lightweight snapshot of a known node suitable for gossip transmission. */
+export interface PeerInfo {
+  /** Unique node identifier. */
+  nodeId: string;
+  /** Display name of the node. */
+  nodeName: string;
+  /** Base URL of the node (empty string for local nodes). */
+  nodeUrl: string;
+  /** Current node status. */
+  status: NodeStatus;
+  /** Latest system metrics snapshot, if available. */
+  metrics: SystemMetrics | null;
+  /** ISO timestamp of when this info was last updated. */
+  lastSeen: string;
+  /** Optional capabilities available on this node. */
+  capabilities?: AgentCapability[];
+  /** Maximum concurrent tasks/runtimes this node can host. */
+  maxConcurrent: number;
+}
+
+/** Request payload sent when a node initiates a peer sync. */
+export interface PeerSyncRequest {
+  /** Node ID of the sender. */
+  senderNodeId: string;
+  /** Base URL of the sender node. */
+  senderNodeUrl: string;
+  /** List of peers known by the sender. */
+  knownPeers: PeerInfo[];
+  /** ISO timestamp of when this sync request was generated. */
+  timestamp: string;
+}
+
+/** Response payload returned after a peer sync exchange. */
+export interface PeerSyncResponse {
+  /** Node ID of the responding node (local node). */
+  senderNodeId: string;
+  /** Base URL of the responding node. */
+  senderNodeUrl: string;
+  /** Full list of peers known by the responding node. */
+  knownPeers: PeerInfo[];
+  /** Peers in the local list that the sender didn't know about. */
+  newPeers: PeerInfo[];
+  /** ISO timestamp of when this response was generated. */
+  timestamp: string;
+}
+
 /** A runtime node that can host project execution (local machine or remote host) */
 export interface NodeConfig {
   /** Unique node ID (e.g., "node_abc123") */

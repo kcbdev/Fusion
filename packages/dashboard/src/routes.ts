@@ -10671,6 +10671,90 @@ Output ONLY the prompt text (no markdown, no explanations).`;
     }
   });
 
+  /**
+   * POST /api/mesh/sync
+   * Exchange peer information with another node for gossip protocol.
+   *
+   * Request body: PeerSyncRequest
+   * Response body: PeerSyncResponse
+   */
+  router.post("/mesh/sync", async (req, res) => {
+    try {
+      const { CentralCore } = await import("@fusion/core");
+      const central = new CentralCore();
+      await central.init();
+
+      // Validate required fields
+      const senderNodeId = req.body?.senderNodeId;
+      if (!senderNodeId) {
+        throw badRequest("senderNodeId is required");
+      }
+
+      const knownPeers = req.body?.knownPeers;
+      if (!Array.isArray(knownPeers)) {
+        throw badRequest("knownPeers must be an array");
+      }
+
+      // Optional: validate knownPeers entries have required fields
+      for (const peer of knownPeers) {
+        if (!peer?.nodeId || !peer?.nodeName || typeof peer?.status !== "string") {
+          throw badRequest("Each knownPeers entry must have nodeId, nodeName, and status");
+        }
+      }
+
+      // Get sender node from registry to validate auth
+      const senderNode = await central.getNode(senderNodeId);
+
+      // Auth validation: if sender is registered with an apiKey, validate it
+      if (senderNode?.apiKey) {
+        const authHeader = req.headers.authorization;
+        const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
+
+        if (!token || token !== senderNode.apiKey) {
+          await central.close();
+          res.status(401).json({ error: "Unauthorized" });
+          return;
+        }
+      }
+
+      // Merge incoming peer data
+      await central.mergePeers(knownPeers);
+
+      // Update sender node status to online (it sent us a request, so it's alive)
+      try {
+        await central.updateNode(senderNodeId, { status: "online" });
+      } catch {
+        // Silently skip if sender node not found in local registry
+      }
+
+      // Get all known peers
+      const allKnownPeers = await central.getAllKnownPeerInfo();
+
+      // Calculate newPeers - peers the sender doesn't know about
+      const senderKnownIds = new Set(knownPeers.map((p: { nodeId: string }) => p.nodeId));
+      const newPeers = allKnownPeers.filter((peer) => !senderKnownIds.has(peer.nodeId));
+
+      // Get local node info
+      const localPeer = await central.getLocalPeerInfo();
+
+      await central.close();
+
+      // Return sync response
+      res.json({
+        senderNodeId: localPeer.nodeId,
+        senderNodeUrl: localPeer.nodeUrl,
+        knownPeers: allKnownPeers,
+        newPeers,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
   // ── Node Discovery Routes (mDNS / DNS-SD) ────────────────────────────────
 
   /**

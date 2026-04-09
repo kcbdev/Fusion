@@ -46,6 +46,7 @@ import type {
   NodeStatus,
   SystemMetrics,
   NodeMeshState,
+  PeerInfo,
   PeerNode,
   DiscoveryConfig,
   DiscoveredNode,
@@ -78,7 +79,7 @@ export interface CentralCoreEvents {
   "node:updated": [node: NodeConfig];
   /** Emitted when node health status changes */
   "node:health:changed": [node: NodeConfig];
-  /** Emitted when node metrics are updated */
+  /** Emitted when node metrics is updated */
   "node:metrics:updated": [payload: { nodeId: string; metrics: SystemMetrics }];
   /** Emitted when a mesh peer is added for a node */
   "mesh:peer:added": [payload: { nodeId: string; peer: PeerNode }];
@@ -86,6 +87,8 @@ export interface CentralCoreEvents {
   "mesh:peer:removed": [payload: { nodeId: string; peerNodeId: string }];
   /** Emitted when a node mesh snapshot changes */
   "mesh:state:changed": [payload: { nodeId: string; state: NodeMeshState }];
+  /** Emitted when a new node is discovered via gossip peer exchange */
+  "gossip:peer:registered": [payload: { nodeId: string; peer: PeerInfo }];
   /** Emitted after a remote node connection test completes */
   "node:connection:test": [result: ConnectionResult];
   /** Emitted when network discovery starts */
@@ -564,6 +567,68 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
   }
 
   /**
+   * Register a remote peer node from gossip exchange.
+   *
+   * This method is used during peer merge to register nodes discovered via
+   * the gossip protocol. It preserves the remote node's ID (rather than
+   * generating a new one) so that cross-node lookups work correctly.
+   *
+   * @param peer — Peer info from the gossip exchange
+   * @returns The registered node
+   */
+  async registerGossipPeer(peer: PeerInfo): Promise<NodeConfig> {
+    this.ensureInitialized();
+
+    const now = new Date().toISOString();
+
+    // Handle name uniqueness by appending suffix if needed
+    let name = peer.nodeName;
+    let suffix = 1;
+    while (true) {
+      const existing = await this.getNodeByName(name);
+      if (!existing) break;
+      suffix++;
+      name = `${peer.nodeName}-${suffix}`;
+    }
+
+    // Determine URL - use provided URL or empty string for local-style
+    const normalizedUrl = peer.nodeUrl || undefined;
+
+    const node: NodeConfig = {
+      id: peer.nodeId,
+      name,
+      type: "remote",
+      url: normalizedUrl,
+      status: peer.status,
+      capabilities: peer.capabilities,
+      systemMetrics: peer.metrics ?? undefined,
+      maxConcurrent: peer.maxConcurrent,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.db!.prepare(
+      `INSERT INTO nodes (id, name, type, url, status, capabilities, systemMetrics, maxConcurrent, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      node.id,
+      node.name,
+      node.type,
+      node.url ?? null,
+      node.status,
+      toJsonNullable(node.capabilities),
+      toJsonNullable(node.systemMetrics),
+      node.maxConcurrent,
+      node.createdAt,
+      node.updatedAt
+    );
+
+    this.db!.bumpLastModified();
+    this.emit("node:registered", node);
+    return node;
+  }
+
+  /**
    * Unregister a runtime node.
    *
    * Idempotent. Projects assigned to this node are automatically unassigned.
@@ -999,6 +1064,116 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
     await this.updateNodeMetrics(localNode.id, metrics);
 
     return this.getMeshState(localNode.id);
+  }
+
+  /**
+   * Merge incoming peer information from a gossip exchange.
+   *
+   * This method processes a list of peers received from another node during
+   * the gossip protocol. It adds new peers, updates stale entries, and
+   * emits appropriate events for mesh state changes.
+   *
+   * @param incomingPeers — List of peer info from gossip exchange
+   * @returns Object with lists of added and updated node IDs
+   */
+  async mergePeers(incomingPeers: PeerInfo[]): Promise<{ added: string[]; updated: string[] }> {
+    this.ensureInitialized();
+
+    const added: string[] = [];
+    const updated: string[] = [];
+
+    for (const peer of incomingPeers) {
+      const existing = await this.getNode(peer.nodeId);
+
+      if (!existing) {
+        // New peer - register it
+        const newNode = await this.registerGossipPeer(peer);
+        added.push(newNode.id);
+        this.emit("gossip:peer:registered", { nodeId: newNode.id, peer });
+      } else if (existing.type === "local") {
+        // Never overwrite the local node from incoming peer data
+        continue;
+      } else {
+        // Existing remote node - check if incoming data is fresher
+        const incomingLastSeen = new Date(peer.lastSeen);
+        const localUpdatedAt = new Date(existing.updatedAt);
+
+        if (incomingLastSeen > localUpdatedAt) {
+          // Incoming data is fresher - update the node
+          await this.updateNode(existing.id, {
+            status: peer.status,
+            url: peer.nodeUrl || undefined,
+            capabilities: peer.capabilities,
+            maxConcurrent: peer.maxConcurrent,
+          });
+
+          // Update metrics if provided
+          if (peer.metrics) {
+            await this.updateNodeMetrics(existing.id, peer.metrics);
+          }
+
+          updated.push(existing.id);
+        }
+      }
+    }
+
+    // Emit mesh state changed if any modifications were made
+    if (added.length > 0 || updated.length > 0) {
+      const localNode = await this.getLocalNode();
+      if (localNode) {
+        const state = await this.getMeshState(localNode.id);
+        this.emit("mesh:state:changed", { nodeId: localNode.id, state });
+      }
+    }
+
+    return { added, updated };
+  }
+
+  /**
+   * Get a PeerInfo snapshot of the local node for gossip transmission.
+   *
+   * @returns PeerInfo for the local node with current metrics
+   */
+  async getLocalPeerInfo(): Promise<PeerInfo> {
+    this.ensureInitialized();
+
+    const localNode = await this.getLocalNode();
+    if (!localNode) {
+      throw new Error("Local node not found");
+    }
+
+    return {
+      nodeId: localNode.id,
+      nodeName: localNode.name,
+      nodeUrl: localNode.url || "",
+      status: localNode.status,
+      metrics: localNode.systemMetrics ?? null,
+      lastSeen: new Date().toISOString(),
+      capabilities: localNode.capabilities,
+      maxConcurrent: localNode.maxConcurrent,
+    };
+  }
+
+  /**
+   * Get PeerInfo snapshots for all known nodes.
+   *
+   * @returns Array of PeerInfo for all nodes in the registry
+   */
+  async getAllKnownPeerInfo(): Promise<PeerInfo[]> {
+    this.ensureInitialized();
+
+    const nodes = await this.listNodes();
+
+    return nodes.map((node) => ({
+      nodeId: node.id,
+      nodeName: node.name,
+      nodeUrl: node.url || "",
+      status: node.status,
+      metrics: node.systemMetrics ?? null,
+      lastSeen: node.updatedAt,
+      capabilities: node.capabilities,
+      maxConcurrent: node.maxConcurrent,
+    }));
   }
 
   /**

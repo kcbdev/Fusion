@@ -164,7 +164,10 @@ export type {
   NodeDiscoveryEvent,
   DiscoveryConfig,
   DiscoveredNode,
+  PeerInfo,
   PeerNode,
+  PeerSyncRequest,
+  PeerSyncResponse,
   ProjectHealth,
   /** @deprecated Use RegisteredProject instead */
   ProjectInfo,

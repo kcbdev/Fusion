@@ -1188,6 +1188,241 @@ describe("CentralCore", () => {
       expect(state.metrics).toEqual(metrics);
       expect(state.knownPeers).toEqual([]);
     });
+
+    describe("peer exchange methods", () => {
+      it("should register a gossip peer and preserve its nodeId", async () => {
+        const peerInfo = {
+          nodeId: "node_remote_gossip",
+          nodeName: "Gossip Peer",
+          nodeUrl: "https://gossip.example.com",
+          status: "online" as const,
+          metrics: null,
+          lastSeen: "2026-04-01T12:00:00.000Z",
+          maxConcurrent: 3,
+        };
+
+        const registered = await central.registerGossipPeer(peerInfo);
+
+        expect(registered.id).toBe("node_remote_gossip");
+        expect(registered.name).toBe("Gossip Peer");
+        expect(registered.type).toBe("remote");
+        expect(registered.url).toBe("https://gossip.example.com");
+        expect(registered.status).toBe("online");
+        expect(registered.maxConcurrent).toBe(3);
+
+        // Verify it can be retrieved by the preserved ID
+        const fetched = await central.getNode("node_remote_gossip");
+        expect(fetched?.id).toBe("node_remote_gossip");
+      });
+
+      it("should handle duplicate peer names by appending suffix", async () => {
+        // First, register a local node with the same name
+        await central.registerNode({ name: "Same Name", type: "local" });
+
+        const peerInfo = {
+          nodeId: "node_same_1",
+          nodeName: "Same Name",
+          nodeUrl: "https://same1.example.com",
+          status: "online" as const,
+          metrics: null,
+          lastSeen: "2026-04-01T12:00:00.000Z",
+          maxConcurrent: 2,
+        };
+
+        const registered = await central.registerGossipPeer(peerInfo);
+
+        // Should have suffix added to avoid collision
+        expect(registered.name).toBe("Same Name-2");
+      });
+
+      it("should merge peers - add new peers", async () => {
+        const peerInfo = {
+          nodeId: "node_new_peer",
+          nodeName: "New Peer",
+          nodeUrl: "https://new-peer.example.com",
+          status: "online" as const,
+          metrics: null,
+          lastSeen: "2026-04-01T12:00:00.000Z",
+          maxConcurrent: 2,
+        };
+
+        const result = await central.mergePeers([peerInfo]);
+
+        expect(result.added).toContain("node_new_peer");
+        expect(result.updated).toEqual([]);
+        expect(await central.getNode("node_new_peer")).toBeDefined();
+      });
+
+      it("should merge peers - update stale peers", async () => {
+        // First, register a peer
+        const peerInfo = {
+          nodeId: "node_stale_peer",
+          nodeName: "Stale Peer",
+          nodeUrl: "https://stale-peer.example.com",
+          status: "offline" as const,
+          metrics: null,
+          lastSeen: "2026-04-01T11:00:00.000Z",
+          maxConcurrent: 2,
+        };
+        await central.registerGossipPeer(peerInfo);
+
+        // Now merge with fresher data
+        const fresherPeer = {
+          ...peerInfo,
+          status: "online" as const,
+          lastSeen: "2026-04-01T12:30:00.000Z",
+        };
+
+        const result = await central.mergePeers([fresherPeer]);
+
+        expect(result.added).toEqual([]);
+        expect(result.updated).toContain("node_stale_peer");
+        const updated = await central.getNode("node_stale_peer");
+        expect(updated?.status).toBe("online");
+      });
+
+      it("should merge peers - skip fresher local data", async () => {
+        // First, register a peer
+        const peerInfo = {
+          nodeId: "node_fresher_local",
+          nodeName: "Fresher Local",
+          nodeUrl: "https://fresher-local.example.com",
+          status: "online" as const,
+          metrics: null,
+          lastSeen: "2026-04-01T11:00:00.000Z",
+          maxConcurrent: 2,
+        };
+        await central.registerGossipPeer(peerInfo);
+
+        // Manually update to be fresher
+        await central.updateNode("node_fresher_local", {
+          status: "offline",
+        });
+
+        // Now merge with older data - should not update
+        const olderPeer = {
+          ...peerInfo,
+          status: "online" as const,
+          lastSeen: "2026-04-01T10:00:00.000Z",
+        };
+
+        const result = await central.mergePeers([olderPeer]);
+
+        expect(result.updated).toEqual([]);
+        const updated = await central.getNode("node_fresher_local");
+        expect(updated?.status).toBe("offline");
+      });
+
+      it("should merge peers - never overwrite local node", async () => {
+        const local = (await central.listNodes()).find((node) => node.type === "local");
+        expect(local).toBeDefined();
+
+        // Create a fake peer info with the local node's ID
+        const fakePeerInfo = {
+          nodeId: local!.id,
+          nodeName: "Fake Local",
+          nodeUrl: "https://fake-local.example.com",
+          status: "online" as const,
+          metrics: null,
+          lastSeen: "2026-04-01T12:00:00.000Z",
+          maxConcurrent: 10,
+        };
+
+        const result = await central.mergePeers([fakePeerInfo]);
+
+        // Should not add or update
+        expect(result.added).toEqual([]);
+        expect(result.updated).toEqual([]);
+
+        // Local node should be unchanged
+        const unchanged = await central.getNode(local!.id);
+        expect(unchanged?.maxConcurrent).toBe(4); // Default local node maxConcurrent
+      });
+
+      it("should merge peers - emit events correctly", async () => {
+        let gossipEvent: { nodeId: string; peer: unknown } | undefined;
+        let stateChangedEvent: { nodeId: string } | undefined;
+
+        central.on("gossip:peer:registered", (payload) => {
+          gossipEvent = payload;
+        });
+        central.on("mesh:state:changed", (payload) => {
+          stateChangedEvent = payload;
+        });
+
+        const peerInfo = {
+          nodeId: "node_event_peer",
+          nodeName: "Event Peer",
+          nodeUrl: "https://event-peer.example.com",
+          status: "online" as const,
+          metrics: null,
+          lastSeen: "2026-04-01T12:00:00.000Z",
+          maxConcurrent: 2,
+        };
+
+        await central.mergePeers([peerInfo]);
+
+        expect(gossipEvent?.nodeId).toBe("node_event_peer");
+        expect(stateChangedEvent?.nodeId).toBeDefined();
+      });
+
+      it("should merge peers - empty input returns empty result", async () => {
+        const result = await central.mergePeers([]);
+
+        expect(result.added).toEqual([]);
+        expect(result.updated).toEqual([]);
+      });
+
+      it("should get local peer info", async () => {
+        const peerInfo = await central.getLocalPeerInfo();
+
+        expect(peerInfo.nodeId).toBeDefined();
+        expect(peerInfo.nodeName).toBe("local");
+        expect(peerInfo.nodeUrl).toBe("");
+        expect(peerInfo.status).toBe("online");
+        expect(peerInfo.lastSeen).toBe("2026-04-01T12:00:00.000Z");
+        expect(peerInfo.maxConcurrent).toBe(4);
+      });
+
+      it("should get all known peer info", async () => {
+        // Register some peers
+        await central.registerGossipPeer({
+          nodeId: "node_all_peer_1",
+          nodeName: "All Peer 1",
+          nodeUrl: "https://all-peer-1.example.com",
+          status: "online" as const,
+          metrics: null,
+          lastSeen: "2026-04-01T12:00:00.000Z",
+          maxConcurrent: 2,
+        });
+
+        await central.registerGossipPeer({
+          nodeId: "node_all_peer_2",
+          nodeName: "All Peer 2",
+          nodeUrl: "https://all-peer-2.example.com",
+          status: "offline" as const,
+          metrics: null,
+          lastSeen: "2026-04-01T11:00:00.000Z",
+          maxConcurrent: 3,
+        });
+
+        const allPeers = await central.getAllKnownPeerInfo();
+
+        // Should include local node plus 2 registered peers
+        expect(allPeers.length).toBeGreaterThanOrEqual(3);
+        expect(allPeers.map((p) => p.nodeId)).toContain("node_all_peer_1");
+        expect(allPeers.map((p) => p.nodeId)).toContain("node_all_peer_2");
+      });
+
+      it("should get all known peer info - empty list", async () => {
+        // Don't register any peers, just check the local node
+        const allPeers = await central.getAllKnownPeerInfo();
+
+        // Should at least include the local node
+        expect(allPeers.length).toBeGreaterThanOrEqual(1);
+        expect(allPeers.some((p) => p.nodeName === "local")).toBe(true);
+      });
+    });
   });
 
   describe("project health", () => {

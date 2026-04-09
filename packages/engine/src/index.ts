@@ -32,6 +32,7 @@ export { TokenCapDetector, type TokenCapCheckResult } from "./token-cap-detector
 export { SelfHealingManager, type SelfHealingOptions } from "./self-healing.js";
 export { ProjectManager } from "./project-manager.js";
 export { NodeHealthMonitor } from "./node-health-monitor.js";
+export { PeerExchangeService, type PeerExchangeServiceOptions, type SyncResult } from "./peer-exchange-service.js";
 export { RemoteNodeClient } from "./runtimes/remote-node-client.js";
 export { RemoteNodeRuntime, type RemoteNodeRuntimeConfig } from "./runtimes/remote-node-runtime.js";
 export { StepSessionExecutor } from "./step-session-executor.js";
