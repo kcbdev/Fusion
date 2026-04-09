@@ -91,7 +91,7 @@ function OllamaIcon({ size, color, label = "Ollama" }: { size: number; color: st
   );
 }
 
-// MiniMax logo — stylized geometric "M" mark
+// MiniMax logo from SimpleIcons — stylized "M" grid mark
 function MiniMaxIcon({ size, color, label = "MiniMax" }: { size: number; color: string; label?: string }) {
   return (
     <svg
@@ -104,14 +104,14 @@ function MiniMaxIcon({ size, color, label = "MiniMax" }: { size: number; color: 
       aria-label={label}
     >
       <path
-        d="M3 3h6.5L12 7.5 14.5 3H21v18h-5.5v-8.75L12 18l-3.5-5.75V21H3V3z"
+        d="M11.43 3.92a.86.86 0 1 0-1.718 0v14.236a1.999 1.999 0 0 1-3.997 0V9.022a.86.86 0 1 0-1.718 0v3.87a1.999 1.999 0 0 1-3.997 0V11.49a.57.57 0 0 1 1.139 0v1.404a.86.86 0 0 0 1.719 0V9.022a1.999 1.999 0 0 1 3.997 0v9.134a.86.86 0 0 0 1.719 0V3.92a1.998 1.998 0 1 1 3.996 0v11.788a.57.57 0 1 1-1.139 0zm10.572 3.105a2 2 0 0 0-1.999 1.997v7.63a.86.86 0 0 1-1.718 0V3.923a1.999 1.999 0 0 0-3.997 0v16.16a.86.86 0 0 1-1.719 0V18.08a.57.57 0 1 0-1.138 0v2a1.998 1.998 0 0 0 3.996 0V3.92a.86.86 0 0 1 1.719 0v12.73a1.999 1.999 0 0 0 3.996 0V9.023a.86.86 0 1 1 1.72 0v6.686a.57.57 0 0 0 1.138 0V9.022a2 2 0 0 0-1.998-1.997"
         fill={color}
       />
     </svg>
   );
 }
 
-// Z.ai / Zhipu AI logo — stylized abstract mark
+// Z.ai / Zhipu AI logo — stylized "Z" mark from brand identity
 function ZaiIcon({ size, color, label = "Z.ai" }: { size: number; color: string; label?: string }) {
   return (
     <svg
@@ -124,7 +124,7 @@ function ZaiIcon({ size, color, label = "Z.ai" }: { size: number; color: string;
       aria-label={label}
     >
       <path
-        d="M4 4h16l-7 9h7L9 21l3-7H5l6-8H4V4z"
+        d="M3 5h18v3.5L10.5 21H7L16.5 8H3V5z"
         fill={color}
       />
     </svg>
@@ -141,7 +141,7 @@ const providerConfig: Record<
   google: { component: GeminiIcon, color: "#4285f4" }, // blue
   gemini: { component: GeminiIcon, color: "#4285f4" }, // blue (same as google)
   ollama: { component: OllamaIcon, color: "#fff" }, // white
-  minimax: { component: MiniMaxIcon, color: "#612BFF" }, // purple
+  minimax: { component: MiniMaxIcon, color: "#E73562" }, // pink/red
   zai: { component: ZaiIcon, color: "#1A6DFF" }, // blue
 };
 

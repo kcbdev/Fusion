@@ -192,7 +192,7 @@ describe("ProviderIcon", () => {
   it("applies provider-specific color for minimax", () => {
     render(<ProviderIcon provider="minimax" />);
     const icon = screen.getByTestId("minimax-icon").parentElement;
-    expect(icon).toHaveStyle({ color: "#612BFF" });
+    expect(icon).toHaveStyle({ color: "#E73562" });
   });
 
   it("passes correct color to SVG fill for minimax", () => {
@@ -200,7 +200,7 @@ describe("ProviderIcon", () => {
     const svg = screen.getByTestId("minimax-icon");
     const paths = svg.querySelectorAll("path");
     expect(paths.length).toBeGreaterThan(0);
-    expect(paths[0]).toHaveAttribute("fill", "#612BFF");
+    expect(paths[0]).toHaveAttribute("fill", "#E73562");
   });
 
   it("normalizes Minimax (capitalized) to minimax", () => {
