@@ -6020,7 +6020,7 @@ body {
   .card-archive-btn,
   .card-unarchive-btn {
     opacity: 1;
-    min-height: 44px;
+    min-height: 28px;
     padding: 4px 10px;
   }
 
@@ -6035,7 +6035,8 @@ body {
   }
 
   .card-steps-toggle {
-    min-height: 44px;
+    min-height: 32px;
+    padding: 4px 0;
   }
 
   /* Card: smaller status badges for 280px width */
@@ -6058,7 +6059,7 @@ body {
 
   /* Card: session files button touch target */
   .card-session-files {
-    min-height: 44px;
+    min-height: 32px;
   }
 
   /* Inline create: fit within 280px column */

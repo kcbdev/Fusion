@@ -163,25 +163,25 @@ describe("TaskCard mobile", () => {
     expectRuleToContain(mobileSection, ".card-archive-btn", "opacity: 1;");
   });
 
-  it("sets .card-archive-btn min-height: 44px in the mobile media block", () => {
+  it("sets .card-archive-btn min-height: 28px in the mobile media block", () => {
     const css = fs.readFileSync(stylesPath, "utf-8");
     const mobileSection = getMainMobileSection(css);
 
-    expectRuleToContain(mobileSection, ".card-archive-btn", "min-height: 44px;");
+    expectRuleToContain(mobileSection, ".card-archive-btn", "min-height: 28px;");
   });
 
-  it("sets .card-steps-toggle min-height: 44px in the mobile media block", () => {
+  it("sets .card-steps-toggle min-height: 32px in the mobile media block", () => {
     const css = fs.readFileSync(stylesPath, "utf-8");
     const mobileSection = getMainMobileSection(css);
 
-    expectRuleToContain(mobileSection, ".card-steps-toggle", "min-height: 44px;");
+    expectRuleToContain(mobileSection, ".card-steps-toggle", "min-height: 32px;");
   });
 
-  it("sets .card-session-files min-height: 44px in the mobile media block", () => {
+  it("sets .card-session-files min-height: 32px in the mobile media block", () => {
     const css = fs.readFileSync(stylesPath, "utf-8");
     const mobileSection = getMainMobileSection(css);
 
-    expectRuleToContain(mobileSection, ".card-session-files", "min-height: 44px;");
+    expectRuleToContain(mobileSection, ".card-session-files", "min-height: 32px;");
   });
 
   it("keeps .card-edit-btn width and height at 44px in the mobile media block", () => {
