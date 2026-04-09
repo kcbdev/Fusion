@@ -5750,6 +5750,12 @@ body {
     min-height: 36px;
   }
 
+  /* Column-header action buttons (e.g. archive) stay compact */
+  .column-header .btn-icon {
+    min-width: 28px;
+    min-height: 28px;
+  }
+
   input[type="text"],
   input[type="search"],
   input[type="email"],
@@ -5821,10 +5827,9 @@ body {
     min-height: 36px;
   }
 
-  /* Column count badge: slightly larger on mobile for tapping */
+  /* Column count badge: slightly wider on mobile for tapping */
   .column-count {
     min-width: 28px;
-    min-height: 28px;
   }
 
   /* Reduce header padding to reclaim horizontal space */
