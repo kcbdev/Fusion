@@ -70,4 +70,54 @@ describe("useSessionFiles", () => {
     expect(result.current.files).toEqual([]);
     expect(mockFetchSessionFiles).not.toHaveBeenCalled();
   });
+
+  describe("enabled option", () => {
+    it("fetches when enabled is true (default)", async () => {
+      mockFetchSessionFiles.mockResolvedValueOnce(["file.ts"]);
+
+      const { result } = renderHook(() =>
+        useSessionFiles("FN-123", "/repo/.worktrees/kb-123", "in-progress", undefined, { enabled: true }),
+      );
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.files).toEqual(["file.ts"]);
+      expect(mockFetchSessionFiles).toHaveBeenCalled();
+    });
+
+    it("fetches when enabled is not specified (default)", async () => {
+      mockFetchSessionFiles.mockResolvedValueOnce(["file.ts"]);
+
+      const { result } = renderHook(() =>
+        useSessionFiles("FN-123", "/repo/.worktrees/kb-123", "in-progress"),
+      );
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.files).toEqual(["file.ts"]);
+      expect(mockFetchSessionFiles).toHaveBeenCalled();
+    });
+
+    it("does not fetch when enabled is false", async () => {
+      const { result } = renderHook(() =>
+        useSessionFiles("FN-123", "/repo/.worktrees/kb-123", "in-progress", undefined, { enabled: false }),
+      );
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.files).toEqual([]);
+      expect(mockFetchSessionFiles).not.toHaveBeenCalled();
+    });
+
+    it("returns stable state (loading: false) when disabled", async () => {
+      const { result } = renderHook(() =>
+        useSessionFiles("FN-123", "/repo/.worktrees/kb-123", "in-progress", undefined, { enabled: false }),
+      );
+
+      // Immediately check (before any async)
+      expect(result.current.loading).toBe(false);
+      expect(result.current.files).toEqual([]);
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.files).toEqual([]);
+      expect(mockFetchSessionFiles).not.toHaveBeenCalled();
+    });
+  });
 });

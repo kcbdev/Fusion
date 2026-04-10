@@ -121,6 +121,49 @@ function areTaskDependenciesEqual(previous: string[], next: string[]): boolean {
   return previous.every((dependency, index) => dependency === next[index]);
 }
 
+/**
+ * Lightweight comparison for attachment metadata (not file content).
+ * Compares counts and top-level fields that affect card rendering.
+ */
+function areAttachmentsEqual(previous: Task["attachments"], next: Task["attachments"]): boolean {
+  if (!previous && !next) return true;
+  if (!previous || !next) return false;
+  if (previous.length !== next.length) return false;
+
+  // Compare attachment metadata that affects card rendering
+  return previous.every((att, i) => {
+    const nextAtt = next[i];
+    if (!nextAtt) return false;
+    // Compare fields that affect the card's visual state
+    return (
+      att.filename === nextAtt.filename &&
+      att.mimeType === nextAtt.mimeType &&
+      att.size === nextAtt.size
+    );
+  });
+}
+
+/**
+ * Lightweight comparison for comments.
+ * Compares counts and top-level fields that affect card rendering.
+ */
+function areCommentsEqual(previous: Task["comments"], next: Task["comments"]): boolean {
+  if (!previous && !next) return true;
+  if (!previous || !next) return false;
+  if (previous.length !== next.length) return false;
+
+  // Compare comment metadata that affects card rendering
+  return previous.every((comment, i) => {
+    const nextComment = next[i];
+    if (!nextComment) return false;
+    return (
+      comment.author === nextComment.author &&
+      comment.content === nextComment.content &&
+      comment.createdAt === nextComment.createdAt
+    );
+  });
+}
+
 // Keep this comparator aligned with the fields TaskCard renders directly and the
 // task metadata that influences child badge freshness/subscriptions.
 function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): boolean {
@@ -164,8 +207,8 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     previousTask.missionId === nextTask.missionId &&
     previousTask.assignedAgentId === nextTask.assignedAgentId &&
     previousTask.mergeRetries === nextTask.mergeRetries &&
-    JSON.stringify(previousTask.attachments ?? []) === JSON.stringify(nextTask.attachments ?? []) &&
-    JSON.stringify(previousTask.comments ?? []) === JSON.stringify(nextTask.comments ?? []) &&
+    areAttachmentsEqual(previousTask.attachments, nextTask.attachments) &&
+    areCommentsEqual(previousTask.comments, nextTask.comments) &&
     areTaskDependenciesEqual(previousTask.dependencies, nextTask.dependencies) &&
     areTaskStepsEqual(previousTask.steps, nextTask.steps) &&
     areTaskBadgeInfosEqual(previousTask.prInfo, nextTask.prInfo) &&
@@ -448,8 +491,24 @@ function TaskCardComponent({
   }, [hasGitHubBadge, isInViewport, subscribeToBadge, task.id, unsubscribeFromBadge]);
 
   const liveBadgeData = badgeUpdates.get(task.id);
-  const { files: sessionFiles, loading: sessionFilesLoading } = useSessionFiles(task.id, task.worktree, task.column, projectId);
-  const { stats: diffStats } = useTaskDiffStats(task.id, task.column, task.mergeDetails?.commitSha, projectId);
+
+  // Viewport-gated session files fetching - only fetch when card is visible
+  const { files: sessionFiles, loading: sessionFilesLoading } = useSessionFiles(
+    task.id,
+    task.worktree,
+    task.column,
+    projectId,
+    { enabled: isInViewport },
+  );
+
+  // Viewport-gated diff stats fetching - only fetch when card is visible
+  const { stats: diffStats } = useTaskDiffStats(
+    task.id,
+    task.column,
+    task.mergeDetails?.commitSha,
+    projectId,
+    { enabled: isInViewport },
+  );
 
   // Get fresh batch data if available
   const batchData = useMemo(() => getFreshBatchData(task.id, projectId), [task.id, projectId]);

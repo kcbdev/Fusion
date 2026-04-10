@@ -138,3 +138,104 @@ SCAN agents
 - `packages/core/src/db.test.ts` - Update expected index list
 - `packages/core/src/run-audit.test.ts` - Update expected index list  
 - `packages/core/src/__tests__/task-documents.test.ts` - Update expected index list
+
+---
+
+# Dashboard Card Rendering Performance (FN-1544)
+
+**Date:** 2026-04-10
+**Task:** FN-1544
+
+## Executive Summary
+
+Performance analysis identified that `TaskCard` components triggered expensive network requests (`session-files` and `diff` endpoints) eagerly on initial render, causing sluggish board/list views with large task sets. Additionally, the memo comparator used high-cost `JSON.stringify` on attachments and comments arrays.
+
+## Issues Identified
+
+### Issue 1: Eager Session Files Fetching (HIGH)
+
+**Problem:** Every `TaskCard` unconditionally called `useSessionFiles` hook, which fetches from `/api/tasks/:id/session-files`. With many cards visible or nearly-visible, this created a flood of network requests on initial render.
+
+**Solution:** Added an `enabled` parameter to `useSessionFiles` (default `true` for backward compatibility). The hook returns stable empty state when disabled without triggering fetches.
+
+### Issue 2: Eager Diff Stats Fetching (HIGH)
+
+**Problem:** Every `TaskCard` for done tasks unconditionally called `useTaskDiffStats` hook, which fetches from `/api/tasks/:id/diff`. This caused repeated fetches during rerenders.
+
+**Solution:** 
+1. Added an `enabled` parameter to `useTaskDiffStats` (default `true` for backward compatibility)
+2. Added short-lived in-memory caching (30-second TTL) keyed by `taskId:projectId` to avoid repeated fetches during rerenders
+3. Cache hits return immediately without loading flicker
+
+### Issue 3: High-Cost Memo Comparison (MEDIUM)
+
+**Problem:** `areTaskCardPropsEqual` used `JSON.stringify(attachments)` and `JSON.stringify(comments)` for comparison. For tasks with many attachments or comments, this serialized entire arrays on every render cycle.
+
+**Solution:** Replaced `JSON.stringify` with lightweight field-by-field comparison functions:
+- `areAttachmentsEqual()` - compares attachment counts and metadata fields (filename, mimeType, size)
+- `areCommentsEqual()` - compares comment counts and metadata fields (author, content, createdAt)
+
+## Mitigation Pattern: Viewport-Gated Card Metadata Loading
+
+The key mitigation uses the existing `isInViewport` state with a 200px margin:
+
+```typescript
+// TaskCard.tsx - Hook calls are gated on viewport visibility
+const { files: sessionFiles, loading: sessionFilesLoading } = useSessionFiles(
+  task.id,
+  task.worktree,
+  task.column,
+  projectId,
+  { enabled: isInViewport },  // Only fetch when card is visible
+);
+
+const { stats: diffStats } = useTaskDiffStats(
+  task.id,
+  task.column,
+  task.mergeDetails?.commitSha,
+  projectId,
+  { enabled: isInViewport },  // Only fetch when card is visible
+);
+```
+
+**Benefits:**
+- Offscreen cards don't trigger fetches
+- Cards entering viewport trigger fetches as expected
+- No new polling loops or background timers
+- Preserves existing card behaviors (badges, file counts, drag/drop, etc.)
+
+## Cache Implementation Details
+
+### useTaskDiffStats Cache
+
+```typescript
+const diffStatsCache = new Map<string, { stats: DiffStats; expiresAt: number }>();
+const CACHE_TTL_MS = 30_000; // 30 seconds
+```
+
+- Key format: `"taskId:projectId"`
+- Entries expire after TTL to ensure freshness
+- Cache is checked before initiating fetch - returns immediately on hit
+- Export `__test_clearDiffStatsCache()` for testing
+
+## Files Modified
+
+- `packages/dashboard/app/hooks/useSessionFiles.ts` - Added `enabled` option
+- `packages/dashboard/app/hooks/useTaskDiffStats.ts` - Added `enabled` option and caching
+- `packages/dashboard/app/hooks/__tests__/useSessionFiles.test.ts` - Tests for `enabled` option
+- `packages/dashboard/app/hooks/__tests__/useTaskDiffStats.test.ts` - Tests for `enabled` option and caching
+- `packages/dashboard/app/components/TaskCard.tsx` - Viewport-gated hook calls, lightweight memo comparison
+- `packages/dashboard/app/components/TaskCard.test.tsx` - Fixed pre-existing test expectations
+
+## Impact Assessment
+
+- **Initial render:** Significant reduction in network requests as offscreen cards don't fetch
+- **Rerenders:** Reduced CPU usage from eliminating `JSON.stringify` on large arrays
+- **Cache efficiency:** Repeated renders of the same task use cached diff stats instead of refetching
+- **User experience:** Board/list views feel more responsive, especially with many tasks
+
+## Key Learnings
+
+1. **Viewport gating is effective** - Using IntersectionObserver with a margin lets us fetch just-in-time without visible delay
+2. **Caching with TTL prevents staleness** - 30-second cache balances freshness with reduced network overhead
+3. **Lightweight comparisons outperform serialization** - Field-by-field comparison is O(n) vs JSON.stringify's O(n) + allocation overhead

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
-import { useTaskDiffStats } from "../useTaskDiffStats";
+import { useTaskDiffStats, __test_clearDiffStatsCache } from "../useTaskDiffStats";
 import * as api from "../../api";
 
 vi.mock("../../api", () => ({
@@ -12,6 +12,7 @@ const mockFetchTaskDiff = vi.mocked(api.fetchTaskDiff);
 describe("useTaskDiffStats", () => {
   beforeEach(() => {
     mockFetchTaskDiff.mockReset();
+    __test_clearDiffStatsCache();
   });
 
   afterEach(() => {
@@ -158,5 +159,272 @@ describe("useTaskDiffStats", () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.stats).toBeNull();
+  });
+
+  describe("enabled option", () => {
+    it("fetches when enabled is true (default)", async () => {
+      mockFetchTaskDiff.mockResolvedValueOnce({
+        files: [],
+        stats: { filesChanged: 1, additions: 2, deletions: 3 },
+      });
+
+      const { result } = renderHook(() =>
+        useTaskDiffStats("FN-123", "done", "abc1234", undefined, { enabled: true }),
+      );
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.stats).toEqual({ filesChanged: 1, additions: 2, deletions: 3 });
+      expect(mockFetchTaskDiff).toHaveBeenCalled();
+    });
+
+    it("fetches when enabled is not specified (default)", async () => {
+      mockFetchTaskDiff.mockResolvedValueOnce({
+        files: [],
+        stats: { filesChanged: 1, additions: 2, deletions: 3 },
+      });
+
+      const { result } = renderHook(() =>
+        useTaskDiffStats("FN-123", "done", "abc1234", undefined),
+      );
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.stats).toEqual({ filesChanged: 1, additions: 2, deletions: 3 });
+      expect(mockFetchTaskDiff).toHaveBeenCalled();
+    });
+
+    it("does not fetch when enabled is false", async () => {
+      const { result } = renderHook(() =>
+        useTaskDiffStats("FN-123", "done", "abc1234", undefined, { enabled: false }),
+      );
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.stats).toBeNull();
+      expect(mockFetchTaskDiff).not.toHaveBeenCalled();
+    });
+
+    it("returns stable state (loading: false) when disabled", async () => {
+      const { result } = renderHook(() =>
+        useTaskDiffStats("FN-123", "done", "abc1234", undefined, { enabled: false }),
+      );
+
+      // Immediately check (before any async)
+      expect(result.current.loading).toBe(false);
+      expect(result.current.stats).toBeNull();
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.stats).toBeNull();
+      expect(mockFetchTaskDiff).not.toHaveBeenCalled();
+    });
+
+    it("respects enabled flag changes", async () => {
+      mockFetchTaskDiff.mockResolvedValueOnce({
+        files: [],
+        stats: { filesChanged: 5, additions: 10, deletions: 2 },
+      });
+
+      const { result, rerender } = renderHook(
+        ({ enabled }) => useTaskDiffStats("FN-123", "done", "abc1234", undefined, { enabled }),
+        { initialProps: { enabled: true } },
+      );
+
+      // Fetch should happen initially
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.stats).toEqual({ filesChanged: 5, additions: 10, deletions: 2 });
+
+      // Toggle enabled off - should not refetch
+      mockFetchTaskDiff.mockClear();
+      rerender({ enabled: false });
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(mockFetchTaskDiff).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("caching", () => {
+    beforeEach(() => {
+      // Clear cache before each caching test to ensure isolation
+      __test_clearDiffStatsCache();
+      mockFetchTaskDiff.mockClear();
+    });
+
+    it("returns cached stats without making a fetch", async () => {
+      // First render - fetches and caches
+      mockFetchTaskDiff.mockResolvedValueOnce({
+        files: [],
+        stats: { filesChanged: 10, additions: 50, deletions: 5 },
+      });
+
+      const { result: first } = renderHook(() =>
+        useTaskDiffStats("FN-CACHE-1", "done", "abc1234", undefined),
+      );
+
+      await waitFor(() => expect(first.current.loading).toBe(false));
+      expect(first.current.stats).toEqual({ filesChanged: 10, additions: 50, deletions: 5 });
+      expect(mockFetchTaskDiff).toHaveBeenCalledTimes(1);
+
+      // Second render with same taskId - should use cache
+      mockFetchTaskDiff.mockClear();
+
+      const { result: second } = renderHook(() =>
+        useTaskDiffStats("FN-CACHE-1", "done", "abc1234", undefined),
+      );
+
+      await waitFor(() => expect(second.current.loading).toBe(false));
+      // Should return cached value, not new value
+      expect(second.current.stats).toEqual({ filesChanged: 10, additions: 50, deletions: 5 });
+      // No additional fetch
+      expect(mockFetchTaskDiff).not.toHaveBeenCalled();
+    });
+
+    it("returns cached stats immediately without loading flicker", async () => {
+      // Pre-populate cache by doing an initial fetch
+      mockFetchTaskDiff.mockResolvedValueOnce({
+        files: [],
+        stats: { filesChanged: 7, additions: 30, deletions: 3 },
+      });
+
+      const { result: first } = renderHook(() =>
+        useTaskDiffStats("FN-CACHE-2", "done", "abc1234", undefined),
+      );
+
+      await waitFor(() => expect(first.current.loading).toBe(false));
+      expect(first.current.stats).toEqual({ filesChanged: 7, additions: 30, deletions: 3 });
+
+      // Second hook instance - cache hit should be immediate
+      mockFetchTaskDiff.mockClear();
+
+      const { result: second } = renderHook(() =>
+        useTaskDiffStats("FN-CACHE-2", "done", "abc1234", undefined),
+      );
+
+      // Cache hit - no loading state, no fetch
+      expect(second.current.loading).toBe(false);
+      expect(second.current.stats).toEqual({ filesChanged: 7, additions: 30, deletions: 3 });
+      expect(mockFetchTaskDiff).not.toHaveBeenCalled();
+    });
+
+    it("caches stats separately per task ID", async () => {
+      // Pre-populate cache for FN-100
+      mockFetchTaskDiff.mockResolvedValueOnce({
+        files: [],
+        stats: { filesChanged: 5, additions: 25, deletions: 2 },
+      });
+
+      const { result: first } = renderHook(() =>
+        useTaskDiffStats("FN-100", "done", "abc1234", undefined),
+      );
+
+      await waitFor(() => expect(first.current.loading).toBe(false));
+      expect(first.current.stats).toEqual({ filesChanged: 5, additions: 25, deletions: 2 });
+
+      // Fetch for FN-200 (note: cache already has FN-100 entry)
+      mockFetchTaskDiff.mockResolvedValueOnce({
+        files: [],
+        stats: { filesChanged: 15, additions: 100, deletions: 10 },
+      });
+
+      const { result: second } = renderHook(() =>
+        useTaskDiffStats("FN-200", "done", "def5678", undefined),
+      );
+
+      await waitFor(() => expect(second.current.loading).toBe(false));
+      expect(second.current.stats).toEqual({ filesChanged: 15, additions: 100, deletions: 10 });
+
+      // Both should have been fetched (FN-100 was in cache from first test's beforeEach, but this test's beforeEach cleared it)
+      expect(mockFetchTaskDiff).toHaveBeenCalledTimes(2);
+
+      // Each should have its own cached value
+      mockFetchTaskDiff.mockClear();
+
+      const { result: cached1 } = renderHook(() =>
+        useTaskDiffStats("FN-100", "done", "abc1234", undefined),
+      );
+      const { result: cached2 } = renderHook(() =>
+        useTaskDiffStats("FN-200", "done", "def5678", undefined),
+      );
+
+      expect(cached1.current.stats).toEqual({ filesChanged: 5, additions: 25, deletions: 2 });
+      expect(cached2.current.stats).toEqual({ filesChanged: 15, additions: 100, deletions: 10 });
+      expect(mockFetchTaskDiff).not.toHaveBeenCalled();
+    });
+
+    it("caches stats separately per project ID", async () => {
+      // Pre-populate cache for task without projectId
+      mockFetchTaskDiff.mockResolvedValueOnce({
+        files: [],
+        stats: { filesChanged: 3, additions: 15, deletions: 1 },
+      });
+
+      const { result: first } = renderHook(() =>
+        useTaskDiffStats("FN-PROJ", "done", "abc1234", undefined),
+      );
+
+      await waitFor(() => expect(first.current.loading).toBe(false));
+      expect(first.current.stats).toEqual({ filesChanged: 3, additions: 15, deletions: 1 });
+
+      // Fetch same task with different projectId
+      mockFetchTaskDiff.mockResolvedValueOnce({
+        files: [],
+        stats: { filesChanged: 8, additions: 40, deletions: 4 },
+      });
+
+      const { result: second } = renderHook(() =>
+        useTaskDiffStats("FN-PROJ", "done", "abc1234", "proj-1"),
+      );
+
+      await waitFor(() => expect(second.current.loading).toBe(false));
+      expect(second.current.stats).toEqual({ filesChanged: 8, additions: 40, deletions: 4 });
+
+      // Both should have been fetched
+      expect(mockFetchTaskDiff).toHaveBeenCalledTimes(2);
+
+      // Cache should have both entries
+      mockFetchTaskDiff.mockClear();
+
+      const { result: cachedNoProj } = renderHook(() =>
+        useTaskDiffStats("FN-PROJ", "done", "abc1234", undefined),
+      );
+      const { result: cachedWithProj } = renderHook(() =>
+        useTaskDiffStats("FN-PROJ", "done", "abc1234", "proj-1"),
+      );
+
+      expect(cachedNoProj.current.stats).toEqual({ filesChanged: 3, additions: 15, deletions: 1 });
+      expect(cachedWithProj.current.stats).toEqual({ filesChanged: 8, additions: 40, deletions: 4 });
+      expect(mockFetchTaskDiff).not.toHaveBeenCalled();
+    });
+
+    it("clears cache via __test_clearDiffStatsCache", async () => {
+      // Pre-populate cache
+      mockFetchTaskDiff.mockResolvedValueOnce({
+        files: [],
+        stats: { filesChanged: 5, additions: 25, deletions: 2 },
+      });
+
+      const { result: first } = renderHook(() =>
+        useTaskDiffStats("FN-CLEAR", "done", "abc1234", undefined),
+      );
+
+      await waitFor(() => expect(first.current.loading).toBe(false));
+      expect(first.current.stats).toEqual({ filesChanged: 5, additions: 25, deletions: 2 });
+
+      // Clear cache
+      __test_clearDiffStatsCache();
+
+      // Next fetch should not hit cache
+      mockFetchTaskDiff.mockClear();
+      mockFetchTaskDiff.mockResolvedValueOnce({
+        files: [],
+        stats: { filesChanged: 99, additions: 999, deletions: 99 },
+      });
+
+      const { result: second } = renderHook(() =>
+        useTaskDiffStats("FN-CLEAR", "done", "abc1234", undefined),
+      );
+
+      await waitFor(() => expect(second.current.loading).toBe(false));
+      // Should fetch fresh value
+      expect(second.current.stats).toEqual({ filesChanged: 99, additions: 999, deletions: 99 });
+      expect(mockFetchTaskDiff).toHaveBeenCalled();
+    });
   });
 });

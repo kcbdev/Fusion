@@ -298,7 +298,8 @@ describe("TaskCard mission badge", () => {
     expect(badge).not.toBeNull();
 
     await waitFor(() => {
-      expect(badge?.textContent).toContain("Database Optimiza...");
+      // MAX_MISSION_TITLE_LENGTH is 12, so first 9 chars + "..."
+      expect(badge?.textContent).toContain("Database ...");
     });
   });
 
@@ -325,8 +326,8 @@ describe("TaskCard mission badge", () => {
     expect(badge).not.toBeNull();
 
     await waitFor(() => {
-      // MAX_MISSION_TITLE_LENGTH is 20, so first 17 chars + "..."
-      expect(badge?.textContent).toContain("This Is A Very Lo...");
+      // MAX_MISSION_TITLE_LENGTH is 12, so first 9 chars + "..."
+      expect(badge?.textContent).toContain("This Is A...");
     });
   });
 

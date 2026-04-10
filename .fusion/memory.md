@@ -22,6 +22,31 @@
 - Debug logging via `process.env.FUSION_DEBUG_AI` helps diagnose AI session issues
 - When testing `console.warn` calls that expect multiple substrings in a single concatenated string, use `expect(mock.calls[0][0]).toMatch(/substring1/)` pattern instead of `expect.stringContaining()` on multiple arguments
 
+## FN-1544: Viewport-Gated Card Metadata Loading
+
+When optimizing dashboard performance for large task sets:
+- **Viewport gating pattern**: Use IntersectionObserver with `rootMargin: "200px"` to prefetch data just before cards become visible
+- **Lazy enable option**: Add `{ enabled?: boolean }` parameter to hooks (default `true` for backward compatibility)
+- **Disabled state**: Return stable empty state without triggering fetches when `enabled: false`
+- **In-memory caching**: Use TTL-based caching (e.g., 30 seconds) to avoid repeated fetches during rerenders
+- **Cache key format**: `"taskId:projectId"` for separate caching per task/project context
+- **Cache hit behavior**: Return immediately without loading flicker — don't set loading state on cache hit
+- **Export test helpers**: Export `__test_clearCache()` functions for test isolation
+- **Lightweight comparisons**: Replace `JSON.stringify` in memo comparators with field-by-field comparisons (e.g., `areAttachmentsEqual`, `areCommentsEqual`)
+
+Example from `useTaskDiffStats`:
+```typescript
+// Cache keyed by taskId:projectId
+const diffStatsCache = new Map<string, { stats: DiffStats; expiresAt: number }>();
+
+// Hook returns immediately on cache hit
+if (cached) {
+  setStats(cached);
+  setLoading(false);
+  return;
+}
+```
+
 ## Conventions
 
 - When mocking function types with Vitest for the build (tsc), use `vi.fn().mockResolvedValue(x) as unknown as T` instead of `vi.fn<Parameters<T>, ReturnType<T>>()`. The generic syntax works at runtime but fails during `tsc` build.
