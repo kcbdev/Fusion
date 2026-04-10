@@ -30,6 +30,7 @@ export { StuckTaskDetector, type StuckTaskDetectorOptions, type DisposableSessio
 export { HeartbeatMonitor, HeartbeatTriggerScheduler, type WakeContext } from "./agent-heartbeat.js";
 export { TokenCapDetector, type TokenCapCheckResult } from "./token-cap-detector.js";
 export { SelfHealingManager, type SelfHealingOptions } from "./self-healing.js";
+export { PluginRunner, type PluginRunnerOptions } from "./plugin-runner.js";
 export { ProjectManager } from "./project-manager.js";
 export { NodeHealthMonitor } from "./node-health-monitor.js";
 export { PeerExchangeService, type PeerExchangeServiceOptions, type SyncResult } from "./peer-exchange-service.js";

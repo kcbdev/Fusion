@@ -63,6 +63,8 @@ export interface StepSessionExecutorOptions {
   semaphore?: AgentSemaphore;
   /** Optional stuck-task detector for session monitoring. */
   stuckTaskDetector?: StuckTaskDetector;
+  /** Optional plugin runner for providing plugin tools to step sessions. */
+  pluginRunner?: import("./plugin-runner.js").PluginRunner;
   /** Callback invoked when a step starts executing. */
   onStepStart?: (stepIndex: number) => void;
   /** Callback invoked when a step completes (success or failure). */
@@ -701,6 +703,9 @@ export class StepSessionExecutor {
         let session: AgentSession | null = null;
 
         try {
+          // Get plugin tools from plugin runner if available
+          const pluginTools = this.options.pluginRunner?.getPluginTools() ?? [];
+
           // Create fresh agent session for this attempt
           const createResult = await createKbAgent({
             cwd: worktreePath,
@@ -708,6 +713,7 @@ export class StepSessionExecutor {
             defaultProvider: taskDetail.modelProvider,
             defaultModelId: taskDetail.modelId,
             defaultThinkingLevel: taskDetail.thinkingLevel,
+            customTools: pluginTools,
             onText: (delta) => {
               agentLogger.onText(delta);
               stuckTaskDetector?.recordActivity(trackingKey);

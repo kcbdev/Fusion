@@ -83,9 +83,6 @@ export class PluginRunner {
     this.handlePluginLoaded = this.onPluginLoaded.bind(this);
     this.handlePluginUnloaded = this.onPluginUnloaded.bind(this);
     this.handlePluginReloaded = this.onPluginReloaded.bind(this);
-    this.handlePluginLoaded = this.onPluginLoaded.bind(this);
-    this.handlePluginUnloaded = this.onPluginUnloaded.bind(this);
-    this.handlePluginReloaded = this.onPluginReloaded.bind(this);
   }
 
   /**

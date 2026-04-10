@@ -38,7 +38,25 @@ vi.mock("@fusion/core", async () => {
         emit: vi.fn(),
       });
       self.on = vi.fn().mockReturnValue(self);
+      self.off = vi.fn();
       self.emit = vi.fn().mockReturnValue(true);
+      return self;
+    }),
+    PluginStore: vi.fn().mockImplementation(function() {
+      const self = {} as Record<string, unknown>;
+      self.init = vi.fn().mockResolvedValue(undefined);
+      self.getPlugin = vi.fn().mockResolvedValue({});
+      self.on = vi.fn();
+      self.off = vi.fn();
+      return self;
+    }),
+    PluginLoader: vi.fn().mockImplementation(function() {
+      const self = {} as Record<string, unknown>;
+      self.loadAllPlugins = vi.fn().mockResolvedValue({ loaded: 0, errors: 0 });
+      self.stopAllPlugins = vi.fn().mockResolvedValue(undefined);
+      self.getLoadedPlugins = vi.fn().mockReturnValue([]);
+      self.on = vi.fn();
+      self.off = vi.fn();
       return self;
     }),
   };
@@ -76,6 +94,18 @@ vi.mock("../self-healing.js", async () => {
         stop: mockSelfHealingStop,
       };
     }),
+  };
+});
+
+// Mock the plugin runner
+vi.mock("../plugin-runner.js", async () => {
+  return {
+    PluginRunner: vi.fn().mockImplementation(() => ({
+      init: vi.fn().mockResolvedValue(undefined),
+      shutdown: vi.fn().mockResolvedValue(undefined),
+      getPluginTools: vi.fn().mockReturnValue([]),
+      getPluginRoutes: vi.fn().mockReturnValue([]),
+    })),
   };
 });
 

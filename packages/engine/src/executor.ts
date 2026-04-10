@@ -1003,6 +1003,7 @@ export class TaskExecutor {
           settings,
           semaphore: this.options.semaphore,
           stuckTaskDetector: this.options.stuckTaskDetector,
+          pluginRunner: this.options.pluginRunner,
           onStepStart: (stepIndex) => {
             this.options.stuckTaskDetector?.recordProgress(task.id);
             try {

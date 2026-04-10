@@ -6,6 +6,8 @@ import type {
   AgentStore,
   HeartbeatInvocationSource,
   AgentHeartbeatRun,
+  PluginStore,
+  PluginLoader,
 } from "@fusion/core";
 import { Scheduler } from "../scheduler.js";
 import { TaskExecutor, type TaskExecutorOptions } from "../executor.js";
@@ -23,6 +25,7 @@ import { runtimeLog } from "../logger.js";
 import { StuckTaskDetector } from "../stuck-task-detector.js";
 import type { UsageLimitPauser } from "../usage-limit-detector.js";
 import { SelfHealingManager } from "../self-healing.js";
+import { PluginRunner } from "../plugin-runner.js";
 import { MissionAutopilot } from "../mission-autopilot.js";
 
 /**
@@ -76,6 +79,9 @@ export class InProcessRuntime
   /** Maps task IDs to agent IDs for lifecycle tracking */
   private taskAgentMap = new Map<string, string>();
   private lastActivityAt: string = new Date().toISOString();
+  private pluginRunner?: PluginRunner;
+  private pluginStore?: PluginStore;
+  private pluginLoader?: PluginLoader;
 
   /**
    * @param config - Runtime configuration
@@ -111,12 +117,30 @@ export class InProcessRuntime
 
     try {
       // 1. Initialize TaskStore
-      const { TaskStore } = await import("@fusion/core");
+      const { TaskStore, PluginStore: PluginStoreClass, PluginLoader: PluginLoaderClass } = await import("@fusion/core");
       this.taskStore = new TaskStore(this.config.workingDirectory);
       await this.taskStore.init();
       runtimeLog.log(`TaskStore initialized for project ${this.config.projectId}`);
 
-      // 2. Initialize WorktreePool
+      // 2. Initialize Plugin system (PluginStore + PluginLoader + PluginRunner)
+      this.pluginStore = new PluginStoreClass(this.taskStore.getFusionDir());
+      await this.pluginStore.init();
+
+      this.pluginLoader = new PluginLoaderClass({
+        pluginStore: this.pluginStore,
+        taskStore: this.taskStore,
+      });
+
+      this.pluginRunner = new PluginRunner({
+        pluginLoader: this.pluginLoader,
+        pluginStore: this.pluginStore,
+        taskStore: this.taskStore,
+        rootDir: this.config.workingDirectory,
+      });
+      await this.pluginRunner.init();
+      runtimeLog.log(`PluginRunner initialized`);
+
+      // 3. Initialize WorktreePool
       this.worktreePool = new WorktreePool();
 
       // Rehydrate pool from disk state (idle worktrees)
@@ -132,11 +156,11 @@ export class InProcessRuntime
         );
       }
 
-      // 3. Initialize global semaphore from CentralCore
+      // 4. Initialize global semaphore from CentralCore
       const globalLimit = await this.getGlobalConcurrencyLimit();
       this.globalSemaphore = new AgentSemaphore(() => globalLimit);
 
-      // 4. Initialize Scheduler
+      // 5. Initialize Scheduler
       const missionStore = this.taskStore.getMissionStore();
       const missionAutopilot = missionStore
         ? new MissionAutopilot(this.taskStore, missionStore)
@@ -180,6 +204,7 @@ export class InProcessRuntime
         pool: this.worktreePool,
         usageLimitPauser: this.usageLimitPauser,
         stuckTaskDetector: this.stuckTaskDetector,
+        pluginRunner: this.pluginRunner,
         missionStore,
         onSliceComplete: (slice) => {
           void this.scheduler.onSliceComplete(slice);
@@ -368,8 +393,9 @@ export class InProcessRuntime
    * 1. Set status to "stopping"
    * 2. Stop scheduler (no new tasks)
    * 3. Wait for executor to finish active tasks (with timeout)
-   * 4. Drain and cleanup worktree pool
-   * 5. Set status to "stopped"
+   * 4. Shutdown plugin runner
+   * 5. Drain and cleanup worktree pool
+   * 6. Set status to "stopped"
    *
    * @throws Error if shutdown timeout is exceeded
    */
@@ -435,7 +461,13 @@ export class InProcessRuntime
         );
       }
 
-      // 3. Drain and cleanup worktree pool
+      // 6. Shutdown plugin runner
+      if (this.pluginRunner) {
+        await this.pluginRunner.shutdown();
+        runtimeLog.log("PluginRunner shutdown complete");
+      }
+
+      // 7. Drain and cleanup worktree pool
       if (this.worktreePool) {
         const worktrees = this.worktreePool.drain();
         if (worktrees.length > 0) {

@@ -46,7 +46,38 @@
 The plugin system is built on three layers:
 1. **PluginStore** (`packages/core/src/plugin-store.ts`) — SQLite-backed CRUD operations for plugin installations, stored in the `plugins` table (schema v24)
 2. **PluginLoader** (`packages/core/src/plugin-loader.ts`) — Dynamic import, lifecycle management, dependency resolution (topological sort), hook invocation
-3. **Plugin SDK** (`packages/plugin-sdk/`) — Type re-exports and `definePlugin()` helper for third-party plugins
+3. **PluginRunner** (`packages/engine/src/plugin-runner.ts`) — Engine/runtime lifecycle integration, hook fanout, and tool adaptation
+
+### PluginRunner Integration (FN-1401)
+
+The `PluginRunner` bridges the plugin core system with the Fusion engine runtime:
+
+**Lifecycle Integration:**
+- `PluginRunner.init()` loads enabled plugins and subscribes to store/loader events for hot-load/unload synchronization
+- `PluginRunner.shutdown()` unsubscribes all listeners and stops all plugins cleanly
+- Runtime integration: `InProcessRuntime.start()` initializes PluginStore/PluginLoader/PluginRunner after TaskStore, `stop()` calls `pluginRunner.shutdown()`
+
+**Hook Timeout & Isolation:**
+- Plugin hooks have a default 5-second timeout (configurable via `hookTimeoutMs`)
+- Each hook invocation wraps in try/catch with timeout rejection — failures are logged but never propagate
+- Task lifecycle hooks: `onTaskCreated` on task:created, `onTaskMoved`/`onTaskCompleted` on task:moved (completion only when `to === "done"`)
+- Agent lifecycle hooks: `onAgentRunStart`/`onAgentRunEnd` invoked in executor session start/end paths
+
+**Tool Adaptation:**
+- Plugin tools are converted from `PluginToolDefinition[]` to `ToolDefinition[]` (pi-coding-agent format)
+- Tool names prefixed with `plugin_` to avoid collision with built-in tools
+- Tools are cached and invalidated on plugin state changes
+- Tool collision guard: built-in tools (task_*, review, etc.) cannot be overridden by plugin tools
+
+**Store Event Synchronization:**
+- PluginRunner subscribes to: `plugin:enabled`, `plugin:disabled`, `plugin:unregistered`, `plugin:stateChanged`, `plugin:updated`
+- Loader event subscribes to: `plugin:loaded`, `plugin:unloaded`, `plugin:reloaded`
+- All events invalidate tool/route caches for immediate hot-reload of new plugin capabilities
+
+**Step-Session Plugin Tool Integration:**
+- PluginRunner injected into `TaskExecutorOptions` as optional dependency
+- `StepSessionExecutor` receives plugin tools via `TaskExecutorOptions.pluginRunner`
+- Each step-session agent creation merges plugin tools with step session custom tools
 
 **Key types** (in `packages/core/src/plugin-types.ts`):
 - `PluginManifest` — Plugin metadata (id, name, version, dependencies, settingsSchema)
