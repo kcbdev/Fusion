@@ -147,6 +147,8 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       orderIndex: row.orderIndex,
       interviewState: row.interviewState as InterviewState,
       dependencies: fromJson<string[]>(row.dependencies) || [],
+      planningNotes: row.planningNotes || undefined,
+      verification: row.verification || undefined,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -165,6 +167,8 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       orderIndex: row.orderIndex,
       activatedAt: row.activatedAt || undefined,
       planState: (row.planState as SlicePlanState) || "not_started",
+      planningNotes: row.planningNotes || undefined,
+      verification: row.verification || undefined,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -959,6 +963,8 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
         orderIndex = ?,
         interviewState = ?,
         dependencies = ?,
+        planningNotes = ?,
+        verification = ?,
         updatedAt = ?
       WHERE id = ?
     `).run(
@@ -968,6 +974,8 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       updated.orderIndex,
       updated.interviewState,
       toJson(updated.dependencies),
+      updated.planningNotes ?? null,
+      updated.verification ?? null,
       updated.updatedAt,
       updated.id,
     );
@@ -1159,6 +1167,9 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
         status = ?,
         orderIndex = ?,
         activatedAt = ?,
+        planState = ?,
+        planningNotes = ?,
+        verification = ?,
         updatedAt = ?
       WHERE id = ?
     `).run(
@@ -1167,6 +1178,9 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       updated.status,
       updated.orderIndex,
       updated.activatedAt ?? null,
+      updated.planState,
+      updated.planningNotes ?? null,
+      updated.verification ?? null,
       updated.updatedAt,
       updated.id,
     );

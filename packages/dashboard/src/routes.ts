@@ -41,6 +41,7 @@ import {
   SessionNotFoundError as AgentGenerationSessionNotFoundError,
 } from "./agent-generation.js";
 import { getMissionInterviewSession, cleanupMissionInterviewSession } from "./mission-interview.js";
+import { getTargetInterviewSession, cleanupTargetInterviewSession } from "./milestone-slice-interview.js";
 import { writeSSEEvent } from "./sse-buffer.js";
 import {
   ApiError,
@@ -10548,6 +10549,12 @@ Output ONLY the prompt text (no markdown, no explanations).`;
       if (getMissionInterviewSession(id)) cleanupMissionInterviewSession(id);
     } catch {
       // Session may not belong to mission interview or may already be cleaned up.
+    }
+
+    try {
+      if (getTargetInterviewSession(id)) cleanupTargetInterviewSession(id);
+    } catch {
+      // Session may not belong to milestone/slice interview or may already be cleaned up.
     }
 
     res.json({ ok: true });

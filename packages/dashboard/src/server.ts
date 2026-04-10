@@ -35,6 +35,10 @@ import {
   setAiSessionStore as setMissionAiSessionStore,
   rehydrateFromStore as rehydrateMissionSessions,
 } from "./mission-interview.js";
+import {
+  setAiSessionStore as setMilestoneSliceAiSessionStore,
+  rehydrateFromStore as rehydrateMilestoneSliceSessions,
+} from "./milestone-slice-interview.js";
 import { ChatManager } from "./chat.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -379,15 +383,17 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
   setPlanningAiSessionStore(aiSessionStore);
   setSubtaskAiSessionStore(aiSessionStore);
   setMissionAiSessionStore(aiSessionStore);
+  setMilestoneSliceAiSessionStore(aiSessionStore);
 
   const planningRehydratedCount = rehydratePlanningSessions(aiSessionStore);
   const subtaskRehydratedCount = rehydrateSubtaskSessions(aiSessionStore);
   const missionRehydratedCount = rehydrateMissionSessions(aiSessionStore);
+  const milestoneSliceRehydratedCount = rehydrateMilestoneSliceSessions(aiSessionStore);
   const totalRehydrated =
-    planningRehydratedCount + subtaskRehydratedCount + missionRehydratedCount;
+    planningRehydratedCount + subtaskRehydratedCount + missionRehydratedCount + milestoneSliceRehydratedCount;
   if (totalRehydrated > 0) {
     console.log(
-      `[server] Rehydrated ${planningRehydratedCount} planning, ${subtaskRehydratedCount} subtask, ${missionRehydratedCount} mission sessions from SQLite`,
+      `[server] Rehydrated ${planningRehydratedCount} planning, ${subtaskRehydratedCount} subtask, ${missionRehydratedCount} mission, ${milestoneSliceRehydratedCount} milestone/slice sessions from SQLite`,
     );
   }
 

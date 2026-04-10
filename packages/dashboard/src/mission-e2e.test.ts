@@ -3256,4 +3256,293 @@ describe("Mission API", () => {
       });
     });
   });
+
+  // ── Milestone Interview Routes ───────────────────────────────────────────────
+
+  describe("milestone interview routes", () => {
+    function createMilestoneMockAiSessionStore() {
+      const store = new Map<string, any>();
+      return {
+        store,
+        upsert: vi.fn((row) => store.set(row.id, row)),
+        get: vi.fn((id) => store.get(id) ?? null),
+        delete: vi.fn((id) => store.delete(id)),
+        listRecoverable: vi.fn(() => Array.from(store.values())),
+        acquireLock: vi.fn().mockReturnValue({ acquired: true, currentHolder: null }),
+      };
+    }
+
+    it("POST /milestones/:milestoneId/interview/start creates session and returns 201", async () => {
+      const aiSessionStore = createMilestoneMockAiSessionStore();
+      const { app, missionStore } = buildApp({ aiSessionStore });
+      const ms = missionStore as ReturnType<typeof createMockMissionStore>;
+
+      const mission = ms.createMission({ title: "Test Mission" });
+      const milestone = ms.addMilestone(mission.id, { title: "Test Milestone" });
+
+      const createSpy = vi.spyOn(
+        await import("./milestone-slice-interview.js"),
+        "createTargetInterviewSession"
+      ).mockResolvedValueOnce("session-123");
+
+      const res = await request(
+        app,
+        "POST",
+        `/api/missions/milestones/${milestone.id}/interview/start`,
+        JSON.stringify({}),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty("sessionId", "session-123");
+      expect(createSpy).toHaveBeenCalled();
+    });
+
+    it("POST /milestones/:milestoneId/interview/start returns 404 for missing milestone", async () => {
+      const { app } = buildApp({});
+      const res = await request(
+        app,
+        "POST",
+        "/api/missions/milestones/MS-NOT-FOUND/interview/start",
+        JSON.stringify({}),
+        { "content-type": "application/json" },
+      );
+      expect(res.status).toBe(404);
+    });
+
+    it("POST /milestones/:milestoneId/interview/start returns 400 for invalid milestone ID", async () => {
+      const { app } = buildApp({});
+      const res = await request(
+        app,
+        "POST",
+        "/api/missions/milestones/invalid-id/interview/start",
+        JSON.stringify({}),
+        { "content-type": "application/json" },
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it("POST /milestones/:milestoneId/interview/respond returns 200 with question/summary", async () => {
+      const { app } = buildApp({});
+
+      const submitSpy = vi.spyOn(
+        await import("./milestone-slice-interview.js"),
+        "submitTargetInterviewResponse"
+      ).mockResolvedValueOnce({
+        type: "question",
+        data: { id: "q-1", type: "text", question: "Next question?" },
+      });
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/missions/milestones/MS-TEST1/interview/respond",
+        JSON.stringify({ sessionId: "session-123", responses: { "q-1": "answer" } }),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.type).toBe("question");
+      expect(submitSpy).toHaveBeenCalledWith("session-123", { "q-1": "answer" }, expect.any(String));
+    });
+
+    it("POST /milestones/:milestoneId/interview/respond returns 400 for missing sessionId", async () => {
+      const { app } = buildApp({});
+      const res = await request(
+        app,
+        "POST",
+        "/api/missions/milestones/MS-TEST1/interview/respond",
+        JSON.stringify({ responses: {} }),
+        { "content-type": "application/json" },
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it("POST /milestones/:milestoneId/interview/apply returns 200 with updated milestone", async () => {
+      const { app, missionStore } = buildApp({});
+      const ms = missionStore as ReturnType<typeof createMockMissionStore>;
+
+      const mission = ms.createMission({ title: "Test Mission" });
+      const milestone = ms.addMilestone(mission.id, { title: "Test Milestone" });
+
+      const applySpy = vi.spyOn(
+        await import("./milestone-slice-interview.js"),
+        "applyTargetInterview"
+      ).mockReturnValueOnce({
+        ...milestone,
+        planningNotes: "Interview notes",
+        verification: "Verification criteria",
+        interviewState: "completed",
+      });
+
+      const res = await request(
+        app,
+        "POST",
+        `/api/missions/milestones/${milestone.id}/interview/apply`,
+        JSON.stringify({ sessionId: "session-123" }),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.interviewState).toBe("completed");
+      expect(applySpy).toHaveBeenCalledWith("session-123", expect.anything());
+    });
+
+    it("POST /milestones/:milestoneId/interview/skip returns 200 with updated milestone", async () => {
+      const { app, missionStore } = buildApp({});
+      const ms = missionStore as ReturnType<typeof createMockMissionStore>;
+
+      const mission = ms.createMission({ title: "Test Mission" });
+      const milestone = ms.addMilestone(mission.id, { title: "Test Milestone" });
+
+      const skipSpy = vi.spyOn(
+        await import("./milestone-slice-interview.js"),
+        "skipTargetInterview"
+      ).mockReturnValueOnce({
+        ...milestone,
+        planningNotes: "Planned using mission-level context",
+        interviewState: "completed",
+      });
+
+      const res = await request(
+        app,
+        "POST",
+        `/api/missions/milestones/${milestone.id}/interview/skip`,
+        JSON.stringify({}),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(200);
+      expect(skipSpy).toHaveBeenCalledWith("milestone", milestone.id, expect.anything());
+    });
+  });
+
+  // ── Slice Interview Routes ─────────────────────────────────────────────────
+
+  describe("slice interview routes", () => {
+    it("POST /slices/:sliceId/interview/start creates session and returns 201", async () => {
+      const { app, missionStore } = buildApp({});
+      const ms = missionStore as ReturnType<typeof createMockMissionStore>;
+
+      const mission = ms.createMission({ title: "Test Mission" });
+      const milestone = ms.addMilestone(mission.id, { title: "Test Milestone" });
+      const slice = ms.addSlice(milestone.id, { title: "Test Slice" });
+
+      const createSpy = vi.spyOn(
+        await import("./milestone-slice-interview.js"),
+        "createTargetInterviewSession"
+      ).mockResolvedValueOnce("session-456");
+
+      const res = await request(
+        app,
+        "POST",
+        `/api/missions/slices/${slice.id}/interview/start`,
+        JSON.stringify({}),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty("sessionId", "session-456");
+      expect(createSpy).toHaveBeenCalled();
+    });
+
+    it("POST /slices/:sliceId/interview/start returns 404 for missing slice", async () => {
+      const { app } = buildApp({});
+      const res = await request(
+        app,
+        "POST",
+        "/api/missions/slices/SL-NOT-FOUND/interview/start",
+        JSON.stringify({}),
+        { "content-type": "application/json" },
+      );
+      expect(res.status).toBe(404);
+    });
+
+    it("POST /slices/:sliceId/interview/respond returns 200 with question/summary", async () => {
+      const { app } = buildApp({});
+
+      const submitSpy = vi.spyOn(
+        await import("./milestone-slice-interview.js"),
+        "submitTargetInterviewResponse"
+      ).mockResolvedValueOnce({
+        type: "complete",
+        data: {
+          title: "Refined Slice",
+          description: "Updated description",
+          planningNotes: "Notes",
+          verification: "Verification",
+        },
+      });
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/missions/slices/SL-TEST1/interview/respond",
+        JSON.stringify({ sessionId: "session-456", responses: { "q-1": "answer" } }),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.type).toBe("complete");
+    });
+
+    it("POST /slices/:sliceId/interview/apply returns 200 with updated slice", async () => {
+      const { app, missionStore } = buildApp({});
+      const ms = missionStore as ReturnType<typeof createMockMissionStore>;
+
+      const mission = ms.createMission({ title: "Test Mission" });
+      const milestone = ms.addMilestone(mission.id, { title: "Test Milestone" });
+      const slice = ms.addSlice(milestone.id, { title: "Test Slice" });
+
+      const applySpy = vi.spyOn(
+        await import("./milestone-slice-interview.js"),
+        "applyTargetInterview"
+      ).mockReturnValueOnce({
+        ...slice,
+        planningNotes: "Interview notes",
+        verification: "Verification criteria",
+        planState: "planned",
+      });
+
+      const res = await request(
+        app,
+        "POST",
+        `/api/missions/slices/${slice.id}/interview/apply`,
+        JSON.stringify({ sessionId: "session-456" }),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.planState).toBe("planned");
+    });
+
+    it("POST /slices/:sliceId/interview/skip returns 200 with updated slice", async () => {
+      const { app, missionStore } = buildApp({});
+      const ms = missionStore as ReturnType<typeof createMockMissionStore>;
+
+      const mission = ms.createMission({ title: "Test Mission" });
+      const milestone = ms.addMilestone(mission.id, { title: "Test Milestone" });
+      const slice = ms.addSlice(milestone.id, { title: "Test Slice" });
+
+      const skipSpy = vi.spyOn(
+        await import("./milestone-slice-interview.js"),
+        "skipTargetInterview"
+      ).mockReturnValueOnce({
+        ...slice,
+        planningNotes: "Planned using mission-level context",
+        planState: "planned",
+      });
+
+      const res = await request(
+        app,
+        "POST",
+        `/api/missions/slices/${slice.id}/interview/skip`,
+        JSON.stringify({}),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(200);
+      expect(skipSpy).toHaveBeenCalledWith("slice", slice.id, expect.anything());
+    });
+  });
 });

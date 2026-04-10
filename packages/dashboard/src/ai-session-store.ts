@@ -15,7 +15,7 @@ import type { Database } from "@fusion/core";
 
 // ── Types ───────────────────────────────────────────────────────────────
 
-export type AiSessionType = "planning" | "subtask" | "mission_interview";
+export type AiSessionType = "planning" | "subtask" | "mission_interview" | "milestone_interview" | "slice_interview";
 export type AiSessionStatus = "generating" | "awaiting_input" | "complete" | "error";
 
 export interface AiSessionRow {

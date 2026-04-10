@@ -2019,6 +2019,680 @@ export function createMissionRouter(
     })
   );
 
+  // ── Milestone Interview Routes ─────────────────────────────────────────────────
+
+  /**
+   * POST /milestones/:milestoneId/interview/start
+   * Start a milestone interview session with AI agent streaming.
+   * Returns: { sessionId: string }
+   */
+  router.post(
+    "/milestones/:milestoneId/interview/start",
+    catchTypedHandler(async (req, res) => {
+      const { milestoneId } = req.params;
+
+      if (!validateMilestoneId(milestoneId)) {
+        throw badRequest("Invalid milestone ID format");
+      }
+
+      const milestone = missionStore.getMilestone(milestoneId);
+      if (!milestone) {
+        throw notFound("Milestone not found");
+      }
+
+      try {
+        const ip = req.ip || req.socket.remoteAddress || "unknown";
+        const rootDir = await getRootDirForRequest(req);
+
+        // Get mission context for the interview
+        const mission = missionStore.getMission(milestone.missionId);
+        const missionContext = mission
+          ? `Mission: "${mission.title}". ${mission.description || ""}`
+          : undefined;
+
+        const {
+          createTargetInterviewSession,
+          RateLimitError,
+        } = await import("./milestone-slice-interview.js");
+
+        const sessionId = await createTargetInterviewSession(
+          ip,
+          "milestone",
+          milestoneId,
+          milestone.title,
+          missionContext,
+          rootDir
+        );
+        res.status(201).json({ sessionId });
+      } catch (err: any) {
+        if (err.name === "RateLimitError") {
+          throw rateLimited(err.message);
+        } else {
+          throw internalError(err.message || "Failed to start interview session");
+        }
+      }
+    })
+  );
+
+  /**
+   * POST /milestones/:milestoneId/interview/respond
+   * Submit response to milestone interview question.
+   * Body: { sessionId: string, responses: Record<string, unknown>, tabId?: string }
+   */
+  router.post(
+    "/milestones/:milestoneId/interview/respond",
+    catchTypedHandler(async (req, res) => {
+      const { sessionId, responses, tabId } = req.body;
+
+      if (!validateMilestoneId(req.params.milestoneId)) {
+        throw badRequest("Invalid milestone ID format");
+      }
+
+      if (!sessionId || typeof sessionId !== "string") {
+        throw badRequest("sessionId is required");
+      }
+
+      if (!responses || typeof responses !== "object") {
+        throw badRequest("responses is required and must be an object");
+      }
+
+      const normalizedTabId = typeof tabId === "string" && tabId.trim().length > 0 ? tabId.trim() : undefined;
+      const lockCheck = checkSessionLock(sessionId, normalizedTabId, aiSessionStore);
+      if (!lockCheck.allowed) {
+        res.status(409).json({
+          error: "Session locked by another tab",
+          lockedByTab: lockCheck.currentHolder,
+        });
+        return;
+      }
+
+      try {
+        const {
+          submitTargetInterviewResponse,
+          TargetSessionNotFoundError,
+          TargetInvalidSessionStateError,
+        } = await import("./milestone-slice-interview.js");
+
+        const rootDir = await getRootDirForRequest(req);
+        const result = await submitTargetInterviewResponse(sessionId, responses, rootDir);
+        res.json(result);
+      } catch (err: any) {
+        if (err.name === "TargetSessionNotFoundError") {
+          throw notFound(err.message);
+        } else if (err.name === "TargetInvalidSessionStateError") {
+          throw badRequest(err.message);
+        } else {
+          throw internalError(err.message || "Failed to process response");
+        }
+      }
+    })
+  );
+
+  /**
+   * GET /milestones/:milestoneId/interview/:sessionId/stream
+   * SSE endpoint for real-time milestone interview session updates.
+   * Streams thinking output, questions, summaries, and errors.
+   */
+  router.get(
+    "/milestones/:milestoneId/interview/:sessionId/stream",
+    catchTypedHandler(async (req, res) => {
+      const { sessionId } = req.params;
+
+      // Set SSE headers
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+
+      // Send initial connection confirmation
+      res.write(": connected\n\n");
+
+      try {
+        const {
+          milestoneSliceInterviewStreamManager: msStreamManager,
+          getTargetInterviewSession,
+        } = await import("./milestone-slice-interview.js");
+
+        // Verify session exists
+        const session = getTargetInterviewSession(sessionId);
+        if (!session) {
+          writeSSEEvent(res, "error", JSON.stringify({ message: "Session not found or expired" }));
+          res.end();
+          return;
+        }
+
+        const lastEventId = parseLastEventId(req);
+        if (lastEventId !== undefined) {
+          const buffered = msStreamManager.getBufferedEvents(sessionId, lastEventId);
+          if (!replayBufferedSSE(res, buffered)) {
+            res.end();
+            return;
+          }
+        }
+
+        if (session.summary) {
+          const existing = msStreamManager.getBufferedEvents(sessionId, 0);
+          const lastSummaryEvent = [...existing].reverse().find((event) => event.event === "summary");
+          const summaryEventId = lastSummaryEvent?.id
+            ?? msStreamManager.broadcast(sessionId, {
+              type: "summary",
+              data: session.summary,
+            });
+
+          if (lastEventId === undefined || summaryEventId > lastEventId) {
+            if (!writeSSEEvent(res, "summary", JSON.stringify(session.summary), summaryEventId)) {
+              res.end();
+              return;
+            }
+          }
+
+          const lastCompleteEvent = [...existing].reverse().find((event) => event.event === "complete");
+          const completeEventId = lastCompleteEvent?.id
+            ?? msStreamManager.broadcast(sessionId, { type: "complete" });
+
+          if (lastEventId === undefined || completeEventId > lastEventId) {
+            writeSSEEvent(res, "complete", JSON.stringify({}), completeEventId);
+          }
+
+          res.end();
+          return;
+        }
+
+        // Subscribe to session events
+        const unsubscribe = msStreamManager.subscribe(sessionId, (event, eventId) => {
+          const data = (event as { data?: unknown }).data;
+          if (!writeSSEEvent(res, event.type, JSON.stringify(data ?? {}), eventId)) {
+            unsubscribe();
+            return;
+          }
+
+          // End stream on complete or error
+          if (event.type === "complete" || event.type === "error") {
+            unsubscribe();
+            res.end();
+          }
+        });
+
+        // Handle client disconnect
+        req.on("close", () => {
+          unsubscribe();
+        });
+
+        // Heartbeat every 30s
+        const heartbeat = setInterval(() => {
+          if (res.writableEnded) {
+            clearInterval(heartbeat);
+            return;
+          }
+          res.write(": heartbeat\n\n");
+        }, 30_000);
+
+        req.on("close", () => {
+          clearInterval(heartbeat);
+        });
+      } catch (err: any) {
+        writeSSEEvent(res, "error", JSON.stringify({ message: err.message || "Stream error" }));
+        res.end();
+      }
+    })
+  );
+
+  /**
+   * POST /milestones/:milestoneId/interview/:sessionId/retry
+   * Retry a failed milestone interview session.
+   */
+  router.post(
+    "/milestones/:milestoneId/interview/:sessionId/retry",
+    catchTypedHandler(async (req, res) => {
+      const { sessionId } = req.params;
+
+      if (!validateMilestoneId(req.params.milestoneId)) {
+        throw badRequest("Invalid milestone ID format");
+      }
+
+      if (!sessionId || typeof sessionId !== "string") {
+        throw badRequest("sessionId is required");
+      }
+
+      const tabId = typeof req.body?.tabId === "string" && req.body.tabId.trim().length > 0
+        ? req.body.tabId.trim()
+        : undefined;
+      const lockCheck = checkSessionLock(sessionId, tabId, aiSessionStore);
+      if (!lockCheck.allowed) {
+        res.status(409).json({
+          error: "Session locked by another tab",
+          lockedByTab: lockCheck.currentHolder,
+        });
+        return;
+      }
+
+      try {
+        const {
+          retryTargetInterviewSession,
+          TargetSessionNotFoundError,
+          TargetInvalidSessionStateError,
+        } = await import("./milestone-slice-interview.js");
+
+        const rootDir = await getRootDirForRequest(req);
+        await retryTargetInterviewSession(sessionId, rootDir);
+        res.json({ success: true, sessionId });
+      } catch (err: any) {
+        if (err.name === "TargetSessionNotFoundError") {
+          throw notFound(err.message);
+        } else if (err.name === "TargetInvalidSessionStateError") {
+          throw badRequest(err.message);
+        } else {
+          throw internalError(err.message || "Failed to retry interview session");
+        }
+      }
+    })
+  );
+
+  /**
+   * POST /milestones/:milestoneId/interview/apply
+   * Apply milestone interview summary to the milestone.
+   * Body: { sessionId: string, summary?: TargetInterviewSummary }
+   */
+  router.post(
+    "/milestones/:milestoneId/interview/apply",
+    catchTypedHandler(async (req, res) => {
+      const { sessionId } = req.body;
+
+      if (!validateMilestoneId(req.params.milestoneId)) {
+        throw badRequest("Invalid milestone ID format");
+      }
+
+      if (!sessionId || typeof sessionId !== "string") {
+        throw badRequest("sessionId is required");
+      }
+
+      try {
+        const {
+          applyTargetInterview,
+          TargetSessionNotFoundError,
+        } = await import("./milestone-slice-interview.js");
+
+        const milestone = applyTargetInterview(sessionId, missionStore);
+        res.json(milestone);
+      } catch (err: any) {
+        if (err.name === "TargetSessionNotFoundError") {
+          throw notFound(err.message);
+        } else {
+          throw internalError(err.message || "Failed to apply interview");
+        }
+      }
+    })
+  );
+
+  /**
+   * POST /milestones/:milestoneId/interview/skip
+   * Skip milestone interview and apply mission-level context.
+   */
+  router.post(
+    "/milestones/:milestoneId/interview/skip",
+    catchTypedHandler(async (req, res) => {
+      const { milestoneId } = req.params;
+
+      if (!validateMilestoneId(milestoneId)) {
+        throw badRequest("Invalid milestone ID format");
+      }
+
+      try {
+        const {
+          skipTargetInterview,
+        } = await import("./milestone-slice-interview.js");
+
+        const milestone = skipTargetInterview("milestone", milestoneId, missionStore);
+        res.json(milestone);
+      } catch (err: any) {
+        if (err.name === "TargetSessionNotFoundError") {
+          throw notFound(err.message);
+        } else {
+          throw internalError(err.message || "Failed to skip interview");
+        }
+      }
+    })
+  );
+
+  // ── Slice Interview Routes ─────────────────────────────────────────────────
+
+  /**
+   * POST /slices/:sliceId/interview/start
+   * Start a slice interview session with AI agent streaming.
+   * Returns: { sessionId: string }
+   */
+  router.post(
+    "/slices/:sliceId/interview/start",
+    catchTypedHandler(async (req, res) => {
+      const { sliceId } = req.params;
+
+      if (!validateSliceId(sliceId)) {
+        throw badRequest("Invalid slice ID format");
+      }
+
+      const slice = missionStore.getSlice(sliceId);
+      if (!slice) {
+        throw notFound("Slice not found");
+      }
+
+      try {
+        const ip = req.ip || req.socket.remoteAddress || "unknown";
+        const rootDir = await getRootDirForRequest(req);
+
+        // Get mission hierarchy context for the interview
+        const milestone = missionStore.getMilestone(slice.milestoneId);
+        const mission = milestone ? missionStore.getMission(milestone.missionId) : undefined;
+        const missionContext = mission && milestone
+          ? `Mission: "${mission.title}". Milestone: "${milestone.title}". ${mission.description || ""}`
+          : milestone
+            ? `Milestone: "${milestone.title}".`
+            : undefined;
+
+        const {
+          createTargetInterviewSession,
+          RateLimitError,
+        } = await import("./milestone-slice-interview.js");
+
+        const sessionId = await createTargetInterviewSession(
+          ip,
+          "slice",
+          sliceId,
+          slice.title,
+          missionContext,
+          rootDir
+        );
+        res.status(201).json({ sessionId });
+      } catch (err: any) {
+        if (err.name === "RateLimitError") {
+          throw rateLimited(err.message);
+        } else {
+          throw internalError(err.message || "Failed to start interview session");
+        }
+      }
+    })
+  );
+
+  /**
+   * POST /slices/:sliceId/interview/respond
+   * Submit response to slice interview question.
+   * Body: { sessionId: string, responses: Record<string, unknown>, tabId?: string }
+   */
+  router.post(
+    "/slices/:sliceId/interview/respond",
+    catchTypedHandler(async (req, res) => {
+      const { sessionId, responses, tabId } = req.body;
+
+      if (!validateSliceId(req.params.sliceId)) {
+        throw badRequest("Invalid slice ID format");
+      }
+
+      if (!sessionId || typeof sessionId !== "string") {
+        throw badRequest("sessionId is required");
+      }
+
+      if (!responses || typeof responses !== "object") {
+        throw badRequest("responses is required and must be an object");
+      }
+
+      const normalizedTabId = typeof tabId === "string" && tabId.trim().length > 0 ? tabId.trim() : undefined;
+      const lockCheck = checkSessionLock(sessionId, normalizedTabId, aiSessionStore);
+      if (!lockCheck.allowed) {
+        res.status(409).json({
+          error: "Session locked by another tab",
+          lockedByTab: lockCheck.currentHolder,
+        });
+        return;
+      }
+
+      try {
+        const {
+          submitTargetInterviewResponse,
+          TargetSessionNotFoundError,
+          TargetInvalidSessionStateError,
+        } = await import("./milestone-slice-interview.js");
+
+        const rootDir = await getRootDirForRequest(req);
+        const result = await submitTargetInterviewResponse(sessionId, responses, rootDir);
+        res.json(result);
+      } catch (err: any) {
+        if (err.name === "TargetSessionNotFoundError") {
+          throw notFound(err.message);
+        } else if (err.name === "TargetInvalidSessionStateError") {
+          throw badRequest(err.message);
+        } else {
+          throw internalError(err.message || "Failed to process response");
+        }
+      }
+    })
+  );
+
+  /**
+   * GET /slices/:sliceId/interview/:sessionId/stream
+   * SSE endpoint for real-time slice interview session updates.
+   * Streams thinking output, questions, summaries, and errors.
+   */
+  router.get(
+    "/slices/:sliceId/interview/:sessionId/stream",
+    catchTypedHandler(async (req, res) => {
+      const { sessionId } = req.params;
+
+      // Set SSE headers
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+
+      // Send initial connection confirmation
+      res.write(": connected\n\n");
+
+      try {
+        const {
+          milestoneSliceInterviewStreamManager: msStreamManager,
+          getTargetInterviewSession,
+        } = await import("./milestone-slice-interview.js");
+
+        // Verify session exists
+        const session = getTargetInterviewSession(sessionId);
+        if (!session) {
+          writeSSEEvent(res, "error", JSON.stringify({ message: "Session not found or expired" }));
+          res.end();
+          return;
+        }
+
+        const lastEventId = parseLastEventId(req);
+        if (lastEventId !== undefined) {
+          const buffered = msStreamManager.getBufferedEvents(sessionId, lastEventId);
+          if (!replayBufferedSSE(res, buffered)) {
+            res.end();
+            return;
+          }
+        }
+
+        if (session.summary) {
+          const existing = msStreamManager.getBufferedEvents(sessionId, 0);
+          const lastSummaryEvent = [...existing].reverse().find((event) => event.event === "summary");
+          const summaryEventId = lastSummaryEvent?.id
+            ?? msStreamManager.broadcast(sessionId, {
+              type: "summary",
+              data: session.summary,
+            });
+
+          if (lastEventId === undefined || summaryEventId > lastEventId) {
+            if (!writeSSEEvent(res, "summary", JSON.stringify(session.summary), summaryEventId)) {
+              res.end();
+              return;
+            }
+          }
+
+          const lastCompleteEvent = [...existing].reverse().find((event) => event.event === "complete");
+          const completeEventId = lastCompleteEvent?.id
+            ?? msStreamManager.broadcast(sessionId, { type: "complete" });
+
+          if (lastEventId === undefined || completeEventId > lastEventId) {
+            writeSSEEvent(res, "complete", JSON.stringify({}), completeEventId);
+          }
+
+          res.end();
+          return;
+        }
+
+        // Subscribe to session events
+        const unsubscribe = msStreamManager.subscribe(sessionId, (event, eventId) => {
+          const data = (event as { data?: unknown }).data;
+          if (!writeSSEEvent(res, event.type, JSON.stringify(data ?? {}), eventId)) {
+            unsubscribe();
+            return;
+          }
+
+          // End stream on complete or error
+          if (event.type === "complete" || event.type === "error") {
+            unsubscribe();
+            res.end();
+          }
+        });
+
+        // Handle client disconnect
+        req.on("close", () => {
+          unsubscribe();
+        });
+
+        // Heartbeat every 30s
+        const heartbeat = setInterval(() => {
+          if (res.writableEnded) {
+            clearInterval(heartbeat);
+            return;
+          }
+          res.write(": heartbeat\n\n");
+        }, 30_000);
+
+        req.on("close", () => {
+          clearInterval(heartbeat);
+        });
+      } catch (err: any) {
+        writeSSEEvent(res, "error", JSON.stringify({ message: err.message || "Stream error" }));
+        res.end();
+      }
+    })
+  );
+
+  /**
+   * POST /slices/:sliceId/interview/:sessionId/retry
+   * Retry a failed slice interview session.
+   */
+  router.post(
+    "/slices/:sliceId/interview/:sessionId/retry",
+    catchTypedHandler(async (req, res) => {
+      const { sessionId } = req.params;
+
+      if (!validateSliceId(req.params.sliceId)) {
+        throw badRequest("Invalid slice ID format");
+      }
+
+      if (!sessionId || typeof sessionId !== "string") {
+        throw badRequest("sessionId is required");
+      }
+
+      const tabId = typeof req.body?.tabId === "string" && req.body.tabId.trim().length > 0
+        ? req.body.tabId.trim()
+        : undefined;
+      const lockCheck = checkSessionLock(sessionId, tabId, aiSessionStore);
+      if (!lockCheck.allowed) {
+        res.status(409).json({
+          error: "Session locked by another tab",
+          lockedByTab: lockCheck.currentHolder,
+        });
+        return;
+      }
+
+      try {
+        const {
+          retryTargetInterviewSession,
+          TargetSessionNotFoundError,
+          TargetInvalidSessionStateError,
+        } = await import("./milestone-slice-interview.js");
+
+        const rootDir = await getRootDirForRequest(req);
+        await retryTargetInterviewSession(sessionId, rootDir);
+        res.json({ success: true, sessionId });
+      } catch (err: any) {
+        if (err.name === "TargetSessionNotFoundError") {
+          throw notFound(err.message);
+        } else if (err.name === "TargetInvalidSessionStateError") {
+          throw badRequest(err.message);
+        } else {
+          throw internalError(err.message || "Failed to retry interview session");
+        }
+      }
+    })
+  );
+
+  /**
+   * POST /slices/:sliceId/interview/apply
+   * Apply slice interview summary to the slice.
+   * Body: { sessionId: string, summary?: TargetInterviewSummary }
+   */
+  router.post(
+    "/slices/:sliceId/interview/apply",
+    catchTypedHandler(async (req, res) => {
+      const { sessionId } = req.body;
+
+      if (!validateSliceId(req.params.sliceId)) {
+        throw badRequest("Invalid slice ID format");
+      }
+
+      if (!sessionId || typeof sessionId !== "string") {
+        throw badRequest("sessionId is required");
+      }
+
+      try {
+        const {
+          applyTargetInterview,
+          TargetSessionNotFoundError,
+        } = await import("./milestone-slice-interview.js");
+
+        const slice = applyTargetInterview(sessionId, missionStore);
+        res.json(slice);
+      } catch (err: any) {
+        if (err.name === "TargetSessionNotFoundError") {
+          throw notFound(err.message);
+        } else {
+          throw internalError(err.message || "Failed to apply interview");
+        }
+      }
+    })
+  );
+
+  /**
+   * POST /slices/:sliceId/interview/skip
+   * Skip slice interview and apply mission-level context.
+   */
+  router.post(
+    "/slices/:sliceId/interview/skip",
+    catchTypedHandler(async (req, res) => {
+      const { sliceId } = req.params;
+
+      if (!validateSliceId(sliceId)) {
+        throw badRequest("Invalid slice ID format");
+      }
+
+      try {
+        const {
+          skipTargetInterview,
+        } = await import("./milestone-slice-interview.js");
+
+        const slice = skipTargetInterview("slice", sliceId, missionStore);
+        res.json(slice);
+      } catch (err: any) {
+        if (err.name === "TargetSessionNotFoundError") {
+          throw notFound(err.message);
+        } else {
+          throw internalError(err.message || "Failed to skip interview");
+        }
+      }
+    })
+  );
 
   return router;
 }
