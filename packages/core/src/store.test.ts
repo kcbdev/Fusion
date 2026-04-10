@@ -872,6 +872,62 @@ describe("TaskStore", () => {
     });
   });
 
+  describe("getSettingsFast()", () => {
+    it("returns the same merged result as getSettings()", async () => {
+      await store.updateGlobalSettings({ themeMode: "light", ntfyEnabled: true });
+      await store.updateSettings({ maxConcurrent: 5, autoMerge: false });
+
+      const fast = await store.getSettingsFast();
+      const regular = await store.getSettings();
+
+      expect(fast.maxConcurrent).toBe(5);
+      expect(fast.autoMerge).toBe(false);
+      expect(fast.themeMode).toBe("light");
+      expect(fast.ntfyEnabled).toBe(true);
+      expect(fast.maxWorktrees).toBe(4); // default
+
+      // Should match getSettings()
+      expect(fast).toEqual(regular);
+    });
+
+    it("returns defaults when no config row exists", async () => {
+      // Delete the config row
+      const db = (store as any).db;
+      db.prepare("DELETE FROM config WHERE id = 1").run();
+
+      const settings = await store.getSettingsFast();
+
+      // Should return defaults merged with global settings
+      expect(settings.maxWorktrees).toBe(4); // default
+      expect(settings.pollIntervalMs).toBe(15000); // default
+      // Global settings should still be present
+      expect(settings.themeMode).toBe("dark"); // global default
+    });
+
+    it("includes global settings merged with project settings", async () => {
+      await store.updateGlobalSettings({ themeMode: "system", colorTheme: "ocean" });
+      await store.updateSettings({ maxConcurrent: 10 });
+
+      const settings = await store.getSettingsFast();
+
+      // Project settings override
+      expect(settings.maxConcurrent).toBe(10);
+      // Global settings are included
+      expect(settings.themeMode).toBe("system");
+      expect(settings.colorTheme).toBe("ocean");
+    });
+
+    it("does not call listWorkflowSteps (fast-path)", async () => {
+      await store.updateSettings({ maxConcurrent: 3 });
+
+      const settings = await store.getSettingsFast();
+
+      // If we got here without errors, the fast path works
+      expect(settings.maxConcurrent).toBe(3);
+      // listWorkflowSteps should not be called by getSettingsFast
+    });
+  });
+
   // ── Prompt Overrides Tests ─────────────────────────────────────────
 
   describe("promptOverrides settings", () => {

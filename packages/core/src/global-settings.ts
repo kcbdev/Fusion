@@ -59,6 +59,9 @@ export class GlobalSettingsStore {
   private readonly settingsPath: string;
   private readonly dir: string;
 
+  /** Write-through cache for settings. Invalidated on every updateSettings() call. */
+  private cachedSettings: GlobalSettings | null = null;
+
   /** Promise chain for serializing read-modify-write cycles */
   private lock: Promise<void> = Promise.resolve();
 
@@ -105,12 +108,19 @@ export class GlobalSettingsStore {
   }
 
   /**
-   * Read global settings from disk. Returns defaults merged with persisted values.
+   * Read global settings. Returns cached value if available, otherwise reads
+   * from disk and caches the result. This avoids repeated filesystem reads for
+   * settings that are accessed frequently.
+   *
    * If the file doesn't exist or is invalid, returns defaults without throwing.
    */
   async getSettings(): Promise<GlobalSettings> {
+    if (this.cachedSettings !== null) {
+      return this.cachedSettings;
+    }
     const parsed = await this.readRaw();
-    return { ...DEFAULT_GLOBAL_SETTINGS, ...parsed } as GlobalSettings;
+    this.cachedSettings = { ...DEFAULT_GLOBAL_SETTINGS, ...parsed } as GlobalSettings;
+    return this.cachedSettings;
   }
 
   /**
@@ -130,7 +140,9 @@ export class GlobalSettingsStore {
       const merged = { ...DEFAULT_GLOBAL_SETTINGS, ...raw, ...patch };
       await mkdir(this.dir, { recursive: true });
       await this.atomicWrite(merged as GlobalSettings);
-      return merged as GlobalSettings;
+      // Update the write-through cache
+      this.cachedSettings = merged as GlobalSettings;
+      return this.cachedSettings;
     });
   }
 
@@ -139,6 +151,15 @@ export class GlobalSettingsStore {
    */
   getSettingsPath(): string {
     return this.settingsPath;
+  }
+
+  /**
+   * Invalidate the in-memory cache. Forces the next getSettings() call to
+   * re-read from disk. Useful for testing and edge cases where external
+   * processes modify the settings file.
+   */
+  invalidateCache(): void {
+    this.cachedSettings = null;
   }
 
   // ── Private helpers ─────────────────────────────────────────────

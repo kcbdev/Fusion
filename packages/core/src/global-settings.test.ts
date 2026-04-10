@@ -270,4 +270,58 @@ describe("GlobalSettingsStore", () => {
       expect(existsSync(tmpPath)).toBe(false);
     });
   });
+
+  describe("in-memory cache", () => {
+    it("returns cached result on second getSettings() call without reading disk", async () => {
+      await store.init();
+      await writeFile(join(dir, "settings.json"), JSON.stringify({ themeMode: "light" }));
+
+      // First call reads from disk
+      const first = await store.getSettings();
+      expect(first.themeMode).toBe("light");
+
+      // Modify the file externally
+      await writeFile(join(dir, "settings.json"), JSON.stringify({ themeMode: "dark" }));
+
+      // Second call should return cached result (light), not the new disk value (dark)
+      const second = await store.getSettings();
+      expect(second.themeMode).toBe("light");
+    });
+
+    it("updateSettings() updates the cache", async () => {
+      await store.init();
+
+      // First call populates cache
+      const first = await store.getSettings();
+      expect(first.themeMode).toBe("dark");
+
+      // Update settings
+      await store.updateSettings({ themeMode: "light" });
+
+      // getSettings should return updated cached value
+      const second = await store.getSettings();
+      expect(second.themeMode).toBe("light");
+    });
+
+    it("invalidateCache() forces re-read from disk", async () => {
+      await store.init();
+      await writeFile(join(dir, "settings.json"), JSON.stringify({ themeMode: "light" }));
+
+      // First call reads from disk
+      const first = await store.getSettings();
+      expect(first.themeMode).toBe("light");
+
+      // Modify the file externally
+      await writeFile(join(dir, "settings.json"), JSON.stringify({ themeMode: "system" }));
+
+      // Without invalidation, should return cached value
+      const cached = await store.getSettings();
+      expect(cached.themeMode).toBe("light");
+
+      // After invalidation, should re-read from disk
+      store.invalidateCache();
+      const afterInvalidate = await store.getSettings();
+      expect(afterInvalidate.themeMode).toBe("system");
+    });
+  });
 });

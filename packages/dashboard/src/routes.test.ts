@@ -70,6 +70,7 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
     archiveTask: vi.fn(),
     unarchiveTask: vi.fn(),
     getSettings: vi.fn().mockResolvedValue({}),
+    getSettingsFast: vi.fn().mockResolvedValue({}),
     updateSettings: vi.fn(),
     updateGlobalSettings: vi.fn(),
     getSettingsByScope: vi.fn().mockResolvedValue({ global: {}, project: {} }),
@@ -253,7 +254,7 @@ describe("Standardized error responses", () => {
 
   it("returns 500 errors as { error } and logs to console.error", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    (store.getSettings as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("Config read failed"));
+    (store.getSettingsFast as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("Config read failed"));
 
     const res = await GET(buildApp(), "/api/settings");
 
@@ -8593,7 +8594,7 @@ describe("GET /settings", () => {
 
   it("returns persisted settings merged with defaults", async () => {
     const persistedSettings = { maxConcurrent: 5, autoMerge: false };
-    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ ...DEFAULT_SETTINGS, ...persistedSettings });
+    (store.getSettingsFast as ReturnType<typeof vi.fn>).mockResolvedValue({ ...DEFAULT_SETTINGS, ...persistedSettings });
 
     const res = await GET(buildApp(), "/api/settings");
 
@@ -8604,7 +8605,7 @@ describe("GET /settings", () => {
   });
 
   it("injects githubTokenConfigured as true when token is configured", async () => {
-    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue(DEFAULT_SETTINGS);
+    (store.getSettingsFast as ReturnType<typeof vi.fn>).mockResolvedValue(DEFAULT_SETTINGS);
 
     const res = await GET(buildApp(), "/api/settings");
 
@@ -8617,7 +8618,7 @@ describe("GET /settings", () => {
     app.use(express.json());
     app.use("/api", createApiRoutes(store)); // no githubToken option
 
-    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue(DEFAULT_SETTINGS);
+    (store.getSettingsFast as ReturnType<typeof vi.fn>).mockResolvedValue(DEFAULT_SETTINGS);
 
     const res = await GET(app, "/api/settings");
 
@@ -8626,7 +8627,7 @@ describe("GET /settings", () => {
   });
 
   it("returns 500 on store error", async () => {
-    (store.getSettings as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("Config read failed"));
+    (store.getSettingsFast as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("Config read failed"));
 
     const res = await GET(buildApp(), "/api/settings");
 
@@ -8912,7 +8913,7 @@ describe("PUT /settings", () => {
     expect(updateRes.status).toBe(200);
 
     // Then, verify GET /settings returns the persisted values
-    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue(updatedSettings);
+    (store.getSettingsFast as ReturnType<typeof vi.fn>).mockResolvedValue(updatedSettings);
     const getRes = await GET(buildApp(), "/api/settings");
 
     expect(getRes.status).toBe(200);

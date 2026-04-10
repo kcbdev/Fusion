@@ -1536,7 +1536,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   router.get("/settings", async (req, res) => {
     try {
       const scopedStore = await getScopedStore(req);
-      const settings = await scopedStore.getSettings();
+      const settings = await scopedStore.getSettingsFast();
       // Inject server-side configuration flags
       res.json({
         ...settings,

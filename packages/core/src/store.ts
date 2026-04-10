@@ -606,6 +606,31 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   /**
+   * Fast-path settings read that skips the expensive workflow steps query.
+   *
+   * This method reads only the `settings` column from the SQLite config row
+   * (avoiding `readConfig()` which always calls `listWorkflowSteps()`), and
+   * uses the cached global settings from `GlobalSettingsStore`. Use this for
+   * read-heavy paths like the settings page that don't need workflow steps.
+   *
+   * Note: Do NOT use this method when you need workflow steps — use `getSettings()` instead.
+   */
+  async getSettingsFast(): Promise<Settings> {
+    const [globalSettings, row] = await Promise.all([
+      this.globalSettingsStore.getSettings(),
+      this.db.prepare("SELECT settings FROM config WHERE id = 1").get() as { settings?: string } | undefined,
+    ]);
+
+    const projectSettings = row?.settings ? fromJson<Settings>(row.settings) : undefined;
+
+    return {
+      ...DEFAULT_SETTINGS,
+      ...globalSettings,
+      ...projectSettings,
+    };
+  }
+
+  /**
    * Get settings separated by scope. Returns both the global and
    * project-level settings independently (useful for the UI to show
    * which scope a value comes from).
