@@ -400,7 +400,12 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   }): boolean {
     if (task.column !== "in-review") return false;
     if ((task.mergeRetries ?? 0) < maxAutoMergeRetries) return false;
-    if (!task.error?.includes("Deterministic test verification failed")) return false;
+    const err = task.error ?? "";
+    const matchesVerificationError = err.includes("Deterministic test verification failed")
+      || err.includes("Deterministic build verification failed")
+      || err.includes("Build verification failed")
+      || err.includes("Test verification failed");
+    if (!matchesVerificationError) return false;
 
     return task.log?.some((entry) =>
       entry.action?.includes("[verification] test command failed (exit 0)")
@@ -409,10 +414,24 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     ) ?? false;
   }
 
-  function canAutoMergeTask(task: { mergeRetries?: number | null; column: string; paused?: boolean; status?: string | null; error?: string | null; steps?: Array<{ status: string }>; workflowStepResults?: Array<{ status: string }>; log?: Array<{ action?: string }> }): boolean {
+  // Cooldown after which a retry-exhausted task in review is eligible for one
+  // more sweep-driven merge attempt. Without this, any task that hits the retry
+  // limit with an error shape that doesn't match the buffer-heal pattern gets
+  // stranded until a human clears mergeRetries.
+  const autoMergeCooldownMs = 30 * 60 * 1000;
+
+  function isRetryCooldownElapsed(task: { updatedAt?: string | null }): boolean {
+    if (!task.updatedAt) return false;
+    const updated = Date.parse(task.updatedAt);
+    if (Number.isNaN(updated)) return false;
+    return Date.now() - updated >= autoMergeCooldownMs;
+  }
+
+  function canAutoMergeTask(task: { mergeRetries?: number | null; column: string; paused?: boolean; status?: string | null; error?: string | null; steps?: Array<{ status: string }>; workflowStepResults?: Array<{ status: string }>; log?: Array<{ action?: string }>; updatedAt?: string | null }): boolean {
     if (getTaskMergeBlocker(task as any)) return false;
     return (task.mergeRetries ?? 0) < maxAutoMergeRetries
-      || hasAutoHealableVerificationBufferFailure(task);
+      || hasAutoHealableVerificationBufferFailure(task)
+      || isRetryCooldownElapsed(task);
   }
 
   /** Enqueue a task for auto-merge if not already queued/active. */
@@ -452,6 +471,12 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
               "Auto-healing stale deterministic verification buffer failure; retrying merge verification",
             );
             await store.updateTask(taskId, { mergeRetries: 0, error: null, status: null });
+          } else if ((task.mergeRetries ?? 0) >= maxAutoMergeRetries && isRetryCooldownElapsed(task as any)) {
+            await store.logEntry(
+              taskId,
+              `Auto-merge retry cooldown elapsed (${Math.round(autoMergeCooldownMs / 60000)}m idle); resetting retries for another attempt`,
+            );
+            await store.updateTask(taskId, { mergeRetries: 0 });
           }
           const mergeStrategy = getMergeStrategy(settings);
           if (mergeStrategy === "pull-request") {
