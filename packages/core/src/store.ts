@@ -1323,6 +1323,15 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const slim = options?.slim ?? false;
     const columnFilter = options?.column;
 
+    // Slim mode drops ONLY the agent log column. On busy boards `log` accounts
+    // for ~99% of the row payload (60+ MB across 1200 tasks); every other JSON
+    // column combined is under 500 KB and is needed by the board UI:
+    //   - `steps`            → step progress badge on TaskCard
+    //   - `comments`         → comment count badge on TaskCard
+    //   - `workflowStepResults` → workflow status indicators
+    //   - `steeringComments` → steering badge
+    // Use `getTask(id)` to load the full row (including `log`) for the
+    // TaskDetailModal's Activity tab and Agent Log subview.
     const slimColumns = `
       id, title, description, "column", status, size, reviewLevel, currentStep,
       worktree, blockedBy, paused, baseBranch, branch, baseCommitSha,
@@ -1332,7 +1341,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       mergeRetries, stuckKillCount, recoveryRetryCount, nextRecoveryAt,
       error, summary, thinkingLevel,
       createdAt, updatedAt, columnMovedAt,
-      dependencies,
+      dependencies, steps, comments, workflowStepResults, steeringComments,
       attachments, prInfo, issueInfo, mergeDetails,
       breakIntoSubtasks, enabledWorkflowSteps, modifiedFiles,
       missionId, sliceId, assignedAgentId, assigneeUserId,
