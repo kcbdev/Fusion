@@ -1,0 +1,40 @@
+{
+  "featureId": "FEAT-004-FIX-001",
+  "reviewedAt": "2026-04-11T20:30:00.000Z",
+  "commitId": "98bf55c3",
+  "transcriptSkeletonReviewed": false,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The fix implements the three blocking issues from FEAT-004: parseValidationResult is no longer a stub, notifyValidationComplete now passes taskId instead of featureId, and recoverActiveMissions now transitions validating features. However, the test file does not cover the validation paths (pass/fail/blocked/error), fix generation, retry budget, or recovery as specified in the feature description. The tests only cover basic lifecycle (start/stop), processTaskOutcome skip conditions, recoverActiveMissions error handling, and one error handling case.",
+    "issues": [
+      {
+        "file": "packages/engine/src/mission-execution-loop.test.ts",
+        "line": 1,
+        "severity": "blocking",
+        "description": "The feature description explicitly states 'Add comprehensive unit tests for MissionExecutionLoop covering all validation paths (pass/fail/blocked/error), fix generation, retry budget, and recovery'. However, the test file (491 lines) only contains: (1) lifecycle tests - start/stop idempotency, (2) processTaskOutcome tests - skip conditions and auto-pass when no assertions, (3) recoverActiveMissions tests - error handling and edge cases, (4) one error handling test. There are NO tests for: parseValidationResult with actual AI response parsing (pass/fail/blocked/error outcomes), fix generation via createGeneratedFixFeature, retry budget enforcement, or the actual recovery logic transitioning features from validating/needs_fix states."
+      },
+      {
+        "file": "packages/engine/src/mission-execution-loop.test.ts",
+        "line": 360,
+        "severity": "non_blocking",
+        "description": "recoverActiveMissions tests do not verify that transitionLoopState is actually called with the correct arguments when recovering a validating feature. Tests only verify that the function doesn't crash, not that the recovery actually transitions features."
+      },
+      {
+        "file": "packages/engine/src/mission-execution-loop.test.ts",
+        "line": 360,
+        "severity": "non_blocking",
+        "description": "recoverActiveMissions tests do not test the needs_fix recovery path that calls processTaskOutcome when the fix task is complete."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The feature description in the fix commit message and the task description both say 'Add comprehensive unit tests for MissionExecutionLoop covering all validation paths (pass/fail/blocked/error), fix generation, retry budget, and recovery'. However, the actual test file does not cover these scenarios. This appears to be a gap between the stated requirements and implementation.",
+      "evidence": "Feature description states 'Add comprehensive unit tests for MissionExecutionLoop covering all validation paths (pass/fail/blocked/error), fix generation, retry budget, and recovery' but test file only has basic lifecycle/error tests"
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/execution-loop/scrutiny/reviews/FEAT-004.json",
+  "summary": "FEAT-004-FIX-001 addresses all three blocking issues from the FEAT-004 review: (1) parseValidationResult now implements actual AI response parsing with extractResponseTextFromSession, extractJsonCandidate, repairJson, validateValidationStatus, extractAssertionResults, and createErrorValidationResult helper methods; (2) notifyValidationComplete now correctly passes feature.taskId to handleTaskCompletion in dashboard.ts, serve.ts, and in-process-runtime.ts; (3) recoverActiveMissions now calls transitionLoopState to transition validating features back to implementing and calls processTaskOutcome for both validating and needs_fix features with linked tasks. HOWEVER, the test file does not fulfill the stated requirement to add comprehensive tests covering all validation paths (pass/fail/blocked/error), fix generation, retry budget, and recovery. The existing tests only cover basic lifecycle and error handling edge cases. The fix is incomplete with respect to the test coverage specified in the feature description."
+}

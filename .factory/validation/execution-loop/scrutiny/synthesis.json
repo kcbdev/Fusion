@@ -1,13 +1,13 @@
 {
   "milestone": "execution-loop",
-  "round": 1,
+  "round": 3,
   "status": "fail",
   "validatorsRun": {
     "test": {
-      "passed": false,
+      "passed": true,
       "command": "pnpm test",
-      "exitCode": 1,
-      "note": "Test suite failed due to missing MissionExecutionLoop mock in serve.test.ts. Fix applied to add the mock, which resolves the immediate test failure. However, the broader test suite has pre-existing failures in merger.test.ts (buffer handling tests) that are unrelated to execution-loop feature."
+      "exitCode": 0,
+      "note": "Full test suite passes (6548+ tests across all packages). Unrelated ChatView.tsx type error was fixed by restoring pre-existing committed state."
     },
     "typecheck": {
       "passed": true,
@@ -18,58 +18,33 @@
       "passed": false,
       "command": "pnpm lint",
       "exitCode": 1,
-      "note": "Lint has 4217 pre-existing errors (mostly @typescript-eslint/no-explicit-any in test files and no-undef in .mjs scripts). These errors predate the execution-loop work and are not introduced by FEAT-004. Only 16 auto-fixable errors were fixed."
+      "note": "4291 pre-existing lint errors (4271 @typescript-eslint/no-explicit-any in test files, no-undef in .mjs scripts). These errors predate execution-loop work and are not introduced by FEAT-004 or FEAT-004-FIX-001. Not blocking since they are pre-existing and not in scope."
     }
   },
   "reviewsSummary": {
     "total": 1,
     "passed": 0,
     "failed": 1,
-    "failedFeatures": ["FEAT-004"]
+    "failedFeatures": ["FEAT-004-FIX-001"]
   },
   "blockingIssues": [
     {
-      "featureId": "FEAT-004",
+      "featureId": "FEAT-004-FIX-001",
       "severity": "blocking",
-      "file": "packages/engine/src/mission-execution-loop.ts",
-      "line": 317,
-      "description": "parseValidationResult() is a stub that always returns { status: 'pass', assertions: all passed }. The comment explicitly says 'For now, return a default pass result since we don't have the actual parsing logic implemented'. This means validation failures are never detected, handleValidationFail is never called, and fix features are never generated. Violates VAL-EL-006 (validation failure creates fix feature) and VAL-EL-007 (validation blocked)."
-    },
-    {
-      "featureId": "FEAT-004",
-      "severity": "blocking",
-      "file": "packages/engine/src/mission-execution-loop.ts",
-      "line": 480,
-      "description": "notifyValidationComplete callback passes featureId to missionAutopilot.handleTaskCompletion(featureId), but handleTaskCompletion expects a taskId parameter. Inside MissionAutopilot.handleTaskCompletion, it calls getFeatureByTaskId(taskId) which receives a featureId and returns null, causing early-return without action. This breaks autopilot coordination for loop states (VAL-EL-012)."
-    },
-    {
-      "featureId": "FEAT-004",
-      "severity": "blocking",
-      "file": "packages/engine/src/mission-execution-loop.ts",
-      "line": 134,
-      "description": "recoverActiveMissions() only logs features in validating/needs_fix states but performs no state transitions or re-triggers. Features in 'validating' state remain stuck with no recovery path unless a new task completion event fires. Violates VAL-EL-009 which requires recovery to 're-enqueue pending validations'."
+      "file": "packages/engine/src/mission-execution-loop.test.ts",
+      "line": 1,
+      "description": "The feature description explicitly states 'Add comprehensive unit tests for MissionExecutionLoop covering all validation paths (pass/fail/blocked/error), fix generation, retry budget, and recovery'. However, the test file (491 lines) only contains: (1) lifecycle tests - start/stop idempotency, (2) processTaskOutcome tests - skip conditions and auto-pass when no assertions, (3) recoverActiveMissions tests - error handling and edge cases, (4) one error handling test. There are NO tests for: parseValidationResult with actual AI response parsing (pass/fail/blocked/error outcomes), fix generation via createGeneratedFixFeature, retry budget enforcement, or the actual recovery logic transitioning features from validating/needs_fix states. This is a stated requirement in the feature description that was not fulfilled."
     }
   ],
   "appliedUpdates": [],
   "suggestedGuidanceUpdates": [
     {
       "target": "AGENTS.md",
-      "suggestion": "Clarify TDD enforcement: AGENTS.md specifies 'write tests BEFORE implementation (TDD)' but no test file was created for MissionExecutionLoop despite the requirement. Consider requiring workers to show test file creation in the same commit as implementation, or adding a validation step that checks for test files.",
-      "evidence": "FEAT-004 handoff shows tests.added: [] despite AGENTS.md requiring TDD; mission-execution-loop.test.ts referenced in feature spec but never created",
+      "suggestion": "Clarify that 'comprehensive unit tests' mentioned in a feature description is an enforceable deliverable, not just guidance. Workers should either implement the stated test coverage or formally scope-reduce the testing requirement before marking the feature complete.",
+      "evidence": "FEAT-004-FIX-001 description explicitly required 'comprehensive unit tests for MissionExecutionLoop covering all validation paths (pass/fail/blocked/error), fix generation, retry budget, and recovery' but no such tests were added. The reviewer correctly identified this as a gap between stated requirements and implementation.",
       "isSystemic": true
-    },
-    {
-      "target": "skills/backend-worker",
-      "suggestion": "Add guidance on AI response parsing: The worker skill procedure was followed correctly but the backend-worker skill does not document how to extract structured JSON from AI agent sessions. The parseValidationResult stub was left unimplemented due to this knowledge gap. Consider adding a library entry or skill section on 'Extracting structured data from AI sessions'.",
-      "evidence": "parseValidationResult at mission-execution-loop.ts:317 returns hardcoded pass; comment acknowledges 'don't have actual parsing logic'; parseValidatorResponse methods in fn-1587 worktree not committed",
-      "isSystemic": false
     }
   ],
-  "rejectedObservations": [
-    {
-      "observation": "runId='unknown' fallback in createGeneratedFixFeature call would throw (line 492)",
-      "reason": "Non-blocking: This code path is unreachable because parseValidationResult always returns 'pass', so the catch block with createGeneratedFixFeature is never executed. The issue would only manifest if parseValidationResult were fixed, but it would also require fix in the runId fallback logic."
-    }
-  ],
-  "previousRound": null
+  "rejectedObservations": [],
+  "previousRound": ".factory/validation/execution-loop/scrutiny/synthesis.json (round 2)"
 }
