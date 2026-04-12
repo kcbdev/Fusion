@@ -18770,13 +18770,18 @@ html .column.drag-over * {
 /* Max concurrent display */
 .executor-status-bar__max {
   font-family: var(--font-mono);
+  font-weight: 600;
   color: var(--text-dim);
+  line-height: 1;
 }
 
 /* Separator between count and max */
 .executor-status-bar__separator {
+  font-family: var(--font-mono);
+  font-weight: 600;
   color: var(--text-dim);
   margin: 0 2px;
+  line-height: 1;
 }
 
 /* Divider between segments */
