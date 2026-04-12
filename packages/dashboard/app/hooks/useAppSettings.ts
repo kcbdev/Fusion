@@ -31,7 +31,7 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
   const [globalPaused, setGlobalPaused] = useState(false);
   const [enginePaused, setEnginePaused] = useState(false);
   const [taskStuckTimeoutMs, setTaskStuckTimeoutMs] = useState<number | undefined>(undefined);
-  const [showQuickChatFAB, setShowQuickChatFAB] = useState(true);
+  const [showQuickChatFAB, setShowQuickChatFAB] = useState(false);
   const [githubTokenConfigured, setGithubTokenConfigured] = useState(false);
 
   /**
@@ -54,7 +54,7 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
       setEnginePaused(Boolean(settings.enginePaused));
       setGithubTokenConfigured(Boolean(settings.githubTokenConfigured));
       setTaskStuckTimeoutMs(settings.taskStuckTimeoutMs);
-      setShowQuickChatFAB(settings.showQuickChatFAB !== false);
+      setShowQuickChatFAB(settings.showQuickChatFAB === true);
     } catch {
       // Keep current state on fetch failure.
     }

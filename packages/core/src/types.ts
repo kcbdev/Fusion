@@ -1272,7 +1272,7 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   reflectionIntervalMs: 3_600_000,
   reflectionAfterTask: true,
   reviewHandoffPolicy: "disabled",
-  showQuickChatFAB: true,
+  showQuickChatFAB: false,
 };
 
 /**

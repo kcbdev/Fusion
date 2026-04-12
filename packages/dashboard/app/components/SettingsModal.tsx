@@ -659,7 +659,7 @@ export function SettingsModal({
                 <input
                   id="showQuickChatFAB"
                   type="checkbox"
-                  checked={form.showQuickChatFAB !== false}
+                  checked={form.showQuickChatFAB === true}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, showQuickChatFAB: e.target.checked }))
                   }

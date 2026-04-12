@@ -385,4 +385,207 @@ describe("QuickChatFAB", () => {
       expect(addToast).toHaveBeenCalledWith("Failed to send message", "error");
     });
   });
+
+  // Drag-related tests
+  describe("draggable behavior", () => {
+    const localStorageMock = {
+      store: {} as Record<string, string>,
+      getItem: vi.fn((key: string) => localStorageMock.store[key] ?? null),
+      setItem: vi.fn((key: string, value: string) => { localStorageMock.store[key] = value; }),
+      removeItem: vi.fn((key: string) => { delete localStorageMock.store[key]; }),
+      clear: vi.fn(() => { localStorageMock.store = {}; }),
+    };
+
+    beforeEach(() => {
+      vi.stubGlobal("localStorage", localStorageMock);
+      localStorageMock.store = {};
+      localStorageMock.getItem.mockClear();
+      localStorageMock.setItem.mockClear();
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("FAB can be dragged to a new position", async () => {
+      render(<QuickChatFAB addToast={addToast} projectId="proj-123" />);
+
+      const fab = screen.getByTestId("quick-chat-fab");
+
+      // Simulate drag: pointerdown -> pointermove -> pointerup
+      const fabRect = { left: window.innerWidth - 72, top: window.innerHeight - 72, width: 48, height: 48 };
+      vi.spyOn(fab, "getBoundingClientRect").mockReturnValue(fabRect as DOMRect);
+
+      // Start drag
+      fireEvent.pointerDown(fab, {
+        clientX: fabRect.left + 24,
+        clientY: fabRect.top + 24,
+        button: 0,
+        pointerId: 1,
+      });
+
+      // Verify data-dragging attribute is set
+      expect(fab.getAttribute("data-dragging")).toBe("true");
+
+      // Move pointer (drag 50px to the left, which means increasing right offset)
+      fireEvent.pointerMove(fab, {
+        clientX: fabRect.left + 24 - 50,
+        clientY: fabRect.top + 24,
+        pointerId: 1,
+      });
+
+      // End drag
+      fireEvent.pointerUp(fab, {
+        clientX: fabRect.left + 24 - 50,
+        clientY: fabRect.top + 24,
+        button: 0,
+        pointerId: 1,
+      });
+
+      // Verify localStorage was called with the new position
+      expect(localStorageMock.setItem).toHaveBeenCalledWith(
+        "fusion-quick-chat-position-proj-123",
+        expect.stringContaining('"x":'),
+      );
+    });
+
+    it("small movement (< 5px) is treated as click not drag", async () => {
+      const onOpenChange = vi.fn();
+      render(<QuickChatFAB addToast={addToast} open={false} onOpenChange={onOpenChange} projectId="proj-123" />);
+
+      const fab = screen.getByTestId("quick-chat-fab");
+
+      // Simulate click: pointerDown + small pointerMove (< 5px) + pointerUp + click
+      // Since movement is < 5px, this should be treated as a click, not a drag
+      fireEvent.pointerDown(fab, {
+        clientX: 100,
+        clientY: 100,
+        button: 0,
+        pointerId: 1,
+      });
+
+      // Small movement (less than 5px threshold)
+      fireEvent.pointerMove(fab, {
+        clientX: 102,
+        clientY: 100,
+        pointerId: 1,
+      });
+
+      fireEvent.pointerUp(fab, {
+        clientX: 102,
+        clientY: 100,
+        button: 0,
+        pointerId: 1,
+      });
+
+      // jsdom doesn't fire click automatically after pointerup with movement < threshold,
+      // so we simulate the click event that would fire in a real browser
+      fireEvent.click(fab);
+
+      // Should have toggled panel (treated as click)
+      expect(onOpenChange).toHaveBeenCalledWith(true);
+
+      // Should NOT have saved position to localStorage (was a click, not a drag)
+      expect(localStorageMock.setItem).not.toHaveBeenCalled();
+    });
+
+    it("FAB position is loaded from localStorage on mount", async () => {
+      // Pre-populate localStorage with saved position
+      localStorageMock.store["fusion-quick-chat-position-proj-123"] = JSON.stringify({ x: 100, y: 200 });
+
+      render(<QuickChatFAB addToast={addToast} projectId="proj-123" />);
+
+      const fab = screen.getByTestId("quick-chat-fab");
+
+      // Verify the FAB has the saved position
+      expect(fab.style.right).toBe("100px");
+      expect(fab.style.bottom).toBe("200px");
+
+      // Verify localStorage was read
+      expect(localStorageMock.getItem).toHaveBeenCalledWith("fusion-quick-chat-position-proj-123");
+    });
+
+    it("FAB position is clamped to viewport boundaries", async () => {
+      render(<QuickChatFAB addToast={addToast} projectId="proj-123" />);
+
+      const fab = screen.getByTestId("quick-chat-fab");
+
+      // Simulate drag to extreme position (off viewport)
+      fireEvent.pointerDown(fab, {
+        clientX: 100,
+        clientY: 100,
+        button: 0,
+        pointerId: 1,
+      });
+
+      // Try to drag way off screen (negative coordinates)
+      fireEvent.pointerMove(fab, {
+        clientX: -1000,
+        clientY: -1000,
+        pointerId: 1,
+      });
+
+      fireEvent.pointerUp(fab, {
+        clientX: -1000,
+        clientY: -1000,
+        button: 0,
+        pointerId: 1,
+      });
+
+      // Position should be clamped to at least 48px from edges
+      const savedPosition = JSON.parse(localStorageMock.setItem.mock.calls[0]?.[1] || "{}");
+      expect(savedPosition.x).toBeGreaterThanOrEqual(48);
+      expect(savedPosition.y).toBeGreaterThanOrEqual(48);
+    });
+
+    it("touch events work for dragging", async () => {
+      render(<QuickChatFAB addToast={addToast} projectId="proj-123" />);
+
+      const fab = screen.getByTestId("quick-chat-fab");
+
+      // Simulate touch drag
+      fireEvent.pointerDown(fab, {
+        clientX: 100,
+        clientY: 100,
+        button: 0,
+        pointerId: 1,
+        pointerType: "touch",
+      });
+
+      // Verify data-dragging attribute is set
+      expect(fab.getAttribute("data-dragging")).toBe("true");
+
+      // Move touch
+      fireEvent.pointerMove(fab, {
+        clientX: 50,
+        clientY: 100,
+        pointerId: 1,
+        pointerType: "touch",
+      });
+
+      // End touch
+      fireEvent.pointerUp(fab, {
+        clientX: 50,
+        clientY: 100,
+        button: 0,
+        pointerId: 1,
+        pointerType: "touch",
+      });
+
+      // Position should have been saved
+      expect(localStorageMock.setItem).toHaveBeenCalled();
+    });
+
+    it("panel position anchors relative to FAB position", async () => {
+      render(<QuickChatFAB addToast={addToast} projectId="proj-123" open={true} />);
+
+      const panel = screen.getByTestId("quick-chat-panel");
+      const fab = screen.getByTestId("quick-chat-fab");
+
+      // Initial positions (FAB at x=24, y=24+footer, panel at x=24, y=84+footer = FAB.y + 60)
+      const fabBottom = parseFloat(fab.style.bottom);
+      const panelBottom = parseFloat(panel.style.bottom);
+      expect(panelBottom - fabBottom).toBe(60);
+    });
+  });
 });

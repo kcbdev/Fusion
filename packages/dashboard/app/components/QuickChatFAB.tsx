@@ -20,6 +20,182 @@ function getAgentLabel(agent: Agent): string {
   return `${base} (${agent.role})`;
 }
 
+/** Position type for FAB positioning (right and bottom offsets from viewport edges) */
+interface Position {
+  x: number;
+  y: number;
+}
+
+/**
+ * Custom hook for draggable behavior.
+ * Positions are stored as right/bottom offsets (matching the current positioning model).
+ * Position persists in localStorage keyed per-project.
+ * @param projectId - Optional project ID for localStorage key
+ * @param externalDidDragRef - External ref to track drag state for click detection
+ */
+function useDraggable(projectId?: string, externalDidDragRef?: React.MutableRefObject<boolean>) {
+  // Get executor footer height from CSS variable
+  const getFooterHeight = useCallback((): number => {
+    if (typeof window === "undefined") return 0;
+    const height = getComputedStyle(document.documentElement)
+      .getPropertyValue("--executor-footer-height")
+      .trim();
+    return height ? parseFloat(height) || 0 : 0;
+  }, []);
+
+  // Default positions
+  const getDefaultPosition = useCallback((): Position => {
+    // Mobile uses smaller default offset (16px vs 24px)
+    if (typeof window !== "undefined" && window.innerWidth <= 768) {
+      return { x: 16, y: 16 + getFooterHeight() };
+    }
+    return { x: 24, y: 24 + getFooterHeight() };
+  }, [getFooterHeight]);
+
+  // Load position from localStorage on mount
+  const [position, setPosition] = useState<Position>(() => {
+    if (typeof window === "undefined") return getDefaultPosition();
+
+    const storageKey = `fusion-quick-chat-position-${projectId || "default"}`;
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved) as Position;
+        // Validate the parsed position has valid numbers
+        if (typeof parsed.x === "number" && typeof parsed.y === "number" && !isNaN(parsed.x) && !isNaN(parsed.y)) {
+          return parsed;
+        }
+      }
+    } catch {
+      // Ignore parse errors, fall back to default
+    }
+    return getDefaultPosition();
+  });
+
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef<{ x: number; y: number; pointerX: number; pointerY: number } | null>(null);
+  // Use external ref if provided, otherwise create internal one
+  const didDragRef = externalDidDragRef ?? useRef(false);
+
+  // Clamp position to keep FAB within viewport
+  const clampPosition = useCallback((pos: Position): Position => {
+    if (typeof window === "undefined") return pos;
+
+    const fabSize = 48; // FAB is 48x48px
+    const edgeMargin = 48; // Keep at least 48px from viewport edges
+    // Account for mobile nav height when clamping bottom
+    const mobileNavHeight = window.innerWidth <= 768 ? 44 : 0;
+    // Account for executor footer height on desktop
+    const footerHeight = window.innerWidth > 768 ? getFooterHeight() : 0;
+
+    const maxX = window.innerWidth - fabSize - edgeMargin;
+    const maxY = window.innerHeight - fabSize - edgeMargin - mobileNavHeight - footerHeight;
+
+    return {
+      x: Math.max(edgeMargin, Math.min(maxX, pos.x)),
+      y: Math.max(edgeMargin, Math.min(maxY, pos.y)),
+    };
+  }, [getFooterHeight]);
+
+  // Persist position to localStorage
+  const savePosition = useCallback((pos: Position) => {
+    if (typeof window === "undefined") return;
+
+    const storageKey = `fusion-quick-chat-position-${projectId || "default"}`;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(pos));
+    } catch {
+      // Ignore storage errors
+    }
+  }, [projectId]);
+
+  // Handle pointer down (start drag)
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    // Only handle primary button (left click) or touch
+    if (e.button !== 0 && e.pointerType === "mouse") return;
+
+    // Check if this is a click on an interactive element inside the FAB (not the FAB itself)
+    const target = e.target as HTMLElement;
+    const fabButton = target.closest(".quick-chat-fab") as HTMLElement | null;
+    if (!fabButton) return;
+
+    e.preventDefault();
+    // setPointerCapture may not exist in jsdom/tests
+    if (typeof fabButton.setPointerCapture === "function") {
+      fabButton.setPointerCapture(e.pointerId);
+    }
+
+    dragStartRef.current = {
+      x: position.x,
+      y: position.y,
+      pointerX: e.clientX,
+      pointerY: e.clientY,
+    };
+    didDragRef.current = false;
+    setIsDragging(true);
+
+    // Prevent text selection during drag
+    document.body.style.userSelect = "none";
+  }, [position]);
+
+  // Handle pointer move (during drag)
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragStartRef.current || !isDragging) return;
+
+    const deltaX = e.clientX - dragStartRef.current.pointerX;
+    const deltaY = e.clientY - dragStartRef.current.pointerY;
+
+    // Check if we've moved enough to be considered a drag (>= 5px)
+    if (Math.abs(deltaX) >= 5 || Math.abs(deltaY) >= 5) {
+      didDragRef.current = true;
+    }
+
+    if (didDragRef.current) {
+      // Move in the opposite direction (dragging right moves FAB right, which means reducing right offset)
+      const newX = dragStartRef.current.x - deltaX;
+      const newY = dragStartRef.current.y - deltaY;
+
+      const clamped = clampPosition({ x: newX, y: newY });
+      setPosition(clamped);
+    }
+  }, [isDragging, clampPosition]);
+
+  // Handle pointer up (end drag)
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    if (!dragStartRef.current) return;
+
+    const fabButton = (e.target as HTMLElement).closest(".quick-chat-fab") as HTMLElement | null;
+    if (fabButton && typeof fabButton.releasePointerCapture === "function") {
+      fabButton.releasePointerCapture(e.pointerId);
+    }
+
+    setIsDragging(false);
+
+    // Restore text selection
+    document.body.style.userSelect = "";
+
+    // If we didn't drag (movement < 5px), this was a click - caller handles toggle
+    if (!didDragRef.current) {
+      dragStartRef.current = null;
+      return;
+    }
+
+    // Save position to localStorage
+    savePosition(position);
+
+    dragStartRef.current = null;
+    didDragRef.current = false;
+  }, [position, savePosition]);
+
+  return {
+    position,
+    isDragging,
+    handlePointerDown,
+    handlePointerMove,
+    handlePointerUp,
+  };
+}
+
 export function QuickChatFAB({ projectId, addToast, showFAB = true, open, onOpenChange }: QuickChatFABProps) {
   const { agents } = useAgents(projectId);
   // Internal state for uncontrolled mode, controlled state when open prop is provided
@@ -37,6 +213,18 @@ export function QuickChatFAB({ projectId, addToast, showFAB = true, open, onOpen
     : setInternalOpen;
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
   const [messageInput, setMessageInput] = useState("");
+
+  // Track if we just finished a drag (to prevent click from firing after drag)
+  const didDragRef = useRef(false);
+
+  // Draggable hook for FAB positioning
+  const {
+    position,
+    isDragging,
+    handlePointerDown,
+    handlePointerMove,
+    handlePointerUp,
+  } = useDraggable(projectId, didDragRef);
 
   // Chat session hook
   const {
@@ -141,9 +329,23 @@ export function QuickChatFAB({ projectId, addToast, showFAB = true, open, onOpen
     void handleSendMessage();
   }, [handleSendMessage]);
 
+  // Handle FAB click - only toggle if this was a click (not a drag)
+  // Reset didDragRef after checking to prevent double-toggle
+  const handleFABClick = useCallback(() => {
+    if (didDragRef.current) {
+      // Was a drag, don't toggle
+      didDragRef.current = false;
+      return;
+    }
+    setIsOpen((prev) => !prev);
+  }, []);
+
   if (agents.length === 0) {
     return null;
   }
+
+  // Calculate panel position: 60px above the FAB (FAB is 48px tall + 12px gap)
+  const panelY = position.y + 60;
 
   return (
     <>
@@ -154,14 +356,24 @@ export function QuickChatFAB({ projectId, addToast, showFAB = true, open, onOpen
           className="quick-chat-fab"
           aria-label="Open quick chat"
           data-testid="quick-chat-fab"
-          onClick={() => setIsOpen((open) => !open)}
+          data-dragging={isDragging ? "true" : "false"}
+          style={{ right: position.x, bottom: position.y }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onClick={handleFABClick}
         >
           <MessageSquare size={24} />
         </button>
       )}
 
       {isOpen && (
-        <div className="quick-chat-panel" ref={panelRef} data-testid="quick-chat-panel">
+        <div
+          className="quick-chat-panel"
+          ref={panelRef}
+          data-testid="quick-chat-panel"
+          style={{ right: position.x, bottom: panelY }}
+        >
           <div className="quick-chat-panel-header">
             <h3>Quick Chat</h3>
             <button
