@@ -1080,6 +1080,87 @@ describe("PlanningModeModal", () => {
         vi.useRealTimers();
       }
     });
+
+    it("connects to stream when resuming awaiting_input session to receive real-time updates", async () => {
+      // This test verifies the fix for the mismatch where a session was advertised as
+      // needing input but the resume path initially entered loading state.
+      // The modal should connect to the stream for awaiting_input sessions to receive
+      // real-time updates (thinking output, next question, etc.).
+      const resumedQuestion: PlanningQuestion = {
+        id: "q-priority",
+        type: "single_select",
+        question: "What's your priority?",
+        options: [
+          { id: "speed", label: "Speed" },
+          { id: "quality", label: "Quality" },
+          { id: "cost", label: "Cost" },
+        ],
+      };
+
+      mockFetchAiSession.mockResolvedValueOnce({
+        id: "session-awaiting-stream-1",
+        type: "planning",
+        status: "awaiting_input",
+        title: "Resume with stream",
+        inputPayload: JSON.stringify({ initialPlan: "Build planning with stream" }),
+        conversationHistory: "[]",
+        currentQuestion: JSON.stringify(resumedQuestion),
+        result: null,
+        thinkingOutput: "",
+        error: null,
+        projectId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      // Track stream connections
+      let streamConnectedSessionId: string | null = null;
+      mockConnectPlanningStream.mockImplementationOnce((sessionId: string, _projectId: string | undefined, _handlers: any) => {
+        streamConnectedSessionId = sessionId;
+        return {
+          close: vi.fn(),
+          isConnected: vi.fn().mockReturnValue(true),
+        };
+      });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          resumeSessionId="session-awaiting-stream-1"
+        />,
+      );
+
+      // Flush React state updates from the resume effect
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      // Session should be fetched
+      await waitFor(() => {
+        expect(mockFetchAiSession).toHaveBeenCalledWith("session-awaiting-stream-1");
+      });
+
+      // Question should appear immediately from session data
+      await waitFor(() => {
+        expect(screen.getByText("What's your priority?")).toBeDefined();
+      });
+
+      // Modal should connect to the stream for real-time updates
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+
+      // Verify stream connection was established
+      expect(mockConnectPlanningStream).toHaveBeenCalled();
+      expect(streamConnectedSessionId).toBe("session-awaiting-stream-1");
+
+      // Should NOT be stuck in loading state
+      expect(screen.queryByText("Generating next question...")).toBeNull();
+    });
   });
 
   describe("Summary view", () => {

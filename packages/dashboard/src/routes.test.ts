@@ -7485,6 +7485,59 @@ describe("Planning Mode Routes", () => {
         expect(streamRes.body).toContain("id: 2");
         expect(streamRes.body).toContain("event: complete");
       });
+
+      it("emits catch-up question event for awaiting_input sessions", async () => {
+        // This test verifies the fix for the mismatch where a session was advertised as
+        // needing input but the resume path initially entered loading state.
+        // When a session is already awaiting input, the stream should emit a catch-up
+        // question event immediately so late subscribers don't miss the transition.
+        const startRes = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start",
+          JSON.stringify({ initialPlan: "Catch-up test planning" }),
+          { "Content-Type": "application/json" },
+        );
+        const sessionId = startRes.body.sessionId as string;
+
+        // Manually simulate an awaiting_input session by updating the session state
+        // In the real app, this happens via respondToPlanning which sets currentQuestion
+        const { planningStreamManager, getSession } = await import("./planning.js");
+        const session = getSession(sessionId);
+        expect(session).toBeDefined();
+
+        // Simulate the session being in awaiting_input state with a question
+        const mockQuestion = {
+          id: "q-catchup",
+          type: "text",
+          question: "What is your preference?",
+          description: "Please choose",
+        };
+        // @ts-ignore - accessing internal state for testing
+        session!.currentQuestion = mockQuestion;
+
+        // Broadcast a complete event after a short delay so the stream ends
+        setTimeout(() => {
+          planningStreamManager.broadcast(sessionId, { type: "complete" });
+        }, 10);
+
+        // Connect to the stream - should receive catch-up question immediately
+        const streamRes = await REQUEST(
+          buildApp(),
+          "GET",
+          `/api/planning/${sessionId}/stream`,
+        );
+
+        expect(streamRes.status).toBe(200);
+        expect(typeof streamRes.body).toBe("string");
+
+        // Should emit the question as a catch-up event
+        expect(streamRes.body).toContain("event: question");
+        expect(streamRes.body).toContain("What is your preference?");
+
+        // Should also emit complete
+        expect(streamRes.body).toContain("event: complete");
+      });
     });
 
     describe("POST /planning/respond", () => {

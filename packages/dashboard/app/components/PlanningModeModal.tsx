@@ -359,6 +359,9 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           const question = JSON.parse(session.currentQuestion);
           setView({ type: "question", session: { sessionId: resumeSessionId, currentQuestion: question, summary: null } });
           if (session.thinkingOutput) setStreamingOutput(session.thinkingOutput);
+          // Connect to stream for real-time updates (e.g., thinking output, next question)
+          // The server will emit a catch-up question event if the client missed it
+          connectToPlanningStream(resumeSessionId);
         } else if (session.status === "complete" && session.result) {
           clearPlanningDescription(projectId);
           const summary = JSON.parse(session.result);

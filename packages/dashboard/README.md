@@ -34,6 +34,7 @@ AI-guided interactive planning for creating well-specified tasks from high-level
 - **Dependency Selection**: Toggle existing tasks as dependencies
 - **Keyboard Navigation**: Tab through options, Enter to submit, Escape to close
 - **Mobile-Safe Inputs**: Text inputs (initial plan, question responses, summary description) use 16px font size on mobile viewports to prevent browser zoom-on-focus
+- **Background Resume with Catch-up**: Planning sessions can be sent to background and resumed later. When resuming a session that's already awaiting input, the UI immediately displays the current question and connects to the server stream for real-time updates. The server emits a catch-up question event for late subscribers, ensuring the UI never gets stuck in a "loading" state when the backend already has a next question.
 
 **API Endpoints**:
 - `POST /api/planning/start` - Begin planning session (`{ initialPlan }`)

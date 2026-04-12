@@ -7332,6 +7332,26 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         return;
       }
 
+      // Catch-up for awaiting_input sessions: emit current question immediately
+      // so late subscribers don't miss the transition and see the question without delay
+      if (session.currentQuestion) {
+        const existing = planningStreamManager.getBufferedEvents(sessionId, 0);
+        const lastQuestionEvent = [...existing].reverse().find((event) => event.event === "question");
+        const questionEventId = lastQuestionEvent?.id
+          ?? planningStreamManager.broadcast(sessionId, {
+            type: "question",
+            data: session.currentQuestion,
+          });
+
+        if (lastEventId === undefined || questionEventId > lastEventId) {
+          if (!writeSSEEvent(res, "question", JSON.stringify(session.currentQuestion), questionEventId)) {
+            res.end();
+            return;
+          }
+        }
+        // Don't return — subscribe to continue receiving events (thinking, next question, etc.)
+      }
+
       // Subscribe to session events
       const unsubscribe = planningStreamManager.subscribe(sessionId, (event, eventId) => {
         const data = (event as { data?: unknown }).data;
