@@ -139,9 +139,6 @@ export function SettingsModal({
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [memoryDirty, setMemoryDirty] = useState(false);
 
-  // Global concurrency state
-  const [globalMaxConcurrent, setGlobalMaxConcurrent] = useState<number>(4);
-
   // Import/Export state
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [, setImportFile] = useState<File | null>(null);
@@ -152,9 +149,12 @@ export function SettingsModal({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetchSettings(projectId)
-      .then((s) => {
-        setForm(s);
+    Promise.all([fetchSettings(projectId), fetchGlobalConcurrency().catch(() => null)])
+      .then(([s, concurrency]) => {
+        setForm({
+          ...s,
+          globalMaxConcurrent: concurrency?.globalMaxConcurrent,
+        });
         setLoading(false);
       })
       .catch((err) => {
@@ -162,14 +162,6 @@ export function SettingsModal({
         setLoading(false);
       });
   }, [addToast, projectId]);
-
-  useEffect(() => {
-    fetchGlobalConcurrency()
-      .then((state) => setGlobalMaxConcurrent(state.globalMaxConcurrent))
-      .catch(() => {
-        // Silently fail — global concurrency may not be available
-      });
-  }, []);
 
   // Load auth status when the authentication section is active
   const loadAuthStatus = useCallback(async () => {
@@ -530,10 +522,16 @@ export function SettingsModal({
       const projectPatch: Partial<Settings> = {};
       for (const [key, value] of Object.entries(payload)) {
         if (key === "githubTokenConfigured") continue; // server-only field
+        if (key === "globalMaxConcurrent") continue; // central-core field, saved below
         if (isProjectSettingsKey(key)) {
           (projectPatch as any)[key] = value;
         }
       }
+
+      const globalMaxConcurrent =
+        typeof payload.globalMaxConcurrent === "number" && Number.isFinite(payload.globalMaxConcurrent)
+          ? Math.max(1, Math.round(payload.globalMaxConcurrent))
+          : undefined;
 
       // Save both scopes in parallel if they have changes.
       // Note: themeMode/colorTheme may also be write-through via useTheme callbacks
@@ -542,7 +540,7 @@ export function SettingsModal({
       await Promise.all([
         Object.keys(globalPatch).length > 0 ? updateGlobalSettings(globalPatch) : Promise.resolve(),
         Object.keys(projectPatch).length > 0 ? updateSettings(projectPatch, projectId) : Promise.resolve(),
-        updateGlobalConcurrency({ globalMaxConcurrent }),
+        globalMaxConcurrent !== undefined ? updateGlobalConcurrency({ globalMaxConcurrent }) : Promise.resolve(),
       ]);
 
       addToast("Settings saved", "success");
@@ -550,7 +548,7 @@ export function SettingsModal({
     } catch (err: any) {
       addToast(err.message, "error");
     }
-  }, [form, globalMaxConcurrent, prefixError, presetDraft, onClose, addToast, projectId]);
+  }, [form, prefixError, presetDraft, onClose, addToast, projectId]);
 
   const handleSaveMemory = useCallback(async () => {
     try {
@@ -1298,18 +1296,6 @@ export function SettingsModal({
             {renderScopeBanner()}
             <h4 className="settings-section-heading">Scheduling</h4>
             <div className="form-group">
-              <label htmlFor="globalMaxConcurrent">Global Max Concurrent</label>
-              <input
-                id="globalMaxConcurrent"
-                type="number"
-                min={1}
-                max={50}
-                value={globalMaxConcurrent}
-                onChange={(e) => setGlobalMaxConcurrent(Number(e.target.value))}
-              />
-              <small className="form-text text-muted">Maximum concurrent agents across all projects</small>
-            </div>
-            <div className="form-group">
               <label htmlFor="maxConcurrent">Max Concurrent Tasks</label>
               <input
                 id="maxConcurrent"
@@ -1321,6 +1307,21 @@ export function SettingsModal({
                   setForm((f) => ({ ...f, maxConcurrent: Number(e.target.value) }))
                 }
               />
+              <small>Project-level agent limit for this board.</small>
+            </div>
+            <div className="form-group">
+              <label htmlFor="globalMaxConcurrent">Global Concurrent Agents</label>
+              <input
+                id="globalMaxConcurrent"
+                type="number"
+                min={1}
+                max={50}
+                value={form.globalMaxConcurrent ?? 4}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, globalMaxConcurrent: Number(e.target.value) }))
+                }
+              />
+              <small>System-wide limit shared by triage, execution, and merge agents across all registered projects.</small>
             </div>
             <div className="form-group">
               <label htmlFor="pollIntervalMs">Poll Interval (ms)</label>

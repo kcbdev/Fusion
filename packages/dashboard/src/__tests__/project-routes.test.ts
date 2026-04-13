@@ -51,6 +51,12 @@ const mockGetGlobalConcurrencyState = vi.fn().mockResolvedValue({
   queuedCount: 0,
   projectsActive: { proj_test123: 2 },
 });
+const mockUpdateGlobalConcurrency = vi.fn().mockResolvedValue({
+  globalMaxConcurrent: 10,
+  currentlyActive: 2,
+  queuedCount: 0,
+  projectsActive: { proj_test123: 2 },
+});
 const mockInit = vi.fn().mockResolvedValue(undefined);
 const mockClose = vi.fn().mockResolvedValue(undefined);
 const mockReconcileProjectStatuses = vi.fn().mockResolvedValue([]);
@@ -70,6 +76,7 @@ vi.mock("@fusion/core", async () => {
       getProjectHealth: mockGetProjectHealth,
       getRecentActivity: mockGetRecentActivity,
       getGlobalConcurrencyState: mockGetGlobalConcurrencyState,
+      updateGlobalConcurrency: mockUpdateGlobalConcurrency,
       reconcileProjectStatuses: mockReconcileProjectStatuses,
     })),
   };
@@ -87,6 +94,7 @@ import {
   fetchActivityFeed,
   fetchFirstRunStatus,
   fetchGlobalConcurrency,
+  updateGlobalConcurrency,
   fetchProjectTasks,
   fetchTasks,
   type ProjectInfo,
@@ -360,6 +368,26 @@ describe("Project Routes API Functions", () => {
       expect(result.globalMaxConcurrent).toBe(4);
       expect(result.currentlyActive).toBe(2);
     });
+
+    it("updates global concurrency state", async () => {
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, {
+        globalMaxConcurrent: 10,
+        currentlyActive: 2,
+        queuedCount: 0,
+        projectsActive: {},
+      }));
+
+      const result = await updateGlobalConcurrency({ globalMaxConcurrent: 10 });
+
+      expect(result.globalMaxConcurrent).toBe(10);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/global-concurrency",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({ globalMaxConcurrent: 10 }),
+        }),
+      );
+    });
   });
 
   describe("fetchProjectTasks", () => {
@@ -593,5 +621,28 @@ describe("GET /api/projects route handler", () => {
     expect(res.status).toBe(200);
     expect(mockReconcileProjectStatuses).toHaveBeenCalledTimes(1);
     expect((res.body as any[])[0].status).toBe("active");
+  });
+});
+
+describe("PUT /api/global-concurrency route handler", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("updates the central global concurrency limit", async () => {
+    const store = new MockStoreForRoutes();
+    const app = createServer(store as any);
+
+    const res = await request(
+      app,
+      "PUT",
+      "/api/global-concurrency",
+      JSON.stringify({ globalMaxConcurrent: 10 }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockUpdateGlobalConcurrency).toHaveBeenCalledWith({ globalMaxConcurrent: 10 });
+    expect((res.body as any).globalMaxConcurrent).toBe(10);
   });
 });

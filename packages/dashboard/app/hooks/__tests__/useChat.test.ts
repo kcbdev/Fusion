@@ -259,9 +259,12 @@ describe("useChat", () => {
 
     await waitFor(() => {
       expect(result.current.isStreaming).toBe(false);
-      expect(result.current.messages).toHaveLength(1);
-      expect(result.current.messages[0]?.role).toBe("assistant");
-      expect(result.current.messages[0]?.id).toBe("msg-002");
+      // User message should be preserved, assistant message added
+      expect(result.current.messages).toHaveLength(2);
+      expect(result.current.messages[0]?.role).toBe("user");
+      expect(result.current.messages[0]?.content).toBe("Hello!");
+      expect(result.current.messages[1]?.role).toBe("assistant");
+      expect(result.current.messages[1]?.id).toBe("msg-002");
       expect(result.current.streamingText).toBe("");
     });
   });

@@ -7,6 +7,7 @@ import type { Settings, ThemeMode, ColorTheme } from "@fusion/core";
 
 const defaultSettings: Settings = {
   maxConcurrent: 2,
+  globalMaxConcurrent: 4,
   maxWorktrees: 4,
   pollIntervalMs: 15000,
   groupOverlappingFiles: false,
@@ -37,6 +38,8 @@ vi.mock("../../api", () => ({
   fetchSettings: vi.fn(() => Promise.resolve({ ...defaultSettings })),
   updateSettings: vi.fn(() => Promise.resolve({ ...defaultSettings })),
   updateGlobalSettings: vi.fn(() => Promise.resolve({ ...defaultSettings })),
+  fetchGlobalConcurrency: vi.fn(() => Promise.resolve({ globalMaxConcurrent: 4, currentlyActive: 0, queuedCount: 0, projectsActive: {} })),
+  updateGlobalConcurrency: vi.fn(() => Promise.resolve({ globalMaxConcurrent: 4, currentlyActive: 0, queuedCount: 0, projectsActive: {} })),
   fetchAuthStatus: vi.fn(() => Promise.resolve({ providers: [{ id: "anthropic", name: "Anthropic", authenticated: false }] })),
   loginProvider: vi.fn(() => Promise.resolve({ url: "https://auth.example.com/login" })),
   logoutProvider: vi.fn(() => Promise.resolve({ success: true })),
@@ -80,7 +83,7 @@ vi.mock("../PluginManager", () => ({
   )),
 }));
 
-import { fetchSettings, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, saveApiKey, clearApiKey, fetchModels, testNtfyNotification } from "../../api";
+import { fetchSettings, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, saveApiKey, clearApiKey, fetchModels, testNtfyNotification, fetchGlobalConcurrency, updateGlobalConcurrency } from "../../api";
 
 const onClose = vi.fn();
 const addToast = vi.fn();
@@ -229,6 +232,7 @@ describe("SettingsModal", () => {
     // Click Scheduling
     fireEvent.click(screen.getByText("Scheduling"));
     expect(screen.getByLabelText("Max Concurrent Tasks")).toBeTruthy();
+    expect(screen.getByLabelText("Global Concurrent Agents")).toBeTruthy();
     expect(screen.queryByLabelText("Task Prefix")).toBeNull();
 
     // Click Commands
@@ -309,6 +313,7 @@ describe("SettingsModal", () => {
     // Scheduling
     fireEvent.click(screen.getByText("Scheduling"));
     expect(screen.getByLabelText("Max Concurrent Tasks")).toBeTruthy();
+    expect(screen.getByLabelText("Global Concurrent Agents")).toBeTruthy();
     expect(screen.getByLabelText("Poll Interval (ms)")).toBeTruthy();
 
     // Worktrees
@@ -667,6 +672,28 @@ describe("SettingsModal", () => {
     const payload = (updateSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(payload.maxConcurrent).toBe(2);
     expect(payload.pollIntervalMs).toBe(15000);
+  });
+
+  it("loads and saves the central global concurrency limit", async () => {
+    (fetchGlobalConcurrency as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      globalMaxConcurrent: 8,
+      currentlyActive: 3,
+      queuedCount: 0,
+      projectsActive: {},
+    });
+
+    render(<SettingsModal onClose={onClose} addToast={addToast} initialSection="scheduling" />);
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+    const input = screen.getByLabelText("Global Concurrent Agents") as HTMLInputElement;
+    expect(input.value).toBe("8");
+
+    fireEvent.change(input, { target: { value: "10" } });
+    fireEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => expect(updateGlobalConcurrency).toHaveBeenCalledWith({ globalMaxConcurrent: 10 }));
+    const projectPayload = (updateSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(projectPayload.globalMaxConcurrent).toBeUndefined();
   });
 
   it("saving in General section updates project settings with task prefix", async () => {

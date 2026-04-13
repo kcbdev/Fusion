@@ -37,6 +37,7 @@ import {
   resumeProject,
   fetchFirstRunStatus,
   fetchGlobalConcurrency,
+  updateGlobalConcurrency,
   fetchProjectTasks,
   fetchProjectConfig,
   fetchExecutorStats,
@@ -2412,6 +2413,25 @@ describe("fetchGlobalConcurrency", () => {
     expect(result.globalMaxConcurrent).toBe(4);
     expect(result.currentlyActive).toBe(2);
     expect(result.projectsActive["proj_abc123"]).toBe(2);
+  });
+
+  it("updates global concurrency state", async () => {
+    const mockState: GlobalConcurrencyState = {
+      globalMaxConcurrent: 10,
+      currentlyActive: 4,
+      queuedCount: 0,
+      projectsActive: {},
+    };
+    globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, mockState));
+
+    const result = await updateGlobalConcurrency({ globalMaxConcurrent: 10 });
+
+    expect(result.globalMaxConcurrent).toBe(10);
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/global-concurrency", {
+      headers: { "Content-Type": "application/json" },
+      method: "PUT",
+      body: JSON.stringify({ globalMaxConcurrent: 10 }),
+    });
   });
 });
 

@@ -13487,23 +13487,29 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
   /**
    * PUT /api/global-concurrency
-   * Update the global execution concurrency limit.
+   * Update the system-wide concurrency limit across all projects.
    * Body: { globalMaxConcurrent: number }
+   * Returns: GlobalConcurrencyState
    */
   router.put("/global-concurrency", async (req, res) => {
+    const { globalMaxConcurrent } = req.body ?? {};
+    if (!Number.isInteger(globalMaxConcurrent) || globalMaxConcurrent < 1) {
+      throw badRequest("globalMaxConcurrent must be an integer >= 1");
+    }
+
     try {
-      const { globalMaxConcurrent } = req.body;
-      if (typeof globalMaxConcurrent !== "number" || globalMaxConcurrent < 1 || globalMaxConcurrent > 50) {
-        throw new ApiError(400, "globalMaxConcurrent must be a number between 1 and 50");
-      }
       const { CentralCore } = await import("@fusion/core");
       const central = new CentralCore();
       await central.init();
+
       const state = await central.updateGlobalConcurrency({ globalMaxConcurrent });
       await central.close();
+
       res.json(state);
     } catch (err: any) {
-      if (err instanceof ApiError) throw err;
+      if (err instanceof ApiError) {
+        throw err;
+      }
       rethrowAsApiError(err);
     }
   });

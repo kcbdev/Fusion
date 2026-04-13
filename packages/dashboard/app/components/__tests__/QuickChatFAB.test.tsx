@@ -255,6 +255,33 @@ describe("QuickChatFAB", () => {
     });
   });
 
+  it("preserves user message after assistant reply completes", async () => {
+    render(<QuickChatFAB addToast={addToast} projectId="proj-123" />);
+
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    // Wait for session initialization
+    await waitFor(() => {
+      expect(mockFetchChatSessions).toHaveBeenCalled();
+    });
+
+    const input = await screen.findByTestId("quick-chat-input");
+    fireEvent.change(input, { target: { value: "Hello" } });
+    fireEvent.click(screen.getByTestId("quick-chat-send"));
+
+    // Wait for streaming to complete
+    await waitFor(() => {
+      expect(screen.getByTestId("quick-chat-input")).not.toBeDisabled();
+    });
+
+    // Check that user's "Hello" message is preserved
+    expect(screen.getByText("Hello")).toBeDefined();
+
+    // Check that assistant response is shown (mock concatenates thinking + text)
+    // The mock sends "Thinking..." then "Here's my response." which concatenates
+    expect(screen.getByText(/Here's my response/)).toBeDefined();
+  });
+
   it("switching agents creates a new session for the selected agent", async () => {
     // First session exists
     mockFetchChatSessions.mockResolvedValueOnce({ sessions: [mockSession] });

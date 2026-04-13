@@ -284,10 +284,8 @@ export function useChat(projectId?: string): UseChatReturn {
             createdAt: new Date().toISOString(),
           };
 
-          setMessages((prev) => {
-            const withoutTemp = prev.filter((m) => m.id !== tempId);
-            return [...withoutTemp, assistantMessage];
-          });
+          // Preserve user message and add assistant message
+          setMessages((prev) => [...prev, assistantMessage]);
 
           setStreamingText("");
           setStreamingThinking("");
