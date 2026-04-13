@@ -20,6 +20,7 @@ import type {
 import { ProjectEngine } from "./project-engine.js";
 import type { ProjectEngineOptions } from "./project-engine.js";
 import type { ProjectRuntimeConfig } from "./project-runtime.js";
+import { AgentSemaphore } from "./concurrency.js";
 import { runtimeLog } from "./logger.js";
 
 /**
@@ -38,10 +39,46 @@ export class ProjectEngineManager {
   private starting = new Map<string, Promise<ProjectEngine>>();
   private stopped = false;
 
+  /**
+   * Shared global semaphore — ONE instance across ALL project engines.
+   * Enforces the cross-project globalMaxConcurrent limit. Without this,
+   * each engine creates its own semaphore and the global limit is not shared.
+   */
+  private globalSemaphore: AgentSemaphore;
+  private currentGlobalLimit = 4;
+  private concurrencyListener?: (...args: unknown[]) => void;
+
   constructor(
     private centralCore: CentralCore,
     private options: EngineManagerOptions = {},
-  ) {}
+  ) {
+    // Dynamic getter so live changes to globalMaxConcurrent take effect immediately
+    this.globalSemaphore = new AgentSemaphore(() => this.currentGlobalLimit);
+
+    // Listen for concurrency changes from CentralCore
+    if (typeof centralCore.on === "function") {
+      this.concurrencyListener = (state: unknown) => {
+        const s = state as { globalMaxConcurrent?: number };
+        if (typeof s.globalMaxConcurrent === "number") {
+          this.currentGlobalLimit = s.globalMaxConcurrent;
+          runtimeLog.log(`Global concurrency limit updated to ${this.currentGlobalLimit}`);
+        }
+      };
+      centralCore.on("concurrency:changed", this.concurrencyListener);
+    }
+
+    // Read initial limit from CentralCore (async — updates the mutable limit)
+    this.refreshGlobalLimit();
+  }
+
+  private async refreshGlobalLimit(): Promise<void> {
+    try {
+      const state = await this.centralCore.getGlobalConcurrencyState();
+      this.currentGlobalLimit = state.globalMaxConcurrent;
+    } catch {
+      // Keep default of 4
+    }
+  }
 
   // ── Public accessors ──
 
@@ -130,6 +167,12 @@ export class ProjectEngineManager {
   async stopAll(): Promise<void> {
     this.stopped = true;
 
+    // Remove concurrency change listener
+    if (this.concurrencyListener && typeof this.centralCore.off === "function") {
+      this.centralCore.off("concurrency:changed", this.concurrencyListener);
+      this.concurrencyListener = undefined;
+    }
+
     const stops = Array.from(this.engines.entries()).map(
       async ([id, engine]) => {
         try {
@@ -203,6 +246,8 @@ export class ProjectEngineManager {
         "in-process",
       maxConcurrent: (settings?.maxConcurrent as number) ?? 4,
       maxWorktrees: (settings?.maxWorktrees as number) ?? 10,
+      // Shared global semaphore — all engines share one concurrency pool
+      globalSemaphore: this.globalSemaphore,
     };
   }
 
