@@ -495,7 +495,7 @@ function TaskCardComponent({
     };
   }, [hasGitHubBadge, isInViewport, subscribeToBadge, task.id, unsubscribeFromBadge]);
 
-  const liveBadgeData = badgeUpdates.get(task.id);
+  const liveBadgeData = badgeUpdates.get(`${projectId ?? "default"}:${task.id}`);
 
   // Compute step version for diff stats refresh when steps change
   const isActiveColumn = task.column === "in-progress" || task.column === "in-review";

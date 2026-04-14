@@ -102,7 +102,7 @@ describe("useBadgeWebSocket", () => {
       });
     });
 
-    const update = result.current.badgeUpdates.get("FN-063");
+    const update = result.current.badgeUpdates.get("default:FN-063");
     expect(update).toMatchObject({
       prInfo: null,
       issueInfo: {
@@ -145,7 +145,7 @@ describe("useBadgeWebSocket", () => {
       });
     });
 
-    expect(result.current.badgeUpdates.get("FN-063")).toMatchObject({
+    expect(result.current.badgeUpdates.get("default:FN-063")).toMatchObject({
       prInfo: { number: 1 },
       issueInfo: { number: 2 },
     });
@@ -173,14 +173,15 @@ describe("useBadgeWebSocket", () => {
       });
     });
 
-    expect(result.current.badgeUpdates.has("FN-063")).toBe(true);
+    // With scoped keys, badge data is stored under "default:FN-063"
+    expect(result.current.badgeUpdates.has("default:FN-063")).toBe(true);
 
     act(() => {
       MockWebSocket.instances[0].emitClose(1006);
     });
 
     expect(result.current.isConnected).toBe(false);
-    expect(result.current.badgeUpdates.has("FN-063")).toBe(true);
+    expect(result.current.badgeUpdates.has("default:FN-063")).toBe(true);
 
     act(() => {
       vi.advanceTimersByTime(1_000);
@@ -224,7 +225,7 @@ describe("useBadgeWebSocket", () => {
 
     expect(MockWebSocket.instances[0].sent).toContain(JSON.stringify({ type: "unsubscribe", taskId: "FN-063" }));
     expect(MockWebSocket.instances[0].close).toHaveBeenCalled();
-    expect(result.current.badgeUpdates.has("FN-063")).toBe(false);
+    expect(result.current.badgeUpdates.has("default:FN-063")).toBe(false);
   });
 
   it("shares a single websocket and ref-counted subscription across hook instances", () => {
@@ -373,7 +374,8 @@ describe("useBadgeWebSocket", () => {
         });
       });
 
-      expect(result.current.badgeUpdates.has("FN-063")).toBe(true);
+      // With scoped keys, badge data is stored under "proj-A:FN-063"
+      expect(result.current.badgeUpdates.has("proj-A:FN-063")).toBe(true);
 
       // Change project
       rerender({ projectId: "proj-B" });
@@ -383,8 +385,69 @@ describe("useBadgeWebSocket", () => {
         vi.advanceTimersByTime(1_000);
       });
 
-      // Badge updates should be cleared
-      expect(result.current.badgeUpdates.has("FN-063")).toBe(false);
+      // Badge updates should be cleared (including old project key)
+      expect(result.current.badgeUpdates.has("proj-A:FN-063")).toBe(false);
+    });
+
+    it("isolates badge updates across projects with same task ID", async () => {
+      // Two hooks watching the same task ID in different projects
+      // Note: The singleton store only maintains one active projectId,
+      // so we test isolation by verifying scoped key storage works correctly
+      const { result: resultA, rerender: rerenderA } = renderHook(
+        ({ projectId }: { projectId?: string }) => useBadgeWebSocket(projectId),
+        { initialProps: { projectId: "proj-A" } },
+      );
+
+      // Subscribe to FN-063 in project A
+      act(() => {
+        resultA.current.subscribeToBadge("FN-063");
+        MockWebSocket.instances[0].emitOpen();
+      });
+
+      // Verify badge update is stored with scoped key
+      act(() => {
+        MockWebSocket.instances[0].emitMessage({
+          type: "badge:updated",
+          taskId: "FN-063",
+          prInfo: { url: "https://github.com/owner/repo/pull/1", number: 1, status: "merged", title: "Merged PR", headBranch: "feat", baseBranch: "main", commentCount: 0 },
+          timestamp: "2026-03-30T12:00:00.000Z",
+        });
+      });
+
+      expect(resultA.current.badgeUpdates.get("proj-A:FN-063")?.prInfo?.status).toBe("merged");
+
+      // Now switch to project B (simulates a different component/context)
+      // After this, the store's projectId is "proj-B"
+      rerenderA({ projectId: "proj-B" });
+
+      // Wait for reconnect
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+
+      // Old project's cache should be cleared
+      expect(resultA.current.badgeUpdates.has("proj-A:FN-063")).toBe(false);
+
+      // Subscribe to the same task ID in the new project
+      act(() => {
+        resultA.current.subscribeToBadge("FN-063");
+        MockWebSocket.instances[1].emitOpen();
+      });
+
+      // Simulate badge update for project-B's FN-063 with different status
+      act(() => {
+        MockWebSocket.instances[1].emitMessage({
+          type: "badge:updated",
+          taskId: "FN-063",
+          prInfo: { url: "https://github.com/owner/repo/pull/2", number: 2, status: "open", title: "Open PR", headBranch: "feat2", baseBranch: "main", commentCount: 0 },
+          timestamp: "2026-03-30T12:01:00.000Z",
+        });
+      });
+
+      // Project B should have its own update
+      expect(resultA.current.badgeUpdates.get("proj-B:FN-063")?.prInfo?.status).toBe("open");
+      // Project A's data should not be present (overwritten by project switch)
+      expect(resultA.current.badgeUpdates.get("proj-A:FN-063")).toBeUndefined();
     });
   });
 });

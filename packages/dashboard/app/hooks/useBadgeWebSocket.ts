@@ -20,6 +20,15 @@ interface StoreSnapshot {
   isConnected: boolean;
 }
 
+/**
+ * Scoped key helper for multi-project isolation.
+ * Keys are formatted as `${projectId}:${taskId}` to prevent
+ * overlapping task IDs across projects from sharing badge state.
+ */
+function toScopedKey(projectId: string | null, taskId: string): string {
+  return `${projectId ?? "default"}:${taskId}`;
+}
+
 class BadgeWebSocketStore {
   private ws: WebSocket | null = null;
   private listeners = new Set<() => void>();
@@ -52,7 +61,9 @@ class BadgeWebSocketStore {
     const hadSubscriptions = this.subscriptionsByTask.size > 0;
     // Collect all (hookId, taskId) pairs that were subscribed
     const previousSubscriptions: Array<{ hookId: string; taskId: string }> = [];
-    for (const [taskId, subscribers] of this.subscriptionsByTask) {
+    for (const [scopedTaskId, subscribers] of this.subscriptionsByTask) {
+      // Extract taskId from scoped key (format: "projectId:taskId")
+      const taskId = scopedTaskId.split(":").slice(1).join(":");
       for (const hookId of subscribers) {
         previousSubscriptions.push({ hookId, taskId });
       }
@@ -63,39 +74,45 @@ class BadgeWebSocketStore {
 
     // Re-subscribe to all previous subscriptions after project change
     // This ensures badge subscriptions survive project switches
-    // Note: we restore subscriptions BEFORE calling connect() so that
-    // onopen will send the subscribe messages over the new socket
     if (hadSubscriptions) {
       for (const { hookId, taskId } of previousSubscriptions) {
-        this.subscriptionsByTask.set(taskId, new Set([hookId]));
+        const scopedKey = toScopedKey(this.projectId, taskId);
+        this.subscriptionsByTask.set(scopedKey, new Set([hookId]));
       }
+      // Set shouldReconnect BEFORE calling connect() to ensure the connection is made
       this.shouldReconnect = this.subscriptionsByTask.size > 0;
+      // Note: we restore subscriptions BEFORE calling connect() so that
+      // onopen will send the subscribe messages over the new socket
       this.connect();
     }
   }
 
   subscribeTask(hookId: string, taskId: string): void {
-    const subscribers = this.subscriptionsByTask.get(taskId) ?? new Set<string>();
-    const beforeSize = subscribers.size;
+    const scopedKey = toScopedKey(this.projectId, taskId);
+    const subscribers = this.subscriptionsByTask.get(scopedKey) ?? new Set<string>();
+    const isNewSubscription = !subscribers.has(hookId);
     subscribers.add(hookId);
-    this.subscriptionsByTask.set(taskId, subscribers);
+    this.subscriptionsByTask.set(scopedKey, subscribers);
 
     this.shouldReconnect = this.subscriptionsByTask.size > 0;
     this.connect();
 
-    if (beforeSize === 0) {
+    // Only send subscribe message if this is a genuinely new subscription
+    // (not a re-subscription from project switch or unmount/remount)
+    if (isNewSubscription) {
       this.send({ type: "subscribe", taskId });
     }
   }
 
   unsubscribeTask(hookId: string, taskId: string): void {
-    const subscribers = this.subscriptionsByTask.get(taskId);
+    const scopedKey = toScopedKey(this.projectId, taskId);
+    const subscribers = this.subscriptionsByTask.get(scopedKey);
     if (!subscribers) return;
 
     subscribers.delete(hookId);
     if (subscribers.size === 0) {
-      this.subscriptionsByTask.delete(taskId);
-      this.badgeUpdates.delete(taskId);
+      this.subscriptionsByTask.delete(scopedKey);
+      this.badgeUpdates.delete(scopedKey);
       this.send({ type: "unsubscribe", taskId });
       this.emit();
     }
@@ -107,7 +124,9 @@ class BadgeWebSocketStore {
   }
 
   cleanupHook(hookId: string): void {
-    for (const taskId of [...this.subscriptionsByTask.keys()]) {
+    for (const scopedTaskId of [...this.subscriptionsByTask.keys()]) {
+      // Extract taskId from scoped key
+      const taskId = scopedTaskId.split(":").slice(1).join(":");
       this.unsubscribeTask(hookId, taskId);
     }
   }
@@ -142,7 +161,13 @@ class BadgeWebSocketStore {
       this.reconnectDelayMs = 1_000;
       this.emit();
 
-      for (const taskId of this.subscriptionsByTask.keys()) {
+      // Extract raw taskIds from scoped keys (format: "projectId:taskId")
+      const uniqueTaskIds = new Set<string>();
+      for (const scopedKey of this.subscriptionsByTask.keys()) {
+        const taskId = scopedKey.split(":").slice(1).join(":");
+        uniqueTaskIds.add(taskId);
+      }
+      for (const taskId of uniqueTaskIds) {
         this.send({ type: "subscribe", taskId });
       }
     };
@@ -154,8 +179,9 @@ class BadgeWebSocketStore {
           return;
         }
 
-        const previous = this.badgeUpdates.get(message.taskId);
-        this.badgeUpdates.set(message.taskId, {
+        const scopedKey = toScopedKey(this.projectId, message.taskId);
+        const previous = this.badgeUpdates.get(scopedKey);
+        this.badgeUpdates.set(scopedKey, {
           prInfo: hasMessageField(message, "prInfo") ? message.prInfo ?? null : previous?.prInfo,
           issueInfo: hasMessageField(message, "issueInfo") ? message.issueInfo ?? null : previous?.issueInfo,
           timestamp: message.timestamp,

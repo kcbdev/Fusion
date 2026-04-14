@@ -347,13 +347,19 @@ export class WebSocketManager extends EventEmitter<WebSocketManagerEvents> {
 /**
  * Create a badge channel key with project scope.
  * Format: badge:{projectId}:{taskId}
+ *
+ * IMPORTANT: This channel key format is critical for multi-project isolation.
+ * The colon-separated format (`badge:project-a:FN-001`) ensures that overlapping
+ * task IDs across projects (e.g., "FN-001" in both project-a and project-b)
+ * cannot share badge state. Each project's badge updates are routed to clients
+ * subscribed to their project's specific channel key.
  */
 function toBadgeChannel(projectId: string, taskId: string): string {
   return `badge:${projectId}:${taskId}`;
 }
 
 /**
- * Extract taskId from a badge channel key.
+ * Extract taskId from a badge channel key given a known projectId.
  */
 function fromBadgeChannel(projectId: string, channel: string): string {
   const prefix = `badge:${projectId}:`;
@@ -362,6 +368,14 @@ function fromBadgeChannel(projectId: string, channel: string): string {
 
 /**
  * Extract taskId and projectId from any badge channel key.
+ * Used for event emission when we need both values but only have the channel string.
+ *
+ * The regex pattern /^badge:([^:]+):(.+)$/ captures:
+ *   - match[1]: projectId (everything between "badge:" and the next colon)
+ *   - match[2]: taskId (everything after the second colon)
+ *
+ * This parsing is necessary because channel subscribers store only the channel string,
+ * but we need the projectId and taskId separately for event emission.
  */
 function extractPartsFromChannel(channel: string): { taskId: string | null; projectId: string | null } {
   // Channel format: badge:{projectId}:{taskId}

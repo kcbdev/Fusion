@@ -67,14 +67,19 @@ process.on("beforeExit", () => {
 });
 
 /**
- * Module-level helper for resolving a scoped TaskStore.
- * Mirrors /api/events semantics: prefer engine's store, fallback to resolver, fallback to default store.
- * Used by realtime endpoints that need project-aware store resolution.
+ * Scoped Realtime Contract
+ * ------------------------
+ * All realtime endpoints (/api/events, /api/ws, /api/tasks/:id/logs/stream,
+ * /api/terminal/ws) MUST resolve project context using resolveScopedStore:
+ *   1. If projectId is omitted, use the default store.
+ *   2. If engineManager has an engine for the project, use its TaskStore.
+ *   3. Otherwise fall back to getOrCreateProjectStore(projectId).
  *
- * @param projectId - The project ID to resolve, or undefined for the default store
- * @param store - The default TaskStore to use when projectId is undefined
- * @param engineManager - Optional engine manager for per-project engine store access
- * @returns The resolved TaskStore
+ * Badge websocket channels MUST be keyed as `badge:{projectId}:{taskId}`
+ * so overlapping task IDs cannot leak across projects.
+ *
+ * @see toBadgeChannel in websocket.ts for channel key format
+ * @see extractPartsFromChannel in websocket.ts for channel key parsing
  */
 export async function resolveScopedStore(
   projectId: string | undefined,

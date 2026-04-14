@@ -1429,7 +1429,8 @@ Use `useBadgeWebSocket(projectId?)` when a UI surface needs live badge snapshots
 - `/api/ws` is badge-specific; do **not** reuse it for general task updates.
 - Badge broadcasts should contain only `prInfo` / `issueInfo` snapshot data, never full task objects.
 - **Project-scoped channels**: connections are bound to scope keys derived from `projectId` (defaults to `"default"`). Channel keying uses `badge:{scopeKey}:{taskId}` to prevent collisions across projects with identical task IDs.
-- **Cross-instance delivery**: badge messages carry `projectId` metadata and are rebroadcast across instances via `BadgePubSub` (`badge-pubsub.ts`).
+- **Channel key isolation**: The `badge:project-a:FN-001` and `badge:project-b:FN-001` channels are completely separate. A badge update broadcast for `project-a/FN-001` will NOT reach clients subscribed to `project-b/FN-001`. This prevents stale data from one project bleeding into another when task IDs overlap.
+- **Cross-instance delivery**: badge messages carry `projectId` metadata and are rebroadcast across instances via `BadgePubSub` (`badge-pubsub.ts`). Cross-instance pub/sub preserves project isolation via the `BadgePubSubMessage.projectId` field.
 - Badge updates are now **push-based via GitHub App webhooks** at `POST /api/github/webhooks`.
 - The server verifies webhook signatures using `FUSION_GITHUB_WEBHOOK_SECRET`, fetches canonical badge state with GitHub App installation tokens, and broadcasts updates via the existing `task:updated` → `/api/ws` bridge.
 - Keep the existing 5-minute refresh endpoints (`/api/tasks/:id/pr/status`, `/api/tasks/:id/issue/status`) as a fallback path when webhook delivery is unavailable.

@@ -243,6 +243,106 @@ describe("WebSocketManager", () => {
     expect(manager.getClientCount()).toBe(0);
     expect(manager.getSubscribedTaskIds()).toEqual([]);
   });
+
+  describe("project-scoped channel isolation", () => {
+    it("subscribe uses scoped channel keys - same task ID in different projects", () => {
+      const manager = new WebSocketManager();
+      const socketA = new MockSocket();
+      const socketB = new MockSocket();
+
+      // Add clients bound to different project scopes
+      manager.addClient(socketA as unknown as WebSocket, "client-1", "project-a");
+      manager.addClient(socketB as unknown as WebSocket, "client-2", "project-b");
+
+      // Subscribe to the same task ID in different projects
+      manager.subscribe("client-1", "FN-063", "project-a");
+      manager.subscribe("client-2", "FN-063", "project-b");
+
+      // Each project should have its own subscription count
+      expect(manager.getSubscriptionCount("FN-063", "project-a")).toBe(1);
+      expect(manager.getSubscriptionCount("FN-063", "project-b")).toBe(1);
+
+      // Unscoped query should return 0 (no unscoped subscriptions)
+      expect(manager.getSubscriptionCount("FN-063")).toBe(0);
+    });
+
+    it("broadcastBadgeUpdate does not leak across projects with same task ID", () => {
+      const manager = new WebSocketManager();
+      const clientA = new MockSocket();
+      const clientB = new MockSocket();
+
+      manager.addClient(clientA as unknown as WebSocket, "client-a", "project-a");
+      manager.addClient(clientB as unknown as WebSocket, "client-b", "project-b");
+
+      // Subscribe both to the same task ID in their respective projects
+      manager.subscribe("client-a", "FN-063", "project-a");
+      manager.subscribe("client-b", "FN-063", "project-b");
+
+      // Broadcast for project-a only
+      manager.broadcastBadgeUpdate("FN-063", {
+        prInfo: { url: "https://github.com/owner/repo/pull/1", number: 1, status: "merged", title: "Project A PR", headBranch: "feat", baseBranch: "main", commentCount: 0 },
+        timestamp: "2026-03-30T12:00:00.000Z",
+      }, "project-a");
+
+      // Only project-a client should receive the update
+      expect(clientA.send).toHaveBeenCalledTimes(1);
+      expect(clientB.send).not.toHaveBeenCalled();
+
+      const messageA = JSON.parse(clientA.sent[0]);
+      expect(messageA).toMatchObject({
+        type: "badge:updated",
+        taskId: "FN-063",
+        prInfo: { status: "merged", title: "Project A PR" },
+      });
+    });
+
+    it("unsubscribe is scoped to project", () => {
+      const manager = new WebSocketManager();
+      const socket = new MockSocket();
+
+      manager.addClient(socket as unknown as WebSocket, "client-1", "project-a");
+
+      // Subscribe in two different project scopes
+      manager.subscribe("client-1", "FN-063", "project-a");
+      manager.subscribe("client-1", "FN-063", "project-b");
+
+      // project-a subscription should exist
+      expect(manager.getSubscriptionCount("FN-063", "project-a")).toBe(1);
+      // project-b subscription should also exist
+      expect(manager.getSubscriptionCount("FN-063", "project-b")).toBe(1);
+
+      // Unsubscribe from project-a only
+      manager.unsubscribe("client-1", "FN-063", "project-a");
+
+      // project-a should be gone, project-b should remain
+      expect(manager.getSubscriptionCount("FN-063", "project-a")).toBe(0);
+      expect(manager.getSubscriptionCount("FN-063", "project-b")).toBe(1);
+    });
+
+    it("getSubscribedTaskIds returns scoped results", () => {
+      const manager = new WebSocketManager();
+      const socket = new MockSocket();
+
+      manager.addClient(socket as unknown as WebSocket, "client-1", "project-x");
+
+      // Subscribe to different tasks in different projects
+      manager.subscribe("client-1", "FN-001", "project-x");
+      manager.subscribe("client-1", "FN-002", "project-x");
+      manager.subscribe("client-1", "FN-003", "project-y");
+
+      // Get task IDs for project-x only
+      const projectXTasks = manager.getSubscribedTaskIds("project-x");
+      expect(projectXTasks).toContain("FN-001");
+      expect(projectXTasks).toContain("FN-002");
+      expect(projectXTasks).not.toContain("FN-003");
+
+      // Get task IDs for project-y only
+      const projectYTasks = manager.getSubscribedTaskIds("project-y");
+      expect(projectYTasks).toContain("FN-003");
+      expect(projectYTasks).not.toContain("FN-001");
+      expect(projectYTasks).not.toContain("FN-002");
+    });
+  });
 });
 
 describe("/api/ws integration", () => {

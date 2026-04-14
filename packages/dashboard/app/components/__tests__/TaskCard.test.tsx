@@ -2270,7 +2270,7 @@ describe("TaskCard GitHub badges", () => {
     mockUseBadgeWebSocket.mockReturnValue({
       badgeUpdates: new Map([
         [
-          "FN-099",
+          "default:FN-099",
           {
             prInfo: {
               url: "https://github.com/owner/repo/pull/42",
@@ -2369,7 +2369,7 @@ describe("TaskCard GitHub badges", () => {
     mockUseBadgeWebSocket.mockReturnValue({
       badgeUpdates: new Map([
         [
-          "FN-099",
+          "default:FN-099",
           {
             issueInfo: {
               url: "https://github.com/owner/repo/issues/123",

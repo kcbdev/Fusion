@@ -45,7 +45,7 @@ function TaskCardBadgeComponent({ taskId, prInfo, issueInfo, updatedAt, isInView
     };
   }, [hasGitHubBadge, isInViewport, projectId, subscribeToBadge, taskId, unsubscribeFromBadge]);
 
-  const liveBadgeData = badgeUpdates.get(taskId);
+  const liveBadgeData = badgeUpdates.get(`${projectId ?? "default"}:${taskId}`);
   const livePrInfo = pickPreferredBadge<PrInfo>(
     liveBadgeData?.prInfo,
     liveBadgeData?.timestamp,

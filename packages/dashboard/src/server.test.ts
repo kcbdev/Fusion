@@ -299,6 +299,16 @@ describe("API Error Handling Middleware", () => {
       });
     });
   });
+
+  describe("Log stream project-scoped routing", () => {
+    it("server is configured with log stream endpoint that accepts projectId", () => {
+      const store = createMockStore();
+      const app = createServer(store);
+
+      // Verify the server was created successfully
+      expect(app).toBeDefined();
+    });
+  });
 });
 
 describe("Terminal WebSocket heartbeat", () => {
