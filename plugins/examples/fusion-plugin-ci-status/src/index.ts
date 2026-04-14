@@ -91,19 +91,16 @@ async function pollCIStatus(
 
 // ── Route Handlers ─────────────────────────────────────────────────────────────
 
+// Route handlers use `unknown` for request type to match PluginRouteDefinition signature.
+// Cast to local MockRequest type where property access is needed.
 interface MockRequest {
   params: Record<string, string>;
   method: string;
   url: string;
 }
 
-interface MockResponse {
-  json: ReturnType<typeof vi.fn>;
-  status: ReturnType<typeof vi.fn>;
-}
-
 function getStatusAllHandler(
-  _req: MockRequest,
+  _req: unknown,
   _ctx: PluginContext,
 ): { branches: BranchStatus[] } {
   const branches = Array.from(branchStatuses.values());
@@ -111,15 +108,16 @@ function getStatusAllHandler(
 }
 
 function getStatusBranchHandler(
-  req: MockRequest,
+  req: unknown,
   _ctx: PluginContext,
 ): { branch: string; status: string; lastChecked: string; url?: string } {
-  const branch = req.params.branch;
+  const request = req as MockRequest;
+  const branch = request.params.branch;
   const status = branchStatuses.get(branch);
 
   if (!status) {
-    const error = new Error("Branch not found");
-    (error as any).statusCode = 404;
+    const error = new Error("Branch not found") as Error & { statusCode?: number };
+    error.statusCode = 404;
     throw error;
   }
 
@@ -127,7 +125,7 @@ function getStatusBranchHandler(
 }
 
 function postRefreshHandler(
-  _req: MockRequest,
+  _req: unknown,
   ctx: PluginContext,
 ): { branches: BranchStatus[]; refreshed: boolean } {
   const ciUrl = ctx.settings.ciUrl as string;
@@ -149,19 +147,19 @@ const routes: PluginRouteDefinition[] = [
   {
     method: "GET",
     path: "/status",
-    handler: getStatusAllHandler as any,
+    handler: getStatusAllHandler as unknown as (req: unknown, ctx: PluginContext) => Promise<unknown>,
     description: "Get status of all tracked branches",
   },
   {
     method: "GET",
     path: "/status/:branch",
-    handler: getStatusBranchHandler as any,
+    handler: getStatusBranchHandler as unknown as (req: unknown, ctx: PluginContext) => Promise<unknown>,
     description: "Get status of a specific branch",
   },
   {
     method: "POST",
     path: "/refresh",
-    handler: postRefreshHandler as any,
+    handler: postRefreshHandler as unknown as (req: unknown, ctx: PluginContext) => Promise<unknown>,
     description: "Trigger an immediate CI status refresh",
   },
 ];

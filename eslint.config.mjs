@@ -50,6 +50,11 @@ export default tseslint.config(
       "packages/dashboard/src/**/*.ts",
       "packages/dashboard/src/**/*.tsx",
       "packages/dashboard/vitest.setup.ts",
+      // Plugin example source files (e.g. fusion-plugin-auto-label, fusion-plugin-ci-status)
+      // follow the same production TypeScript rules as packages/* to ensure consistency
+      // with project conventions (argsIgnorePattern for underscore params, etc.)
+      "plugins/examples/*/src/**/*.ts",
+      "plugins/examples/*/src/**/*.tsx",
     ],
     plugins: {
       "@typescript-eslint": tseslint.plugin,
@@ -164,37 +169,6 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": "off",
       // Allow console in demo files
       "no-console": "off",
-    },
-  },
-
-  // ─────────────────────────────────────────────────────────────
-  // PLUGIN EXAMPLES — relaxed rules
-  // ─────────────────────────────────────────────────────────────
-  {
-    files: ["plugins/**/*.ts", "plugins/**/*.tsx"],
-    plugins: {
-      "@typescript-eslint": tseslint.plugin,
-    },
-    languageOptions: {
-      parser: tseslint.parser,
-      parserOptions: {
-        ecmaVersion: "latest",
-        sourceType: "module",
-      },
-    },
-    rules: {
-      // Allow explicit any for mocks
-      "@typescript-eslint/no-explicit-any": "off",
-      // Allow unused vars in tests
-      "@typescript-eslint/no-unused-vars": "off",
-      // Allow unsafe function types
-      "@typescript-eslint/no-unsafe-function-type": "off",
-      // Allow prefer-const
-      "prefer-const": "off",
-      // Allow fallthrough
-      "no-fallthrough": "off",
-      // Allow useless escape
-      "no-useless-escape": "off",
     },
   },
 
