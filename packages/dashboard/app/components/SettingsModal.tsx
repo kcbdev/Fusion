@@ -33,8 +33,8 @@ import { applyPresetToSelection, generateUniquePresetId } from "../utils/modelPr
  *   - appearance: Theme and color settings (global)
  *   - notifications: ntfy.sh notification settings (global)
  *   - global-models: Default/fallback models and thinking level (global)
- *   - general: Task prefix configuration (project)
  *   - project-models: Planning & validator models, model presets, and AI summarization (project)
+ *   - general: Task prefix configuration (project)
  *   - scheduling: Concurrency, poll interval, file overlap serialization, and step execution
  *     settings (runStepsInNewSessions, maxParallelSteps) (project)
  *   - worktrees: Worktree limits, init commands, recycling (project)
@@ -60,11 +60,11 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "appearance", label: "Appearance", scope: "global" },
   { id: "notifications", label: "Notifications", scope: "global" },
   { id: "global-models", label: "Models", scope: "global" },
+  { id: "project-models", label: "Project Models", scope: "project" },
   { id: "__global_header", label: "Global", scope: undefined, isGroupHeader: true },
   // Project group
   { id: "__project_header", label: "Project", scope: undefined, isGroupHeader: true },
   { id: "general", label: "General", scope: "project" },
-  { id: "project-models", label: "Project Models", scope: "project" },
   { id: "scheduling", label: "Scheduling", scope: "project" },
   { id: "worktrees", label: "Worktrees", scope: "project" },
   { id: "commands", label: "Commands", scope: "project" },
