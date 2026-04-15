@@ -852,6 +852,168 @@ describe("SelfHealingManager", () => {
   });
 
   describe("recoverMergedReviewTasks", () => {
+    it("finalizes stale merging tasks when a task commit already landed", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+      });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+        taskStuckTimeoutMs: 60_000,
+      });
+      const staleUpdatedAt = new Date(Date.now() - 61_000).toISOString();
+
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-1673",
+          column: "in-review",
+          status: "merging",
+          error: null,
+          paused: false,
+          worktree: "/tmp/test-project/.worktrees/fn-1673",
+          branch: "fusion/fn-1673",
+          baseCommitSha: "base123",
+          updatedAt: staleUpdatedAt,
+          steps: [{ name: "Ship it", status: "done" }],
+          workflowStepResults: [],
+          mergeDetails: undefined,
+          log: [],
+        },
+      ]);
+      mockedExistsSync.mockReturnValue(true);
+      mockedExecSync.mockImplementation((command) => {
+        const cmd = String(command);
+        if (cmd.includes("git log")) {
+          return "979ba2c04\u001ffeat(FN-1673): add editable AI suggestion drafts before acceptance\n" as any;
+        }
+        if (cmd.includes("git show --shortstat")) {
+          return " 1 file changed, 2 insertions(+), 2 deletions(-)\n" as any;
+        }
+        return "" as any;
+      });
+
+      const result = await managerWithRecovery.recoverInterruptedMergingTasks();
+
+      expect(result).toBe(1);
+      expect(store.updateTask).toHaveBeenCalledWith("FN-1673", {
+        status: null,
+        error: null,
+        mergeRetries: 0,
+        mergeDetails: expect.objectContaining({
+          commitSha: "979ba2c04",
+          mergeCommitMessage: "feat(FN-1673): add editable AI suggestion drafts before acceptance",
+          mergeConfirmed: true,
+          filesChanged: 1,
+          insertions: 2,
+          deletions: 2,
+        }),
+      });
+      expect(store.moveTask).toHaveBeenCalledWith("FN-1673", "done");
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-1673",
+        expect.stringContaining("stale merge status finalized from landed commit 979ba2c"),
+      );
+
+      managerWithRecovery.stop();
+    });
+
+    it("clears stale merging status for retry when no landed commit is found", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+      });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+        taskStuckTimeoutMs: 60_000,
+      });
+      const staleUpdatedAt = new Date(Date.now() - 61_000).toISOString();
+
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-1674",
+          column: "in-review",
+          status: "merging",
+          error: null,
+          updatedAt: staleUpdatedAt,
+          steps: [{ name: "Ship it", status: "done" }],
+          workflowStepResults: [],
+          log: [],
+        },
+      ]);
+      mockedExecSync.mockImplementation((command) => {
+        if (String(command).includes("git log")) return "" as any;
+        return "" as any;
+      });
+
+      const result = await managerWithRecovery.recoverInterruptedMergingTasks();
+
+      expect(result).toBe(1);
+      expect(store.updateTask).toHaveBeenCalledWith("FN-1674", {
+        status: null,
+        error: null,
+      });
+      expect(store.moveTask).not.toHaveBeenCalledWith("FN-1674", "done");
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-1674",
+        expect.stringContaining("stale merge status cleared"),
+      );
+
+      managerWithRecovery.stop();
+    });
+
+    it("does not recover fresh merging tasks before the stuck timeout", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+      });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+        taskStuckTimeoutMs: 60_000,
+      });
+
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-1675",
+          column: "in-review",
+          status: "merging",
+          error: null,
+          updatedAt: new Date().toISOString(),
+          log: [],
+        },
+      ]);
+
+      const result = await managerWithRecovery.recoverInterruptedMergingTasks();
+
+      expect(result).toBe(0);
+      expect(store.updateTask).not.toHaveBeenCalled();
+      expect(store.moveTask).not.toHaveBeenCalled();
+
+      managerWithRecovery.stop();
+    });
+
+    it("does not recover stale merging tasks when stuck detection is disabled", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+      });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+        taskStuckTimeoutMs: 0,
+      });
+
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-1676",
+          column: "in-review",
+          status: "merging",
+          error: null,
+          updatedAt: new Date(Date.now() - 24 * 60 * 60_000).toISOString(),
+          log: [],
+        },
+      ]);
+
+      const result = await managerWithRecovery.recoverInterruptedMergingTasks();
+
+      expect(result).toBe(0);
+      expect(store.listTasks).not.toHaveBeenCalled();
+      expect(store.updateTask).not.toHaveBeenCalled();
+      expect(store.moveTask).not.toHaveBeenCalled();
+
+      managerWithRecovery.stop();
+    });
+
     it("merges eligible in-review tasks that still have an unmerged worktree", async () => {
       const managerWithRecovery = new SelfHealingManager(store, {
         rootDir: "/tmp/test-project",

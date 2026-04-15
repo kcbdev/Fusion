@@ -18,7 +18,7 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { getTaskMergeBlocker, type TaskStore, type Settings, type Task } from "@fusion/core";
+import { getTaskMergeBlocker, type TaskStore, type Settings, type Task, type MergeDetails } from "@fusion/core";
 import { createLogger } from "./logger.js";
 import { scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
 
@@ -63,6 +63,7 @@ export interface SelfHealingOptions {
 
 const APPROVED_TRIAGE_RECOVERY_GRACE_MS = 60_000;
 const ORPHANED_EXECUTION_RECOVERY_GRACE_MS = 60_000;
+const ACTIVE_MERGE_STATUSES = new Set(["merging", "merging-pr"]);
 /**
  * Longer grace period for tasks that still have a worktree on disk.
  * This avoids racing with `executor.resumeOrphaned()` which runs on
@@ -70,6 +71,31 @@ const ORPHANED_EXECUTION_RECOVERY_GRACE_MS = 60_000;
  * 5 minutes is well past any startup window.
  */
 const ORPHANED_WITH_WORKTREE_GRACE_MS = 300_000;
+
+interface LandedTaskCommit {
+  sha: string;
+  subject?: string;
+  filesChanged?: number;
+  insertions?: number;
+  deletions?: number;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function parseShortstat(output: string): Pick<LandedTaskCommit, "filesChanged" | "insertions" | "deletions"> {
+  const normalized = output.trim().replace(/\n/g, " ");
+  const filesMatch = normalized.match(/(\d+) files? changed/);
+  const insertionsMatch = normalized.match(/(\d+) insertions?\(\+\)/);
+  const deletionsMatch = normalized.match(/(\d+) deletions?\(-\)/);
+
+  return {
+    filesChanged: filesMatch ? Number.parseInt(filesMatch[1], 10) : 0,
+    insertions: insertionsMatch ? Number.parseInt(insertionsMatch[1], 10) : 0,
+    deletions: deletionsMatch ? Number.parseInt(deletionsMatch[1], 10) : 0,
+  };
+}
 
 export class SelfHealingManager {
   // ── Auto-unpause state ──────────────────────────────────────────────
@@ -114,6 +140,7 @@ export class SelfHealingManager {
   async runStartupRecovery(): Promise<void> {
     await this.recoverNoProgressNoTaskDoneFailures();
     await this.recoverCompletedTasks();
+    await this.recoverInterruptedMergingTasks();
     await this.recoverMisclassifiedFailures();
     await this.recoverOrphanedExecutions();
     await this.recoverApprovedTriageTasks();
@@ -342,6 +369,82 @@ export class SelfHealingManager {
     }, intervalMs);
   }
 
+  private isPastInterruptedMergeGrace(task: Task, timeoutMs: number): boolean {
+    const updatedAt = task.updatedAt ? Date.parse(task.updatedAt) : 0;
+    if (!Number.isFinite(updatedAt) || updatedAt <= 0) return false;
+    return Date.now() - updatedAt >= timeoutMs;
+  }
+
+  private async findLandedTaskCommit(task: Task): Promise<LandedTaskCommit | null> {
+    const readLog = async (range: string) => {
+      const command = [
+        "git log",
+        "--format=%H%x1f%s",
+        "--max-count=20",
+        "--fixed-strings",
+        `--grep=${shellQuote(task.id)}`,
+        shellQuote(range),
+      ].join(" ");
+
+      return execAsync(command, {
+        cwd: this.options.rootDir,
+        maxBuffer: 1024 * 1024,
+      });
+    };
+
+    let stdout: string;
+    try {
+      const result = await readLog(task.baseCommitSha ? `${task.baseCommitSha}..HEAD` : "HEAD");
+      stdout = result.stdout;
+    } catch {
+      if (!task.baseCommitSha) return null;
+      const result = await readLog("HEAD");
+      stdout = result.stdout;
+    }
+
+    const firstLine = stdout.trim().split("\n").find(Boolean);
+    if (!firstLine) return null;
+
+    const [sha, subject] = firstLine.split("\x1f");
+    if (!sha) return null;
+
+    const commit: LandedTaskCommit = { sha, subject };
+    try {
+      const stats = await execAsync(`git show --shortstat --format= ${shellQuote(sha)}`, {
+        cwd: this.options.rootDir,
+        maxBuffer: 1024 * 1024,
+      });
+      Object.assign(commit, parseShortstat(stats.stdout));
+    } catch {
+      // Stats are useful for the task detail view but not required for recovery.
+    }
+
+    return commit;
+  }
+
+  private async cleanupInterruptedMergeArtifacts(task: Task): Promise<void> {
+    if (task.worktree && existsSync(task.worktree)) {
+      try {
+        await execAsync(`git worktree remove ${shellQuote(task.worktree)} --force`, {
+          cwd: this.options.rootDir,
+          timeout: 120_000,
+        });
+      } catch {
+        // Non-fatal; existing orphan/worktree cleanup can retry later.
+      }
+    }
+
+    const branch = task.branch || `fusion/${task.id.toLowerCase()}`;
+    try {
+      await execAsync(`git branch -D ${shellQuote(branch)}`, {
+        cwd: this.options.rootDir,
+        timeout: 120_000,
+      });
+    } catch {
+      // Non-fatal; branch may be gone or still checked out.
+    }
+  }
+
   private async runMaintenance(): Promise<void> {
     const startMs = Date.now();
     log.log("Maintenance cycle starting");
@@ -353,6 +456,7 @@ export class SelfHealingManager {
       this.checkpointWal();
       await this.enforceWorktreeCap();
       await this.recoverCompletedTasks();
+      await this.recoverInterruptedMergingTasks();
       await this.recoverMergeableReviewTasks();
       await this.recoverMergedReviewTasks();
       await this.recoverMisclassifiedFailures();
@@ -515,6 +619,93 @@ export class SelfHealingManager {
       return recovered;
     } catch (err: unknown) { const errorMessage = err instanceof Error ? err.message : String(err);
       log.error(`Mergeable review recovery failed: ${errorMessage}`);
+      return 0;
+    }
+  }
+
+  /**
+   * Recover stale `in-review` tasks left in a transient merge status.
+   *
+   * The direct AI merger can successfully create the final commit and then be
+   * interrupted before it stores mergeDetails and moves the task to `done`.
+   * When that happens no future task:moved event fires, so the merge queue has
+   * nothing to retry. This recovery confirms the task-specific commit exists on
+   * the current main lineage before finalizing the task.
+   *
+   * If no landed commit is found, it only clears the stale transient status so
+   * the normal mergeable-review recovery can retry the merge.
+   *
+   * @returns Number of tasks finalized or unblocked
+   */
+  async recoverInterruptedMergingTasks(): Promise<number> {
+    try {
+      const settings = await this.store.getSettings();
+      const timeoutMs = settings.taskStuckTimeoutMs;
+      if (!timeoutMs || timeoutMs <= 0) return 0;
+
+      const tasks = await this.store.listTasks({ column: "in-review" });
+      const candidates = tasks.filter((task) =>
+        task.column === "in-review" &&
+        Boolean(task.status && ACTIVE_MERGE_STATUSES.has(task.status)) &&
+        this.isPastInterruptedMergeGrace(task, timeoutMs),
+      );
+
+      if (candidates.length === 0) return 0;
+
+      log.warn(`Found ${candidates.length} stale merging task(s) in in-review`);
+
+      let recovered = 0;
+      for (const task of candidates) {
+        try {
+          const landedCommit = await this.findLandedTaskCommit(task);
+
+          if (landedCommit) {
+            const mergeDetails: MergeDetails = {
+              commitSha: landedCommit.sha,
+              filesChanged: landedCommit.filesChanged,
+              insertions: landedCommit.insertions,
+              deletions: landedCommit.deletions,
+              mergeCommitMessage: landedCommit.subject,
+              mergedAt: new Date().toISOString(),
+              mergeConfirmed: true,
+              prNumber: task.prInfo?.number,
+            };
+
+            await this.store.updateTask(task.id, {
+              status: null,
+              error: null,
+              mergeRetries: 0,
+              mergeDetails,
+            });
+            await this.store.moveTask(task.id, "done");
+            await this.cleanupInterruptedMergeArtifacts(task);
+            await this.store.logEntry(
+              task.id,
+              `Auto-recovered: stale merge status finalized from landed commit ${landedCommit.sha.slice(0, 8)}`,
+            );
+            log.log(`Recovered interrupted merge ${task.id}: finalized landed commit ${landedCommit.sha.slice(0, 8)}`);
+            recovered++;
+            continue;
+          }
+
+          await this.store.updateTask(task.id, { status: null, error: null });
+          await this.store.logEntry(
+            task.id,
+            "Auto-recovered: stale merge status cleared; merge will be retried",
+          );
+          log.log(`Recovered interrupted merge ${task.id}: cleared stale status for retry`);
+          recovered++;
+        } catch (err: unknown) { const errorMessage = err instanceof Error ? err.message : String(err);
+          log.error(`Failed to recover interrupted merge ${task.id}: ${errorMessage}`);
+        }
+      }
+
+      if (recovered > 0) {
+        log.log(`Recovered ${recovered} interrupted merge task(s)`);
+      }
+      return recovered;
+    } catch (err: unknown) { const errorMessage = err instanceof Error ? err.message : String(err);
+      log.error(`Interrupted merge recovery failed: ${errorMessage}`);
       return 0;
     }
   }
