@@ -1,6 +1,8 @@
 # Agent Sandbox Research Findings: FN-1839
 
-**Research Date:** 2026-04-14  
+*Revised FN-1859: Original AgentOS section (agentos-project/agentos) replaced with Rivet Agent OS (rivet.dev/agent-os) research.*
+
+**Research Date:** 2026-04-14 (original), 2026-04-15 (revision)  
 **Task:** Research AgentOS and Alternative Sandbox Technologies for Fusion Agent Execution Isolation  
 **Author:** Research Agent  
 
@@ -8,11 +10,11 @@
 
 ## 1. Executive Summary
 
-**Can AgentOS integrate with Fusion?** No — AgentOS is a Reinforcement Learning (RL) agent framework for Python (`agentos-project/agentos`, 25 stars), fundamentally incompatible with Fusion's TypeScript/Node.js runtime and AI coding agent workflow model. It targets ML researchers, not software engineering teams.
+**Can Rivet Agent OS integrate with Fusion?** **Potentially viable with moderate effort** — Rivet Agent OS is a Rust-based in-process agent runtime with ~6ms cold starts (92x faster than cloud sandboxes), WebAssembly and V8 isolate security, and npm package deployment. It natively supports Claude Code, Pi, and other coding agents via the Agent Communication Protocol (ACP). Integration would require adapting Fusion's tool surface (read_file, edit_file, bash, spawn_agent) to agentOS host tools, but the architectural fit is reasonable given agentOS's host tool model.
 
-**Top Recommended Sandbox Option for Fusion:** **Docker containers with seccomp profiles** for the short-to-medium term, with **gVisor** as the medium-term upgrade path. This recommendation is conditional on Linux deployment — macOS users would require Docker Desktop or OrbStack.
+**Top Recommended Sandbox Option for Fusion:** **Docker containers with seccomp profiles** for the short-to-medium term, with **Rivet Agent OS** as a compelling alternative that offers similar isolation without container overhead.
 
-**Key Trade-off:** Adding a container runtime introduces a dependency on Docker (or containerd) and increases operational complexity, but provides strong filesystem and network isolation that Fusion's current `ChildProcessRuntime` lacks. The tradeoff is worthwhile if Fusion's threat model includes malicious or buggy agent code attempting filesystem escapes or network exfiltration.
+**Key Trade-off:** Adding Rivet Agent OS introduces a Rust native dependency alongside Node.js, but provides near-zero cold starts (~6ms vs 100–300ms for ChildProcessRuntime), granular filesystem/network permissions, and WebAssembly-based isolation without requiring Docker. The tradeoff is worthwhile for teams wanting stronger security boundaries with lower latency.
 
 ---
 
@@ -90,40 +92,102 @@ Defined in `packages/engine/src/plugin-runner.ts`, the `PluginRunner` bridges pl
 
 ---
 
-## 3. AgentOS Deep Dive
+## 3. Rivet Agent OS Deep Dive
 
-### 3.1 What is AgentOS?
+### 3.1 What is Rivet Agent OS?
 
-**Project:** `agentos-project/agentos` (GitHub)  
-**Language:** Python  
-**Maturity:** 25 stars, 9 forks, last push February 2023 (archived)  
-**Purpose:** Reinforcement Learning agent framework — "Python Component System (PCS) + AgentOS" for building, running, and sharing RL agents  
-**Website:** agentos.org
+**Project:** `rivet-dev/agent-os` (GitHub)  
+**Language:** Rust  
+**Maturity:** 2,694 stars, 110 forks, Apache 2.0 license  
+**Created:** 2024-02-07, Last push: 2026-04-14  
+**Purpose:** "A portable open-source operating system for agents. ~6 ms coldstarts, 32x cheaper than sandboxes. Powered by WebAssembly and V8 isolates."  
+**Website:** https://rivet.dev/agent-os/  
+**GitHub:** https://github.com/rivet-dev/agent-os
+
+Rivet Agent OS is fundamentally different from the original researched `agentos-project/agentos`. It is a Rust-based in-process agent runtime designed for production AI coding agents, not a Python RL research framework.
 
 ### 3.2 Architecture
 
-AgentOS consists of two components:
+agentOS is built on an **in-process operating system kernel written in JavaScript/Rust**. Three runtimes mount into the kernel:
 
-1. **Python Component System (PCS):** An open Python API, CLI, and web server for building, running, and sharing Python programs. Uses `MLflow` for environment management.
+1. **WebAssembly**: POSIX utilities (coreutils, grep, sed, etc.) compiled to WASM
+2. **V8 isolates**: JavaScript/TypeScript agent code runs in sandboxed V8 contexts
 
-2. **AgentOS:** Libraries built on PCS that make it easy to build, run, and share agents that use RL to solve tasks.
+The kernel manages:
+- Virtual filesystem
+- Process table
+- Pipes and PTYs
+- Virtual network stack
 
-### 3.3 Integration Analysis (8 Dimensions)
+Everything runs inside the kernel — nothing executes on the host directly.
+
+**Key deployment model:** npm package (`@rivet-dev/agent-os`) — can be deployed via Rivet Cloud, self-hosted, Railway, Vercel, Kubernetes, or any container platform.
+
+### 3.3 Agent Support
+
+agentOS supports multiple coding agents via the **Agent Communication Protocol (ACP)**:
+- **Pi** (primary)
+- **Claude Code** (in progress)
+- **Codex** (in progress)
+- **OpenCode** (in progress)
+- **Amp** (in progress)
+
+This is relevant because Fusion's pi-coding-agent uses Pi-compatible tools, making agentOS a natural fit.
+
+### 3.4 Security Model
+
+agentOS uses **WebAssembly and V8 isolates** for security — "the same isolation technology trusted by browsers worldwide."
+
+Security features include:
+- **Deny-by-default permissions** for filesystem, network, process, and environment access
+- **Programmatic network control**: Allow, deny, or proxy any outbound connection
+- **Resource limits**: Set precise CPU and memory limits per agent
+- **Isolated private network**: Each agent runs in its own network namespace
+
+### 3.5 Performance Benchmarks
+
+| Metric | agentOS | Fastest Sandbox (E2B) | Speedup |
+|--------|---------|------------------------|---------|
+| Cold start p50 | 4.8 ms | 440 ms | **92x faster** |
+| Cold start p95 | 5.6 ms | 950 ms | **170x faster** |
+| Cold start p99 | 6.1 ms | 3,150 ms | **516x faster** |
+
+| Workload | agentOS | Cheapest Sandbox (Daytona) | Reduction |
+|----------|---------|----------------------------|----------|
+| Full coding agent | ~131 MB | ~1,024 MB | **8x smaller** |
+| Simple shell command | ~22 MB | ~1,024 MB | **47x smaller** |
+
+### 3.6 Integration with Sandboxes
+
+Importantly, agentOS "pairs seamlessly with sandboxes for heavier workloads" — it can spin up a full sandbox on demand (E2B, Daytona, etc.) and mount the sandbox's filesystem when the workload needs it (browsers, native binaries, dev servers). This makes it an orchestration layer rather than a replacement for all sandboxing.
+
+### 3.7 Integration Analysis (8 Dimensions)
 
 | Dimension | Analysis |
 |----------|---------|
-| **Security Boundary** | No sandboxing — AgentOS runs Python in the host environment. Not designed for untrusted code. |
-| **Startup Overhead** | Python environment startup (~1–5s) + MLflow initialization. Incompatible with Fusion's 30-second heartbeat cycle. |
-| **Filesystem Access** | Full filesystem access via Python. No worktree isolation concept. |
-| **Network Access** | Full network access. Agents can make HTTP requests freely. |
-| **IPC / Tooling Compatibility** | Python-based. Fusion is TypeScript/Node.js. Would require a separate process communicating via IPC, but AgentOS has no IPC mechanism designed for this. |
-| **Cross-Platform** | Linux/macOS for Python. Windows support via WSL. Not natively available on all platforms. |
-| **Operational Complexity** | MLflow dependency, Python environment management. High operational burden for Fusion's `fn serve` deployment model. |
-| **Recommended Integration Point** | None — fundamentally incompatible. |
+| **Security Boundary** | Strong — WebAssembly + V8 isolates, deny-by-default permissions, per-agent network namespaces. Agent code runs in sandboxed contexts with no direct host access. |
+| **Startup Overhead** | ~6ms cold start (92x faster than cloud sandboxes). This is 17–50x faster than Fusion's ChildProcessRuntime (100–300ms). Aligns well with heartbeat cycles. |
+| **Filesystem Access** | Virtual filesystem with mount capabilities for S3, Google Drive, SQLite, host directories. Could mount `.worktrees/{task-id}` as a host directory. The `.fusion/` directory could be restricted to read-only or excluded. |
+| **Network Access** | Programmable allow/deny/proxy for outbound connections. Could allow LLM API endpoints (api.anthropic.com, api.openai.com) while blocking other egress. Matches Fusion's security needs. |
+| **IPC / Tooling Compatibility** | Host tools model — Fusion's tool surface (read_file, edit_file, bash, spawn_agent) would need to be reimplemented as agentOS host tools. This is feasible but requires effort. The pi-coding-agent tools are Node.js native; they would need a bridge to agentOS's JavaScript host tool API. |
+| **Cross-Platform** | Excellent — npm package runs on Linux, macOS, Windows. "Just an npm package. No Kubernetes operators, no sidecar containers." Works on Rivet Cloud or self-hosted. |
+| **Operational Complexity** | Moderate — adds Rust native dependency alongside Node.js. The npm package model keeps deployment similar to existing Fusion. No Docker daemon required. |
+| **Recommended Integration Point** | New `AgentOsRuntime` implementing `ProjectRuntime` interface. Replace or supplement `ChildProcessRuntime` for in-process sandbox execution with agentOS handling the isolate lifecycle. |
 
-### 3.4 Verdict
+### 3.8 Verdict
 
-**Not viable for Fusion.** AgentOS is a Reinforcement Learning research framework, not a production agent sandboxing solution. It predates the AI coding agent era and has been largely unmaintained since 2023.
+**Viable for Fusion with moderate implementation effort.** Rivet Agent OS offers compelling advantages:
+- Near-zero cold starts (~6ms) vs ChildProcessRuntime (~100–300ms)
+- WebAssembly + V8 isolate security without Docker dependency
+- Native support for Pi-compatible agents
+- npm package deployment model
+
+**Key challenges:**
+- Tool surface reimplementation: Fusion's pi-coding-agent tools (read_file, edit_file, bash, etc.) are Node.js native. They would need a bridge to agentOS's host tool API.
+- Node.js compatibility: agentOS runs agents in V8 isolates with WASM POSIX utilities. Full Node.js compatibility (npm packages, native modules) requires the sandbox extension for heavy workloads.
+- Project maturity: While actively maintained (2,694 stars, recent commits), this is still early-stage technology.
+
+**Integration complexity:** Medium. The architectural fit is reasonable, but the tool bridge requires custom implementation.
 
 ---
 
@@ -316,7 +380,7 @@ AgentOS consists of two components:
 
 | Technology | Startup Latency | Security Strength | Cross-Platform | Complexity | Fusion Fit Score (1–5) |
 |------------|----------------|-------------------|-----------------|------------|------------------------|
-| **AgentOS** | N/A (incompatible) | None | Python | High | 1 — Not viable |
+| **Rivet Agent OS** | ~6ms | Strong (Wasm + V8) | Excellent (npm) | Moderate | 4 — Strong candidate |
 | **gVisor** | ~100ms | Strong (syscall interception) | Linux only | Moderate | 4 — Strong candidate |
 | **Firecracker VMs** | ~125ms | Very Strong (VM) | Linux/KVM only | High | 3 — Powerful but complex |
 | **WebAssembly/WASI** | ~10ms | Strong (linear memory) | Excellent | Low | 2 — Tool incompatibility |
@@ -326,7 +390,7 @@ AgentOS consists of two components:
 | **E2B cloud** | ~500ms–2s | Strong (VM) | Universal | High | 3 — External dependency |
 | **Modal** | ~500ms–2s | Strong (container) | Universal | High | 1 — Python-focused |
 
-**Highlighted Recommendation:** Docker + seccomp (Score: 5) for short-term; gVisor (Score: 4) for medium-term security upgrade.
+**Highlighted Recommendation:** Docker + seccomp (Score: 5) for short-term with maximum compatibility; Rivet Agent OS (Score: 4) as a compelling alternative with near-zero cold starts and no Docker dependency.
 
 ---
 
@@ -496,11 +560,11 @@ export interface ProjectRuntimeFactory {
 
 ### 7.2 Performance Benchmarks Needed
 
-| Metric | Current (ChildProcessRuntime) | Docker | gVisor | Firecracker |
-|--------|-------------------------------|--------|--------|-------------|
-| Cold start latency | 100–300ms | ~200–500ms | ~100ms | ~125ms |
-| Memory overhead | 0 | 50–100MB | 10–50MB | 5MB |
-| Concurrent sandbox limit | N/A | ~10–50 containers | ~50–100 | ~100+ |
+| Metric | Current (ChildProcessRuntime) | Docker | Rivet Agent OS | gVisor | Firecracker |
+|--------|-------------------------------|--------|----------------|--------|-------------|
+| Cold start latency | 100–300ms | ~200–500ms | ~6ms | ~100ms | ~125ms |
+| Memory overhead | 0 | 50–100MB | ~131MB | 10–50MB | 5MB |
+| Concurrent sandbox limit | N/A | ~10–50 containers | ~100+ isolates | ~50–100 | ~100+ |
 
 ### 7.3 Security Audit Considerations
 
@@ -511,15 +575,19 @@ export interface ProjectRuntimeFactory {
 
 ### 7.4 Open Questions
 
-1. **How should worktree cleanup work?** Currently `git worktree remove` happens on the host. With containers, the worktree exists inside the sandbox. Need to decide: snapshot-and-copy-out vs. bind-mount from host.
+1. **How should worktree cleanup work?** Currently `git worktree remove` happens on the host. With containers or agentOS, the worktree exists inside the sandbox. Need to decide: snapshot-and-copy-out vs. bind-mount from host.
 
 2. **Plugin tool execution:** Plugin tools run via `PluginRunner`. Should they also be sandboxed? Current design assumes trusted plugins.
 
-3. **Heartbeat timing with sandbox overhead:** The 30-second heartbeat check cycle assumes `ChildProcessRuntime` startup. If sandbox startup is significantly slower, this may need adjustment.
+3. **Heartbeat timing with sandbox overhead:** The 30-second heartbeat check cycle assumes `ChildProcessRuntime` startup. With Rivet Agent OS (~6ms cold start), heartbeat timing may be less of a concern, but still needs benchmarking.
 
-4. **macOS deployment story:** gVisor and namespace jails are Linux-only. What's the strategy for macOS users? Docker Desktop as common denominator?
+4. **macOS deployment story:** gVisor and namespace jails are Linux-only. What's the strategy for macOS users? Docker Desktop as common denominator? Rivet Agent OS works on macOS via npm, making it a viable option here.
 
-5. **fn serve headless deployment:** `fn serve` is designed for remote machines. Running Docker inside Docker or requiring Docker-in-Docker is complex. What's the container runtime strategy for remote nodes?
+5. **fn serve headless deployment:** `fn serve` is designed for remote machines. Running Docker inside Docker or requiring Docker-in-Docker is complex. What's the container runtime strategy for remote nodes? Rivet Agent OS may simplify this as it doesn't require Docker.
+
+6. **Tool bridge complexity:** How much effort is required to implement Fusion's pi-coding-agent tools as agentOS host tools? This is the critical path item for Rivet Agent OS integration.
+
+7. **Node.js compatibility:** Rivet Agent OS runs agents in V8 isolates with WASM POSIX utilities. Full Node.js compatibility (npm packages, native modules) requires the sandbox extension. What's the fallback for npm-heavy tasks?
 
 ---
 
@@ -530,13 +598,14 @@ Fusion's current `ChildProcessRuntime` provides process-level isolation (separat
 | Priority | Option | When to Choose |
 |---------|--------|---------------|
 | **1** | Docker + seccomp | Teams already using Docker, need moderate security improvement, want familiar tooling |
-| **2** | gVisor | Linux deployments requiring strong syscall isolation, willing to manage `runsc` dependency |
-| **3** | Firejail hardening | Quick win for individual `bash` tool hardening, minimal operational changes |
-| **4** | Firecracker | Maximum isolation required, team has VM management infrastructure |
+| **2** | Rivet Agent OS | Teams wanting near-zero cold starts (~6ms), no Docker dependency, WebAssembly-based security |
+| **3** | gVisor | Linux deployments requiring strong syscall isolation, willing to manage `runsc` dependency |
+| **4** | Firejail hardening | Quick win for individual `bash` tool hardening, minimal operational changes |
+| **5** | Firecracker | Maximum isolation required, team has VM management infrastructure |
 
-**AgentOS is not a viable option** for Fusion — it is a Reinforcement Learning research framework incompatible with Fusion's architecture.
+**Rivet Agent OS is a viable option** for Fusion — it is a Rust-based in-process agent runtime with compelling performance (6ms cold starts, 92x faster than cloud sandboxes) and WebAssembly/V8 isolate security. It natively supports Pi-compatible coding agents and offers an npm package deployment model.
 
-**Recommended path:** Start with Docker-based isolation (Option A in 6.1) for rapid iteration, then invest in gVisor integration (6.3) for the production-grade solution.
+**Recommended path:** Start with Docker-based isolation (Option A in 6.1) for rapid iteration and maximum compatibility, then consider Rivet Agent OS integration for teams wanting lower latency and no Docker dependency.
 
 ---
 
@@ -549,9 +618,9 @@ Fusion's current `ChildProcessRuntime` provides process-level isolation (separat
 - `packages/engine/src/executor.ts` — Agent session creation, tools, worktree management
 - `packages/engine/src/plugin-runner.ts` — Plugin tool execution, hook timeout isolation
 - `packages/core/src/types.ts` — `IsolationMode` type, `ProjectSettings` interface
+- `rivet-dev/agent-os` — https://github.com/rivet-dev/agent-os
 - `google/gvisor` — https://github.com/google/gvisor
 - `firecracker-microvm/firecracker` — https://github.com/firecracker-microvm/firecracker
 - `bytecodealliance/wasmtime` — https://github.com/bytecodealliance/wasmtime
 - `netblue30/firejail` — https://github.com/netblue30/firejail
 - `e2b-dev/infra` — https://github.com/e2b-dev/infra
-- `agentos-project/agentos` — https://github.com/agentos-project/agentos
