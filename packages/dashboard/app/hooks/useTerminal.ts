@@ -66,6 +66,9 @@ function createEmptyBuffer(): BufferedMessages {
  * - Early message buffering: scrollback, connected, and initial data messages
  *   are buffered and replayed to subscribers that register after the WebSocket
  *   starts receiving events (e.g. while xterm is still initializing).
+ * - Project-context isolation: stale WebSocket callbacks from prior project/session
+ *   contexts cannot update current UI state. Uses context version guards to reject
+ *   events from outdated connections.
  * 
  * @example
  * ```tsx
@@ -81,6 +84,26 @@ function createEmptyBuffer(): BufferedMessages {
  */
 export function useTerminal(sessionId: string | null, projectId?: string): UseTerminalReturn {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
+
+  // Track context version to detect stale WebSocket callbacks after project/session switches.
+  // Incremented whenever projectId or sessionId changes, invalidating any callbacks
+  // from WebSocket connections that belong to the previous context.
+  const contextVersionRef = useRef(0);
+
+  // Track previous values to detect context changes
+  const previousSessionIdRef = useRef<string | null>(sessionId);
+  const previousProjectIdRef = useRef<string | undefined>(projectId);
+
+  // Detect context change: either projectId or sessionId changed
+  const contextChanged =
+    previousSessionIdRef.current !== sessionId ||
+    previousProjectIdRef.current !== projectId;
+
+  if (contextChanged) {
+    previousSessionIdRef.current = sessionId;
+    previousProjectIdRef.current = projectId;
+    contextVersionRef.current++;
+  }
   
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
@@ -170,7 +193,37 @@ export function useTerminal(sessionId: string | null, projectId?: string): UseTe
     }
   }, []);
 
-  // Cleanup function
+  // Internal cleanup for context changes: closes WebSocket WITHOUT marking as
+  // manual close, so onclose handler doesn't interfere with the context transition.
+  // Does NOT reset isManualCloseRef to preserve the flag for the calling context.
+  const closeWebSocketForContextChange = useCallback(() => {
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
+
+    if (wsRef.current) {
+      // Remove listeners to prevent stale onclose from interfering
+      // with the context transition
+      wsRef.current.onopen = null;
+      wsRef.current.onmessage = null;
+      wsRef.current.onclose = null;
+      wsRef.current.onerror = null;
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+
+    // Clear buffers on context change to prevent stale replay
+    initialBufferRef.current = createEmptyBuffer();
+  }, []);
+
+  // Cleanup function (used for unmount and manual reconnect)
+  // Marks the close as intentional so onclose handler doesn't reconnect.
   const cleanup = useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
@@ -213,6 +266,11 @@ export function useTerminal(sessionId: string | null, projectId?: string): UseTe
     isManualCloseRef.current = false;
     setConnectionStatus("connecting");
 
+    // Capture the context version at connection start. Stale callbacks from
+    // previous project/session contexts will be rejected by comparing against
+    // the current contextVersionRef.current value.
+    const contextVersionAtConnect = contextVersionRef.current;
+
     // Build WebSocket URL with optional projectId for multi-project support
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     let wsUrl = `${protocol}//${window.location.host}/api/terminal/ws?sessionId=${encodeURIComponent(sessionId)}`;
@@ -224,6 +282,12 @@ export function useTerminal(sessionId: string | null, projectId?: string): UseTe
     wsRef.current = ws;
 
     ws.onopen = () => {
+      // Reject stale events from previous context
+      if (contextVersionRef.current !== contextVersionAtConnect) {
+        ws.close();
+        return;
+      }
+
       // Reset buffer ONLY when connection is established — ensures any
       // late-arriving messages from a previous session are discarded and
       // the new session's scrollback/data is captured in a fresh buffer.
@@ -237,6 +301,10 @@ export function useTerminal(sessionId: string | null, projectId?: string): UseTe
       }
 
       heartbeatIntervalRef.current = setInterval(() => {
+        // Reject stale heartbeat from previous context
+        if (contextVersionRef.current !== contextVersionAtConnect) {
+          return;
+        }
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: "ping" }));
         }
@@ -244,6 +312,11 @@ export function useTerminal(sessionId: string | null, projectId?: string): UseTe
     };
 
     ws.onmessage = (event) => {
+      // Reject stale events from previous context
+      if (contextVersionRef.current !== contextVersionAtConnect) {
+        return;
+      }
+
       try {
         const msg: WebSocketMessage = JSON.parse(event.data);
         const buffer = initialBufferRef.current;
@@ -294,6 +367,11 @@ export function useTerminal(sessionId: string | null, projectId?: string): UseTe
     };
 
     ws.onclose = (event) => {
+      // Reject stale close events from previous context
+      if (contextVersionRef.current !== contextVersionAtConnect) {
+        return;
+      }
+
       wsRef.current = null;
       
       if (heartbeatIntervalRef.current) {
@@ -331,7 +409,15 @@ export function useTerminal(sessionId: string | null, projectId?: string): UseTe
       const delay = INITIAL_RECONNECT_DELAY * Math.pow(2, reconnectAttemptsRef.current - 1);
       setConnectionStatus("reconnecting");
 
+      // Capture the version at reconnect scheduling time to detect if context
+      // changed while the timeout was pending
+      const contextVersionAtSchedule = contextVersionRef.current;
+
       reconnectTimeoutRef.current = setTimeout(() => {
+        // Reject reconnect if context changed while timeout was pending
+        if (contextVersionRef.current !== contextVersionAtSchedule) {
+          return;
+        }
         if (!isManualCloseRef.current) {
           connect();
         }
@@ -350,17 +436,28 @@ export function useTerminal(sessionId: string | null, projectId?: string): UseTe
     connect();
   }, [cleanup, connect]);
 
-  // Connect when sessionId changes
+  // Connect when sessionId or projectId changes
+  // Handle context change: close existing WebSocket, cancel timers, reset state
   useEffect(() => {
+    // If context changed, perform cleanup before connecting to new context
+    if (contextChanged) {
+      // Use internal cleanup that doesn't mark as manual close,
+      // allowing proper context transition without stale onclose interference
+      closeWebSocketForContextChange();
+
+      // Reset transient state
+      reconnectAttemptsRef.current = 0;
+      setConnectionStatus("disconnected");
+    }
+
     if (sessionId) {
       connect();
     } else {
-      cleanup();
       setConnectionStatus("disconnected");
     }
 
     return cleanup;
-  }, [sessionId, connect, cleanup]);
+  }, [sessionId, projectId, contextChanged, connect, cleanup, closeWebSocketForContextChange]);
 
   return {
     connectionStatus,

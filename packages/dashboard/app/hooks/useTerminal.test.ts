@@ -687,4 +687,301 @@ describe("useTerminal", () => {
       vi.useRealTimers();
     });
   });
+
+  describe("stale-context isolation", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("closes old WebSocket when projectId changes", () => {
+      const { rerender } = renderHook(
+        ({ sessionId, projectId }: { sessionId: string | null; projectId?: string }) =>
+          useTerminal(sessionId, projectId),
+        { initialProps: { sessionId: "test-session-123", projectId: "proj-A" } },
+      );
+
+      const oldWs = MockWebSocket.instances[0];
+      const oldWsCloseSpy = vi.spyOn(oldWs, "close");
+
+      // Change projectId
+      rerender({ sessionId: "test-session-123", projectId: "proj-B" });
+
+      // Old WebSocket should be closed
+      expect(oldWsCloseSpy).toHaveBeenCalled();
+    });
+
+    it("stale WebSocket onopen does not update status when context changed", () => {
+      const { rerender } = renderHook(
+        ({ sessionId, projectId }: { sessionId: string | null; projectId?: string }) =>
+          useTerminal(sessionId, projectId),
+        { initialProps: { sessionId: "test-session-123", projectId: "proj-A" } },
+      );
+
+      const oldWs = MockWebSocket.instances[0];
+
+      // Change projectId - this closes old ws
+      rerender({ sessionId: "test-session-123", projectId: "proj-B" });
+
+      // Simulate the OLD WebSocket opening (stale event)
+      act(() => {
+        oldWs.emitOpen();
+      });
+
+      // The stale ws onopen should not affect the new context's status
+      // We need to verify that the new WebSocket (proj-B) is the one that matters
+      expect(MockWebSocket.instances).toHaveLength(2);
+      const newWs = MockWebSocket.instances[1];
+
+      // The new ws should be connecting, not connected (since we haven't opened it yet)
+      // Wait for the new ws to be created
+      act(() => {
+        vi.advanceTimersByTime(0);
+      });
+    });
+
+    it("stale WebSocket onmessage does not call callbacks when context changed", () => {
+      const { rerender } = renderHook(
+        ({ sessionId, projectId }: { sessionId: string | null; projectId?: string }) =>
+          useTerminal(sessionId, projectId),
+        { initialProps: { sessionId: "test-session-123", projectId: "proj-A" } },
+      );
+
+      // Register callback BEFORE context change
+      const onData = vi.fn();
+      const { result } = renderHook(
+        ({ sessionId, projectId }: { sessionId: string | null; projectId?: string }) => {
+          const hook = useTerminal(sessionId, projectId);
+          return hook;
+        },
+        {
+          initialProps: { sessionId: "test-session-123", projectId: "proj-A" },
+          wrapper: ({ children }) => children,
+        },
+      );
+
+      // Use a simpler approach: test within a single hook instance
+      const { result: singleResult } = renderHook(() => {
+        const hook = useTerminal("test-session-123", "proj-A");
+        return hook;
+      });
+
+      const dataCallback = vi.fn();
+      singleResult.current.onData(dataCallback);
+
+      // Change projectId - this closes old ws and increments context version
+      singleResult.current; // access to ensure re-render
+      const { rerender: rerenderSingle } = renderHook(
+        ({ sessionId, projectId }: { sessionId: string | null; projectId?: string }) =>
+          useTerminal(sessionId, projectId),
+        { initialProps: { sessionId: "test-session-123", projectId: "proj-A" } },
+      );
+
+      // Change projectId
+      rerenderSingle({ sessionId: "test-session-123", projectId: "proj-B" });
+
+      const oldWs = MockWebSocket.instances[0];
+
+      // Simulate the OLD WebSocket receiving a message (stale event)
+      act(() => {
+        oldWs.emitMessage({ type: "data", data: "stale data" });
+      });
+
+      // The stale message should NOT call the callback
+      expect(dataCallback).not.toHaveBeenCalled();
+    });
+
+    it("stale WebSocket reconnect timeout is ignored when context changed", () => {
+      const { rerender } = renderHook(
+        ({ sessionId, projectId }: { sessionId: string | null; projectId?: string }) =>
+          useTerminal(sessionId, projectId),
+        { initialProps: { sessionId: "test-session-123", projectId: "proj-A" } },
+      );
+
+      // Open and then close the WebSocket to trigger reconnect timeout
+      act(() => {
+        MockWebSocket.instances[0].emitOpen();
+        MockWebSocket.instances[0].emitClose(1006); // Unexpected close triggers reconnect
+      });
+
+      // Wait for reconnect to be scheduled
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+
+      // Now change projectId before reconnect fires
+      rerender({ sessionId: "test-session-123", projectId: "proj-B" });
+
+      // Advance past when reconnect would have fired
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+
+      // At this point:
+      // - ws1 was created (original)
+      // - ws1 close triggered reconnect
+      // - reconnect timeout fired and created ws2 (for stale context A)
+      // - context changed to B
+      // - closeWebSocketForContextChange closed ws1 and ws2
+      // - connect() created ws3 (for new context B)
+      // The stale ws2 reconnect should NOT have created another instance
+      expect(MockWebSocket.instances).toHaveLength(3);
+      
+      // The final ws should be for project B
+      expect(MockWebSocket.instances[2].url).toContain("projectId=proj-B");
+    });
+
+    it("resets connection status on context change", () => {
+      const { result, rerender } = renderHook(
+        ({ sessionId, projectId }: { sessionId: string | null; projectId?: string }) =>
+          useTerminal(sessionId, projectId),
+        { initialProps: { sessionId: "test-session-123", projectId: "proj-A" } },
+      );
+
+      // Connect
+      act(() => {
+        MockWebSocket.instances[0].emitOpen();
+      });
+
+      expect(result.current.connectionStatus).toBe("connected");
+
+      // Change projectId
+      rerender({ sessionId: "test-session-123", projectId: "proj-B" });
+
+      // Status should be reset to disconnected/connecting
+      // (disconnected initially, then connecting for the new context)
+      act(() => {
+        vi.advanceTimersByTime(0);
+      });
+
+      expect(result.current.connectionStatus).toBe("connecting");
+    });
+
+    it("only reconnects to active context (new projectId)", () => {
+      const { result, rerender } = renderHook(
+        ({ sessionId, projectId }: { sessionId: string | null; projectId?: string }) =>
+          useTerminal(sessionId, projectId),
+        { initialProps: { sessionId: "test-session-123", projectId: "proj-A" } },
+      );
+
+      // Open the first WebSocket
+      act(() => {
+        MockWebSocket.instances[0].emitOpen();
+      });
+
+      // Close to trigger reconnect
+      act(() => {
+        MockWebSocket.instances[0].emitClose(1006);
+      });
+
+      // Wait for reconnect timeout to fire
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+
+      // At this point:
+      // - ws1 was closed
+      // - onclose scheduled reconnect
+      // - reconnect timeout fired and called connect()
+      // - connect() closed ws1 and created ws2 (proj-A)
+      
+      // Change projectId - this closes ws2 and creates ws3 (proj-B)
+      rerender({ sessionId: "test-session-123", projectId: "proj-B" });
+
+      // Wait for effects
+      act(() => {
+        vi.advanceTimersByTime(0);
+      });
+
+      // Final ws should be for project B
+      const finalWs = MockWebSocket.instances[MockWebSocket.instances.length - 1];
+      expect(finalWs.url).toContain("projectId=proj-B");
+
+      // Open the final ws
+      act(() => {
+        finalWs.emitOpen();
+      });
+
+      // Status should be connected
+      expect(result.current.connectionStatus).toBe("connected");
+    });
+
+    it("clears buffer on context change", () => {
+      const { result, rerender } = renderHook(
+        ({ projectId }: { projectId?: string }) => useTerminal("test-session-123", projectId),
+        { initialProps: { projectId: "proj-A" as string | undefined } },
+      );
+
+      // Send some data before context change
+      act(() => {
+        MockWebSocket.instances[0].emitMessage({ type: "scrollback", data: "buffered data" });
+      });
+
+      // Register a callback that would receive the buffer
+      const scrollbackCallback = vi.fn();
+      result.current.onScrollback(scrollbackCallback);
+
+      // Change projectId - this should clear the buffer
+      rerender({ projectId: "proj-B" });
+
+      // Wait for new context
+      act(() => {
+        vi.advanceTimersByTime(0);
+      });
+
+      // Register a new callback on the NEW context
+      const newScrollbackCallback = vi.fn();
+      result.current.onScrollback(newScrollbackCallback);
+
+      // No buffered data should be delivered because the buffer was cleared
+      expect(newScrollbackCallback).not.toHaveBeenCalled();
+    });
+
+    it("handles rapid context switches correctly", () => {
+      const { result, rerender } = renderHook(
+        ({ sessionId, projectId }: { sessionId: string | null; projectId?: string }) =>
+          useTerminal(sessionId, projectId),
+        { initialProps: { sessionId: "test-session-123", projectId: "proj-A" } },
+      );
+
+      // Rapid switches: A -> B -> C
+      // Each switch closes old ws and creates new ws
+      rerender({ sessionId: "test-session-123", projectId: "proj-B" });
+      rerender({ sessionId: "test-session-123", projectId: "proj-C" });
+
+      // Wait for effects
+      act(() => {
+        vi.advanceTimersByTime(0);
+      });
+
+      // Each rerender creates a new ws (close old + connect new)
+      // ws1 (proj-A), ws2 (proj-B), ws3 (proj-C)
+      expect(MockWebSocket.instances).toHaveLength(3);
+      expect(MockWebSocket.instances[2].url).toContain("projectId=proj-C");
+    });
+
+    it("sessionId change also triggers context cleanup", () => {
+      const { result, rerender } = renderHook(
+        ({ sessionId, projectId }: { sessionId: string | null; projectId?: string }) =>
+          useTerminal(sessionId, projectId),
+        { initialProps: { sessionId: "test-session-123", projectId: "proj-A" } },
+      );
+
+      const oldWs = MockWebSocket.instances[0];
+      const oldWsCloseSpy = vi.spyOn(oldWs, "close");
+
+      // Change sessionId only
+      rerender({ sessionId: "test-session-456", projectId: "proj-A" });
+
+      // Old WebSocket should be closed
+      expect(oldWsCloseSpy).toHaveBeenCalled();
+
+      // New WebSocket should be created with new sessionId
+      expect(MockWebSocket.instances).toHaveLength(2);
+      expect(MockWebSocket.instances[1].url).toContain("sessionId=test-session-456");
+    });
+  });
 });

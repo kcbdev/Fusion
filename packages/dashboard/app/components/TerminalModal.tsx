@@ -161,6 +161,8 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   const keyboardOverlapRef = useRef(0);
   /** Tracks a pending requestAnimationFrame for deferred xterm re-fit. */
   const pendingFitRef = useRef<number | null>(null);
+  /** Tracks the previous projectId to detect project switches and invalidate xterm. */
+  const previousProjectIdRef = useRef<string | undefined>(projectId);
 
   // Keep the latest keyboard overlap in a ref so async xterm setup can read
   // current mobile keyboard state without forcing the init effect to re-run.
@@ -308,13 +310,20 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
 
     const currentSessionId = activeTab.sessionId;
 
-    // If already initialized for this session, skip
-    if (xtermInitializedRef.current === currentSessionId && xtermRef.current) {
+    // Detect project switch: if projectId changed, invalidate xterm even if sessionId is the same.
+    // This ensures xterm content from the previous project is not displayed in the new project.
+    const projectChanged = previousProjectIdRef.current !== projectId;
+    if (projectChanged) {
+      previousProjectIdRef.current = projectId;
+    }
+
+    // If already initialized for this session AND project hasn't changed, skip
+    if (xtermInitializedRef.current === currentSessionId && xtermRef.current && !projectChanged) {
       return;
     }
 
-    // Clean up existing xterm if switching sessions or if DOM was cleared
-    if (xtermRef.current && xtermInitializedRef.current !== currentSessionId) {
+    // Clean up existing xterm if switching sessions/projects or if DOM was cleared
+    if (xtermRef.current && (xtermInitializedRef.current !== currentSessionId || projectChanged)) {
       xtermRef.current.dispose();
       xtermRef.current = null;
       fitAddonRef.current = null;

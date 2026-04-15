@@ -3603,3 +3603,251 @@ describe("TerminalModal — xterm focus initialization (FN-1602)", () => {
     });
   });
 });
+
+// --- FN-1765: Project-context propagation ---
+describe("TerminalModal — project-context propagation (FN-1765)", () => {
+  const mockOnClose = vi.fn();
+  const mockSendInput = vi.fn();
+  const mockResize = vi.fn();
+  const mockReconnect = vi.fn();
+
+  const createMockTerminalState = (overrides = {}) => ({
+    connectionStatus: "connected" as const,
+    sendInput: mockSendInput,
+    resize: mockResize,
+    onData: vi.fn(() => vi.fn()),
+    onExit: vi.fn(() => vi.fn()),
+    onConnect: vi.fn(() => vi.fn()),
+    onScrollback: vi.fn(() => vi.fn()),
+    reconnect: mockReconnect,
+    onSessionInvalid: vi.fn(() => vi.fn()),
+    ...overrides,
+  });
+
+  const defaultTab = {
+    id: "tab-1",
+    sessionId: "session-1",
+    title: "bash",
+    isActive: true,
+    createdAt: Date.now(),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTerminalInstance.open.mockClear();
+    mockTerminalInstance.dispose.mockClear();
+    mockTerminalInstance.clear.mockClear();
+    mockUseTerminal.mockReturnValue(createMockTerminalState());
+    mockUseTerminalSessions.mockReturnValue({
+      tabs: [defaultTab],
+      activeTab: defaultTab,
+      isReady: true,
+      bootstrapError: null,
+      createTab: vi.fn(),
+      closeTab: vi.fn(),
+      setActiveTab: vi.fn(),
+      updateTabTitle: vi.fn(),
+      restartActiveTab: vi.fn(),
+      retryBootstrap: vi.fn(),
+      replaceActiveTabSession: vi.fn(),
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("passes projectId to useTerminal hook", async () => {
+    render(<TerminalModal isOpen={true} onClose={mockOnClose} projectId="proj-123" />);
+
+    await waitFor(() => {
+      expect(mockUseTerminal).toHaveBeenCalledWith("session-1", "proj-123");
+    });
+  });
+
+  it("passes undefined projectId to useTerminal when not provided", async () => {
+    render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+    await waitFor(() => {
+      expect(mockUseTerminal).toHaveBeenCalledWith("session-1", undefined);
+    });
+  });
+
+  it("re-invokes useTerminal with new projectId when projectId prop changes", async () => {
+    const { rerender } = render(
+      <TerminalModal isOpen={true} onClose={mockOnClose} projectId="proj-A" />
+    );
+
+    await waitFor(() => {
+      expect(mockUseTerminal).toHaveBeenCalledWith("session-1", "proj-A");
+    });
+
+    // Simulate project switch
+    rerender(<TerminalModal isOpen={true} onClose={mockOnClose} projectId="proj-B" />);
+
+    await waitFor(() => {
+      // useTerminal should be called with the new projectId
+      expect(mockUseTerminal).toHaveBeenCalledWith(expect.any(String), "proj-B");
+    });
+  });
+
+  it("disposes xterm when projectId changes", async () => {
+    // Project A has session-1
+    mockUseTerminalSessions.mockReturnValue({
+      tabs: [defaultTab],
+      activeTab: defaultTab,
+      isReady: true,
+      bootstrapError: null,
+      createTab: vi.fn(),
+      closeTab: vi.fn(),
+      setActiveTab: vi.fn(),
+      updateTabTitle: vi.fn(),
+      restartActiveTab: vi.fn(),
+      retryBootstrap: vi.fn(),
+      replaceActiveTabSession: vi.fn(),
+    });
+
+    const { rerender } = render(
+      <TerminalModal isOpen={true} onClose={mockOnClose} projectId="proj-A" />
+    );
+
+    // Wait for initial xterm to be created
+    await waitFor(() => {
+      expect(mockTerminalInstance.open).toHaveBeenCalled();
+    });
+
+    // Clear mock to track disposal separately
+    mockTerminalInstance.dispose.mockClear();
+
+    // Project B has a different session (simulating project-scoped sessions)
+    const projBSession = {
+      id: "tab-1",
+      sessionId: "session-2",
+      title: "zsh",
+      isActive: true,
+      createdAt: Date.now(),
+    };
+
+    mockUseTerminalSessions.mockReturnValue({
+      tabs: [projBSession],
+      activeTab: projBSession,
+      isReady: true,
+      bootstrapError: null,
+      createTab: vi.fn(),
+      closeTab: vi.fn(),
+      setActiveTab: vi.fn(),
+      updateTabTitle: vi.fn(),
+      restartActiveTab: vi.fn(),
+      retryBootstrap: vi.fn(),
+      replaceActiveTabSession: vi.fn(),
+    });
+
+    // Switch project
+    rerender(<TerminalModal isOpen={true} onClose={mockOnClose} projectId="proj-B" />);
+
+    // xterm should be disposed when project changes (different session triggers cleanup)
+    await waitFor(() => {
+      expect(mockTerminalInstance.dispose).toHaveBeenCalled();
+    });
+
+    // New xterm should be initialized for the new project's session
+    await waitFor(() => {
+      expect(mockTerminalInstance.open).toHaveBeenCalled();
+    });
+  });
+
+  it("uses fresh useTerminal session for new project after project switch", async () => {
+    // Initial project A
+    const { rerender } = render(
+      <TerminalModal isOpen={true} onClose={mockOnClose} projectId="proj-A" />
+    );
+
+    await waitFor(() => {
+      expect(mockUseTerminal).toHaveBeenCalledWith("session-1", "proj-A");
+    });
+
+    // Simulate project B having different sessions
+    const projBTab = {
+      id: "tab-1",
+      sessionId: "session-2", // Different session for project B
+      title: "zsh",
+      isActive: true,
+      createdAt: Date.now(),
+    };
+
+    mockUseTerminalSessions.mockReturnValue({
+      tabs: [projBTab],
+      activeTab: projBTab,
+      isReady: true,
+      bootstrapError: null,
+      createTab: vi.fn(),
+      closeTab: vi.fn(),
+      setActiveTab: vi.fn(),
+      updateTabTitle: vi.fn(),
+      restartActiveTab: vi.fn(),
+      retryBootstrap: vi.fn(),
+      replaceActiveTabSession: vi.fn(),
+    });
+
+    // Switch to project B
+    rerender(<TerminalModal isOpen={true} onClose={mockOnClose} projectId="proj-B" />);
+
+    // useTerminal should be called with the new project's session
+    await waitFor(() => {
+      expect(mockUseTerminal).toHaveBeenCalledWith("session-2", "proj-B");
+    });
+  });
+
+  it("does not dispose xterm when projectId stays the same but session changes", async () => {
+    const { rerender } = render(
+      <TerminalModal isOpen={true} onClose={mockOnClose} projectId="proj-A" />
+    );
+
+    // Wait for initial xterm to be created
+    await waitFor(() => {
+      expect(mockTerminalInstance.open).toHaveBeenCalled();
+    });
+
+    // Clear mock to track disposal
+    mockTerminalInstance.dispose.mockClear();
+
+    // Create a new tab (session change, but same project)
+    const newTab = {
+      id: "tab-2",
+      sessionId: "session-2",
+      title: "zsh",
+      isActive: true,
+      createdAt: Date.now(),
+    };
+
+    mockUseTerminalSessions.mockReturnValue({
+      tabs: [
+        { ...defaultTab, isActive: false },
+        newTab,
+      ],
+      activeTab: newTab,
+      isReady: true,
+      bootstrapError: null,
+      createTab: vi.fn(),
+      closeTab: vi.fn(),
+      setActiveTab: vi.fn(),
+      updateTabTitle: vi.fn(),
+      restartActiveTab: vi.fn(),
+      retryBootstrap: vi.fn(),
+      replaceActiveTabSession: vi.fn(),
+    });
+
+    // Switch tab (not project)
+    rerender(<TerminalModal isOpen={true} onClose={mockOnClose} projectId="proj-A" />);
+
+    // xterm should be disposed for tab switch
+    await waitFor(() => {
+      expect(mockTerminalInstance.dispose).toHaveBeenCalled();
+    });
+
+    // New xterm should be initialized for the new session
+    await waitFor(() => {
+      expect(mockTerminalInstance.open).toHaveBeenCalled();
+    });
+  });
+});
