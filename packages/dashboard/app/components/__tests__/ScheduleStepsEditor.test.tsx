@@ -18,6 +18,7 @@ vi.mock("lucide-react", () => ({
   GripVertical: () => <span data-testid="icon-grip">≡</span>,
   Terminal: () => <span data-testid="icon-terminal">$</span>,
   Sparkles: () => <span data-testid="icon-sparkles">✨</span>,
+  ListPlus: () => <span data-testid="icon-list-plus">📋</span>,
 }));
 
 // Mock api - provide models synchronously for immediate availability
@@ -87,6 +88,7 @@ describe("ScheduleStepsEditor", () => {
       render(<ScheduleStepsEditor steps={[]} onChange={onChange} />);
       expect(screen.getByText("Add Command Step")).toBeDefined();
       expect(screen.getByText("Add AI Prompt Step")).toBeDefined();
+      expect(screen.getByText("Add Create Task Step")).toBeDefined();
     });
 
     it("adds a command step when clicking Add Command Step", () => {
@@ -107,6 +109,18 @@ describe("ScheduleStepsEditor", () => {
       expect(newSteps).toHaveLength(1);
       expect(newSteps[0].type).toBe("ai-prompt");
       expect(newSteps[0].name).toBe("New AI Prompt Step");
+    });
+
+    it("adds a create-task step when clicking Add Create Task Step", () => {
+      render(<ScheduleStepsEditor steps={[]} onChange={onChange} />);
+      fireEvent.click(screen.getByText("Add Create Task Step"));
+      expect(onChange).toHaveBeenCalledTimes(1);
+      const newSteps = onChange.mock.calls[0][0] as AutomationStep[];
+      expect(newSteps).toHaveLength(1);
+      expect(newSteps[0].type).toBe("create-task");
+      expect(newSteps[0].name).toBe("New Create Task Step");
+      expect(newSteps[0].taskDescription).toBe("");
+      expect(newSteps[0].taskColumn).toBe("triage");
     });
 
     it("appends to existing steps", () => {
@@ -249,6 +263,36 @@ describe("ScheduleStepsEditor", () => {
       fireEvent.click(screen.getByText("Save Step"));
       expect(screen.getByText("Command is required")).toBeDefined();
     });
+
+    it("shows error when create-task step has no task description", () => {
+      const steps = [makeStep({ id: "s1", type: "create-task", name: "Create Task", taskDescription: "Some description" })];
+      render(<ScheduleStepsEditor steps={steps} onChange={onChange} />);
+      fireEvent.click(screen.getByLabelText("Edit Create Task"));
+      // Clear the task description
+      const descField = screen.getByLabelText("Task Description *");
+      fireEvent.change(descField, { target: { value: "" } });
+      fireEvent.click(screen.getByText("Save Step"));
+      expect(screen.getByText("Task description is required")).toBeDefined();
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it("allows saving create-task step with all fields filled", async () => {
+      const steps = [makeStep({ id: "s1", type: "create-task", name: "Create Task", taskDescription: "", taskColumn: "triage" })];
+      render(<ScheduleStepsEditor steps={steps} onChange={onChange} />);
+      fireEvent.click(screen.getByLabelText("Edit Create Task"));
+
+      // Fill in all fields
+      fireEvent.change(screen.getByLabelText("Task Title (optional)"), { target: { value: "Weekly Review" } });
+      fireEvent.change(screen.getByLabelText("Task Description *"), { target: { value: "Check dependencies" } });
+
+      fireEvent.click(screen.getByText("Save Step"));
+
+      expect(onChange).toHaveBeenCalledTimes(1);
+      const savedStep = onChange.mock.calls[0][0][0] as AutomationStep;
+      expect(savedStep.taskTitle).toBe("Weekly Review");
+      expect(savedStep.taskDescription).toBe("Check dependencies");
+      expect(savedStep.taskColumn).toBe("triage");
+    });
   });
 
   describe("empty state", () => {
@@ -356,6 +400,38 @@ describe("ScheduleStepsEditor", () => {
       // The onChange should be a function that accepts a value string
       // We can't fully test the React state update in this mock setup,
       // but we can verify the callback is properly wired
+    });
+
+    it("shows model dropdown for create-task step type", async () => {
+      const steps = [makeStep({ id: "s1", type: "create-task", name: "Create Task", taskDescription: "Test description" })];
+      render(<ScheduleStepsEditor steps={steps} onChange={onChange} />);
+      
+      fireEvent.click(screen.getByLabelText("Edit Create Task"));
+      
+      // Wait for models to load and dropdown to appear
+      await waitFor(() => expect(screen.getByTestId("model-dropdown")).toBeDefined());
+      
+      expect(screen.getByTestId("model-dropdown")).toBeDefined();
+    });
+
+    it("pre-populates model dropdown when editing create-task step with existing model", async () => {
+      const steps = [makeStep({ 
+        id: "s1", 
+        type: "create-task", 
+        name: "Create Task", 
+        taskDescription: "Test description",
+        modelProvider: "anthropic", 
+        modelId: "claude-sonnet-4-5" 
+      })];
+      render(<ScheduleStepsEditor steps={steps} onChange={onChange} />);
+      
+      fireEvent.click(screen.getByLabelText("Edit Create Task"));
+      
+      // Wait for models to load and dropdown to appear
+      await waitFor(() => expect(screen.getByTestId("model-dropdown")).toBeDefined());
+      
+      const dropdown = screen.getByTestId("model-dropdown") as HTMLSelectElement;
+      expect(dropdown.getAttribute("data-value")).toBe("anthropic/claude-sonnet-4-5");
     });
   });
 

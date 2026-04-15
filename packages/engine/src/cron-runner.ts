@@ -2,7 +2,7 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import type { TaskStore } from "@fusion/core";
 import type { AutomationStore } from "@fusion/core";
-import type { ScheduledTask, AutomationRunResult, AutomationStep, AutomationStepResult } from "@fusion/core";
+import type { ScheduledTask, AutomationRunResult, AutomationStep, AutomationStepResult, Column, TaskCreateInput } from "@fusion/core";
 import { createLogger } from "./logger.js";
 
 const execAsync = promisify(exec);
@@ -325,6 +325,8 @@ export class CronRunner {
       return this.executeCommandStep(step, stepIndex, timeoutMs, stepStartedAt);
     } else if (step.type === "ai-prompt") {
       return this.executeAiPromptStep(step, stepIndex, timeoutMs, stepStartedAt);
+    } else if (step.type === "create-task") {
+      return this.executeCreateTaskStep(step, stepIndex, stepStartedAt);
     }
 
     // Unknown step type
@@ -477,6 +479,70 @@ export class CronRunner {
     } catch (err: any) {
       const errorMessage = err.message ?? String(err);
       log.warn(`    ✗ AI prompt step "${step.name}" failed: ${errorMessage}`);
+
+      return {
+        stepId: step.id,
+        stepName: step.name,
+        stepIndex,
+        success: false,
+        output: "",
+        error: errorMessage,
+        startedAt,
+        completedAt: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Execute a create-task step.
+   * Creates a new task in the task board using the configured fields.
+   */
+  private async executeCreateTaskStep(
+    step: AutomationStep,
+    stepIndex: number,
+    startedAt: string,
+  ): Promise<AutomationStepResult> {
+    // Validate that taskDescription is present and non-empty
+    if (!step.taskDescription?.trim()) {
+      return {
+        stepId: step.id,
+        stepName: step.name,
+        stepIndex,
+        success: false,
+        output: "",
+        error: "Create-task step has no task description specified",
+        startedAt,
+        completedAt: new Date().toISOString(),
+      };
+    }
+
+    // Build TaskCreateInput from step fields
+    const taskInput: TaskCreateInput = {
+      title: step.taskTitle?.trim() || undefined,
+      description: step.taskDescription.trim(),
+      column: (step.taskColumn as Column) || "triage",
+      modelProvider: step.modelProvider?.trim() || undefined,
+      modelId: step.modelId?.trim() || undefined,
+    };
+
+    try {
+      const task = await this.store.createTask(taskInput);
+
+      const output = `Created task ${task.id}: ${task.title || task.description.slice(0, 80)}`;
+      log.log(`    ✓ Create-task step "${step.name}" created task ${task.id}`);
+
+      return {
+        stepId: step.id,
+        stepName: step.name,
+        stepIndex,
+        success: true,
+        output,
+        startedAt,
+        completedAt: new Date().toISOString(),
+      };
+    } catch (err) {
+      const errorMessage = (err as Error).message ?? String(err);
+      log.warn(`    ✗ Create-task step "${step.name}" failed: ${errorMessage}`);
 
       return {
         stepId: step.id,

@@ -18,7 +18,7 @@ export const AUTOMATION_PRESETS: Record<Exclude<ScheduleType, "custom">, string>
 // ── Automation Step Types ────────────────────────────────────────────
 
 /** The type of an automation step. */
-export type AutomationStepType = "command" | "ai-prompt";
+export type AutomationStepType = "command" | "ai-prompt" | "create-task";
 
 /** A single step within a multi-step scheduled task. */
 export interface AutomationStep {
@@ -36,6 +36,12 @@ export interface AutomationStep {
   modelProvider?: string;
   /** AI model ID (for ai-prompt steps). */
   modelId?: string;
+  /** Task title for the created task (for create-task steps). */
+  taskTitle?: string;
+  /** Task description for the created task (for create-task steps). */
+  taskDescription?: string;
+  /** Target column for the created task (for create-task steps). Defaults to "triage". */
+  taskColumn?: string;
   /** Per-step timeout override in milliseconds. */
   timeoutMs?: number;
   /** Whether to continue to the next step if this one fails. Default: false. */

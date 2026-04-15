@@ -1056,4 +1056,177 @@ describe("CronRunner", () => {
       expect(result.stepResults![0].error).toContain("timed out");
     });
   });
+
+  // ── Create-task step execution ─────────────────────────────────────────
+
+  describe("create-task step execution", () => {
+    function makeCreateTaskStep(overrides: Partial<AutomationStep> = {}): AutomationStep {
+      return {
+        id: randomUUID(),
+        type: "create-task",
+        name: "Create task step",
+        taskDescription: "Review dependencies for security vulnerabilities",
+        ...overrides,
+      };
+    }
+
+    it("successfully creates a task when taskDescription is provided", async () => {
+      const mockTask = { id: "FN-1234", title: "Review", description: "Review dependencies" };
+      const createTaskMock = vi.fn().mockResolvedValue(mockTask);
+      const store = createMockStore({} as any);
+      (store as any).createTask = createTaskMock;
+
+      const schedule = createMockSchedule({
+        command: "",
+        steps: [makeCreateTaskStep({ taskDescription: "Check npm packages" })],
+      });
+      const automationStore = createMockAutomationStore([schedule]);
+      runner = new CronRunner(store, automationStore);
+
+      const result = await runner.executeSchedule(schedule);
+
+      expect(result.success).toBe(true);
+      expect(result.stepResults).toHaveLength(1);
+      expect(result.stepResults![0].success).toBe(true);
+      expect(result.stepResults![0].output).toContain("Created task FN-1234");
+      expect(createTaskMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns error when taskDescription is missing", async () => {
+      const store = createMockStore();
+      const schedule = createMockSchedule({
+        command: "",
+        steps: [makeCreateTaskStep({ taskDescription: "" })],
+      });
+      const automationStore = createMockAutomationStore([schedule]);
+      runner = new CronRunner(store, automationStore);
+
+      const result = await runner.executeSchedule(schedule);
+
+      expect(result.success).toBe(false);
+      expect(result.stepResults).toHaveLength(1);
+      expect(result.stepResults![0].success).toBe(false);
+      expect(result.stepResults![0].error).toContain("no task description specified");
+    });
+
+    it("passes taskTitle, taskColumn, modelProvider, modelId to store.createTask()", async () => {
+      const mockTask = { id: "FN-5678", title: "Weekly Review", description: "Check packages" };
+      const createTaskMock = vi.fn().mockResolvedValue(mockTask);
+      const store = createMockStore({} as any);
+      (store as any).createTask = createTaskMock;
+
+      const schedule = createMockSchedule({
+        command: "",
+        steps: [makeCreateTaskStep({
+          taskTitle: "Weekly Review",
+          taskDescription: "Check packages",
+          taskColumn: "todo",
+          modelProvider: "anthropic",
+          modelId: "claude-sonnet-4-5",
+        })],
+      });
+      const automationStore = createMockAutomationStore([schedule]);
+      runner = new CronRunner(store, automationStore);
+
+      await runner.executeSchedule(schedule);
+
+      expect(createTaskMock).toHaveBeenCalledWith({
+        title: "Weekly Review",
+        description: "Check packages",
+        column: "todo",
+        modelProvider: "anthropic",
+        modelId: "claude-sonnet-4-5",
+      });
+    });
+
+    it("defaults column to triage when taskColumn is not set", async () => {
+      const mockTask = { id: "FN-9999", title: "", description: "Some task" };
+      const createTaskMock = vi.fn().mockResolvedValue(mockTask);
+      const store = createMockStore({} as any);
+      (store as any).createTask = createTaskMock;
+
+      const schedule = createMockSchedule({
+        command: "",
+        steps: [makeCreateTaskStep({ taskDescription: "Some task" })],
+      });
+      const automationStore = createMockAutomationStore([schedule]);
+      runner = new CronRunner(store, automationStore);
+
+      await runner.executeSchedule(schedule);
+
+      expect(createTaskMock).toHaveBeenCalledWith(
+        expect.objectContaining({ column: "triage" }),
+      );
+    });
+
+    it("handles store.createTask() errors gracefully", async () => {
+      const createTaskMock = vi.fn().mockRejectedValue(new Error("Database constraint violation"));
+      const store = createMockStore({} as any);
+      (store as any).createTask = createTaskMock;
+
+      const schedule = createMockSchedule({
+        command: "",
+        steps: [makeCreateTaskStep({ taskDescription: "This will fail" })],
+      });
+      const automationStore = createMockAutomationStore([schedule]);
+      runner = new CronRunner(store, automationStore);
+
+      const result = await runner.executeSchedule(schedule);
+
+      expect(result.success).toBe(false);
+      expect(result.stepResults).toHaveLength(1);
+      expect(result.stepResults![0].success).toBe(false);
+      expect(result.stepResults![0].error).toContain("Database constraint violation");
+    });
+
+    it("trims whitespace from task fields", async () => {
+      const mockTask = { id: "FN-0001", title: "Cleaned", description: "Trimmed" };
+      const createTaskMock = vi.fn().mockResolvedValue(mockTask);
+      const store = createMockStore({} as any);
+      (store as any).createTask = createTaskMock;
+
+      const schedule = createMockSchedule({
+        command: "",
+        steps: [makeCreateTaskStep({
+          taskTitle: "  Cleaned  ",
+          taskDescription: "  Trimmed  ",
+          modelProvider: "  anthropic  ",
+          modelId: "  claude-sonnet-4-5  ",
+        })],
+      });
+      const automationStore = createMockAutomationStore([schedule]);
+      runner = new CronRunner(store, automationStore);
+
+      await runner.executeSchedule(schedule);
+
+      expect(createTaskMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Cleaned",
+          description: "Trimmed",
+          modelProvider: "anthropic",
+          modelId: "claude-sonnet-4-5",
+        }),
+      );
+    });
+
+    it("sets title to undefined when taskTitle is not provided", async () => {
+      const mockTask = { id: "FN-0002", title: "", description: "Minimal task" };
+      const createTaskMock = vi.fn().mockResolvedValue(mockTask);
+      const store = createMockStore({} as any);
+      (store as any).createTask = createTaskMock;
+
+      const schedule = createMockSchedule({
+        command: "",
+        steps: [makeCreateTaskStep({ taskTitle: undefined })],
+      });
+      const automationStore = createMockAutomationStore([schedule]);
+      runner = new CronRunner(store, automationStore);
+
+      await runner.executeSchedule(schedule);
+
+      // When taskTitle is undefined, title should be undefined in the input
+      const callArg = createTaskMock.mock.calls[0][0];
+      expect(callArg.title).toBeUndefined();
+    });
+  });
 });

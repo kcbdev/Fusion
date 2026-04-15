@@ -25,12 +25,31 @@ function generateStepId(): string {
 }
 
 function createEmptyStep(type: AutomationStepType): AutomationStep {
+  if (type === "command") {
+    return {
+      id: generateStepId(),
+      type,
+      name: "New Command Step",
+      command: "",
+      continueOnFailure: false,
+    };
+  }
+  if (type === "ai-prompt") {
+    return {
+      id: generateStepId(),
+      type,
+      name: "New AI Prompt Step",
+      prompt: "",
+      continueOnFailure: false,
+    };
+  }
+  // create-task
   return {
     id: generateStepId(),
     type,
-    name: type === "command" ? "New Command Step" : "New AI Prompt Step",
-    command: type === "command" ? "" : undefined,
-    prompt: type === "ai-prompt" ? "" : undefined,
+    name: "New Create Task Step",
+    taskDescription: "",
+    taskColumn: "triage",
     continueOnFailure: false,
   };
 }
@@ -48,6 +67,9 @@ function StepEditor({ step, onSave, onCancel }: StepEditorProps) {
   const [prompt, setPrompt] = useState(step.prompt ?? "");
   const [modelProvider, setModelProvider] = useState(step.modelProvider ?? "");
   const [modelId, setModelId] = useState(step.modelId ?? "");
+  const [taskTitle, setTaskTitle] = useState(step.taskTitle ?? "");
+  const [taskDescription, setTaskDescription] = useState(step.taskDescription ?? "");
+  const [taskColumn, setTaskColumn] = useState(step.taskColumn ?? "triage");
   const [timeoutMs, setTimeoutMs] = useState<number | undefined>(step.timeoutMs);
   const [continueOnFailure, setContinueOnFailure] = useState(step.continueOnFailure ?? false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -88,12 +110,19 @@ function StepEditor({ step, onSave, onCancel }: StepEditorProps) {
     if (!name.trim()) e.name = "Step name is required";
     if (type === "command" && !command.trim()) e.command = "Command is required";
     if (type === "ai-prompt" && !prompt.trim()) e.prompt = "Prompt is required";
+    if (type === "create-task" && !taskDescription.trim()) e.taskDescription = "Task description is required";
+    // Model pairing validation for ai-prompt and create-task
+    if ((type === "ai-prompt" || type === "create-task") && (modelProvider || modelId)) {
+      if (!modelProvider || !modelId) {
+        e.modelProvider = "Both model provider and model ID must be set together";
+      }
+    }
     if (timeoutMs !== undefined && timeoutMs < 1000) {
       e.timeoutMs = "Timeout must be at least 1 second (1000ms)";
     }
     setErrors(e);
     return Object.keys(e).length === 0;
-  }, [name, type, command, prompt, timeoutMs]);
+  }, [name, type, command, prompt, taskDescription, modelProvider, modelId, timeoutMs]);
 
   // Compute combined model value from separate fields
   const modelValue = (modelProvider && modelId) ? `${modelProvider}/${modelId}` : "";
@@ -114,18 +143,35 @@ function StepEditor({ step, onSave, onCancel }: StepEditorProps) {
 
   const handleSave = useCallback(() => {
     if (!validate()) return;
-    onSave({
+
+    // Clear fields that don't apply to this step type
+    const baseStep = {
       ...step,
       name: name.trim(),
       type,
       command: type === "command" ? command.trim() : undefined,
       prompt: type === "ai-prompt" ? prompt.trim() : undefined,
-      modelProvider: type === "ai-prompt" && modelProvider ? modelProvider.trim() : undefined,
-      modelId: type === "ai-prompt" && modelId ? modelId.trim() : undefined,
+      taskTitle: type === "create-task" && taskTitle.trim() ? taskTitle.trim() : undefined,
+      taskDescription: type === "create-task" && taskDescription.trim() ? taskDescription.trim() : undefined,
+      taskColumn: type === "create-task" ? taskColumn : undefined,
+      modelProvider: (type === "ai-prompt" || type === "create-task") && modelProvider.trim() ? modelProvider.trim() : undefined,
+      modelId: (type === "ai-prompt" || type === "create-task") && modelId.trim() ? modelId.trim() : undefined,
       timeoutMs: timeoutMs || undefined,
       continueOnFailure,
-    });
-  }, [validate, onSave, step, name, type, command, prompt, modelProvider, modelId, timeoutMs, continueOnFailure]);
+    };
+
+    // Clear ai-prompt and create-task specific fields when switching to command
+    if (type !== "ai-prompt") {
+      delete baseStep.prompt;
+    }
+    if (type !== "create-task") {
+      delete baseStep.taskTitle;
+      delete baseStep.taskDescription;
+      delete baseStep.taskColumn;
+    }
+
+    onSave(baseStep as AutomationStep);
+  }, [validate, onSave, step, name, type, command, prompt, taskTitle, taskDescription, taskColumn, modelProvider, modelId, timeoutMs, continueOnFailure]);
 
   return (
     <div className="step-editor">
@@ -151,6 +197,7 @@ function StepEditor({ step, onSave, onCancel }: StepEditorProps) {
         >
           <option value="command">Command</option>
           <option value="ai-prompt">AI Prompt</option>
+          <option value="create-task">Create Task</option>
         </select>
       </div>
 
@@ -197,6 +244,64 @@ function StepEditor({ step, onSave, onCancel }: StepEditorProps) {
             />
             {modelsError && <small className="field-error">{modelsError}</small>}
             <small>AI model for this step. Uses default if not selected.</small>
+          </div>
+        </>
+      )}
+
+      {type === "create-task" && (
+        <>
+          <div className="form-group">
+            <label htmlFor={`step-task-title-${step.id}`}>Task Title (optional)</label>
+            <input
+              id={`step-task-title-${step.id}`}
+              type="text"
+              placeholder="e.g. Review weekly dependencies"
+              value={taskTitle}
+              onChange={(e) => setTaskTitle(e.target.value)}
+            />
+            <small>Leave blank to auto-summarize from description</small>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor={`step-task-description-${step.id}`}>Task Description *</label>
+            <textarea
+              id={`step-task-description-${step.id}`}
+              placeholder="e.g. Check all npm dependencies for security vulnerabilities and update outdated packages"
+              value={taskDescription}
+              onChange={(e) => setTaskDescription(e.target.value)}
+              rows={4}
+              aria-invalid={!!errors.taskDescription}
+            />
+            {errors.taskDescription && <small className="field-error">{errors.taskDescription}</small>}
+          </div>
+
+          <div className="form-group">
+            <label htmlFor={`step-task-column-${step.id}`}>Target Column</label>
+            <select
+              id={`step-task-column-${step.id}`}
+              value={taskColumn}
+              onChange={(e) => setTaskColumn(e.target.value)}
+            >
+              <option value="triage">Triage</option>
+              <option value="todo">To Do</option>
+            </select>
+            <small>Column where the new task will be created</small>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor={`step-task-model-${step.id}`}>Executor Model (optional)</label>
+            <CustomModelDropdown
+              id={`step-task-model-${step.id}`}
+              label="Model"
+              models={models}
+              value={modelValue}
+              onChange={handleModelChange}
+              placeholder="Use default"
+              disabled={modelsLoading}
+            />
+            {modelsError && <small className="field-error">{modelsError}</small>}
+            {errors.modelProvider && <small className="field-error">{errors.modelProvider}</small>}
+            <small>AI model for executing the created task. Uses default if not selected.</small>
           </div>
         </>
       )}
@@ -369,6 +474,14 @@ export function ScheduleStepsEditor({ steps, onChange, onEditingChange }: Schedu
         >
           <Plus size={14} />
           Add AI Prompt Step
+        </button>
+        <button
+          type="button"
+          className="btn btn-sm"
+          onClick={() => handleAddStep("create-task")}
+        >
+          <Plus size={14} />
+          Add Create Task Step
         </button>
       </div>
     </div>
