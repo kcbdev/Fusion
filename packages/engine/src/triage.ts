@@ -697,17 +697,25 @@ export class TriageProcessor {
           onThinking: agentLogger.onThinking,
           onToolStart: agentLogger.onToolStart,
           onToolEnd: agentLogger.onToolEnd,
-          // Per-task planning model override takes precedence, then project settings, then global defaults
+          // Resolve planning model using canonical lane hierarchy:
+          // 1. Task planning override pair (planningModelProvider + planningModelId)
+          // 2. Project planning override pair (planningProvider + planningModelId)
+          // 3. Global planning lane pair (planningGlobalProvider + planningGlobalModelId)
+          // 4. Default pair (defaultProvider + defaultModelId)
           defaultProvider: task.planningModelProvider && task.planningModelId
             ? task.planningModelProvider
             : (settings.planningProvider && settings.planningModelId
-              ? settings.planningProvider
-              : settings.defaultProvider),
+                ? settings.planningProvider
+                : (settings.planningGlobalProvider && settings.planningGlobalModelId
+                    ? settings.planningGlobalProvider
+                    : settings.defaultProvider)),
           defaultModelId: task.planningModelProvider && task.planningModelId
             ? task.planningModelId
             : (settings.planningProvider && settings.planningModelId
-              ? settings.planningModelId
-              : settings.defaultModelId),
+                ? settings.planningModelId
+                : (settings.planningGlobalProvider && settings.planningGlobalModelId
+                    ? settings.planningGlobalModelId
+                    : settings.defaultModelId)),
           fallbackProvider: settings.planningFallbackProvider && settings.planningFallbackModelId
             ? settings.planningFallbackProvider
             : settings.fallbackProvider,
@@ -1191,10 +1199,18 @@ export class TriageProcessor {
             undefined,
             {
               onText: (delta) => options.onAgentText?.(taskId, delta),
+              // Execution defaults as final fallback
               defaultProvider: currentSettings.defaultProvider,
               defaultModelId: currentSettings.defaultModelId,
-              validatorModelProvider: currentSettings.validatorProvider,
-              validatorModelId: currentSettings.validatorModelId,
+              // Project-level validator override
+              projectValidatorProvider: currentSettings.validatorProvider,
+              projectValidatorModelId: currentSettings.validatorModelId,
+              // Project-level validator fallback
+              projectValidatorFallbackProvider: currentSettings.validatorFallbackProvider,
+              projectValidatorFallbackModelId: currentSettings.validatorFallbackModelId,
+              // Global validator lane
+              globalValidatorProvider: currentSettings.validatorGlobalProvider,
+              globalValidatorModelId: currentSettings.validatorGlobalModelId,
               defaultThinkingLevel: currentSettings.defaultThinkingLevel,
               store,
               taskId,

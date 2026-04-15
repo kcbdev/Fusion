@@ -497,12 +497,21 @@ export class TaskExecutor {
             activeEntry.lastModelId = task.modelId;
 
             const settings = await this.store.getSettings();
+            // Resolve model using canonical lane hierarchy for hot-swap
             const newProvider = task.modelProvider && task.modelId
               ? task.modelProvider
-              : settings?.defaultProvider;
+              : (settings?.executionProvider && settings?.executionModelId
+                  ? settings.executionProvider
+                  : (settings?.executionGlobalProvider && settings?.executionGlobalModelId
+                      ? settings.executionGlobalProvider
+                      : settings?.defaultProvider));
             const newModelId = task.modelProvider && task.modelId
               ? task.modelId
-              : settings?.defaultModelId;
+              : (settings?.executionProvider && settings?.executionModelId
+                  ? settings.executionModelId
+                  : (settings?.executionGlobalProvider && settings?.executionGlobalModelId
+                      ? settings.executionGlobalModelId
+                      : settings?.defaultModelId));
 
             if (newProvider && newModelId) {
               try {
@@ -1414,14 +1423,25 @@ export class TaskExecutor {
       });
 
       const agentWork = async () => {
-        // Resolve model settings: use per-task overrides if both provider and modelId are set,
-        // otherwise fall back to global settings
+        // Resolve model settings using canonical lane hierarchy:
+        // 1. Task override pair (modelProvider + modelId)
+        // 2. Project execution override pair (executionProvider + executionModelId)
+        // 3. Global execution lane pair (executionGlobalProvider + executionGlobalModelId)
+        // 4. Default pair (defaultProvider + defaultModelId)
         const executorProvider = detail.modelProvider && detail.modelId
           ? detail.modelProvider
-          : settings.defaultProvider;
+          : (settings.executionProvider && settings.executionModelId
+              ? settings.executionProvider
+              : (settings.executionGlobalProvider && settings.executionGlobalModelId
+                  ? settings.executionGlobalProvider
+                  : settings.defaultProvider));
         const executorModelId = detail.modelProvider && detail.modelId
           ? detail.modelId
-          : settings.defaultModelId;
+          : (settings.executionProvider && settings.executionModelId
+              ? settings.executionModelId
+              : (settings.executionGlobalProvider && settings.executionGlobalModelId
+                  ? settings.executionGlobalModelId
+                  : settings.defaultModelId));
         const executorFallbackProvider = settings.fallbackProvider;
         const executorFallbackModelId = settings.fallbackModelId;
         const executorThinkingLevel = detail.thinkingLevel ?? settings.defaultThinkingLevel;
@@ -2337,16 +2357,24 @@ export class TaskExecutor {
             reviewType, promptContent, baseline,
             {
               onText: (delta) => options.onAgentText?.(taskId, delta),
+              // Execution defaults as final fallback
               defaultProvider: settings.defaultProvider,
               defaultModelId: settings.defaultModelId,
               fallbackProvider: settings.fallbackProvider,
               fallbackModelId: settings.fallbackModelId,
               defaultThinkingLevel: detail.thinkingLevel ?? settings.defaultThinkingLevel,
-              // Per-task validator overrides take precedence over global validator settings
-              validatorModelProvider: detail.validatorModelProvider ?? settings.validatorProvider,
-              validatorModelId: detail.validatorModelId ?? settings.validatorModelId,
-              validatorFallbackModelProvider: settings.validatorFallbackProvider,
-              validatorFallbackModelId: settings.validatorFallbackModelId,
+              // Task-level validator override (from task)
+              taskValidatorProvider: detail.validatorModelProvider,
+              taskValidatorModelId: detail.validatorModelId,
+              // Project-level validator override
+              projectValidatorProvider: settings.validatorProvider,
+              projectValidatorModelId: settings.validatorModelId,
+              // Project-level validator fallback
+              projectValidatorFallbackProvider: settings.validatorFallbackProvider,
+              projectValidatorFallbackModelId: settings.validatorFallbackModelId,
+              // Global validator lane
+              globalValidatorProvider: settings.validatorGlobalProvider,
+              globalValidatorModelId: settings.validatorGlobalModelId,
               store,
               taskId,
               task: detail,

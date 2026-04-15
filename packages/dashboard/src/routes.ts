@@ -2813,15 +2813,18 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
             try {
               const { summarizeTitle } = await import("@fusion/core");
 
-              // Resolve model selection hierarchy for summarization
+              // Resolve model selection hierarchy for summarization:
+              // 1. Project titleSummarizer override (titleSummarizerProvider + titleSummarizerModelId)
+              // 2. Global summarization lane (titleSummarizerGlobalProvider + titleSummarizerGlobalModelId)
+              // 3. Default pair (defaultProvider + defaultModelId)
               const resolvedProvider =
                 (settings.titleSummarizerProvider && settings.titleSummarizerModelId ? settings.titleSummarizerProvider : undefined) ||
-                (settings.planningProvider && settings.planningModelId ? settings.planningProvider : undefined) ||
+                (settings.titleSummarizerGlobalProvider && settings.titleSummarizerGlobalModelId ? settings.titleSummarizerGlobalProvider : undefined) ||
                 (settings.defaultProvider && settings.defaultModelId ? settings.defaultProvider : undefined);
 
               const resolvedModelId =
                 (settings.titleSummarizerProvider && settings.titleSummarizerModelId ? settings.titleSummarizerModelId : undefined) ||
-                (settings.planningProvider && settings.planningModelId ? settings.planningModelId : undefined) ||
+                (settings.titleSummarizerGlobalProvider && settings.titleSummarizerGlobalModelId ? settings.titleSummarizerGlobalModelId : undefined) ||
                 (settings.defaultProvider && settings.defaultModelId ? settings.defaultModelId : undefined);
 
               return await summarizeTitle(desc, scopedStore.getRootDir(), resolvedProvider, resolvedModelId);
@@ -7386,13 +7389,30 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const ip = req.ip || req.socket.remoteAddress || "unknown";
       const rootDir = scopedStore.getRootDir();
 
+      // Resolve planning model using canonical lane hierarchy:
+      // 1. Request body planning override (planningModelProvider + planningModelId)
+      // 2. Project planning override (settings.planningProvider + settings.planningModelId)
+      // 3. Global planning lane (settings.planningGlobalProvider + settings.planningGlobalModelId)
+      // 4. Default pair (settings.defaultProvider + settings.defaultModelId)
+      const resolvedPlanningProvider =
+        (planningModelProvider && planningModelId ? planningModelProvider : undefined) ||
+        (settings.planningProvider && settings.planningModelId ? settings.planningProvider : undefined) ||
+        (settings.planningGlobalProvider && settings.planningGlobalModelId ? settings.planningGlobalProvider : undefined) ||
+        settings.defaultProvider;
+
+      const resolvedPlanningModelId =
+        (planningModelProvider && planningModelId ? planningModelId : undefined) ||
+        (settings.planningProvider && settings.planningModelId ? settings.planningModelId : undefined) ||
+        (settings.planningGlobalProvider && settings.planningGlobalModelId ? settings.planningGlobalModelId : undefined) ||
+        settings.defaultModelId;
+
       const { createSessionWithAgent, RateLimitError: _RateLimitError2 } = await import("./planning.js");
       const sessionId = await createSessionWithAgent(
         ip,
         initialPlan,
         rootDir,
-        planningModelProvider,
-        planningModelId,
+        resolvedPlanningProvider,
+        resolvedPlanningModelId,
         settings.promptOverrides,
       );
       res.status(201).json({ sessionId });
@@ -8499,24 +8519,24 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw err;
       }
 
-      // Resolve model selection hierarchy:
-      // 1. Request body provider+modelId
-      // 2. Settings titleSummarizerProvider + titleSummarizerModelId
-      // 3. Settings planningProvider + planningModelId
-      // 4. Settings defaultProvider + defaultModelId
+      // Resolve model selection hierarchy for summarization:
+      // 1. Request body provider+modelId (request override)
+      // 2. Project titleSummarizer override (titleSummarizerProvider + titleSummarizerModelId)
+      // 3. Global summarization lane (titleSummarizerGlobalProvider + titleSummarizerGlobalModelId)
+      // 4. Default pair (defaultProvider + defaultModelId)
       // 5. Automatic model resolution (no explicit model)
       const settings = await scopedStore.getSettings();
 
       const resolvedProvider =
         (provider && modelId ? provider : undefined) ||
         (settings.titleSummarizerProvider && settings.titleSummarizerModelId ? settings.titleSummarizerProvider : undefined) ||
-        (settings.planningProvider && settings.planningModelId ? settings.planningProvider : undefined) ||
+        (settings.titleSummarizerGlobalProvider && settings.titleSummarizerGlobalModelId ? settings.titleSummarizerGlobalProvider : undefined) ||
         (settings.defaultProvider && settings.defaultModelId ? settings.defaultProvider : undefined);
 
       const resolvedModelId =
         (provider && modelId ? modelId : undefined) ||
         (settings.titleSummarizerProvider && settings.titleSummarizerModelId ? settings.titleSummarizerModelId : undefined) ||
-        (settings.planningProvider && settings.planningModelId ? settings.planningModelId : undefined) ||
+        (settings.titleSummarizerGlobalProvider && settings.titleSummarizerGlobalModelId ? settings.titleSummarizerGlobalModelId : undefined) ||
         (settings.defaultProvider && settings.defaultModelId ? settings.defaultModelId : undefined);
 
       if (process.env.FUSION_DEBUG_AI) {
@@ -9480,8 +9500,20 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
           cwd: scopedStore.getRootDir(),
           systemPrompt,
           tools: "none",
-          defaultProvider: settings.planningProvider || settings.defaultProvider,
-          defaultModelId: settings.planningModelId || settings.defaultModelId,
+          // Resolve planning model using canonical lane hierarchy:
+          // 1. Project planning override (planningProvider + planningModelId)
+          // 2. Global planning lane (planningGlobalProvider + planningGlobalModelId)
+          // 3. Default pair (defaultProvider + defaultModelId)
+          defaultProvider: (settings.planningProvider && settings.planningModelId
+            ? settings.planningProvider
+            : (settings.planningGlobalProvider && settings.planningGlobalModelId
+                ? settings.planningGlobalProvider
+                : settings.defaultProvider)),
+          defaultModelId: (settings.planningProvider && settings.planningModelId
+            ? settings.planningModelId
+            : (settings.planningGlobalProvider && settings.planningGlobalModelId
+                ? settings.planningGlobalModelId
+                : settings.defaultModelId)),
           defaultThinkingLevel: settings.defaultThinkingLevel,
         });
 

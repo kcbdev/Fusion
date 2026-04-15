@@ -732,8 +732,8 @@ describe("TriageProcessor", () => {
         {
           defaultProvider: "anthropic",
           defaultModelId: "claude-opus-4-6",
-          validatorProvider: "anthropic",
-          validatorModelId: "claude-opus-4-6",
+          projectValidatorProvider: "anthropic",
+          projectValidatorModelId: "claude-opus-4-6",
         },
       );
 
@@ -751,8 +751,8 @@ describe("TriageProcessor", () => {
         expect.objectContaining({
           defaultProvider: "openai-codex",
           defaultModelId: "gpt-5.4",
-          validatorModelProvider: "zai",
-          validatorModelId: "glm-5.1",
+          projectValidatorProvider: "zai",
+          projectValidatorModelId: "glm-5.1",
           userComments: undefined,
         }),
       );

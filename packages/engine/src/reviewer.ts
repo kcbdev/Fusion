@@ -191,18 +191,26 @@ export interface ReviewOptions {
   defaultProvider?: string;
   /** Default model ID within the provider (e.g. "claude-sonnet-4-5"). When set with `defaultProvider`, overrides the reviewer's model selection. */
   defaultModelId?: string;
-  /** Validator model provider override. When both `validatorModelProvider` and `validatorModelId` are set, they take precedence over `defaultProvider`/`defaultModelId`. */
-  validatorModelProvider?: string;
-  /** Validator model ID override. When both `validatorModelProvider` and `validatorModelId` are set, they take precedence over `defaultProvider`/`defaultModelId`. */
-  validatorModelId?: string;
+  /** Task-level validator model provider override. When both provider and modelId are set, takes precedence over project/global lanes. */
+  taskValidatorProvider?: string;
+  /** Task-level validator model ID override. When both provider and modelId are set, takes precedence over project/global lanes. */
+  taskValidatorModelId?: string;
+  /** Project-level validator model provider override. Takes precedence over global validator lane. */
+  projectValidatorProvider?: string;
+  /** Project-level validator model ID override. Takes precedence over global validator lane. */
+  projectValidatorModelId?: string;
+  /** Global validator lane provider. Takes precedence over execution defaults. */
+  globalValidatorProvider?: string;
+  /** Global validator lane model ID. Takes precedence over execution defaults. */
+  globalValidatorModelId?: string;
   /** Fallback model provider used when the primary reviewer model hits a retryable provider-side error. */
   fallbackProvider?: string;
   /** Fallback model ID used with `fallbackProvider`. */
   fallbackModelId?: string;
-  /** Validator fallback model provider override. When both validator fallback fields are set, they take precedence over fallbackProvider/fallbackModelId. */
-  validatorFallbackModelProvider?: string;
-  /** Validator fallback model ID override. When both validator fallback fields are set, they take precedence over fallbackProvider/fallbackModelId. */
-  validatorFallbackModelId?: string;
+  /** Project-level validator fallback provider override. Takes precedence over global fallback. */
+  projectValidatorFallbackProvider?: string;
+  /** Project-level validator fallback model ID override. Takes precedence over global fallback. */
+  projectValidatorFallbackModelId?: string;
   /** Default thinking effort level for the reviewer agent session. */
   defaultThinkingLevel?: string;
   /** Task store for persisting agent log entries. When provided with `taskId`, enables full conversation logging. */
@@ -251,19 +259,34 @@ export async function reviewStep(
       })
     : null;
 
-  // Resolve validator model settings: use per-task overrides if both provider and modelId are set,
-  // otherwise fall back to defaultProvider/defaultModelId
-  const validatorProvider = options.validatorModelProvider && options.validatorModelId
-    ? options.validatorModelProvider
-    : options.defaultProvider;
-  const validatorModelId = options.validatorModelProvider && options.validatorModelId
-    ? options.validatorModelId
-    : options.defaultModelId;
-  const validatorFallbackProvider = options.validatorFallbackModelProvider && options.validatorFallbackModelId
-    ? options.validatorFallbackModelProvider
+  // Resolve validator model settings using canonical lane hierarchy:
+  // 1. Task-level validator override pair (taskValidatorProvider + taskValidatorModelId)
+  // 2. Project-level validator override pair (projectValidatorProvider + projectValidatorModelId)
+  // 3. Global validator lane pair (globalValidatorProvider + globalValidatorModelId)
+  // 4. Execution default pair (defaultProvider + defaultModelId)
+  const validatorProvider = options.taskValidatorProvider && options.taskValidatorModelId
+    ? options.taskValidatorProvider
+    : (options.projectValidatorProvider && options.projectValidatorModelId
+        ? options.projectValidatorProvider
+        : (options.globalValidatorProvider && options.globalValidatorModelId
+            ? options.globalValidatorProvider
+            : options.defaultProvider));
+  const validatorModelId = options.taskValidatorProvider && options.taskValidatorModelId
+    ? options.taskValidatorModelId
+    : (options.projectValidatorProvider && options.projectValidatorModelId
+        ? options.projectValidatorModelId
+        : (options.globalValidatorProvider && options.globalValidatorModelId
+            ? options.globalValidatorModelId
+            : options.defaultModelId));
+
+  // Resolve validator fallback using lane hierarchy:
+  // 1. Project-level validator fallback (projectValidatorFallbackProvider + projectValidatorFallbackModelId)
+  // 2. Execution fallback (fallbackProvider + fallbackModelId)
+  const validatorFallbackProvider = options.projectValidatorFallbackProvider && options.projectValidatorFallbackModelId
+    ? options.projectValidatorFallbackProvider
     : options.fallbackProvider;
-  const validatorFallbackModelId = options.validatorFallbackModelProvider && options.validatorFallbackModelId
-    ? options.validatorFallbackModelId
+  const validatorFallbackModelId = options.projectValidatorFallbackProvider && options.projectValidatorFallbackModelId
+    ? options.projectValidatorFallbackModelId
     : options.fallbackModelId;
 
   // Resolve per-agent custom instructions for the reviewer role

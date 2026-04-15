@@ -126,6 +126,26 @@ In **Triage**, an AI agent reads your project, understands context, and writes a
 - **Multi-Project** — Manage multiple projects from a single installation with project isolation
 - **Inter-Agent Messaging** — Built-in messaging for coordination between agents and users
 
+### Model System
+
+Fusion uses a dual-scope model hierarchy with five independent lanes. Global settings define baseline defaults, and project settings provide per-project overrides.
+
+**Lanes:**
+
+| Lane | Purpose | Global Baseline Keys | Project Override Keys |
+|------|---------|---------------------|----------------------|
+| Executor | Task execution agent | `executionGlobalProvider` + `executionGlobalModelId` | `executionProvider` + `executionModelId` |
+| Planning/Triage | Task specification agent | `planningGlobalProvider` + `planningGlobalModelId` | `planningProvider` + `planningModelId` |
+| Validator | Plan/code reviewer | `validatorGlobalProvider` + `validatorGlobalModelId` | `validatorProvider` + `validatorModelId` |
+| Title Summarization | Auto-title generation | `titleSummarizerGlobalProvider` + `titleSummarizerGlobalModelId` | `titleSummarizerProvider` + `titleSummarizerModelId` |
+| Workflow Step Refinement | AI prompt refinement | (uses `defaultProvider`/`defaultModelId`) | (uses `modelProvider`/`modelId` on WorkflowStep) |
+
+**Per-Task Overrides:** Tasks can override the executor, validator, and planning lanes with per-task model fields (`modelProvider`/`modelId`, `validatorModelProvider`/`validatorModelId`, `planningModelProvider`/`planningModelId`).
+
+**Precedence:** Per-task → Project override → Global lane → `defaultProvider`/`defaultModelId` → Automatic resolution.
+
+For full settings documentation, see [Settings Reference](./docs/settings-reference.md).
+
 ### Quick Examples
 
 ```bash

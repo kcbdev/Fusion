@@ -788,12 +788,34 @@ export class StepSessionExecutor {
             : [];
 
           // Create fresh agent session for this attempt
+          // Resolve executor model using canonical lane hierarchy:
+          // 1. Task override pair (taskDetail.modelProvider + taskDetail.modelId)
+          // 2. Project execution override pair (settings.executionProvider + settings.executionModelId)
+          // 3. Global execution lane pair (settings.executionGlobalProvider + settings.executionGlobalModelId)
+          // 4. Default pair (settings.defaultProvider + settings.defaultModelId)
+          const executorProvider = taskDetail.modelProvider && taskDetail.modelId
+            ? taskDetail.modelProvider
+            : (settings.executionProvider && settings.executionModelId
+                ? settings.executionProvider
+                : (settings.executionGlobalProvider && settings.executionGlobalModelId
+                    ? settings.executionGlobalProvider
+                    : settings.defaultProvider));
+          const executorModelId = taskDetail.modelProvider && taskDetail.modelId
+            ? taskDetail.modelId
+            : (settings.executionProvider && settings.executionModelId
+                ? settings.executionModelId
+                : (settings.executionGlobalProvider && settings.executionGlobalModelId
+                    ? settings.executionGlobalModelId
+                    : settings.defaultModelId));
+
           const createResult = await createKbAgent({
             cwd: worktreePath,
             systemPrompt: `You are an AI agent executing step ${stepIndex} of task ${taskDetail.id}. Follow instructions precisely.`,
-            defaultProvider: taskDetail.modelProvider,
-            defaultModelId: taskDetail.modelId,
-            defaultThinkingLevel: taskDetail.thinkingLevel,
+            defaultProvider: executorProvider,
+            defaultModelId: executorModelId,
+            fallbackProvider: settings.fallbackProvider,
+            fallbackModelId: settings.fallbackModelId,
+            defaultThinkingLevel: taskDetail.thinkingLevel ?? settings.defaultThinkingLevel,
             customTools: [...pluginTools, ...documentTools],
             onText: (delta) => {
               agentLogger.onText(delta);

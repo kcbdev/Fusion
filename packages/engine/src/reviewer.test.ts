@@ -259,7 +259,7 @@ describe("reviewStep — validator model overrides", () => {
     vi.clearAllMocks();
   });
 
-  it("uses validatorModelProvider and validatorModelId when both are set", async () => {
+  it("uses taskValidatorProvider and taskValidatorModelId when both are set", async () => {
     mockedCreateHaiAgent.mockResolvedValue(
       createMockSession("### Verdict: APPROVE\n### Summary\nLooks good."),
     );
@@ -270,8 +270,8 @@ describe("reviewStep — validator model overrides", () => {
       {
         defaultProvider: "openai",
         defaultModelId: "gpt-4o",
-        validatorModelProvider: "anthropic",
-        validatorModelId: "claude-sonnet-4-5",
+        taskValidatorProvider: "anthropic",
+        taskValidatorModelId: "claude-sonnet-4-5",
       },
     );
 
@@ -281,7 +281,7 @@ describe("reviewStep — validator model overrides", () => {
     expect(opts.defaultModelId).toBe("claude-sonnet-4-5");
   });
 
-  it("falls back to defaultProvider/defaultModelId when validatorModelProvider is missing", async () => {
+  it("falls back to defaultProvider/defaultModelId when taskValidatorProvider is missing", async () => {
     mockedCreateHaiAgent.mockResolvedValue(
       createMockSession("### Verdict: APPROVE\n### Summary\nLooks good."),
     );
@@ -292,8 +292,8 @@ describe("reviewStep — validator model overrides", () => {
       {
         defaultProvider: "openai",
         defaultModelId: "gpt-4o",
-        // validatorModelProvider is missing
-        validatorModelId: "claude-sonnet-4-5",
+        // taskValidatorProvider is missing
+        taskValidatorModelId: "claude-sonnet-4-5",
       },
     );
 
@@ -303,7 +303,7 @@ describe("reviewStep — validator model overrides", () => {
     expect(opts.defaultModelId).toBe("gpt-4o");
   });
 
-  it("falls back to defaultProvider/defaultModelId when validatorModelId is missing", async () => {
+  it("falls back to defaultProvider/defaultModelId when taskValidatorModelId is missing", async () => {
     mockedCreateHaiAgent.mockResolvedValue(
       createMockSession("### Verdict: APPROVE\n### Summary\nLooks good."),
     );
@@ -314,8 +314,8 @@ describe("reviewStep — validator model overrides", () => {
       {
         defaultProvider: "openai",
         defaultModelId: "gpt-4o",
-        validatorModelProvider: "anthropic",
-        // validatorModelId is missing
+        taskValidatorProvider: "anthropic",
+        // taskValidatorModelId is missing
       },
     );
 
@@ -336,6 +336,74 @@ describe("reviewStep — validator model overrides", () => {
       {
         defaultProvider: "openai",
         defaultModelId: "gpt-4o",
+      },
+    );
+
+    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(1);
+    const opts = mockedCreateHaiAgent.mock.calls[0][0];
+    expect(opts.defaultProvider).toBe("openai");
+    expect(opts.defaultModelId).toBe("gpt-4o");
+  });
+
+  it("resolves project validator override when task override is not set", async () => {
+    mockedCreateHaiAgent.mockResolvedValue(
+      createMockSession("### Verdict: APPROVE\n### Summary\nLooks good."),
+    );
+
+    await reviewStep(
+      "/tmp/worktree", "FN-100", 1, "Test Step", "plan", "# prompt",
+      undefined,
+      {
+        defaultProvider: "openai",
+        defaultModelId: "gpt-4o",
+        projectValidatorProvider: "anthropic",
+        projectValidatorModelId: "claude-opus-4",
+        // taskValidatorProvider is not set
+      },
+    );
+
+    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(1);
+    const opts = mockedCreateHaiAgent.mock.calls[0][0];
+    expect(opts.defaultProvider).toBe("anthropic");
+    expect(opts.defaultModelId).toBe("claude-opus-4");
+  });
+
+  it("resolves global validator lane when project override is not set", async () => {
+    mockedCreateHaiAgent.mockResolvedValue(
+      createMockSession("### Verdict: APPROVE\n### Summary\nLooks good."),
+    );
+
+    await reviewStep(
+      "/tmp/worktree", "FN-100", 1, "Test Step", "plan", "# prompt",
+      undefined,
+      {
+        defaultProvider: "openai",
+        defaultModelId: "gpt-4o",
+        globalValidatorProvider: "google",
+        globalValidatorModelId: "gemini-2.5",
+        // projectValidatorProvider is not set
+        // taskValidatorProvider is not set
+      },
+    );
+
+    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(1);
+    const opts = mockedCreateHaiAgent.mock.calls[0][0];
+    expect(opts.defaultProvider).toBe("google");
+    expect(opts.defaultModelId).toBe("gemini-2.5");
+  });
+
+  it("falls back to execution default when no validator lanes are set", async () => {
+    mockedCreateHaiAgent.mockResolvedValue(
+      createMockSession("### Verdict: APPROVE\n### Summary\nLooks good."),
+    );
+
+    await reviewStep(
+      "/tmp/worktree", "FN-100", 1, "Test Step", "plan", "# prompt",
+      undefined,
+      {
+        defaultProvider: "openai",
+        defaultModelId: "gpt-4o",
+        // No validator lanes set
       },
     );
 

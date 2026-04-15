@@ -77,6 +77,14 @@ API endpoints reviewed:
 | `favoriteModels` | Global | `GET/PUT /api/settings/global` | Favorited models |
 | `openrouterModelSync` | Global | `GET/PUT /api/settings/global` | Startup model sync behavior |
 | `modelOnboardingComplete` | Global | `GET/PUT /api/settings/global` | Onboarding completion flag |
+| `executionGlobalProvider` | Global | `GET/PUT /api/settings/global` | Global baseline AI provider for task execution |
+| `executionGlobalModelId` | Global | `GET/PUT /api/settings/global` | Global baseline AI model ID for task execution |
+| `planningGlobalProvider` | Global | `GET/PUT /api/settings/global` | Global baseline AI provider for planning/triage |
+| `planningGlobalModelId` | Global | `GET/PUT /api/settings/global` | Global baseline AI model ID for planning/triage |
+| `validatorGlobalProvider` | Global | `GET/PUT /api/settings/global` | Global baseline AI provider for validator/reviewer |
+| `validatorGlobalModelId` | Global | `GET/PUT /api/settings/global` | Global baseline AI model ID for validator/reviewer |
+| `titleSummarizerGlobalProvider` | Global | `GET/PUT /api/settings/global` | Global baseline AI provider for title summarization |
+| `titleSummarizerGlobalModelId` | Global | `GET/PUT /api/settings/global` | Global baseline AI model ID for title summarization |
 
 ### 3.2 Project settings (`.fusion/config.json` / `config.settings`)
 
@@ -97,6 +105,10 @@ API endpoints reviewed:
 | `worktreeNaming` | Project | `GET/PUT /api/settings` | Worktree naming strategy |
 | `taskPrefix` | Project | `GET/PUT /api/settings` | Task ID prefix |
 | `includeTaskIdInCommit` | Project | `GET/PUT /api/settings` | Commit scope formatting |
+| `defaultProviderOverride` | Project | `GET/PUT /api/settings` | Project-level override for base default provider |
+| `defaultModelIdOverride` | Project | `GET/PUT /api/settings` | Project-level override for base default model ID |
+| `executionProvider` | Project | `GET/PUT /api/settings` | AI provider for task execution |
+| `executionModelId` | Project | `GET/PUT /api/settings` | AI model ID for task execution |
 | `planningProvider` | Project | `GET/PUT /api/settings` | Planning model provider |
 | `planningModelId` | Project | `GET/PUT /api/settings` | Planning model id |
 | `planningFallbackProvider` | Project | `GET/PUT /api/settings` | Planning fallback provider |
@@ -147,6 +159,7 @@ API endpoints reviewed:
 Additional backend notes:
 - `githubTokenConfigured` is returned by `GET /api/settings` but is **computed server-side**, not persisted.
 - Non-settings config persisted in backend include `nextId`, `workflowSteps`, and `nextWorkflowStepId` (`config` row / config JSON compatibility path).
+- **`*Global*` keys are never persisted in project settings** — these belong exclusively to global settings. Conversely, project-only keys (`defaultProviderOverride`, `executionProvider`, `planningProvider`, etc.) are never persisted in global settings. The two scopes are strictly isolated.
 
 ---
 

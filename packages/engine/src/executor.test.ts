@@ -5655,6 +5655,269 @@ describe("Per-task model overrides", () => {
   });
 });
 
+// ── Lane hierarchy model resolution tests ─────────────────────────────────────
+
+describe("Executor lane hierarchy model resolution", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedExistsSync.mockReturnValue(true);
+  });
+
+  it("resolves task override when both provider and modelId are set", async () => {
+    const store = createMockStore();
+    const capturedOptions: any[] = [];
+
+    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+      capturedOptions.push(opts);
+      return {
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          state: {},
+        },
+      } as any;
+    });
+
+    store.getSettings.mockResolvedValue({
+      maxConcurrent: 2,
+      maxWorktrees: 4,
+      pollIntervalMs: 15000,
+      defaultProvider: "openai",
+      defaultModelId: "gpt-4o",
+      executionGlobalProvider: "google",
+      executionGlobalModelId: "gemini-2.5",
+      executionProvider: undefined,
+      executionModelId: undefined,
+    });
+
+    const executor = new TaskExecutor(store, "/tmp/test");
+
+    store.getTask.mockResolvedValue({
+      id: "FN-001",
+      title: "Test",
+      description: "Test task",
+      column: "in-progress",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      prompt: "# test",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      modelProvider: "anthropic",
+      modelId: "claude-sonnet-4-5",
+    });
+
+    await executor.execute({
+      id: "FN-001",
+      title: "Test",
+      description: "Test task",
+      column: "in-progress",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      modelProvider: "anthropic",
+      modelId: "claude-sonnet-4-5",
+    });
+
+    // Task override takes precedence
+    expect(capturedOptions[0].defaultProvider).toBe("anthropic");
+    expect(capturedOptions[0].defaultModelId).toBe("claude-sonnet-4-5");
+  });
+
+  it("resolves project execution override when task override is not set", async () => {
+    const store = createMockStore();
+    const capturedOptions: any[] = [];
+
+    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+      capturedOptions.push(opts);
+      return {
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          state: {},
+        },
+      } as any;
+    });
+
+    store.getSettings.mockResolvedValue({
+      maxConcurrent: 2,
+      maxWorktrees: 4,
+      pollIntervalMs: 15000,
+      defaultProvider: "openai",
+      defaultModelId: "gpt-4o",
+      executionGlobalProvider: "google",
+      executionGlobalModelId: "gemini-2.5",
+      executionProvider: "anthropic",
+      executionModelId: "claude-opus-4",
+    });
+
+    const executor = new TaskExecutor(store, "/tmp/test");
+
+    store.getTask.mockResolvedValue({
+      id: "FN-001",
+      title: "Test",
+      description: "Test task",
+      column: "in-progress",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      prompt: "# test",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      // No task-level model override
+    });
+
+    await executor.execute({
+      id: "FN-001",
+      title: "Test",
+      description: "Test task",
+      column: "in-progress",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      // No task-level model override
+    });
+
+    // Project execution override takes precedence over global lane
+    expect(capturedOptions[0].defaultProvider).toBe("anthropic");
+    expect(capturedOptions[0].defaultModelId).toBe("claude-opus-4");
+  });
+
+  it("resolves global execution lane when project override is not set", async () => {
+    const store = createMockStore();
+    const capturedOptions: any[] = [];
+
+    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+      capturedOptions.push(opts);
+      return {
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          state: {},
+        },
+      } as any;
+    });
+
+    store.getSettings.mockResolvedValue({
+      maxConcurrent: 2,
+      maxWorktrees: 4,
+      pollIntervalMs: 15000,
+      defaultProvider: "openai",
+      defaultModelId: "gpt-4o",
+      executionGlobalProvider: "google",
+      executionGlobalModelId: "gemini-2.5",
+      executionProvider: undefined,
+      executionModelId: undefined,
+    });
+
+    const executor = new TaskExecutor(store, "/tmp/test");
+
+    store.getTask.mockResolvedValue({
+      id: "FN-001",
+      title: "Test",
+      description: "Test task",
+      column: "in-progress",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      prompt: "# test",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      // No task-level model override
+    });
+
+    await executor.execute({
+      id: "FN-001",
+      title: "Test",
+      description: "Test task",
+      column: "in-progress",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      // No task-level model override
+    });
+
+    // Global execution lane takes precedence over default
+    expect(capturedOptions[0].defaultProvider).toBe("google");
+    expect(capturedOptions[0].defaultModelId).toBe("gemini-2.5");
+  });
+
+  it("falls back to default when no lane overrides are set", async () => {
+    const store = createMockStore();
+    const capturedOptions: any[] = [];
+
+    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+      capturedOptions.push(opts);
+      return {
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          state: {},
+        },
+      } as any;
+    });
+
+    store.getSettings.mockResolvedValue({
+      maxConcurrent: 2,
+      maxWorktrees: 4,
+      pollIntervalMs: 15000,
+      defaultProvider: "openai",
+      defaultModelId: "gpt-4o",
+      executionGlobalProvider: undefined,
+      executionGlobalModelId: undefined,
+      executionProvider: undefined,
+      executionModelId: undefined,
+    });
+
+    const executor = new TaskExecutor(store, "/tmp/test");
+
+    store.getTask.mockResolvedValue({
+      id: "FN-001",
+      title: "Test",
+      description: "Test task",
+      column: "in-progress",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      prompt: "# test",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      // No task-level model override
+    });
+
+    await executor.execute({
+      id: "FN-001",
+      title: "Test",
+      description: "Test task",
+      column: "in-progress",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      // No task-level model override
+    });
+
+    // Default takes precedence when no lane overrides are set
+    expect(capturedOptions[0].defaultProvider).toBe("openai");
+    expect(capturedOptions[0].defaultModelId).toBe("gpt-4o");
+  });
+});
+
 // ── Per-task thinkingLevel override tests ───────────────────────────
 
 describe("Per-task thinkingLevel override", () => {

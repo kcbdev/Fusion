@@ -204,7 +204,7 @@ Fusion uses a dual-scope model settings system with five lanes. Global settings 
 5. Global `defaultProvider` + `defaultModelId`
 6. Automatic provider/model resolution
 
-> **Note:** Runtime fallback precedence logic is deferred to FN-1711. The hierarchy above reflects the schema contracts added in FN-1710.
+> **Note:** Runtime fallback precedence logic is implemented in engine and dashboard routes (FN-1711). The hierarchy above reflects the full schema contracts added in FN-1710.
 
 ---
 
