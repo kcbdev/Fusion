@@ -22,10 +22,11 @@ vi.mock("node:https", () => ({
   request: (...args: any[]) => mockRequest(...args),
 }));
 
-// Mock fs
-const mockReadFileSync = vi.fn();
-vi.mock("node:fs", () => ({
-  readFileSync: (...args: any[]) => mockReadFileSync(...args),
+// Mock fs/promises
+const mockReadFile = vi.fn();
+vi.mock("node:fs/promises", () => ({
+  readFile: (...args: any[]) => mockReadFile(...args),
+  default: { readFile: (...args: any[]) => mockReadFile(...args) },
 }));
 
 // Mock child_process
@@ -53,7 +54,7 @@ describe("usage", () => {
     clearUsageCache();
     _clearRefreshedToken();
     mockRequest.mockClear();
-    mockReadFileSync.mockClear();
+    mockReadFile.mockClear();
     mockExecFileSync.mockClear();
     vi.stubEnv("HOME", "/home/testuser");
   });
@@ -65,8 +66,8 @@ describe("usage", () => {
   describe("fetchAllProviderUsage", () => {
     it("returns providers array even when all are not authenticated", async () => {
       // All credential files don't exist
-      mockReadFileSync.mockImplementation(() => {
-        throw new Error("File not found");
+      mockReadFile.mockImplementation(async () => {
+        return Promise.reject(new Error("File not found"));
       });
 
       const providers = await fetchAllProviderUsage();
@@ -87,8 +88,8 @@ describe("usage", () => {
     });
 
     it("returns cached data within TTL", async () => {
-      mockReadFileSync.mockImplementation(() => {
-        throw new Error("File not found");
+      mockReadFile.mockImplementation(async () => {
+        return Promise.reject(new Error("File not found"));
       });
 
       const first = await fetchAllProviderUsage();
@@ -99,8 +100,8 @@ describe("usage", () => {
     });
 
     it("fetches fresh data after cache expires", async () => {
-      mockReadFileSync.mockImplementation(() => {
-        throw new Error("File not found");
+      mockReadFile.mockImplementation(async () => {
+        return Promise.reject(new Error("File not found"));
       });
 
       const first = await fetchAllProviderUsage();
@@ -129,11 +130,11 @@ describe("usage", () => {
     }) {
       const { credFileContent = null, keychainContent = null } = options;
 
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes("claude") && credFileContent !== null) {
           return JSON.stringify(credFileContent);
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
 
       mockExecFileSync.mockImplementation((cmd: string, _args: string[]) => {
@@ -177,8 +178,8 @@ describe("usage", () => {
     }
 
     it("detects no auth when credentials file doesn't exist and keychain fails", async () => {
-      mockReadFileSync.mockImplementation(() => {
-        throw new Error("File not found");
+      mockReadFile.mockImplementation(async () => {
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -255,14 +256,14 @@ describe("usage", () => {
     });
 
     it("detects missing scope error", async () => {
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes("claude")) {
           return JSON.stringify({
             accessToken: "test-token",
             scopes: ["other:scope"], // missing user:profile
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -450,14 +451,14 @@ describe("usage", () => {
         five_hour: { utilization: 10.0 },
       };
 
-      mockReadFileSync.mockImplementation((path: string) => {
+      mockReadFile.mockImplementation((path: string) => {
         if (path.includes("claude")) {
           return JSON.stringify({
             accessToken: "test-token",
             scopes: ["user:profile"],
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -505,14 +506,14 @@ describe("usage", () => {
         },
       };
 
-      mockReadFileSync.mockImplementation((path: string) => {
+      mockReadFile.mockImplementation((path: string) => {
         if (path.includes("claude")) {
           return JSON.stringify({
             accessToken: "test-token",
             scopes: ["user:profile"],
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -593,14 +594,14 @@ describe("usage", () => {
       const noopSleep = vi.fn().mockResolvedValue(undefined);
       _setSleepFn(noopSleep);
 
-      mockReadFileSync.mockImplementation((path: string) => {
+      mockReadFile.mockImplementation((path: string) => {
         if (path.includes("claude")) {
           return JSON.stringify({
             accessToken: "test-token",
             scopes: ["user:profile"],
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -647,14 +648,14 @@ describe("usage", () => {
       const noopSleep = vi.fn().mockResolvedValue(undefined);
       _setSleepFn(noopSleep);
 
-      mockReadFileSync.mockImplementation((path: string) => {
+      mockReadFile.mockImplementation((path: string) => {
         if (path.includes("claude")) {
           return JSON.stringify({
             accessToken: "test-token",
             scopes: ["user:profile"],
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -698,14 +699,14 @@ describe("usage", () => {
       const noopSleep = vi.fn().mockResolvedValue(undefined);
       _setSleepFn(noopSleep);
 
-      mockReadFileSync.mockImplementation((path: string) => {
+      mockReadFile.mockImplementation((path: string) => {
         if (path.includes("claude")) {
           return JSON.stringify({
             accessToken: "test-token",
             scopes: ["user:profile"],
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -970,14 +971,14 @@ describe("usage", () => {
       const noopSleep = vi.fn().mockResolvedValue(undefined);
       _setSleepFn(noopSleep);
 
-      mockReadFileSync.mockImplementation((path: string) => {
+      mockReadFile.mockImplementation((path: string) => {
         if (path.includes("claude")) {
           return JSON.stringify({
             accessToken: "expired-token",
             scopes: ["user:profile"],
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -1040,14 +1041,14 @@ describe("usage", () => {
       const noopSleep = vi.fn().mockResolvedValue(undefined);
       _setSleepFn(noopSleep);
 
-      mockReadFileSync.mockImplementation((path: string) => {
+      mockReadFile.mockImplementation((path: string) => {
         if (path.includes("claude")) {
           return JSON.stringify({
             accessToken: "forbidden-token",
             scopes: ["user:profile"],
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -1534,8 +1535,8 @@ describe("usage", () => {
 
   describe("Codex provider", () => {
     it("detects no auth when auth.json doesn't exist", async () => {
-      mockReadFileSync.mockImplementation(() => {
-        throw new Error("File not found");
+      mockReadFile.mockImplementation(async () => {
+        return Promise.reject(new Error("File not found"));
       });
 
       const providers = await fetchAllProviderUsage();
@@ -1564,7 +1565,7 @@ describe("usage", () => {
         },
       };
 
-      mockReadFileSync.mockImplementation((path: string) => {
+      mockReadFile.mockImplementation((path: string) => {
         if (path.includes("codex")) {
           return JSON.stringify({
             tokens: {
@@ -1573,7 +1574,7 @@ describe("usage", () => {
             },
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
 
       const mockReq = {
@@ -1625,7 +1626,7 @@ describe("usage", () => {
         },
       };
 
-      mockReadFileSync.mockImplementation((path: string) => {
+      mockReadFile.mockImplementation((path: string) => {
         if (path.includes("codex")) {
           return JSON.stringify({
             tokens: {
@@ -1633,7 +1634,7 @@ describe("usage", () => {
             },
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
 
       const mockReq = { on: vi.fn(), write: vi.fn(), end: vi.fn() };
@@ -1669,7 +1670,7 @@ describe("usage", () => {
         },
       };
 
-      mockReadFileSync.mockImplementation((path: string) => {
+      mockReadFile.mockImplementation((path: string) => {
         if (path.includes("codex")) {
           return JSON.stringify({
             tokens: {
@@ -1677,7 +1678,7 @@ describe("usage", () => {
             },
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
 
       const mockReq = { on: vi.fn(), write: vi.fn(), end: vi.fn() };
@@ -1709,8 +1710,8 @@ describe("usage", () => {
 
   describe("Gemini provider", () => {
     it("detects no auth when oauth_creds.json doesn't exist", async () => {
-      mockReadFileSync.mockImplementation(() => {
-        throw new Error("File not found");
+      mockReadFile.mockImplementation(async () => {
+        return Promise.reject(new Error("File not found"));
       });
 
       const providers = await fetchAllProviderUsage();
@@ -1737,7 +1738,7 @@ describe("usage", () => {
         ],
       };
 
-      mockReadFileSync.mockImplementation((path: string) => {
+      mockReadFile.mockImplementation((path: string) => {
         if (path.includes("gemini")) {
           if (path.includes("oauth_creds")) {
             return JSON.stringify({
@@ -1746,9 +1747,9 @@ describe("usage", () => {
             });
           }
           // settings.json doesn't exist (oauth-personal is default)
-          throw new Error("File not found");
+          return Promise.reject(new Error("File not found"));
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
 
       const mockReq = {
@@ -1799,7 +1800,7 @@ describe("usage", () => {
         ],
       };
 
-      mockReadFileSync.mockImplementation((path: string) => {
+      mockReadFile.mockImplementation((path: string) => {
         if (path.includes("gemini")) {
           if (path.includes("oauth_creds")) {
             return JSON.stringify({
@@ -1807,9 +1808,9 @@ describe("usage", () => {
               id_token: "header.eyJlbWFpbCI6InRlc3RAZXhhbXBsZS5jb20ifQ.signature",
             });
           }
-          throw new Error("File not found");
+          return Promise.reject(new Error("File not found"));
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
 
       const mockReq = { on: vi.fn(), write: vi.fn(), end: vi.fn() };
@@ -1835,7 +1836,7 @@ describe("usage", () => {
     });
 
     it("handles unsupported auth type (api-key)", async () => {
-      mockReadFileSync.mockImplementation((path: string) => {
+      mockReadFile.mockImplementation((path: string) => {
         if (path.includes("gemini")) {
           if (path.includes("oauth_creds")) {
             return JSON.stringify({
@@ -1852,7 +1853,7 @@ describe("usage", () => {
             });
           }
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
 
       const providers = await fetchAllProviderUsage();
@@ -1865,8 +1866,8 @@ describe("usage", () => {
 
   describe("Minimax provider", () => {
     it("detects no auth when pi auth.json doesn't exist", async () => {
-      mockReadFileSync.mockImplementation(() => {
-        throw new Error("File not found");
+      mockReadFile.mockImplementation(async () => {
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -1881,13 +1882,13 @@ describe("usage", () => {
     });
 
     it("detects no auth when minimax entry has no key", async () => {
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes(".pi/agent/auth.json")) {
           return JSON.stringify({
             minimax: { type: "api_key" /* missing key */ },
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -1901,11 +1902,11 @@ describe("usage", () => {
     });
 
     it("detects no auth when minimax entry is missing entirely", async () => {
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes(".pi/agent/auth.json")) {
           return JSON.stringify({ /* no minimax key */ });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -1942,13 +1943,13 @@ describe("usage", () => {
         ],
       };
 
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes(".pi/agent/auth.json")) {
           return JSON.stringify({
             minimax: { type: "api_key", key: "test-api-key" },
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -2014,13 +2015,13 @@ describe("usage", () => {
         ],
       };
 
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes(".pi/agent/auth.json")) {
           return JSON.stringify({
             minimax: { type: "api_key", key: "test-api-key" },
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -2063,8 +2064,8 @@ describe("usage", () => {
         ],
       };
 
-      mockReadFileSync.mockImplementation(() => {
-        throw new Error("File not found");
+      mockReadFile.mockImplementation(async () => {
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -2099,13 +2100,13 @@ describe("usage", () => {
     });
 
     it("handles 401 auth error", async () => {
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes(".pi/agent/auth.json")) {
           return JSON.stringify({
             minimax: { type: "api_key", key: "expired-key" },
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -2133,13 +2134,13 @@ describe("usage", () => {
     });
 
     it("handles 403 auth error", async () => {
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes(".pi/agent/auth.json")) {
           return JSON.stringify({
             minimax: { type: "api_key", key: "forbidden-key" },
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -2181,11 +2182,11 @@ describe("usage", () => {
         ],
       };
 
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes(".pi/agent/auth.json")) {
           return JSON.stringify({ minimax: { type: "api_key", key: "test-key" } });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -2220,8 +2221,8 @@ describe("usage", () => {
 
   describe("Zai provider", () => {
     it("detects no auth when pi auth.json doesn't exist", async () => {
-      mockReadFileSync.mockImplementation(() => {
-        throw new Error("File not found");
+      mockReadFile.mockImplementation(async () => {
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -2236,13 +2237,13 @@ describe("usage", () => {
     });
 
     it("detects no auth when zai entry has no key", async () => {
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes(".pi/agent/auth.json")) {
           return JSON.stringify({
             zai: { type: "api_key" /* missing key */ },
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -2284,13 +2285,13 @@ describe("usage", () => {
         success: true,
       };
 
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes(".pi/agent/auth.json")) {
           return JSON.stringify({
             zai: { type: "api_key", key: "test-api-key" },
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -2346,8 +2347,8 @@ describe("usage", () => {
         success: true,
       };
 
-      mockReadFileSync.mockImplementation(() => {
-        throw new Error("File not found");
+      mockReadFile.mockImplementation(async () => {
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -2397,13 +2398,13 @@ describe("usage", () => {
         success: true,
       };
 
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes(".fusion/agent/auth.json")) {
           return JSON.stringify({
             zai: { type: "api_key", key: "fusion-zai-key" },
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -2446,13 +2447,13 @@ describe("usage", () => {
         success: true,
       };
 
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes(".pi/agent/auth.json")) {
           return JSON.stringify({
             zai: { type: "api_key", key: "test-api-key" },
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -2488,13 +2489,13 @@ describe("usage", () => {
         success: false,
       };
 
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes(".pi/agent/auth.json")) {
           return JSON.stringify({
             zai: { type: "api_key", key: "test-api-key" },
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -2522,13 +2523,13 @@ describe("usage", () => {
     });
 
     it("handles 401 auth error", async () => {
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes(".pi/agent/auth.json")) {
           return JSON.stringify({
             zai: { type: "api_key", key: "expired-key" },
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -2556,13 +2557,13 @@ describe("usage", () => {
     });
 
     it("handles 403 auth error", async () => {
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes(".pi/agent/auth.json")) {
           return JSON.stringify({
             zai: { type: "api_key", key: "forbidden-key" },
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -2607,11 +2608,11 @@ describe("usage", () => {
         success: true,
       };
 
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes(".pi/agent/auth.json")) {
           return JSON.stringify({ zai: { type: "api_key", key: "test-api-key" } });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -2665,11 +2666,11 @@ describe("usage", () => {
         success: true,
       };
 
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes(".pi/agent/auth.json")) {
           return JSON.stringify({ zai: { type: "api_key", key: "test-api-key" } });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -2762,14 +2763,14 @@ describe("usage", () => {
 
   describe("error handling", () => {
     it("handles Claude API errors gracefully", async () => {
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes("claude")) {
           return JSON.stringify({
             accessToken: "test-token",
             scopes: ["user:profile"],
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -2797,14 +2798,14 @@ describe("usage", () => {
     });
 
     it("handles Claude network error", async () => {
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes("claude")) {
           return JSON.stringify({
             accessToken: "test-token",
             scopes: ["user:profile"],
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -2834,7 +2835,7 @@ describe("usage", () => {
 
   describe("formatDuration helper", () => {
     it("formats duration correctly via resetText", async () => {
-      mockReadFileSync.mockImplementation((path: string) => {
+      mockReadFile.mockImplementation((path: string) => {
         if (path.includes("codex")) {
           return JSON.stringify({
             tokens: {
@@ -2842,7 +2843,7 @@ describe("usage", () => {
             },
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
 
       const mockResponse = {
@@ -2902,11 +2903,11 @@ describe("usage", () => {
         ],
       };
 
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes(".pi/agent/auth.json")) {
           return JSON.stringify({ minimax: { type: "api_key", key: "test-key" } });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -2953,11 +2954,11 @@ describe("usage", () => {
         ],
       };
 
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes(".pi/agent/auth.json")) {
           return JSON.stringify({ minimax: { type: "api_key", key: "test-key" } });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -3245,14 +3246,14 @@ describe("usage", () => {
 
   describe("Claude API error diagnostics", () => {
     it("includes response body snippet in HTTP 500 error", async () => {
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes("claude")) {
           return JSON.stringify({
             accessToken: "test-token",
             scopes: ["user:profile"],
           });
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
       mockExecFileSync.mockImplementation(() => {
         throw new Error("Keychain item not found");
@@ -3357,11 +3358,11 @@ describe("usage", () => {
     }) {
       const { credFileContent = null, keychainContent = null } = options;
 
-      mockReadFileSync.mockImplementation((filePath: string) => {
+      mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes("claude") && credFileContent !== null) {
           return JSON.stringify(credFileContent);
         }
-        throw new Error("File not found");
+        return Promise.reject(new Error("File not found"));
       });
 
       mockExecFileSync.mockImplementation((cmd: string, _args: string[]) => {

@@ -5,7 +5,8 @@
  * by integrating with the pi-coding-agent package manager and skills.sh API.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join, relative, dirname } from "node:path";
 
 /**
@@ -216,7 +217,7 @@ export function createSkillsAdapter(options: {
       let settings: { skills?: string[]; packages?: unknown[] } = {};
       if (existsSync(settingsPath)) {
         try {
-          settings = JSON.parse(readFileSync(settingsPath, "utf-8")) as typeof settings;
+          settings = JSON.parse(await readFile(settingsPath, "utf-8")) as typeof settings;
         } catch {
           // Ignore parse errors
         }
@@ -272,13 +273,13 @@ export function createSkillsAdapter(options: {
       const settingsPath = options.getSettingsPath(rootDir);
       const settingsDir = dirname(settingsPath);
       if (!existsSync(settingsDir)) {
-        mkdirSync(settingsDir, { recursive: true });
+        await mkdir(settingsDir, { recursive: true });
       }
 
       let settings: Record<string, unknown> = {};
       if (existsSync(settingsPath)) {
         try {
-          settings = JSON.parse(readFileSync(settingsPath, "utf-8")) as Record<string, unknown>;
+          settings = JSON.parse(await readFile(settingsPath, "utf-8")) as Record<string, unknown>;
         } catch {
           // Start fresh on parse error
         }
@@ -314,7 +315,7 @@ export function createSkillsAdapter(options: {
 
         settings.skills = skills;
 
-        writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+        await writeFile(settingsPath, JSON.stringify(settings, null, 2));
         return {
           settingsPath: "skills",
           pattern: `${prefix}${skillPath}`,
@@ -366,7 +367,7 @@ export function createSkillsAdapter(options: {
         pkgEntry.skills.push(`${prefix}${skillPath}`);
 
         settings.packages = packages;
-        writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+        await writeFile(settingsPath, JSON.stringify(settings, null, 2));
         return {
           settingsPath: "packages[].skills",
           pattern: `${prefix}${skillPath}`,
@@ -578,12 +579,12 @@ function normalizeEntry(entry: unknown): CatalogEntry {
 /**
  * Read project settings from .fusion/settings.json.
  */
-export function readProjectSettings(projectPath: string): Record<string, unknown> {
+export async function readProjectSettings(projectPath: string): Promise<Record<string, unknown>> {
   const fusionSettings = join(projectPath, ".fusion", "settings.json");
 
   if (existsSync(fusionSettings)) {
     try {
-      return JSON.parse(readFileSync(fusionSettings, "utf-8")) as Record<string, unknown>;
+      return JSON.parse(await readFile(fusionSettings, "utf-8")) as Record<string, unknown>;
     } catch {
       // Return empty on parse error
     }
@@ -595,15 +596,15 @@ export function readProjectSettings(projectPath: string): Record<string, unknown
 /**
  * Write project settings to .fusion/settings.json atomically.
  */
-export function writeProjectSettings(projectPath: string, settings: Record<string, unknown>): void {
+export async function writeProjectSettings(projectPath: string, settings: Record<string, unknown>): Promise<void> {
   const settingsDir = join(projectPath, ".fusion");
   const settingsPath = join(settingsDir, "settings.json");
 
   if (!existsSync(settingsDir)) {
-    mkdirSync(settingsDir, { recursive: true });
+    await mkdir(settingsDir, { recursive: true });
   }
 
-  writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+  await writeFile(settingsPath, JSON.stringify(settings, null, 2));
 }
 
 /**

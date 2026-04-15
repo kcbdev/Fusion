@@ -1,5 +1,5 @@
-import * as fs from "node:fs";
 import * as path from "node:path";
+import { readFile } from "node:fs/promises";
 import * as https from "node:https";
 import * as child_process from "node:child_process";
 
@@ -241,9 +241,9 @@ function getAuthFileCandidates(): string[] {
   ];
 }
 
-function readAuthKeyFromFile(authPath: string, provider: string): string | null {
+async function readAuthKeyFromFile(authPath: string, provider: string): Promise<string | null> {
   try {
-    const auth = JSON.parse(fs.readFileSync(authPath, "utf-8"));
+    const auth = JSON.parse(await readFile(authPath, "utf-8"));
     const entry = auth?.[provider];
     if (entry && (entry.type === "api_key" || entry.type === "key") && entry.key) {
       return entry.key;
@@ -274,7 +274,7 @@ async function readConfiguredApiKey(provider: string, authStorage?: AuthStorageL
   } catch {}
 
   for (const authPath of getAuthFileCandidates()) {
-    const apiKey = readAuthKeyFromFile(authPath, provider);
+    const apiKey = await readAuthKeyFromFile(authPath, provider);
     if (apiKey) return apiKey;
   }
 
@@ -810,7 +810,7 @@ async function fetchClaudeUsage(): Promise<ProviderUsage> {
   let creds: any = null;
   for (const p of credPaths) {
     try {
-      creds = JSON.parse(fs.readFileSync(p, "utf-8"));
+      creds = JSON.parse(await readFile(p, "utf-8"));
       break;
     } catch {}
   }
@@ -1023,7 +1023,7 @@ async function fetchCodexUsage(): Promise<ProviderUsage> {
 
   let auth: any = null;
   try {
-    auth = JSON.parse(fs.readFileSync(authPath, "utf-8"));
+    auth = JSON.parse(await readFile(authPath, "utf-8"));
   } catch {
     usage.error = "No Codex credentials — run 'codex' to login";
     return usage;
@@ -1134,7 +1134,7 @@ async function fetchGeminiUsage(): Promise<ProviderUsage> {
   const oauthPath = path.join(process.env.HOME || "~", ".gemini", "oauth_creds.json");
   let oauthCreds: any = null;
   try {
-    oauthCreds = JSON.parse(fs.readFileSync(oauthPath, "utf-8"));
+    oauthCreds = JSON.parse(await readFile(oauthPath, "utf-8"));
   } catch {
     usage.error = "No Gemini credentials — run 'gemini' to login";
     return usage;
@@ -1154,7 +1154,7 @@ async function fetchGeminiUsage(): Promise<ProviderUsage> {
   // Check auth type from settings
   const settingsPath = path.join(process.env.HOME || "~", ".gemini", "settings.json");
   try {
-    const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+    const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
     const authType = settings?.security?.auth?.selectedType;
     if (authType === "api-key" || authType === "vertex-ai") {
       usage.status = "error";

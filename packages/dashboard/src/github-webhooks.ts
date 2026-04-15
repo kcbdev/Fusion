@@ -3,6 +3,17 @@ import { readFileSync } from "node:fs";
 import type { IssueInfo, PrInfo } from "@fusion/core";
 import { GitHubClient } from "./github.js";
 
+// Module-level cache for the GitHub App private key
+// undefined = not yet read, null = read failed, string = cached key
+let cachedPrivateKey: string | null | undefined = undefined;
+
+/**
+ * Clear the private key cache (for testing).
+ */
+export function _clearPrivateKeyCache(): void {
+  cachedPrivateKey = undefined;
+}
+
 /**
  * GitHub App webhook configuration from environment variables.
  */
@@ -64,16 +75,20 @@ export function getGitHubAppConfig(): GitHubAppConfig | null {
   const webhookSecret = process.env.FUSION_GITHUB_WEBHOOK_SECRET;
 
   let privateKey: string | undefined;
-  
+
   if (process.env.FUSION_GITHUB_APP_PRIVATE_KEY) {
     privateKey = process.env.FUSION_GITHUB_APP_PRIVATE_KEY;
   } else if (process.env.FUSION_GITHUB_APP_PRIVATE_KEY_PATH) {
-    try {
-      privateKey = readFileSync(process.env.FUSION_GITHUB_APP_PRIVATE_KEY_PATH, "utf-8");
-    } catch {
-      // Failed to read key file
-      return null;
+    // Check cache before reading from disk
+    if (cachedPrivateKey === undefined) {
+      try {
+        cachedPrivateKey = readFileSync(process.env.FUSION_GITHUB_APP_PRIVATE_KEY_PATH, "utf-8");
+      } catch {
+        // Failed to read key file
+        cachedPrivateKey = null;
+      }
     }
+    privateKey = cachedPrivateKey ?? undefined;
   }
 
   if (!appId || !privateKey || !webhookSecret) {
