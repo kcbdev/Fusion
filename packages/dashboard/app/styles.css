@@ -689,7 +689,7 @@ body {
 .node-selector-dropdown {
   position: absolute;
   top: calc(100% + var(--space-xs));
-  right: 0;
+  left: 0;
   min-width: 180px;
   background: var(--surface);
   border: 1px solid var(--border);

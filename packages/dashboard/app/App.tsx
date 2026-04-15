@@ -318,7 +318,11 @@ function AppInner() {
     if (taskView === "skills") {
       return (
         <PageErrorBoundary>
-          <SkillsView addToast={addToast} projectId={currentProject?.id} onClose={() => handleChangeTaskView("board")} />
+          <SkillsView
+            addToast={addToast}
+            projectId={currentProject?.id}
+            onClose={() => handleChangeTaskView("board")}
+          />
         </PageErrorBoundary>
       );
     }
