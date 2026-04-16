@@ -33329,8 +33329,22 @@ html .column.drag-over * {
 
 /* Mobile responsive */
 @media (max-width: 768px) {
+  /* Allow vertical scrolling on mobile for roadmap list and detail views */
+  .roadmaps-view {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
   .roadmaps-view__sidebar {
     display: none;
+  }
+
+  /* Allow vertical scrolling in the main content area on mobile */
+  .roadmaps-view__main {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    flex: 1;
+    padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px));
   }
 
   /* Mobile Roadmap List */
@@ -33581,6 +33595,22 @@ html .column.drag-over * {
   /* Mobile create form on desktop sidebar for roadmaps - ensure proper sizing */
   .roadmaps-view__create-form {
     margin: var(--space-sm);
+  }
+
+  /* Bump icon button touch targets to 36px on mobile */
+  .roadmaps-view__icon-btn {
+    width: 36px;
+    height: 36px;
+  }
+
+  .roadmaps-view__icon-btn[role="button"] {
+    width: 36px;
+    height: 36px;
+  }
+
+  /* Feature create overlay - offset from mobile nav bar */
+  .roadmaps-view__feature-create-overlay {
+    bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + var(--space-md));
   }
 }
 

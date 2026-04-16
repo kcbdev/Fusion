@@ -881,5 +881,42 @@ describe("RoadmapsView", () => {
         expect(screen.getByTestId("roadmap-title-input")).toBeInTheDocument();
       });
     });
+
+    it("mobile roadmap list has scrollable container structure", async () => {
+      render(<RoadmapsView addToast={mockAddToast} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("roadmaps-view__mobile-list")).toBeInTheDocument();
+      });
+
+      // The mobile list should have the scrollable container
+      const mobileList = screen.getByTestId("roadmaps-view__mobile-list");
+      expect(mobileList).toBeInTheDocument();
+
+      // The list items container should exist and be scrollable
+      const listItems = mobileList.querySelector(".roadmaps-view__mobile-list-items");
+      expect(listItems).toBeInTheDocument();
+    });
+
+    it("selecting roadmap on mobile shows detail view with header and milestone content", async () => {
+      render(<RoadmapsView addToast={mockAddToast} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("mobile-roadmap-item-RM-001")).toBeInTheDocument();
+      });
+
+      // Click on a roadmap item
+      fireEvent.click(screen.getByTestId("mobile-roadmap-item-RM-001"));
+
+      // Should show the mobile header with back button
+      await waitFor(() => {
+        expect(screen.getByTestId("roadmaps-view__mobile-header")).toBeInTheDocument();
+        expect(screen.getByTestId("mobile-back-btn")).toBeInTheDocument();
+      });
+
+      // Should show milestone content
+      expect(screen.getByText("Milestone 1")).toBeInTheDocument();
+      expect(screen.getByText("Milestone 2")).toBeInTheDocument();
+    });
   });
 });
