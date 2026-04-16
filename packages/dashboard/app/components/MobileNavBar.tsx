@@ -279,18 +279,6 @@ export function MobileNavBar({
 
         <button
           type="button"
-          className={`mobile-nav-tab${view === "insights" ? " mobile-nav-tab--active" : ""}`}
-          data-testid="mobile-nav-tab-insights"
-          role="tab"
-          aria-selected={view === "insights"}
-          onClick={() => onChangeView("insights")}
-        >
-          <Sparkles />
-          <span className="mobile-nav-tab-label">Insights</span>
-        </button>
-
-        <button
-          type="button"
           className="mobile-nav-tab"
           data-testid="mobile-nav-tab-more"
           role="tab"
