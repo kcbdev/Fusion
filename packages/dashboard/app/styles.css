@@ -7242,6 +7242,12 @@ body {
   .gm-status-grid {
     grid-template-columns: 1fr;
   }
+
+  .gm-panel {
+    flex: none;
+    min-height: auto;
+    overflow-y: auto;
+  }
 }
 
 /* === Tablet Responsive Tier (769px–1024px) === */

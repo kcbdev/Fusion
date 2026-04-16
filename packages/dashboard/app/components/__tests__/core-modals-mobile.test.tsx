@@ -102,6 +102,14 @@ describe("core modals mobile css coverage", () => {
     expect(mobileBlock).toContain("min-height: 36px;");
   });
 
+  it("GitManagerModal: panel allows content scrolling on mobile", () => {
+    const css = fs.readFileSync(stylesPath, "utf-8");
+    const mobileBlock = getMainMobileBlock(css);
+
+    expect(mobileBlock).toContain(".gm-panel {");
+    expect(mobileBlock).toContain("overflow-y: auto;");
+  });
+
   it("TaskDetailModal: action dropdown menus have max-height constraint on mobile", () => {
     const css = fs.readFileSync(stylesPath, "utf-8");
     const mobileBlock = getMainMobileBlock(css);
