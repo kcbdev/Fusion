@@ -269,7 +269,11 @@ Dashboard SSE (`/api/events`) streams plugin lifecycle events as normalized `plu
 ## Pitfalls
 
 - When adding props to a React component interface that were previously declared but not destructured in the function body, remember to add them to the destructuring list too. TypeScript won't warn about unused interface fields, so `onOpenScripts` in `MobileNavBarProps` compiled fine but caused `ReferenceError: onOpenScripts is not defined` at runtime.
-- **Express wildcard route ordering (FN-1492)**: When defining Express routes with wildcard patterns like `{*filepath}`, ALWAYS define more specific routes BEFORE the generic wildcard route. Express matches routes in order, so `POST /files/{*filepath}` would shadow `POST /files/{*filepath}/delete` if defined first. The fix is to define operation routes (`/copy`, `/move`, `/delete`, `/rename`, `/download`, etc.) BEFORE the generic write route. See `packages/dashboard/src/routes.ts` for the correct ordering pattern.
+- **Express wildcard route ordering (FN-1492/FN-1909)**: When defining Express routes, ALWAYS define more specific routes BEFORE generic parameterized or wildcard routes. Express matches routes in order, so:
+  - `{*filepath}` patterns: `POST /files/{*filepath}` shadows `POST /files/{*filepath}/delete` if defined first
+  - `/:id` patterns (FN-1909): `GET /:id` shadows `GET /runs` and `GET /runs/:id` if defined before them
+  - The fix is to define operation routes (`/runs`, `/run`, `/runs/:id`, `/copy`, `/move`, `/delete`, etc.) BEFORE the generic write/catch-all route
+  - See `packages/dashboard/src/routes.ts` and `packages/dashboard/src/insights-routes.ts` for the correct ordering patterns
 - **Webhook HMAC testing**: The `REQUEST` test utility in `test-request.ts` doesn't handle stream-based middleware like `express.raw()` well. For webhook routes requiring HMAC verification (e.g., GitHub webhooks, routine webhooks), test the `verifyWebhookSignature` function directly using `await import()` rather than trying to set up raw body middleware through Express. See the routine webhook tests in `routes.test.ts` for the pattern.
 
 - `vi.fn<Parameters<SomeType>, ReturnType<SomeType>>()` works in Vitest runtime but causes TypeScript build errors (`TS2558: Expected 0-1 type arguments, but got 2`). Always use the cast pattern instead.

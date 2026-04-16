@@ -165,6 +165,58 @@ export function createInsightsRouter(store: TaskStore): Router {
     }
   });
 
+  // ── Trigger Insight Run ───────────────────────────────────────────────
+
+  router.post("/run", (req: Request, res: Response) => {
+    try {
+      const projectId = getProjectId(req) ?? "";
+      const store = getInsightStore();
+      const trigger: InsightRunTrigger = (req.body.trigger as InsightRunTrigger) ?? "manual";
+
+      if (!VALID_TRIGGERS.includes(trigger)) {
+        throw badRequest(`Invalid trigger: ${trigger}`);
+      }
+
+      const input: InsightRunCreateInput = {
+        trigger,
+        inputMetadata: req.body.inputMetadata,
+      };
+
+      const run = store.createRun(projectId, input);
+      res.status(201).json(run);
+    } catch (error) {
+      rethrowAsApiError(error, "Failed to create insight run");
+    }
+  });
+
+  // ── List Runs ──────────────────────────────────────────────────────────
+
+  router.get("/runs", (req: Request, res: Response) => {
+    try {
+      const store = getInsightStore();
+      const runs = store.listRuns({});
+      res.json({ runs });
+    } catch (error) {
+      rethrowAsApiError(error, "Failed to list runs");
+    }
+  });
+
+  // ── Get Run ────────────────────────────────────────────────────────────
+
+  router.get("/runs/:id", (req: Request, res: Response) => {
+    try {
+      const id = String(req.params.id);
+      const store = getInsightStore();
+      const run = store.getRun(id);
+      if (!run) {
+        throw notFound(`Run not found: ${id}`);
+      }
+      res.json(run);
+    } catch (error) {
+      rethrowAsApiError(error, "Failed to get run");
+    }
+  });
+
   // ── Get Insight ────────────────────────────────────────────────────────
 
   router.get("/:id", (req: Request, res: Response) => {
@@ -181,7 +233,7 @@ export function createInsightsRouter(store: TaskStore): Router {
     }
   });
 
-  // ── Update Insight ──────────────────────────────────────────────────────
+  // ── Update Insight ─────────────────────────────────────────────────────
 
   router.patch("/:id", (req: Request, res: Response) => {
     try {
@@ -247,58 +299,6 @@ export function createInsightsRouter(store: TaskStore): Router {
       res.json(insight);
     } catch (error) {
       rethrowAsApiError(error, "Failed to dismiss insight");
-    }
-  });
-
-  // ── Trigger Insight Run ────────────────────────────────────────────────
-
-  router.post("/run", (req: Request, res: Response) => {
-    try {
-      const projectId = getProjectId(req) ?? "";
-      const store = getInsightStore();
-      const trigger: InsightRunTrigger = (req.body.trigger as InsightRunTrigger) ?? "manual";
-
-      if (!VALID_TRIGGERS.includes(trigger)) {
-        throw badRequest(`Invalid trigger: ${trigger}`);
-      }
-
-      const input: InsightRunCreateInput = {
-        trigger,
-        inputMetadata: req.body.inputMetadata,
-      };
-
-      const run = store.createRun(projectId, input);
-      res.status(201).json(run);
-    } catch (error) {
-      rethrowAsApiError(error, "Failed to create insight run");
-    }
-  });
-
-  // ── List Runs ──────────────────────────────────────────────────────────
-
-  router.get("/runs", (req: Request, res: Response) => {
-    try {
-      const store = getInsightStore();
-      const runs = store.listRuns({});
-      res.json({ runs });
-    } catch (error) {
-      rethrowAsApiError(error, "Failed to list runs");
-    }
-  });
-
-  // ── Get Run ────────────────────────────────────────────────────────────
-
-  router.get("/runs/:id", (req: Request, res: Response) => {
-    try {
-      const id = String(req.params.id);
-      const store = getInsightStore();
-      const run = store.getRun(id);
-      if (!run) {
-        throw notFound(`Run not found: ${id}`);
-      }
-      res.json(run);
-    } catch (error) {
-      rethrowAsApiError(error, "Failed to get run");
     }
   });
 
