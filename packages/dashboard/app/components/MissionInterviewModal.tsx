@@ -684,7 +684,7 @@ export function MissionInterviewModal({
   if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && handleCancel()}>
+    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && handleCancel()} role="dialog" aria-modal="true">
       <div className="modal modal-lg planning-modal">
         <div className="modal-header">
           <div className="detail-title-row">

@@ -2636,11 +2636,11 @@ export function SettingsModal({
   };
 
   return (
-    <div className="modal-overlay open" onClick={handleOverlayClick}>
+    <div className="modal-overlay open" onClick={handleOverlayClick} role="dialog" aria-modal="true">
       <div className="modal modal-lg">
         <div className="modal-header">
           <h3>Settings</h3>
-          <button className="modal-close" onClick={onClose}>
+          <button className="modal-close" onClick={onClose} aria-label="Close">
             &times;
           </button>
         </div>
@@ -2726,11 +2726,11 @@ export function SettingsModal({
       
       {/* Import Confirmation Dialog */}
       {importDialogOpen && importPreview && (
-        <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && setImportDialogOpen(false)}>
+        <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && setImportDialogOpen(false)} role="dialog" aria-modal="true">
           <div className="modal modal-md">
             <div className="modal-header">
               <h3>Import Settings</h3>
-              <button className="modal-close" onClick={() => setImportDialogOpen(false)}>
+              <button className="modal-close" onClick={() => setImportDialogOpen(false)} aria-label="Close">
                 &times;
               </button>
             </div>

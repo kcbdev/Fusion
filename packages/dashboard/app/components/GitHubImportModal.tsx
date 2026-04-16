@@ -346,7 +346,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId 
   const showInlineErrorBanner = activeTab === "issues" ? showIssuesError : showPullsError;
 
   return (
-    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true">
       <div className="modal modal-lg github-import-modal">
         <div className="modal-header github-import-modal__header">
           <div>

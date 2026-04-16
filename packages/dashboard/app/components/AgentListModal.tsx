@@ -176,7 +176,7 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
   if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true">
       <div className="modal modal--wide">
         <div className="modal-header">
           <h2 className="modal-title">
@@ -212,8 +212,8 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
             >
               <RefreshCw size={16} className={isLoading ? "spin" : ""} />
             </button>
-            <button className="btn-icon" onClick={onClose} title="Close">
-              <X size={20} />
+            <button className="modal-close" onClick={onClose} aria-label="Close">
+              &times;
             </button>
           </div>
         </div>

@@ -3481,6 +3481,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
         className="mission-manager-overlay open"
         onClick={(e) => e.target === e.currentTarget && onClose()}
         data-testid="mission-manager-overlay"
+        role="dialog"
+        aria-modal="true"
       >
         {manager}
       </div>

@@ -271,6 +271,8 @@ export function MailboxModal({
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
+      role="dialog"
+      aria-modal="true"
       data-testid="mailbox-modal-overlay"
     >
       <div className="modal modal-lg mailbox-modal" data-testid="mailbox-modal">

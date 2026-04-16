@@ -208,14 +208,14 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
   if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay open" onClick={handleClose} onKeyDown={handleKeyDown}>
-      <div 
-        className="modal modal-lg new-task-modal" 
+    <div className="modal-overlay open" onClick={handleClose} onKeyDown={handleKeyDown} role="dialog" aria-modal="true">
+      <div
+        className="modal modal-lg new-task-modal"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
           <h3>New Task</h3>
-          <button className="modal-close" onClick={handleClose} disabled={isSubmitting}>
+          <button className="modal-close" onClick={handleClose} disabled={isSubmitting} aria-label="Close">
             &times;
           </button>
         </div>

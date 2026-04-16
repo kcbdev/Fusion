@@ -465,7 +465,7 @@ export function ScheduledTasksModal({ onClose, addToast, projectId }: ScheduledT
 
   return (
     <div className="modal-overlay open" onClick={handleOverlayClick}>
-      <div className="modal modal-lg" role="dialog" aria-labelledby="schedules-modal-title">
+      <div className="modal modal-lg" role="dialog" aria-modal="true" aria-labelledby="schedules-modal-title">
         <div className="modal-header">
           <h3 id="schedules-modal-title">Scheduled Tasks</h3>
           <div className="modal-header-actions">

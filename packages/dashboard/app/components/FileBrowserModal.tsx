@@ -167,7 +167,7 @@ export function FileBrowserModal({
   };
 
   return (
-    <div className="modal-overlay open" onClick={onClose}>
+    <div className="modal-overlay open" onClick={onClose} role="dialog" aria-modal="true">
       <div className="modal file-browser-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header file-browser-modal-header">
           <div className="file-browser-header-title">
@@ -186,7 +186,7 @@ export function FileBrowserModal({
               workspaces={workspaces}
               onSelect={handleWorkspaceSelect}
             />
-            <button className="modal-close" onClick={onClose}>
+            <button className="modal-close" onClick={onClose} aria-label="Close">
               <X size={20} />
             </button>
           </div>

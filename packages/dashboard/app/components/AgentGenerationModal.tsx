@@ -173,7 +173,7 @@ export function AgentGenerationModal({
             Generate Agent
           </span>
           <button
-            className="btn-icon"
+            className="modal-close"
             onClick={handleCancel}
             aria-label="Close"
             style={{
@@ -185,7 +185,7 @@ export function AgentGenerationModal({
               lineHeight: 1,
             }}
           >
-            ×
+            &times;
           </button>
         </div>
 

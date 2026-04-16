@@ -448,6 +448,8 @@ export function MilestoneSliceInterviewModal({
     <div
       className="modal-overlay open"
       onClick={(e) => e.target === e.currentTarget && handleCancel()}
+      role="dialog"
+      aria-modal="true"
       data-testid="milestone-slice-interview-modal"
     >
       <div className="modal modal-lg planning-modal">

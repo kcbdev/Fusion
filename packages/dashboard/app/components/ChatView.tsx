@@ -75,7 +75,7 @@ function NewChatDialog({ onClose, onCreate }: NewChatDialogProps) {
   };
 
   return (
-    <div className="chat-new-dialog-backdrop" onClick={onClose}>
+    <div className="chat-new-dialog-backdrop" onClick={onClose} role="dialog" aria-modal="true">
       <div className="chat-new-dialog" onClick={(e) => e.stopPropagation()}>
         <h3>New Chat</h3>
         <form onSubmit={handleSubmit}>

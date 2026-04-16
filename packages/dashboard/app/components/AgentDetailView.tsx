@@ -286,7 +286,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
 
   if (isLoading) {
     return (
-      <div className="agent-detail-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="agent-detail-overlay" onClick={(e) => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true">
         <div className="agent-detail-modal">
           <div className="agent-detail-loading">
             <Loader2 className="animate-spin" size={24} />
@@ -305,7 +305,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
   const health = getHealthStatus();
 
   return (
-    <div className="agent-detail-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="agent-detail-overlay" onClick={(e) => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true">
       <div className="agent-detail-modal">
         {/* Header */}
         <div className="agent-detail-header">
@@ -413,7 +413,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
             <button className="btn-icon" onClick={() => void loadAgent()} title="Refresh">
               <RefreshCw size={16} />
             </button>
-            <button className="btn-icon" onClick={onClose} title="Close">
+            <button className="btn-icon" onClick={onClose} aria-label="Close" title="Close">
               <X size={20} />
             </button>
           </div>

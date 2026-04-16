@@ -1037,7 +1037,7 @@ export function TaskDetailModal({
   const prAutomationLabel = task.status ? prAutomationStatusLabels[task.status] : undefined;
 
   return (
-    <div className="modal-overlay open" onClick={handleOverlayClick}>
+    <div className="modal-overlay open" onClick={handleOverlayClick} role="dialog" aria-modal="true">
       <div className="modal modal-lg" onDragOver={handleDragOver} onDrop={handleDrop}>
         <div className="modal-header">
           <div className="detail-title-row">
@@ -1057,7 +1057,7 @@ export function TaskDetailModal({
                 <Pencil size={14} />
               </button>
             )}
-            <button className="modal-close" onClick={onClose}>
+            <button className="modal-close" onClick={onClose} aria-label="Close">
               &times;
             </button>
           </div>
@@ -1798,6 +1798,8 @@ export function TaskDetailModal({
           <div
             className="modal-overlay open detail-refine-overlay"
             onClick={handleCloseRefineModal}
+            role="dialog"
+            aria-modal="true"
           >
             <div
               className="modal detail-refine-modal"
@@ -1805,7 +1807,7 @@ export function TaskDetailModal({
             >
               <div className="modal-header">
                 <h3 className="detail-refine-title">Refine</h3>
-                <button className="modal-close" onClick={handleCloseRefineModal}>
+                <button className="modal-close" onClick={handleCloseRefineModal} aria-label="Close">
                   &times;
                 </button>
               </div>

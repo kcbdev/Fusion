@@ -346,8 +346,8 @@ export function AgentImportModal({ isOpen, onClose, onImported, projectId }: Age
         {/* Header */}
         <div className="agent-dialog-header">
           <span className="agent-dialog-header-title">Import Agents</span>
-          <button className="btn-icon" onClick={handleClose} aria-label="Close">
-            ×
+          <button className="modal-close" onClick={handleClose} aria-label="Close">
+            &times;
           </button>
         </div>
 

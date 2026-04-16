@@ -180,6 +180,8 @@ export function ActivityLogModal({
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
+      role="dialog"
+      aria-modal="true"
       data-testid="activity-log-modal-overlay"
     >
       <div className="modal modal-lg activity-log-modal" data-testid="activity-log-modal">

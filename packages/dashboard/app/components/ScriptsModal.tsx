@@ -172,6 +172,7 @@ export function ScriptsModal({ isOpen, onClose, addToast, projectId, onRunScript
         className="modal scripts-modal"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
+        aria-modal="true"
         aria-label="Scripts"
       >
         {/* Header */}
@@ -180,8 +181,8 @@ export function ScriptsModal({ isOpen, onClose, addToast, projectId, onRunScript
             <Terminal size={18} style={{ marginRight: "8px", verticalAlign: "middle" }} />
             Scripts
           </h2>
-          <button className="btn-icon" onClick={onClose} aria-label="Close">
-            <X size={16} />
+          <button className="modal-close" onClick={onClose} aria-label="Close">
+            &times;
           </button>
         </div>
 

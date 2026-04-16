@@ -137,7 +137,7 @@ export function ModelSelectionModal({
   const hasValidatorOverride = Boolean(validatorValue);
 
   return (
-    <div className="modal-overlay open" onClick={handleOverlayClick} data-testid="model-selection-modal">
+    <div className="modal-overlay open" onClick={handleOverlayClick} role="dialog" aria-modal="true" data-testid="model-selection-modal">
       <div className="modal modal-lg">
         <div className="modal-header">
           <div className="detail-title-row">

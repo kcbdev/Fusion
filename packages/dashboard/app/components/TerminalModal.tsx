@@ -779,6 +779,8 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
     <div
       className="modal-overlay open"
       onClick={handleOverlayClick}
+      role="dialog"
+      aria-modal="true"
       data-testid="terminal-modal-overlay"
       style={
         keyboardOverlap > 0

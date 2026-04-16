@@ -675,7 +675,7 @@ export function GitManagerModal({ isOpen, onClose, tasks, addToast, projectId }:
   if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true">
       <div className="modal gm-modal" ref={modalRef}>
         <div className="modal-header">
           <h3>
@@ -691,7 +691,7 @@ export function GitManagerModal({ isOpen, onClose, tasks, addToast, projectId }:
             >
               <RefreshCw size={14} className={loading ? "spin" : ""} />
             </button>
-            <button className="modal-close" onClick={onClose}>
+            <button className="modal-close" onClick={onClose} aria-label="Close">
               <X size={18} />
             </button>
           </div>

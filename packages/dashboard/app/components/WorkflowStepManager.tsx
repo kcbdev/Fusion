@@ -373,13 +373,14 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
         className="modal workflow-step-manager-modal"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
+        aria-modal="true"
         aria-label="Workflow Steps"
       >
         {/* Header */}
         <div className="modal-header">
           <h2>Workflow Steps</h2>
-          <button className="btn-icon" onClick={onClose} aria-label="Close">
-            <X size={16} />
+          <button className="modal-close" onClick={onClose} aria-label="Close">
+            &times;
           </button>
         </div>
 

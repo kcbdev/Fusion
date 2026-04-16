@@ -112,7 +112,7 @@ export function ChangesDiffModal({
   const isDone = column === "done";
 
   return (
-    <div className="modal-overlay open" onClick={onClose}>
+    <div className="modal-overlay open" onClick={onClose} role="dialog" aria-modal="true">
       <div
         className="modal changes-diff-modal"
         onClick={(e) => e.stopPropagation()}
@@ -171,7 +171,7 @@ export function ChangesDiffModal({
                 Refresh
               </button>
             )}
-            <button className="modal-close" onClick={onClose}>
+            <button className="modal-close" onClick={onClose} aria-label="Close">
               <X size={20} />
             </button>
           </div>

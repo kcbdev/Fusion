@@ -130,11 +130,11 @@ describe("AgentListModal", () => {
       );
 
       await waitFor(() => {
-        const closeButton = screen.getByTitle("Close");
+        const closeButton = screen.getByRole("button", { name: "Close" });
         expect(closeButton).toBeTruthy();
       });
 
-      const closeButton = screen.getByTitle("Close");
+      const closeButton = screen.getByRole("button", { name: "Close" });
       fireEvent.click(closeButton);
       expect(mockOnClose).toHaveBeenCalled();
     });
@@ -1412,7 +1412,7 @@ describe("AgentListModal", () => {
       });
 
       // Close via close button
-      fireEvent.click(screen.getByTitle("Close"));
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
       expect(mockOnClose).toHaveBeenCalledTimes(1);
 
       // Unmount and verify closed state works
