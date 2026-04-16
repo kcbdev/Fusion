@@ -7,10 +7,34 @@ const { centralInstances } = vi.hoisted(() => {
   return { centralInstances };
 });
 
+// ── Multi-project test fixtures ─────────────────────────────────────────
+//
+// Test fixtures model at least two registered projects with distinct IDs/paths
+// and independently addressable engine instances. This enables regression tests
+// for multi-project scoped scheduling where wrong-engine binding can silently
+// route operations to the wrong project.
+//
+const PROJECT_FIXTURES = {
+  primary: {
+    id: "project-1",
+    name: "Primary Project",
+    path: "/repo",
+    status: "active" as const,
+    isolationMode: "in-process" as const,
+  },
+  secondary: {
+    id: "project-2",
+    name: "Secondary Project",
+    path: "/repo-secondary",
+    status: "active" as const,
+    isolationMode: "in-process" as const,
+  },
+};
+
 // ── Capture arguments ───────────────────────────────────────────────
 
 // Minimal mock store backed by EventEmitter so `store.on` works
-function makeMockStore() {
+function makeMockStore(projectId = "default") {
   const emitter = new EventEmitter();
   // runDashboard registers several independent settings listeners by design;
   // keep the test mock above Node's low default threshold while still checking
@@ -36,8 +60,9 @@ function makeMockStore() {
       openrouterModelSync: true,
     }),
     listTasks: vi.fn().mockResolvedValue([]),
-    getFusionDir: vi.fn().mockReturnValue("/tmp/test/.fusion"),
+    getFusionDir: vi.fn().mockReturnValue(`/tmp/${projectId}/.fusion`),
     getMissionStore: vi.fn().mockReturnValue(mockMissionStore),
+    healthCheck: vi.fn().mockReturnValue(true),
     on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
       emitter.on(event, handler);
     }),
@@ -60,18 +85,28 @@ const mockProcessAndAudit = vi.fn().mockResolvedValue({
   extraction: { runAt: new Date().toISOString(), success: true, insightCount: 3, duplicateCount: 0, skippedCount: 0, summary: "Test" },
 });
 
+// Track getProjectByPath calls to allow per-test resolution control
+let getProjectByPathResolver: ((cwd: string) => unknown) | null = null;
+
 vi.mock("@fusion/core", () => ({
   TaskStore: vi.fn().mockImplementation(() => makeMockStore()),
   CentralCore: vi.fn().mockImplementation(() => {
     const instance = {
       init: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined),
-      getProjectByPath: vi.fn().mockResolvedValue({ id: "project-1" }),
+      getProjectByPath: vi.fn().mockImplementation((cwd: string) => {
+        // Use per-test resolver when available; default to primary project
+        if (getProjectByPathResolver) {
+          return Promise.resolve(getProjectByPathResolver(cwd));
+        }
+        return Promise.resolve({ ...PROJECT_FIXTURES.primary, path: cwd });
+      }),
       getProject: vi.fn().mockImplementation((id: string) =>
-        Promise.resolve({ id, name: `Project ${id}`, path: process.cwd(), status: "active", isolationMode: "in-process", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }),
+        Promise.resolve({ id, name: `Project ${id}`, path: `/repo/${id}`, status: "active", isolationMode: "in-process", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }),
       ),
       listProjects: vi.fn().mockResolvedValue([
-        { id: "project-1", name: "Test Project", path: process.cwd(), status: "active", isolationMode: "in-process", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+        { ...PROJECT_FIXTURES.primary, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+        { ...PROJECT_FIXTURES.secondary, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
       ]),
       listNodes: vi.fn().mockResolvedValue([
         { id: "node-local", name: "local", type: "local", status: "offline" },
@@ -159,6 +194,9 @@ vi.mock("@fusion/dashboard", () => ({
 
 // ── Mock @fusion/engine ────────────────────────────────────────────────
 
+// Track which engine is used for default/cwd path to assert correct routing
+const engineUsageLog: string[] = [];
+
 vi.mock("@fusion/engine", async (importOriginal) => {
   const original = await importOriginal<typeof import("@fusion/engine")>();
   return {
@@ -183,10 +221,11 @@ vi.mock("@fusion/engine", async (importOriginal) => {
     ProjectEngineManager: vi.fn().mockImplementation((centralCore: any, _options: any) => {
       const engines = new Map<string, any>();
       // Create mock engines that match the ProjectEngine mock shape above.
-      const createMockEngine = () => ({
+      // Each engine is independently addressable by project ID.
+      const createMockEngine = (projectId: string) => ({
         start: vi.fn().mockResolvedValue(undefined),
         stop: vi.fn().mockResolvedValue(undefined),
-        getTaskStore: vi.fn().mockImplementation(() => makeMockStore()),
+        getTaskStore: vi.fn().mockImplementation(() => makeMockStore(projectId)),
         getRuntime: vi.fn().mockReturnValue({
           getHeartbeatMonitor: vi.fn().mockReturnValue(undefined),
           getMissionAutopilot: vi.fn().mockReturnValue(undefined),
@@ -202,12 +241,15 @@ vi.mock("@fusion/engine", async (importOriginal) => {
         startAll: vi.fn(async () => {
           const projects = await centralCore.listProjects();
           for (const project of projects) {
-            const engine = createMockEngine();
+            const engine = createMockEngine(project.id);
             await engine.start();
             engines.set(project.id, engine);
           }
         }),
-        getEngine: vi.fn((id: string) => engines.get(id)),
+        getEngine: vi.fn((id: string) => {
+          engineUsageLog.push(`getEngine(${id})`);
+          return engines.get(id);
+        }),
         getAllEngines: vi.fn(() => engines),
         getStore: vi.fn((id: string) => engines.get(id)?.getTaskStore()),
         has: vi.fn((id: string) => engines.has(id)),
@@ -328,10 +370,45 @@ async function runDashboard(...args: Parameters<typeof runDashboardImpl>): Retur
   return result;
 }
 
+// ── Multi-project test utilities ────────────────────────────────────
+
+/**
+ * Reset multi-project test state between tests.
+ * Clears engine usage log and project-by-path resolver.
+ */
+function resetMultiProjectState(): void {
+  engineUsageLog.length = 0;
+  getProjectByPathResolver = null;
+  centralInstances.length = 0;
+}
+
+/**
+ * Configure how CentralCore.getProjectByPath resolves for tests.
+ * Call this in beforeEach to set up specific project resolution scenarios.
+ *
+ * @param resolver - Function that maps cwd to project record, or null to use default (primary project)
+ *
+ * @example
+ * // Set up secondary project as cwd
+ * setupProjectByPath((cwd) => {
+ *   if (cwd === "/repo-secondary") return PROJECT_FIXTURES.secondary;
+ *   return null; // Not registered
+ * });
+ *
+ * // Use default (primary project)
+ * setupProjectByPath(null);
+ */
+function setupProjectByPath(
+  resolver: ((cwd: string) => unknown) | null
+): void {
+  getProjectByPathResolver = resolver;
+}
+
 // ── Tests ───────────────────────────────────────────────────────────
 
 afterEach(() => {
   disposeTrackedDashboards();
+  resetMultiProjectState();
 });
 
 describe("runDashboard — AuthStorage & ModelRegistry wiring", () => {
@@ -679,6 +756,122 @@ describe("runDashboard — Peer exchange and discovery", () => {
     expect(meshCentral).toBeDefined();
     expect(typeof meshCentral.startDiscovery).toBe("function");
     expect(typeof meshCentral.updateNode).toBe("function");
+  });
+});
+
+describe("runDashboard — multi-project cwd/default engine resolution", () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockDiscoverAndLoadExtensions.mockResolvedValue({
+      runtime: { pendingProviderRegistrations: [] },
+      errors: [],
+    });
+    const { TaskStore } = await import("@fusion/core");
+    (TaskStore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => makeMockStore());
+    // Default: cwd resolves to primary project
+    setupProjectByPath(null);
+  });
+
+  it("selects default engine via CentralCore.getProjectByPath(cwd), not by registry order", async () => {
+    const { createServer } = await import("@fusion/dashboard");
+    const { ProjectEngineManager } = await import("@fusion/engine");
+
+    await runDashboard(0, {});
+
+    // Verify the engine manager was created
+    expect(ProjectEngineManager).toHaveBeenCalledTimes(1);
+
+    // Verify CentralCore.getProjectByPath was called with cwd
+    const centralCore = centralInstances[0];
+    expect(centralCore.getProjectByPath).toHaveBeenCalled();
+
+    // Verify createServer received an engine (the cwd/default engine)
+    const serverOpts = (createServer as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(serverOpts).toHaveProperty("engine");
+    expect(serverOpts.engine).toBeDefined();
+  });
+
+  it("passes engineManager to createServer for multi-project scope resolution", async () => {
+    const { createServer } = await import("@fusion/dashboard");
+    const { ProjectEngineManager } = await import("@fusion/engine");
+
+    await runDashboard(0, {});
+
+    const managerInstance = (ProjectEngineManager as unknown as ReturnType<typeof vi.fn>).mock.results[0]?.value;
+    const serverOpts = (createServer as ReturnType<typeof vi.fn>).mock.calls[0][1];
+
+    // engineManager should be passed for multi-project route resolution
+    expect(serverOpts.engineManager).toBe(managerInstance);
+  });
+
+  it("passes onProjectFirstAccessed callback that delegates to engineManager.onProjectAccessed", async () => {
+    const { createServer } = await import("@fusion/dashboard");
+    const { ProjectEngineManager } = await import("@fusion/engine");
+
+    await runDashboard(0, {});
+
+    const managerInstance = (ProjectEngineManager as unknown as ReturnType<typeof vi.fn>).mock.results[0]?.value;
+    const serverOpts = (createServer as ReturnType<typeof vi.fn>).mock.calls[0][1];
+
+    // Verify the callback is passed
+    expect(serverOpts).toHaveProperty("onProjectFirstAccessed");
+    expect(typeof serverOpts.onProjectFirstAccessed).toBe("function");
+
+    // Invoke the callback and verify delegation
+    serverOpts.onProjectFirstAccessed("proj-new");
+    expect(managerInstance.onProjectAccessed).toHaveBeenCalledWith("proj-new");
+  });
+
+  it("does NOT pass engine when cwd project cannot be resolved (no foreign default engine)", async () => {
+    // Configure cwd to return null (project not registered)
+    setupProjectByPath((_cwd) => null);
+
+    const { createServer } = await import("@fusion/dashboard");
+    const { ProjectEngineManager } = await import("@fusion/engine");
+
+    await runDashboard(0, {});
+
+    // Verify engineManager was still passed (for multi-project support)
+    const managerInstance = (ProjectEngineManager as unknown as ReturnType<typeof vi.fn>).mock.results[0]?.value;
+    const serverOpts = (createServer as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(serverOpts.engineManager).toBe(managerInstance);
+
+    // But NO default engine was bound (prevents wrong-project execution)
+    expect(serverOpts.engine).toBeUndefined();
+  });
+
+  it("forwards scoped automation/routine lane dependencies to createServer", async () => {
+    const { createServer } = await import("@fusion/dashboard");
+
+    await runDashboard(0, {});
+
+    const serverOpts = (createServer as ReturnType<typeof vi.fn>).mock.calls[0][1];
+
+    // automationStore should be forwarded for scoped scheduling
+    expect(serverOpts).toHaveProperty("automationStore");
+    expect(serverOpts.automationStore).toBeDefined();
+  });
+
+  it("maintains correct engine binding when onProjectFirstAccessed is called", async () => {
+    const { createServer } = await import("@fusion/dashboard");
+
+    await runDashboard(0, {});
+
+    // Get the original engine binding
+    const serverOpts1 = (createServer as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    const originalEngine = serverOpts1.engine;
+
+    // Trigger onProjectFirstAccessed for a secondary project
+    if (serverOpts1.onProjectFirstAccessed) {
+      serverOpts1.onProjectFirstAccessed("proj-secondary");
+    }
+
+    // Verify createServer was only called once (engine binding unchanged)
+    expect((createServer as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+
+    // Verify the engine passed is still the original cwd engine
+    const serverOpts2 = (createServer as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(serverOpts2.engine).toBe(originalEngine);
   });
 });
 

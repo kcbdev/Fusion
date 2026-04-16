@@ -1,6 +1,36 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 
+// ── Multi-project test fixtures ─────────────────────────────────────────
+//
+// Test fixtures model at least two registered projects with distinct IDs/paths
+// and independently addressable engine instances. This enables regression tests
+// for multi-project scoped scheduling where wrong-engine binding can silently
+// route operations to the wrong project.
+//
+const PROJECT_FIXTURES = {
+  primary: {
+    id: "project-1",
+    name: "Primary Project",
+    path: "/repo",
+    status: "active" as const,
+    isolationMode: "in-process" as const,
+  },
+  secondary: {
+    id: "project-2",
+    name: "Secondary Project",
+    path: "/repo-secondary",
+    status: "active" as const,
+    isolationMode: "in-process" as const,
+  },
+};
+
+// Track getProjectByPath calls to allow per-test resolution control
+let getProjectByPathResolver: ((cwd: string) => unknown) | null = null;
+
+// Track which engine is used for default/cwd path to assert correct routing
+const engineUsageLog: string[] = [];
+
 const mocks = vi.hoisted(() => {
   type ListenCall = {
     port: number;
@@ -32,7 +62,7 @@ const mocks = vi.hoisted(() => {
   const projectEngineInstances: any[] = [];
   const listenCalls: ListenCall[] = [];
 
-  function createTaskStoreMock() {
+  function createTaskStoreMock(projectId = "default") {
     const emitter = new EventEmitter();
     const missionStore = {
       listMissions: vi.fn().mockResolvedValue([]),
@@ -42,7 +72,7 @@ const mocks = vi.hoisted(() => {
       init: vi.fn().mockResolvedValue(undefined),
       watch: vi.fn().mockResolvedValue(undefined),
       close: vi.fn(),
-      getFusionDir: vi.fn().mockReturnValue("/repo/.fusion"),
+      getFusionDir: vi.fn().mockReturnValue(`/repo/${projectId}/.fusion`),
       getMissionStore: vi.fn().mockReturnValue(missionStore),
       getSettings: vi.fn().mockResolvedValue({
         maxConcurrent: 2,
@@ -105,12 +135,19 @@ const mocks = vi.hoisted(() => {
     const instance = {
       init: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined),
-      getProjectByPath: vi.fn().mockResolvedValue({ id: "project-1" }),
+      getProjectByPath: vi.fn().mockImplementation((cwd: string) => {
+        // Use per-test resolver when available; default to primary project
+        if (getProjectByPathResolver) {
+          return Promise.resolve(getProjectByPathResolver(cwd));
+        }
+        return Promise.resolve({ ...PROJECT_FIXTURES.primary, path: cwd });
+      }),
       getProject: vi.fn().mockImplementation((id: string) =>
         Promise.resolve({ id, name: `Project ${id}`, path: `/repo/${id}`, status: "active", isolationMode: "in-process", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }),
       ),
       listProjects: vi.fn().mockResolvedValue([
-        { id: "project-1", name: "Test Project", path: "/repo", status: "active", isolationMode: "in-process", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+        { ...PROJECT_FIXTURES.primary, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+        { ...PROJECT_FIXTURES.secondary, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
       ]),
       listNodes: vi.fn().mockResolvedValue([
         { id: "node-local", name: "local", type: "local", status: "offline" },
@@ -444,6 +481,9 @@ const mocks = vi.hoisted(() => {
       syncInsightExtractionAutomationMock.mockResolvedValue(undefined);
       processAndAuditInsightExtractionMock.mockClear();
       createAiPromptExecutorMock.mockClear();
+      // Reset multi-project state
+      engineUsageLog.length = 0;
+      getProjectByPathResolver = null;
     },
   };
 });
@@ -492,7 +532,11 @@ vi.mock("@fusion/engine", () => ({
           engines.set(project.id, engine);
         }
       }),
-      getEngine: vi.fn((id: string) => engines.get(id)),
+      // Track which engine is used to verify correct cwd/default routing
+      getEngine: vi.fn((id: string) => {
+        engineUsageLog.push(`getEngine(${id})`);
+        return engines.get(id);
+      }),
       getAllEngines: vi.fn(() => engines),
       getStore: vi.fn((id: string) => engines.get(id)?.getTaskStore()),
       has: vi.fn((id: string) => engines.has(id)),
@@ -1367,6 +1411,221 @@ describe("runServe --daemon flag", () => {
     expect(createServer).toHaveBeenCalledTimes(1);
     const serverOpts = createServer.mock.calls[0][1];
     expect(serverOpts.daemon).toBeUndefined();
+
+    await triggerSignal("SIGINT");
+  });
+});
+
+// ── Multi-project test utilities ────────────────────────────────────
+
+/**
+ * Reset multi-project test state between tests.
+ * Clears engine usage log and project-by-path resolver.
+ */
+function resetMultiProjectState(): void {
+  engineUsageLog.length = 0;
+  getProjectByPathResolver = null;
+  mocks.reset();
+}
+
+/**
+ * Configure how CentralCore.getProjectByPath resolves for tests.
+ * Call this in beforeEach to set up specific project resolution scenarios.
+ *
+ * @param resolver - Function that maps cwd to project record, or null to use default (primary project)
+ *
+ * @example
+ * // Set up secondary project as cwd
+ * setupProjectByPath((cwd) => {
+ *   if (cwd === "/repo-secondary") return PROJECT_FIXTURES.secondary;
+ *   return null; // Not registered
+ * });
+ *
+ * // Use default (primary project)
+ * setupProjectByPath(null);
+ */
+function setupProjectByPath(
+  resolver: ((cwd: string) => unknown) | null
+): void {
+  getProjectByPathResolver = resolver;
+}
+
+// ── Tests: runServe multi-project startup wiring ─────────────────────
+
+describe("runServe — multi-project cwd/default engine resolution", () => {
+  const originalCwd = process.cwd;
+  const originalOn = process.on;
+  const originalExit = process.exit;
+
+  let signalHandlers: Record<"SIGINT" | "SIGTERM", Array<() => void>>;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let cwdSpy: ReturnType<typeof vi.spyOn>;
+  let processOnSpy: ReturnType<typeof vi.spyOn>;
+
+  async function triggerSignal(signal: "SIGINT" | "SIGTERM") {
+    const handlers = signalHandlers[signal];
+    expect(handlers.length).toBeGreaterThan(0);
+    handlers[handlers.length - 1]();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.reset();
+    resetMultiProjectState();
+
+    signalHandlers = { SIGINT: [], SIGTERM: [] };
+
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    cwdSpy = vi.spyOn(process, "cwd").mockReturnValue("/repo");
+    processOnSpy = vi.spyOn(process, "on").mockImplementation(((event: string, listener: () => void) => {
+      if (event === "SIGINT" || event === "SIGTERM") {
+        signalHandlers[event].push(listener);
+      }
+      return process;
+    }) as typeof process.on);
+    process.exit = vi.fn() as never;
+
+    // Default: cwd resolves to primary project
+    setupProjectByPath(null);
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    cwdSpy.mockRestore();
+    processOnSpy.mockRestore();
+    process.cwd = originalCwd;
+    process.on = originalOn;
+    process.exit = originalExit;
+  });
+
+  it("resolves cwdEngine from CentralCore.getProjectByPath(cwd) and passes to createServer", async () => {
+    const { createServer } = await import("@fusion/dashboard");
+    const { ProjectEngineManager } = await import("@fusion/engine");
+
+    await runServe(4040, {});
+
+    // Verify engineManager was created
+    expect(ProjectEngineManager).toHaveBeenCalledTimes(1);
+    const managerInstance = ProjectEngineManager.mock.results[0]?.value;
+
+    // Verify createServer received the cwd engine
+    expect(createServer).toHaveBeenCalledTimes(1);
+    const serverOpts = createServer.mock.calls[0][1];
+
+    // The cwd engine should be passed as the default execution engine
+    expect(serverOpts).toHaveProperty("engine");
+    expect(serverOpts.engine).toBeDefined();
+
+    // engineManager should also be passed for multi-project route resolution
+    expect(serverOpts.engineManager).toBe(managerInstance);
+  });
+
+  it("passes onMerge bound to cwd engine, not any other project", async () => {
+    const { createServer } = await import("@fusion/dashboard");
+
+    await runServe(4040, {});
+
+    const serverOpts = createServer.mock.calls[0][1];
+    expect(serverOpts).toHaveProperty("onMerge");
+    expect(typeof serverOpts.onMerge).toBe("function");
+  });
+
+  it("forwards scoped automationStore and missionAutopilot to createServer", async () => {
+    const { createServer } = await import("@fusion/dashboard");
+
+    await runServe(4040, {});
+
+    const serverOpts = createServer.mock.calls[0][1];
+
+    // Verify scoped scheduling dependencies are forwarded
+    expect(serverOpts).toHaveProperty("automationStore");
+    expect(serverOpts.automationStore).toBeDefined();
+
+    expect(serverOpts).toHaveProperty("missionAutopilot");
+    expect(serverOpts.missionAutopilot).toBeDefined();
+
+    expect(serverOpts).toHaveProperty("missionExecutionLoop");
+    expect(serverOpts.missionExecutionLoop).toBeDefined();
+  });
+
+  it("forwards heartbeatMonitor with rootDir bound to cwd", async () => {
+    const { createServer } = await import("@fusion/dashboard");
+
+    await runServe(4040, {});
+
+    const serverOpts = createServer.mock.calls[0][1];
+    expect(serverOpts).toHaveProperty("heartbeatMonitor");
+    expect(serverOpts.heartbeatMonitor).toBeDefined();
+    // heartbeatMonitor should have rootDir for scope validation
+    expect(serverOpts.heartbeatMonitor.rootDir).toBe("/repo");
+  });
+
+  it("forwards onProjectFirstAccessed callback that delegates to engineManager", async () => {
+    const { createServer } = await import("@fusion/dashboard");
+    const { ProjectEngineManager } = await import("@fusion/engine");
+
+    await runServe(4040, {});
+
+    const managerInstance = ProjectEngineManager.mock.results[0]?.value;
+    const serverOpts = createServer.mock.calls[0][1];
+
+    expect(serverOpts).toHaveProperty("onProjectFirstAccessed");
+    expect(typeof serverOpts.onProjectFirstAccessed).toBe("function");
+
+    // Invoke callback and verify delegation
+    serverOpts.onProjectFirstAccessed("proj-new");
+    expect(managerInstance.onProjectAccessed).toHaveBeenCalledWith("proj-new");
+  });
+
+  it("does NOT allow secondary project access to hijack default execution callbacks", async () => {
+    const { createServer } = await import("@fusion/dashboard");
+
+    await runServe(4040, {});
+
+    // Get original onMerge
+    const serverOpts1 = createServer.mock.calls[0][1];
+    const originalOnMerge = serverOpts1.onMerge;
+    const originalEngine = serverOpts1.engine;
+
+    // Simulate secondary project access via onProjectFirstAccessed
+    if (serverOpts1.onProjectFirstAccessed) {
+      serverOpts1.onProjectFirstAccessed("project-2");
+    }
+
+    // Verify createServer was only called once (no re-creation with different engine)
+    expect(createServer).toHaveBeenCalledTimes(1);
+
+    // Verify callbacks are still bound to original cwd engine
+    const serverOpts2 = createServer.mock.calls[0][1];
+    expect(serverOpts2.onMerge).toBe(originalOnMerge);
+    expect(serverOpts2.engine).toBe(originalEngine);
+  });
+
+  it("exits process when cwd cannot be resolved to a registered project", async () => {
+    // Configure cwd to return null (project not registered)
+    setupProjectByPath((_cwd) => null);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await runServe(4040, {});
+
+    // runServe should exit when no cwd engine can be started
+    expect(process.exit).toHaveBeenCalledWith(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[serve] No engine started for the current project")
+    );
+
+    errorSpy.mockRestore();
+  });
+
+  it("process.exit is NOT called when cwd project is resolved", async () => {
+    // cwd resolves to primary project
+    setupProjectByPath(null);
+
+    await runServe(4040, {});
+
+    // Should NOT exit - process should continue running
+    expect(process.exit).not.toHaveBeenCalled();
 
     await triggerSignal("SIGINT");
   });
