@@ -353,6 +353,8 @@ import {
   saveOnboardingState,
   clearOnboardingState,
   markOnboardingCompleted,
+  markStepSkipped,
+  getSkippedSteps,
   getStepData,
   type OnboardingStep,
 } from "./model-onboarding-state";
@@ -400,12 +402,14 @@ export function ModelOnboardingModal({
   const initialStep: OnboardingStep = persistedState && persistedState.currentStep !== "complete"
     ? persistedState.currentStep as OnboardingStep
     : "ai-setup";
-  // Restore completed steps from persisted state
+  // Restore completed/skipped steps from persisted state
   const persistedCompletedSteps = persistedState?.completedSteps ?? [];
+  const persistedSkippedSteps = persistedState?.skippedSteps ?? getSkippedSteps();
 
   const [isOpen, setIsOpen] = useState(true);
   const [step, setStep] = useState<OnboardingStep>(initialStep);
   const [completedSteps, setCompletedSteps] = useState<OnboardingStep[]>(persistedCompletedSteps);
+  const [skippedSteps, setSkippedSteps] = useState<OnboardingStep[]>(persistedSkippedSteps);
   const [authProviders, setAuthProviders] = useState<AuthProvider[]>([]);
   const [authLoading, setAuthLoading] = useState(true);
   const [authActionInProgress, setAuthActionInProgress] = useState<string | null>(null);
@@ -446,9 +450,9 @@ export function ModelOnboardingModal({
   // Persist step state whenever it changes (for resume functionality)
   useEffect(() => {
     if (step !== "complete") {
-      saveOnboardingState(step, { completedSteps });
+      saveOnboardingState(step, { completedSteps, skippedSteps });
     }
-  }, [step, completedSteps]);
+  }, [step, completedSteps, skippedSteps]);
 
   // Auto-mark unconnected providers as skipped when leaving ai-setup step
   // Only skip if NO providers are connected (if at least one is connected, others remain "Not connected")
@@ -673,29 +677,6 @@ export function ModelOnboardingModal({
     };
   }, []);
 
-  // Navigate to next step
-  const handleNext = useCallback(() => {
-    // Mark current step as completed before moving forward
-    setCompletedSteps(prev => [...new Set([...prev, step])]);
-    if (step === "ai-setup") {
-      setStep("github");
-    } else if (step === "github") {
-      setStep("first-task");
-    }
-  }, [step]);
-
-  // Navigate to previous step
-  const handleBack = useCallback(() => {
-    // Remove current step from completedSteps when going back (undoing progress)
-    const currentStepKey = step;
-    setCompletedSteps(prev => prev.filter(s => s !== currentStepKey));
-    if (step === "github") {
-      setStep("ai-setup");
-    } else if (step === "first-task") {
-      setStep("github");
-    }
-  }, [step]);
-
   const setGitHubSkippedState = useCallback((skipped: boolean) => {
     setIsGithubSkipped(skipped);
     saveOnboardingState(step, {
@@ -708,12 +689,61 @@ export function ModelOnboardingModal({
     });
   }, [step, completedSteps]);
 
-  const handleSkipGitHubStep = useCallback(() => {
-    if (!isGithubAuthenticated) {
+  // Navigate to next step
+  const handleNext = useCallback(() => {
+    // Mark current step as completed before moving forward
+    setCompletedSteps((prev) => [...new Set([...prev, step])]);
+    // Completing a step clears any prior skipped status
+    setSkippedSteps((prev) => prev.filter((s) => s !== step));
+
+    if (step === "github" && !isGithubAuthenticated) {
+      setGitHubSkippedState(false);
+    }
+
+    if (step === "ai-setup") {
+      setStep("github");
+    } else if (step === "github") {
+      setStep("first-task");
+    }
+  }, [step, isGithubAuthenticated, setGitHubSkippedState]);
+
+  // Navigate forward without marking completion
+  const handleSkip = useCallback(() => {
+    setSkippedSteps((prev) => [...new Set([...prev, step])]);
+    markStepSkipped(step);
+
+    if (step === "github" && !isGithubAuthenticated) {
       setGitHubSkippedState(true);
     }
-    handleNext();
-  }, [isGithubAuthenticated, setGitHubSkippedState, handleNext]);
+
+    if (step === "ai-setup") {
+      setStep("github");
+    } else if (step === "github") {
+      setStep("first-task");
+    }
+  }, [step, isGithubAuthenticated, setGitHubSkippedState]);
+
+  // Navigate to previous step
+  const handleBack = useCallback(() => {
+    // Remove current step from completed/skipped when going back (undoing progress)
+    const currentStepKey = step;
+    setCompletedSteps((prev) => prev.filter((s) => s !== currentStepKey));
+    setSkippedSteps((prev) => prev.filter((s) => s !== currentStepKey));
+
+    if (currentStepKey === "github" && !isGithubAuthenticated) {
+      setGitHubSkippedState(false);
+    }
+
+    if (step === "github") {
+      setStep("ai-setup");
+    } else if (step === "first-task") {
+      setStep("github");
+    }
+  }, [step, isGithubAuthenticated, setGitHubSkippedState]);
+
+  const handleSkipGitHubStep = useCallback(() => {
+    handleSkip();
+  }, [handleSkip]);
 
   // OAuth login handler
   const handleLogin = useCallback(
@@ -1192,8 +1222,9 @@ export function ModelOnboardingModal({
           {steps.map((s, index) => {
             // A step is done if it's in completedSteps AND is before current position
             const isDone = completedSteps.includes(s.key) && currentStepIndex > index;
-            // Clickable if it's a completed step (can review) or we're on a future step
-            const isClickable = isDone;
+            const isSkipped = skippedSteps.includes(s.key) && !completedSteps.includes(s.key) && currentStepIndex > index;
+            // Clickable if it's a completed/skipped step (can review)
+            const isClickable = isDone || isSkipped;
             return (
               <div key={s.key} className="onboarding-step-wrapper">
                 {index > 0 && (
@@ -1207,7 +1238,7 @@ export function ModelOnboardingModal({
                   <button
                     className={`model-onboarding-step-indicator ${
                       step === s.key ? "active" : ""
-                    } ${isDone ? "done" : ""}`}
+                    } ${isDone ? "done" : ""} ${isSkipped ? "skipped" : ""}`}
                     onClick={() => setStep(s.key)}
                     aria-label={`Go back to ${s.label}`}
                     title={`Review ${s.label}`}
@@ -1215,6 +1246,8 @@ export function ModelOnboardingModal({
                     <span className="step-number">
                       {isDone ? (
                         <CheckCircle size={14} />
+                      ) : isSkipped ? (
+                        <span className="onboarding-step-skip-mark">–</span>
                       ) : (
                         index + 1
                       )}
@@ -1225,11 +1258,13 @@ export function ModelOnboardingModal({
                   <div
                     className={`model-onboarding-step-indicator ${
                       step === s.key ? "active" : ""
-                    } ${isDone ? "done" : ""}`}
+                    } ${isDone ? "done" : ""} ${isSkipped ? "skipped" : ""}`}
                   >
                     <span className="step-number">
                       {isDone ? (
                         <CheckCircle size={14} />
+                      ) : isSkipped ? (
+                        <span className="onboarding-step-skip-mark">–</span>
                       ) : (
                         index + 1
                       )}
@@ -1751,7 +1786,7 @@ export function ModelOnboardingModal({
               >
                 Skip for now
               </button>
-              <button className="onboarding-skip-step-link" onClick={handleNext}>
+              <button className="onboarding-skip-step-link" onClick={handleSkip}>
                 Skip setup →
               </button>
               <button className="btn btn-primary" onClick={handleNext}>
@@ -1765,7 +1800,7 @@ export function ModelOnboardingModal({
               <button className="btn btn-sm" onClick={handleBack}>
                 ← Back
               </button>
-              <button className="onboarding-skip-step-link" onClick={handleSkipGitHubStep}>
+              <button className="onboarding-skip-step-link" onClick={handleSkip}>
                 Skip GitHub →
               </button>
               <button className="btn btn-primary" onClick={handleNext}>

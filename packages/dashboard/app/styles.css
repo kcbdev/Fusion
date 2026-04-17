@@ -23742,6 +23742,11 @@ html .column.drag-over * {
   border-radius: var(--radius-sm);
 }
 
+.model-onboarding-step-indicator.skipped {
+  opacity: 0.7;
+  border-color: var(--color-muted);
+}
+
 .model-onboarding-step-indicator .step-number {
   width: 24px;
   height: 24px;
@@ -23756,6 +23761,12 @@ html .column.drag-over * {
 
 .model-onboarding-step-indicator .step-label {
   font-weight: 500;
+}
+
+.onboarding-step-skip-mark {
+  font-size: var(--space-lg);
+  color: var(--text-muted);
+  line-height: 1;
 }
 
 .model-onboarding-step-connector {

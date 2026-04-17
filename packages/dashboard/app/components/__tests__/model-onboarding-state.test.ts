@@ -9,7 +9,9 @@ import {
   isOnboardingCompleted,
   getOnboardingCompletedAt,
   markStepCompleted,
+  markStepSkipped,
   getCompletedSteps,
+  getSkippedSteps,
   getStepData,
   ONBOARDING_STEP_LABELS,
 } from "../model-onboarding-state";
@@ -72,6 +74,7 @@ describe("model-onboarding-state", () => {
         currentStep: "ai-setup",
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: [],
+        skippedSteps: [],
         dismissed: false,
         completed: false,
         stepData: {},
@@ -86,6 +89,7 @@ describe("model-onboarding-state", () => {
         currentStep: "unknown-step",
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: [],
+        skippedSteps: [],
         dismissed: false,
         completed: false,
         stepData: {},
@@ -114,6 +118,7 @@ describe("model-onboarding-state", () => {
         currentStep: "github",
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: [],
+        skippedSteps: [],
         dismissed: false,
         completed: false,
         stepData: {},
@@ -125,6 +130,7 @@ describe("model-onboarding-state", () => {
         currentStep: "first-task" as const,
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: ["ai-setup", "github"] as const,
+        skippedSteps: [],
         dismissed: true,
         completed: false,
         stepData: { "ai-setup": { someData: "value" } },
@@ -231,6 +237,7 @@ describe("model-onboarding-state", () => {
       const parsed = JSON.parse(stored);
       expect(parsed.currentStep).toBe("ai-setup");
       expect(parsed.completedSteps).toEqual(["ai-setup"]);
+      expect(parsed.skippedSteps).toEqual([]);
       expect(parsed.dismissed).toBe(false);
       expect(parsed.completed).toBe(false);
     });
@@ -258,6 +265,27 @@ describe("model-onboarding-state", () => {
       const parsed = JSON.parse(stored);
       expect(parsed.completedSteps).toEqual(["ai-setup", "github", "first-task"]);
     });
+
+    it("markStepCompleted removes step from skippedSteps", () => {
+      markStepSkipped("ai-setup");
+      markStepCompleted("ai-setup");
+
+      const state = getOnboardingState();
+      expect(state?.completedSteps).toContain("ai-setup");
+      expect(state?.skippedSteps).not.toContain("ai-setup");
+    });
+  });
+
+  describe("markStepSkipped", () => {
+    it("markStepSkipped adds step to skippedSteps", () => {
+      markStepSkipped("ai-setup");
+      expect(getOnboardingState()?.skippedSteps).toContain("ai-setup");
+    });
+
+    it("markStepSkipped does not add to completedSteps", () => {
+      markStepSkipped("ai-setup");
+      expect(getOnboardingState()?.completedSteps).not.toContain("ai-setup");
+    });
   });
 
   describe("clearOnboardingState", () => {
@@ -266,6 +294,7 @@ describe("model-onboarding-state", () => {
         currentStep: "ai-setup" as const,
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: ["ai-setup"],
+        skippedSteps: [],
         dismissed: false,
         completed: false,
         stepData: {},
@@ -280,6 +309,7 @@ describe("model-onboarding-state", () => {
         currentStep: "github" as const,
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: ["ai-setup", "github"] as const,
+        skippedSteps: [],
         dismissed: true,
         completed: false,
         stepData: { "ai-setup": { someData: "value" } },
@@ -314,6 +344,7 @@ describe("model-onboarding-state", () => {
         currentStep: "ai-setup" as const,
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: ["ai-setup"],
+        skippedSteps: [],
         dismissed: false,
         completed: false,
         stepData: {},
@@ -336,6 +367,7 @@ describe("model-onboarding-state", () => {
         currentStep: "first-task" as const,
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: [],
+        skippedSteps: [],
         dismissed: false,
         completed: false,
         stepData: {},
@@ -349,6 +381,7 @@ describe("model-onboarding-state", () => {
         currentStep: "complete" as const,
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: ["ai-setup", "github", "first-task"],
+        skippedSteps: [],
         dismissed: false,
         completed: true,
         stepData: {},
@@ -363,6 +396,7 @@ describe("model-onboarding-state", () => {
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedAt: "2024-01-02T00:00:00.000Z",
         completedSteps: [],
+        skippedSteps: [],
         dismissed: false,
         completed: false,
         stepData: {},
@@ -377,6 +411,7 @@ describe("model-onboarding-state", () => {
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedAt: "2024-01-02T00:00:00.000Z",
         completedSteps: [],
+        skippedSteps: [],
         dismissed: false,
         completed: false,
         stepData: {},
@@ -390,6 +425,7 @@ describe("model-onboarding-state", () => {
         currentStep: "first-task" as const,
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: [],
+        skippedSteps: [],
         dismissed: false,
         stepData: {},
         // Note: no completed field
@@ -404,6 +440,7 @@ describe("model-onboarding-state", () => {
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedAt: "",
         completedSteps: [],
+        skippedSteps: [],
         dismissed: false,
         completed: false,
         stepData: {},
@@ -437,6 +474,26 @@ describe("model-onboarding-state", () => {
     });
   });
 
+  describe("getSkippedSteps", () => {
+    it("getSkippedSteps returns persisted skipped steps", () => {
+      saveOnboardingState("github", { skippedSteps: ["ai-setup"] });
+      expect(getSkippedSteps()).toEqual(["ai-setup"]);
+    });
+
+    it("skippedSteps defaults to empty array for legacy state", () => {
+      const legacyState = {
+        currentStep: "github" as const,
+        updatedAt: "2024-01-01T00:00:00.000Z",
+        completedSteps: ["ai-setup"],
+        dismissed: false,
+        completed: false,
+        stepData: {},
+      };
+      mockStore[STORAGE_KEY] = JSON.stringify(legacyState);
+      expect(getSkippedSteps()).toEqual([]);
+    });
+  });
+
   describe("getStepData", () => {
     it("returns null when no state exists", () => {
       expect(getStepData("ai-setup")).toBeNull();
@@ -459,6 +516,7 @@ describe("model-onboarding-state", () => {
         currentStep: "first-task" as const,
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: [],
+        skippedSteps: [],
         dismissed: false,
         completed: false,
         // Note: no stepData field
@@ -478,6 +536,7 @@ describe("model-onboarding-state", () => {
         currentStep: "complete" as const,
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: [],
+        skippedSteps: [],
         dismissed: false,
         completed: false,
         stepData: {},
@@ -507,6 +566,7 @@ describe("model-onboarding-state", () => {
         currentStep: "first-task" as const,
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: ["ai-setup", "github"],
+        skippedSteps: [],
         dismissed: false,
         completed: true,
         stepData: {},
@@ -521,6 +581,7 @@ describe("model-onboarding-state", () => {
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedAt: "2024-01-02T00:00:00.000Z",
         completedSteps: [],
+        skippedSteps: [],
         dismissed: false,
         completed: false,
         stepData: {},
@@ -534,6 +595,7 @@ describe("model-onboarding-state", () => {
         currentStep: "github" as const,
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: ["ai-setup"],
+        skippedSteps: [],
         dismissed: true,
         completed: false,
         stepData: {},
@@ -554,6 +616,7 @@ describe("model-onboarding-state", () => {
         currentStep: "complete" as const,
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: [],
+        skippedSteps: [],
         dismissed: false,
         completed: false,
         stepData: {},
@@ -616,6 +679,7 @@ describe("model-onboarding-state", () => {
         currentStep: "first-task" as const,
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: ["ai-setup", "github"],
+        skippedSteps: [],
         dismissed: false,
         completed: true,
         stepData: {},
@@ -630,6 +694,7 @@ describe("model-onboarding-state", () => {
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedAt: "2024-01-02T00:00:00.000Z",
         completedSteps: [],
+        skippedSteps: [],
         dismissed: false,
         completed: false,
         stepData: {},
@@ -643,6 +708,7 @@ describe("model-onboarding-state", () => {
         currentStep: "custom-step" as const,
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: [],
+        skippedSteps: [],
         dismissed: false,
         completed: false,
         stepData: {},
@@ -661,6 +727,7 @@ describe("model-onboarding-state", () => {
         currentStep: "my-custom-step" as const,
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: [],
+        skippedSteps: [],
         dismissed: false,
         completed: false,
         stepData: {},
@@ -675,6 +742,7 @@ describe("model-onboarding-state", () => {
         currentStep: "my_custom_step" as const,
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: [],
+        skippedSteps: [],
         dismissed: false,
         completed: false,
         stepData: {},
@@ -752,6 +820,7 @@ describe("model-onboarding-state", () => {
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedAt: timestamp,
         completedSteps: [],
+        skippedSteps: [],
         dismissed: false,
         completed: true,
         stepData: {},
@@ -765,6 +834,7 @@ describe("model-onboarding-state", () => {
         currentStep: "first-task" as const,
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: [],
+        skippedSteps: [],
         dismissed: false,
         completed: false,
         stepData: {},
@@ -788,6 +858,7 @@ describe("model-onboarding-state", () => {
         currentStep: "github",
         updatedAt: "2024-01-01T00:00:00.000Z",
         completedSteps: [],
+        skippedSteps: [],
         dismissed: false,
         completed: false,
         stepData: {},

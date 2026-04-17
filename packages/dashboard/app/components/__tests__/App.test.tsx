@@ -107,7 +107,9 @@ const mockSaveOnboardingState = vi.fn();
 const mockClearOnboardingState = vi.fn();
 const mockIsOnboardingCompleted = vi.fn();
 const mockMarkOnboardingCompleted = vi.fn();
+const mockMarkStepSkipped = vi.fn();
 const mockGetOnboardingCompletedAt = vi.fn();
+const mockGetSkippedSteps = vi.fn();
 const mockGetStepData = vi.fn();
 
 vi.mock("../../components/model-onboarding-state", () => ({
@@ -118,7 +120,9 @@ vi.mock("../../components/model-onboarding-state", () => ({
   clearOnboardingState: (...args: unknown[]) => mockClearOnboardingState(...args),
   isOnboardingCompleted: (...args: unknown[]) => mockIsOnboardingCompleted(...args),
   markOnboardingCompleted: (...args: unknown[]) => mockMarkOnboardingCompleted(...args),
+  markStepSkipped: (...args: unknown[]) => mockMarkStepSkipped(...args),
   getOnboardingCompletedAt: (...args: unknown[]) => mockGetOnboardingCompletedAt(...args),
+  getSkippedSteps: (...args: unknown[]) => mockGetSkippedSteps(...args),
   getStepData: (...args: unknown[]) => mockGetStepData(...args),
 }));
 
@@ -262,8 +266,13 @@ beforeEach(() => {
   mockIsOnboardingCompleted.mockReset();
   mockIsOnboardingCompleted.mockReturnValue(false);
   mockMarkOnboardingCompleted.mockReset();
+  mockMarkStepSkipped.mockReset();
   mockGetOnboardingCompletedAt.mockReset();
   mockGetOnboardingCompletedAt.mockReturnValue(null);
+  mockGetSkippedSteps.mockReset();
+  mockGetSkippedSteps.mockReturnValue([]);
+  mockGetStepData.mockReset();
+  mockGetStepData.mockReturnValue(null);
 });
 
 describe("App deep link handling", () => {

@@ -12,6 +12,8 @@ interface OnboardingState {
   updatedAt: string; // ISO-8601 timestamp
   /** Steps that have been completed (visited and passed) */
   completedSteps: OnboardingStep[];
+  /** Steps that were intentionally skipped and can be completed later */
+  skippedSteps: OnboardingStep[];
   /** Whether the user explicitly dismissed the modal without finishing */
   dismissed: boolean;
   /** Whether the user finished all steps and completed onboarding */
@@ -28,6 +30,7 @@ const STORAGE_KEY = "fusion_model_onboarding_state";
  * Default values for backward compatibility with partial state objects
  */
 const DEFAULT_COMPLETED_STEPS: OnboardingStep[] = [];
+const DEFAULT_SKIPPED_STEPS: OnboardingStep[] = [];
 const DEFAULT_DISMISSED = false;
 const DEFAULT_COMPLETED = false;
 const DEFAULT_STEP_DATA: Partial<Record<OnboardingStep, Record<string, unknown>>> = {};
@@ -79,6 +82,7 @@ function applyStateDefaults(state: OnboardingState): OnboardingState {
   return {
     ...state,
     completedSteps: state.completedSteps ?? DEFAULT_COMPLETED_STEPS,
+    skippedSteps: state.skippedSteps ?? DEFAULT_SKIPPED_STEPS,
     dismissed: state.dismissed ?? DEFAULT_DISMISSED,
     completed: state.completed ?? DEFAULT_COMPLETED,
     stepData: state.stepData ?? DEFAULT_STEP_DATA,
@@ -91,6 +95,7 @@ function applyStateDefaults(state: OnboardingState): OnboardingState {
  * @param step - The current step (known OnboardingStep or unknown string for future steps)
  * @param options - Optional rich payload for extended state tracking
  * @param options.completedSteps - Array of steps that have been completed (for resume functionality)
+ * @param options.skippedSteps - Array of steps intentionally skipped (for resume functionality)
  * @param options.dismissed - Whether the user explicitly dismissed without finishing
  * @param options.completed - Whether the user finished all steps
  * @param options.stepData - Per-step data for restoring UI state on reopen
@@ -99,6 +104,7 @@ export function saveOnboardingState(
   step: OnboardingStep | string,
   options?: {
     completedSteps?: OnboardingStep[];
+    skippedSteps?: OnboardingStep[];
     dismissed?: boolean;
     completed?: boolean;
     stepData?: Partial<Record<OnboardingStep, Record<string, unknown>>>;
@@ -112,6 +118,7 @@ export function saveOnboardingState(
       currentStep: step,
       updatedAt: new Date().toISOString(),
       completedSteps: DEFAULT_COMPLETED_STEPS,
+      skippedSteps: DEFAULT_SKIPPED_STEPS,
       dismissed: DEFAULT_DISMISSED,
       completed: DEFAULT_COMPLETED,
       stepData: DEFAULT_STEP_DATA,
@@ -141,6 +148,7 @@ export function saveOnboardingState(
 
     // Merge completedSteps
     const completedSteps = options.completedSteps ?? existing?.completedSteps ?? DEFAULT_COMPLETED_STEPS;
+    const skippedSteps = options.skippedSteps ?? existing?.skippedSteps ?? DEFAULT_SKIPPED_STEPS;
 
     // Merge stepData per-step key
     const stepData: Partial<Record<OnboardingStep, Record<string, unknown>>> = {
@@ -161,6 +169,7 @@ export function saveOnboardingState(
       currentStep: step,
       updatedAt: now,
       completedSteps,
+      skippedSteps,
       dismissed,
       completed,
       stepData,
@@ -191,6 +200,7 @@ export function markStepCompleted(step: OnboardingStep): void {
         currentStep: step,
         updatedAt: now,
         completedSteps: [step],
+        skippedSteps: DEFAULT_SKIPPED_STEPS,
         dismissed: DEFAULT_DISMISSED,
         completed: DEFAULT_COMPLETED,
         stepData: DEFAULT_STEP_DATA,
@@ -207,6 +217,51 @@ export function markStepCompleted(step: OnboardingStep): void {
     const state: OnboardingState = {
       ...existing,
       completedSteps,
+      skippedSteps: existing.skippedSteps.filter((s) => s !== step),
+      updatedAt: now,
+    };
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // Storage quota exceeded or private browsing - fail silently
+  }
+}
+
+/**
+ * Mark a specific step as skipped.
+ * Reads current state, adds step to skippedSteps (deduped), and saves.
+ * If no state exists, initializes a fresh state with skippedSteps containing only this step.
+ * @param step - The step to mark as skipped
+ */
+export function markStepSkipped(step: OnboardingStep): void {
+  if (typeof window === "undefined") return;
+
+  try {
+    const existing = getOnboardingState();
+    const now = new Date().toISOString();
+
+    if (!existing) {
+      const state: OnboardingState = {
+        currentStep: step,
+        updatedAt: now,
+        completedSteps: DEFAULT_COMPLETED_STEPS,
+        skippedSteps: [step],
+        dismissed: DEFAULT_DISMISSED,
+        completed: DEFAULT_COMPLETED,
+        stepData: DEFAULT_STEP_DATA,
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      return;
+    }
+
+    const skippedSteps = existing.skippedSteps.includes(step)
+      ? existing.skippedSteps
+      : [...existing.skippedSteps, step];
+
+    const state: OnboardingState = {
+      ...existing,
+      skippedSteps,
+      completedSteps: existing.completedSteps.filter((s) => s !== step),
       updatedAt: now,
     };
 
@@ -242,6 +297,7 @@ export function clearOnboardingState(options?: { preserveProgress?: boolean }): 
         currentStep: "complete",
         updatedAt: now,
         completedSteps: DEFAULT_COMPLETED_STEPS,
+        skippedSteps: DEFAULT_SKIPPED_STEPS,
         dismissed: false,
         completed: true,
         stepData: DEFAULT_STEP_DATA,
@@ -285,6 +341,7 @@ export function markOnboardingCompleted(): void {
           updatedAt: now,
           completedAt: now,
           completedSteps: DEFAULT_COMPLETED_STEPS,
+          skippedSteps: DEFAULT_SKIPPED_STEPS,
           dismissed: false,
           completed: true,
           stepData: DEFAULT_STEP_DATA,
@@ -375,6 +432,16 @@ export function getCompletedSteps(): OnboardingStep[] {
   const state = getOnboardingState();
   if (!state) return DEFAULT_COMPLETED_STEPS;
   return state.completedSteps;
+}
+
+/**
+ * Get the list of skipped steps from stored state.
+ * Returns empty array if no state exists or skippedSteps is missing.
+ */
+export function getSkippedSteps(): OnboardingStep[] {
+  const state = getOnboardingState();
+  if (!state) return DEFAULT_SKIPPED_STEPS;
+  return state.skippedSteps;
 }
 
 /**

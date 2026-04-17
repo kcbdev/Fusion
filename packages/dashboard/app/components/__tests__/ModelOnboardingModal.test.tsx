@@ -44,6 +44,8 @@ const mockGetOnboardingState = vi.fn();
 const mockSaveOnboardingState = vi.fn();
 const mockClearOnboardingState = vi.fn();
 const mockMarkOnboardingCompleted = vi.fn();
+const mockMarkStepSkipped = vi.fn();
+const mockGetSkippedSteps = vi.fn();
 const mockGetStepData = vi.fn();
 
 vi.mock("../model-onboarding-state", () => ({
@@ -51,6 +53,8 @@ vi.mock("../model-onboarding-state", () => ({
   saveOnboardingState: (...args: unknown[]) => mockSaveOnboardingState(...args),
   clearOnboardingState: (...args: unknown[]) => mockClearOnboardingState(...args),
   markOnboardingCompleted: (...args: unknown[]) => mockMarkOnboardingCompleted(...args),
+  markStepSkipped: (...args: unknown[]) => mockMarkStepSkipped(...args),
+  getSkippedSteps: (...args: unknown[]) => mockGetSkippedSteps(...args),
   getStepData: (...args: unknown[]) => mockGetStepData(...args),
 }));
 
@@ -123,6 +127,8 @@ beforeEach(() => {
   mockSaveOnboardingState.mockImplementation(() => {});
   mockClearOnboardingState.mockImplementation(() => {});
   mockMarkOnboardingCompleted.mockImplementation(() => {});
+  mockMarkStepSkipped.mockImplementation(() => {});
+  mockGetSkippedSteps.mockReturnValue([]);
   mockGetStepData.mockReturnValue(null);
   // Reset mockFetchAuthStatus to default - use mockImplementation for clear control
   mockFetchAuthStatus.mockReset();
@@ -186,6 +192,155 @@ describe("ModelOnboardingModal", () => {
       // Both Back and Next should be visible
       expect(screen.getByText("← Back")).toBeTruthy();
       expect(screen.getByText("Next →")).toBeTruthy();
+    });
+  });
+
+  describe("skip vs complete step tracking (FN-1937)", () => {
+    it("does not mark AI Setup step as completed when Skip setup is clicked", async () => {
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Skip setup →" })).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Skip setup →" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Connect GitHub")).toBeTruthy();
+      });
+
+      const aiSetupIndicator = screen.getByRole("button", { name: "Go back to AI Setup" });
+      expect(aiSetupIndicator).toHaveClass("skipped");
+      expect(aiSetupIndicator).not.toHaveClass("done");
+      expect(aiSetupIndicator.querySelector('[data-testid="icon-check-circle"]')).toBeNull();
+    });
+
+    it("marks AI Setup step as completed when Next is clicked", async () => {
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Next →" })).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Next →" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Connect GitHub")).toBeTruthy();
+      });
+
+      const aiSetupIndicator = screen.getByRole("button", { name: "Go back to AI Setup" });
+      expect(aiSetupIndicator).toHaveClass("done");
+      expect(aiSetupIndicator).not.toHaveClass("skipped");
+    });
+
+    it("does not add step to completedSteps when skipped", async () => {
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Skip setup →" })).toBeTruthy();
+      });
+
+      mockSaveOnboardingState.mockClear();
+      fireEvent.click(screen.getByRole("button", { name: "Skip setup →" }));
+
+      await waitFor(() => {
+        const hasSkipPersistence = mockSaveOnboardingState.mock.calls.some((call) => {
+          const options = call[1] as { completedSteps?: string[]; skippedSteps?: string[] } | undefined;
+          return !options?.completedSteps?.includes("ai-setup") && options?.skippedSteps?.includes("ai-setup");
+        });
+        expect(hasSkipPersistence).toBe(true);
+      });
+    });
+
+    it("shows dash icon for skipped step in progress indicator", async () => {
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Skip setup →" })).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Skip setup →" }));
+
+      await waitFor(() => {
+        const skipMark = document.querySelector(".onboarding-step-skip-mark");
+        expect(skipMark).toBeTruthy();
+        expect(skipMark).toHaveTextContent("–");
+      });
+    });
+
+    it("allows going back to a skipped step", async () => {
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Skip setup →" })).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Skip setup →" }));
+      await waitFor(() => {
+        expect(screen.getByText("Connect GitHub")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "← Back" }));
+      await waitFor(() => {
+        expect(screen.getByText("Set Up AI")).toBeTruthy();
+      });
+    });
+
+    it("removes skipped status when step is completed after going back", async () => {
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Skip setup →" })).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Skip setup →" }));
+      await waitFor(() => {
+        expect(screen.getByText("Connect GitHub")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Go back to AI Setup" }));
+      await waitFor(() => {
+        expect(screen.getByText("Set Up AI")).toBeTruthy();
+      });
+
+      mockSaveOnboardingState.mockClear();
+      fireEvent.click(screen.getByRole("button", { name: "Next →" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Connect GitHub")).toBeTruthy();
+      });
+
+      const aiSetupIndicator = screen.getByRole("button", { name: "Go back to AI Setup" });
+      expect(aiSetupIndicator).toHaveClass("done");
+      expect(aiSetupIndicator).not.toHaveClass("skipped");
+
+      const hasCompletedPersistence = mockSaveOnboardingState.mock.calls.some((call) => {
+        const options = call[1] as { completedSteps?: string[]; skippedSteps?: string[] } | undefined;
+        return options?.completedSteps?.includes("ai-setup") && !options?.skippedSteps?.includes("ai-setup");
+      });
+      expect(hasCompletedPersistence).toBe(true);
+    });
+
+    it("skipped step is clickable in progress indicator", async () => {
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Skip setup →" })).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Skip setup →" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Connect GitHub")).toBeTruthy();
+      });
+
+      const aiSetupIndicator = screen.getByRole("button", { name: "Go back to AI Setup" });
+      expect(aiSetupIndicator).toHaveClass("skipped");
+
+      fireEvent.click(aiSetupIndicator);
+      await waitFor(() => {
+        expect(screen.getByText("Set Up AI")).toBeTruthy();
+      });
     });
   });
 
