@@ -489,6 +489,257 @@ describe("ModelOnboardingModal", () => {
     });
   });
 
+  describe("API key validation and error feedback", () => {
+    it("shows required validation when API key is empty", async () => {
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-apikey-input-openai")).toBeTruthy();
+      });
+
+      const input = screen.getByTestId("onboarding-apikey-input-openai");
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      await waitFor(() => {
+        expect(screen.getByText("API key is required")).toBeTruthy();
+      });
+      expect(mockSaveApiKey).not.toHaveBeenCalled();
+    });
+
+    it("shows format validation for known provider and blocks save", async () => {
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-apikey-input-openai")).toBeTruthy();
+      });
+
+      const input = screen.getByTestId("onboarding-apikey-input-openai");
+      fireEvent.change(input, { target: { value: "abc" } });
+      fireEvent.click(screen.getByTestId("onboarding-apikey-save-openai"));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("OpenAI keys should follow this format: Starts with sk- (e.g. sk-...)"),
+        ).toBeTruthy();
+      });
+      expect(mockSaveApiKey).not.toHaveBeenCalled();
+    });
+
+    it("passes valid format to server", async () => {
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-apikey-input-openai")).toBeTruthy();
+      });
+
+      const input = screen.getByTestId("onboarding-apikey-input-openai");
+      fireEvent.change(input, { target: { value: "sk-test-key" } });
+      fireEvent.click(screen.getByTestId("onboarding-apikey-save-openai"));
+
+      await waitFor(() => {
+        expect(mockSaveApiKey).toHaveBeenCalledWith("openai", "sk-test-key");
+      });
+    });
+
+    it("shows actionable network error message", async () => {
+      mockSaveApiKey.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-apikey-input-openai")).toBeTruthy();
+      });
+
+      const input = screen.getByTestId("onboarding-apikey-input-openai");
+      fireEvent.change(input, { target: { value: "sk-network-test" } });
+      fireEvent.click(screen.getByTestId("onboarding-apikey-save-openai"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Could not reach the server. Check your connection and try again.")).toBeTruthy();
+      });
+      expect(input).toHaveClass("onboarding-apikey-input--error");
+    });
+
+    it("shows server error message inline", async () => {
+      mockSaveApiKey.mockRejectedValueOnce(new Error("Unknown API key provider: xyz"));
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-apikey-input-openai")).toBeTruthy();
+      });
+
+      const input = screen.getByTestId("onboarding-apikey-input-openai");
+      fireEvent.change(input, { target: { value: "sk-server-test" } });
+      fireEvent.click(screen.getByTestId("onboarding-apikey-save-openai"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Unknown API key provider: xyz")).toBeTruthy();
+      });
+      expect(input).toHaveClass("onboarding-apikey-input--error");
+    });
+
+    it("shows inline success confirmation", async () => {
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-apikey-input-openai")).toBeTruthy();
+      });
+
+      const input = screen.getByTestId("onboarding-apikey-input-openai");
+      fireEvent.change(input, { target: { value: "sk-success-test" } });
+      fireEvent.click(screen.getByTestId("onboarding-apikey-save-openai"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-apikey-success-openai")).toHaveTextContent("✓ Key saved");
+      });
+      expect(input).toHaveClass("onboarding-apikey-input--success");
+    });
+
+    it("auto-clears success message after timeout", async () => {
+      vi.useFakeTimers();
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      const input = screen.getByTestId("onboarding-apikey-input-openai");
+      fireEvent.change(input, { target: { value: "sk-timeout-test" } });
+      fireEvent.click(screen.getByTestId("onboarding-apikey-save-openai"));
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(screen.getByTestId("onboarding-apikey-success-openai")).toBeTruthy();
+
+      await act(async () => {
+        vi.advanceTimersByTime(3100);
+      });
+
+      expect(screen.queryByTestId("onboarding-apikey-success-openai")).toBeNull();
+    });
+
+    it("clears inline error state when input changes", async () => {
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-apikey-input-openai")).toBeTruthy();
+      });
+
+      const input = screen.getByTestId("onboarding-apikey-input-openai");
+      const formatError = "OpenAI keys should follow this format: Starts with sk- (e.g. sk-...)";
+      fireEvent.change(input, { target: { value: "abc" } });
+      fireEvent.click(screen.getByTestId("onboarding-apikey-save-openai"));
+
+      await waitFor(() => {
+        expect(screen.getByText(formatError)).toBeTruthy();
+      });
+      expect(input).toHaveClass("onboarding-apikey-input--error");
+
+      fireEvent.change(input, { target: { value: "sk-corrected" } });
+
+      await waitFor(() => {
+        expect(screen.queryByText(formatError)).toBeNull();
+      });
+      expect(input).not.toHaveClass("onboarding-apikey-input--error");
+    });
+
+    it("clears inline success state when input changes", async () => {
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-apikey-input-openai")).toBeTruthy();
+      });
+
+      const input = screen.getByTestId("onboarding-apikey-input-openai");
+      fireEvent.change(input, { target: { value: "sk-before-edit" } });
+      fireEvent.click(screen.getByTestId("onboarding-apikey-save-openai"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-apikey-success-openai")).toBeTruthy();
+      });
+      expect(input).toHaveClass("onboarding-apikey-input--success");
+
+      fireEvent.change(input, { target: { value: "sk-after-edit" } });
+
+      await waitFor(() => {
+        expect(screen.queryByTestId("onboarding-apikey-success-openai")).toBeNull();
+      });
+      expect(input).not.toHaveClass("onboarding-apikey-input--success");
+    });
+
+    it("shows format hint for known providers", async () => {
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Format: Starts with sk-")).toBeTruthy();
+      });
+    });
+
+    it("uses fallback validation for unknown providers", async () => {
+      mockFetchAuthStatus.mockResolvedValueOnce({
+        providers: [
+          { id: "mystery-provider", name: "Mystery AI", authenticated: false, type: "api_key" },
+        ],
+      });
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-apikey-input-mystery-provider")).toBeTruthy();
+      });
+
+      const input = screen.getByTestId("onboarding-apikey-input-mystery-provider");
+      fireEvent.change(input, { target: { value: "short" } });
+      fireEvent.click(screen.getByTestId("onboarding-apikey-save-mystery-provider"));
+
+      await waitFor(() => {
+        expect(screen.getByText(/At least 8 characters/)).toBeTruthy();
+      });
+      expect(mockSaveApiKey).not.toHaveBeenCalled();
+
+      fireEvent.change(input, { target: { value: "longenoughkey" } });
+      fireEvent.click(screen.getByTestId("onboarding-apikey-save-mystery-provider"));
+
+      await waitFor(() => {
+        expect(mockSaveApiKey).toHaveBeenCalledWith("mystery-provider", "longenoughkey");
+      });
+    });
+
+    it("allows skipping and continuing even when validation errors exist", async () => {
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-apikey-input-openai")).toBeTruthy();
+      });
+
+      const input = screen.getByTestId("onboarding-apikey-input-openai");
+      fireEvent.change(input, { target: { value: "abc" } });
+      fireEvent.click(screen.getByTestId("onboarding-apikey-save-openai"));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("OpenAI keys should follow this format: Starts with sk- (e.g. sk-...)"),
+        ).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Skip setup →" }));
+      await waitFor(() => {
+        expect(screen.getByText("Connect GitHub")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "← Back" }));
+      await waitFor(() => {
+        expect(screen.getByText("Set Up AI")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Next →" }));
+      await waitFor(() => {
+        expect(screen.getByText("Connect GitHub")).toBeTruthy();
+      });
+    });
+  });
+
   describe("GitHub step", () => {
     it("GitHub step shows fallback when no GitHub provider", async () => {
       render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);

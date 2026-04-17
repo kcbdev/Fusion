@@ -24052,6 +24052,30 @@ html .column.drag-over * {
   box-shadow: var(--focus-ring);
 }
 
+/* API key input validation states */
+.onboarding-apikey-input--error {
+  border-color: var(--color-error);
+  box-shadow: var(--glow-danger);
+}
+
+.onboarding-apikey-input--success {
+  border-color: var(--color-success);
+  box-shadow: var(--glow-success);
+}
+
+/* Inline validation feedback for API key entry */
+.onboarding-apikey-success {
+  font-size: var(--space-md);
+  color: var(--color-success);
+  margin-top: var(--space-xs);
+}
+
+.onboarding-apikey-hint {
+  font-size: var(--space-md);
+  color: var(--text-muted);
+  margin-top: var(--space-xs);
+}
+
 .onboarding-apikey-instructions {
   margin: 0;
   color: var(--text-muted);

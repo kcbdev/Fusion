@@ -103,6 +103,78 @@ const PROVIDER_INFO: Record<string, ProviderInfo> = {
   },
 };
 
+const PROVIDER_KEY_HINTS: Record<string, {
+  pattern: RegExp;
+  hint: string;
+  example: string;
+}> = {
+  anthropic: { pattern: /^sk-ant-/, hint: "Starts with sk-ant-", example: "sk-ant-api03-..." },
+  openai: { pattern: /^sk-/, hint: "Starts with sk-", example: "sk-..." },
+  "openai-codex": { pattern: /^sk-/, hint: "Starts with sk-", example: "sk-..." },
+  openrouter: { pattern: /^sk-or-/, hint: "Starts with sk-or-", example: "sk-or-v1-..." },
+  google: { pattern: /^AIza/, hint: "Starts with AIza", example: "AIza..." },
+  gemini: { pattern: /^AIza/, hint: "Starts with AIza", example: "AIza..." },
+  minimax: { pattern: /^.{8,}$/, hint: "At least 8 characters", example: "..." },
+  ollama: { pattern: /^.+$/, hint: "Any non-empty value", example: "ollama" },
+  zai: { pattern: /^.{8,}$/, hint: "At least 8 characters", example: "..." },
+  kimi: { pattern: /^.{8,}$/, hint: "At least 8 characters", example: "..." },
+  "kimi-coding": { pattern: /^.{8,}$/, hint: "At least 8 characters", example: "..." },
+  moonshot: { pattern: /^.{8,}$/, hint: "At least 8 characters", example: "..." },
+};
+
+const PROVIDER_KEY_HINTS_FALLBACK = {
+  pattern: /^.{8,}$/,
+  hint: "At least 8 characters",
+  example: "...",
+};
+
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  "openai-codex": "OpenAI Codex",
+  openrouter: "OpenRouter",
+  google: "Google",
+  gemini: "Gemini",
+  minimax: "MiniMax",
+  ollama: "Ollama",
+  zai: "Zhipu AI",
+  kimi: "Kimi",
+  "kimi-coding": "Kimi Coding",
+  moonshot: "Moonshot",
+};
+
+function getProviderDisplayName(providerId: string): string {
+  if (PROVIDER_DISPLAY_NAMES[providerId]) {
+    return PROVIDER_DISPLAY_NAMES[providerId];
+  }
+
+  const normalized = providerId.trim();
+  if (!normalized) {
+    return "This provider";
+  }
+
+  return normalized
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
+}
+
+function validateApiKeyFormat(providerId: string, key: string): string | null {
+  const trimmedKey = key.trim();
+  if (!trimmedKey) {
+    return "API key is required";
+  }
+
+  const providerHint = PROVIDER_KEY_HINTS[providerId] ?? PROVIDER_KEY_HINTS_FALLBACK;
+  if (providerHint.pattern.test(trimmedKey)) {
+    return null;
+  }
+
+  const providerName = getProviderDisplayName(providerId);
+  return `${providerName} keys should follow this format: ${providerHint.hint} (e.g. ${providerHint.example})`;
+}
+
 const API_KEY_INFO_FALLBACK: ApiKeyInfo = {
   fieldLabel: "API Key",
   setupInstructions: "Enter your API key for this provider.",
@@ -169,6 +241,7 @@ interface ApiKeyEntryFormProps {
   inputValue: string;
   isSaving: boolean;
   error?: string;
+  success?: string | null;
   isConnected: boolean;
   onInputChange: (providerId: string, key: string) => void;
   onSave: (providerId: string, key: string) => void | Promise<void>;
@@ -181,6 +254,7 @@ function ApiKeyEntryForm({
   inputValue,
   isSaving,
   error,
+  success,
   isConnected,
   onInputChange,
   onSave,
@@ -188,6 +262,10 @@ function ApiKeyEntryForm({
 }: ApiKeyEntryFormProps) {
   const inputId = `onboarding-apikey-input-${provider.id}`;
   const saveDisabled = isSaving || !inputValue.trim();
+  const providerKeyHint = PROVIDER_KEY_HINTS[provider.id];
+  const inputClassName = `input onboarding-apikey-input${
+    error ? " onboarding-apikey-input--error" : ""
+  }${success ? " onboarding-apikey-input--success" : ""}`;
 
   if (isConnected) {
     return (
@@ -218,7 +296,7 @@ function ApiKeyEntryForm({
         <input
           id={inputId}
           type="password"
-          className="input onboarding-apikey-input"
+          className={inputClassName}
           placeholder={apiKeyInfo.inputPlaceholder ?? "Enter API key"}
           value={inputValue}
           onChange={(e) => onInputChange(provider.id, e.target.value)}
@@ -238,7 +316,20 @@ function ApiKeyEntryForm({
           {isSaving ? "Saving…" : "Save"}
         </button>
       </div>
+      {providerKeyHint && (
+        <small className="onboarding-apikey-hint">
+          Format: {providerKeyHint.hint}
+        </small>
+      )}
       {error && <small className="field-error">{error}</small>}
+      {success && !error && (
+        <small
+          className="onboarding-apikey-success"
+          data-testid={`onboarding-apikey-success-${provider.id}`}
+        >
+          {success}
+        </small>
+      )}
       <p className="onboarding-apikey-instructions">{apiKeyInfo.setupInstructions}</p>
       {apiKeyInfo.dashboardUrl && (
         <a
@@ -323,6 +414,8 @@ export function ModelOnboardingModal({
   const [saving, setSaving] = useState(false);
   const [apiKeyInputs, setApiKeyInputs] = useState<Record<string, string>>({});
   const [apiKeyErrors, setApiKeyErrors] = useState<Record<string, string>>({});
+  const [apiKeySuccess, setApiKeySuccess] = useState<Record<string, string | null>>({});
+  const apiKeySuccessTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [loginOutcomes, setLoginOutcomes] = useState<Record<string, LoginOutcome>>({});
   const [isGithubSkipped, setIsGithubSkipped] = useState<boolean>(() => {
@@ -575,6 +668,8 @@ export function ModelOnboardingModal({
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current);
       }
+      Object.values(apiKeySuccessTimers.current).forEach(clearTimeout);
+      apiKeySuccessTimers.current = {};
     };
   }, []);
 
@@ -714,7 +809,23 @@ export function ModelOnboardingModal({
       ...prev,
       [providerId]: value,
     }));
+
+    const successTimer = apiKeySuccessTimers.current[providerId];
+    if (successTimer) {
+      clearTimeout(successTimer);
+      delete apiKeySuccessTimers.current[providerId];
+    }
+
     setApiKeyErrors((prev) => {
+      if (!prev[providerId]) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[providerId];
+      return next;
+    });
+
+    setApiKeySuccess((prev) => {
       if (!prev[providerId]) {
         return prev;
       }
@@ -728,33 +839,93 @@ export function ModelOnboardingModal({
   const handleSaveApiKey = useCallback(
     async (providerId: string, keyValue?: string) => {
       const key = (keyValue ?? apiKeyInputs[providerId] ?? "").trim();
-      if (!key) {
+      const validationError = validateApiKeyFormat(providerId, key);
+      if (validationError) {
         setApiKeyErrors((prev) => ({
           ...prev,
-          [providerId]: "API key is required",
+          [providerId]: validationError,
         }));
         return;
       }
+
+      const existingTimer = apiKeySuccessTimers.current[providerId];
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+        delete apiKeySuccessTimers.current[providerId];
+      }
+
       setAuthActionInProgress(providerId);
       setApiKeyErrors((prev) => {
         const next = { ...prev };
         delete next[providerId];
         return next;
       });
+      setApiKeySuccess((prev) => {
+        if (!prev[providerId]) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[providerId];
+        return next;
+      });
+
       try {
         await saveApiKey(providerId, key);
         await loadAuthStatus();
+
         setApiKeyInputs((prev) => {
           const next = { ...prev };
           delete next[providerId];
           return next;
         });
+        setApiKeyErrors((prev) => {
+          if (!prev[providerId]) {
+            return prev;
+          }
+          const next = { ...prev };
+          delete next[providerId];
+          return next;
+        });
+        setApiKeySuccess((prev) => ({
+          ...prev,
+          [providerId]: "✓ Key saved",
+        }));
+
+        apiKeySuccessTimers.current[providerId] = setTimeout(() => {
+          setApiKeySuccess((prev) => {
+            if (!prev[providerId]) {
+              return prev;
+            }
+            const next = { ...prev };
+            delete next[providerId];
+            return next;
+          });
+          delete apiKeySuccessTimers.current[providerId];
+        }, 3000);
+
         addToast("API key saved", "success");
       } catch (err: unknown) {
-        addToast(
-          err instanceof Error ? err.message : "Failed to save API key",
-          "error",
-        );
+        const errorMessage =
+          err instanceof TypeError && err.message.includes("Failed to fetch")
+            ? "Could not reach the server. Check your connection and try again."
+            : err instanceof Error
+              ? err.message
+              : "Failed to save API key";
+
+        setApiKeyErrors((prev) => ({
+          ...prev,
+          [providerId]: errorMessage,
+        }));
+        setApiKeySuccess((prev) => {
+          if (!prev[providerId]) {
+            return prev;
+          }
+          const next = { ...prev };
+          delete next[providerId];
+          return next;
+        });
+
+        addToast(errorMessage, "error");
       } finally {
         setAuthActionInProgress(null);
       }
@@ -1247,6 +1418,7 @@ export function ModelOnboardingModal({
                             inputValue={apiKeyInputs[provider.id] ?? ""}
                             isSaving={authActionInProgress === provider.id}
                             error={apiKeyErrors[provider.id]}
+                            success={apiKeySuccess[provider.id]}
                             isConnected={provider.authenticated}
                             onInputChange={handleApiKeyInputChange}
                             onSave={handleSaveApiKey}
