@@ -487,6 +487,26 @@ describe("GET /tasks/:id", () => {
     expect(res.body.prompt).toBe("# KB-001\n\nTest task");
   });
 
+  it("caps task detail activity logs to keep the modal payload bounded", async () => {
+    const log = Array.from({ length: 510 }, (_, index) => ({
+      timestamp: `2026-01-01T00:${String(index % 60).padStart(2, "0")}:00.000Z`,
+      action: `entry-${index}`,
+    }));
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...FAKE_TASK_DETAIL,
+      log,
+    });
+
+    const res = await GET(buildApp(), "/api/tasks/KB-001");
+
+    expect(res.status).toBe(200);
+    expect(res.body.log).toHaveLength(500);
+    expect(res.body.log[0].action).toBe("entry-10");
+    expect(res.body.log[499].action).toBe("entry-509");
+    expect(res.body.activityLogTotal).toBe(510);
+    expect(res.body.activityLogTruncatedCount).toBe(10);
+  });
+
   it("returns 404 when task genuinely does not exist (ENOENT)", async () => {
     const err: NodeJS.ErrnoException = new Error("ENOENT: no such file or directory");
     err.code = "ENOENT";

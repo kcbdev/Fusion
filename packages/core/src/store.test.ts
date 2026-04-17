@@ -8481,6 +8481,35 @@ describe("RunMutationContext", () => {
     }
   });
 
+  it("logEntry() bounds retained activity entries and truncates large outcomes", async () => {
+    const localRoot = makeTmpDir();
+    const localGlobal = makeTmpDir();
+    try {
+      const localStore = new TaskStore(localRoot, localGlobal);
+      await localStore.init();
+
+      const task = await localStore.createTask({ description: "Test task" });
+      const longOutcome = "x".repeat(5_000);
+
+      for (let index = 0; index < 1_005; index += 1) {
+        await localStore.logEntry(task.id, `Action ${index}`, index === 1_004 ? longOutcome : undefined);
+      }
+
+      const updatedTask = await localStore.getTask(task.id);
+      expect(updatedTask.log).toHaveLength(1_000);
+      expect(updatedTask.log[0].action).toBe("Action 5");
+      const lastEntry = updatedTask.log[updatedTask.log.length - 1];
+      expect(lastEntry.action).toBe("Action 1004");
+      expect(lastEntry.outcome?.length).toBeLessThan(longOutcome.length);
+      expect(lastEntry.outcome).toContain("outcome truncated");
+
+      localStore.close();
+    } finally {
+      await rm(localRoot, { recursive: true, force: true });
+      await rm(localGlobal, { recursive: true, force: true });
+    }
+  });
+
   it("addComment() with runContext includes runContext in log entry", async () => {
     const localRoot = makeTmpDir();
     const localGlobal = makeTmpDir();

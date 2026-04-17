@@ -59,7 +59,7 @@ export function fromJson<T>(json: string | null | undefined): T | undefined {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 34;
+const SCHEMA_VERSION = 35;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -936,13 +936,22 @@ export class Database {
           END
         `);
 
-        // AFTER UPDATE trigger - reindex updated tasks (delete old + insert new)
+        const hasTaskTitle = this.hasColumn("tasks", "title");
+        const updateColumns = hasTaskTitle
+          ? "id, title, description, comments"
+          : "id, description, comments";
+        const oldTitle = hasTaskTitle ? "COALESCE(old.title, '')" : "''";
+        const newTitle = hasTaskTitle ? "COALESCE(new.title, '')" : "''";
+
+        // AFTER UPDATE trigger - reindex updated tasks (delete old + insert new).
+        // Restrict this to searchable columns so log/status churn does not bloat
+        // the FTS index during long-running executor activity.
         this.db.exec(`
-          CREATE TRIGGER IF NOT EXISTS tasks_fts_au AFTER UPDATE ON tasks BEGIN
+          CREATE TRIGGER IF NOT EXISTS tasks_fts_au AFTER UPDATE OF ${updateColumns} ON tasks BEGIN
             INSERT INTO tasks_fts(tasks_fts, rowid, id, title, description, comments)
-              VALUES('delete', old.rowid, old.id, COALESCE(old.title, ''), old.description, COALESCE(old.comments, '[]'));
+              VALUES('delete', old.rowid, old.id, ${oldTitle}, old.description, COALESCE(old.comments, '[]'));
             INSERT INTO tasks_fts(rowid, id, title, description, comments)
-              VALUES (new.rowid, new.id, COALESCE(new.title, ''), new.description, COALESCE(new.comments, '[]'));
+              VALUES (new.rowid, new.id, ${newTitle}, new.description, COALESCE(new.comments, '[]'));
           END
         `);
 
@@ -1410,6 +1419,34 @@ export class Database {
         // Add scope column to routines table
         this.addColumnIfMissing("routines", "scope", "TEXT DEFAULT 'project'");
         this.db.exec(`CREATE INDEX IF NOT EXISTS idxRoutinesScope ON routines(scope)`);
+      });
+    }
+
+    // Restrict task full-text-search maintenance to searchable fields only.
+    // Agent/activity logs live in tasks.log and are intentionally not searchable;
+    // log-only executor updates should not churn or bloat the FTS index.
+    if (version < 35) {
+      this.applyMigration(35, () => {
+        const hasTaskTitle = this.hasColumn("tasks", "title");
+        const updateColumns = hasTaskTitle
+          ? "id, title, description, comments"
+          : "id, description, comments";
+        const oldTitle = hasTaskTitle ? "COALESCE(old.title, '')" : "''";
+        const newTitle = hasTaskTitle ? "COALESCE(new.title, '')" : "''";
+
+        this.db.exec(`
+          DROP TRIGGER IF EXISTS tasks_fts_au;
+          CREATE TRIGGER tasks_fts_au AFTER UPDATE OF ${updateColumns} ON tasks BEGIN
+            INSERT INTO tasks_fts(tasks_fts, rowid, id, title, description, comments)
+              VALUES('delete', old.rowid, old.id, ${oldTitle}, old.description, COALESCE(old.comments, '[]'));
+            INSERT INTO tasks_fts(rowid, id, title, description, comments)
+              VALUES (new.rowid, new.id, ${newTitle}, new.description, COALESCE(new.comments, '[]'));
+          END;
+        `);
+
+        if (hasTaskTitle) {
+          this.db.exec("INSERT INTO tasks_fts(tasks_fts) VALUES('rebuild')");
+        }
       });
     }
   }

@@ -1256,6 +1256,11 @@ export function TaskDetailModal({
               ) : (
                 <div className="detail-activity">
                   <h4>Activity</h4>
+                  {(workingTask as typeof workingTask & { activityLogTruncatedCount?: number }).activityLogTruncatedCount ? (
+                    <div className="detail-log-truncated">
+                      Showing the most recent {workingTask.log.length} activity entries.
+                    </div>
+                  ) : null}
                   {workingTask.log && workingTask.log.length > 0 ? (
                     <div className="detail-activity-list">
                       {[...workingTask.log].reverse().map((entry, i) => (

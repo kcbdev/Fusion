@@ -64,6 +64,8 @@ import {
 import { rateLimit, RATE_LIMITS } from "./rate-limit.js";
 import { resolvePluginManifest } from "./plugin-routes.js";
 
+const TASK_DETAIL_ACTIVITY_LOG_LIMIT = 500;
+
 /**
  * Minimal interface matching pi-coding-agent's ModelRegistry API surface
  * used by the models route. Avoids a direct dependency on the pi-coding-agent package.
@@ -640,6 +642,19 @@ function logEntryToTimelineEntry(entry: import("@fusion/core").AgentLogEntry): T
     sortKey: createTimelineSortKey("log", entry.timestamp, entry.timestamp),
     log: entry,
   };
+}
+
+function trimTaskDetailActivityLog<T extends Task>(task: T): T {
+  if (!Array.isArray(task.log) || task.log.length <= TASK_DETAIL_ACTIVITY_LOG_LIMIT) {
+    return task;
+  }
+
+  return {
+    ...task,
+    log: task.log.slice(-TASK_DETAIL_ACTIVITY_LOG_LIMIT),
+    activityLogTotal: task.log.length,
+    activityLogTruncatedCount: task.log.length - TASK_DETAIL_ACTIVITY_LOG_LIMIT,
+  } as T;
 }
 
 // ── Git Remote Detection ──────────────────────────────────────────
@@ -3784,8 +3799,10 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   router.get("/tasks/:id", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
-      const task = await scopedStore.getTask(req.params.id);
-      res.json(task);
+      const task = await scopedStore.getTask(req.params.id, {
+        activityLogLimit: TASK_DETAIL_ACTIVITY_LOG_LIMIT,
+      });
+      res.json(trimTaskDetailActivityLog(task));
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;

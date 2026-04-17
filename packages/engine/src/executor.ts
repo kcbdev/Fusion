@@ -2,7 +2,7 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext } from "@fusion/core";
@@ -65,6 +65,8 @@ const STEP_STATUSES: StepStatus[] = ["pending", "in-progress", "done", "skipped"
 /** Maximum retry attempts for workflow step hard failures before giving up */
 const MAX_WORKFLOW_STEP_RETRIES = 3;
 const WORKFLOW_SCRIPT_OUTPUT_MAX_CHARS = 4_000;
+
+class NonRetryableWorktreeError extends Error {}
 
 function truncateWorkflowScriptOutput(output: string): string {
   if (output.length <= WORKFLOW_SCRIPT_OUTPUT_MAX_CHARS) return output;
@@ -3297,15 +3299,19 @@ and show an appropriate message to the user.\`
   ): Promise<{ path: string; branch: string }> {
     // Track the worktree path we're attempting to use (may change during recovery)
     const currentPath = path;
+    const resolvedStartPoint = startPoint
+      ? await this.resolveWorktreeStartPoint(startPoint, taskId)
+      : undefined;
 
     for (let attempt = 0; attempt < this.MAX_WORKTREE_RETRIES; attempt++) {
       try {
-        return await this.tryCreateWorktree(branch, currentPath, taskId, startPoint, attempt);
+        return await this.tryCreateWorktree(branch, currentPath, taskId, resolvedStartPoint, attempt);
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         const isLastAttempt = attempt === this.MAX_WORKTREE_RETRIES - 1;
+        const isTerminalWorktreeError = error instanceof NonRetryableWorktreeError;
 
-        if (isLastAttempt) {
+        if (isLastAttempt || isTerminalWorktreeError) {
           await this.store.logEntry(
             taskId,
             `Worktree creation failed after ${this.MAX_WORKTREE_RETRIES} attempts`,
@@ -3326,6 +3332,27 @@ and show an appropriate message to the user.\`
     throw new Error("Unexpected exit from worktree creation retry loop");
   }
 
+  private async resolveWorktreeStartPoint(startPoint: string, taskId: string): Promise<string> {
+    const command = isAbsolute(startPoint) && existsSync(startPoint)
+      ? `git -C "${startPoint}" rev-parse --verify HEAD^{commit}`
+      : `git rev-parse --verify "${startPoint}^{commit}"`;
+
+    try {
+      const { stdout } = await execAsync(command, { cwd: this.rootDir });
+      return stdout.trim() || startPoint;
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      await this.store.logEntry(
+        taskId,
+        `Worktree base ref is missing`,
+        `${startPoint}: ${errorMessage}`,
+      );
+      throw new NonRetryableWorktreeError(
+        `Cannot create worktree for ${taskId}: base ref "${startPoint}" does not exist or cannot be resolved`,
+      );
+    }
+  }
+
   /**
    * Single attempt to create a worktree with conflict detection and recovery.
    * Returns the actual worktree path used (may differ from input if recovery generated new name).
@@ -3336,6 +3363,7 @@ and show an appropriate message to the user.\`
     taskId: string,
     startPoint?: string,
     attemptNumber = 0,
+    recoveryDepth = 0,
   ): Promise<{ path: string; branch: string }> {
     // If directory exists but is not a registered worktree, remove it first
     if (existsSync(path)) {
@@ -3398,10 +3426,15 @@ and show an appropriate message to the user.\`
 
       // Handle "invalid reference" - stale branch that doesn't exist
       if (conflictInfo.type === "invalid-reference") {
+        if (recoveryDepth >= this.MAX_WORKTREE_RETRIES - 1) {
+          throw new NonRetryableWorktreeError(
+            `Stale branch reference for ${branch} remained invalid after ${this.MAX_WORKTREE_RETRIES} cleanup attempts`,
+          );
+        }
         const branchCleaned = await this.cleanupStaleBranch(branch, taskId);
         if (branchCleaned) {
           await this.store.logEntry(taskId, `Removed stale branch reference, retrying`);
-          return this.tryCreateWorktree(branch, path, taskId, startPoint, attemptNumber);
+          return this.tryCreateWorktree(branch, path, taskId, startPoint, attemptNumber, recoveryDepth + 1);
         }
         throw new Error(
           `Invalid reference for branch ${branch}: unable to clean up stale reference`,
@@ -3444,10 +3477,15 @@ and show an appropriate message to the user.\`
 
         // Handle stale reference in fallback path too
         if (fallbackConflictInfo.type === "invalid-reference") {
+          if (recoveryDepth >= this.MAX_WORKTREE_RETRIES - 1) {
+            throw new NonRetryableWorktreeError(
+              `Stale branch reference for ${branch} remained invalid after ${this.MAX_WORKTREE_RETRIES} cleanup attempts`,
+            );
+          }
           const branchCleaned = await this.cleanupStaleBranch(branch, taskId);
           if (branchCleaned) {
             await this.store.logEntry(taskId, `Cleaned up stale reference in fallback, retrying`);
-            return this.tryCreateWorktree(branch, path, taskId, startPoint, attemptNumber);
+            return this.tryCreateWorktree(branch, path, taskId, startPoint, attemptNumber, recoveryDepth + 1);
           }
         }
 

@@ -25,6 +25,23 @@ import { runCommandAsync } from "./run-command.js";
  * so that all backup operations use a consistent directory.
  */
 const LEGACY_BACKUP_DIR = ".kb/backups";
+const TASK_ACTIVITY_LOG_ENTRY_LIMIT = 1_000;
+const TASK_ACTIVITY_LOG_OUTCOME_LIMIT = 4_000;
+
+function truncateTaskLogOutcome(outcome: string | undefined): string | undefined {
+  if (!outcome || outcome.length <= TASK_ACTIVITY_LOG_OUTCOME_LIMIT) {
+    return outcome;
+  }
+  return `${outcome.slice(0, TASK_ACTIVITY_LOG_OUTCOME_LIMIT)}\n... outcome truncated to ${TASK_ACTIVITY_LOG_OUTCOME_LIMIT} characters ...`;
+}
+
+function compactTaskActivityLog(entries: TaskLogEntry[]): TaskLogEntry[] {
+  const recentEntries = entries.slice(-TASK_ACTIVITY_LOG_ENTRY_LIMIT);
+  return recentEntries.map((entry) => ({
+    ...entry,
+    outcome: truncateTaskLogOutcome(entry.outcome),
+  }));
+}
 
 /**
  * Canonicalizes a settings object by resolving legacy defaults.
@@ -335,7 +352,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       "modelPresetId", "modelProvider", "modelId",
       "validatorModelProvider", "validatorModelId",
       "planningModelProvider", "planningModelId",
-      "mergeRetries", "stuckKillCount", "recoveryRetryCount", "nextRecoveryAt",
+      "mergeRetries", "workflowStepRetries", "stuckKillCount", "recoveryRetryCount", "nextRecoveryAt",
       "error", "summary", "thinkingLevel",
       "createdAt", "updatedAt", "columnMovedAt",
       "dependencies", "steps", "comments", "workflowStepResults", "steeringComments",
@@ -344,6 +361,45 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       "missionId", "sliceId", "assignedAgentId", "assigneeUserId",
       "checkedOutBy", "checkedOutAt",
     ].map((column) => `${prefix}${column}`).join(", ");
+  }
+
+  private getTaskSelectClauseWithActivityLogLimit(limit: number): string {
+    const columns = [
+      "id", "title", "description", "\"column\"", "status", "size", "reviewLevel", "currentStep",
+      "worktree", "blockedBy", "paused", "baseBranch", "branch", "baseCommitSha",
+      "modelPresetId", "modelProvider", "modelId",
+      "validatorModelProvider", "validatorModelId",
+      "planningModelProvider", "planningModelId",
+      "mergeRetries", "workflowStepRetries", "stuckKillCount", "recoveryRetryCount", "nextRecoveryAt",
+      "error", "summary", "thinkingLevel",
+      "createdAt", "updatedAt", "columnMovedAt",
+      "dependencies", "steps", "attachments", "steeringComments",
+      "comments", "workflowStepResults", "prInfo", "issueInfo", "mergeDetails",
+      "breakIntoSubtasks", "enabledWorkflowSteps", "modifiedFiles",
+      "missionId", "sliceId", "assignedAgentId", "assigneeUserId",
+      "checkedOutBy", "checkedOutAt",
+    ];
+
+    const limitedLog = `
+      CASE
+        WHEN json_valid(log) AND json_array_length(log) > ${limit} THEN (
+          SELECT json_group_array(json(value))
+          FROM (
+            SELECT value
+            FROM (
+              SELECT key, value
+              FROM json_each(tasks.log)
+              ORDER BY key DESC
+              LIMIT ${limit}
+            )
+            ORDER BY key ASC
+          )
+        )
+        ELSE log
+      END AS log
+    `;
+
+    return [...columns, limitedLog].join(", ");
   }
 
   /**
@@ -423,8 +479,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   /**
    * Read a task from SQLite by ID.
    */
-  private readTaskFromDb(id: string): Task | undefined {
-    const row = this.db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
+  private readTaskFromDb(id: string, options?: { activityLogLimit?: number }): Task | undefined {
+    const selectClause = options?.activityLogLimit
+      ? this.getTaskSelectClauseWithActivityLogLimit(options.activityLogLimit)
+      : "*";
+    const row = this.db.prepare(`SELECT ${selectClause} FROM tasks WHERE id = ?`).get(id);
     if (!row) return undefined;
     return this.rowToTask(row);
   }
@@ -1416,8 +1475,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   /**
    * Read a task and its prompt content.
    */
-  async getTask(id: string): Promise<TaskDetail> {
-    const task = this.readTaskFromDb(id);
+  async getTask(id: string, options?: { activityLogLimit?: number }): Promise<TaskDetail> {
+    const task = this.readTaskFromDb(id, options);
     if (!task) {
       throw new Error(`Task ${id} not found`);
     }
@@ -2110,12 +2169,13 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       const entry: TaskLogEntry = {
         timestamp: new Date().toISOString(),
         action,
-        outcome,
+        outcome: truncateTaskLogOutcome(outcome),
       };
       if (runContext) {
         entry.runContext = runContext;
       }
       task.log.push(entry);
+      task.log = compactTaskActivityLog(task.log);
       task.updatedAt = new Date().toISOString();
 
       // When runContext is provided, record audit event atomically with task mutation

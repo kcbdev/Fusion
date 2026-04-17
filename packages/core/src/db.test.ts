@@ -119,7 +119,7 @@ describe("Database", () => {
     });
 
     it("seeds schema version", () => {
-      expect(db.getSchemaVersion()).toBe(34);
+      expect(db.getSchemaVersion()).toBe(35);
     });
 
     it("seeds lastModified", () => {
@@ -142,7 +142,7 @@ describe("Database", () => {
 
     it("is idempotent - calling init() twice does not fail", () => {
       expect(() => db.init()).not.toThrow();
-      expect(db.getSchemaVersion()).toBe(34);
+      expect(db.getSchemaVersion()).toBe(35);
     });
 
     it("does not overwrite existing config on re-init", () => {
@@ -749,7 +749,7 @@ describe("schema migrations", () => {
     db.init();
 
     // Verify version bumped to 29 (includes v1→v2 through v26→v29)
-    expect(db.getSchemaVersion()).toBe(34);
+    expect(db.getSchemaVersion()).toBe(35);
 
     // Verify new columns exist and existing data is intact
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
@@ -774,11 +774,11 @@ describe("schema migrations", () => {
     const db = new Database(kbDir);
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(34);
+    expect(db.getSchemaVersion()).toBe(35);
 
     // Re-init should not fail
     db.init();
-    expect(db.getSchemaVersion()).toBe(34);
+    expect(db.getSchemaVersion()).toBe(35);
 
     db.close();
   });
@@ -794,7 +794,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(34);
+    expect(db.getSchemaVersion()).toBe(35);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = 'agentRatings'").all() as Array<{ name: string }>;
     expect(tables).toEqual([{ name: "agentRatings" }]);
@@ -818,7 +818,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(34);
+    expect(db.getSchemaVersion()).toBe(35);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = 'mission_events'").all() as Array<{ name: string }>;
     expect(tables).toEqual([{ name: "mission_events" }]);
@@ -922,7 +922,7 @@ describe("schema migrations", () => {
     db.init();
 
     // Verify version bumped to 29
-    expect(db.getSchemaVersion()).toBe(34);
+    expect(db.getSchemaVersion()).toBe(35);
 
     // Verify new columns exist and existing data is intact
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
@@ -1136,13 +1136,16 @@ describe("FTS5 full-text search", () => {
 
   it("creates FTS5 triggers after init", () => {
     const triggers = db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='trigger'"
-    ).all() as { name: string }[];
+      "SELECT name, sql FROM sqlite_master WHERE type='trigger'"
+    ).all() as { name: string; sql: string }[];
     const triggerNames = triggers.map((t) => t.name);
 
     expect(triggerNames).toContain("tasks_fts_ai");
     expect(triggerNames).toContain("tasks_fts_au");
     expect(triggerNames).toContain("tasks_fts_ad");
+
+    const updateTrigger = triggers.find((t) => t.name === "tasks_fts_au");
+    expect(updateTrigger?.sql).toContain("AFTER UPDATE OF id, title, description, comments ON tasks");
   });
 
   it("populates FTS index from existing tasks on migration", () => {
@@ -1288,7 +1291,7 @@ describe("createDatabase factory", () => {
     const db = createDatabase(kbDir);
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(34);
+    expect(db.getSchemaVersion()).toBe(35);
     expect(db.getLastModified()).toBeGreaterThan(0);
 
     db.close();

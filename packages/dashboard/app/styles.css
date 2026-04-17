@@ -5248,6 +5248,15 @@ body {
   gap: 0;
 }
 
+.detail-log-truncated {
+  margin-bottom: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border: var(--btn-border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
 .detail-log-entry {
   padding: 8px 0 8px 14px;
   border-left: 2px solid var(--border);

@@ -844,6 +844,39 @@ describe("TaskExecutor worktree recovery", () => {
     );
   });
 
+  it("fails fast when the configured base ref is missing", async () => {
+    const store = createMockStore();
+
+    mockedExecSync.mockImplementation((cmd: string | string[]) => {
+      const command = typeof cmd === "string" ? cmd : cmd[0];
+      if (command.includes("git rev-parse --verify")) {
+        const error: any = new Error("fatal: Needed a single revision");
+        error.stderr = Buffer.from("fatal: Needed a single revision");
+        throw error;
+      }
+      return Buffer.from("");
+    });
+
+    const onError = vi.fn();
+    const executor = new TaskExecutor(store, "/tmp/test", { onError });
+    await executor.execute({ ...makeTask(), baseBranch: "fusion/missing-base" });
+
+    expect(mockedExecSync).not.toHaveBeenCalledWith(
+      expect.stringContaining("git worktree add"),
+      expect.any(Object),
+    );
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-050",
+      "Worktree base ref is missing",
+      expect.stringContaining("fusion/missing-base"),
+    );
+    expect(store.updateTask).toHaveBeenCalledWith(
+      "FN-050",
+      expect.objectContaining({ status: "failed" }),
+    );
+    expect(onError).toHaveBeenCalled();
+  });
+
   it("fails after 3 unsuccessful attempts with detailed error", async () => {
     const store = createMockStore();
 
@@ -1171,6 +1204,45 @@ describe("TaskExecutor worktree recovery", () => {
       "FN-050",
       expect.objectContaining({ worktree: expect.any(String) }),
     );
+  });
+
+  it("bounds stale-reference cleanup retries when update-ref succeeds but the ref remains invalid", async () => {
+    const store = createMockStore();
+    let worktreeAddCallCount = 0;
+
+    mockedExecSync.mockImplementation((cmd: string | string[]) => {
+      const command = typeof cmd === "string" ? cmd : cmd[0];
+      if (command.includes("git worktree add")) {
+        worktreeAddCallCount++;
+        const error: any = new Error("fatal: invalid reference: 'fusion/fn-050'");
+        error.stderr = Buffer.from("fatal: invalid reference: 'fusion/fn-050'");
+        throw error;
+      }
+      if (command.includes("git branch -D")) {
+        const error: any = new Error("error: branch 'fusion/fn-050' not found");
+        error.stderr = Buffer.from("error: branch 'fusion/fn-050' not found");
+        throw error;
+      }
+      return Buffer.from("");
+    });
+
+    const onError = vi.fn();
+    const executor = new TaskExecutor(store, "/tmp/test", { onError });
+    const executePromise = executor.execute(makeTask());
+    await vi.advanceTimersByTimeAsync(2000);
+    await executePromise;
+
+    expect(worktreeAddCallCount).toBe(3);
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-050",
+      expect.stringContaining("Worktree creation failed after 3 attempts"),
+      expect.any(String),
+    );
+    expect(store.updateTask).toHaveBeenCalledWith(
+      "FN-050",
+      expect.objectContaining({ status: "failed" }),
+    );
+    expect(onError).toHaveBeenCalled();
   });
 
   it("fails task when all stale reference cleanup steps fail", async () => {
