@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import { ModelOnboardingModal } from "../ModelOnboardingModal";
 import type { AuthProvider } from "../../api";
+import type { Task } from "@fusion/core";
 
 // Mock the API module
 const mockFetchAuthStatus = vi.fn();
@@ -93,6 +94,12 @@ const defaultModels = [
   { provider: "anthropic", id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", reasoning: false, contextWindow: 200000 },
   { provider: "openai", id: "gpt-4o", name: "GPT-4o", reasoning: false, contextWindow: 128000 },
 ];
+
+const createdTaskMock = {
+  id: "FN-0001",
+  title: "Initial task",
+  description: "Implement onboarding success flow\nAdditional details that should not render",
+} as unknown as Task;
 
 // Navigate through steps helper
 async function navigateToGitHubStep() {
@@ -1225,6 +1232,229 @@ describe("ModelOnboardingModal", () => {
       expect(screen.getByText("Import from GitHub")).toBeTruthy();
     });
 
+    it("shows task-created success view after firstCreatedTask transitions from null", async () => {
+      mockGetOnboardingState.mockReturnValue({
+        currentStep: "first-task",
+        completedSteps: ["ai-setup", "github"],
+        skippedSteps: [],
+        updatedAt: "2026-04-17T00:00:00.000Z",
+        dismissed: false,
+        completed: false,
+        stepData: {},
+      });
+
+      const { rerender } = render(
+        <ModelOnboardingModal
+          onComplete={vi.fn()}
+          addToast={vi.fn()}
+          firstCreatedTask={null}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Create Your First Task")).toBeTruthy();
+      });
+
+      rerender(
+        <ModelOnboardingModal
+          onComplete={vi.fn()}
+          addToast={vi.fn()}
+          firstCreatedTask={createdTaskMock}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Your first task is ready!")).toBeTruthy();
+      });
+
+      expect(screen.queryByText("Create a New Task")).toBeNull();
+      expect(screen.getByText(createdTaskMock.id)).toBeTruthy();
+      expect(screen.getByText("Implement onboarding success flow")).toBeTruthy();
+    });
+
+    it("shows the created task ID in the success view", async () => {
+      mockGetOnboardingState.mockReturnValue({
+        currentStep: "first-task",
+        completedSteps: ["ai-setup", "github"],
+        skippedSteps: [],
+        updatedAt: "2026-04-17T00:00:00.000Z",
+        dismissed: false,
+        completed: false,
+        stepData: {},
+      });
+
+      const { rerender } = render(
+        <ModelOnboardingModal
+          onComplete={vi.fn()}
+          addToast={vi.fn()}
+          firstCreatedTask={null}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Create Your First Task")).toBeTruthy();
+      });
+
+      rerender(
+        <ModelOnboardingModal
+          onComplete={vi.fn()}
+          addToast={vi.fn()}
+          firstCreatedTask={createdTaskMock}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("FN-0001")).toBeTruthy();
+      });
+    });
+
+    it("shows the first line of created task description in the success view", async () => {
+      mockGetOnboardingState.mockReturnValue({
+        currentStep: "first-task",
+        completedSteps: ["ai-setup", "github"],
+        skippedSteps: [],
+        updatedAt: "2026-04-17T00:00:00.000Z",
+        dismissed: false,
+        completed: false,
+        stepData: {},
+      });
+
+      const { rerender } = render(
+        <ModelOnboardingModal
+          onComplete={vi.fn()}
+          addToast={vi.fn()}
+          firstCreatedTask={null}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Create Your First Task")).toBeTruthy();
+      });
+
+      rerender(
+        <ModelOnboardingModal
+          onComplete={vi.fn()}
+          addToast={vi.fn()}
+          firstCreatedTask={createdTaskMock}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Implement onboarding success flow")).toBeTruthy();
+      });
+    });
+
+    it("View Task button calls onViewTask with task and then onComplete", async () => {
+      mockGetOnboardingState.mockReturnValue({
+        currentStep: "first-task",
+        completedSteps: ["ai-setup", "github"],
+        skippedSteps: [],
+        updatedAt: "2026-04-17T00:00:00.000Z",
+        dismissed: false,
+        completed: false,
+        stepData: {},
+      });
+
+      const onComplete = vi.fn();
+      const onViewTask = vi.fn();
+      const { rerender } = render(
+        <ModelOnboardingModal
+          onComplete={onComplete}
+          addToast={vi.fn()}
+          onViewTask={onViewTask}
+          firstCreatedTask={null}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Create Your First Task")).toBeTruthy();
+      });
+
+      rerender(
+        <ModelOnboardingModal
+          onComplete={onComplete}
+          addToast={vi.fn()}
+          onViewTask={onViewTask}
+          firstCreatedTask={createdTaskMock}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "View Task" })).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "View Task" }));
+
+      expect(onViewTask).toHaveBeenCalledWith(createdTaskMock);
+      expect(onComplete).toHaveBeenCalled();
+    });
+
+    it("Go to Dashboard button calls onComplete", async () => {
+      mockGetOnboardingState.mockReturnValue({
+        currentStep: "first-task",
+        completedSteps: ["ai-setup", "github"],
+        skippedSteps: [],
+        updatedAt: "2026-04-17T00:00:00.000Z",
+        dismissed: false,
+        completed: false,
+        stepData: {},
+      });
+
+      const onComplete = vi.fn();
+      const onViewTask = vi.fn();
+      const { rerender } = render(
+        <ModelOnboardingModal
+          onComplete={onComplete}
+          addToast={vi.fn()}
+          onViewTask={onViewTask}
+          firstCreatedTask={null}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Create Your First Task")).toBeTruthy();
+      });
+
+      rerender(
+        <ModelOnboardingModal
+          onComplete={onComplete}
+          addToast={vi.fn()}
+          onViewTask={onViewTask}
+          firstCreatedTask={createdTaskMock}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Go to Dashboard" })).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Go to Dashboard" }));
+
+      expect(onComplete).toHaveBeenCalled();
+      expect(onViewTask).not.toHaveBeenCalled();
+    });
+
+    it("keeps CTA cards visible and success hidden when firstCreatedTask is not provided", async () => {
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} firstCreatedTask={null} />);
+
+      await navigateToFirstTaskStep();
+
+      expect(screen.getByText("Create a New Task")).toBeTruthy();
+      expect(screen.queryByText("Your first task is ready!")).toBeNull();
+    });
+
+    it("Finish Setup still transitions to complete step when no task is created", async () => {
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} firstCreatedTask={null} />);
+
+      await navigateToFirstTaskStep();
+
+      fireEvent.click(screen.getByText("Finish Setup"));
+
+      await waitFor(() => {
+        expect(screen.getByText("All Set!")).toBeTruthy();
+      });
+    });
+
     it("Import from GitHub card shows connection note when GitHub not connected", async () => {
       render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} />);
 
@@ -1306,7 +1536,7 @@ describe("ModelOnboardingModal", () => {
   });
 
   describe("completion", () => {
-    it("completes onboarding and calls onOpenNewTask callback", async () => {
+    it("marks onboarding complete and opens New Task without closing onboarding immediately", async () => {
       const onComplete = vi.fn();
       const onOpenNewTask = vi.fn();
 
@@ -1348,9 +1578,10 @@ describe("ModelOnboardingModal", () => {
         );
       });
 
-      // Should close modal and call both callbacks
-      expect(onComplete).toHaveBeenCalled();
+      // Should open New Task flow but keep onboarding open for success handoff
       expect(onOpenNewTask).toHaveBeenCalled();
+      expect(onComplete).not.toHaveBeenCalled();
+      expect(screen.getByText("Create Your First Task")).toBeTruthy();
     });
 
     it("completes onboarding and calls onOpenGitHubImport callback", async () => {

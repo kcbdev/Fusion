@@ -24499,6 +24499,65 @@ html .column.drag-over * {
   font-size: 12px;
 }
 
+/* === Onboarding Task Created Success === */
+.onboarding-task-created {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-lg);
+  text-align: center;
+  padding: var(--space-xl) 0;
+}
+
+.onboarding-task-created .success-icon {
+  color: var(--color-success);
+  filter: drop-shadow(var(--glow-success));
+  width: calc(var(--space-xl) + var(--space-2xl));
+  height: calc(var(--space-xl) + var(--space-2xl));
+}
+
+.onboarding-task-created__title {
+  margin: 0;
+  font-size: calc(var(--space-lg) + (var(--space-xs) / 2));
+  font-weight: 600;
+  color: var(--text);
+}
+
+.onboarding-task-created__task-id {
+  font-family: var(--font-mono);
+  font-size: calc(var(--space-md) + (var(--space-xs) / 2));
+  color: var(--text-muted);
+  background: var(--surface);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+.onboarding-task-created__description {
+  margin: 0;
+  font-size: calc(var(--space-md) + (var(--space-xs) / 4));
+  color: var(--text-muted);
+  max-width: calc(var(--space-xl) * 15);
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.onboarding-task-created__hint {
+  margin: 0;
+  font-size: calc(var(--space-md) + (var(--space-xs) / 4));
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.onboarding-task-created__actions {
+  display: flex;
+  gap: var(--space-sm);
+  justify-content: center;
+  width: 100%;
+}
+
 /* Onboarding Resume Card */
 .onboarding-resume-card {
   display: flex;
@@ -24793,6 +24852,15 @@ html .column.drag-over * {
 
   .onboarding-cta-card .cta-content span {
     font-size: 12px;
+  }
+
+  .onboarding-task-created__actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .onboarding-task-created__actions .btn {
+    width: 100%;
   }
 }
 

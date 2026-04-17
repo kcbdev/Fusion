@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useState } from "react";
 import type { ProjectInfo } from "../api";
 import type { ColorTheme, Column, MergeResult, Task, TaskCreateInput, ThemeMode } from "@fusion/core";
 import type { UseProjectActionsResult } from "../hooks/useProjectActions";
@@ -75,8 +76,41 @@ export function AppModals({
   onSettingsClose,
   onReopenOnboarding,
 }: AppModalsProps) {
+  const [firstCreatedTask, setFirstCreatedTask] = useState<Task | null>(null);
+
   // Use the override handler if provided, otherwise fall back to modalManager.closeSettings
   const handleSettingsClose = onSettingsClose ?? modalManager.closeSettings;
+
+  const handleOpenNewTask = useCallback(() => {
+    modalManager.openNewTask();
+  }, [modalManager]);
+
+  const handleOpenGitHubImport = useCallback(() => {
+    modalManager.openGitHubImport();
+  }, [modalManager]);
+
+  const handleOnboardingViewTask = useCallback((task: Task) => {
+    setFirstCreatedTask(null);
+    modalManager.closeModelOnboarding();
+    modalManager.openDetailTask(task);
+  }, [modalManager]);
+
+  const handleModalCreateWithOnboardingTracking = useCallback(
+    async (input: TaskCreateInput): Promise<Task> => {
+      const task = await taskHandlers.handleModalCreate(input);
+      if (modalManager.modelOnboardingOpen) {
+        setFirstCreatedTask(task);
+      }
+      return task;
+    },
+    [taskHandlers.handleModalCreate, modalManager.modelOnboardingOpen],
+  );
+
+  useEffect(() => {
+    if (!modalManager.modelOnboardingOpen && firstCreatedTask) {
+      setFirstCreatedTask(null);
+    }
+  }, [modalManager.modelOnboardingOpen, firstCreatedTask]);
 
   return (
     <>
@@ -193,7 +227,7 @@ export function AppModals({
           isOpen={modalManager.newTaskModalOpen}
           onClose={modalManager.closeNewTask}
           tasks={tasks}
-          onCreateTask={taskHandlers.handleModalCreate}
+          onCreateTask={handleModalCreateWithOnboardingTracking}
           addToast={addToast}
           projectId={projectId}
           onPlanningMode={modalManager.openPlanningWithInitialPlan}
@@ -253,6 +287,10 @@ export function AppModals({
         <ModelOnboardingModal
           onComplete={projectActions.handleModelOnboardingComplete}
           addToast={addToast}
+          onOpenNewTask={handleOpenNewTask}
+          onOpenGitHubImport={handleOpenGitHubImport}
+          firstCreatedTask={firstCreatedTask}
+          onViewTask={handleOnboardingViewTask}
         />
       )}
 

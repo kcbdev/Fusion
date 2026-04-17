@@ -421,6 +421,10 @@ export interface ModelOnboardingModalProps {
   onOpenNewTask?: () => void;
   /** Optional callback when user wants to open GitHub import */
   onOpenGitHubImport?: () => void;
+  /** First task created from the onboarding flow, if available */
+  firstCreatedTask?: Task | null;
+  /** Optional callback when user wants to open the created task detail */
+  onViewTask?: (task: Task) => void;
 }
 
 /** Outcome states for OAuth login attempts */
@@ -448,6 +452,8 @@ export function ModelOnboardingModal({
   addToast,
   onOpenNewTask,
   onOpenGitHubImport,
+  firstCreatedTask,
+  onViewTask,
 }: ModelOnboardingModalProps) {
   // Initialize from persisted state if available (allows resume from last step)
   const persistedState = getOnboardingState();
@@ -462,6 +468,7 @@ export function ModelOnboardingModal({
   const [step, setStep] = useState<OnboardingStep>(initialStep);
   const [completedSteps, setCompletedSteps] = useState<OnboardingStep[]>(persistedCompletedSteps);
   const [skippedSteps, setSkippedSteps] = useState<OnboardingStep[]>(persistedSkippedSteps);
+  const [showTaskCreated, setShowTaskCreated] = useState(false);
   const [authProviders, setAuthProviders] = useState<AuthProvider[]>([]);
   const [authLoading, setAuthLoading] = useState(true);
   const [authActionInProgress, setAuthActionInProgress] = useState<string | null>(null);
@@ -479,6 +486,7 @@ export function ModelOnboardingModal({
     return state?.stepData?.github?.skipped === true;
   });
   const pollCountRef = useRef<number>(0);
+  const previousCreatedTaskRef = useRef<Task | null | undefined>(firstCreatedTask);
 
   // Initialize skippedProviders from persisted state
   const [skippedProviders, setSkippedProviders] = useState<Record<string, boolean>>(
@@ -505,6 +513,21 @@ export function ModelOnboardingModal({
       saveOnboardingState(step, { completedSteps, skippedSteps });
     }
   }, [step, completedSteps, skippedSteps]);
+
+  useEffect(() => {
+    const hadCreatedTask = previousCreatedTaskRef.current != null;
+    const hasCreatedTask = firstCreatedTask != null;
+
+    if (!hadCreatedTask && hasCreatedTask) {
+      setShowTaskCreated(true);
+    }
+
+    if (!hasCreatedTask) {
+      setShowTaskCreated(false);
+    }
+
+    previousCreatedTaskRef.current = firstCreatedTask;
+  }, [firstCreatedTask]);
 
   // Auto-mark unconnected providers as skipped when leaving ai-setup step
   // Only skip if NO providers are connected (if at least one is connected, others remain "Not connected")
@@ -1138,11 +1161,9 @@ export function ModelOnboardingModal({
       setSaving(false);
     }
 
-    // Close modal and trigger callback
-    setIsOpen(false);
-    onComplete();
+    // Keep onboarding open so task creation can hand back to a success state
     onOpenNewTask?.();
-  }, [selectedModel, availableModels, onComplete, onOpenNewTask]);
+  }, [selectedModel, availableModels, onOpenNewTask]);
 
   // Handle GitHub import CTA - mark complete, close modal, then open GitHub import
   const handleOpenGitHubImport = useCallback(async () => {
@@ -1201,6 +1222,19 @@ export function ModelOnboardingModal({
   // Close from the completion step
   const handleFinish = useCallback(() => {
     setIsOpen(false);
+    onComplete();
+  }, [onComplete]);
+
+  const handleViewCreatedTask = useCallback(() => {
+    if (!firstCreatedTask) {
+      return;
+    }
+
+    onViewTask?.(firstCreatedTask);
+    onComplete();
+  }, [firstCreatedTask, onViewTask, onComplete]);
+
+  const handleGoToDashboard = useCallback(() => {
     onComplete();
   }, [onComplete]);
 
@@ -1299,6 +1333,9 @@ export function ModelOnboardingModal({
       detail: selectedModelDisplayName,
     });
   }
+
+  const firstCreatedTaskPreview =
+    firstCreatedTask?.description?.split("\n")[0]?.trim() || firstCreatedTask?.title || "";
 
   return (
     <div
@@ -1820,54 +1857,86 @@ export function ModelOnboardingModal({
                 Your workspace is ready. Here's how to get started:
               </p>
 
-              <ReadinessSummary items={readinessItems} />
-
-              <OnboardingDisclosure summary="What happens when I create a task?">
-                <p className="onboarding-helper-text">
-                  A task describes something you want done. Fusion's AI agents will read
-                  your description and work on implementing it. You can track progress on
-                  the board and review the results.
-                </p>
-              </OnboardingDisclosure>
-
-              <div className="onboarding-cta-options">
-                <button
-                  className="onboarding-cta-card primary"
-                  onClick={handleOpenNewTask}
-                  disabled={saving}
-                >
-                  <div className="cta-icon">
-                    <Plus size={24} />
+              {showTaskCreated && firstCreatedTask ? (
+                <div className="onboarding-task-created">
+                  <CheckCircle size={56} className="success-icon" />
+                  <h3 className="onboarding-task-created__title">Your first task is ready!</h3>
+                  <div className="onboarding-task-created__task-id">{firstCreatedTask.id}</div>
+                  {firstCreatedTaskPreview && (
+                    <p className="onboarding-task-created__description">{firstCreatedTaskPreview}</p>
+                  )}
+                  <p className="onboarding-task-created__hint">
+                    Your task has been created and will appear on the board.
+                  </p>
+                  <div className="onboarding-task-created__actions">
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={handleViewCreatedTask}
+                    >
+                      View Task
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={handleGoToDashboard}
+                    >
+                      Go to Dashboard
+                    </button>
                   </div>
-                  <div className="cta-content">
-                    <strong>Create a New Task</strong>
-                    <span>Describe what you need built and AI will work on it</span>
-                  </div>
-                </button>
+                </div>
+              ) : (
+                <>
+                  <ReadinessSummary items={readinessItems} />
 
-                <button
-                  className={`onboarding-cta-card${!isGithubAuthenticated ? " onboarding-cta-card--disabled" : ""}`}
-                  data-testid="cta-github-import"
-                  onClick={handleOpenGitHubImport}
-                  disabled={saving}
-                >
-                  <div className="cta-icon">
-                    <GitPullRequest size={24} />
-                  </div>
-                  <div className="cta-content">
-                    <strong>Import from GitHub</strong>
-                    <span>Turn GitHub issues into tasks you can track here</span>
-                    {!isGithubAuthenticated && (
-                      <small className="onboarding-cta-note">Requires GitHub connection</small>
-                    )}
-                  </div>
-                </button>
-              </div>
+                  <OnboardingDisclosure summary="What happens when I create a task?">
+                    <p className="onboarding-helper-text">
+                      A task describes something you want done. Fusion's AI agents will read
+                      your description and work on implementing it. You can track progress on
+                      the board and review the results.
+                    </p>
+                  </OnboardingDisclosure>
 
-              <p className="onboarding-skip-note">
-                You can create tasks anytime from the board, or use{" "}
-                <code>fn task create</code> in the terminal.
-              </p>
+                  <div className="onboarding-cta-options">
+                    <button
+                      className="onboarding-cta-card primary"
+                      onClick={handleOpenNewTask}
+                      disabled={saving}
+                    >
+                      <div className="cta-icon">
+                        <Plus size={24} />
+                      </div>
+                      <div className="cta-content">
+                        <strong>Create a New Task</strong>
+                        <span>Describe what you need built and AI will work on it</span>
+                      </div>
+                    </button>
+
+                    <button
+                      className={`onboarding-cta-card${!isGithubAuthenticated ? " onboarding-cta-card--disabled" : ""}`}
+                      data-testid="cta-github-import"
+                      onClick={handleOpenGitHubImport}
+                      disabled={saving}
+                    >
+                      <div className="cta-icon">
+                        <GitPullRequest size={24} />
+                      </div>
+                      <div className="cta-content">
+                        <strong>Import from GitHub</strong>
+                        <span>Turn GitHub issues into tasks you can track here</span>
+                        {!isGithubAuthenticated && (
+                          <small className="onboarding-cta-note">Requires GitHub connection</small>
+                        )}
+                      </div>
+                    </button>
+                  </div>
+
+                  <p className="onboarding-skip-note">
+                    You can create tasks anytime from the board, or use{" "}
+                    <code>fn task create</code> in the terminal.
+                  </p>
+                </>
+              )}
             </div>
           )}
 
@@ -1916,7 +1985,7 @@ export function ModelOnboardingModal({
             </>
           )}
 
-          {step === "first-task" && (
+          {step === "first-task" && !showTaskCreated && (
             <>
               <button className="btn btn-sm" onClick={handleBack}>
                 ← Back
