@@ -2094,12 +2094,14 @@ describe("maintenance cycle concurrency", () => {
     expect((manager as any).maintenanceRunning).toBe(false);
   });
 
-  it("runs batch 1 operations in parallel", async () => {
+  it("runs batch 1 operations in sequence (with isolation — one failure doesn't block others)", async () => {
     let runningCount = 0;
     let maxConcurrent = 0;
+    let executionOrder: string[] = [];
 
     const makeSlow = (label: string) =>
       (vi.spyOn(manager as any, label).mockImplementation(async () => {
+        executionOrder.push(label);
         runningCount++;
         maxConcurrent = Math.max(maxConcurrent, runningCount);
         await vi.advanceTimersByTimeAsync(10);
@@ -2115,16 +2117,25 @@ describe("maintenance cycle concurrency", () => {
 
     await (manager as any).runMaintenance();
 
-    // If they ran in parallel, maxConcurrent should be > 1
-    expect(maxConcurrent).toBeGreaterThan(1);
+    // Operations run sequentially (one at a time), not in parallel.
+    // This is intentional — each step is isolated so one failure doesn't
+    // block or race with the others.
+    expect(maxConcurrent).toBe(1);
+    // All operations should have run
+    expect(executionOrder).toContain("pruneWorktrees");
+    expect(executionOrder).toContain("cleanupOrphans");
+    expect(executionOrder).toContain("cleanupOrphanedBranches");
+    expect(executionOrder).toContain("enforceWorktreeCap");
   });
 
-  it("runs batch 2 operations in parallel", async () => {
+  it("runs batch 2 operations in sequence (with isolation — one failure doesn't block others)", async () => {
     let runningCount = 0;
     let maxConcurrent = 0;
+    let executionOrder: string[] = [];
 
     const makeSlow = (label: string) =>
       (vi.spyOn(manager as any, label).mockImplementation(async () => {
+        executionOrder.push(label);
         runningCount++;
         maxConcurrent = Math.max(maxConcurrent, runningCount);
         await vi.advanceTimersByTimeAsync(10);
@@ -2145,7 +2156,10 @@ describe("maintenance cycle concurrency", () => {
 
     await (manager as any).runMaintenance();
 
-    expect(maxConcurrent).toBeGreaterThan(1);
+    // Operations run sequentially (one at a time), not in parallel.
+    expect(maxConcurrent).toBe(1);
+    // All operations should have run (including last one)
+    expect(executionOrder[executionOrder.length - 1]).toBe("recoverOrphanedSpecifyingTasks");
   });
 
   it("one failing batch 2 operation does not abort the batch", async () => {

@@ -738,6 +738,8 @@ describe("Scheduler after restart", () => {
     const todoTask = makeTask("FN-070", "todo");
     store.listTasks.mockResolvedValue([todoTask]);
     store.getSettings.mockResolvedValue({ ...DEFAULT_SETTINGS });
+    // Mock getTask for compare-and-swap verification in schedule()
+    store.getTask.mockResolvedValue(todoTask);
 
     // Needs parseFileScopeFromPrompt for overlap checks
     store.parseFileScopeFromPrompt.mockResolvedValue([]);
@@ -1320,6 +1322,8 @@ describe("Engine pause/unpause cycle", () => {
     store.listTasks.mockResolvedValue([todoTask]);
     store.getSettings.mockResolvedValue({ ...DEFAULT_SETTINGS, enginePaused: false });
     store.parseFileScopeFromPrompt.mockResolvedValue([]);
+    // Mock getTask for compare-and-swap verification in schedule()
+    store.getTask.mockResolvedValue(todoTask);
 
     const onSchedule = vi.fn();
     const scheduler = new Scheduler(store, {

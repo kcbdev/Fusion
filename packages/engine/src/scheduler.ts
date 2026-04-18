@@ -670,6 +670,21 @@ export class Scheduler {
           reservedWorktreeNames,
         );
 
+        // Compare-and-swap: re-read the task to verify it's still in "todo" before dispatching.
+        // This prevents dispatching a task twice if another schedule() call or user action
+        // moved it away from "todo" between our initial snapshot and this dispatch attempt.
+        // The re-entrance guard prevents overlapping schedule() passes, but external events
+        // (user moves, API calls) can still trigger concurrent state changes.
+        const freshTask = await this.store.getTask(task.id);
+        if (!freshTask || freshTask.column !== "todo") {
+          schedulerLog.log(`Task ${task.id} no longer in "todo" (column=${freshTask?.column ?? "N/A"}) — skipping dispatch`);
+          continue;
+        }
+        if (freshTask.paused) {
+          schedulerLog.log(`Task ${task.id} is paused — skipping dispatch`);
+          continue;
+        }
+
         // Clear status, reserve worktree path, and then move to in-progress
         schedulerLog.log(`Starting ${task.id}: ${task.title || task.id} (deps satisfied)`);
         await this.store.updateTask(task.id, {

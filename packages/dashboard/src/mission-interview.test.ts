@@ -700,6 +700,15 @@ describe("mission-interview module", () => {
       expect(agentConfig).toHaveProperty("onThinking");
       expect(agentConfig).toHaveProperty("onText");
 
+      // Verify stream callbacks use the active session id
+      const broadcastSpy = vi.spyOn(missionInterviewStreamManager, "broadcast").mockReturnValue(1);
+      agentConfig.onText("Hello");
+      expect(broadcastSpy).toHaveBeenCalledWith(sessionId, { type: "text", data: "Hello" });
+
+      agentConfig.onThinking("thinking...");
+      expect(broadcastSpy).toHaveBeenCalledWith(sessionId, { type: "thinking", data: "thinking..." });
+      broadcastSpy.mockRestore();
+
       // Verify no unexpected model override fields
       expect(agentConfig).not.toHaveProperty("modelProvider");
       expect(agentConfig).not.toHaveProperty("modelId");

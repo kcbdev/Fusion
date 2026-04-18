@@ -171,6 +171,7 @@ export type MissionInterviewResponse =
 /** SSE event types for mission interview streaming */
 export type MissionInterviewStreamEvent =
   | { type: "thinking"; data: string }
+  | { type: "text"; data: string }
   | { type: "question"; data: PlanningQuestion }
   | { type: "summary"; data: MissionPlanSummary }
   | { type: "error"; data: string }
@@ -777,6 +778,10 @@ async function createMissionInterviewAgent(
     },
     onText: (delta: string) => {
       session.thinkingOutput += delta;
+      missionInterviewStreamManager.broadcast(session.id, {
+        type: "text",
+        data: delta,
+      });
     },
   });
 }

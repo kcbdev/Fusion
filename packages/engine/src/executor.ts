@@ -513,6 +513,13 @@ export class TaskExecutor {
           );
           this.activeStepExecutors.delete(task.id);
         }
+        // Clean up all in-memory state for this task so nothing leaks across runs.
+        // This prevents zombie state from persisting when a task moves away from
+        // in-progress while execute() is still unwinding, or when the scheduler
+        // moves a task out before the executor's task:moved fires.
+        this.loopRecoveryState.delete(task.id);
+        this.spawnedAgents.delete(task.id);
+        this.stuckAborted.delete(task.id);
       }
     });
 
@@ -535,6 +542,10 @@ export class TaskExecutor {
           this.options.stuckTaskDetector?.untrackTask(task.id);
           const { session } = this.activeSessions.get(task.id)!;
           session.dispose();
+          // Also clean up in-memory state to prevent leaks if the task is later unpaused
+          this.loopRecoveryState.delete(task.id);
+          this.spawnedAgents.delete(task.id);
+          this.stuckAborted.delete(task.id);
           return;
         }
         if (task.paused && this.activeStepExecutors.has(task.id)) {
@@ -543,6 +554,10 @@ export class TaskExecutor {
           this.options.stuckTaskDetector?.untrackTask(task.id);
           const stepExecutor = this.activeStepExecutors.get(task.id)!;
           await stepExecutor.terminateAllSessions();
+          // Also clean up in-memory state to prevent leaks if the task is later unpaused
+          this.loopRecoveryState.delete(task.id);
+          this.spawnedAgents.delete(task.id);
+          this.stuckAborted.delete(task.id);
           return;
         }
 
@@ -556,7 +571,9 @@ export class TaskExecutor {
             try {
               await this.clearResumeFailureState(task);
               await this.store.logEntry(task.id, "Resuming execution after unpause", undefined, this.currentRunContext);
-            } catch { /* non-critical */ }
+            } catch (clearErr) {
+              executorLog.warn(`${task.id} clearResumeFailureState failed during unpause: ${clearErr instanceof Error ? clearErr.message : String(clearErr)}`);
+            }
             this.execute(task).catch((err) =>
               executorLog.error(`Failed to resume unpaused ${task.id}:`, err),
             );
@@ -677,6 +694,10 @@ export class TaskExecutor {
           this.pausedAborted.add(taskId);
           this.options.stuckTaskDetector?.untrackTask(taskId);
           session.dispose();
+          // Clean up all in-memory state so nothing leaks when tasks are later unpaused
+          this.loopRecoveryState.delete(taskId);
+          this.spawnedAgents.delete(taskId);
+          this.stuckAborted.delete(taskId);
         }
         for (const [taskId, stepExecutor] of this.activeStepExecutors) {
           executorLog.log(`Global pause — terminating step sessions for ${taskId}`);
@@ -685,6 +706,10 @@ export class TaskExecutor {
           stepExecutor.terminateAllSessions().catch(err =>
             executorLog.warn(`Failed to terminate step sessions for global pause ${taskId}: ${err}`)
           );
+          // Clean up all in-memory state so nothing leaks when tasks are later unpaused
+          this.loopRecoveryState.delete(taskId);
+          this.spawnedAgents.delete(taskId);
+          this.stuckAborted.delete(taskId);
         }
       }
     });
@@ -1470,9 +1495,14 @@ export class TaskExecutor {
         } finally {
           this.executing.delete(task.id);
           this.loopRecoveryState.delete(task.id);
-          await stepExecutor.cleanup().catch(cleanupErr =>
-            executorLog.warn(`StepSessionExecutor cleanup failed for ${task.id}: ${cleanupErr}`)
-          );
+          // Wrap cleanup in try/catch so activeStepExecutors.delete() always runs.
+          // If cleanup() throws, the executor continues to clean up the in-memory map
+          // and requeue logic without leaking the reference.
+          try {
+            await stepExecutor.cleanup();
+          } catch (cleanupErr) {
+            executorLog.warn(`StepSessionExecutor cleanup failed for ${task.id}: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`);
+          }
           this.activeStepExecutors.delete(task.id);
 
           // Stuck-requeue: clean up worktree and move to todo
@@ -2136,6 +2166,16 @@ export class TaskExecutor {
       this.executing.delete(task.id);
       // Clear run context at end of execute() lifecycle
       this.currentRunContext = undefined;
+
+      // Terminate all spawned child agents on ALL exit paths.
+      // This must run here (in the outer finally) rather than only in agentWork's
+      // finally block, because failures during worktree creation or before
+      // agentWork is entered leave children orphaned with no other cleanup path.
+      try {
+        await this.terminateAllChildren(task.id);
+      } catch (err) {
+        executorLog.warn(`terminateAllChildren failed for ${task.id}: ${err instanceof Error ? err.message : String(err)}`);
+      }
 
       // Reset loop recovery state at end of execute() lifecycle.
       // State is in-memory and per-run — should not persist across attempts.
@@ -4131,12 +4171,16 @@ and show an appropriate message to the user.\`
       // Normal completion — mark as active (available)
       try {
         await this.options.agentStore?.updateAgentState(agentId, "active");
-      } catch { /* non-critical */ }
+      } catch (markActiveErr) {
+        executorLog.warn(`Child agent ${agentId} updateAgentState(active) failed: ${markActiveErr instanceof Error ? markActiveErr.message : String(markActiveErr)}`);
+      }
     } catch (err: unknown) {
       // Error during execution — mark as error
       try {
         await this.options.agentStore?.updateAgentState(agentId, "error");
-      } catch { /* non-critical */ }
+      } catch (markErrorErr) {
+        executorLog.warn(`Child agent ${agentId} updateAgentState(error) failed: ${markErrorErr instanceof Error ? markErrorErr.message : String(markErrorErr)}`);
+      }
       const errorMessage = err instanceof Error ? err.message : String(err);
       executorLog.warn(`Child agent ${agentId} failed: ${errorMessage}`);
     } finally {

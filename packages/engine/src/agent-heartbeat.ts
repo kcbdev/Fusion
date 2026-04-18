@@ -297,7 +297,27 @@ export class HeartbeatMonitor {
    */
   async withAgentStartLock<T>(agentId: string, fn: () => Promise<T>): Promise<T> {
     const existing = this.agentStartLocks.get(agentId) ?? Promise.resolve();
-    const operation = existing.then(fn, fn);
+    const operation = existing.then(
+      async () => {
+        try {
+          return await fn();
+        } finally {
+          // Clean up accumulated run state for this agent at end of each serialized run.
+          // This guarantees cleanup even when the run path throws without calling completeRun
+          // (e.g., execution error before completeRun is reached, or completeRun itself throws).
+          // Because withAgentStartLock serializes runs per agent, the finally runs after each
+          // run completes but before the next concurrent call's callback starts.
+          this.clearRunState(agentId);
+        }
+      },
+      async (err) => {
+        try {
+          throw err;
+        } finally {
+          this.clearRunState(agentId);
+        }
+      },
+    );
     this.agentStartLocks.set(agentId, operation);
     return operation as Promise<T>;
   }
@@ -310,6 +330,39 @@ export class HeartbeatMonitor {
    * @returns The created run
    */
   async startRun(agentId: string, options?: WakeupOptions): Promise<AgentHeartbeatRun> {
+    // Safety net: fail any existing active runs for this agent before creating a new one.
+    // This prevents accumulation of zombie runs when startRun is called multiple times
+    // (e.g., concurrent timer + on-demand triggers, or retries after crashes).
+    try {
+      const existingRun = await this.store.getActiveHeartbeatRun(agentId);
+      if (existingRun) {
+        heartbeatLog.warn(
+          `Agent ${agentId} has active run ${existingRun.id} — marking failed before starting new run`,
+        );
+        try {
+          const existingDetail = await this.store.getRunDetail(agentId, existingRun.id);
+          if (existingDetail) {
+            await this.store.saveRun({
+              ...existingDetail,
+              endedAt: new Date().toISOString(),
+              status: "terminated",
+              stderrExcerpt: "Superseded by new heartbeat run (previous run was stale)",
+            });
+          }
+          await this.store.endHeartbeatRun(existingRun.id, "terminated");
+          this.clearRunState(agentId);
+        } catch (failErr) {
+          const failErrMessage = failErr instanceof Error ? failErr.message : String(failErr);
+          heartbeatLog.warn(
+            `Failed to terminate stale active run ${existingRun.id} for ${agentId}: ${failErrMessage} — continuing anyway`,
+          );
+        }
+      }
+    } catch (activeRunCheckErr) {
+      const msg = activeRunCheckErr instanceof Error ? activeRunCheckErr.message : String(activeRunCheckErr);
+      heartbeatLog.warn(`Failed to check for existing active run for ${agentId}: ${msg} — continuing with new run`);
+    }
+
     const run = await this.store.startHeartbeatRun(agentId);
 
     // Enrich with execution context
@@ -327,8 +380,8 @@ export class HeartbeatMonitor {
     // Transition agent to running state
     try {
       await this.store.updateAgentState(agentId, "running");
-    } catch {
-      // May fail if already in running state - that's ok
+    } catch (startRunErr) {
+      heartbeatLog.warn(`updateAgentState(running) failed for ${agentId}: ${startRunErr instanceof Error ? startRunErr.message : String(startRunErr)} — continuing`);
     }
 
     this.onRunStarted?.(agentId, enrichedRun);
@@ -384,7 +437,10 @@ export class HeartbeatMonitor {
 
     await this.store.saveRun(completedRun);
 
-    // Clear accumulated run state for this agent
+    // Clear accumulated run state for this agent.
+    // Safe to call even when runCreatedTasks was already cleared by withAgentStartLock's
+    // finally block (idempotent Map.delete), and necessary for direct completeRun calls
+    // that bypass the lock (e.g., test scenarios, edge-case error paths).
     this.clearRunState(agentId);
 
     // Update cumulative usage on agent
@@ -397,8 +453,8 @@ export class HeartbeatMonitor {
             totalOutputTokens: (agent.totalOutputTokens ?? 0) + completionResult.usageJson.outputTokens,
           });
         }
-      } catch {
-        // Non-critical, skip
+      } catch (usageUpdateErr) {
+        heartbeatLog.warn(`Agent ${agentId} usage update failed: ${usageUpdateErr instanceof Error ? usageUpdateErr.message : String(usageUpdateErr)} — continuing`);
       }
     }
 
@@ -413,8 +469,8 @@ export class HeartbeatMonitor {
           // Skip the normal state transition below since we already set the correct state
           completionResult = { ...completionResult, skipStateTransition: true };
         }
-      } catch {
-        // If budget check fails, proceed with normal state transition
+      } catch (budgetCheckErr) {
+        heartbeatLog.warn(`Agent ${agentId} budget check failed: ${budgetCheckErr instanceof Error ? budgetCheckErr.message : String(budgetCheckErr)} — proceeding with normal state transition`);
       }
     }
 
@@ -430,8 +486,8 @@ export class HeartbeatMonitor {
           // Completed successfully - back to active
           await this.store.updateAgentState(agentId, "active");
         }
-      } catch {
-        // State transition may fail if already in target state
+      } catch (stateTransErr) {
+        heartbeatLog.warn(`Agent ${agentId} state transition failed: ${stateTransErr instanceof Error ? stateTransErr.message : String(stateTransErr)} — continuing`);
       }
     }
 
@@ -470,8 +526,8 @@ export class HeartbeatMonitor {
 
       try {
         await this.store.updateAgentState(agentId, "active");
-      } catch {
-        // Best effort — if already active or transition is currently invalid, ignore.
+      } catch (stopStateErr) {
+        heartbeatLog.warn(`Agent ${agentId} updateAgentState(active) failed during stop: ${stopStateErr instanceof Error ? stopStateErr.message : String(stopStateErr)}`);
       }
 
       this.clearRunState(agentId);
@@ -500,8 +556,8 @@ export class HeartbeatMonitor {
 
     try {
       await this.store.updateAgentState(agentId, "active");
-    } catch {
-      // Best effort — if the state cannot be transitioned right now, don't fail stop semantics.
+    } catch (stopPersistErr) {
+      heartbeatLog.warn(`Agent ${agentId} updateAgentState(active) failed during persisted-run stop: ${stopPersistErr instanceof Error ? stopPersistErr.message : String(stopPersistErr)}`);
     }
 
     this.clearRunState(agentId);
@@ -649,8 +705,8 @@ export class HeartbeatMonitor {
       let preloadedAgent: Agent | null = null;
       try {
         preloadedAgent = await this.store.getAgent(agentId);
-      } catch {
-        // If preloading fails, resolve again in the execution path below.
+      } catch (preloadErr) {
+        heartbeatLog.warn(`Agent ${agentId} agent preloading failed: ${preloadErr instanceof Error ? preloadErr.message : String(preloadErr)} — will resolve in execution path`);
       }
 
       const resolvedTaskId = explicitTaskId ?? preloadedAgent?.taskId;
@@ -736,8 +792,8 @@ export class HeartbeatMonitor {
             });
             return (await this.store.getRunDetail(agentId, run.id))!;
           }
-        } catch {
-          // If getBudgetStatus fails (e.g., method not available), proceed without budget check
+        } catch (budgetErr) {
+          heartbeatLog.warn(`Agent ${agentId} budget status check failed: ${budgetErr instanceof Error ? budgetErr.message : String(budgetErr)} — proceeding without budget check`);
         }
 
         // Resolve agent
@@ -782,8 +838,8 @@ export class HeartbeatMonitor {
                 await checkoutTask.call(taskStore, taskId, agentId, runContext);
                 // Audit trail: record checkout mutation (FN-1404)
                 await audit.database({ type: "task:checkout", target: taskId });
-              } catch {
-                heartbeatLog.log(`Task ${taskId} already checked out — skipping`);
+              } catch (checkoutErr) {
+                heartbeatLog.warn(`Task ${taskId} checkout failed: ${checkoutErr instanceof Error ? checkoutErr.message : String(checkoutErr)} — skipping`);
                 taskId = undefined;
                 inboxSelection = null;
               }
@@ -843,8 +899,8 @@ export class HeartbeatMonitor {
           const resolvedTaskId = taskId!;
           try {
             taskDetail = await taskStore.getTask(resolvedTaskId);
-          } catch {
-            heartbeatLog.warn(`Task ${resolvedTaskId} not found — graceful exit`);
+          } catch (taskDetailErr) {
+            heartbeatLog.warn(`Task ${resolvedTaskId} fetch failed: ${taskDetailErr instanceof Error ? taskDetailErr.message : String(taskDetailErr)} — graceful exit`);
             await this.completeRun(agentId, run.id, {
               status: "completed",
               resultJson: { reason: "task_not_found", taskId: resolvedTaskId },
@@ -1069,8 +1125,8 @@ export class HeartbeatMonitor {
             if (triggerDetail === "wake-on-message" && this.messageStore) {
               try {
                 pendingMessages = this.messageStore.getInbox(agentId, "agent", { read: false, limit: 10 });
-              } catch {
-                heartbeatLog.warn(`Failed to fetch inbox messages for ${agentId} during wake-on-message`);
+              } catch (inboxErr) {
+                heartbeatLog.warn(`Failed to fetch inbox messages for ${agentId} during wake-on-message: ${inboxErr instanceof Error ? inboxErr.message : String(inboxErr)}`);
               }
             }
 
@@ -1124,8 +1180,8 @@ export class HeartbeatMonitor {
             if (triggerDetail === "wake-on-message" && this.messageStore) {
               try {
                 pendingMessages = this.messageStore.getInbox(agentId, "agent", { read: false, limit: 10 });
-              } catch {
-                heartbeatLog.warn(`Failed to fetch inbox messages for ${agentId} during wake-on-message`);
+              } catch (inboxErr) {
+                heartbeatLog.warn(`Failed to fetch inbox messages for ${agentId} during wake-on-message: ${inboxErr instanceof Error ? inboxErr.message : String(inboxErr)}`);
               }
             }
 
@@ -1198,9 +1254,8 @@ export class HeartbeatMonitor {
           if (pendingMessages.length > 0 && this.messageStore) {
             try {
               this.messageStore.markAllAsRead(agentId, "agent");
-            } catch {
-              // Non-critical — mark as read failed, messages remain unread
-              heartbeatLog.warn(`Failed to mark messages as read for ${agentId}`);
+            } catch (markReadErr) {
+              heartbeatLog.warn(`Failed to mark messages as read for ${agentId}: ${markReadErr instanceof Error ? markReadErr.message : String(markReadErr)}`);
             }
           }
 
@@ -1237,7 +1292,11 @@ export class HeartbeatMonitor {
           });
         } finally {
           await flushAgentLogger();
-          this.untrackAgent(agentId);
+          // Defensively untrack the agent — wrap in try/catch to guarantee cleanup
+          // can't be blocked by an exception in untrackAgent itself.
+          try { this.untrackAgent(agentId); } catch (untrackErr) {
+            heartbeatLog.warn(`untrackAgent failed for ${agentId}: ${untrackErr instanceof Error ? untrackErr.message : String(untrackErr)}`);
+          }
           try { session.dispose(); } catch { /* ignore */ }
         }
 
@@ -1247,14 +1306,39 @@ export class HeartbeatMonitor {
         heartbeatLog.error(`Heartbeat execution error for ${agentId}: ${errorMessage}`);
         await flushAgentLogger();
 
-        // Attempt to complete the run as failed if it's still active
+        // Attempt to complete the run as failed if it's still active.
+        // If completeRun also fails, fall back to a direct DB update to ensure
+        // the run is not permanently stuck in "active" state.
         try {
           await this.completeRun(agentId, run.id, {
             status: "failed",
             stderrExcerpt: errorMessage,
           });
-        } catch {
-          // If completeRun also fails, the run remains active — nothing more we can do
+        } catch (completeRunErr) {
+          const completeRunErrMsg = completeRunErr instanceof Error ? completeRunErr.message : String(completeRunErr);
+          heartbeatLog.error(`completeRun failed for ${agentId}/${run.id}: ${completeRunErrMsg} — attempting safety-net completion`);
+
+          // Safety net: directly update the run record to prevent zombie run state.
+          // This runs only when completeRun itself threw, guaranteeing the run
+          // doesn't remain permanently stuck in "active" state.
+          try {
+            const runDetail = await this.store.getRunDetail(agentId, run.id);
+            if (runDetail && runDetail.status !== "completed" && runDetail.status !== "failed" && runDetail.status !== "terminated") {
+              await this.store.saveRun({
+                ...runDetail,
+                endedAt: new Date().toISOString(),
+                status: "failed",
+                stderrExcerpt: `Heartbeat execution failed: ${errorMessage}. Run completion also failed: ${completeRunErrMsg}`,
+              });
+              await this.store.endHeartbeatRun(run.id, "terminated");
+              // Also clean up run state accumulator
+              this.clearRunState(agentId);
+              heartbeatLog.log(`Safety-net run completion for ${agentId}/${run.id} — run terminated`);
+            }
+          } catch (safetyNetErr) {
+            const safetyNetErrMsg = safetyNetErr instanceof Error ? safetyNetErr.message : String(safetyNetErr);
+            heartbeatLog.error(`Safety-net run completion also failed for ${agentId}/${run.id}: ${safetyNetErrMsg} — run may be stuck permanently`);
+          }
         }
 
         return (await this.store.getRunDetail(agentId, run.id))!;
@@ -1306,8 +1390,8 @@ export class HeartbeatMonitor {
         // Log agent link on the created task with run context for correlation
         try {
           await taskStore.logEntry(createdTaskId, `Created by agent ${agentId} during heartbeat run`, undefined, runContext);
-        } catch {
-          // Non-critical — task was created, just the log failed
+        } catch (taskCreateLogErr) {
+          heartbeatLog.warn(`Task ${createdTaskId} agent-link log failed: ${taskCreateLogErr instanceof Error ? taskCreateLogErr.message : String(taskCreateLogErr)}`);
         }
 
         // Audit trail: record task creation (FN-1404)
@@ -1395,8 +1479,8 @@ export class HeartbeatMonitor {
           result.maxConcurrentRuns = Math.max(1, Math.round(rc.maxConcurrentRuns));
         }
       }
-    } catch {
-      // If agent lookup fails, use monitor defaults
+    } catch (agentLookupErr) {
+      heartbeatLog.warn(`getAgentConfig(${agentId}) agent lookup failed: ${agentLookupErr instanceof Error ? agentLookupErr.message : String(agentLookupErr)} — using monitor defaults`);
     }
 
     return result;
@@ -1660,8 +1744,8 @@ export class HeartbeatTriggerScheduler {
             heartbeatLog.log(`Agent ${agent.id} budget exhausted — assignment trigger skipped`);
             return;
           }
-        } catch {
-          // If getBudgetStatus fails, proceed without budget check
+        } catch (budgetErr) {
+          heartbeatLog.warn(`Assignment trigger budget check failed for ${agent.id}: ${budgetErr instanceof Error ? budgetErr.message : String(budgetErr)} — proceeding without budget check`);
         }
 
         let triggeringCommentIds: string[] | undefined;
@@ -1745,8 +1829,8 @@ export class HeartbeatTriggerScheduler {
           heartbeatLog.log(`Agent ${agentId} over budget threshold (${budgetStatus.usagePercent}%) — timer tick skipped`);
           return;
         }
-      } catch {
-        // If getBudgetStatus fails, proceed without budget check
+      } catch (budgetErr) {
+        heartbeatLog.warn(`Timer tick budget check failed for ${agentId}: ${budgetErr instanceof Error ? budgetErr.message : String(budgetErr)} — proceeding without budget check`);
       }
 
       await this.callback(agentId, "timer", {

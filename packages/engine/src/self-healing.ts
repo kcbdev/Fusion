@@ -148,15 +148,28 @@ export class SelfHealingManager {
    * stale in-progress/specifying tasks that no longer have a live worker.
    */
   async runStartupRecovery(): Promise<void> {
-    await this.recoverNoProgressNoTaskDoneFailures();
-    await this.recoverCompletedTasks();
-    await this.recoverStaleIncompleteReviewTasks();
-    await this.recoverReviewTasksWithFailedPreMergeSteps();
-    await this.recoverInterruptedMergingTasks();
-    await this.recoverMisclassifiedFailures();
-    await this.recoverOrphanedExecutions();
-    await this.recoverApprovedTriageTasks();
-    await this.recoverOrphanedSpecifyingTasks();
+    // Each recovery step is isolated — one failure doesn't prevent subsequent steps.
+    const steps: Array<{ name: string; fn: () => Promise<unknown> }> = [
+      { name: "no-progress-no-task-done", fn: () => this.recoverNoProgressNoTaskDoneFailures().then(() => undefined) },
+      { name: "completed-tasks", fn: () => this.recoverCompletedTasks().then(() => undefined) },
+      { name: "stale-incomplete-review", fn: () => this.recoverStaleIncompleteReviewTasks().then(() => undefined) },
+      { name: "failed-pre-merge-steps", fn: () => this.recoverReviewTasksWithFailedPreMergeSteps().then(() => undefined) },
+      { name: "interrupted-merging", fn: () => this.recoverInterruptedMergingTasks().then(() => undefined) },
+      { name: "misclassified-failures", fn: () => this.recoverMisclassifiedFailures().then(() => undefined) },
+      { name: "orphaned-executions", fn: () => this.recoverOrphanedExecutions().then(() => undefined) },
+      { name: "approved-triage", fn: () => this.recoverApprovedTriageTasks().then(() => undefined) },
+      { name: "orphaned-specifying", fn: () => this.recoverOrphanedSpecifyingTasks().then(() => undefined) },
+    ];
+
+    for (const step of steps) {
+      try {
+        await step.fn();
+        log.log(`Startup recovery step "${step.name}" completed`);
+      } catch (stepErr) {
+        const stepErrMessage = stepErr instanceof Error ? stepErr.message : String(stepErr);
+        log.error(`Startup recovery step "${step.name}" failed: ${stepErrMessage} — continuing with remaining steps`);
+      }
+    }
   }
 
   stop(): void {
@@ -469,44 +482,55 @@ export class SelfHealingManager {
 
     try {
       // Batch 1 — Git/filesystem cleanup
-      const batch1Results = await Promise.allSettled([
-        this.pruneWorktrees(),
-        this.cleanupOrphans(),
-        this.cleanupOrphanedBranches(),
-        Promise.resolve(this.checkpointWal()),
-        this.enforceWorktreeCap(),
-      ]);
-      for (const result of batch1Results) {
-        if (result.status === "rejected") {
-          log.error(`Batch 1 cleanup failed: ${result.reason}`);
+      const batch1Fns: Array<{ name: string; fn: () => Promise<unknown> }> = [
+        { name: "prune-worktrees", fn: () => this.pruneWorktrees() },
+        { name: "cleanup-orphans", fn: () => this.cleanupOrphans() },
+        { name: "cleanup-orphaned-branches", fn: () => this.cleanupOrphanedBranches() },
+        { name: "checkpoint-wal", fn: () => Promise.resolve(this.checkpointWal()) },
+        { name: "enforce-worktree-cap", fn: () => this.enforceWorktreeCap() },
+      ];
+      for (const fn of batch1Fns) {
+        try {
+          await fn.fn();
+          log.log(`Maintenance batch 1 step "${fn.name}" succeeded`);
+        } catch (stepErr) {
+          log.error(`Maintenance batch 1 step "${fn.name}" failed: ${stepErr instanceof Error ? stepErr.message : String(stepErr)}`);
         }
       }
 
       // Batch 2 — Task recovery (operations are independent of each other)
-      const batch2Results = await Promise.allSettled([
-        this.recoverCompletedTasks(),
-        this.recoverStaleIncompleteReviewTasks(),
-        this.recoverReviewTasksWithFailedPreMergeSteps(),
-        this.recoverInterruptedMergingTasks(),
-        this.recoverMergeableReviewTasks(),
-        this.recoverMergedReviewTasks(),
-        this.recoverMisclassifiedFailures(),
-        this.recoverNoProgressNoTaskDoneFailures(),
-        this.recoverOrphanedExecutions(),
-        this.recoverApprovedTriageTasks(),
-        this.recoverOrphanedSpecifyingTasks(),
-      ]);
-      for (const result of batch2Results) {
-        if (result.status === "rejected") {
-          log.error(`Batch 2 recovery failed: ${result.reason}`);
+      const batch2Fns: Array<{ name: string; fn: () => Promise<unknown> }> = [
+        { name: "recover-completed-tasks", fn: () => this.recoverCompletedTasks() },
+        { name: "recover-stale-incomplete-review", fn: () => this.recoverStaleIncompleteReviewTasks() },
+        { name: "recover-failed-pre-merge-steps", fn: () => this.recoverReviewTasksWithFailedPreMergeSteps() },
+        { name: "recover-interrupted-merging", fn: () => this.recoverInterruptedMergingTasks() },
+        { name: "recover-mergeable-review", fn: () => this.recoverMergeableReviewTasks() },
+        { name: "recover-merged-review", fn: () => this.recoverMergedReviewTasks() },
+        { name: "recover-misclassified-failures", fn: () => this.recoverMisclassifiedFailures() },
+        { name: "recover-no-progress-no-task-done", fn: () => this.recoverNoProgressNoTaskDoneFailures() },
+        { name: "recover-orphaned-executions", fn: () => this.recoverOrphanedExecutions() },
+        { name: "recover-approved-triage", fn: () => this.recoverApprovedTriageTasks() },
+        { name: "recover-orphaned-specifying", fn: () => this.recoverOrphanedSpecifyingTasks() },
+      ];
+      for (const fn of batch2Fns) {
+        try {
+          await fn.fn();
+          log.log(`Maintenance batch 2 step "${fn.name}" succeeded`);
+        } catch (stepErr) {
+          log.error(`Maintenance batch 2 step "${fn.name}" failed: ${stepErr instanceof Error ? stepErr.message : String(stepErr)}`);
         }
       }
 
       // Batch 3 — Archive (runs after recovery so we don't archive recoverable tasks)
-      const batch3Results = await Promise.allSettled([this.archiveStaleDoneTasks()]);
-      for (const result of batch3Results) {
-        if (result.status === "rejected") {
-          log.error(`Batch 3 archive failed: ${result.reason}`);
+      const batch3Fns: Array<{ name: string; fn: () => Promise<unknown> }> = [
+        { name: "archive-stale-done", fn: () => this.archiveStaleDoneTasks() },
+      ];
+      for (const fn of batch3Fns) {
+        try {
+          await fn.fn();
+          log.log(`Maintenance batch 3 step "${fn.name}" succeeded`);
+        } catch (stepErr) {
+          log.error(`Maintenance batch 3 step "${fn.name}" failed: ${stepErr instanceof Error ? stepErr.message : String(stepErr)}`);
         }
       }
 
