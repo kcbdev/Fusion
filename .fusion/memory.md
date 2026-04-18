@@ -1233,3 +1233,61 @@ When a mission feature's implementation task completes, `MissionExecutionLoop.pr
 - **VALID_TRANSITIONS**: `"in-progress"` → `"done"` was added specifically for validation tasks (note in `types.ts`)
 
 The error status from `parseValidationResult()` (empty response, invalid JSON, invalid status) is now handled in `processTaskOutcome()` alongside pass/fail/blocked.
+
+## FN-2048: SSE Connection Leak — `closed` Flag Pattern in sse-bus
+
+Rapid view transitions (e.g., Board↔Missions) caused zombie EventSource connections to accumulate, exhausting the browser's HTTP/1.1 connection pool (6 per origin) and blocking subsequent `fetchMissions` calls. Two fixes prevent this:
+
+### 1. `closed` flag in sse-bus `Channel`
+
+The `closeChannel` function sets `channel.closed = true` **before** closing the EventSource. This prevents `forceReconnect()` (triggered by error events) from scheduling a reconnect timer after the channel has already been torn down. Additionally, the reconnect timer callback itself checks `channel.closed` before calling `openChannel`.
+
+```typescript
+interface Channel {
+  // ...
+  closed: boolean;
+}
+
+function closeChannel(channel: Channel): void {
+  channel.closed = true;  // Set BEFORE es.close() to block synchronous reconnect
+  if (channel.es) channel.es.close();
+  // ...
+}
+
+function forceReconnect(channel: Channel): void {
+  // ...
+  if (channel.closed) return;  // Guard: do not schedule reconnect on teardown
+  // ...
+  channel.reconnectTimer = setTimeout(() => {
+    if (channel.closed) return;  // Guard: do not reopen after teardown
+    // ...
+  }, RECONNECT_DELAY_MS);
+}
+```
+
+**Key insight**: The `closed` check at the top of `forceReconnect` prevents the timer from being set when `closeChannel` runs synchronously after an error event. Without this, the reconnect timer could be set after the channel was already marked for teardown, creating a zombie connection.
+
+### 2. `active` flag in useTasks SSE effect
+
+The SSE effect in `useTasks.ts` uses an `active` boolean to prevent stale `onReconnect` callbacks from firing after the effect has cleaned up (e.g., when `sseEnabled` flips to `false`):
+
+```typescript
+useEffect(() => {
+  let active = true;
+  // ...
+  return subscribeSse(url, {
+    onReconnect: () => {
+      if (!active) return;  // Block stale callbacks after effect cleanup
+      // ...
+    },
+  });
+  return () => { active = false; };  // Runs after subscribeSse's cleanup
+}, [projectId, sseEnabled]);
+```
+
+**Important**: The cleanup function that sets `active = false` must be returned **after** the `subscribeSse()` return value — not as a second `return` (which would be unreachable). The unsubscribe from `subscribeSse` is called first, then `active` is set to false.
+
+### Files affected
+- `packages/dashboard/app/sse-bus.ts` — `closed` flag on Channel
+- `packages/dashboard/app/hooks/useTasks.ts` — `active` flag in SSE effect
+- Tests: `packages/dashboard/app/__tests__/sse-bus.test.ts`, `packages/dashboard/app/hooks/__tests__/useTasks.test.ts`

@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi, beforeEach } from "vitest";
 import { MockEventSource } from "../../vitest.setup";
 import { subscribeSse, __resetSseBus, __sseBusChannelCount } from "../sse-bus";
 
@@ -128,5 +128,44 @@ describe("sse-bus", () => {
     es._emit("error");
     expect(reconnects).toBe(1);
     unsub();
+  });
+
+  it("does not set a reconnect timer after closeChannel is called", () => {
+    vi.useFakeTimers();
+    const url = "/api/events";
+    const unsub = subscribeSse(url, { events: { "task:created": () => {} } });
+    const es = MockEventSource.instances[0];
+
+    // Simulate an error which triggers forceReconnect (and schedules reconnect timer)
+    es._emit("error");
+
+    // Immediately unsubscribe (triggers closeChannel which sets closed=true)
+    unsub();
+
+    // Advance timers past RECONNECT_DELAY_MS (3 seconds)
+    vi.advanceTimersByTime(4_000);
+
+    // No new EventSource should be created — the closed flag prevented reconnect
+    expect(MockEventSource.instances).toHaveLength(1);
+    vi.useRealTimers();
+  });
+
+  it("does not leak channels on rapid subscribe/unsubscribe cycles", () => {
+    const url = "/api/events";
+    for (let i = 0; i < 5; i++) {
+      const unsub = subscribeSse(url, { events: { "task:created": () => {} } });
+      unsub();
+    }
+    expect(__sseBusChannelCount()).toBe(0);
+    // After 5 subscribe/unsubscribe cycles the channel has been opened and closed 5
+    // times, creating 5 EventSource instances (channel is deleted from the map on
+    // every unsubscribe). The key leak concern is zombie reconnect timers — verify
+    // no additional instances are created when reconnect delay fires after teardown.
+    const countBeforeTimers = MockEventSource.instances.length;
+    vi.useFakeTimers();
+    vi.advanceTimersByTime(4_000);
+    vi.useRealTimers();
+    // No new instances should be created by the (blocked) reconnect timer
+    expect(MockEventSource.instances.length).toBe(countBeforeTimers);
   });
 });

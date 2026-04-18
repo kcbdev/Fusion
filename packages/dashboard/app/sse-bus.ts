@@ -28,6 +28,8 @@ interface Channel {
   heartbeatTimer: ReturnType<typeof setTimeout> | null;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
   hasOpenedOnce: boolean;
+  /** Set true at the start of closeChannel to prevent reconnect after teardown. */
+  closed: boolean;
 }
 
 const channels = new Map<string, Channel>();
@@ -50,6 +52,7 @@ function forceReconnect(channel: Channel): void {
   }
   channel.nativeListeners.clear();
 
+  if (channel.closed) return;
   if (channel.subscribers.size === 0 || channel.reconnectTimer) return;
 
   // A teardown means events may have been missed while the stream was
@@ -59,12 +62,14 @@ function forceReconnect(channel: Channel): void {
 
   channel.reconnectTimer = setTimeout(() => {
     channel.reconnectTimer = null;
+    if (channel.closed) return;
     if (channel.subscribers.size > 0) openChannel(channel);
   }, RECONNECT_DELAY_MS);
 }
 
 function openChannel(channel: Channel): void {
   if (channel.es) return;
+  if (channel.closed) return;
   if (channel.reconnectTimer) {
     clearTimeout(channel.reconnectTimer);
     channel.reconnectTimer = null;
@@ -123,6 +128,7 @@ function reattachNativeListeners(channel: Channel): void {
 }
 
 function closeChannel(channel: Channel): void {
+  channel.closed = true;
   if (channel.heartbeatTimer) clearTimeout(channel.heartbeatTimer);
   if (channel.reconnectTimer) clearTimeout(channel.reconnectTimer);
   if (channel.es) channel.es.close();
@@ -158,6 +164,7 @@ export function subscribeSse(url: string, sub: SseSubscription = {}): () => void
       heartbeatTimer: null,
       reconnectTimer: null,
       hasOpenedOnce: false,
+      closed: false,
     };
     channels.set(url, channel);
   }

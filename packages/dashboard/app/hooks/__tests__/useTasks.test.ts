@@ -1621,5 +1621,70 @@ describe("useTasks", () => {
 
       expect(MockEventSource.instances.length).toBe(0);
     });
+
+    it("does not grow EventSource instances on repeated sseEnabled toggles", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const { rerender } = renderHook(
+        ({ sseEnabled }: { sseEnabled?: boolean }) => useTasks({ projectId: "test-project", sseEnabled }),
+        { initialProps: { sseEnabled: true } }
+      );
+
+      await waitFor(() => {
+        expect(MockEventSource.instances.length).toBeGreaterThanOrEqual(1);
+      });
+
+      // Toggle false → true multiple times
+      for (let i = 0; i < 3; i++) {
+        await act(async () => {
+          rerender({ sseEnabled: false });
+        });
+        await act(async () => {
+          rerender({ sseEnabled: true });
+        });
+      }
+
+      const countAfterToggles = MockEventSource.instances.length;
+
+      // Advance fake timers — no pending reconnect timers should fire after teardown
+      vi.advanceTimersByTime(4_000);
+
+      // Count must not grow after timer advancement (the closed flag in sse-bus prevents
+      // reconnect timers from creating zombie connections after channel teardown).
+      expect(MockEventSource.instances.length).toBe(countAfterToggles);
+      vi.useRealTimers();
+    });
+
+    it("does not trigger onReconnect refetch after sseEnabled flips to false", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const { rerender } = renderHook(
+        ({ sseEnabled }: { sseEnabled?: boolean }) => useTasks({ projectId: "test-project", sseEnabled }),
+        { initialProps: { sseEnabled: true } }
+      );
+
+      await waitFor(() => {
+        expect(MockEventSource.instances.length).toBeGreaterThanOrEqual(1);
+      });
+
+      const es = MockEventSource.instances[0];
+      mockFetchTasks.mockClear();
+
+      // Simulate an error on the EventSource (triggers reconnect flow)
+      act(() => {
+        es._emit("error");
+      });
+      expect(mockFetchTasks).toHaveBeenCalledTimes(1); // onReconnect fires once during error
+
+      // Before the reconnect timer fires, flip sseEnabled to false
+      await act(async () => {
+        rerender({ sseEnabled: false });
+      });
+
+      // Advance timers past RECONNECT_DELAY_MS (3 seconds)
+      vi.advanceTimersByTime(4_000);
+
+      // No additional fetchTasks should have been called — active flag blocked it
+      expect(mockFetchTasks).toHaveBeenCalledTimes(1);
+      vi.useRealTimers();
+    });
   });
 });

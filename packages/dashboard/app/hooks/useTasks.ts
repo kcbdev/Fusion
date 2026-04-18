@@ -166,6 +166,9 @@ export function useTasks(options?: UseTasksOptions) {
     const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
 
     const isStale = () => projectContextVersionRef.current !== contextVersionAtStart;
+    // Guards against reconnect callbacks firing after the effect has cleaned up
+    // (e.g., sseEnabled flipped to false during a pending reconnect timer in sse-bus).
+    let active = true;
 
     const handleCreated = (e: MessageEvent) => {
       if (isStale()) return;
@@ -256,7 +259,7 @@ export function useTasks(options?: UseTasksOptions) {
       );
     };
 
-    return subscribeSse(`/api/events${query}`, {
+    const unsubscribe = subscribeSse(`/api/events${query}`, {
       events: {
         "task:created": handleCreated,
         "task:moved": handleMoved,
@@ -265,10 +268,15 @@ export function useTasks(options?: UseTasksOptions) {
         "task:merged": handleMerged,
       },
       onReconnect: () => {
+        if (!active) return;
         if (isStale()) return;
         void refreshTasksRef.current();
       },
     });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, [projectId, sseEnabled]);
 
   const createTask = useCallback(async (input: TaskCreateInput): Promise<Task> => {
