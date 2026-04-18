@@ -7058,7 +7058,13 @@ body {
   .settings-content {
     flex: 1;
     min-height: 0;
+    overflow-x: hidden;
     overflow-y: auto;
+  }
+
+  .settings-content .form-group small {
+    overflow-wrap: break-word;
+    word-break: break-all;
   }
 
   .settings-content input,
