@@ -206,6 +206,8 @@ export interface HeaderProps {
   onSelectNode?: (node: NodeConfig | null) => void;
   /** Whether the current view is a remote node */
   isRemote?: boolean;
+  /** Experimental feature flags controlling visibility of nav items. */
+  experimentalFeatures?: { insights?: boolean; roadmap?: boolean };
 }
 
 export function Header({
@@ -248,6 +250,7 @@ export function Header({
   currentNode,
   onSelectNode,
   isRemote = false,
+  experimentalFeatures,
 }: HeaderProps) {
   const mode: ViewportMode = useViewportMode();
   const isMobile = mode === "mobile";
@@ -747,24 +750,28 @@ export function Header({
                 <Zap size={16} />
               </button>
             )}
-            <button
-              className={`view-toggle-btn${view === "roadmaps" ? " active" : ""}`}
-              onClick={() => onChangeView("roadmaps")}
-              title="Roadmaps view"
-              aria-label="Roadmaps view"
-              aria-pressed={view === "roadmaps"}
-            >
-              <Map size={16} />
-            </button>
-            <button
-              className={`view-toggle-btn${view === "insights" ? " active" : ""}`}
-              onClick={() => onChangeView("insights")}
-              title="Insights view"
-              aria-label="Insights view"
-              aria-pressed={view === "insights"}
-            >
-              <Sparkles size={16} />
-            </button>
+            {experimentalFeatures?.roadmap && (
+              <button
+                className={`view-toggle-btn${view === "roadmaps" ? " active" : ""}`}
+                onClick={() => onChangeView("roadmaps")}
+                title="Roadmaps view"
+                aria-label="Roadmaps view"
+                aria-pressed={view === "roadmaps"}
+              >
+                <Map size={16} />
+              </button>
+            )}
+            {experimentalFeatures?.insights && (
+              <button
+                className={`view-toggle-btn${view === "insights" ? " active" : ""}`}
+                onClick={() => onChangeView("insights")}
+                title="Insights view"
+                aria-label="Insights view"
+                aria-pressed={view === "insights"}
+              >
+                <Sparkles size={16} />
+              </button>
+            )}
           </div>
         )}
 

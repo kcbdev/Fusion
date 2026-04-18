@@ -58,6 +58,8 @@ export interface MobileNavBarProps {
   onViewAllProjects?: () => void;
   /** Whether to show the skills tab */
   showSkillsTab?: boolean;
+  /** Experimental feature flags controlling visibility of nav items. */
+  experimentalFeatures?: { insights?: boolean; roadmap?: boolean };
 }
 
 function GitHubLogo({ size = 20 }: { size?: number }) {
@@ -103,6 +105,7 @@ export function MobileNavBar({
   projectId,
   onViewAllProjects,
   showSkillsTab,
+  experimentalFeatures,
 }: MobileNavBarProps) {
   const mode = useViewportMode();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
@@ -258,17 +261,19 @@ export function MobileNavBar({
           </button>
         )}
 
-        <button
-          type="button"
-          className={`mobile-nav-tab${view === "roadmaps" ? " mobile-nav-tab--active" : ""}`}
-          data-testid="mobile-nav-tab-roadmaps"
-          role="tab"
-          aria-selected={view === "roadmaps"}
-          onClick={() => onChangeView("roadmaps")}
-        >
-          <Map />
-          <span className="mobile-nav-tab-label">Roadmaps</span>
-        </button>
+        {experimentalFeatures?.roadmap && (
+          <button
+            type="button"
+            className={`mobile-nav-tab${view === "roadmaps" ? " mobile-nav-tab--active" : ""}`}
+            data-testid="mobile-nav-tab-roadmaps"
+            role="tab"
+            aria-selected={view === "roadmaps"}
+            onClick={() => onChangeView("roadmaps")}
+          >
+            <Map />
+            <span className="mobile-nav-tab-label">Roadmaps</span>
+          </button>
+        )}
 
         <button
           type="button"
@@ -505,25 +510,29 @@ export function MobileNavBar({
               <span>Documents</span>
             </button>
 
-            <button
-              type="button"
-              className="mobile-more-item"
-              data-testid="mobile-more-item-roadmaps"
-              onClick={() => handleMoreAction(() => onChangeView("roadmaps"))}
-            >
-              <Map />
-              <span>Roadmaps</span>
-            </button>
+            {experimentalFeatures?.roadmap && (
+              <button
+                type="button"
+                className="mobile-more-item"
+                data-testid="mobile-more-item-roadmaps"
+                onClick={() => handleMoreAction(() => onChangeView("roadmaps"))}
+              >
+                <Map />
+                <span>Roadmaps</span>
+              </button>
+            )}
 
-            <button
-              type="button"
-              className="mobile-more-item"
-              data-testid="mobile-more-item-insights"
-              onClick={() => handleMoreAction(() => onChangeView("insights"))}
-            >
-              <Sparkles />
-              <span>Insights</span>
-            </button>
+            {experimentalFeatures?.insights && (
+              <button
+                type="button"
+                className="mobile-more-item"
+                data-testid="mobile-more-item-insights"
+                onClick={() => handleMoreAction(() => onChangeView("insights"))}
+              >
+                <Sparkles />
+                <span>Insights</span>
+              </button>
+            )}
 
             <div className="mobile-more-separator" />
 

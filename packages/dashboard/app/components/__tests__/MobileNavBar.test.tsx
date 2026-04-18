@@ -56,7 +56,7 @@ describe("MobileNavBar", () => {
     mockViewport("mobile");
   });
 
-  it("renders eight tab buttons (tasks + agents + missions + chat + mailbox + skills + roadmaps + more) when showSkillsTab is true", () => {
+  it("renders seven tab buttons (tasks + agents + missions + chat + mailbox + skills + more) when showSkillsTab is true", () => {
     render(<MobileNavBar {...createDefaultProps()} showSkillsTab={true} />);
 
     expect(screen.getByTestId("mobile-nav-tab-tasks")).toBeDefined();
@@ -65,8 +65,13 @@ describe("MobileNavBar", () => {
     expect(screen.getByTestId("mobile-nav-tab-chat")).toBeDefined();
     expect(screen.getByTestId("mobile-nav-tab-mailbox")).toBeDefined();
     expect(screen.getByTestId("mobile-nav-tab-skills")).toBeDefined();
-    expect(screen.getByTestId("mobile-nav-tab-roadmaps")).toBeDefined();
+    expect(screen.queryByTestId("mobile-nav-tab-roadmaps")).toBeNull();
     expect(screen.getByTestId("mobile-nav-tab-more")).toBeDefined();
+  });
+
+  it("renders roadmaps tab when experimentalFeatures.roadmap is true", () => {
+    render(<MobileNavBar {...createDefaultProps()} experimentalFeatures={{ roadmap: true }} />);
+    expect(screen.getByTestId("mobile-nav-tab-roadmaps")).toBeDefined();
   });
 
   it("does not render skills tab when showSkillsTab is false", () => {
@@ -206,14 +211,26 @@ describe("MobileNavBar", () => {
     expect(screen.getByTestId("mobile-more-item-usage")).toBeDefined();
     expect(screen.getByTestId("mobile-more-item-projects")).toBeDefined();
     expect(screen.getByTestId("mobile-more-item-chat")).toBeDefined();
-    expect(screen.getByTestId("mobile-more-item-roadmaps")).toBeDefined();
-    expect(screen.getByTestId("mobile-more-item-insights")).toBeDefined();
+    expect(screen.queryByTestId("mobile-more-item-roadmaps")).toBeNull();
+    expect(screen.queryByTestId("mobile-more-item-insights")).toBeNull();
     expect(screen.getByTestId("mobile-more-item-settings")).toBeDefined();
+  });
+
+  it("shows roadmaps in more sheet when experimentalFeatures.roadmap is true", () => {
+    render(<MobileNavBar {...createDefaultProps()} experimentalFeatures={{ roadmap: true }} />);
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+    expect(screen.getByTestId("mobile-more-item-roadmaps")).toBeDefined();
+  });
+
+  it("shows insights in more sheet when experimentalFeatures.insights is true", () => {
+    render(<MobileNavBar {...createDefaultProps()} experimentalFeatures={{ insights: true }} />);
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+    expect(screen.getByTestId("mobile-more-item-insights")).toBeDefined();
   });
 
   it("insights item in more sheet calls onChangeView with 'insights'", () => {
     const props = createDefaultProps();
-    const { container } = render(<MobileNavBar {...props} />);
+    const { container } = render(<MobileNavBar {...props} experimentalFeatures={{ insights: true }} />);
 
     fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
     fireEvent.click(screen.getByTestId("mobile-more-item-insights"));

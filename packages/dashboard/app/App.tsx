@@ -190,6 +190,8 @@ function AppInner() {
     showQuickChatFAB,
     githubTokenConfigured,
     experimentalFeatures,
+    insightsEnabled,
+    roadmapEnabled,
     toggleAutoMerge,
     toggleGlobalPause,
     toggleEnginePause,
@@ -198,6 +200,18 @@ function AppInner() {
 
   const skillsEnabled = experimentalFeatures.skillsView === true;
   const nodesEnabled = experimentalFeatures.nodesView === true;
+
+  // Redirect to board if insights/roadmaps view is disabled
+  // Only run after settings have been loaded (experimentalFeatures is non-empty)
+  useEffect(() => {
+    if (Object.keys(experimentalFeatures).length === 0) return;
+    if (taskView === "insights" && !insightsEnabled) {
+      handleChangeTaskView("board");
+    }
+    if (taskView === "roadmaps" && !roadmapEnabled) {
+      handleChangeTaskView("board");
+    }
+  }, [taskView, insightsEnabled, roadmapEnabled, experimentalFeatures, handleChangeTaskView]);
 
   // Auto-close nodes overlay if feature flag is toggled off while overlay is open
   useEffect(() => {
@@ -589,6 +603,7 @@ function AppInner() {
           }
         }}
         isRemote={isRemote}
+        experimentalFeatures={{ insights: insightsEnabled, roadmap: roadmapEnabled }}
       />
       {viewMode === "project" && currentProject && !nodesOpen && taskView !== "missions" && !modalManager.isPlanningOpen && (
         <SessionNotificationBanner
@@ -650,6 +665,7 @@ function AppInner() {
         onOpenQuickChat={() => setQuickChatOpen(true)}
         projectId={currentProject?.id}
         showSkillsTab={skillsEnabled}
+        experimentalFeatures={{ insights: insightsEnabled, roadmap: roadmapEnabled }}
       />
       {viewMode === "project" && currentProject && taskView !== "chat" && taskView !== "mailbox" && taskView !== "insights" && (
         <QuickChatFAB

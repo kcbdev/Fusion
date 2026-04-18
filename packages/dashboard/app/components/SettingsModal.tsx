@@ -77,6 +77,14 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const AUTO_ARCHIVE_DEFAULT_AFTER_DAYS = 2;
 
+/** Well-known experimental feature flags with display labels.
+ *  These always appear in the Experimental Features settings tab,
+ *  regardless of whether they exist in the project's settings blob. */
+const KNOWN_EXPERIMENTAL_FEATURES: Record<string, string> = {
+  insights: "Insights",
+  roadmap: "Roadmaps",
+};
+
 export type SectionId = SettingsSection["id"];
 
 interface SettingsModalProps {
@@ -2522,7 +2530,11 @@ export function SettingsModal({
       }
       case "experimental": {
         const experimentalFeatures = form.experimentalFeatures ?? {};
-        const featureFlags = Object.entries(experimentalFeatures).sort(([a], [b]) => a.localeCompare(b));
+        // Merge known features (always shown) with any custom features from settings
+        const allFeatureKeys = Array.from(
+          new Set([...Object.keys(KNOWN_EXPERIMENTAL_FEATURES), ...Object.keys(experimentalFeatures)])
+        ).sort((a, b) => a.localeCompare(b));
+        const featureFlags = allFeatureKeys.map((key) => [key, experimentalFeatures[key] === true] as const);
 
         return (
           <>
@@ -2535,38 +2547,30 @@ export function SettingsModal({
               </small>
             </div>
 
-            {featureFlags.length === 0 ? (
-              <div className="form-group">
-                <small className="settings-muted">
-                  No experimental features configured. Features will appear here once added by the system.
-                </small>
+            <div className="form-group">
+              <label>Feature Flags</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-sm)" }}>
+                {featureFlags.map(([key, enabled]) => (
+                  <label key={key} htmlFor={`experimental-${key}`} className="checkbox-label">
+                    <input
+                      id={`experimental-${key}`}
+                      type="checkbox"
+                      checked={enabled}
+                      onChange={(e) => {
+                        setForm((f) => ({
+                          ...f,
+                          experimentalFeatures: {
+                            ...(f.experimentalFeatures ?? {}),
+                            [key]: e.target.checked,
+                          },
+                        }));
+                      }}
+                    />
+                    <span>{KNOWN_EXPERIMENTAL_FEATURES[key] ?? key}</span>
+                  </label>
+                ))}
               </div>
-            ) : (
-              <div className="form-group">
-                <label>Feature Flags</label>
-                <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-sm)" }}>
-                  {featureFlags.map(([key, enabled]) => (
-                    <label key={key} htmlFor={`experimental-${key}`} className="checkbox-label">
-                      <input
-                        id={`experimental-${key}`}
-                        type="checkbox"
-                        checked={enabled}
-                        onChange={(e) => {
-                          setForm((f) => ({
-                            ...f,
-                            experimentalFeatures: {
-                              ...(f.experimentalFeatures ?? {}),
-                              [key]: e.target.checked,
-                            },
-                          }));
-                        }}
-                      />
-                      <span>{key}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
+            </div>
           </>
         );
       }

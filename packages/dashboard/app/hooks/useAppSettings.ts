@@ -14,6 +14,8 @@ export interface UseAppSettingsResult {
   showQuickChatFAB: boolean;
   githubTokenConfigured: boolean;
   experimentalFeatures: Record<string, boolean>;
+  insightsEnabled: boolean;
+  roadmapEnabled: boolean;
   toggleAutoMerge: () => Promise<void>;
   toggleGlobalPause: () => Promise<void>;
   toggleEnginePause: () => Promise<void>;
@@ -35,6 +37,8 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
   const [showQuickChatFAB, setShowQuickChatFAB] = useState(false);
   const [githubTokenConfigured, setGithubTokenConfigured] = useState(false);
   const [experimentalFeatures, setExperimentalFeatures] = useState<Record<string, boolean>>({});
+  const [insightsEnabled, setInsightsEnabled] = useState(false);
+  const [roadmapEnabled, setRoadmapEnabled] = useState(false);
 
   /**
    * Fetches config and settings from the backend and updates local state.
@@ -60,6 +64,9 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
       setTaskStuckTimeoutMs(settings.taskStuckTimeoutMs);
       setShowQuickChatFAB(settings.showQuickChatFAB === true);
       setExperimentalFeatures(settings.experimentalFeatures ?? {});
+      const features = settings.experimentalFeatures ?? {};
+      setInsightsEnabled(features.insights === true);
+      setRoadmapEnabled(features.roadmap === true);
     }
   }, [projectId]);
 
@@ -121,6 +128,8 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
     showQuickChatFAB,
     githubTokenConfigured,
     experimentalFeatures,
+    insightsEnabled,
+    roadmapEnabled,
     toggleAutoMerge,
     toggleGlobalPause,
     toggleEnginePause,

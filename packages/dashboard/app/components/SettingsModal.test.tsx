@@ -644,7 +644,7 @@ describe("SettingsModal", () => {
       expect(screen.getByText("Experimental Features")).toBeDefined();
     });
 
-    it("shows empty state message when no experimental features are configured", async () => {
+    it("shows known experimental features (Insights, Roadmaps) even when no custom features are configured", async () => {
       renderModal();
 
       await waitFor(() => {
@@ -653,7 +653,9 @@ describe("SettingsModal", () => {
 
       await userEvent.click(screen.getByText("Experimental Features"));
 
-      expect(screen.getByText(/No experimental features configured/i)).toBeInTheDocument();
+      // Known features should always be shown
+      expect(screen.getByText("Insights")).toBeInTheDocument();
+      expect(screen.getByText("Roadmaps")).toBeInTheDocument();
     });
 
     it("shows feature flags when experimentalFeatures is set", async () => {
@@ -774,7 +776,7 @@ describe("SettingsModal", () => {
       expect(screen.getByText(/only affect this project/i)).toBeInTheDocument();
     });
 
-    it("handles undefined experimentalFeatures (falls back to empty)", async () => {
+    it("handles undefined experimentalFeatures (falls back to empty) but still shows known features", async () => {
       mockFetchSettings.mockResolvedValue({
         ...defaultSettings,
         experimentalFeatures: undefined,
@@ -788,8 +790,9 @@ describe("SettingsModal", () => {
 
       await userEvent.click(screen.getByText("Experimental Features"));
 
-      // Should show empty state since undefined falls back to {}
-      expect(screen.getByText(/No experimental features configured/i)).toBeInTheDocument();
+      // Known features should always be shown regardless of settings
+      expect(screen.getByText("Insights")).toBeInTheDocument();
+      expect(screen.getByText("Roadmaps")).toBeInTheDocument();
     });
 
     it("saves experimentalFeatures with multiple toggled flags", async () => {

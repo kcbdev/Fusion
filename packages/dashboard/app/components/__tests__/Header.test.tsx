@@ -453,16 +453,16 @@ describe("Header", () => {
 
   // ── Roadmaps View Toggle ───────────────────────────────────────
 
-  it("renders roadmaps view button in view toggle when onChangeView is provided", () => {
+  it("renders roadmaps view button in view toggle when experimentalFeatures.roadmap is true", () => {
     const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} />);
+    render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ roadmap: true }} />);
     const roadmapsBtn = screen.getByTitle("Roadmaps view");
     expect(roadmapsBtn).toBeDefined();
   });
 
   it("calls onChangeView with 'roadmaps' when roadmaps view button is clicked", () => {
     const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} />);
+    render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ roadmap: true }} />);
     const roadmapsBtn = screen.getByTitle("Roadmaps view");
     fireEvent.click(roadmapsBtn);
     expect(onChangeView).toHaveBeenCalledWith("roadmaps");
@@ -470,7 +470,7 @@ describe("Header", () => {
 
   it("marks roadmaps view button as active when view is 'roadmaps'", () => {
     const onChangeView = vi.fn();
-    render(<Header view="roadmaps" onChangeView={onChangeView} />);
+    render(<Header view="roadmaps" onChangeView={onChangeView} experimentalFeatures={{ roadmap: true }} />);
     const roadmapsBtn = screen.getByTitle("Roadmaps view");
     expect(roadmapsBtn.className).toContain("active");
     expect(roadmapsBtn.getAttribute("aria-pressed")).toBe("true");
@@ -478,24 +478,36 @@ describe("Header", () => {
 
   it("does not mark roadmaps view button as active when view is 'board'", () => {
     const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} />);
+    render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ roadmap: true }} />);
     const roadmapsBtn = screen.getByTitle("Roadmaps view");
     expect(roadmapsBtn.className).not.toContain("active");
     expect(roadmapsBtn.getAttribute("aria-pressed")).toBe("false");
   });
 
-  // ── Insights View Toggle ─────────────────────────────────────────
+  it("does not render roadmaps view button when experimentalFeatures.roadmap is false", () => {
+    const onChangeView = vi.fn();
+    render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ roadmap: false }} />);
+    expect(screen.queryByTitle("Roadmaps view")).toBeNull();
+  });
 
-  it("renders insights view button in view toggle when onChangeView is provided", () => {
+  it("does not render roadmaps view button when experimentalFeatures is not provided", () => {
     const onChangeView = vi.fn();
     render(<Header view="board" onChangeView={onChangeView} />);
+    expect(screen.queryByTitle("Roadmaps view")).toBeNull();
+  });
+
+  // ── Insights View Toggle ─────────────────────────────────────────
+
+  it("renders insights view button in view toggle when experimentalFeatures.insights is true", () => {
+    const onChangeView = vi.fn();
+    render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ insights: true }} />);
     const insightsBtn = screen.getByTitle("Insights view");
     expect(insightsBtn).toBeDefined();
   });
 
   it("calls onChangeView with 'insights' when insights view button is clicked", () => {
     const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} />);
+    render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ insights: true }} />);
     const insightsBtn = screen.getByTitle("Insights view");
     fireEvent.click(insightsBtn);
     expect(onChangeView).toHaveBeenCalledWith("insights");
@@ -503,7 +515,7 @@ describe("Header", () => {
 
   it("marks insights view button as active when view is 'insights'", () => {
     const onChangeView = vi.fn();
-    render(<Header view="insights" onChangeView={onChangeView} />);
+    render(<Header view="insights" onChangeView={onChangeView} experimentalFeatures={{ insights: true }} />);
     const insightsBtn = screen.getByTitle("Insights view");
     expect(insightsBtn.className).toContain("active");
     expect(insightsBtn.getAttribute("aria-pressed")).toBe("true");
@@ -511,10 +523,22 @@ describe("Header", () => {
 
   it("does not mark insights view button as active when view is 'board'", () => {
     const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} />);
+    render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ insights: true }} />);
     const insightsBtn = screen.getByTitle("Insights view");
     expect(insightsBtn.className).not.toContain("active");
     expect(insightsBtn.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("does not render insights view button when experimentalFeatures.insights is false", () => {
+    const onChangeView = vi.fn();
+    render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ insights: false }} />);
+    expect(screen.queryByTitle("Insights view")).toBeNull();
+  });
+
+  it("does not render insights view button when experimentalFeatures is not provided", () => {
+    const onChangeView = vi.fn();
+    render(<Header view="board" onChangeView={onChangeView} />);
+    expect(screen.queryByTitle("Insights view")).toBeNull();
   });
 
   // ── Search Visibility by View ─────────────────────────────────────

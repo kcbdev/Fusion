@@ -15,6 +15,7 @@ const defaultSettings: Settings = {
   worktreeInitCommand: "",
   testCommand: "",
   buildCommand: "",
+  experimentalFeatures: { insights: true, roadmap: true },
 };
 
 vi.mock("../../api", async (importOriginal) => {
@@ -1305,6 +1306,24 @@ describe("App view switching", () => {
     // Cleanup
     localStorage.removeItem("kb:proj_a:kb-dashboard-task-view");
     localStorage.removeItem("kb:proj_b:kb-dashboard-task-view");
+  });
+
+  it("does not render insights view button when insights experimental feature is disabled", async () => {
+    // Override fetchSettings to return insights as disabled
+    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ...defaultSettings,
+      experimentalFeatures: { insights: false },
+    });
+
+    render(<App />);
+
+    // Wait for the header to render
+    await waitFor(() => {
+      expect(screen.getByTitle("Board view")).toBeTruthy();
+    });
+
+    // Insights button should not be rendered
+    expect(screen.queryByTitle("Insights view")).toBeNull();
   });
 });
 
