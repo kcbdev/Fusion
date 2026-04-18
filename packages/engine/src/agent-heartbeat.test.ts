@@ -1250,6 +1250,222 @@ describe("HeartbeatMonitor", () => {
       });
     });
 
+    // ── Identity Agents Without Tasks ─────────────────────────────────────────────
+    // FN-2051: Agents with identity (soul, instructions, memory) should run heartbeat
+    // sessions even without a task assignment, enabling them to do ambient work like
+    // messaging, memory management, task creation, and delegation.
+    describe("identity agents without tasks", () => {
+      it("agent WITH soul but no task creates session and completes successfully", async () => {
+        const store = createStoreWithAgentForExec({ taskId: undefined, soul: "I am a coordinator agent who monitors project health" });
+        const mockSession = createMockAgentSession();
+        mockedCreateKbAgent.mockResolvedValue({ session: mockSession as any });
+
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+        const result = await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+        expect(result).toBeDefined();
+        expect(result.status).toBe("completed");
+        // Should create a session
+        expect(mockedCreateKbAgent).toHaveBeenCalledOnce();
+        // Reason should indicate identity run
+        expect(result.resultJson).toEqual(expect.objectContaining({ reason: "no_assignment_identity_run" }));
+      });
+
+      it("agent WITH instructionsText but no task creates session and completes successfully", async () => {
+        const store = createStoreWithAgentForExec({ taskId: undefined, instructionsText: "Monitor task board and create follow-up tasks" });
+        const mockSession = createMockAgentSession();
+        mockedCreateKbAgent.mockResolvedValue({ session: mockSession as any });
+
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+        const result = await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+        expect(result).toBeDefined();
+        expect(result.status).toBe("completed");
+        expect(mockedCreateKbAgent).toHaveBeenCalledOnce();
+        expect(result.resultJson).toEqual(expect.objectContaining({ reason: "no_assignment_identity_run" }));
+      });
+
+      it("agent WITH memory but no task creates session and completes successfully", async () => {
+        const store = createStoreWithAgentForExec({ taskId: undefined, memory: "Last week we shipped the new API. Watch for integration issues." });
+        const mockSession = createMockAgentSession();
+        mockedCreateKbAgent.mockResolvedValue({ session: mockSession as any });
+
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+        const result = await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+        expect(result).toBeDefined();
+        expect(result.status).toBe("completed");
+        expect(mockedCreateKbAgent).toHaveBeenCalledOnce();
+        expect(result.resultJson).toEqual(expect.objectContaining({ reason: "no_assignment_identity_run" }));
+      });
+
+      it("ephemeral agent with soul but no task still bails with no_assignment", async () => {
+        // Ephemeral agents (agentKind: "task-worker") should NOT run no-task sessions
+        const store = createStoreWithAgentForExec({
+          taskId: undefined,
+          soul: "I am a task worker",
+          metadata: { agentKind: "task-worker" },
+        });
+        const mockSession = createMockAgentSession();
+        mockedCreateKbAgent.mockResolvedValue({ session: mockSession as any });
+
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+        const result = await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+        expect(result).toBeDefined();
+        expect(result.status).toBe("completed");
+        // Ephemeral agents should NOT create a session
+        expect(mockedCreateKbAgent).not.toHaveBeenCalled();
+        // Should still exit with no_assignment (not no_assignment_identity_run)
+        expect(result.resultJson).toEqual({ reason: "no_assignment" });
+      });
+
+      it("identity agent without task receives correct tools (task_create, list_agents, delegate_task, heartbeat_done)", async () => {
+        const store = createStoreWithAgentForExec({ taskId: undefined, soul: "I am a coordinator" });
+        const mockSession = createMockAgentSession();
+        mockedCreateKbAgent.mockResolvedValue({ session: mockSession as any });
+
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+        await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+        expect(mockedCreateKbAgent).toHaveBeenCalledOnce();
+        const callArgs = mockedCreateKbAgent.mock.calls[0]![0]!;
+        const toolNames = callArgs.customTools!.map((tool: any) => tool.name);
+
+        // Should have task_create, list_agents, delegate_task
+        expect(toolNames).toContain("task_create");
+        expect(toolNames).toContain("list_agents");
+        expect(toolNames).toContain("delegate_task");
+        // Should have heartbeat_done
+        expect(toolNames).toContain("heartbeat_done");
+        // Should have memory tools
+        expect(toolNames).toContain("memory_search");
+        expect(toolNames).toContain("memory_append");
+
+        // Should NOT have task_log, task_document_write, task_document_read (they require taskId)
+        expect(toolNames).not.toContain("task_log");
+        expect(toolNames).not.toContain("task_document_write");
+        expect(toolNames).not.toContain("task_document_read");
+      });
+
+      it("identity agent without task receives no-task execution prompt mentioning 'no assigned task'", async () => {
+        const store = createStoreWithAgentForExec({ taskId: undefined, soul: "I am a coordinator" });
+        const mockSession = createMockAgentSession();
+        mockedCreateKbAgent.mockResolvedValue({ session: mockSession as any });
+
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+        await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+        expect(mockedCreateKbAgent).toHaveBeenCalledOnce();
+        // The execution prompt is passed to session.prompt by promptWithFallback mock
+        const promptCalls = mockSession.prompt.mock.calls;
+        expect(promptCalls.length).toBeGreaterThan(0);
+        const executionPrompt = promptCalls[promptCalls.length - 1]![0]!;
+
+        // Should mention no assigned task
+        expect(executionPrompt).toContain("No assigned task");
+        // Should describe ambient work capabilities
+        expect(executionPrompt).toContain("ambient work");
+        expect(executionPrompt).toContain("task_create");
+        expect(executionPrompt).toContain("list_agents");
+        expect(executionPrompt).toContain("delegate_task");
+        // Should NOT include task-specific content
+        expect(executionPrompt).not.toContain("Assigned task:");
+        expect(executionPrompt).not.toContain("Task description:");
+      });
+
+      it("identity agent without task gets soul in system prompt", async () => {
+        const store = createStoreWithAgentForExec({ taskId: undefined, soul: "I am a CEO who prioritizes high-impact work" });
+        const mockSession = createMockAgentSession();
+        mockedCreateKbAgent.mockResolvedValue({ session: mockSession as any });
+
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+        await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+        expect(mockedCreateKbAgent).toHaveBeenCalledOnce();
+        const callArgs = mockedCreateKbAgent.mock.calls[0]![0]!;
+        // Soul should be in the system prompt
+        expect(callArgs.systemPrompt).toContain("## Soul");
+        expect(callArgs.systemPrompt).toContain("I am a CEO who prioritizes high-impact work");
+      });
+
+      it("agent WITHOUT identity (no soul, instructions, memory) still exits with no_assignment", async () => {
+        // Agent with empty strings should also exit gracefully
+        const store = createStoreWithAgentForExec({
+          taskId: undefined,
+          soul: "",
+          instructionsText: "",
+          memory: "",
+        });
+        const mockSession = createMockAgentSession();
+        mockedCreateKbAgent.mockResolvedValue({ session: mockSession as any });
+
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+        const result = await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+        expect(result).toBeDefined();
+        expect(result.status).toBe("completed");
+        // Should NOT create a session for agents without identity
+        expect(mockedCreateKbAgent).not.toHaveBeenCalled();
+        expect(result.resultJson).toEqual({ reason: "no_assignment" });
+      });
+
+      it("identity agent without task includes messaging tools when messageStore is available", async () => {
+        const store = createStoreWithAgentForExec({ taskId: undefined, soul: "I am a coordinator" });
+        const mockSession = createMockAgentSession();
+        mockedCreateKbAgent.mockResolvedValue({ session: mockSession as any });
+
+        const messageStore = {
+          setMessageToAgentHook: vi.fn(),
+          getInbox: vi.fn().mockReturnValue([]),
+          markAllAsRead: vi.fn(),
+        } as unknown as MessageStore;
+
+        const monitor = new HeartbeatMonitor({
+          store,
+          messageStore,
+          taskStore: mockTaskStore,
+          rootDir: "/tmp",
+        });
+
+        await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+        expect(mockedCreateKbAgent).toHaveBeenCalledOnce();
+        const callArgs = mockedCreateKbAgent.mock.calls[0]![0]!;
+        const toolNames = callArgs.customTools!.map((tool: any) => tool.name);
+
+        // Should have messaging tools when messageStore is available
+        expect(toolNames).toContain("send_message");
+        expect(toolNames).toContain("read_messages");
+      });
+
+      it("identity agent without task does NOT include messaging tools when messageStore is unavailable", async () => {
+        const store = createStoreWithAgentForExec({ taskId: undefined, soul: "I am a coordinator" });
+        const mockSession = createMockAgentSession();
+        mockedCreateKbAgent.mockResolvedValue({ session: mockSession as any });
+
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+        await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+        expect(mockedCreateKbAgent).toHaveBeenCalledOnce();
+        const callArgs = mockedCreateKbAgent.mock.calls[0]![0]!;
+        const toolNames = callArgs.customTools!.map((tool: any) => tool.name);
+
+        // Should NOT have messaging tools when messageStore is not available
+        expect(toolNames).not.toContain("send_message");
+        expect(toolNames).not.toContain("read_messages");
+      });
+    });
+
     describe("blocked-task dedup", () => {
       const buildContextHash = (blockedBy: string, taskDetail: Partial<TaskDetail>): string => {
         const commentCount = (taskDetail.comments?.length ?? 0) + (taskDetail.steeringComments?.length ?? 0);

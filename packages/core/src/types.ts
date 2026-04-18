@@ -2045,6 +2045,26 @@ export function isEphemeralAgent(
   return false;
 }
 
+/**
+ * Check if an agent has meaningful identity content (soul, instructions, or memory).
+ * Agents with identity should run heartbeat sessions even without a task assignment,
+ * so they can load their prompts and do useful ambient work.
+ *
+ * @param agent - Agent object (partial shape accepted, null/undefined returns false)
+ * @returns true if the agent has any of: soul, instructionsText, instructionsPath, or memory with non-empty trimmed content
+ */
+export function hasAgentIdentity(
+  agent: { soul?: string | null; instructionsText?: string | null; instructionsPath?: string | null; memory?: string | null } | null | undefined,
+): boolean {
+  if (!agent) return false;
+  return !!(
+    agent.soul?.trim() ||
+    agent.instructionsText?.trim() ||
+    agent.instructionsPath?.trim() ||
+    agent.memory?.trim()
+  );
+}
+
 /** Single heartbeat event recorded for an agent */
 export interface AgentHeartbeatEvent {
   /** ISO-8601 timestamp of when the heartbeat was recorded */

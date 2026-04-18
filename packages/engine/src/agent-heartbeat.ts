@@ -18,7 +18,7 @@
  */
 
 import type { AgentStore, AgentHeartbeatRun, HeartbeatInvocationSource, AgentHeartbeatConfig, AgentBudgetStatus, Message, MessageStore, TaskStore, TaskDetail, AgentRole, Agent, InboxTask, BlockedStateSnapshot, RunMutationContext, Settings } from "@fusion/core";
-import { buildExecutionMemoryInstructions } from "@fusion/core";
+import { buildExecutionMemoryInstructions, isEphemeralAgent, hasAgentIdentity } from "@fusion/core";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import { createTaskCreateTool, createTaskLogToolWithContext, createTaskDocumentWriteTool, createTaskDocumentReadTool, createListAgentsTool, createDelegateTaskTool, createSendMessageTool, createReadMessagesTool, createMemoryTools, taskCreateParams } from "./agent-tools.js";
@@ -751,6 +751,10 @@ export class HeartbeatMonitor {
           return (await this.store.getRunDetail(agentId, run.id))!;
         }
 
+        // Check if agent has identity (used later for no-task run decisions)
+        const agentHasIdentity = hasAgentIdentity(agent);
+        const isAgentEphemeral = isEphemeralAgent(agent);
+
         // Resolve task assignment (explicit override → existing assignment → inbox-lite selection)
         let taskId = explicitTaskId ?? agent.taskId;
         let inboxSelection: InboxTask | null = null;
@@ -802,103 +806,120 @@ export class HeartbeatMonitor {
         }
 
         if (!taskId) {
-          heartbeatLog.log(`Agent ${agentId} has no task assignment — graceful exit`);
-          await this.completeRun(agentId, run.id, {
-            status: "completed",
-            resultJson: { reason: "no_assignment" },
-          });
-          return (await this.store.getRunDetail(agentId, run.id))!;
-        }
-
-        // Validate agent state
-        const validStates = ["active", "running", "idle"];
-        if (!validStates.includes(agent.state)) {
-          heartbeatLog.log(`Agent ${agentId} state is "${agent.state}" — graceful exit`);
-          await this.completeRun(agentId, run.id, {
-            status: "completed",
-            resultJson: { reason: "invalid_state", state: agent.state },
-            skipStateTransition: true,
-          });
-          return (await this.store.getRunDetail(agentId, run.id))!;
-        }
-
-        // Fetch task context
-        let taskDetail: TaskDetail;
-        try {
-          taskDetail = await taskStore.getTask(taskId);
-        } catch {
-          heartbeatLog.warn(`Task ${taskId} not found — graceful exit`);
-          await this.completeRun(agentId, run.id, {
-            status: "completed",
-            resultJson: { reason: "task_not_found", taskId },
-          });
-          return (await this.store.getRunDetail(agentId, run.id))!;
-        }
-
-        // Checkout enforcement: agent must hold the lease to work on this task.
-        // The heartbeat only validates existing checkout state — it does NOT attempt
-        // to acquire a checkout itself. The calling system (scheduler, API trigger)
-        // is responsible for checking out the task before the heartbeat starts.
-        if (taskDetail.checkedOutBy && taskDetail.checkedOutBy !== agentId) {
-          heartbeatLog.warn(
-            `Agent ${agentId} does not hold checkout for ${taskId} (held by ${taskDetail.checkedOutBy}) — graceful exit`
-          );
-          await this.completeRun(agentId, run.id, {
-            status: "completed",
-            resultJson: {
-              reason: "checkout_conflict",
-              taskId,
-              checkedOutBy: taskDetail.checkedOutBy,
-            },
-          });
-          return (await this.store.getRunDetail(agentId, run.id))!;
-        }
-
-        const blockedBy = typeof taskDetail.blockedBy === "string" ? taskDetail.blockedBy.trim() : "";
-        const isBlockedTask = taskDetail.status === "queued" && blockedBy.length > 0;
-
-        if (isBlockedTask) {
-          const commentCount = (taskDetail.comments?.length ?? 0) + (taskDetail.steeringComments?.length ?? 0);
-          const lastCommentId = taskDetail.comments?.at(-1)?.id;
-          const lastSteeringCommentId = taskDetail.steeringComments?.at(-1)?.id;
-          const contextHash = Buffer.from(
-            JSON.stringify({ commentCount, lastCommentId, lastSteeringCommentId, blockedBy }),
-          )
-            .toString("base64")
-            .slice(0, 16);
-
-          const currentBlockedState: BlockedStateSnapshot = {
-            taskId,
-            blockedBy,
-            recordedAt: new Date().toISOString(),
-            contextHash,
-          };
-
-          const previousBlockedState = await this.store.getLastBlockedState(agentId);
-          if (previousBlockedState && isBlockedStateDuplicate(currentBlockedState, previousBlockedState)) {
-            heartbeatLog.log(`Task ${taskId} is still blocked by ${blockedBy} (duplicate state) — skipping comment`);
+          // Agents with identity (soul, instructions, memory) should run a full heartbeat
+          // session even without a task, so they can do ambient work like messaging,
+          // memory management, task creation, and delegation.
+          // Ephemeral agents and agents without identity still exit gracefully.
+          if (!agentHasIdentity || isAgentEphemeral) {
+            heartbeatLog.log(`Agent ${agentId} has no task assignment — graceful exit`);
             await this.completeRun(agentId, run.id, {
               status: "completed",
-              resultJson: { reason: "blocked_duplicate", taskId, blockedBy },
+              resultJson: { reason: "no_assignment" },
+            });
+            return (await this.store.getRunDetail(agentId, run.id))!;
+          }
+          heartbeatLog.log(`Agent ${agentId} has no task but has identity — running no-task heartbeat`);
+        }
+        const isNoTaskRun = !taskId;
+
+        // Validate agent state (only for task-scoped runs)
+        if (!isNoTaskRun) {
+          const validStates = ["active", "running", "idle"];
+          if (!validStates.includes(agent.state)) {
+            heartbeatLog.log(`Agent ${agentId} state is "${agent.state}" — graceful exit`);
+            await this.completeRun(agentId, run.id, {
+              status: "completed",
+              resultJson: { reason: "invalid_state", state: agent.state },
+              skipStateTransition: true,
+            });
+            return (await this.store.getRunDetail(agentId, run.id))!;
+          }
+        }
+
+        // Fetch task context (only for task-scoped runs)
+        let taskDetail: TaskDetail | undefined;
+        if (!isNoTaskRun) {
+          // taskId is guaranteed to be defined here because isNoTaskRun = !taskId
+          const resolvedTaskId = taskId!;
+          try {
+            taskDetail = await taskStore.getTask(resolvedTaskId);
+          } catch {
+            heartbeatLog.warn(`Task ${resolvedTaskId} not found — graceful exit`);
+            await this.completeRun(agentId, run.id, {
+              status: "completed",
+              resultJson: { reason: "task_not_found", taskId: resolvedTaskId },
             });
             return (await this.store.getRunDetail(agentId, run.id))!;
           }
 
-          const blockedMessage = `Task is blocked by ${blockedBy}; waiting for dependency/context changes before retrying.`;
-          await taskStore.addComment(taskId, blockedMessage, "agent", undefined, runContext);
-          // Audit trail: record comment mutation (FN-1404)
-          await audit.database({ type: "task:comment:add", target: taskId, metadata: { blockedBy } });
-          await this.store.setLastBlockedState(agentId, currentBlockedState);
+          // Checkout enforcement: agent must hold the lease to work on this task.
+          // The heartbeat only validates existing checkout state — it does NOT attempt
+          // to acquire a checkout itself. The calling system (scheduler, API trigger)
+          // is responsible for checking out the task before the heartbeat starts.
+          if (taskDetail.checkedOutBy && taskDetail.checkedOutBy !== agentId) {
+            heartbeatLog.warn(
+              `Agent ${agentId} does not hold checkout for ${resolvedTaskId} (held by ${taskDetail.checkedOutBy}) — graceful exit`
+            );
+            await this.completeRun(agentId, run.id, {
+              status: "completed",
+              resultJson: {
+                reason: "checkout_conflict",
+                taskId: resolvedTaskId,
+                checkedOutBy: taskDetail.checkedOutBy,
+              },
+            });
+            return (await this.store.getRunDetail(agentId, run.id))!;
+          }
 
-          heartbeatLog.log(`Task ${taskId} is blocked by ${blockedBy} — recorded blocked state`);
-          await this.completeRun(agentId, run.id, {
-            status: "completed",
-            resultJson: { reason: "blocked", taskId, blockedBy },
-          });
-          return (await this.store.getRunDetail(agentId, run.id))!;
+          const blockedBy = typeof taskDetail.blockedBy === "string" ? taskDetail.blockedBy.trim() : "";
+          const isBlockedTask = taskDetail.status === "queued" && blockedBy.length > 0;
+
+          if (isBlockedTask) {
+            const commentCount = (taskDetail.comments?.length ?? 0) + (taskDetail.steeringComments?.length ?? 0);
+            const lastCommentId = taskDetail.comments?.at(-1)?.id;
+            const lastSteeringCommentId = taskDetail.steeringComments?.at(-1)?.id;
+            const contextHash = Buffer.from(
+              JSON.stringify({ commentCount, lastCommentId, lastSteeringCommentId, blockedBy }),
+            )
+              .toString("base64")
+              .slice(0, 16);
+
+            const currentBlockedState: BlockedStateSnapshot = {
+              taskId: resolvedTaskId,
+              blockedBy,
+              recordedAt: new Date().toISOString(),
+              contextHash,
+            };
+
+            const previousBlockedState = await this.store.getLastBlockedState(agentId);
+            if (previousBlockedState && isBlockedStateDuplicate(currentBlockedState, previousBlockedState)) {
+              heartbeatLog.log(`Task ${resolvedTaskId} is still blocked by ${blockedBy} (duplicate state) — skipping comment`);
+              await this.completeRun(agentId, run.id, {
+                status: "completed",
+                resultJson: { reason: "blocked_duplicate", taskId: resolvedTaskId, blockedBy },
+              });
+              return (await this.store.getRunDetail(agentId, run.id))!;
+            }
+
+            const blockedMessage = `Task is blocked by ${blockedBy}; waiting for dependency/context changes before retrying.`;
+            await taskStore.addComment(resolvedTaskId, blockedMessage, "agent", undefined, runContext);
+            // Audit trail: record comment mutation (FN-1404)
+            await audit.database({ type: "task:comment:add", target: resolvedTaskId, metadata: { blockedBy } });
+            await this.store.setLastBlockedState(agentId, currentBlockedState);
+
+            heartbeatLog.log(`Task ${resolvedTaskId} is blocked by ${blockedBy} — recorded blocked state`);
+            await this.completeRun(agentId, run.id, {
+              status: "completed",
+              resultJson: { reason: "blocked", taskId: resolvedTaskId, blockedBy },
+            });
+            return (await this.store.getRunDetail(agentId, run.id))!;
+          }
         }
 
-        await this.store.clearLastBlockedState(agentId);
+        // Clear blocked state when task is no longer blocked (only for task-scoped runs)
+        if (!isNoTaskRun) {
+          await this.store.clearLastBlockedState(agentId);
+        }
 
         // Track usage via callbacks
         const STDOUT_EXCERPT_LIMIT = 4000;
@@ -940,8 +961,30 @@ export class HeartbeatMonitor {
         const { buildSessionSkillContextSync } = await import("./session-skill-context.js");
 
         // Build tools with task creation tracking and run context for mutation correlation
-        // Pass messageStore for messaging tools (send_message, read_messages)
-        const heartbeatTools = this.createHeartbeatTools(agentId, taskStore, taskId, runContext, audit, this.messageStore);
+        // For no-task runs, exclude task_log and document tools (they require a taskId)
+        let heartbeatTools: ToolDefinition[];
+        if (isNoTaskRun) {
+          // No-task runs: task_create, list_agents, delegate_task, messaging, memory, heartbeat_done
+          heartbeatTools = [];
+
+          // task_create tool (no tracking needed for no-task runs)
+          heartbeatTools.push(createTaskCreateTool(taskStore));
+
+          // Agent delegation tools
+          heartbeatTools.push(createListAgentsTool(this.store));
+          heartbeatTools.push(createDelegateTaskTool(this.store, taskStore));
+
+          // Messaging tools — when MessageStore is available
+          if (this.messageStore) {
+            heartbeatTools.push(createSendMessageTool(this.messageStore, agentId));
+            heartbeatTools.push(createReadMessagesTool(this.messageStore, agentId));
+          }
+        } else {
+          // Task-scoped runs: full tool set including task_log and document tools
+          // taskId is guaranteed to be defined here because isNoTaskRun = !taskId
+          heartbeatTools = this.createHeartbeatTools(agentId, taskStore, taskId!, runContext, audit, this.messageStore);
+        }
+
         let memorySettings: Settings | undefined;
         try {
           memorySettings = await getHeartbeatMemorySettings(taskStore);
@@ -958,11 +1001,14 @@ export class HeartbeatMonitor {
         }
         heartbeatTools.push(heartbeatDoneTool);
 
-        agentLogger = new AgentLogger({
-          store: taskStore,
-          taskId,
-          agent: agent.role as AgentRole,
-        });
+        // AgentLogger requires a taskId — only create for task-scoped runs
+        if (!isNoTaskRun && taskId) {
+          agentLogger = new AgentLogger({
+            store: taskStore,
+            taskId,
+            agent: agent.role as AgentRole,
+          });
+        }
 
         // Build skill selection context for heartbeat session (uses waking agent's skills, no role fallback)
         const skillContext = buildSessionSkillContextSync(agent, "heartbeat", rootDir);
@@ -1014,75 +1060,132 @@ export class HeartbeatMonitor {
 
         try {
           // Build execution prompt
-          const taskTitle = taskDetail.title ?? taskDetail.description.slice(0, 100);
-
-          // Fetch unread messages when woken by message trigger
           let pendingMessages: Message[] = [];
-          if (triggerDetail === "wake-on-message" && this.messageStore) {
-            try {
-              pendingMessages = this.messageStore.getInbox(agentId, "agent", { read: false, limit: 10 });
-            } catch {
-              // Non-critical — if message fetch fails, proceed without messages
-              heartbeatLog.warn(`Failed to fetch inbox messages for ${agentId} during wake-on-message`);
-            }
-          }
+          let executionPrompt: string;
 
-          const triggeringCommentLines: string[] = [];
-          if (effectiveTriggeringCommentIds && effectiveTriggeringCommentIds.length > 0) {
-            const commentLookup = new Map<string, { author: string; text: string }>();
-            for (const comment of taskDetail.comments ?? []) {
-              commentLookup.set(comment.id, { author: comment.author, text: comment.text });
-            }
-            for (const steeringComment of taskDetail.steeringComments ?? []) {
-              commentLookup.set(steeringComment.id, { author: steeringComment.author, text: steeringComment.text });
-            }
-
-            const formatCommentText = (text: string): string => text.replace(/\s+/g, " ").trim();
-
-            for (const commentId of effectiveTriggeringCommentIds) {
-              const comment = commentLookup.get(commentId);
-              if (comment) {
-                triggeringCommentLines.push(`- [${comment.author}]: "${formatCommentText(comment.text)}"`);
+          if (isNoTaskRun) {
+            // No-task heartbeat: agent has identity but no assigned task
+            // Fetch unread messages when woken by message trigger
+            if (triggerDetail === "wake-on-message" && this.messageStore) {
+              try {
+                pendingMessages = this.messageStore.getInbox(agentId, "agent", { read: false, limit: 10 });
+              } catch {
+                heartbeatLog.warn(`Failed to fetch inbox messages for ${agentId} during wake-on-message`);
               }
             }
 
-            if (triggeringCommentLines.length > 0) {
-              triggeringCommentLines.unshift(
+            // Build pending messages section
+            const pendingMessagesLines: string[] = [];
+            if (pendingMessages.length > 0) {
+              pendingMessagesLines.push(
                 "",
-                "You were woken because of new comments on this task. Review them and take appropriate action.",
-                `Triggering comment type: ${effectiveTriggeringCommentType ?? "task"}`,
-                "New comments since last run:",
+                "Pending Messages:",
+                ...pendingMessages.map((msg) => {
+                  const timestamp = new Date(msg.createdAt).toLocaleString();
+                  return `- [from: ${msg.fromId}] ${msg.content} (${timestamp})`;
+                }),
               );
             }
-          }
 
-          // Build pending messages section
-          const pendingMessagesLines: string[] = [];
-          if (pendingMessages.length > 0) {
-            pendingMessagesLines.push(
+            executionPrompt = [
+              `Heartbeat execution for agent "${agent.name}" (ID: ${agent.id})`,
+              `Source: ${source}${triggerDetail ? ` (${triggerDetail})` : ""}`,
               "",
-              "Pending Messages:",
-              ...pendingMessages.map((msg) => {
-                const timestamp = new Date(msg.createdAt).toLocaleString();
-                return `- [from: ${msg.fromId}] ${msg.content} (${timestamp})`;
-              }),
-            );
-          }
+              "**No assigned task** — This heartbeat run has no task assignment.",
+              "",
+              "You have identity (soul, instructions, and/or memory) loaded, which means you can perform",
+              "useful ambient work. Here are some things you can do:",
+              "",
+              "1. **Check your messages** — Use read_messages to review any pending messages",
+              "   and use send_message to respond or communicate with other agents.",
+              "",
+              "2. **Create new tasks** — Use task_create to spawn follow-up work that needs",
+              "   to be done. This is useful for surfacing issues or ideas you discover.",
+              "",
+              "3. **Delegate work** — Use list_agents to discover available agents and",
+              "   delegate_task to assign work to them.",
+              "",
+              "4. **Update your memory** — Use memory_append to persist important learnings",
+              "   or context that will help you in future sessions.",
+              "",
+              "5. **Monitor the project** — Review the task board and identify any issues",
+              "   or opportunities that should be addressed.",
+              ...pendingMessagesLines,
+              "",
+              "Your soul, instructions, and memory are already loaded in the system prompt.",
+              "Focus on work that benefits the project without requiring a specific task context.",
+              "Call heartbeat_done when finished.",
+            ].join("\n");
+          } else {
+            // Task-scoped heartbeat: agent has an assigned task
+            const taskTitle = taskDetail!.title ?? taskDetail!.description.slice(0, 100);
 
-          const executionPrompt = [
-            `Heartbeat execution for agent "${agent.name}" (ID: ${agent.id})`,
-            `Source: ${source}${triggerDetail ? ` (${triggerDetail})` : ""}`,
-            `Assigned task: ${taskId} — ${taskTitle}`,
-            "",
-            "Task description:",
-            taskDetail.description,
-            "",
-            taskDetail.prompt ? `PROMPT.md:\n${taskDetail.prompt}` : "No PROMPT.md available.",
-            ...triggeringCommentLines,
-            ...pendingMessagesLines,
-            "",
-            "Review the task status and take appropriate action. Call heartbeat_done when finished.",
-          ].join("\n");
+            // Fetch unread messages when woken by message trigger
+            if (triggerDetail === "wake-on-message" && this.messageStore) {
+              try {
+                pendingMessages = this.messageStore.getInbox(agentId, "agent", { read: false, limit: 10 });
+              } catch {
+                heartbeatLog.warn(`Failed to fetch inbox messages for ${agentId} during wake-on-message`);
+              }
+            }
+
+            const triggeringCommentLines: string[] = [];
+            if (effectiveTriggeringCommentIds && effectiveTriggeringCommentIds.length > 0) {
+              const commentLookup = new Map<string, { author: string; text: string }>();
+              for (const comment of taskDetail!.comments ?? []) {
+                commentLookup.set(comment.id, { author: comment.author, text: comment.text });
+              }
+              for (const steeringComment of taskDetail!.steeringComments ?? []) {
+                commentLookup.set(steeringComment.id, { author: steeringComment.author, text: steeringComment.text });
+              }
+
+              const formatCommentText = (text: string): string => text.replace(/\s+/g, " ").trim();
+
+              for (const commentId of effectiveTriggeringCommentIds) {
+                const comment = commentLookup.get(commentId);
+                if (comment) {
+                  triggeringCommentLines.push(`- [${comment.author}]: "${formatCommentText(comment.text)}"`);
+                }
+              }
+
+              if (triggeringCommentLines.length > 0) {
+                triggeringCommentLines.unshift(
+                  "",
+                  "You were woken because of new comments on this task. Review them and take appropriate action.",
+                  `Triggering comment type: ${effectiveTriggeringCommentType ?? "task"}`,
+                  "New comments since last run:",
+                );
+              }
+            }
+
+            // Build pending messages section
+            const pendingMessagesLines: string[] = [];
+            if (pendingMessages.length > 0) {
+              pendingMessagesLines.push(
+                "",
+                "Pending Messages:",
+                ...pendingMessages.map((msg) => {
+                  const timestamp = new Date(msg.createdAt).toLocaleString();
+                  return `- [from: ${msg.fromId}] ${msg.content} (${timestamp})`;
+                }),
+              );
+            }
+
+            executionPrompt = [
+              `Heartbeat execution for agent "${agent.name}" (ID: ${agent.id})`,
+              `Source: ${source}${triggerDetail ? ` (${triggerDetail})` : ""}`,
+              `Assigned task: ${taskId} — ${taskTitle}`,
+              "",
+              "Task description:",
+              taskDetail!.description,
+              "",
+              taskDetail!.prompt ? `PROMPT.md:\n${taskDetail!.prompt}` : "No PROMPT.md available.",
+              ...triggeringCommentLines,
+              ...pendingMessagesLines,
+              "",
+              "Review the task status and take appropriate action. Call heartbeat_done when finished.",
+            ].join("\n");
+          }
 
           // Execute
           await promptWithFallback(session, executionPrompt);
@@ -1106,7 +1209,10 @@ export class HeartbeatMonitor {
             summary: heartbeatSummary,
             toolCallCount,
           };
-          if (inboxSelection) {
+          if (isNoTaskRun) {
+            // Identity agents without tasks get a special reason for observability
+            completionResultJson.reason = "no_assignment_identity_run";
+          } else if (inboxSelection) {
             completionResultJson.reason = "inbox_selected";
             completionResultJson.priority = inboxSelection.priority;
             completionResultJson.taskId = taskId;
