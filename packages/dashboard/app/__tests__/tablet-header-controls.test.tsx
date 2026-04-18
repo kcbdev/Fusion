@@ -98,6 +98,41 @@ describe("tablet header controls", () => {
     expect(screen.getByTitle("Board view")).toBeDefined();
     expect(screen.getByTitle("List view")).toBeDefined();
     expect(screen.getByTitle("Agents view")).toBeDefined();
+    // Skills, Roadmaps, Insights are NOT inline (they're in overflow)
+    expect(screen.queryByTitle("Skills view")).toBeNull();
+    expect(screen.queryByTitle("Roadmaps view")).toBeNull();
+    expect(screen.queryByTitle("Insights view")).toBeNull();
+  });
+
+  it("renders view toggle overflow trigger on tablet", () => {
+    renderTabletHeader({ onChangeView: noop });
+    expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeDefined();
+  });
+
+  it("opens overflow menu with Insights, Roadmaps, Skills on tablet when trigger is clicked", () => {
+    renderTabletHeader({ onChangeView: noop, showSkillsTab: true, experimentalFeatures: { insights: true, roadmap: true } });
+    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+    expect(screen.getByTestId("view-overflow-insights")).toBeDefined();
+    expect(screen.getByTestId("view-overflow-roadmaps")).toBeDefined();
+    expect(screen.getByTestId("view-overflow-skills")).toBeDefined();
+  });
+
+  it("calls onChangeView from overflow menu on tablet", () => {
+    const onChangeView = vi.fn();
+    renderTabletHeader({ onChangeView, experimentalFeatures: { insights: true } });
+    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+    fireEvent.click(screen.getByTestId("view-overflow-insights"));
+    expect(onChangeView).toHaveBeenCalledWith("insights");
+  });
+
+  it("closes overflow menu on tablet after selecting an item", async () => {
+    renderTabletHeader({ onChangeView: noop, showSkillsTab: true, experimentalFeatures: { insights: true, roadmap: true } });
+    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+    expect(screen.getByTestId("view-overflow-insights")).toBeDefined();
+    fireEvent.click(screen.getByTestId("view-overflow-skills"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("view-overflow-insights")).toBeNull();
+    });
   });
 
   // ── Lower-priority actions move to overflow on tablet ──────────

@@ -1254,11 +1254,12 @@ describe("App view switching", () => {
 
     // Wait for the header to render
     await waitFor(() => {
-      expect(screen.getByTitle("Insights view")).toBeTruthy();
+      expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeTruthy();
     });
 
-    // Click to switch to insights view
-    fireEvent.click(screen.getByTitle("Insights view"));
+    // Open the overflow menu and click Insights
+    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+    fireEvent.click(screen.getByTestId("view-overflow-insights"));
 
     // Insights view should be rendered (it has a insights-view container)
     await waitFor(() => {
@@ -1277,10 +1278,11 @@ describe("App view switching", () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByTitle("Insights view")).toBeTruthy();
+      expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByTitle("Insights view"));
+    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+    fireEvent.click(screen.getByTestId("view-overflow-insights"));
 
     await waitFor(() => {
       expect(localStorage.getItem(taskViewStorageKey())).toBe("insights");
@@ -1296,7 +1298,8 @@ describe("App view switching", () => {
       expect(document.querySelector(".insights-view")).toBeTruthy();
     });
 
-    expect(screen.getByTitle("Insights view").className).toContain("active");
+    // Overflow trigger should be active when view is insights
+    expect(screen.getByTestId("view-toggle-overflow-trigger").className).toContain("active");
 
     localStorage.removeItem(taskViewStorageKey());
   });
@@ -1319,8 +1322,8 @@ describe("App view switching", () => {
       expect(document.querySelector(".insights-view")).toBeTruthy();
     });
 
-    // Verify insights is active
-    expect(screen.getByTitle("Insights view").className).toContain("active");
+    // Verify overflow trigger is active
+    expect(screen.getByTestId("view-toggle-overflow-trigger").className).toContain("active");
 
     // Cleanup
     localStorage.removeItem("kb:proj_a:kb-dashboard-task-view");
@@ -1341,8 +1344,9 @@ describe("App view switching", () => {
       expect(screen.getByTitle("Board view")).toBeTruthy();
     });
 
-    // Insights button should not be rendered
-    expect(screen.queryByTitle("Insights view")).toBeNull();
+    // Open the overflow menu - Insights item should not be rendered
+    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+    expect(screen.queryByTestId("view-overflow-insights")).toBeNull();
   });
 });
 

@@ -268,6 +268,7 @@ export function Header({
   const [isTerminalSubmenuOpen, setIsTerminalSubmenuOpen] = useState(false);
   const [isNodeSelectorOpen, setIsNodeSelectorOpen] = useState(false);
   const [isMobileProjectSwitchOpen, setIsMobileProjectSwitchOpen] = useState(false);
+  const [isViewOverflowOpen, setIsViewOverflowOpen] = useState(false);
   const [overflowScripts, setOverflowScripts] = useState<Record<string, string>>({});
   const [overflowScriptsLoading, setOverflowScriptsLoading] = useState(false);
   const overflowButtonRef = useRef<HTMLButtonElement>(null);
@@ -277,6 +278,8 @@ export function Header({
   const terminalSubmenuOpenRef = useRef(false);
   const nodeSelectorRef = useRef<HTMLDivElement>(null);
   const mobileProjectSwitchRef = useRef<HTMLDivElement>(null);
+  const viewOverflowRef = useRef<HTMLDivElement>(null);
+  const viewOverflowTriggerRef = useRef<HTMLButtonElement>(null);
   
   // Get remote nodes only (exclude local node type)
   const remoteNodes = useMemo(() => 
@@ -380,6 +383,7 @@ export function Header({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        setIsViewOverflowOpen(false);
         if (terminalSubmenuOpenRef.current) {
           setIsTerminalSubmenuOpen(false);
           return;
@@ -411,6 +415,25 @@ export function Header({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isMobileProjectSwitchOpen]);
+
+  // Close view toggle overflow on outside click
+  useEffect(() => {
+    if (!isViewOverflowOpen) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        viewOverflowRef.current &&
+        !viewOverflowRef.current.contains(e.target as Node) &&
+        viewOverflowTriggerRef.current &&
+        !viewOverflowTriggerRef.current.contains(e.target as Node)
+      ) {
+        setIsViewOverflowOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isViewOverflowOpen]);
 
   const handleMobileSearchToggle = useCallback(() => {
     setIsMobileSearchOpen((prev) => !prev);
@@ -744,38 +767,68 @@ export function Header({
             >
               <Mail size={16} />
             </button>
-            {showSkillsTab && (
-              <button
-                className={`view-toggle-btn${view === "skills" ? " active" : ""}`}
-                onClick={() => onChangeView("skills")}
-                title="Skills view"
-                aria-label="Skills view"
-                aria-pressed={view === "skills"}
+            <button
+              ref={viewOverflowTriggerRef}
+              className={`view-toggle-btn${["skills", "roadmaps", "insights"].includes(view) ? " active" : ""}`}
+              onClick={() => setIsViewOverflowOpen((prev) => !prev)}
+              title="More views"
+              aria-label="More views"
+              aria-haspopup="menu"
+              aria-expanded={isViewOverflowOpen}
+              data-testid="view-toggle-overflow-trigger"
+            >
+              <ChevronDown size={12} />
+            </button>
+            {isViewOverflowOpen && (
+              <div
+                ref={viewOverflowRef}
+                className="view-toggle-overflow-menu"
+                role="menu"
+                aria-label="More views"
               >
-                <Zap size={16} />
-              </button>
-            )}
-            {experimentalFeatures?.roadmap && (
-              <button
-                className={`view-toggle-btn${view === "roadmaps" ? " active" : ""}`}
-                onClick={() => onChangeView("roadmaps")}
-                title="Roadmaps view"
-                aria-label="Roadmaps view"
-                aria-pressed={view === "roadmaps"}
-              >
-                <Map size={16} />
-              </button>
-            )}
-            {experimentalFeatures?.insights && (
-              <button
-                className={`view-toggle-btn${view === "insights" ? " active" : ""}`}
-                onClick={() => onChangeView("insights")}
-                title="Insights view"
-                aria-label="Insights view"
-                aria-pressed={view === "insights"}
-              >
-                <Sparkles size={16} />
-              </button>
+                {experimentalFeatures?.insights && (
+                  <button
+                    className={`view-toggle-overflow-item${view === "insights" ? " active" : ""}`}
+                    onClick={() => {
+                      onChangeView("insights");
+                      setIsViewOverflowOpen(false);
+                    }}
+                    role="menuitem"
+                    data-testid="view-overflow-insights"
+                  >
+                    <Sparkles size={14} />
+                    <span>Insights</span>
+                  </button>
+                )}
+                {experimentalFeatures?.roadmap && (
+                  <button
+                    className={`view-toggle-overflow-item${view === "roadmaps" ? " active" : ""}`}
+                    onClick={() => {
+                      onChangeView("roadmaps");
+                      setIsViewOverflowOpen(false);
+                    }}
+                    role="menuitem"
+                    data-testid="view-overflow-roadmaps"
+                  >
+                    <Map size={14} />
+                    <span>Roadmaps</span>
+                  </button>
+                )}
+                {showSkillsTab && (
+                  <button
+                    className={`view-toggle-overflow-item${view === "skills" ? " active" : ""}`}
+                    onClick={() => {
+                      onChangeView("skills");
+                      setIsViewOverflowOpen(false);
+                    }}
+                    role="menuitem"
+                    data-testid="view-overflow-skills"
+                  >
+                    <Zap size={14} />
+                    <span>Skills</span>
+                  </button>
+                )}
+              </div>
             )}
           </div>
         )}

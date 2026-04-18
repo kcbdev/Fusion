@@ -358,205 +358,143 @@ describe("Header", () => {
     expect(missionsBtn.getAttribute("aria-pressed")).toBe("false");
   });
 
-  // ── Skills View Toggle ─────────────────────────────────────────
+  // ── View Toggle Overflow ─────────────────────────────────────────
 
-  it("renders skills view button in view toggle when onChangeView is provided", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} showSkillsTab={true} />);
-    const skillsBtn = screen.getByTitle("Skills view");
-    expect(skillsBtn).toBeDefined();
-  });
+  describe("View Toggle Overflow", () => {
+    it("renders overflow trigger button when onChangeView is provided", () => {
+      const onChangeView = vi.fn();
+      render(<Header view="board" onChangeView={onChangeView} />);
+      expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeDefined();
+    });
 
-  it("calls onChangeView with 'skills' when skills view button is clicked", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} showSkillsTab={true} />);
-    const skillsBtn = screen.getByTitle("Skills view");
-    fireEvent.click(skillsBtn);
-    expect(onChangeView).toHaveBeenCalledWith("skills");
-  });
+    it("does not render overflow trigger when onChangeView is not provided", () => {
+      render(<Header view="board" />);
+      expect(screen.queryByTestId("view-toggle-overflow-trigger")).toBeNull();
+    });
 
-  it("marks skills view button as active when view is 'skills'", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="skills" onChangeView={onChangeView} showSkillsTab={true} />);
-    const skillsBtn = screen.getByTitle("Skills view");
-    expect(skillsBtn.className).toContain("active");
-    expect(skillsBtn.getAttribute("aria-pressed")).toBe("true");
-  });
+    it("opens overflow menu when trigger is clicked", () => {
+      const onChangeView = vi.fn();
+      render(<Header view="board" onChangeView={onChangeView} showSkillsTab experimentalFeatures={{ insights: true, roadmap: true }} />);
+      const trigger = screen.getByTestId("view-toggle-overflow-trigger");
+      fireEvent.click(trigger);
+      expect(screen.getByTestId("view-overflow-insights")).toBeDefined();
+      expect(screen.getByTestId("view-overflow-roadmaps")).toBeDefined();
+      expect(screen.getByTestId("view-overflow-skills")).toBeDefined();
+    });
 
-  it("does not mark skills view button as active when view is 'board'", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} showSkillsTab={true} />);
-    const skillsBtn = screen.getByTitle("Skills view");
-    expect(skillsBtn.className).not.toContain("active");
-    expect(skillsBtn.getAttribute("aria-pressed")).toBe("false");
-  });
+    it("closes overflow menu when trigger is clicked again", () => {
+      const onChangeView = vi.fn();
+      render(<Header view="board" onChangeView={onChangeView} showSkillsTab experimentalFeatures={{ insights: true, roadmap: true }} />);
+      const trigger = screen.getByTestId("view-toggle-overflow-trigger");
+      fireEvent.click(trigger);
+      expect(screen.getByTestId("view-overflow-insights")).toBeDefined();
+      fireEvent.click(trigger);
+      expect(screen.queryByTestId("view-overflow-insights")).toBeNull();
+    });
 
-  it("does not render skills view button when showSkillsTab is false", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} showSkillsTab={false} />);
-    expect(screen.queryByTitle("Skills view")).toBeNull();
-  });
+    it("calls onChangeView with 'insights' when Insights overflow item is clicked", () => {
+      const onChangeView = vi.fn();
+      render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ insights: true }} />);
+      fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+      fireEvent.click(screen.getByTestId("view-overflow-insights"));
+      expect(onChangeView).toHaveBeenCalledWith("insights");
+    });
 
-  it("does not render skills view button when showSkillsTab is omitted", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} />);
-    expect(screen.queryByTitle("Skills view")).toBeNull();
-  });
+    it("calls onChangeView with 'roadmaps' when Roadmaps overflow item is clicked", () => {
+      const onChangeView = vi.fn();
+      render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ roadmap: true }} />);
+      fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+      fireEvent.click(screen.getByTestId("view-overflow-roadmaps"));
+      expect(onChangeView).toHaveBeenCalledWith("roadmaps");
+    });
 
-  // ── Chat View Toggle ─────────────────────────────────────────
+    it("calls onChangeView with 'skills' when Skills overflow item is clicked", () => {
+      const onChangeView = vi.fn();
+      render(<Header view="board" onChangeView={onChangeView} showSkillsTab />);
+      fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+      fireEvent.click(screen.getByTestId("view-overflow-skills"));
+      expect(onChangeView).toHaveBeenCalledWith("skills");
+    });
 
-  it("renders chat view button in view toggle when onChangeView is provided", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} />);
-    const chatBtn = screen.getByTitle("Chat view");
-    expect(chatBtn).toBeDefined();
-  });
+    it("shows overflow trigger as active when view is 'insights'", () => {
+      const onChangeView = vi.fn();
+      render(<Header view="insights" onChangeView={onChangeView} experimentalFeatures={{ insights: true }} />);
+      expect(screen.getByTestId("view-toggle-overflow-trigger").className).toContain("active");
+    });
 
-  it("calls onChangeView with 'chat' when chat view button is clicked", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} />);
-    const chatBtn = screen.getByTitle("Chat view");
-    fireEvent.click(chatBtn);
-    expect(onChangeView).toHaveBeenCalledWith("chat");
-  });
+    it("shows overflow trigger as active when view is 'roadmaps'", () => {
+      const onChangeView = vi.fn();
+      render(<Header view="roadmaps" onChangeView={onChangeView} experimentalFeatures={{ roadmap: true }} />);
+      expect(screen.getByTestId("view-toggle-overflow-trigger").className).toContain("active");
+    });
 
-  it("marks chat view button as active when view is 'chat'", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="chat" onChangeView={onChangeView} />);
-    const chatBtn = screen.getByTitle("Chat view");
-    expect(chatBtn.className).toContain("active");
-    expect(chatBtn.getAttribute("aria-pressed")).toBe("true");
-  });
+    it("shows overflow trigger as active when view is 'skills'", () => {
+      const onChangeView = vi.fn();
+      render(<Header view="skills" onChangeView={onChangeView} showSkillsTab />);
+      expect(screen.getByTestId("view-toggle-overflow-trigger").className).toContain("active");
+    });
 
-  it("does not mark chat view button as active when view is 'board'", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} />);
-    const chatBtn = screen.getByTitle("Chat view");
-    expect(chatBtn.className).not.toContain("active");
-    expect(chatBtn.getAttribute("aria-pressed")).toBe("false");
-  });
+    it("overflow trigger is not active when view is 'board'", () => {
+      const onChangeView = vi.fn();
+      render(<Header view="board" onChangeView={onChangeView} />);
+      expect(screen.getByTestId("view-toggle-overflow-trigger").className).not.toContain("active");
+    });
 
-  // ── Mailbox View Toggle ─────────────────────────────────────
+    it("overflow trigger is not active when view is 'list'", () => {
+      const onChangeView = vi.fn();
+      render(<Header view="list" onChangeView={onChangeView} />);
+      expect(screen.getByTestId("view-toggle-overflow-trigger").className).not.toContain("active");
+    });
 
-  it("renders mailbox view button in view toggle when onChangeView is provided", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} />);
-    const mailboxBtn = screen.getByTitle("Mailbox view");
-    expect(mailboxBtn).toBeDefined();
-  });
+    it("closes overflow menu on Escape key", () => {
+      const onChangeView = vi.fn();
+      render(<Header view="board" onChangeView={onChangeView} showSkillsTab experimentalFeatures={{ insights: true }} />);
+      fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+      expect(screen.getByTestId("view-overflow-insights")).toBeDefined();
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(screen.queryByTestId("view-overflow-insights")).toBeNull();
+    });
 
-  it("calls onChangeView with 'mailbox' when mailbox view button is clicked", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} />);
-    const mailboxBtn = screen.getByTitle("Mailbox view");
-    fireEvent.click(mailboxBtn);
-    expect(onChangeView).toHaveBeenCalledWith("mailbox");
-  });
+    it("closes overflow menu on outside click", async () => {
+      const onChangeView = vi.fn();
+      render(<Header view="board" onChangeView={onChangeView} showSkillsTab experimentalFeatures={{ insights: true }} />);
+      fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+      expect(screen.getByTestId("view-overflow-insights")).toBeDefined();
+      // Simulate click outside
+      fireEvent.mouseDown(document.body);
+      await waitFor(() => {
+        expect(screen.queryByTestId("view-overflow-insights")).toBeNull();
+      });
+    });
 
-  it("marks mailbox view button as active when view is 'mailbox'", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="mailbox" onChangeView={onChangeView} />);
-    const mailboxBtn = screen.getByTitle("Mailbox view");
-    expect(mailboxBtn.className).toContain("active");
-    expect(mailboxBtn.getAttribute("aria-pressed")).toBe("true");
-  });
+    it("does not render skills, roadmaps, insights as inline toggle buttons", () => {
+      const onChangeView = vi.fn();
+      render(<Header view="board" onChangeView={onChangeView} showSkillsTab experimentalFeatures={{ insights: true, roadmap: true }} />);
+      expect(screen.queryByTitle("Skills view")).toBeNull();
+      expect(screen.queryByTitle("Roadmaps view")).toBeNull();
+      expect(screen.queryByTitle("Insights view")).toBeNull();
+    });
 
-  it("does not mark mailbox view button as active when view is 'board'", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} />);
-    const mailboxBtn = screen.getByTitle("Mailbox view");
-    expect(mailboxBtn.className).not.toContain("active");
-    expect(mailboxBtn.getAttribute("aria-pressed")).toBe("false");
-  });
+    it("does not render Insights overflow item when experimentalFeatures.insights is false", () => {
+      const onChangeView = vi.fn();
+      render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ insights: false }} />);
+      fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+      expect(screen.queryByTestId("view-overflow-insights")).toBeNull();
+    });
 
-  // ── Roadmaps View Toggle ───────────────────────────────────────
+    it("does not render Roadmaps overflow item when experimentalFeatures.roadmap is false", () => {
+      const onChangeView = vi.fn();
+      render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ roadmap: false }} />);
+      fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+      expect(screen.queryByTestId("view-overflow-roadmaps")).toBeNull();
+    });
 
-  it("renders roadmaps view button in view toggle when experimentalFeatures.roadmap is true", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ roadmap: true }} />);
-    const roadmapsBtn = screen.getByTitle("Roadmaps view");
-    expect(roadmapsBtn).toBeDefined();
-  });
-
-  it("calls onChangeView with 'roadmaps' when roadmaps view button is clicked", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ roadmap: true }} />);
-    const roadmapsBtn = screen.getByTitle("Roadmaps view");
-    fireEvent.click(roadmapsBtn);
-    expect(onChangeView).toHaveBeenCalledWith("roadmaps");
-  });
-
-  it("marks roadmaps view button as active when view is 'roadmaps'", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="roadmaps" onChangeView={onChangeView} experimentalFeatures={{ roadmap: true }} />);
-    const roadmapsBtn = screen.getByTitle("Roadmaps view");
-    expect(roadmapsBtn.className).toContain("active");
-    expect(roadmapsBtn.getAttribute("aria-pressed")).toBe("true");
-  });
-
-  it("does not mark roadmaps view button as active when view is 'board'", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ roadmap: true }} />);
-    const roadmapsBtn = screen.getByTitle("Roadmaps view");
-    expect(roadmapsBtn.className).not.toContain("active");
-    expect(roadmapsBtn.getAttribute("aria-pressed")).toBe("false");
-  });
-
-  it("does not render roadmaps view button when experimentalFeatures.roadmap is false", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ roadmap: false }} />);
-    expect(screen.queryByTitle("Roadmaps view")).toBeNull();
-  });
-
-  it("does not render roadmaps view button when experimentalFeatures is not provided", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} />);
-    expect(screen.queryByTitle("Roadmaps view")).toBeNull();
-  });
-
-  // ── Insights View Toggle ─────────────────────────────────────────
-
-  it("renders insights view button in view toggle when experimentalFeatures.insights is true", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ insights: true }} />);
-    const insightsBtn = screen.getByTitle("Insights view");
-    expect(insightsBtn).toBeDefined();
-  });
-
-  it("calls onChangeView with 'insights' when insights view button is clicked", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ insights: true }} />);
-    const insightsBtn = screen.getByTitle("Insights view");
-    fireEvent.click(insightsBtn);
-    expect(onChangeView).toHaveBeenCalledWith("insights");
-  });
-
-  it("marks insights view button as active when view is 'insights'", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="insights" onChangeView={onChangeView} experimentalFeatures={{ insights: true }} />);
-    const insightsBtn = screen.getByTitle("Insights view");
-    expect(insightsBtn.className).toContain("active");
-    expect(insightsBtn.getAttribute("aria-pressed")).toBe("true");
-  });
-
-  it("does not mark insights view button as active when view is 'board'", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ insights: true }} />);
-    const insightsBtn = screen.getByTitle("Insights view");
-    expect(insightsBtn.className).not.toContain("active");
-    expect(insightsBtn.getAttribute("aria-pressed")).toBe("false");
-  });
-
-  it("does not render insights view button when experimentalFeatures.insights is false", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ insights: false }} />);
-    expect(screen.queryByTitle("Insights view")).toBeNull();
-  });
-
-  it("does not render insights view button when experimentalFeatures is not provided", () => {
-    const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} />);
-    expect(screen.queryByTitle("Insights view")).toBeNull();
+    it("does not render Skills overflow item when showSkillsTab is false", () => {
+      const onChangeView = vi.fn();
+      render(<Header view="board" onChangeView={onChangeView} showSkillsTab={false} />);
+      fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+      expect(screen.queryByTestId("view-overflow-skills")).toBeNull();
+    });
   });
 
   // ── Search Visibility by View ─────────────────────────────────────

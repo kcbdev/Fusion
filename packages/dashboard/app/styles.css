@@ -858,6 +858,7 @@ body {
   border-radius: var(--radius);
   padding: 2px;
   box-sizing: border-box;
+  position: relative;
 }
 
 .view-toggle-btn {
@@ -891,6 +892,42 @@ body {
 .view-toggle-btn.active:hover {
   background: var(--todo);
   color: var(--bg);
+}
+
+/* === View Toggle Overflow Dropdown === */
+.view-toggle-overflow-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: var(--space-xs);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  min-width: 140px;
+  z-index: 200;
+  padding: var(--space-xs) 0;
+}
+.view-toggle-overflow-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+.view-toggle-overflow-item:hover {
+  background: var(--card-hover);
+  color: var(--text);
+}
+.view-toggle-overflow-item.active {
+  color: var(--todo);
 }
 
 /* Header Search */
