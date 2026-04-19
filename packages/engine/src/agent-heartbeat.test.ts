@@ -1376,8 +1376,9 @@ describe("HeartbeatMonitor", () => {
         expect(systemPrompt).not.toContain("task_log");
         expect(systemPrompt).not.toContain("task_document_write");
         expect(systemPrompt).not.toContain("task_document_read");
+        expect(systemPrompt).not.toContain("Task Documents:");
         expect(systemPrompt).toContain("task_create");
-        expect(systemPrompt).toContain("heartbeat_done");
+        expect(systemPrompt).toContain("memory_append");
 
         // The execution prompt is passed to session.prompt by promptWithFallback mock
         const promptCalls = mockSession.prompt.mock.calls;
@@ -1394,6 +1395,24 @@ describe("HeartbeatMonitor", () => {
         // Should NOT include task-specific content
         expect(executionPrompt).not.toContain("Assigned task:");
         expect(executionPrompt).not.toContain("Task description:");
+      });
+
+      it("task-scoped heartbeat run receives full system prompt with task_log and task Documents", async () => {
+        const store = createStoreWithAgentForExec({ taskId: "FN-001" });
+        const mockSession = createMockAgentSession();
+        mockedCreateKbAgent.mockResolvedValue({ session: mockSession as any });
+
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+        await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+        expect(mockedCreateKbAgent).toHaveBeenCalledOnce();
+        const callArgs = mockedCreateKbAgent.mock.calls[0]![0]!;
+        const systemPrompt = callArgs.systemPrompt;
+
+        expect(systemPrompt).toContain("task_log");
+        expect(systemPrompt).toContain("task_document_write");
+        expect(systemPrompt).toContain("Task Documents:");
       });
 
       it("identity agent without task gets soul in system prompt", async () => {

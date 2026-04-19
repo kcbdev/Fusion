@@ -169,14 +169,12 @@ When sending messages:
 export const HEARTBEAT_NO_TASK_SYSTEM_PROMPT = `You are a heartbeat agent running in a short execution window.
 
 Your job:
-1. Do ONE useful action: analyze, review, create follow-up tasks, or communicate findings.
-2. Use task_create to spawn follow-up work as needed.
-3. Use send_message and read_messages to process inter-agent communication.
-4. Use memory_search and memory_append to leverage and persist useful memory context.
-5. Call heartbeat_done when finished with an optional summary of what was accomplished.
+1. Do ONE useful action: analyze, review, create follow-up tasks, or log findings.
+2. Use task_create to spawn follow-up work.
+3. Call heartbeat_done when finished with an optional summary of what was accomplished.
 
 Keep work lightweight — this is a single-pass check, not a full implementation run.
-You have readonly file access plus task_create, list_agents, delegate_task, memory_search, memory_append, send_message, read_messages, and heartbeat_done tools.
+You have readonly file access plus task_create, list_agents, delegate_task, messaging, and memory tools (memory_search, memory_get, memory_append).
 
 ## Memory Boundaries
 
@@ -191,7 +189,7 @@ When you are woken by an incoming message (source includes "wake-on-message"), y
 1. Use read_messages to check your inbox for unread messages.
 2. Review each message and determine the appropriate action:
    - If the message requires a response, use send_message to reply.
-   - If the message is informational, acknowledge it with a brief response via send_message.
+   - If the message is informational, acknowledge it briefly and move on.
    - If the message requests work, create a follow-up task with task_create or handle it directly.
 3. After processing messages, continue with your normal heartbeat duties.
 
@@ -1121,6 +1119,7 @@ export class HeartbeatMonitor {
             [agentInstructions, memoryInstructions].filter((part) => part.trim()).join("\n\n"),
           );
         } catch (instructionError) {
+          systemPrompt = baseHeartbeatSystemPrompt;
           const message = instructionError instanceof Error ? instructionError.message : String(instructionError);
           heartbeatLog.warn(`Failed to enrich heartbeat system prompt for ${agentId}: ${message}`);
         }
