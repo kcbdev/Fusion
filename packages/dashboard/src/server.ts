@@ -14,6 +14,7 @@ import { rateLimit, RATE_LIMITS } from "./rate-limit.js";
 import { ApiError, sendErrorResponse } from "./api-error.js";
 import { getOrCreateProjectStore, evictAllProjectStores, setOnProjectFirstCreated } from "./project-store-resolver.js";
 import { getTerminalService, STALE_SESSION_THRESHOLD_MS } from "./terminal-service.js";
+import { destroyAllDevServerManagers, getDevServerManager } from "./dev-server-manager.js";
 import { WebSocketServer, type WebSocket } from "ws";
 import { terminalSessionManager } from "./terminal.js";
 
@@ -391,6 +392,9 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
 
   // Initialize terminal service with project root
   getTerminalService(store.getRootDir());
+
+  // Initialize dev server manager for this project
+  getDevServerManager(store.getRootDir());
 
   const isHeadless = options?.headless === true;
 
@@ -823,6 +827,7 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
     server.once("close", () => {
       clearAiSessionCleanupInterval();
       aiSessionStore.stopScheduledCleanup();
+      destroyAllDevServerManagers();
     });
 
     if (!dashboardApp.__fnWebSocketsAttached) {

@@ -24,6 +24,8 @@ import { GitHubClient, parseBadgeUrl } from "./github.js";
 import { githubRateLimiter } from "./github-poll.js";
 import { terminalSessionManager } from "./terminal.js";
 import { getTerminalService } from "./terminal-service.js";
+import { getDevServerManager } from "./dev-server-manager.js";
+import { detectDevServerCandidates, invalidateDetectionCache } from "./dev-server-detect.js";
 import { listFiles, readFile, writeFile, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, searchWorkspaceFiles, copyWorkspaceFile, moveWorkspaceFile, deleteWorkspaceFile, renameWorkspaceFile, getWorkspaceFileForDownload, getWorkspaceFolderForZip, listProjectMarkdownFiles, scanMarkdownFiles, FileServiceError, type MarkdownFileListResponse } from "./file-service.js";
 import { clearUsageCache, fetchAllProviderUsage } from "./usage.js";
 import {
@@ -7592,6 +7594,129 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       if (err instanceof ApiError) {
         throw err;
       }
+      rethrowAsApiError(err);
+    }
+  });
+
+  /* === Dev Server Routes === */
+
+  router.get("/dev-server/candidates", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const candidates = await detectDevServerCandidates(scopedStore.getRootDir());
+      res.json(candidates);
+    } catch (err: unknown) {
+      rethrowAsApiError(err);
+    }
+  });
+
+  router.get("/dev-server/status", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const manager = getDevServerManager(scopedStore.getRootDir());
+      res.json(manager.getState());
+    } catch (err: unknown) {
+      rethrowAsApiError(err);
+    }
+  });
+
+  router.post("/dev-server/start", async (req, res) => {
+    try {
+      const { command, scriptName, cwd } = req.body ?? {};
+
+      if (typeof command !== "string" || command.trim().length === 0) {
+        throw badRequest("command is required");
+      }
+      if (typeof scriptName !== "string" || scriptName.trim().length === 0) {
+        throw badRequest("scriptName is required");
+      }
+      if (cwd !== undefined && typeof cwd !== "string") {
+        throw badRequest("cwd must be a string when provided");
+      }
+
+      const { store: scopedStore } = await getProjectContext(req);
+      const rootDir = scopedStore.getRootDir();
+      const manager = getDevServerManager(rootDir);
+
+      await manager.start(command, scriptName, cwd);
+      invalidateDetectionCache(rootDir);
+      res.json(manager.getState());
+    } catch (err: unknown) {
+      rethrowAsApiError(err);
+    }
+  });
+
+  router.post("/dev-server/stop", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const manager = getDevServerManager(scopedStore.getRootDir());
+      await manager.stop();
+      res.json(manager.getState());
+    } catch (err: unknown) {
+      rethrowAsApiError(err);
+    }
+  });
+
+  router.post("/dev-server/restart", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const manager = getDevServerManager(scopedStore.getRootDir());
+      await manager.restart();
+      res.json(manager.getState());
+    } catch (err: unknown) {
+      rethrowAsApiError(err);
+    }
+  });
+
+  router.post("/dev-server/preview-url", async (req, res) => {
+    try {
+      const { url } = req.body ?? {};
+      if (url !== null && typeof url !== "string") {
+        throw badRequest("url must be a string or null");
+      }
+
+      const { store: scopedStore } = await getProjectContext(req);
+      const manager = getDevServerManager(scopedStore.getRootDir());
+      manager.setManualPreviewUrl(url);
+      res.json(manager.getState());
+    } catch (err: unknown) {
+      rethrowAsApiError(err);
+    }
+  });
+
+  router.get("/dev-server/logs/stream", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const manager = getDevServerManager(scopedStore.getRootDir());
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+      res.write(`event: connected\ndata: ${JSON.stringify({})}\n\n`);
+
+      const onLog = (event: { serverId: string; line: string }) => {
+        res.write(`event: dev-server:log\ndata: ${JSON.stringify({ line: event.line })}\n\n`);
+      };
+
+      const onStatus = (state: import("./dev-server-manager.js").DevServerState) => {
+        res.write(`event: dev-server:status\ndata: ${JSON.stringify(state)}\n\n`);
+      };
+
+      manager.on("log", onLog);
+      manager.on("status", onStatus);
+
+      const heartbeat = setInterval(() => {
+        res.write(": heartbeat\n\n");
+      }, 30_000);
+
+      req.on("close", () => {
+        clearInterval(heartbeat);
+        manager.off("log", onLog);
+        manager.off("status", onStatus);
+      });
+    } catch (err: unknown) {
       rethrowAsApiError(err);
     }
   });
