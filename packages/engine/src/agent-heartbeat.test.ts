@@ -9,6 +9,7 @@ import {
   HEARTBEAT_SYSTEM_PROMPT_NO_TASK,
 } from "./agent-heartbeat.js";
 import { AgentLogger } from "./agent-logger.js";
+import * as agentTools from "./agent-tools.js";
 import type { AgentStore, AgentHeartbeatRun, TaskStore, TaskDetail, Agent, MessageStore, Message, AgentBudgetStatus } from "@fusion/core";
 
 // Mock logger to suppress noise in test output
@@ -3288,6 +3289,35 @@ describe("HeartbeatMonitor", () => {
         undefined,
         undefined,
       );
+    });
+
+    it("task_create tracking falls back to parsing text when details.taskId is missing", async () => {
+      const store = createMockStore();
+      const createTaskCreateToolSpy = vi.spyOn(agentTools, "createTaskCreateTool").mockReturnValue({
+        name: "task_create",
+        label: "Create Task",
+        description: "Create a task",
+        parameters: {} as any,
+        execute: vi.fn().mockResolvedValue({
+          content: [{ type: "text", text: "Created PROJ-777: Follow-up task" }],
+          details: {},
+        }),
+      } as any);
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      try {
+        const tools = monitor.createHeartbeatTools("agent-001", mockTaskStore, "FN-001");
+        await tools[0]!.execute("call-1", { description: "Follow-up task" }, undefined as any, undefined as any, undefined as any);
+
+        expect(mockTaskStore.logEntry).toHaveBeenCalledWith(
+          "PROJ-777",
+          "Created by agent agent-001 during heartbeat run",
+          undefined,
+          undefined,
+        );
+      } finally {
+        createTaskCreateToolSpy.mockRestore();
+      }
     });
 
     it("task_create tracking handles missing details gracefully", async () => {

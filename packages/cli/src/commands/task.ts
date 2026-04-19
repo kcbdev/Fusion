@@ -1392,7 +1392,7 @@ function wrapText(text: string, width: number): string[] {
 }
 
 /** Run the planning mode */
-export async function runTaskPlan(initialPlanArg?: string, yesFlag = false, projectName?: string): Promise<void> {
+export async function runTaskPlan(initialPlanArg?: string, yesFlag = false, projectName?: string): Promise<string | undefined> {
   let initialPlan = initialPlanArg;
 
   // If no initial plan, prompt interactively
@@ -1481,7 +1481,7 @@ export async function runTaskPlan(initialPlanArg?: string, yesFlag = false, proj
       } catch (promptErr) {
         // Prompt was cancelled (Ctrl+C handled above)
         if (cancelled) {
-          return;
+          return undefined;
         }
         throw promptErr;
       }
@@ -1540,11 +1540,12 @@ export async function runTaskPlan(initialPlanArg?: string, yesFlag = false, proj
           }
           console.log(`    Path:   .fusion/tasks/${task.id}/`);
           console.log();
-        } else {
-          console.log("\n  Task creation cancelled.\n");
+
+          return task.id;
         }
 
-        break;
+        console.log("\n  Task creation cancelled.\n");
+        return undefined;
       }
 
       // Next question

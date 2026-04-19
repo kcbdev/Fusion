@@ -10,9 +10,14 @@ vi.mock("@fusion/core/gh-cli", () => ({
   getGhErrorMessage: vi.fn((error: unknown) => (error instanceof Error ? error.message : String(error))),
 }));
 
+vi.mock("../commands/task.js", () => ({
+  runTaskPlan: vi.fn(),
+}));
+
 import kbExtension from "../extension.js";
 import { TaskStore } from "@fusion/core";
 import { isGhAvailable, isGhAuthenticated, runGhJsonAsync } from "@fusion/core/gh-cli";
+import { runTaskPlan } from "../commands/task.js";
 
 // ── Mock ExtensionAPI that captures registrations ──────────────────
 
@@ -73,6 +78,7 @@ describe("fn pi extension", () => {
     vi.mocked(isGhAvailable).mockReturnValue(true);
     vi.mocked(isGhAuthenticated).mockReturnValue(true);
     vi.mocked(runGhJsonAsync).mockReset();
+    vi.mocked(runTaskPlan).mockReset();
 
     tmpDir = await mkdtemp(join(tmpdir(), "kb-ext-test-"));
     api = createMockAPI();
@@ -141,6 +147,25 @@ describe("fn pi extension", () => {
 
     it("registers session_shutdown listener", () => {
       expect(api.events.has("session_shutdown")).toBe(true);
+    });
+  });
+
+  describe("fn_task_plan", () => {
+    it("uses runTaskPlan return value for taskId regardless of prefix", async () => {
+      vi.mocked(runTaskPlan).mockResolvedValueOnce("PROJ-042");
+      const tool = api.tools.get("fn_task_plan")!;
+
+      const result = await tool.execute(
+        "plan-1",
+        { description: "Plan a project task" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(runTaskPlan).toHaveBeenCalledWith("Plan a project task", true);
+      expect(result.details.taskId).toBe("PROJ-042");
+      expect(result.content[0].text).toContain("Task PROJ-042");
     });
   });
 

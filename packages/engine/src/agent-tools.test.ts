@@ -6,6 +6,7 @@ import {
   buildQmdAgentMemoryCollectionAddArgs,
   buildQmdAgentMemorySearchArgs,
   createMemoryTools,
+  createTaskCreateTool,
   createSendMessageTool,
   createReadMessagesTool,
   qmdAgentMemoryCollectionName,
@@ -52,6 +53,41 @@ vi.mock("node:child_process", async () => {
     ...actual,
     execFile: execFileMock,
   };
+});
+
+describe("createTaskCreateTool", () => {
+  it("returns details.taskId and keeps Created <id> response text", async () => {
+    const store = {
+      createTask: vi.fn().mockResolvedValue({
+        id: "PROJ-042",
+        description: "Follow-up task",
+        dependencies: ["PROJ-001"],
+        column: "triage",
+      }),
+    };
+
+    const tool = createTaskCreateTool(store as any);
+    const result = await tool.execute(
+      "call-1",
+      {
+        description: "Follow-up task",
+        dependencies: ["PROJ-001"],
+      } as any,
+      undefined,
+      undefined,
+      {} as any,
+    );
+
+    expect(store.createTask).toHaveBeenCalledWith({
+      description: "Follow-up task",
+      dependencies: ["PROJ-001"],
+      column: "triage",
+    });
+    expect(result.details).toEqual({ taskId: "PROJ-042" });
+    const responseText = result.content[0]?.type === "text" ? result.content[0].text : "";
+    expect(responseText).toContain("Created PROJ-042: Follow-up task");
+    expect(responseText).toContain("(depends on: PROJ-001)");
+  });
 });
 
 describe("createMemoryTools", () => {

@@ -1038,8 +1038,9 @@ export default function kbExtension(pi: ExtensionAPI) {
         originalError.apply(console, args);
       };
 
+      let taskId: string | undefined;
       try {
-        await runTaskPlan(params.description, true); // Use --yes flag for non-interactive
+        taskId = await runTaskPlan(params.description, true); // Use --yes flag for non-interactive
       } catch (err: any) {
         console.error = originalError;
         console.log = originalLog;
@@ -1048,10 +1049,6 @@ export default function kbExtension(pi: ExtensionAPI) {
         console.error = originalError;
         console.log = originalLog;
       }
-
-      // Parse created task ID from logs
-      const createdMatch = logs.find((l) => l.match(/Created (FN-\d+):/));
-      const taskId = createdMatch ? createdMatch.match(/Created (FN-\d+):/)?.[1] : undefined;
 
       // Get summary line
       const summaryLine = logs.find((l) => l.includes("✓ Created")) || "Task created";

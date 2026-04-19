@@ -405,24 +405,15 @@ describe("runTaskPlan", () => {
 
     mockQuestion.mockResolvedValueOnce("y");
 
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
-      throw new Error("Process.exit called");
-    });
+    const taskId = await runTaskPlan("Build something", true);
 
-    try {
-      await runTaskPlan("Build something", true);
-    } catch {
-      // expected
-    }
-
+    expect(taskId).toBe("FN-042");
     expect(mockCreateTask).toHaveBeenCalledWith({
       title: "Planned Task",
       description: "A well-planned task",
       column: "triage",
       dependencies: ["FN-001"],
     });
-
-    exitSpy.mockRestore();
   });
 
   it("prompts for confirmation without --yes flag", async () => {
@@ -575,22 +566,13 @@ describe("runTaskPlan", () => {
       .mockResolvedValueOnce("y")
       .mockResolvedValueOnce("n");
 
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
-      throw new Error("Process.exit called");
-    });
+    const taskId = await runTaskPlan("Build something", false);
 
-    try {
-      await runTaskPlan("Build something", false);
-    } catch {
-      // expected
-    }
-
+    expect(taskId).toBeUndefined();
     expect(mockCreateTask).not.toHaveBeenCalled();
     expect(mockConsoleLog).toHaveBeenCalledWith(
       expect.stringContaining("Task creation cancelled")
     );
-
-    exitSpy.mockRestore();
   });
 
   it("validates single_select input and retries on invalid", async () => {
