@@ -17,7 +17,7 @@ export { MissionAutopilot, type MissionAutopilotOptions } from "./mission-autopi
 export { MissionExecutionLoop, type MissionExecutionLoopOptions, type ValidationResult, loopLog } from "./mission-execution-loop.js";
 export { aiMergeTask, type MergerOptions } from "./merger.js";
 export { reviewStep, type ReviewType, type ReviewVerdict, type ReviewResult, type ReviewOptions } from "./reviewer.js";
-export { createKbAgent, promptWithFallback, type AgentOptions, type AgentResult } from "./pi.js";
+export { createFnAgent, promptWithFallback, type AgentOptions, type AgentResult } from "./pi.js";
 export {
   resolveSessionSkills,
   createSkillsOverrideFromSelection,

@@ -5,7 +5,7 @@ import { request } from "../test-request.js";
 import { createServer } from "../server.js";
 
 const piMocks = vi.hoisted(() => ({
-  createKbAgent: vi.fn(),
+  createFnAgent: vi.fn(),
   promptWithFallback: vi.fn(),
 }));
 
@@ -13,7 +13,7 @@ vi.mock("@fusion/engine", async () => {
   const actual = await vi.importActual<typeof import("@fusion/engine")>("@fusion/engine");
   return {
     ...actual,
-    createKbAgent: piMocks.createKbAgent,
+    createFnAgent: piMocks.createFnAgent,
     promptWithFallback: piMocks.promptWithFallback,
   };
 });
@@ -141,7 +141,7 @@ describe("Insights routes", () => {
     mergeInsightsSpy.mockReturnValue("# merged insights");
     computeFingerprintSpy.mockImplementation((title: string, category: string) => `fp-${category}-${title.length}`);
 
-    piMocks.createKbAgent.mockImplementation((options: { onText?: (delta: string) => void }) => {
+    piMocks.createFnAgent.mockImplementation((options: { onText?: (delta: string) => void }) => {
       options.onText?.('{"summary":"Test extraction","insights":[]}');
       return {
         session: {
@@ -189,7 +189,7 @@ describe("Insights routes", () => {
     );
     expect(readWorkingMemorySpy).toHaveBeenCalledWith("/tmp/fn-1909");
     expect(buildPromptSpy).toHaveBeenCalledWith("Test working memory content", null);
-    expect(piMocks.createKbAgent).toHaveBeenCalledTimes(1);
+    expect(piMocks.createFnAgent).toHaveBeenCalledTimes(1);
     expect(piMocks.promptWithFallback).toHaveBeenCalledTimes(1);
     expect(parseResponseSpy).toHaveBeenCalledTimes(1);
     expect(mockUpdateRun).toHaveBeenLastCalledWith(
@@ -232,7 +232,7 @@ describe("Insights routes", () => {
         completedAt: expect.any(String),
       }),
     );
-    expect(piMocks.createKbAgent).not.toHaveBeenCalled();
+    expect(piMocks.createFnAgent).not.toHaveBeenCalled();
     expect(piMocks.promptWithFallback).not.toHaveBeenCalled();
     expect(res.body).toEqual(
       expect.objectContaining({

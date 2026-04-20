@@ -38,7 +38,7 @@ const { mockCreateKbAgent } = vi.hoisted(() => ({
 }));
 
 vi.mock("@fusion/engine", () => ({
-  createKbAgent: mockCreateKbAgent,
+  createFnAgent: mockCreateKbAgent,
 }));
 
 function makeTmpDir(): string {
@@ -141,8 +141,8 @@ describe("session resume + history restore", () => {
         data: { id: "q-3", type: "text", question: "What timeline?" },
       }),
     ]);
-    const createKbAgentSpy = vi.fn(async () => resumedAgent);
-    __setCreateKbAgent(createKbAgentSpy as any);
+    const createFnAgentSpy = vi.fn(async () => resumedAgent);
+    __setCreateKbAgent(createFnAgentSpy as any);
 
     const restored = getSession(row.id);
     expect(restored).toBeDefined();
@@ -157,7 +157,7 @@ describe("session resume + history restore", () => {
       expect(response.data.id).toBe("q-3");
     }
 
-    expect(createKbAgentSpy).toHaveBeenCalledTimes(1);
+    expect(createFnAgentSpy).toHaveBeenCalledTimes(1);
     expect(resumedAgent.session.prompt).toHaveBeenCalledTimes(2);
     expect(resumedAgent.session.prompt.mock.calls[0]?.[0]).toContain("Previous conversation summary");
     expect(resumedAgent.session.prompt.mock.calls[1]?.[0]).toContain("Any constraints?");
@@ -197,8 +197,8 @@ describe("session resume + history restore", () => {
         data: { id: "q-m-3", type: "text", question: "Who are the users?" },
       }),
     ]);
-    const createKbAgentSpy = vi.fn(async () => resumedAgent);
-    mockCreateKbAgent.mockImplementation(createKbAgentSpy);
+    const createFnAgentSpy = vi.fn(async () => resumedAgent);
+    mockCreateKbAgent.mockImplementation(createFnAgentSpy);
 
     const restored = getMissionInterviewSession(row.id);
     expect(restored).toBeDefined();
@@ -218,7 +218,7 @@ describe("session resume + history restore", () => {
       expect(response.data.id).toBe("q-m-3");
     }
 
-    expect(createKbAgentSpy).toHaveBeenCalledTimes(1);
+    expect(createFnAgentSpy).toHaveBeenCalledTimes(1);
     expect(resumedAgent.session.prompt).toHaveBeenCalledTimes(2);
     expect(resumedAgent.session.prompt.mock.calls[0]?.[0]).toContain("Previous conversation summary");
     expect(resumedAgent.session.prompt.mock.calls[1]?.[0]).toContain("Any technical constraints?");

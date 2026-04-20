@@ -5,7 +5,7 @@
  * Sessions are stored in-memory with TTL cleanup.
  * 
  * Features:
- * - AI agent integration via createKbAgent for real-time planning conversations
+ * - AI agent integration via createFnAgent for real-time planning conversations
  * - Streaming via SSE (createSessionWithAgent) and non-streaming (createSession)
  * - Rate limiting per IP
  * - Session expiration and cleanup
@@ -29,22 +29,22 @@ import { SessionEventBuffer, type SessionBufferedEvent } from "./sse-buffer.js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AgentResult = any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let createKbAgent: any;
+let createFnAgent: any;
 
 // Initialize the import (this runs in actual server, mocked in tests)
 async function initEngine() {
-  if (!createKbAgent) {
+  if (!createFnAgent) {
     try {
       // Use dynamic import with variable to prevent static analysis
       const engineModule = "@fusion/engine";
       const engine = await import(/* @vite-ignore */ engineModule);
-      if (!createKbAgent) {
-        createKbAgent = engine.createKbAgent;
+      if (!createFnAgent) {
+        createFnAgent = engine.createFnAgent;
       }
     } catch {
       // Allow failure in test environments - agent functionality will be stubbed
-      if (!createKbAgent) {
-        createKbAgent = undefined;
+      if (!createFnAgent) {
+        createFnAgent = undefined;
       }
     }
   }
@@ -578,12 +578,12 @@ export async function createSession(
   const systemPrompt = resolvePrompt("planning-system", promptOverrides) || PLANNING_SYSTEM_PROMPT;
 
   // Create AI agent and get the first question
-  // Only await engineReady if createKbAgent hasn't been set externally (e.g., via __setCreateKbAgent)
-  if (!createKbAgent) {
+  // Only await engineReady if createFnAgent hasn't been set externally (e.g., via __setCreateKbAgent)
+  if (!createFnAgent) {
     await ensureEngineReady();
   }
 
-  const agentResult = await createKbAgent({
+  const agentResult = await createFnAgent({
     cwd: rootDir,
     systemPrompt,
     tools: "readonly",
@@ -805,13 +805,13 @@ async function createPlanningAgent(
   modelId?: string,
   promptOverrides?: PromptOverrideMap,
 ): Promise<AgentResult> {
-  // Ensure engine is loaded before using createKbAgent
+  // Ensure engine is loaded before using createFnAgent
   await ensureEngineReady();
 
   // Resolve the effective system prompt (override or default)
   const systemPrompt = resolvePrompt("planning-system", promptOverrides) || PLANNING_SYSTEM_PROMPT;
 
-  return createKbAgent({
+  return createFnAgent({
     cwd: rootDir,
     systemPrompt,
     tools: "readonly",
@@ -1564,10 +1564,10 @@ export function __resetPlanningState(): void {
 }
 
 /**
- * Inject a mock createKbAgent function. Used for testing only.
+ * Inject a mock createFnAgent function. Used for testing only.
  */
-export function __setCreateKbAgent(mock: typeof createKbAgent): void {
-  createKbAgent = mock;
+export function __setCreateKbAgent(mock: typeof createFnAgent): void {
+  createFnAgent = mock;
 }
 
 // ── Custom Errors ───────────────────────────────────────────────────────────

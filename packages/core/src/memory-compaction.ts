@@ -79,8 +79,8 @@ export async function compactMemoryWithAi(
   provider?: string,
   modelId?: string
 ): Promise<string> {
-  const createKbAgent = await getKbAgent();
-  if (!createKbAgent) {
+  const createFnAgent = await getKbAgent();
+  if (!createFnAgent) {
     if (DEBUG) console.log("[memory-compaction] AI engine not available");
     throw new AiServiceError("AI engine not available");
   }
@@ -104,7 +104,7 @@ export async function compactMemoryWithAi(
   }
 
   if (DEBUG) console.log("[memory-compaction] Creating agent session...");
-  const agentResult = await createKbAgent(agentOptions);
+  const agentResult = await createFnAgent(agentOptions);
 
   if (!agentResult?.session) {
     if (DEBUG) console.log("[memory-compaction] Failed to initialize AI agent - no session");

@@ -26,17 +26,17 @@ import { SessionEventBuffer, type SessionBufferedEvent } from "./sse-buffer.js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AgentResult = any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let createKbAgent: any;
+let createFnAgent: any;
 
 async function initEngine() {
-  if (!createKbAgent) {
+  if (!createFnAgent) {
     try {
       const engineModule = "@fusion/engine";
       const engine = await import(/* @vite-ignore */ engineModule);
-      createKbAgent = engine.createKbAgent;
+      createFnAgent = engine.createFnAgent;
     } catch {
       // Allow failure in test environments
-      createKbAgent = undefined;
+      createFnAgent = undefined;
     }
   }
 }
@@ -758,7 +758,7 @@ async function createMissionInterviewAgent(
 
   const effectivePrompt = resolvePrompt("mission-interview-system", promptOverrides);
 
-  return createKbAgent({
+  return createFnAgent({
     cwd: rootDir,
     systemPrompt: effectivePrompt,
     tools: "readonly",

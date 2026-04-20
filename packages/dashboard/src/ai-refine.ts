@@ -16,19 +16,19 @@ import { resolvePrompt } from "@fusion/core";
 
 // Dynamic import for @fusion/engine to avoid resolution issues in test environment
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let createKbAgent: any;
+let createFnAgent: any;
 
 // Initialize the import (this runs in actual server, mocked in tests)
 async function initEngine() {
-  if (!createKbAgent) {
+  if (!createFnAgent) {
     try {
       // Use dynamic import with variable to prevent static analysis
       const engineModule = "@fusion/engine";
       const engine = await import(/* @vite-ignore */ engineModule);
-      createKbAgent = engine.createKbAgent;
+      createFnAgent = engine.createFnAgent;
     } catch {
       // Allow failure in test environments - agent functionality will be stubbed
-      createKbAgent = undefined;
+      createFnAgent = undefined;
     }
   }
 }
@@ -267,16 +267,16 @@ export async function refineText(
   rootDir: string,
   promptOverrides?: PromptOverrideMap,
 ): Promise<string> {
-  // Ensure engine is loaded before using createKbAgent
+  // Ensure engine is loaded before using createFnAgent
   await ensureEngineReady();
 
-  if (!createKbAgent) {
+  if (!createFnAgent) {
     throw new AiServiceError("AI engine not available");
   }
 
   const effectivePrompt = resolvePrompt("ai-refine-system", promptOverrides);
 
-  const agentResult = await createKbAgent({
+  const agentResult = await createFnAgent({
     cwd: rootDir,
     systemPrompt: effectivePrompt,
     tools: "readonly",

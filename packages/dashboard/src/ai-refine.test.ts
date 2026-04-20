@@ -22,7 +22,7 @@ const { mockCreateKbAgent } = vi.hoisted(() => ({
 
 // Mock the engine module to avoid dynamic import issues in tests
 vi.mock("@fusion/engine", () => ({
-  createKbAgent: mockCreateKbAgent,
+  createFnAgent: mockCreateKbAgent,
 }));
 
 describe("ai-refine module", () => {
@@ -349,7 +349,7 @@ describe("ai-refine module", () => {
       expect(call[0].systemPrompt).toMatch(/^You are a text refinement assistant/);
     });
 
-    it("does not introduce unexpected model/provider override fields in createKbAgent", async () => {
+    it("does not introduce unexpected model/provider override fields in createFnAgent", async () => {
       const mockAgent = createRefineMockAgent("Refined text here");
       mockCreateKbAgent.mockResolvedValueOnce(mockAgent);
 

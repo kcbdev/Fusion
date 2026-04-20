@@ -15,33 +15,33 @@
 
 // Dynamic import for @fusion/engine to avoid resolution issues in test environment
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let createKbAgent: any;
+let createFnAgent: any;
 
 // Track if engine has been initialized (prevents multiple imports)
 let engineInitialized = false;
 
-// Flag to indicate if createKbAgent was explicitly set (even to undefined)
-let createKbAgentExplicitlySet = false;
+// Flag to indicate if createFnAgent was explicitly set (even to undefined)
+let createFnAgentExplicitlySet = false;
 
 // Initialize the import (this runs in actual server, mocked in tests)
 async function initEngine(): Promise<void> {
   if (engineInitialized) return;
 
-  // If createKbAgent was explicitly set (even to undefined), don't try to import
-  if (createKbAgentExplicitlySet) {
+  // If createFnAgent was explicitly set (even to undefined), don't try to import
+  if (createFnAgentExplicitlySet) {
     engineInitialized = true;
     return;
   }
 
-  if (!createKbAgent) {
+  if (!createFnAgent) {
     try {
       // Use dynamic import with variable to prevent static analysis
       const engineModule = "@fusion/engine";
       const engine = await import(/* @vite-ignore */ engineModule);
-      createKbAgent = engine.createKbAgent;
+      createFnAgent = engine.createFnAgent;
     } catch {
       // Allow failure in test environments - agent functionality will be stubbed
-      createKbAgent = undefined;
+      createFnAgent = undefined;
     }
   }
   engineInitialized = true;
@@ -354,10 +354,10 @@ export async function generateMilestoneSuggestions(
   modelProvider?: string,
   modelId?: string,
 ): Promise<MilestoneSuggestion[]> {
-  // Ensure engine is loaded before using createKbAgent
+  // Ensure engine is loaded before using createFnAgent
   await initEngine();
 
-  if (!createKbAgent) {
+  if (!createFnAgent) {
     throw new ServiceUnavailableError("AI service is not available");
   }
 
@@ -368,11 +368,11 @@ export async function generateMilestoneSuggestions(
   // Race AI generation against a timeout to prevent hanging requests
   const result = await Promise.race([
     (async () => {
-      let agent: ReturnType<typeof createKbAgent> | undefined;
+      let agent: ReturnType<typeof createFnAgent> | undefined;
 
       try {
         // Create AI agent with milestone suggestion system prompt
-        agent = await createKbAgent({
+        agent = await createFnAgent({
           cwd: rootDir,
           systemPrompt: MILESTONE_SUGGESTION_SYSTEM_PROMPT,
           tools: "readonly",
@@ -713,10 +713,10 @@ export async function generateFeatureSuggestions(
   modelProvider?: string,
   modelId?: string,
 ): Promise<FeatureSuggestion[]> {
-  // Ensure engine is loaded before using createKbAgent
+  // Ensure engine is loaded before using createFnAgent
   await initEngine();
 
-  if (!createKbAgent) {
+  if (!createFnAgent) {
     throw new ServiceUnavailableError("AI service is not available");
   }
 
@@ -736,11 +736,11 @@ export async function generateFeatureSuggestions(
   // Race AI generation against a timeout to prevent hanging requests
   const result = await Promise.race([
     (async () => {
-      let agent: ReturnType<typeof createKbAgent> | undefined;
+      let agent: ReturnType<typeof createFnAgent> | undefined;
 
       try {
         // Create AI agent with feature suggestion system prompt
-        agent = await createKbAgent({
+        agent = await createFnAgent({
           cwd: rootDir,
           systemPrompt,
           tools: "readonly",
@@ -893,15 +893,15 @@ export class ServiceUnavailableError extends Error {
  * Reset module state. Used for testing only.
  */
 export function __resetSuggestionState(): void {
-  createKbAgent = undefined;
+  createFnAgent = undefined;
   engineInitialized = false;
-  createKbAgentExplicitlySet = false;
+  createFnAgentExplicitlySet = false;
 }
 
 /**
- * Inject a mock createKbAgent function. Used for testing only.
+ * Inject a mock createFnAgent function. Used for testing only.
  */
-export function __setCreateKbAgent(mock: typeof createKbAgent): void {
-  createKbAgent = mock;
-  createKbAgentExplicitlySet = true;
+export function __setCreateKbAgent(mock: typeof createFnAgent): void {
+  createFnAgent = mock;
+  createFnAgentExplicitlySet = true;
 }

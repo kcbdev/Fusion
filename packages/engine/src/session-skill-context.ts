@@ -56,10 +56,10 @@ export interface SessionSkillContextInput {
 
 /**
  * Result of building session skill context.
- * Contains the SkillSelectionContext for createKbAgent and any diagnostics.
+ * Contains the SkillSelectionContext for createFnAgent and any diagnostics.
  */
 export interface SessionSkillContextResult {
-  /** Context to pass to createKbAgent's skillSelection option */
+  /** Context to pass to createFnAgent's skillSelection option */
   skillSelectionContext: SkillSelectionContext | undefined;
   /** Normalized skill names that were resolved (for logging/debugging) */
   resolvedSkillNames: string[];
@@ -159,7 +159,7 @@ export const SKILL_DIAGNOSTIC_MESSAGES = {
 // ── Main Builder ────────────────────────────────────────────────────────────
 
 /**
- * Build session skill context for createKbAgent.
+ * Build session skill context for createFnAgent.
  *
  * Applies precedence rules:
  * 1. Use assigned agent skills if available

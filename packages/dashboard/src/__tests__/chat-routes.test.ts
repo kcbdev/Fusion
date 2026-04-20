@@ -178,9 +178,9 @@ const { mockCreateKbAgent, mockChatStreamManager, mockSendMessage, mockCancelGen
   };
 });
 
-// Mock @fusion/engine to prevent createKbAgent resolution
+// Mock @fusion/engine to prevent createFnAgent resolution
 vi.mock("@fusion/engine", () => ({
-  createKbAgent: mockCreateKbAgent,
+  createFnAgent: mockCreateKbAgent,
 }));
 
 // Mock ChatStore

@@ -671,8 +671,8 @@ export function wrapToolsWithBoundary(
  * Create a pi agent session configured for fn.
  * Reuses the user's existing pi auth and model configuration.
  */
-export async function createKbAgent(options: AgentOptions): Promise<AgentResult> {
-  piLog.log(`createKbAgent called (cwd=${options.cwd}, tools=${options.tools}, provider=${options.defaultProvider}, model=${options.defaultModelId})`);
+export async function createFnAgent(options: AgentOptions): Promise<AgentResult> {
+  piLog.log(`createFnAgent called (cwd=${options.cwd}, tools=${options.tools}, provider=${options.defaultProvider}, model=${options.defaultModelId})`);
   const authStorage = createFusionAuthStorage();
   const modelRegistry = new ModelRegistry(authStorage, getModelRegistryModelsPath());
   await registerExtensionProviders(options.cwd, modelRegistry);

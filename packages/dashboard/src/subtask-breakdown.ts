@@ -6,16 +6,16 @@ import type { AiSessionStore, AiSessionRow } from "./ai-session-store.js";
 import { SessionEventBuffer, type SessionBufferedEvent } from "./sse-buffer.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let createKbAgent: any;
+let createFnAgent: any;
 const engineModule = "@fusion/engine";
 
 async function initEngine() {
-  if (!createKbAgent) {
+  if (!createFnAgent) {
     try {
       const engine = await import(/* @vite-ignore */ engineModule);
-      createKbAgent = engine.createKbAgent;
+      createFnAgent = engine.createFnAgent;
     } catch {
-      createKbAgent = undefined;
+      createFnAgent = undefined;
     }
   }
 }
@@ -54,7 +54,7 @@ export type SubtaskStreamCallback = (event: SubtaskStreamEvent, eventId?: number
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 
-/** Minimal interface for the agent object created by createKbAgent */
+/** Minimal interface for the agent object created by createFnAgent */
 interface SubtaskAgent {
   session: {
     dispose?: () => void;
@@ -406,8 +406,8 @@ async function generateSubtasks(
   // Resolve the effective system prompt (override or default)
   const systemPrompt = resolvePrompt("subtask-breakdown-system", promptOverrides) || SUBTASK_BREAKDOWN_PROMPT;
 
-  if (createKbAgent) {
-    const agent = await createKbAgent({
+  if (createFnAgent) {
+    const agent = await createFnAgent({
       cwd,
       systemPrompt,
       tools: "readonly",

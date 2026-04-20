@@ -538,7 +538,7 @@ Some freeform text without checkboxes.`;
 
 // Mock pi.js for StepSessionExecutor tests
 vi.mock("./pi.js", () => ({
-  createKbAgent: vi.fn(),
+  createFnAgent: vi.fn(),
   promptWithFallback: vi.fn(async (session: any, prompt: string) => {
     await session.prompt(prompt);
   }),
@@ -639,13 +639,13 @@ vi.mock("node:fs", () => ({
   existsSync: vi.fn().mockReturnValue(true),
 }));
 
-import { createKbAgent } from "./pi.js";
+import { createFnAgent } from "./pi.js";
 import { generateWorktreeName } from "./worktree-names.js";
 import { execSync } from "node:child_process";
 import { AgentSemaphore } from "./concurrency.js";
 import { createLogger } from "./logger.js";
 
-const mockedCreateKbAgent = vi.mocked(createKbAgent);
+const mockedCreateKbAgent = vi.mocked(createFnAgent);
 const mockedExecSync = vi.mocked(execSync);
 const mockedGenerateWorktreeName = vi.mocked(generateWorktreeName);
 const mockedCreateLogger = vi.mocked(createLogger);
@@ -2023,7 +2023,7 @@ describe("StepSessionExecutor", () => {
 // ── Skill Selection Regression Tests (FN-1514) ──────────────────────────
 //
 // Note: These tests verify that skillSelection is passed through the
-// StepSessionExecutor to createKbAgent calls. The actual skill resolution
+// StepSessionExecutor to createFnAgent calls. The actual skill resolution
 // logic is tested in session-skill-context.test.ts.
 // The full integration with executeAll is tested indirectly through
 // the executor tests which create StepSessionExecutor with skillSelection.
@@ -2074,7 +2074,7 @@ describe("StepSessionExecutor skillSelection regression (FN-1511)", () => {
 describe("StepSessionExecutor tool availability", () => {
   /**
    * These tests verify tool configuration by capturing the customTools
-   * passed to createKbAgent during executeStep execution. Each test
+   * passed to createFnAgent during executeStep execution. Each test
    * uses fake timers and advances time to resolve any pending sleep()s.
    */
   async function captureCustomTools(options?: {

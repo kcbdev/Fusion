@@ -337,14 +337,14 @@ describe("agent-generation module", () => {
   });
 
   describe("prompt override support", () => {
-    // Mock createKbAgent to capture the systemPrompt passed to it
+    // Mock createFnAgent to capture the systemPrompt passed to it
     let capturedSystemPrompt: string | undefined;
 
     beforeEach(async () => {
       capturedSystemPrompt = undefined;
-      // Mock createKbAgent before tests run
+      // Mock createFnAgent before tests run
       vi.doMock("@fusion/engine", () => ({
-        createKbAgent: vi.fn(async (options: { cwd: string; systemPrompt: string; tools: string }) => {
+        createFnAgent: vi.fn(async (options: { cwd: string; systemPrompt: string; tools: string }) => {
           capturedSystemPrompt = options.systemPrompt;
           const messages: Array<{ role: string; content: string }> = [];
           return {

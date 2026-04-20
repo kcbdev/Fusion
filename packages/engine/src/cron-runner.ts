@@ -618,7 +618,7 @@ const AI_AUTOMATION_SYSTEM_PROMPT = [
 ].join("\n");
 
 /**
- * Create an AiPromptExecutor that uses createKbAgent for real AI execution.
+ * Create an AiPromptExecutor that uses createFnAgent for real AI execution.
  *
  * Each call creates a fresh agent session, runs the prompt, collects the
  * text response, and disposes the session.
@@ -629,13 +629,13 @@ const AI_AUTOMATION_SYSTEM_PROMPT = [
 export async function createAiPromptExecutor(cwd: string): Promise<AiPromptExecutor> {
   // We import lazily to keep the factory self-contained and to avoid
   // pulling pi.ts into the module graph when AI execution isn't used.
-  const { createKbAgent, promptWithFallback } = await import("./pi.js");
+  const { createFnAgent, promptWithFallback } = await import("./pi.js");
   const disposeLog = createLogger("cron-runner");
 
   return async (prompt: string, modelProvider?: string, modelId?: string): Promise<string> => {
     let responseText = "";
 
-    const { session } = await createKbAgent({
+    const { session } = await createFnAgent({
       cwd,
       systemPrompt: AI_AUTOMATION_SYSTEM_PROMPT,
       tools: "readonly",

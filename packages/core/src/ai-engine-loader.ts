@@ -1,5 +1,5 @@
 /**
- * Shared lazy loader for `@fusion/engine`'s `createKbAgent`.
+ * Shared lazy loader for `@fusion/engine`'s `createFnAgent`.
  *
  * @fusion/engine must be imported dynamically (not statically) so that:
  *   - core can be consumed in test environments where engine isn't resolvable
@@ -12,17 +12,17 @@
 // Engine exports a function type we intentionally don't pull in here — importing
 // the type would reintroduce the static resolution this module is designed to avoid.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type CreateKbAgent = any;
+type CreateFnAgent = any;
 
-let createKbAgent: CreateKbAgent | undefined;
+let createFnAgent: CreateFnAgent | undefined;
 
 async function initEngine(): Promise<void> {
   try {
     const engineModule = "@fusion/engine";
     const engine = await import(/* @vite-ignore */ engineModule);
-    createKbAgent = engine.createKbAgent;
+    createFnAgent = engine.createFnAgent;
   } catch {
-    createKbAgent = undefined;
+    createFnAgent = undefined;
   }
 }
 
@@ -36,10 +36,10 @@ export interface AgentMessage {
 const engineReady: Promise<void> = initEngine();
 
 /**
- * Returns `createKbAgent` from `@fusion/engine`, or `undefined` if the engine
+ * Returns `createFnAgent` from `@fusion/engine`, or `undefined` if the engine
  * could not be loaded (typical in tests or when engine isn't installed).
  */
-export async function getKbAgent(): Promise<CreateKbAgent> {
+export async function getKbAgent(): Promise<CreateFnAgent> {
   await engineReady;
-  return createKbAgent;
+  return createFnAgent;
 }

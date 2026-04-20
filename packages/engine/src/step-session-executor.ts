@@ -19,7 +19,7 @@ import { join } from "node:path";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { AgentStore, MessageStore, TaskDetail, Settings, TaskStore } from "@fusion/core";
 
-import { createKbAgent, promptWithFallback, describeModel } from "./pi.js";
+import { createFnAgent, promptWithFallback, describeModel } from "./pi.js";
 import type { SkillSelectionContext } from "./skill-resolver.js";
 import { generateWorktreeName } from "./worktree-names.js";
 import { AgentSemaphore } from "./concurrency.js";
@@ -848,7 +848,7 @@ export class StepSessionExecutor {
                     ? settings.executionGlobalModelId
                     : settings.defaultModelId));
 
-          const createResult = await createKbAgent({
+          const createResult = await createFnAgent({
             cwd: worktreePath,
             systemPrompt: `You are an AI agent executing step ${stepIndex} of task ${taskDetail.id}. Follow instructions precisely.`,
             defaultProvider: executorProvider,

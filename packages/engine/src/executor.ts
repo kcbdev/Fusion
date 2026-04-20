@@ -10,7 +10,7 @@ import { buildExecutionMemoryInstructions, getTaskMergeBlocker, resolveAgentProm
 import { findWorktreeUser } from "./merger.js";
 import { generateWorktreeName, slugify } from "./worktree-names.js";
 import { Type, type Static } from "@mariozechner/pi-ai";
-import { createKbAgent, describeModel, promptWithFallback, compactSessionContext } from "./pi.js";
+import { createFnAgent, describeModel, promptWithFallback, compactSessionContext } from "./pi.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
 import { reviewStep, type ReviewVerdict } from "./reviewer.js";
 import { ModelRegistry, SessionManager, type ToolDefinition, type AgentSession } from "@mariozechner/pi-coding-agent";
@@ -1562,7 +1562,7 @@ export class TaskExecutor {
       const codeReviewVerdicts = new Map<number, ReviewVerdict>();
 
       let wasPaused = false;
-      // Mutable ref — populated after createKbAgent, tools access lazily via closure
+      // Mutable ref — populated after createFnAgent, tools access lazily via closure
       const sessionRef: { current: AgentSession | null } = { current: null };
       const stepCheckpoints = new Map<number, string>();
 
@@ -1665,7 +1665,7 @@ export class TaskExecutor {
 
         // sessionFile must be let because it's destructured alongside session which is reassigned
         // eslint-disable-next-line prefer-const
-        let { session, sessionFile } = await createKbAgent({
+        let { session, sessionFile } = await createFnAgent({
           cwd: worktreePath,
           systemPrompt: executorSystemPrompt,
           tools: "coding",
@@ -1895,7 +1895,7 @@ export class TaskExecutor {
             this.activeSessions.delete(task.id);
             session.dispose();
 
-            const { session: retrySession, sessionFile: retrySessionFile } = await createKbAgent({
+            const { session: retrySession, sessionFile: retrySessionFile } = await createFnAgent({
               cwd: worktreePath,
               systemPrompt: executorSystemPrompt,
               tools: "coding",
@@ -3413,7 +3413,7 @@ and show an appropriate message to the user.\`
         projectRootDir: this.rootDir,
       });
 
-      const { session } = await createKbAgent({
+      const { session } = await createFnAgent({
         cwd: worktreePath,
         systemPrompt: stepSystemPrompt,
         tools: toolMode,
@@ -4311,7 +4311,7 @@ and show an appropriate message to the user.\`
           });
 
           // Create child agent session
-          const { session: childSession } = await createKbAgent({
+          const { session: childSession } = await createFnAgent({
             cwd: childWorktreePath,
             systemPrompt: childSystemPrompt,
             tools: "coding",

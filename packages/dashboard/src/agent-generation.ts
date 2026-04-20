@@ -41,18 +41,18 @@ const promptCatalogReadyPromise = initPromptCatalog();
 
 // Dynamic import for @fusion/engine to avoid resolution issues in test environment
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let createKbAgent: any;
+let createFnAgent: any;
 
 // Initialize the import (this runs in actual server, mocked in tests)
 async function initEngine() {
-  if (!createKbAgent) {
+  if (!createFnAgent) {
     try {
       const engineModule = "@fusion/engine";
       const engine = await import(/* @vite-ignore */ engineModule);
-      createKbAgent = engine.createKbAgent;
+      createFnAgent = engine.createFnAgent;
     } catch {
       // Allow failure in test environments - agent functionality will be stubbed
-      createKbAgent = undefined;
+      createFnAgent = undefined;
     }
   }
 }
@@ -485,14 +485,14 @@ async function generateSpecWithAI(
   rootDir: string,
   promptOverrides?: PromptOverrideMap
 ): Promise<AgentGenerationSpec> {
-  if (!createKbAgent) {
+  if (!createFnAgent) {
     throw new Error("AI agent not available. Ensure the engine is properly configured.");
   }
 
   // Resolve the system prompt using prompt overrides (with fallback to default)
   const effectiveSystemPrompt = resolvePrompt("agent-generation-system", promptOverrides) || AGENT_GENERATION_SYSTEM_PROMPT;
 
-  const agent = await createKbAgent({
+  const agent = await createFnAgent({
     cwd: rootDir,
     systemPrompt: effectiveSystemPrompt,
     tools: "none",

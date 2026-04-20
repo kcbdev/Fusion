@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { describeModel, compactSessionContext, COMPACTION_FALLBACK_INSTRUCTIONS, createKbAgent, promptWithFallback, type AgentOptions } from "./pi.js";
+import { describeModel, compactSessionContext, COMPACTION_FALLBACK_INSTRUCTIONS, createFnAgent, promptWithFallback, type AgentOptions } from "./pi.js";
 import { createAgentSession, type AgentSession } from "@mariozechner/pi-coding-agent";
 import { piLog } from "./logger.js";
 
@@ -263,7 +263,7 @@ describe("promptWithFallback context recovery", () => {
   });
 });
 
-describe("createKbAgent skills parameter", () => {
+describe("createFnAgent skills parameter", () => {
   let piLogSpy: ReturnType<typeof vi.spyOn>;
   let piWarnSpy: ReturnType<typeof vi.spyOn>;
   let piErrorSpy: ReturnType<typeof vi.spyOn>;
@@ -306,7 +306,7 @@ describe("createKbAgent skills parameter", () => {
       skills: ["review", "fusion"],
     };
 
-    await createKbAgent(options);
+    await createFnAgent(options);
 
     // Verify resolveSessionSkills was called with auto-derived context
     expect(mockResolveSessionSkills).toHaveBeenCalledTimes(1);
@@ -328,7 +328,7 @@ describe("createKbAgent skills parameter", () => {
       },
     };
 
-    await createKbAgent(options);
+    await createFnAgent(options);
 
     // Verify resolveSessionSkills was called with explicit skillSelection (not auto-derived)
     expect(mockResolveSessionSkills).toHaveBeenCalledTimes(1);
@@ -350,7 +350,7 @@ describe("createKbAgent skills parameter", () => {
       skills: [],
     };
 
-    await createKbAgent(options);
+    await createFnAgent(options);
 
     // Verify no skill resolution occurred
     expect(mockResolveSessionSkills).not.toHaveBeenCalled();
@@ -364,7 +364,7 @@ describe("createKbAgent skills parameter", () => {
       skills: ["review", "fusion"],
     };
 
-    await createKbAgent(options);
+    await createFnAgent(options);
 
     // Verify the log message includes the skill names
     expect(piLogSpy).toHaveBeenCalledWith(
@@ -389,7 +389,7 @@ describe("createKbAgent skills parameter", () => {
       skills: ["nonexistent-skill"],
     };
 
-    await createKbAgent(options);
+    await createFnAgent(options);
 
     // The diagnostics should be logged
     expect(mockResolveSessionSkills).toHaveBeenCalled();
@@ -601,7 +601,7 @@ describe("session failure diagnostics", () => {
       .mockResolvedValueOnce({ session: primarySession } as any)
       .mockResolvedValueOnce({ session: fallbackSession } as any);
 
-    const { session } = await createKbAgent({
+    const { session } = await createFnAgent({
       cwd: "/test/project",
       systemPrompt: "Test fallback swap",
       defaultProvider: "test",
@@ -639,7 +639,7 @@ describe("piLog structured diagnostics", () => {
   });
 
   it("logs session creation with model info", async () => {
-    await createKbAgent({
+    await createFnAgent({
       cwd: "/test/project",
       systemPrompt: "Test",
       defaultProvider: "test",
@@ -668,7 +668,7 @@ describe("piLog structured diagnostics", () => {
         },
       } as any);
 
-    await createKbAgent({
+    await createFnAgent({
       cwd: "/test/project",
       systemPrompt: "Test",
       defaultProvider: "test",
@@ -688,7 +688,7 @@ describe("piLog structured diagnostics", () => {
     createAgentSessionMock.mockReset();
     createAgentSessionMock.mockRejectedValueOnce(new Error("fatal model failure"));
 
-    await expect(createKbAgent({
+    await expect(createFnAgent({
       cwd: "/test/project",
       systemPrompt: "Test",
       defaultProvider: "test",

@@ -2,7 +2,7 @@
  * MissionExecutionLoop unit tests.
  *
  * Tests the validation cycle orchestration class with mocked TaskStore, MissionStore,
- * and AI agent (createKbAgent/promptWithFallback).
+ * and AI agent (createFnAgent/promptWithFallback).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -31,9 +31,9 @@ const mockSessionHolder: {
 
 // Mock the pi module before MissionExecutionLoop is imported
 vi.mock("./pi.js", () => {
-  const createKbAgent = vi.fn(() => Promise.resolve({ session: mockSessionHolder.session }));
+  const createFnAgent = vi.fn(() => Promise.resolve({ session: mockSessionHolder.session }));
   const promptWithFallback = vi.fn().mockResolvedValue(undefined);
-  return { createKbAgent, promptWithFallback };
+  return { createFnAgent, promptWithFallback };
 });
 
 vi.mock("./logger.js", () => ({

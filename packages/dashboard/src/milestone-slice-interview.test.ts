@@ -7,7 +7,7 @@ const { mockCreateKbAgent } = vi.hoisted(() => ({
 }));
 
 vi.mock("@fusion/engine", () => ({
-  createKbAgent: mockCreateKbAgent,
+  createFnAgent: mockCreateKbAgent,
 }));
 
 import {
@@ -217,7 +217,7 @@ describe("milestone-slice-interview module", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     __resetMilestoneSliceInterviewState();
-    // Reset cached createKbAgent to force re-import with mock
+    // Reset cached createFnAgent to force re-import with mock
     const mod = await import("./milestone-slice-interview.js") as any;
     mod.__resetEngine?.();
     mockCreateKbAgent.mockImplementation(async () => createMockAgent([createQuestionJson()]));

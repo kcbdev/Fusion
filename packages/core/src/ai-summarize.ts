@@ -209,8 +209,8 @@ export async function summarizeTitle(
     return null; // Too short for summarization
   }
 
-  const createKbAgent = await getKbAgent();
-  if (!createKbAgent) {
+  const createFnAgent = await getKbAgent();
+  if (!createFnAgent) {
     if (DEBUG) console.log("[ai-summarize] AI engine not available");
     throw new AiServiceError("AI engine not available");
   }
@@ -234,7 +234,7 @@ export async function summarizeTitle(
   }
 
   if (DEBUG) console.log("[ai-summarize] Creating agent session...");
-  const agentResult = await createKbAgent(agentOptions);
+  const agentResult = await createFnAgent(agentOptions);
 
   if (!agentResult?.session) {
     if (DEBUG) console.log("[ai-summarize] Failed to initialize AI agent - no session");

@@ -4,7 +4,7 @@ import { detectReviewHandoffIntent } from "./executor.js";
 
 // Mock external dependencies
 vi.mock("./pi.js", () => ({
-  createKbAgent: vi.fn(),
+  createFnAgent: vi.fn(),
   describeModel: vi.fn().mockReturnValue("mock-provider/mock-model"),
   compactSessionContext: vi.fn(async (session, instructions) => {
     // Delegate to session.compact if available (supports loop recovery tests)
@@ -165,7 +165,7 @@ vi.mock("@mariozechner/pi-coding-agent", () => {
 });
 
 import { TaskExecutor, buildExecutionPrompt } from "./executor.js";
-import { createKbAgent } from "./pi.js";
+import { createFnAgent } from "./pi.js";
 import { reviewStep as mockedReviewStepFn } from "./reviewer.js";
 import { execSync } from "node:child_process";
 import { findWorktreeUser, aiMergeTask } from "./merger.js";
@@ -177,7 +177,7 @@ import { StepSessionExecutor } from "./step-session-executor.js";
 import { executorLog } from "./logger.js";
 import { withRateLimitRetry } from "./rate-limit-retry.js";
 
-const mockedCreateHaiAgent = vi.mocked(createKbAgent);
+const mockedCreateHaiAgent = vi.mocked(createFnAgent);
 const mockedSessionManager = vi.mocked(SessionManager);
 const mockedGenerateWorktreeName = vi.mocked(generateWorktreeName);
 const mockedFindWorktreeUser = vi.mocked(findWorktreeUser);
@@ -3151,7 +3151,7 @@ describe("TaskExecutor pause behavior", () => {
     // Should use SessionManager.open for the initial resumed execution
     expect(mockedSessionManager.open).toHaveBeenCalledWith(sessionFilePath);
 
-    // The first createKbAgent call should use the opened session manager
+    // The first createFnAgent call should use the opened session manager
     const firstCall = mockedCreateHaiAgent.mock.calls[0][0] as any;
     expect(firstCall.sessionManager).toBeDefined();
 
@@ -4032,7 +4032,7 @@ describe("TaskExecutor enginePaused soft pause (no agent termination)", () => {
 const mockedReviewStep = vi.mocked(mockedReviewStepFn);
 
 /**
- * Helper: executes a task and captures the custom tools passed to createKbAgent.
+ * Helper: executes a task and captures the custom tools passed to createFnAgent.
  * Returns a map of tool name → tool execute function for direct testing.
  */
 async function captureTools(): Promise<Record<string, (id: string, params: any) => Promise<any>>> {
@@ -4262,7 +4262,7 @@ describe("Code review verdict enforcement - task_update blocking", () => {
   });
 
   it("EXECUTOR_SYSTEM_PROMPT contains code review enforcement language", async () => {
-    // Capture the system prompt passed to createKbAgent
+    // Capture the system prompt passed to createFnAgent
     let capturedSystemPrompt = "";
     mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
       capturedSystemPrompt = opts.systemPrompt || "";
@@ -4340,7 +4340,7 @@ describe("RETHINK verdict handling", () => {
   }
 
   /**
-   * Helper: run executor and capture custom tools from createKbAgent mock.
+   * Helper: run executor and capture custom tools from createFnAgent mock.
    * Returns the tools map keyed by tool name.
    */
   async function captureRethinkTools(store: any, options?: any) {
@@ -6985,7 +6985,7 @@ describe("Workflow Steps Execution", () => {
       updatedAt: new Date().toISOString(),
     });
 
-    // createKbAgent called twice: main agent + workflow step agent
+    // createFnAgent called twice: main agent + workflow step agent
     expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
 
     // Second call should be the workflow step with readonly tools
@@ -7207,7 +7207,7 @@ describe("Workflow Steps Execution", () => {
       updatedAt: new Date().toISOString(),
     });
 
-    // Should only call createKbAgent once (main execution), skip workflow step
+    // Should only call createFnAgent once (main execution), skip workflow step
     expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(1);
 
     // Should log that it was skipped
@@ -7340,7 +7340,7 @@ describe("Workflow Steps Execution", () => {
       updatedAt: new Date().toISOString(),
     });
 
-    // createKbAgent called twice: main agent + workflow step agent
+    // createFnAgent called twice: main agent + workflow step agent
     expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
 
     // Second call should use the workflow step's model override
@@ -7510,7 +7510,7 @@ describe("Workflow Steps Execution", () => {
       updatedAt: new Date().toISOString(),
     });
 
-    // Should only call createKbAgent once (main execution — no agent for script mode)
+    // Should only call createFnAgent once (main execution — no agent for script mode)
     expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(1);
 
     // Should log script execution
@@ -7868,7 +7868,7 @@ describe("Workflow Steps Execution", () => {
       updatedAt: new Date().toISOString(),
     });
 
-    // Should only call createKbAgent once (main execution)
+    // Should only call createFnAgent once (main execution)
     expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(1);
 
     // Should log that it was skipped
@@ -7957,7 +7957,7 @@ describe("Workflow Steps Execution", () => {
       updatedAt: new Date().toISOString(),
     });
 
-    // createKbAgent called twice: main agent + workflow step agent (prompt mode)
+    // createFnAgent called twice: main agent + workflow step agent (prompt mode)
     expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
 
     // Second call should use prompt mode (readonly tools, agent-based)
@@ -8064,7 +8064,7 @@ describe("Workflow Steps Execution", () => {
       updatedAt: new Date().toISOString(),
     });
 
-    // createKbAgent called twice: main agent + 1 pre-merge step (post-merge skipped)
+    // createFnAgent called twice: main agent + 1 pre-merge step (post-merge skipped)
     expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
 
     // Verify the workflow step results only contain pre-merge
@@ -9302,7 +9302,7 @@ describe("Agent Spawning", () => {
     );
   });
 
-  it("creates child agent session via createKbAgent", async () => {
+  it("creates child agent session via createFnAgent", async () => {
     const agentStore = createMockAgentStore();
     const { tools } = await captureToolsWithAgentStore(agentStore);
 
@@ -9312,7 +9312,7 @@ describe("Agent Spawning", () => {
       task: "Do some work",
     });
 
-    // createKbAgent is called at least twice: once for parent, once for child
+    // createFnAgent is called at least twice: once for parent, once for child
     expect(mockedCreateHaiAgent.mock.calls.length).toBeGreaterThanOrEqual(2);
     
     // Find the child session call
@@ -10039,7 +10039,7 @@ describe("TaskExecutor agent execution flow (FN-978)", () => {
     let capturedOnText: ((delta: string) => void) | undefined;
 
     mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
-      // Capture the onText callback that's passed to createKbAgent
+      // Capture the onText callback that's passed to createFnAgent
       capturedOnText = opts.onText;
       return {
         session: {
@@ -10169,7 +10169,7 @@ describe("TaskExecutor agent execution flow (FN-978)", () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
 
     // The executing guard prevents duplicate execution from the event handler.
-    // Note: createKbAgent may be called a second time if the agent finishes
+    // Note: createFnAgent may be called a second time if the agent finishes
     // without calling task_done (retry path), but the initial trigger should
     // only cause one execution, not two.
     // Verify that store.on was called with task:moved (listener registered)
@@ -10286,7 +10286,7 @@ describe("StepSessionExecutor integration", () => {
     expect(mockedStepSessionExecutor).toHaveBeenCalled();
     // executeAll should have been called
     expect(mockExecuteAll).toHaveBeenCalledOnce();
-    // createKbAgent should NOT have been called for step-session path
+    // createFnAgent should NOT have been called for step-session path
     expect(mockedCreateHaiAgent).not.toHaveBeenCalled();
   });
 
@@ -10945,7 +10945,7 @@ describe("TaskExecutor skillSelection regression (FN-1511)", () => {
   });
 
   /**
-   * Helper: execute a task and capture createKbAgent call arguments.
+   * Helper: execute a task and capture createFnAgent call arguments.
    */
   async function captureCreateKbAgentArgs(options?: {
     assignedAgentId?: string;
@@ -11019,7 +11019,7 @@ describe("TaskExecutor skillSelection regression (FN-1511)", () => {
   }
 
   describe("single-session mode (runStepsInNewSessions: false)", () => {
-    it("passes skillSelection to createKbAgent when assigned agent has skills", async () => {
+    it("passes skillSelection to createFnAgent when assigned agent has skills", async () => {
       const args = await captureCreateKbAgentArgs({
         assignedAgentId: "agent-001",
         assignedAgentSkills: ["triage", "executor"],
@@ -11085,7 +11085,7 @@ describe("TaskExecutor skillSelection regression (FN-1511)", () => {
     // Note: These tests verify that skillSelection flows from executor to
     // StepSessionExecutor. The full integration is complex due to mock setup,
     // so we verify the contract indirectly through the step-session-executor tests.
-    // The executor tests focus on verifying skillSelection is present in createKbAgent calls.
+    // The executor tests focus on verifying skillSelection is present in createFnAgent calls.
     // See StepSessionExecutor skillSelection tests in step-session-executor.test.ts.
 
     // Skipped: Integration tests for step-session skill selection are covered
@@ -11114,7 +11114,7 @@ describe("TaskExecutor messaging tools", () => {
   });
 
   /**
-   * Helper: execute a task and capture the customTools array passed to createKbAgent.
+   * Helper: execute a task and capture the customTools array passed to createFnAgent.
    */
   async function captureCustomTools(options?: {
     messageStore?: unknown;

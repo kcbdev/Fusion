@@ -30,16 +30,16 @@ vi.mock("./logger.js", () => {
 
 // Mock pi.ts for executeHeartbeat tests
 vi.mock("./pi.js", () => ({
-  createKbAgent: vi.fn(),
+  createFnAgent: vi.fn(),
   promptWithFallback: vi.fn(async (session: any, prompt: string) => {
     await session.prompt(prompt);
   }),
 }));
 
 // Import the mocked functions for test control
-import { createKbAgent } from "./pi.js";
+import { createFnAgent } from "./pi.js";
 import { heartbeatLog } from "./logger.js";
-const mockedCreateKbAgent = vi.mocked(createKbAgent);
+const mockedCreateKbAgent = vi.mocked(createFnAgent);
 
 // Mock store factory
 function createMockStore(overrides: Partial<AgentStore> = {}): AgentStore {
@@ -1198,7 +1198,7 @@ describe("HeartbeatMonitor", () => {
     let mockTaskStore: TaskStore;
     let mockAgent: Agent;
 
-    // Helper: create a mock session returned by createKbAgent
+    // Helper: create a mock session returned by createFnAgent
     function createMockAgentSession() {
       return {
         prompt: vi.fn().mockResolvedValue(undefined),
@@ -2722,7 +2722,7 @@ describe("HeartbeatMonitor", () => {
         expect(taskLogTool.name).toBe("task_log");
       });
 
-      it("passes model config from agent runtimeConfig to createKbAgent", async () => {
+      it("passes model config from agent runtimeConfig to createFnAgent", async () => {
         const store = createStoreWithAgentForExec({
           runtimeConfig: { modelProvider: "openai", modelId: "gpt-4o" },
         });
@@ -2898,7 +2898,7 @@ describe("HeartbeatMonitor", () => {
     });
 
     describe("error handling", () => {
-      it("completes run as failed when createKbAgent throws", async () => {
+      it("completes run as failed when createFnAgent throws", async () => {
         const store = createStoreWithAgentForExec();
         mockedCreateKbAgent.mockRejectedValue(new Error("Model unavailable"));
 
@@ -4561,10 +4561,10 @@ describe("HeartbeatTriggerScheduler", () => {
 describe("executeHeartbeat — skill selection resolver contract (FN-1510/FN-1511)", () => {
   // We need to test the skill selection contract without affecting other tests.
   // Since buildSessionSkillContextSync is called via dynamic import inside executeHeartbeat,
-  // we need to test the integration at a higher level - verifying that createKbAgent
+  // we need to test the integration at a higher level - verifying that createFnAgent
   // receives the skillSelection option when agent has skills.
 
-  // Helper: create a mock session returned by createKbAgent
+  // Helper: create a mock session returned by createFnAgent
   function createMockAgentSession() {
     return {
       prompt: vi.fn().mockResolvedValue(undefined),
@@ -4690,11 +4690,11 @@ describe("executeHeartbeat — skill selection resolver contract (FN-1510/FN-151
     vi.restoreAllMocks();
   });
 
-  // These tests verify the skill selection contract at the createKbAgent level.
+  // These tests verify the skill selection contract at the createFnAgent level.
   // Since we can't easily mock dynamic imports, we verify that when an agent has
-  // skills in metadata, the createKbAgent is called and the result includes skill info.
+  // skills in metadata, the createFnAgent is called and the result includes skill info.
 
-  it("createKbAgent is called with agent session for heartbeat with skills", async () => {
+  it("createFnAgent is called with agent session for heartbeat with skills", async () => {
     mockedCreateKbAgent.mockResolvedValue({
       session: createMockAgentSession(),
     } as any);
@@ -4711,7 +4711,7 @@ describe("executeHeartbeat — skill selection resolver contract (FN-1510/FN-151
     expect(result.status).toBe("completed");
   });
 
-  it("createKbAgent is called with correct cwd for skill resolution", async () => {
+  it("createFnAgent is called with correct cwd for skill resolution", async () => {
     mockedCreateKbAgent.mockResolvedValue({
       session: createMockAgentSession(),
     } as any);
@@ -4751,7 +4751,7 @@ describe("executeHeartbeat — skill selection resolver contract (FN-1510/FN-151
 });
 
 describe("executeHeartbeat — skill selection non-fatal (FN-1510/FN-1511)", () => {
-  // Helper: create a mock session returned by createKbAgent
+  // Helper: create a mock session returned by createFnAgent
   function createMockAgentSession() {
     return {
       prompt: vi.fn().mockResolvedValue(undefined),

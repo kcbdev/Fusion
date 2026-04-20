@@ -12,15 +12,15 @@ import type {
 } from "@fusion/core";
 
 vi.mock("./pi.js", () => ({
-  createKbAgent: vi.fn(),
+  createFnAgent: vi.fn(),
   promptWithFallback: vi.fn(),
 }));
 
-import { createKbAgent, promptWithFallback } from "./pi.js";
+import { createFnAgent, promptWithFallback } from "./pi.js";
 import { AgentReflectionService } from "./agent-reflection.js";
 import { createReflectOnPerformanceTool, reflectOnPerformanceParams } from "./agent-tools.js";
 
-const mockedCreateKbAgent = vi.mocked(createKbAgent);
+const mockedCreateKbAgent = vi.mocked(createFnAgent);
 const mockedPromptWithFallback = vi.mocked(promptWithFallback);
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {

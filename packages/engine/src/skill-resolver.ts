@@ -6,7 +6,7 @@
  * 2. Optional caller-requested skill names (for per-task overrides)
  *
  * The resolver reads project settings files directly (read-only) and produces
- * a filter set used by createKbAgent's DefaultResourceLoader.skillsOverride.
+ * a filter set used by createFnAgent's DefaultResourceLoader.skillsOverride.
  */
 
 import { existsSync, readFileSync } from "node:fs";

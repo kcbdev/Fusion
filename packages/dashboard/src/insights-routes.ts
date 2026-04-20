@@ -251,10 +251,10 @@ export function createInsightsRouter(store: TaskStore): Router {
       const existingInsights = await readInsightsMemory(rootDir);
 
       try {
-        const { createKbAgent, promptWithFallback } = await import("@fusion/engine");
+        const { createFnAgent, promptWithFallback } = await import("@fusion/engine");
 
         let responseText = "";
-        const { session } = await createKbAgent({
+        const { session } = await createFnAgent({
           cwd: rootDir,
           systemPrompt: [
             "You extract durable project insights from working memory notes.",

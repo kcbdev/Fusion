@@ -132,7 +132,7 @@ function setupMockStreamingAgent(options?: {
   const thinkingPerPrompt = options?.thinkingPerPrompt ?? [];
   let promptIndex = 0;
 
-  const createKbAgentSpy = vi.fn(async (agentOptions?: { onThinking?: (delta: string) => void }) => {
+  const createFnAgentSpy = vi.fn(async (agentOptions?: { onThinking?: (delta: string) => void }) => {
     const messages: Array<{ role: string; content: string }> = [];
 
     return {
@@ -153,8 +153,8 @@ function setupMockStreamingAgent(options?: {
     };
   });
 
-  __setCreateKbAgent(createKbAgentSpy as any);
-  return { createKbAgentSpy };
+  __setCreateKbAgent(createFnAgentSpy as any);
+  return { createFnAgentSpy };
 }
 
 class MockAiSessionStore extends EventEmitter {
@@ -377,9 +377,9 @@ describe("planning module", () => {
   });
 
   describe("createSessionWithAgent", () => {
-    it("passes planning model override to createKbAgent when provided", async () => {
-      const createKbAgentSpy = vi.fn(async () => createMockAgent(STANDARD_QUESTION_RESPONSES));
-      __setCreateKbAgent(createKbAgentSpy as any);
+    it("passes planning model override to createFnAgent when provided", async () => {
+      const createFnAgentSpy = vi.fn(async () => createMockAgent(STANDARD_QUESTION_RESPONSES));
+      __setCreateKbAgent(createFnAgentSpy as any);
 
       const sessionId = await createSessionWithAgent(
         getUniqueIp(),
@@ -392,10 +392,10 @@ describe("planning module", () => {
       expect(sessionId).toBeDefined();
 
       await vi.waitFor(() => {
-        expect(createKbAgentSpy).toHaveBeenCalledTimes(1);
+        expect(createFnAgentSpy).toHaveBeenCalledTimes(1);
       }, { timeout: 10000 });
 
-      expect(createKbAgentSpy).toHaveBeenCalledWith(
+      expect(createFnAgentSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           defaultProvider: "google",
           defaultModelId: "gemini-2.5-pro",
@@ -404,25 +404,25 @@ describe("planning module", () => {
     });
 
     it("creates agent without model overrides when none provided", async () => {
-      const createKbAgentSpy = vi.fn(async () => createMockAgent(STANDARD_QUESTION_RESPONSES));
-      __setCreateKbAgent(createKbAgentSpy as any);
+      const createFnAgentSpy = vi.fn(async () => createMockAgent(STANDARD_QUESTION_RESPONSES));
+      __setCreateKbAgent(createFnAgentSpy as any);
 
       const sessionId = await createSessionWithAgent(getUniqueIp(), "Build auth system", TEST_ROOT_DIR);
 
       expect(sessionId).toBeDefined();
 
       await vi.waitFor(() => {
-        expect(createKbAgentSpy).toHaveBeenCalledTimes(1);
+        expect(createFnAgentSpy).toHaveBeenCalledTimes(1);
       }, { timeout: 10000 });
 
-      const callArg = createKbAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
+      const callArg = createFnAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
       expect(callArg?.defaultProvider).toBeUndefined();
       expect(callArg?.defaultModelId).toBeUndefined();
     });
 
     it("uses custom prompt from promptOverrides when provided", async () => {
-      const createKbAgentSpy = vi.fn(async () => createMockAgent(STANDARD_QUESTION_RESPONSES));
-      __setCreateKbAgent(createKbAgentSpy as any);
+      const createFnAgentSpy = vi.fn(async () => createMockAgent(STANDARD_QUESTION_RESPONSES));
+      __setCreateKbAgent(createFnAgentSpy as any);
 
       const customPrompt = "Custom planning prompt with specific guidelines...";
       const promptOverrides = { "planning-system": customPrompt };
@@ -439,16 +439,16 @@ describe("planning module", () => {
       expect(sessionId).toBeDefined();
 
       await vi.waitFor(() => {
-        expect(createKbAgentSpy).toHaveBeenCalledTimes(1);
+        expect(createFnAgentSpy).toHaveBeenCalledTimes(1);
       }, { timeout: 10000 });
 
-      const callArg = createKbAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
+      const callArg = createFnAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
       expect(callArg?.systemPrompt).toBe(customPrompt);
     });
 
     it("falls back to default prompt when promptOverrides is undefined", async () => {
-      const createKbAgentSpy = vi.fn(async () => createMockAgent(STANDARD_QUESTION_RESPONSES));
-      __setCreateKbAgent(createKbAgentSpy as any);
+      const createFnAgentSpy = vi.fn(async () => createMockAgent(STANDARD_QUESTION_RESPONSES));
+      __setCreateKbAgent(createFnAgentSpy as any);
 
       const sessionId = await createSessionWithAgent(
         getUniqueIp(),
@@ -462,16 +462,16 @@ describe("planning module", () => {
       expect(sessionId).toBeDefined();
 
       await vi.waitFor(() => {
-        expect(createKbAgentSpy).toHaveBeenCalledTimes(1);
+        expect(createFnAgentSpy).toHaveBeenCalledTimes(1);
       }, { timeout: 10000 });
 
-      const callArg = createKbAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
+      const callArg = createFnAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
       expect(callArg?.systemPrompt).toContain("planning assistant");
     });
 
     it("falls back to default prompt when promptOverrides does not contain planning key", async () => {
-      const createKbAgentSpy = vi.fn(async () => createMockAgent(STANDARD_QUESTION_RESPONSES));
-      __setCreateKbAgent(createKbAgentSpy as any);
+      const createFnAgentSpy = vi.fn(async () => createMockAgent(STANDARD_QUESTION_RESPONSES));
+      __setCreateKbAgent(createFnAgentSpy as any);
 
       // Provide an override for a different key
       const promptOverrides = { "triage-welcome": "Some other prompt" };
@@ -488,10 +488,10 @@ describe("planning module", () => {
       expect(sessionId).toBeDefined();
 
       await vi.waitFor(() => {
-        expect(createKbAgentSpy).toHaveBeenCalledTimes(1);
+        expect(createFnAgentSpy).toHaveBeenCalledTimes(1);
       }, { timeout: 10000 });
 
-      const callArg = createKbAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
+      const callArg = createFnAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
       expect(callArg?.systemPrompt).toContain("planning assistant");
     });
   });
@@ -589,8 +589,8 @@ describe("planning module", () => {
           },
         }),
       ]);
-      const createKbAgentSpy = vi.fn(async () => resumedAgent);
-      __setCreateKbAgent(createKbAgentSpy as any);
+      const createFnAgentSpy = vi.fn(async () => resumedAgent);
+      __setCreateKbAgent(createFnAgentSpy as any);
 
       const response = await submitResponse(
         row.id,
@@ -602,7 +602,7 @@ describe("planning module", () => {
       if (response.type === "question") {
         expect(response.data.id).toBe("q-3");
       }
-      expect(createKbAgentSpy).toHaveBeenCalledWith(
+      expect(createFnAgentSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           cwd: TEST_ROOT_DIR,
           systemPrompt: expect.stringContaining("planning assistant"),
@@ -828,13 +828,13 @@ describe("planning module", () => {
           },
         }),
       ]);
-      const createKbAgentSpy = vi.fn(async () => resumedAgent);
-      __setCreateKbAgent(createKbAgentSpy as any);
+      const createFnAgentSpy = vi.fn(async () => resumedAgent);
+      __setCreateKbAgent(createFnAgentSpy as any);
 
       await retrySession(row.id, TEST_ROOT_DIR, promptOverrides);
 
-      expect(createKbAgentSpy).toHaveBeenCalledTimes(1);
-      const callArg = createKbAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(createFnAgentSpy).toHaveBeenCalledTimes(1);
+      const callArg = createFnAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
       expect(callArg?.systemPrompt).toBe(customPrompt);
     });
 
@@ -871,13 +871,13 @@ describe("planning module", () => {
           },
         }),
       ]);
-      const createKbAgentSpy = vi.fn(async () => resumedAgent);
-      __setCreateKbAgent(createKbAgentSpy as any);
+      const createFnAgentSpy = vi.fn(async () => resumedAgent);
+      __setCreateKbAgent(createFnAgentSpy as any);
 
       await retrySession(row.id, TEST_ROOT_DIR);
 
-      expect(createKbAgentSpy).toHaveBeenCalledTimes(1);
-      const callArg = createKbAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(createFnAgentSpy).toHaveBeenCalledTimes(1);
+      const callArg = createFnAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
       expect(callArg?.systemPrompt).toContain("planning assistant");
     });
   });

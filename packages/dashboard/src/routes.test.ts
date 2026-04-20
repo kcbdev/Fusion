@@ -47,7 +47,7 @@ vi.mock("@fusion/core", async () => {
 });
 
 vi.mock("@fusion/engine", () => ({
-  createKbAgent: vi.fn(async () => ({
+  createFnAgent: vi.fn(async () => ({
     session: {
       state: {
         messages: [] as Array<{ role: string; content: string }>,
@@ -7891,8 +7891,8 @@ describe("Planning Mode Routes", () => {
           },
         };
 
-        const createKbAgentSpy = vi.fn(async () => mockAgent);
-        __setCreateKbAgent(createKbAgentSpy as any);
+        const createFnAgentSpy = vi.fn(async () => mockAgent);
+        __setCreateKbAgent(createFnAgentSpy as any);
 
         const res = await REQUEST(
           buildApp(),
@@ -7910,7 +7910,7 @@ describe("Planning Mode Routes", () => {
         expect(res.body.sessionId).toBeDefined();
 
         await vi.waitFor(() => {
-          expect(createKbAgentSpy).toHaveBeenCalledWith(
+          expect(createFnAgentSpy).toHaveBeenCalledWith(
             expect.objectContaining({
               defaultProvider: "google",
               defaultModelId: "gemini-2.5-pro",
@@ -7935,8 +7935,8 @@ describe("Planning Mode Routes", () => {
             dispose: vi.fn(),
           },
         };
-        const createKbAgentSpy = vi.fn(async () => mockAgent);
-        __setCreateKbAgent(createKbAgentSpy as any);
+        const createFnAgentSpy = vi.fn(async () => mockAgent);
+        __setCreateKbAgent(createFnAgentSpy as any);
 
         const res = await REQUEST(
           buildApp(),
@@ -7952,7 +7952,7 @@ describe("Planning Mode Routes", () => {
 
         expect(res.status).toBe(201);
         await vi.waitFor(() => {
-          expect(createKbAgentSpy).toHaveBeenCalledWith(
+          expect(createFnAgentSpy).toHaveBeenCalledWith(
             expect.objectContaining({
               defaultProvider: "google",
               defaultModelId: "gemini-2.5-pro",
@@ -7969,8 +7969,8 @@ describe("Planning Mode Routes", () => {
             dispose: vi.fn(),
           },
         };
-        const createKbAgentSpy = vi.fn(async () => mockAgent);
-        __setCreateKbAgent(createKbAgentSpy as any);
+        const createFnAgentSpy = vi.fn(async () => mockAgent);
+        __setCreateKbAgent(createFnAgentSpy as any);
 
         // Mock project settings with planningProvider + planningModelId
         (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
@@ -7988,7 +7988,7 @@ describe("Planning Mode Routes", () => {
 
         expect(res.status).toBe(201);
         await vi.waitFor(() => {
-          expect(createKbAgentSpy).toHaveBeenCalledWith(
+          expect(createFnAgentSpy).toHaveBeenCalledWith(
             expect.objectContaining({
               defaultProvider: "anthropic",
               defaultModelId: "claude-sonnet-4-5",
@@ -8005,8 +8005,8 @@ describe("Planning Mode Routes", () => {
             dispose: vi.fn(),
           },
         };
-        const createKbAgentSpy = vi.fn(async () => mockAgent);
-        __setCreateKbAgent(createKbAgentSpy as any);
+        const createFnAgentSpy = vi.fn(async () => mockAgent);
+        __setCreateKbAgent(createFnAgentSpy as any);
 
         // Mock project settings with planningGlobalProvider + planningGlobalModelId (no project lane)
         (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
@@ -8024,7 +8024,7 @@ describe("Planning Mode Routes", () => {
 
         expect(res.status).toBe(201);
         await vi.waitFor(() => {
-          expect(createKbAgentSpy).toHaveBeenCalledWith(
+          expect(createFnAgentSpy).toHaveBeenCalledWith(
             expect.objectContaining({
               defaultProvider: "openai",
               defaultModelId: "gpt-4o",
@@ -8041,8 +8041,8 @@ describe("Planning Mode Routes", () => {
             dispose: vi.fn(),
           },
         };
-        const createKbAgentSpy = vi.fn(async () => mockAgent);
-        __setCreateKbAgent(createKbAgentSpy as any);
+        const createFnAgentSpy = vi.fn(async () => mockAgent);
+        __setCreateKbAgent(createFnAgentSpy as any);
 
         // Mock project settings with only defaultProvider + defaultModelId
         (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
@@ -8060,7 +8060,7 @@ describe("Planning Mode Routes", () => {
 
         expect(res.status).toBe(201);
         await vi.waitFor(() => {
-          expect(createKbAgentSpy).toHaveBeenCalledWith(
+          expect(createFnAgentSpy).toHaveBeenCalledWith(
             expect.objectContaining({
               defaultProvider: "mistral",
               defaultModelId: "mistral-large",
@@ -8077,8 +8077,8 @@ describe("Planning Mode Routes", () => {
             dispose: vi.fn(),
           },
         };
-        const createKbAgentSpy = vi.fn(async () => mockAgent);
-        __setCreateKbAgent(createKbAgentSpy as any);
+        const createFnAgentSpy = vi.fn(async () => mockAgent);
+        __setCreateKbAgent(createFnAgentSpy as any);
 
         // Mock project settings with no model configuration
         (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({});
@@ -8094,7 +8094,7 @@ describe("Planning Mode Routes", () => {
         expect(res.status).toBe(201);
         await vi.waitFor(() => {
           // No explicit defaultProvider/defaultModelId means automatic resolution
-          expect(createKbAgentSpy).toHaveBeenCalledWith(
+          expect(createFnAgentSpy).toHaveBeenCalledWith(
             expect.not.objectContaining({
               defaultProvider: expect.anything(),
               defaultModelId: expect.anything(),
@@ -8130,8 +8130,8 @@ describe("Planning Mode Routes", () => {
             dispose: vi.fn(),
           },
         };
-        const createKbAgentSpy = vi.fn(async () => mockAgent);
-        __setCreateKbAgent(createKbAgentSpy as any);
+        const createFnAgentSpy = vi.fn(async () => mockAgent);
+        __setCreateKbAgent(createFnAgentSpy as any);
 
         // Mock project settings with partial provider (no modelId)
         (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
@@ -8151,7 +8151,7 @@ describe("Planning Mode Routes", () => {
         // Partial project lane should be ignored, falls through to next tier
         await vi.waitFor(() => {
           // Should NOT use the partial provider
-          expect(createKbAgentSpy).toHaveBeenCalledWith(
+          expect(createFnAgentSpy).toHaveBeenCalledWith(
             expect.not.objectContaining({
               defaultProvider: "anthropic",
             }),
@@ -9521,8 +9521,8 @@ describe("POST /planning/start-streaming with projectId scoping", () => {
         dispose: vi.fn(),
       },
     };
-    const createKbAgentSpy = vi.fn(async () => mockAgent);
-    __setCreateKbAgent(createKbAgentSpy as any);
+    const createFnAgentSpy = vi.fn(async () => mockAgent);
+    __setCreateKbAgent(createFnAgentSpy as any);
 
     const res = await REQUEST(
       buildApp(),
@@ -9538,7 +9538,7 @@ describe("POST /planning/start-streaming with projectId scoping", () => {
     expect(scopedStore.getRootDir()).toBe("/scoped/planning/project");
     // Verify scoped settings were used for prompt resolution
     await vi.waitFor(() => {
-      expect(createKbAgentSpy).toHaveBeenCalledWith(
+      expect(createFnAgentSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           systemPrompt: customPlanningPrompt,
           defaultProvider: "scoped-provider",
@@ -9566,8 +9566,8 @@ describe("POST /planning/start-streaming with projectId scoping", () => {
         dispose: vi.fn(),
       },
     };
-    const createKbAgentSpy = vi.fn(async () => mockAgent);
-    __setCreateKbAgent(createKbAgentSpy as any);
+    const createFnAgentSpy = vi.fn(async () => mockAgent);
+    __setCreateKbAgent(createFnAgentSpy as any);
 
     const res = await REQUEST(
       buildApp(),
@@ -9584,7 +9584,7 @@ describe("POST /planning/start-streaming with projectId scoping", () => {
     expect(res.status).toBe(201);
     // Request body override takes precedence over scoped settings
     await vi.waitFor(() => {
-      expect(createKbAgentSpy).toHaveBeenCalledWith(
+      expect(createFnAgentSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           defaultProvider: "google",
           defaultModelId: "gemini-2.5-pro",
@@ -9611,8 +9611,8 @@ describe("POST /planning/start-streaming with projectId scoping", () => {
         dispose: vi.fn(),
       },
     };
-    const createKbAgentSpy = vi.fn(async () => mockAgent);
-    __setCreateKbAgent(createKbAgentSpy as any);
+    const createFnAgentSpy = vi.fn(async () => mockAgent);
+    __setCreateKbAgent(createFnAgentSpy as any);
 
     const res = await REQUEST(
       buildApp(),
@@ -9625,7 +9625,7 @@ describe("POST /planning/start-streaming with projectId scoping", () => {
     expect(res.status).toBe(201);
     // Scoped settings planning lane should be used
     await vi.waitFor(() => {
-      expect(createKbAgentSpy).toHaveBeenCalledWith(
+      expect(createFnAgentSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           defaultProvider: "anthropic",
           defaultModelId: "claude-sonnet-4",
@@ -9655,8 +9655,8 @@ describe("POST /planning/start-streaming with projectId scoping", () => {
         dispose: vi.fn(),
       },
     };
-    const createKbAgentSpy = vi.fn(async () => mockAgent);
-    __setCreateKbAgent(createKbAgentSpy as any);
+    const createFnAgentSpy = vi.fn(async () => mockAgent);
+    __setCreateKbAgent(createFnAgentSpy as any);
 
     const res = await REQUEST(
       buildApp(),
@@ -9670,7 +9670,7 @@ describe("POST /planning/start-streaming with projectId scoping", () => {
     // Default store should be used (getOrCreateProjectStore should not be called)
     expect(projectStoreResolver.getOrCreateProjectStore).not.toHaveBeenCalled();
     await vi.waitFor(() => {
-      expect(createKbAgentSpy).toHaveBeenCalledWith(
+      expect(createFnAgentSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           defaultProvider: "default-provider",
           defaultModelId: "default-model",
@@ -13778,8 +13778,8 @@ describe("POST /workflow-steps/:id/refine", () => {
       dispose: vi.fn(),
     };
 
-    const createKbAgentMock = vi.fn(async () => ({ session }));
-    __setCreateKbAgentForRefine(createKbAgentMock);
+    const createFnAgentMock = vi.fn(async () => ({ session }));
+    __setCreateKbAgentForRefine(createFnAgentMock);
 
     const res = await REQUEST(buildApp(), "POST", "/api/workflow-steps/WS-001/refine", JSON.stringify({}), {
       "Content-Type": "application/json",
@@ -13788,7 +13788,7 @@ describe("POST /workflow-steps/:id/refine", () => {
     expect(res.status).toBe(200);
     expect(res.body.prompt).toBe("Refined prompt from AI");
     expect(res.body.workflowStep.prompt).toBe("Refined prompt from AI");
-    expect(createKbAgentMock).toHaveBeenCalledTimes(1);
+    expect(createFnAgentMock).toHaveBeenCalledTimes(1);
     expect(session.prompt).toHaveBeenCalledWith(expect.stringContaining("Name: Docs"));
     expect(session.dispose).toHaveBeenCalledTimes(1);
     expect(store.updateWorkflowStep).toHaveBeenCalledWith("WS-001", { prompt: "Refined prompt from AI" });
@@ -13840,18 +13840,18 @@ describe("POST /workflow-steps/:id/refine", () => {
       dispose: vi.fn(),
     };
 
-    const createKbAgentMock = vi.fn(async (options: { cwd: string; systemPrompt: string; tools: string }) => {
+    const createFnAgentMock = vi.fn(async (options: { cwd: string; systemPrompt: string; tools: string }) => {
       capturedSystemPrompt = options.systemPrompt;
       return { session };
     });
-    __setCreateKbAgentForRefine(createKbAgentMock);
+    __setCreateKbAgentForRefine(createFnAgentMock);
 
     const res = await REQUEST(buildApp(), "POST", "/api/workflow-steps/WS-001/refine", JSON.stringify({}), {
       "Content-Type": "application/json",
     });
 
     expect(res.status).toBe(200);
-    expect(createKbAgentMock).toHaveBeenCalledTimes(1);
+    expect(createFnAgentMock).toHaveBeenCalledTimes(1);
     // Verify the custom prompt was passed
     expect(capturedSystemPrompt).toBe(customPrompt);
   });
@@ -13881,18 +13881,18 @@ describe("POST /workflow-steps/:id/refine", () => {
       dispose: vi.fn(),
     };
 
-    const createKbAgentMock = vi.fn(async (options: { cwd: string; systemPrompt: string; tools: string }) => {
+    const createFnAgentMock = vi.fn(async (options: { cwd: string; systemPrompt: string; tools: string }) => {
       capturedSystemPrompt = options.systemPrompt;
       return { session };
     });
-    __setCreateKbAgentForRefine(createKbAgentMock);
+    __setCreateKbAgentForRefine(createFnAgentMock);
 
     const res = await REQUEST(buildApp(), "POST", "/api/workflow-steps/WS-001/refine", JSON.stringify({}), {
       "Content-Type": "application/json",
     });
 
     expect(res.status).toBe(200);
-    expect(createKbAgentMock).toHaveBeenCalledTimes(1);
+    expect(createFnAgentMock).toHaveBeenCalledTimes(1);
     // Should use the default prompt (contains "You are an expert at creating")
     expect(capturedSystemPrompt).toContain("You are an expert at creating");
     expect(capturedSystemPrompt).toContain("workflow steps");
@@ -13922,18 +13922,18 @@ describe("POST /workflow-steps/:id/refine", () => {
       dispose: vi.fn(),
     };
 
-    const createKbAgentMock = vi.fn(async (options: { defaultProvider?: string; defaultModelId?: string }) => {
+    const createFnAgentMock = vi.fn(async (options: { defaultProvider?: string; defaultModelId?: string }) => {
       capturedModel = options;
       return { session };
     });
-    __setCreateKbAgentForRefine(createKbAgentMock);
+    __setCreateKbAgentForRefine(createFnAgentMock);
 
     const res = await REQUEST(buildApp(), "POST", "/api/workflow-steps/WS-001/refine", JSON.stringify({}), {
       "Content-Type": "application/json",
     });
 
     expect(res.status).toBe(200);
-    expect(createKbAgentMock).toHaveBeenCalledTimes(1);
+    expect(createFnAgentMock).toHaveBeenCalledTimes(1);
     expect(capturedModel.defaultProvider).toBe("anthropic");
     expect(capturedModel.defaultModelId).toBe("claude-sonnet-4-5");
   });
@@ -13956,18 +13956,18 @@ describe("POST /workflow-steps/:id/refine", () => {
       dispose: vi.fn(),
     };
 
-    const createKbAgentMock = vi.fn(async (options: { defaultProvider?: string; defaultModelId?: string }) => {
+    const createFnAgentMock = vi.fn(async (options: { defaultProvider?: string; defaultModelId?: string }) => {
       capturedModel = options;
       return { session };
     });
-    __setCreateKbAgentForRefine(createKbAgentMock);
+    __setCreateKbAgentForRefine(createFnAgentMock);
 
     const res = await REQUEST(buildApp(), "POST", "/api/workflow-steps/WS-001/refine", JSON.stringify({}), {
       "Content-Type": "application/json",
     });
 
     expect(res.status).toBe(200);
-    expect(createKbAgentMock).toHaveBeenCalledTimes(1);
+    expect(createFnAgentMock).toHaveBeenCalledTimes(1);
     expect(capturedModel.defaultProvider).toBe("openai");
     expect(capturedModel.defaultModelId).toBe("gpt-4o");
   });
@@ -13990,18 +13990,18 @@ describe("POST /workflow-steps/:id/refine", () => {
       dispose: vi.fn(),
     };
 
-    const createKbAgentMock = vi.fn(async (options: { defaultProvider?: string; defaultModelId?: string }) => {
+    const createFnAgentMock = vi.fn(async (options: { defaultProvider?: string; defaultModelId?: string }) => {
       capturedModel = options;
       return { session };
     });
-    __setCreateKbAgentForRefine(createKbAgentMock);
+    __setCreateKbAgentForRefine(createFnAgentMock);
 
     const res = await REQUEST(buildApp(), "POST", "/api/workflow-steps/WS-001/refine", JSON.stringify({}), {
       "Content-Type": "application/json",
     });
 
     expect(res.status).toBe(200);
-    expect(createKbAgentMock).toHaveBeenCalledTimes(1);
+    expect(createFnAgentMock).toHaveBeenCalledTimes(1);
     expect(capturedModel.defaultProvider).toBe("mistral");
     expect(capturedModel.defaultModelId).toBe("mistral-large");
   });
@@ -14027,11 +14027,11 @@ describe("POST /workflow-steps/:id/refine", () => {
       dispose: vi.fn(),
     };
 
-    const createKbAgentMock = vi.fn(async (options: { defaultProvider?: string; defaultModelId?: string }) => {
+    const createFnAgentMock = vi.fn(async (options: { defaultProvider?: string; defaultModelId?: string }) => {
       capturedModel = options;
       return { session };
     });
-    __setCreateKbAgentForRefine(createKbAgentMock);
+    __setCreateKbAgentForRefine(createFnAgentMock);
 
     const res = await REQUEST(buildApp(), "POST", "/api/workflow-steps/WS-001/refine", JSON.stringify({}), {
       "Content-Type": "application/json",
@@ -14097,11 +14097,11 @@ describe("POST /workflow-steps/:id/refine with projectId scoping", () => {
       dispose: vi.fn(),
     };
 
-    const createKbAgentMock = vi.fn(async (options: { cwd: string; systemPrompt: string; tools: string }) => {
+    const createFnAgentMock = vi.fn(async (options: { cwd: string; systemPrompt: string; tools: string }) => {
       capturedSystemPrompt = options.systemPrompt;
       return { session };
     });
-    __setCreateKbAgentForRefine(createKbAgentMock);
+    __setCreateKbAgentForRefine(createFnAgentMock);
 
     const res = await REQUEST(
       buildApp(),
@@ -14146,11 +14146,11 @@ describe("POST /workflow-steps/:id/refine with projectId scoping", () => {
       dispose: vi.fn(),
     };
 
-    const createKbAgentMock = vi.fn(async (options: { cwd: string; systemPrompt: string; tools: string }) => {
+    const createFnAgentMock = vi.fn(async (options: { cwd: string; systemPrompt: string; tools: string }) => {
       capturedSystemPrompt = options.systemPrompt;
       return { session };
     });
-    __setCreateKbAgentForRefine(createKbAgentMock);
+    __setCreateKbAgentForRefine(createFnAgentMock);
 
     const res = await REQUEST(
       buildApp(),
@@ -14226,12 +14226,12 @@ describe("POST /agents/generate/spec with projectId scoping", () => {
       session: mockSession,
     };
 
-    // Mock createKbAgent at the module level for agent-generation
+    // Mock createFnAgent at the module level for agent-generation
     vi.doMock("@fusion/engine", async (importOriginal) => {
       const actual = await importOriginal<typeof import("@fusion/engine")>();
       return {
         ...actual,
-        createKbAgent: vi.fn(async () => mockAgent),
+        createFnAgent: vi.fn(async () => mockAgent),
       };
     });
 
@@ -14267,12 +14267,12 @@ describe("POST /agents/generate/spec with projectId scoping", () => {
       session: mockSession,
     };
 
-    // Mock createKbAgent at the module level for agent-generation
+    // Mock createFnAgent at the module level for agent-generation
     vi.doMock("@fusion/engine", async (importOriginal) => {
       const actual = await importOriginal<typeof import("@fusion/engine")>();
       return {
         ...actual,
-        createKbAgent: vi.fn(async () => mockAgent),
+        createFnAgent: vi.fn(async () => mockAgent),
       };
     });
 

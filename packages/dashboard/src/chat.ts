@@ -5,7 +5,7 @@
  * Follows the PlanningStreamManager pattern for SSE broadcast.
  *
  * Features:
- * - AI agent integration via createKbAgent for real-time chat responses
+ * - AI agent integration via createFnAgent for real-time chat responses
  * - Streaming via SSE (sendMessage) with thinking/text/done/error events
  * - Rate limiting per IP (30 messages per minute)
  * - Message persistence through ChatStore
@@ -31,27 +31,27 @@ import { SessionEventBuffer } from "./sse-buffer.js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AgentResult = any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let createKbAgent: any;
+let createFnAgent: any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let buildAgentChatPromptFn: any;
 
 // Initialize the import (this runs in actual server, mocked in tests)
 async function initEngine() {
-  if (!createKbAgent || !buildAgentChatPromptFn) {
+  if (!createFnAgent || !buildAgentChatPromptFn) {
     try {
       // Use dynamic import with variable to prevent static analysis
       const engineModule = "@fusion/engine";
       const engine = await import(/* @vite-ignore */ engineModule);
-      if (!createKbAgent) {
-        createKbAgent = engine.createKbAgent;
+      if (!createFnAgent) {
+        createFnAgent = engine.createFnAgent;
       }
       if (!buildAgentChatPromptFn) {
         buildAgentChatPromptFn = engine.buildAgentChatPrompt;
       }
     } catch {
       // Allow failure in test environments - agent functionality will be stubbed
-      if (!createKbAgent) {
-        createKbAgent = undefined;
+      if (!createFnAgent) {
+        createFnAgent = undefined;
       }
       if (!buildAgentChatPromptFn) {
         buildAgentChatPromptFn = undefined;
@@ -581,7 +581,7 @@ export class ChatManager {
       // Ensure engine is loaded
       await ensureEngineReady();
 
-      if (!createKbAgent) {
+      if (!createFnAgent) {
         throw new Error("AI agent not available");
       }
 
@@ -646,7 +646,7 @@ export class ChatManager {
         : resolvedContent;
 
       // Create AI agent session
-      agentResult = await createKbAgent({
+      agentResult = await createFnAgent({
         cwd: this.rootDir,
         systemPrompt,
         tools: "coding",
@@ -792,10 +792,10 @@ export class ChatManager {
 // ── Test Helpers ────────────────────────────────────────────────────────────
 
 /**
- * Inject a mock createKbAgent function. Used for testing only.
+ * Inject a mock createFnAgent function. Used for testing only.
  */
-export function __setCreateKbAgent(mock: typeof createKbAgent): void {
-  createKbAgent = mock;
+export function __setCreateKbAgent(mock: typeof createFnAgent): void {
+  createFnAgent = mock;
 }
 
 /**

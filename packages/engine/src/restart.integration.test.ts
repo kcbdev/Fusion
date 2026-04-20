@@ -17,7 +17,7 @@ import { AgentSemaphore } from "./concurrency.js";
 // ── Module-level mocks (matching existing test patterns) ──────────────────
 
 vi.mock("./pi.js", () => ({
-  createKbAgent: vi.fn(),
+  createFnAgent: vi.fn(),
   describeModel: vi.fn().mockReturnValue("mock-provider/mock-model"),
   promptWithFallback: vi.fn(async (session, prompt, options) => {
     if (options === undefined) {
@@ -96,12 +96,12 @@ import { TriageProcessor } from "./triage.js";
 import { Scheduler } from "./scheduler.js";
 import { aiMergeTask } from "./merger.js";
 import { WorktreePool, scanIdleWorktrees, cleanupOrphanedWorktrees } from "./worktree-pool.js";
-import { createKbAgent } from "./pi.js";
+import { createFnAgent } from "./pi.js";
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import type { Task, TaskDetail, TaskStep, Column, Settings, StepStatus } from "@fusion/core";
 
-const mockedCreateHaiAgent = vi.mocked(createKbAgent);
+const mockedCreateHaiAgent = vi.mocked(createFnAgent);
 const mockedExecSync = vi.mocked(execSync);
 const mockedExistsSync = vi.mocked(existsSync);
 const mockedReaddirSync = vi.mocked(readdirSync);

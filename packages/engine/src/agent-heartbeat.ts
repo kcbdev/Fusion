@@ -1058,8 +1058,8 @@ export class HeartbeatMonitor {
           },
         };
 
-        // Lazy-load createKbAgent and promptWithFallback
-        const { createKbAgent, promptWithFallback } = await import("./pi.js");
+        // Lazy-load createFnAgent and promptWithFallback
+        const { createFnAgent, promptWithFallback } = await import("./pi.js");
         const { buildSessionSkillContextSync } = await import("./session-skill-context.js");
 
         // Build tools with task creation tracking and run context for mutation correlation
@@ -1135,7 +1135,7 @@ export class HeartbeatMonitor {
         }
 
         // Create agent session
-        const { session } = await createKbAgent({
+        const { session } = await createFnAgent({
           cwd: rootDir,
           systemPrompt,
           tools: "readonly",

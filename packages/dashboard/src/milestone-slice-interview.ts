@@ -86,17 +86,17 @@ export { parseTargetInterviewResponseImpl as parseTargetInterviewResponse };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AgentResult = any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let createKbAgent: any;
+let createFnAgent: any;
 
 async function initEngine() {
-  if (!createKbAgent) {
+  if (!createFnAgent) {
     try {
       const engineModule = "@fusion/engine";
       const engine = await import(/* @vite-ignore */ engineModule);
-      createKbAgent = engine.createKbAgent;
+      createFnAgent = engine.createFnAgent;
     } catch {
       // Allow failure in test environments
-      createKbAgent = undefined;
+      createFnAgent = undefined;
     }
   }
 }
@@ -678,7 +678,7 @@ async function createTargetInterviewAgent(
 ): Promise<AgentResult> {
   await ensureEngineReady();
 
-  return createKbAgent({
+  return createFnAgent({
     cwd: rootDir,
     systemPrompt: getSystemPrompt(session.targetType),
     tools: "readonly",

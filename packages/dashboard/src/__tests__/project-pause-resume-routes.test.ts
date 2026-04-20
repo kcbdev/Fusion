@@ -33,7 +33,7 @@ vi.mock("@fusion/core", async () => {
 });
 
 vi.mock("@fusion/engine", () => ({
-  createKbAgent: vi.fn(async () => ({
+  createFnAgent: vi.fn(async () => ({
     session: {
       state: { messages: [] as Array<{ role: string; content: string }> },
       prompt: vi.fn(async function (this: { state?: { messages?: Array<{ role: string; content: string }> } }, message: string) {

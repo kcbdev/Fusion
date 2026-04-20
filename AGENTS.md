@@ -275,7 +275,7 @@ When debugging agent execution issues (agents stuck on "starting"), check these 
 3. **`[executor] execute() called for FN-XXX`** — Confirms execute() was entered
 4. **`[executor] FN-XXX: worktree ready at ...`** — Confirms worktree creation
 5. **`[executor] FN-XXX: creating agent session`** — Confirms model resolution and session creation started
-6. **`[pi] createKbAgent called`** — Confirms the agent factory was invoked
+6. **`[pi] createFnAgent called`** — Confirms the agent factory was invoked
 7. **`[pi] Session created successfully`** — Confirms the AI session was created
 8. **`[executor] FN-XXX: calling promptWithFallback()...`** — Confirms the prompt was sent
 9. **`[stuck-detector] Tracking task FN-XXX`** — Confirms heartbeat monitoring started

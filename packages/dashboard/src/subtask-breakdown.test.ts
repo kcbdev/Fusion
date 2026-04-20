@@ -9,7 +9,7 @@ const { mockCreateKbAgent } = vi.hoisted(() => ({
 }));
 
 vi.mock("@fusion/engine", () => ({
-  createKbAgent: mockCreateKbAgent,
+  createFnAgent: mockCreateKbAgent,
 }));
 
 import type { AiSessionRow } from "./ai-session-store.js";
@@ -539,14 +539,14 @@ describe("subtask session lifecycle", () => {
     const customPrompt = "Custom subtask prompt...";
     const promptOverrides = { "subtask-breakdown-system": customPrompt };
 
-    const createKbAgentSpy = vi.fn().mockImplementation(async () => ({
+    const createFnAgentSpy = vi.fn().mockImplementation(async () => ({
       session: {
         state: { messages: [] },
         prompt: vi.fn(),
         dispose: vi.fn(),
       },
     }));
-    mockCreateKbAgent.mockImplementation(createKbAgentSpy);
+    mockCreateKbAgent.mockImplementation(createFnAgentSpy);
 
     const created = await createSubtaskSession(description, undefined, "/tmp/project", promptOverrides);
 
@@ -556,22 +556,22 @@ describe("subtask session lifecycle", () => {
       return session?.status === "complete";
     }, { timeout: 5000 });
 
-    expect(createKbAgentSpy).toHaveBeenCalledTimes(1);
-    const callArg = createKbAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(createFnAgentSpy).toHaveBeenCalledTimes(1);
+    const callArg = createFnAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(callArg?.systemPrompt).toBe(customPrompt);
   });
 
   it("createSubtaskSession falls back to default prompt when promptOverrides is undefined", async () => {
     const description = "Build test coverage for new API";
 
-    const createKbAgentSpy = vi.fn().mockImplementation(async () => ({
+    const createFnAgentSpy = vi.fn().mockImplementation(async () => ({
       session: {
         state: { messages: [] },
         prompt: vi.fn(),
         dispose: vi.fn(),
       },
     }));
-    mockCreateKbAgent.mockImplementation(createKbAgentSpy);
+    mockCreateKbAgent.mockImplementation(createFnAgentSpy);
 
     const created = await createSubtaskSession(description, undefined, "/tmp/project");
 
@@ -581,8 +581,8 @@ describe("subtask session lifecycle", () => {
       return session?.status === "complete";
     }, { timeout: 5000 });
 
-    expect(createKbAgentSpy).toHaveBeenCalledTimes(1);
-    const callArg = createKbAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(createFnAgentSpy).toHaveBeenCalledTimes(1);
+    const callArg = createFnAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(callArg?.systemPrompt).toContain("task decomposition assistant");
   });
 
@@ -590,14 +590,14 @@ describe("subtask session lifecycle", () => {
     const description = "Build test coverage for new API";
     const promptOverrides = { "planning-system": "Some other prompt" };
 
-    const createKbAgentSpy = vi.fn().mockImplementation(async () => ({
+    const createFnAgentSpy = vi.fn().mockImplementation(async () => ({
       session: {
         state: { messages: [] },
         prompt: vi.fn(),
         dispose: vi.fn(),
       },
     }));
-    mockCreateKbAgent.mockImplementation(createKbAgentSpy);
+    mockCreateKbAgent.mockImplementation(createFnAgentSpy);
 
     const created = await createSubtaskSession(description, undefined, "/tmp/project", promptOverrides);
 
@@ -607,8 +607,8 @@ describe("subtask session lifecycle", () => {
       return session?.status === "complete";
     }, { timeout: 5000 });
 
-    expect(createKbAgentSpy).toHaveBeenCalledTimes(1);
-    const callArg = createKbAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(createFnAgentSpy).toHaveBeenCalledTimes(1);
+    const callArg = createFnAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(callArg?.systemPrompt).toContain("task decomposition assistant");
   });
 
@@ -660,19 +660,19 @@ describe("subtask session lifecycle", () => {
 
     mockCreateKbAgent.mockReset();
 
-    const createKbAgentSpy = vi.fn().mockImplementation(async () => ({
+    const createFnAgentSpy = vi.fn().mockImplementation(async () => ({
       session: {
         state: { messages: [] },
         prompt: vi.fn(),
         dispose: vi.fn(),
       },
     }));
-    mockCreateKbAgent.mockImplementation(createKbAgentSpy);
+    mockCreateKbAgent.mockImplementation(createFnAgentSpy);
 
     await retrySubtaskSession(row.id, "/tmp/project", promptOverrides);
 
-    expect(createKbAgentSpy).toHaveBeenCalledTimes(1);
-    const callArg = createKbAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(createFnAgentSpy).toHaveBeenCalledTimes(1);
+    const callArg = createFnAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(callArg?.systemPrompt).toBe(customPrompt);
   });
 
@@ -689,19 +689,19 @@ describe("subtask session lifecycle", () => {
 
     mockCreateKbAgent.mockReset();
 
-    const createKbAgentSpy = vi.fn().mockImplementation(async () => ({
+    const createFnAgentSpy = vi.fn().mockImplementation(async () => ({
       session: {
         state: { messages: [] },
         prompt: vi.fn(),
         dispose: vi.fn(),
       },
     }));
-    mockCreateKbAgent.mockImplementation(createKbAgentSpy);
+    mockCreateKbAgent.mockImplementation(createFnAgentSpy);
 
     await retrySubtaskSession(row.id, "/tmp/project");
 
-    expect(createKbAgentSpy).toHaveBeenCalledTimes(1);
-    const callArg = createKbAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(createFnAgentSpy).toHaveBeenCalledTimes(1);
+    const callArg = createFnAgentSpy.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(callArg?.systemPrompt).toContain("task decomposition assistant");
   });
 

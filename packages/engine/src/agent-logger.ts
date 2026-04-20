@@ -59,12 +59,12 @@ export interface AgentLoggerOptions {
  * detailed argument summaries via {@link summarizeToolArgs}.
  *
  * Produces `onText` and `onToolStart` callbacks compatible with
- * `createKbAgent`'s `AgentOptions` interface.
+ * `createFnAgent`'s `AgentOptions` interface.
  *
  * @example
  * ```ts
  * const logger = new AgentLogger({ store, taskId, onAgentText, onAgentTool });
- * const { session } = await createKbAgent({
+ * const { session } = await createFnAgent({
  *   cwd: worktreePath,
  *   onText: logger.onText,
  *   onToolStart: logger.onToolStart,

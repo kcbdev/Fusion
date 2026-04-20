@@ -145,7 +145,7 @@ describe("ai-summarize", () => {
     });
 
     it("should throw AiServiceError when engine not available", async () => {
-      // In test environment, the dynamic import fails, so createKbAgent is undefined
+      // In test environment, the dynamic import fails, so createFnAgent is undefined
       const longDesc = "a".repeat(201);
       await expect(summarizeTitle(longDesc, "/tmp")).rejects.toThrow(AiServiceError);
       await expect(summarizeTitle(longDesc, "/tmp")).rejects.toThrow("AI engine not available");

@@ -41,7 +41,7 @@ const { mockCreateKbAgent } = vi.hoisted(() => ({
 }));
 
 vi.mock("@fusion/engine", () => ({
-  createKbAgent: mockCreateKbAgent,
+  createFnAgent: mockCreateKbAgent,
 }));
 
 function makePlanningAgent(responses: string[]) {

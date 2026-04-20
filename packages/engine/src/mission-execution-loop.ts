@@ -19,7 +19,7 @@ import type {
   MissionFeature,
   MissionValidatorRun,
 } from "@fusion/core";
-import { createKbAgent, promptWithFallback, type AgentResult } from "./pi.js";
+import { createFnAgent, promptWithFallback, type AgentResult } from "./pi.js";
 import { createLogger } from "./logger.js";
 
 /** Logger for the mission execution loop subsystem. */
@@ -325,7 +325,7 @@ export class MissionExecutionLoop extends EventEmitter {
 
     try {
       // Create validation agent session
-      session = await createKbAgent({
+      session = await createFnAgent({
         cwd: this.rootDir,
         systemPrompt: this.buildValidationSystemPrompt(feature, assertions, taskContext),
         tools: "readonly",
@@ -383,7 +383,7 @@ export class MissionExecutionLoop extends EventEmitter {
    * Run the actual validation session with the AI agent.
    */
   private async runValidationSession(
-    agentSession: Awaited<ReturnType<typeof createKbAgent>>["session"],
+    agentSession: Awaited<ReturnType<typeof createFnAgent>>["session"],
     prompt: string,
   ): Promise<void> {
     // Use promptWithFallback for resilience - if the primary model fails,
@@ -401,7 +401,7 @@ export class MissionExecutionLoop extends EventEmitter {
    * We extract the text from the AI's messages and parse the JSON response.
    */
   private async parseValidationResult(
-    agentSession: Awaited<ReturnType<typeof createKbAgent>>["session"],
+    agentSession: Awaited<ReturnType<typeof createFnAgent>>["session"],
     assertions: MissionContractAssertion[],
   ): Promise<ValidationResult> {
     try {
@@ -467,7 +467,7 @@ export class MissionExecutionLoop extends EventEmitter {
    * Looks for the last assistant message with text content.
    */
   private extractResponseTextFromSession(
-    agentSession: Awaited<ReturnType<typeof createKbAgent>>["session"],
+    agentSession: Awaited<ReturnType<typeof createFnAgent>>["session"],
   ): string | undefined {
     try {
       // Access the session state to get messages

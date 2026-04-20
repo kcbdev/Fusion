@@ -238,7 +238,7 @@ describe("memory-compaction", () => {
 
   describe("compactMemoryWithAi", () => {
     it("should throw AiServiceError when engine not available", async () => {
-      // In test environment, the dynamic import fails, so createKbAgent is undefined
+      // In test environment, the dynamic import fails, so createFnAgent is undefined
       const content = "Some memory content that is long enough";
       await expect(compactMemoryWithAi(content, "/tmp")).rejects.toThrow(AiServiceError);
       await expect(compactMemoryWithAi(content, "/tmp")).rejects.toThrow("AI engine not available");

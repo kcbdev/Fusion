@@ -7,7 +7,7 @@ const { mockCreateKbAgent } = vi.hoisted(() => ({
 }));
 
 vi.mock("@fusion/engine", () => ({
-  createKbAgent: mockCreateKbAgent,
+  createFnAgent: mockCreateKbAgent,
 }));
 
 import {
@@ -354,8 +354,8 @@ describe("mission-interview module", () => {
           },
         }),
       ]);
-      const createKbAgentSpy = vi.fn(async () => resumedAgent);
-      mockCreateKbAgent.mockImplementation(createKbAgentSpy);
+      const createFnAgentSpy = vi.fn(async () => resumedAgent);
+      mockCreateKbAgent.mockImplementation(createFnAgentSpy);
 
       const result = await submitMissionInterviewResponse(
         row.id,
@@ -367,7 +367,7 @@ describe("mission-interview module", () => {
       if (result.type === "question") {
         expect(result.data.id).toBe("q-3");
       }
-      expect(createKbAgentSpy).toHaveBeenCalledWith(
+      expect(createFnAgentSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           cwd: "/tmp/project",
           systemPrompt: expect.stringContaining("mission planning assistant"),
@@ -581,7 +581,7 @@ describe("mission-interview module", () => {
       await waitForCurrentQuestion(await createMissionInterviewSession("192.168.1.1", "Test Mission 2", "/tmp/project"));
 
       // The first session starts asynchronously, so we need to wait
-      // Check the createKbAgent call was made with default prompt
+      // Check the createFnAgent call was made with default prompt
       expect(mockCreateKbAgent).toHaveBeenCalled();
       const lastCall = mockCreateKbAgent.mock.calls[mockCreateKbAgent.mock.calls.length - 1];
       expect(lastCall[0].systemPrompt).toMatch(/^You are a mission planning assistant/);
@@ -677,7 +677,7 @@ describe("mission-interview module", () => {
       );
     });
 
-    it("does not introduce unexpected model/provider override fields in createKbAgent", async () => {
+    it("does not introduce unexpected model/provider override fields in createFnAgent", async () => {
       const mockAgent = createMockAgent([createQuestionJson()]);
       mockCreateKbAgent.mockImplementationOnce(async () => mockAgent);
 

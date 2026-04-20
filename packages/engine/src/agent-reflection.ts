@@ -13,7 +13,7 @@ import type {
   TaskStore,
 } from "@fusion/core";
 import { createLogger } from "./logger.js";
-import { createKbAgent, promptWithFallback } from "./pi.js";
+import { createFnAgent, promptWithFallback } from "./pi.js";
 
 const reflectionLog = createLogger("reflection");
 
@@ -97,7 +97,7 @@ export class AgentReflectionService {
       }
 
       let responseText = "";
-      const { session } = await createKbAgent({
+      const { session } = await createFnAgent({
         cwd: this.rootDir,
         systemPrompt: REFLECTION_SYSTEM_PROMPT,
         tools: "readonly",

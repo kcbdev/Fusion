@@ -110,7 +110,7 @@ function formatModelTag(provider?: string | null, modelId?: string | null): stri
 
 /**
  * Constant agent ID for the built-in kb agent.
- * The chat system always uses createKbAgent with CHAT_SYSTEM_PROMPT regardless
+ * The chat system always uses createFnAgent with CHAT_SYSTEM_PROMPT regardless
  * of the agentId stored on the session. This ID serves as metadata only.
  */
 const KB_AGENT_ID = "__kb_agent__";

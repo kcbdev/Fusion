@@ -23,7 +23,7 @@ vi.mock("./reviewer.js", () => ({
 }));
 
 vi.mock("./pi.js", () => ({
-  createKbAgent: mockCreateKbAgent,
+  createFnAgent: mockCreateKbAgent,
   describeModel: vi.fn().mockReturnValue("mock-model"),
   promptWithFallback: vi.fn().mockReturnValue("mock-prompt"),
 }));
@@ -1277,7 +1277,7 @@ describe("taskCreate tool model inheritance", () => {
 
     it("closes parent after proactive split even when breakIntoSubtasks is undefined", async () => {
       // Test that the post-session closure path doesn't gate on breakIntoSubtasks.
-      // Strategy: capture the customTools from createKbAgent, then have
+      // Strategy: capture the customTools from createFnAgent, then have
       // promptWithFallback invoke the task_create tool to simulate the agent
       // proactively splitting an oversized task.
       const task: Task = {
@@ -1329,7 +1329,7 @@ describe("taskCreate tool model inheritance", () => {
           .mockResolvedValueOnce(childTask2),
       });
 
-      // Capture customTools from createKbAgent call
+      // Capture customTools from createFnAgent call
       let capturedCustomTools: any[] = [];
       const mockDispose = vi.fn();
       mockCreateKbAgent.mockImplementation(async (opts: any) => {
@@ -1457,7 +1457,7 @@ describe("taskCreate tool model inheritance", () => {
         pollIntervalMs: 100_000,
       });
 
-      // Mock createKbAgent to throw a transient error
+      // Mock createFnAgent to throw a transient error
       mockCreateKbAgent.mockRejectedValue(new Error("upstream connect error"));
 
       await processor.specifyTask(task);
@@ -1633,7 +1633,7 @@ describe("taskCreate tool model inheritance", () => {
         getTask: vi.fn().mockResolvedValue({ ...task, attachments: [] }),
       });
 
-      // Set up createKbAgent to return a session that immediately throws
+      // Set up createFnAgent to return a session that immediately throws
       // after the model log line, so we can verify the appendAgentLog call.
       // The session will be created, model logged, then promptWithFallback
       // throws — but the model log has already been written.
@@ -2447,10 +2447,10 @@ describe("tool callback behavior (FN-1500)", () => {
     const processor = new TriageProcessor(store, "/tmp/root", { stuckTaskDetector: mockDetector });
 
     // Access the agentLogger via internal agentWork closure
-    // by running specifyTask and intercepting the createKbAgent call
+    // by running specifyTask and intercepting the createFnAgent call
     let capturedOnAgentTool: ((id: string, name: string) => void) | undefined;
     mockCreateKbAgent.mockImplementation(async (opts: any) => {
-      // Capture the onToolStart callback that was passed to createKbAgent
+      // Capture the onToolStart callback that was passed to createFnAgent
       // This is the onAgentTool from agentLogger
       if (opts.onToolStart) {
         capturedOnAgentTool = opts.onToolStart;
@@ -2586,7 +2586,7 @@ describe("TriageProcessor skillSelection regression (FN-1511)", () => {
   });
 
   /**
-   * Helper: execute triage on a task and capture createKbAgent call arguments.
+   * Helper: execute triage on a task and capture createFnAgent call arguments.
    */
   async function captureCreateKbAgentArgs(options?: {
     assignedAgentId?: string;
@@ -2661,7 +2661,7 @@ describe("TriageProcessor skillSelection regression (FN-1511)", () => {
   }
 
   describe("skillSelection context propagation", () => {
-    it("passes skillSelection to createKbAgent with correct projectRootDir", async () => {
+    it("passes skillSelection to createFnAgent with correct projectRootDir", async () => {
       const args = await captureCreateKbAgentArgs({
         assignedAgentId: "agent-001",
         assignedAgentSkills: ["triage"],

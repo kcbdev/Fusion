@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock external dependencies
 vi.mock("./pi.js", () => ({
-  createKbAgent: vi.fn(),
+  createFnAgent: vi.fn(),
   promptWithFallback: vi.fn(async (session, prompt, options) => {
     if (options === undefined) {
       await session.prompt(prompt);
@@ -113,11 +113,11 @@ import {
   type ConflictCategory,
 } from "./merger.js";
 import { mergerLog } from "./logger.js";
-import { createKbAgent } from "./pi.js";
+import { createFnAgent } from "./pi.js";
 import { execSync } from "node:child_process";
 import { type TaskStore, type Task, type MergeResult, DEFAULT_SETTINGS } from "@fusion/core";
 
-const mockedCreateHaiAgent = vi.mocked(createKbAgent);
+const mockedCreateHaiAgent = vi.mocked(createFnAgent);
 const mockedExecSync = vi.mocked(execSync);
 const { existsSync: mockedExistsSyncRaw, readFileSync: mockedReadFileSyncRaw } = await import("node:fs");
 const mockedExistsSync = vi.mocked(mockedExistsSyncRaw);
@@ -925,7 +925,7 @@ describe("aiMergeTask — model settings threading", () => {
     } as any);
   });
 
-  it("passes defaultProvider and defaultModelId from settings to createKbAgent", async () => {
+  it("passes defaultProvider and defaultModelId from settings to createFnAgent", async () => {
     const store = createMockStore(
       { id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050" },
       [{ id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050", column: "in-review" } as Task],
@@ -3771,7 +3771,7 @@ describe("aiMergeTask — post-merge workflow steps", () => {
     await aiMergeTask(store, "/tmp/root", "FN-050");
 
     // getWorkflowStep may be called but pre-merge steps should not trigger agent creation
-    // beyond the merge agent itself. We verify createKbAgent was called only once (merge agent)
+    // beyond the merge agent itself. We verify createFnAgent was called only once (merge agent)
     // since pre-merge steps are skipped in the merger
     const mergeAgentCalls = mockedCreateHaiAgent.mock.calls.filter(
       (c: any) => c[0]?.systemPrompt?.includes("You are a merge agent")
@@ -4169,7 +4169,7 @@ describe("aiMergeTask — fresh session and compaction recovery", () => {
     });
   }
 
-  it("creates a fresh session for merge agent via createKbAgent", async () => {
+  it("creates a fresh session for merge agent via createFnAgent", async () => {
     setupFreshSessionExecSync();
 
     const sessionInstances: any[] = [];
@@ -5026,7 +5026,7 @@ describe("aiMergeTask — skill selection resolver contract (FN-1510/FN-1511)", 
     vi.clearAllMocks();
   });
 
-  it("passes skillSelection to createKbAgent when agentStore is provided", async () => {
+  it("passes skillSelection to createFnAgent when agentStore is provided", async () => {
     const { buildSessionSkillContext } = await import("./session-skill-context.js");
     vi.mocked(buildSessionSkillContext).mockResolvedValue({
       skillSelectionContext: {
@@ -5064,7 +5064,7 @@ describe("aiMergeTask — skill selection resolver contract (FN-1510/FN-1511)", 
     });
 
     expect(mockedCreateHaiAgent).toHaveBeenCalled();
-    // Find the first createKbAgent call (main merger agent)
+    // Find the first createFnAgent call (main merger agent)
     const firstCall = mockedCreateHaiAgent.mock.calls[0];
     const opts = firstCall[0];
     expect(opts.skillSelection).toBeDefined();

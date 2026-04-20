@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("./pi.js", () => ({
-  createKbAgent: vi.fn(),
+  createFnAgent: vi.fn(),
   describeModel: vi.fn().mockReturnValue("mock-provider/mock-model"),
   promptWithFallback: vi.fn(async (session, prompt, options) => {
     if (options === undefined) {
@@ -13,9 +13,9 @@ vi.mock("./pi.js", () => ({
 }));
 
 import { reviewStep, REVIEWER_SYSTEM_PROMPT } from "./reviewer.js";
-import { createKbAgent } from "./pi.js";
+import { createFnAgent } from "./pi.js";
 
-const mockedCreateHaiAgent = vi.mocked(createKbAgent);
+const mockedCreateHaiAgent = vi.mocked(createFnAgent);
 
 function createMockSession(reviewText: string) {
   return {
@@ -38,7 +38,7 @@ describe("reviewStep — model settings threading", () => {
     vi.clearAllMocks();
   });
 
-  it("passes defaultProvider and defaultModelId to createKbAgent when provided", async () => {
+  it("passes defaultProvider and defaultModelId to createFnAgent when provided", async () => {
     mockedCreateHaiAgent.mockResolvedValue(
       createMockSession("### Verdict: APPROVE\n### Summary\nLooks good."),
     );
@@ -130,7 +130,7 @@ describe("reviewStep — spec review type", () => {
     expect(result.verdict).toBe("RETHINK");
   });
 
-  it("calls createKbAgent with readonly tools and correct system prompt", async () => {
+  it("calls createFnAgent with readonly tools and correct system prompt", async () => {
     mockedCreateHaiAgent.mockResolvedValue(
       createMockSession("### Verdict: APPROVE\n### Summary\nGood spec."),
     );
@@ -504,7 +504,7 @@ describe("reviewStep — user comments in spec review", () => {
         sessionManager: { getLeafId: vi.fn() },
       },
     } as any);
-    vi.mocked(createKbAgent).mockImplementation(mockedCreateHaiAgent);
+    vi.mocked(createFnAgent).mockImplementation(mockedCreateHaiAgent);
   });
 
   it("includes user comments in spec review request", async () => {
@@ -647,7 +647,7 @@ describe("reviewStep — skill selection resolver contract (FN-1510/FN-1511)", (
     vi.clearAllMocks();
   });
 
-  it("passes skillSelection to createKbAgent when agentStore and rootDir are provided", async () => {
+  it("passes skillSelection to createFnAgent when agentStore and rootDir are provided", async () => {
     const { buildSessionSkillContext } = await import("./session-skill-context.js");
     vi.mocked(buildSessionSkillContext).mockResolvedValue({
       skillSelectionContext: {
@@ -828,7 +828,7 @@ describe("reviewStep — skill selection resolver contract (FN-1510/FN-1511)", (
       },
     );
 
-    // Verify the resolved names are passed to createKbAgent
+    // Verify the resolved names are passed to createFnAgent
     expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(1);
     const opts = mockedCreateHaiAgent.mock.calls[0][0];
     expect(opts.skillSelection?.requestedSkillNames).toEqual(resolvedNames);

@@ -4,7 +4,7 @@ import { vi } from "vitest";
 const noisyOutputMarkers = [
   "Subagent result watcher failed",
   "pi-async-subagent-results",
-  "[pi] createKbAgent called",
+  "[pi] createFnAgent called",
   "[pi] Session created successfully",
   "[pi-claude-cli] Claude CLI is not authenticated",
   "Terminal WebSocket server mounted at /api/terminal/ws",

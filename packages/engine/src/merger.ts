@@ -7,7 +7,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { getTaskMergeBlocker, type TaskStore, type MergeResult, type MergeDetails, type WorkflowStep, type WorkflowStepResult, type Settings, type AgentPromptsConfig } from "@fusion/core";
 import { resolveAgentPrompt } from "@fusion/core";
-import { createKbAgent, describeModel, promptWithFallback, compactSessionContext } from "./pi.js";
+import { createFnAgent, describeModel, promptWithFallback, compactSessionContext } from "./pi.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
 import type { WorktreePool } from "./worktree-pool.js";
 import { AgentLogger } from "./agent-logger.js";
@@ -662,7 +662,7 @@ async function attemptInMergeVerificationFix(
     }
 
     // Create the fix agent session
-    const { session } = await createKbAgent({
+    const { session } = await createFnAgent({
       cwd: rootDir, // Runs on the main branch in the project root
       systemPrompt: `You are a verification fix agent running during a merge on the main branch.
 
@@ -1395,7 +1395,7 @@ You are assisting with a paused \`git pull --rebase\`.
       : undefined,
   });
 
-  const { session } = await createKbAgent({
+  const { session } = await createFnAgent({
     cwd: rootDir,
     systemPrompt,
     tools: "coding",
@@ -2563,7 +2563,7 @@ interface AiAgentParams {
 /**
  * Run the AI agent to resolve conflicts and/or write commit message.
  *
- * Each invocation creates a **fresh session** via `createKbAgent` to ensure
+ * Each invocation creates a **fresh session** via `createFnAgent` to ensure
  * no stale conversation state from previous merge attempts or unrelated sessions
  * pollutes the merge context. The session is disposed in the `finally` block
  * regardless of success or failure.
@@ -2673,7 +2673,7 @@ async function runAiAgentForCommit(params: AiAgentParams): Promise<{ success: bo
     }
   }
 
-  const { session } = await createKbAgent({
+  const { session } = await createFnAgent({
     cwd: rootDir,
     systemPrompt: mergerSystemPrompt,
     tools: "coding",
@@ -3123,7 +3123,7 @@ If issues are found that need attention, describe them clearly.`;
       }
     }
 
-    const { session } = await createKbAgent({
+    const { session } = await createFnAgent({
       cwd: rootDir,
       systemPrompt: postMergeSystemPrompt,
       tools: toolMode,

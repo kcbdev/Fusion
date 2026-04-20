@@ -229,11 +229,11 @@ async function discoverDashboardPiExtensions(cwd: string): Promise<PiExtensionSe
 }
 
 // Dynamic import fallback for @fusion/engine with injectable override for tests.
-let createKbAgentForRefine: typeof import("@fusion/engine").createKbAgent | undefined;
+let createFnAgentForRefine: typeof import("@fusion/engine").createFnAgent | undefined;
 
-/** @internal Inject a mock createKbAgent function for workflow-step refine route tests. */
-export function __setCreateKbAgentForRefine(mock: typeof createKbAgentForRefine): void {
-  createKbAgentForRefine = mock;
+/** @internal Inject a mock createFnAgent function for workflow-step refine route tests. */
+export function __setCreateKbAgentForRefine(mock: typeof createFnAgentForRefine): void {
+  createFnAgentForRefine = mock;
 }
 
 // Default system prompt for workflow step refinement (fallback when overrides unavailable)
@@ -2848,18 +2848,18 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
   // ── Memory Insights Routes ───────────────────────────────────────────
 
-  // Lazy-loaded createKbAgent for AI operations (same pattern as ai-refine.ts)
+  // Lazy-loaded createFnAgent for AI operations (same pattern as ai-refine.ts)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let createKbAgentForInsights: any;
+  let createFnAgentForInsights: any;
 
   async function initCreateKbAgentForInsights(): Promise<void> {
-    if (createKbAgentForInsights) return;
+    if (createFnAgentForInsights) return;
     try {
       // Use dynamic import with @vite-ignore to prevent static analysis issues
       const engine = await import(/* @vite-ignore */ "@fusion/engine");
-      createKbAgentForInsights = engine.createKbAgent;
+      createFnAgentForInsights = engine.createFnAgent;
     } catch {
-      createKbAgentForInsights = undefined;
+      createFnAgentForInsights = undefined;
     }
   }
 
@@ -2928,7 +2928,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       await initCreateKbAgentForInsights();
 
-      if (!createKbAgentForInsights) {
+      if (!createFnAgentForInsights) {
         throw new ApiError(503, "AI engine not available");
       }
 
@@ -2960,7 +2960,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         (settings.defaultProvider && settings.defaultModelId ? settings.defaultModelId : undefined);
 
       // Create AI agent session for extraction
-      const agentResult = await createKbAgentForInsights({
+      const agentResult = await createFnAgentForInsights({
         cwd: rootDir,
         tools: "readonly",
         defaultProvider: resolvedProvider,
@@ -10948,12 +10948,12 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       // Use AI to refine the description into a detailed agent prompt
       let refinedPrompt: string;
       try {
-        let createKbAgent = createKbAgentForRefine;
-        if (!createKbAgent) {
+        let createFnAgent = createFnAgentForRefine;
+        if (!createFnAgent) {
           // Dynamic import to avoid resolution issues in tests
           const engineModule = "@fusion/engine";
           const engine = await import(/* @vite-ignore */ engineModule);
-          createKbAgent = engine.createKbAgent;
+          createFnAgent = engine.createFnAgent;
         }
 
         const settings = await scopedStore.getSettings();
@@ -10964,10 +10964,10 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
           settings.promptOverrides
         ) || DEFAULT_WORKFLOW_STEP_REFINE_PROMPT;
 
-        if (!createKbAgent) {
-          throw new Error("createKbAgent is not available");
+        if (!createFnAgent) {
+          throw new Error("createFnAgent is not available");
         }
-        const { session } = await createKbAgent({
+        const { session } = await createFnAgent({
           cwd: scopedStore.getRootDir(),
           systemPrompt,
           tools: "readonly",

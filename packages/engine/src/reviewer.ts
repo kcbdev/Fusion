@@ -10,7 +10,7 @@
 
 import type { TaskStore, TaskComment, AgentPromptsConfig, Settings } from "@fusion/core";
 import { buildReviewerMemoryInstructions, resolveAgentPrompt } from "@fusion/core";
-import { createKbAgent, describeModel, promptWithFallback } from "./pi.js";
+import { createFnAgent, describeModel, promptWithFallback } from "./pi.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
 import { AgentLogger } from "./agent-logger.js";
 import { reviewerLog } from "./logger.js";
@@ -359,7 +359,7 @@ export async function reviewStep(
         } : undefined),
       ]
     : undefined;
-  const { session } = await createKbAgent({
+  const { session } = await createFnAgent({
     cwd,
     systemPrompt: reviewerSystemPrompt,
     tools: "readonly",

@@ -11,7 +11,7 @@ const cronLoggerSpies = vi.hoisted(() => ({
 }));
 
 const piModuleMocks = vi.hoisted(() => ({
-  createKbAgent: vi.fn(),
+  createFnAgent: vi.fn(),
   promptWithFallback: vi.fn(),
 }));
 
@@ -24,7 +24,7 @@ vi.mock("./logger.js", () => ({
 }));
 
 vi.mock("./pi.js", () => ({
-  createKbAgent: piModuleMocks.createKbAgent,
+  createFnAgent: piModuleMocks.createFnAgent,
   promptWithFallback: piModuleMocks.promptWithFallback,
 }));
 
@@ -99,7 +99,7 @@ describe("CronRunner", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     piModuleMocks.promptWithFallback.mockResolvedValue(undefined);
-    piModuleMocks.createKbAgent.mockResolvedValue({
+    piModuleMocks.createFnAgent.mockResolvedValue({
       session: {
         dispose: vi.fn(),
       },
@@ -145,7 +145,7 @@ describe("CronRunner", () => {
 
   describe("createAiPromptExecutor", () => {
     it("returns response text even when session disposal throws", async () => {
-      piModuleMocks.createKbAgent.mockImplementation(async (options: { onText?: (delta: string) => void }) => {
+      piModuleMocks.createFnAgent.mockImplementation(async (options: { onText?: (delta: string) => void }) => {
         options.onText?.("hello ");
         options.onText?.("world");
         return {

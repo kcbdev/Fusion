@@ -13,7 +13,7 @@ import type {
   ToolDefinition,
   AgentSession,
 } from "@mariozechner/pi-coding-agent";
-import { createKbAgent, describeModel, promptWithFallback } from "./pi.js";
+import { createFnAgent, describeModel, promptWithFallback } from "./pi.js";
 import { reviewStep, type ReviewVerdict } from "./reviewer.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
 import { PRIORITY_SPECIFY, type AgentSemaphore } from "./concurrency.js";
@@ -635,7 +635,7 @@ export class TriageProcessor {
           },
         });
 
-        // Mutable ref — populated after createKbAgent, tools access lazily via closure
+        // Mutable ref — populated after createFnAgent, tools access lazily via closure
         const sessionRef: { current: AgentSession | null } = { current: null };
         // Checkpoint for RETHINK rewind — captured lazily on first review_spec call
         const checkpointRef: { current: string | null } = { current: null };
@@ -704,7 +704,7 @@ export class TriageProcessor {
           projectRootDir: this.rootDir,
         });
 
-        let { session } = await createKbAgent({
+        let { session } = await createFnAgent({
           cwd: this.rootDir,
           systemPrompt: triageSystemPrompt,
           tools: "coding",
@@ -868,7 +868,7 @@ export class TriageProcessor {
             specReviewVerdictRef.current = null;
             approvedCommentFingerprintRef.current = "";
 
-            const fallbackResult = await createKbAgent({
+            const fallbackResult = await createFnAgent({
               cwd: this.rootDir,
               systemPrompt: triageSystemPrompt,
               tools: "coding",

@@ -130,7 +130,7 @@ describe("worktree path boundary helpers", () => {
        
       const tools = [mockReadTool as any];
 
-      // Simulate wrapping (normally done inside createKbAgent)
+      // Simulate wrapping (normally done inside createFnAgent)
       const { wrapToolsWithBoundary } = await import("./pi.js");
       const wrapped = wrapToolsWithBoundary(
         tools,
@@ -365,7 +365,7 @@ describe("worktree path boundary helpers", () => {
   });
 });
 
-describe("createKbAgent", () => {
+describe("createFnAgent", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     execSyncMock.mockReturnValue("");
@@ -395,9 +395,9 @@ describe("createKbAgent", () => {
       return "worktree /project\nHEAD abc123\nbranch refs/heads/main\n";
     });
 
-    const { createKbAgent } = await import("./pi.js");
+    const { createFnAgent } = await import("./pi.js");
 
-    await expect(createKbAgent({
+    await expect(createFnAgent({
       cwd: "/project/.worktrees/fn-001",
       systemPrompt: "test",
       tools: "coding",
@@ -422,9 +422,9 @@ describe("createKbAgent", () => {
         "worktree /project/.worktrees/fn-001\nHEAD def456\nbranch refs/heads/fusion/fn-001\n";
     });
 
-    const { createKbAgent } = await import("./pi.js");
+    const { createFnAgent } = await import("./pi.js");
 
-    await createKbAgent({
+    await createFnAgent({
       cwd: "/project/.worktrees/fn-001",
       systemPrompt: "test",
       tools: "coding",
@@ -452,9 +452,9 @@ describe("createKbAgent", () => {
       errors: [],
     });
 
-    const { createKbAgent } = await import("./pi.js");
+    const { createFnAgent } = await import("./pi.js");
 
-    await createKbAgent({
+    await createFnAgent({
       cwd: "/tmp",
       systemPrompt: "test",
       tools: "readonly",
@@ -474,9 +474,9 @@ describe("createKbAgent", () => {
   });
 
   it("avoids lock-based SettingsManager.create when loading extension providers", async () => {
-    const { createKbAgent } = await import("./pi.js");
+    const { createFnAgent } = await import("./pi.js");
 
-    await createKbAgent({
+    await createFnAgent({
       cwd: "/tmp",
       systemPrompt: "test",
       tools: "readonly",
@@ -495,9 +495,9 @@ describe("createKbAgent", () => {
       provider === "zai" && modelId === "glm-5.1" ? undefined : { provider, id: modelId }
     ));
 
-    const { createKbAgent } = await import("./pi.js");
+    const { createFnAgent } = await import("./pi.js");
 
-    await expect(createKbAgent({
+    await expect(createFnAgent({
       cwd: "/tmp",
       systemPrompt: "test",
       tools: "readonly",
@@ -513,9 +513,9 @@ describe("createKbAgent", () => {
       provider === "openai-codex" && modelId === "missing-model" ? undefined : { provider, id: modelId }
     ));
 
-    const { createKbAgent } = await import("./pi.js");
+    const { createFnAgent } = await import("./pi.js");
 
-    await expect(createKbAgent({
+    await expect(createFnAgent({
       cwd: "/tmp",
       systemPrompt: "test",
       tools: "coding",
@@ -529,9 +529,9 @@ describe("createKbAgent", () => {
   });
 
   it("creates a session when configured models resolve successfully", async () => {
-    const { createKbAgent } = await import("./pi.js");
+    const { createFnAgent } = await import("./pi.js");
 
-    await createKbAgent({
+    await createFnAgent({
       cwd: "/tmp",
       systemPrompt: "test",
       tools: "readonly",
@@ -570,9 +570,9 @@ describe("createKbAgent", () => {
         },
       });
 
-    const { createKbAgent } = await import("./pi.js");
+    const { createFnAgent } = await import("./pi.js");
 
-    const { session } = await createKbAgent({
+    const { session } = await createFnAgent({
       cwd: "/tmp",
       systemPrompt: "test",
       tools: "readonly",
@@ -620,9 +620,9 @@ describe("createKbAgent", () => {
         },
       });
 
-    const { createKbAgent } = await import("./pi.js");
+    const { createFnAgent } = await import("./pi.js");
 
-    const { session } = await createKbAgent({
+    const { session } = await createFnAgent({
       cwd: "/tmp",
       systemPrompt: "test",
       tools: "readonly",
@@ -643,9 +643,9 @@ describe("createKbAgent", () => {
   });
 
   it("enables auto-compaction to prevent context-window overflow", async () => {
-    const { createKbAgent } = await import("./pi.js");
+    const { createFnAgent } = await import("./pi.js");
 
-    await createKbAgent({
+    await createFnAgent({
       cwd: "/tmp",
       systemPrompt: "test",
       tools: "coding",
@@ -660,9 +660,9 @@ describe("createKbAgent", () => {
   });
 
   it("passes compaction enabled alongside retry settings", async () => {
-    const { createKbAgent } = await import("./pi.js");
+    const { createFnAgent } = await import("./pi.js");
 
-    await createKbAgent({
+    await createFnAgent({
       cwd: "/tmp",
       systemPrompt: "test",
       tools: "readonly",
@@ -734,7 +734,7 @@ describe("createKbAgent", () => {
         },
       }));
 
-      const { createKbAgent: freshCreateKbAgent } = await import("./pi.js");
+      const { createFnAgent: freshCreateKbAgent } = await import("./pi.js");
 
       await freshCreateKbAgent({
         cwd: "/tmp",
@@ -809,7 +809,7 @@ describe("createKbAgent", () => {
         },
       }));
 
-      const { createKbAgent: freshCreateKbAgent } = await import("./pi.js");
+      const { createFnAgent: freshCreateKbAgent } = await import("./pi.js");
 
       await freshCreateKbAgent({
         cwd: "/tmp",
@@ -881,7 +881,7 @@ describe("createKbAgent", () => {
         },
       }));
 
-      const { createKbAgent: freshCreateKbAgent } = await import("./pi.js");
+      const { createFnAgent: freshCreateKbAgent } = await import("./pi.js");
 
       await freshCreateKbAgent({
         cwd: "/tmp",
