@@ -23,7 +23,7 @@ const mockedExecSync = vi.mocked(execSync);
 import { runCommandAsync } from "./run-command.js";
 const mockedRunCommandAsync = vi.mocked(runCommandAsync);
 
-import { TaskStore } from "./store.js";
+import { TaskStore, TaskHasDependentsError } from "./store.js";
 import { appendFile, readFile, writeFile, mkdir, rm, readdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { mkdtempSync, existsSync } from "node:fs";
@@ -3886,6 +3886,50 @@ Task with acceptance criteria
       );
 
       expect(logs).toEqual([]);
+    });
+
+    it("deleteTask refuses when another live task depends on this id", async () => {
+      // Regression for the triage-split bug: splitting a parent into children
+      // used to hard-delete the parent even when a child carried the parent id
+      // in its dependencies array, permanently blocking the child because the
+      // scheduler treats missing-dep ids as unmet.
+      const parent = await store.createTask({ description: "Parent to be split" });
+      const child = await store.createTask({
+        description: "Child that accidentally depends on parent",
+      });
+      await store.updateTask(child.id, { dependencies: [parent.id] });
+
+      await expect(store.deleteTask(parent.id)).rejects.toBeInstanceOf(TaskHasDependentsError);
+
+      // Parent must still exist so the dependent isn't stranded.
+      const stillThere = await store.getTask(parent.id);
+      expect(stillThere.id).toBe(parent.id);
+
+      // The error must name the dependent so callers/logs can triage it.
+      try {
+        await store.deleteTask(parent.id);
+      } catch (err) {
+        expect(err).toBeInstanceOf(TaskHasDependentsError);
+        expect((err as TaskHasDependentsError).dependentIds).toContain(child.id);
+      }
+
+      // After the dependent's reference is removed, delete succeeds.
+      await store.updateTask(child.id, { dependencies: [] });
+      await expect(store.deleteTask(parent.id)).resolves.toMatchObject({ id: parent.id });
+    });
+
+    it("deleteTask allows deletion when a similarly-named id contains the target (substring false-positive guard)", async () => {
+      // The LIKE probe uses '%id%'; ensure we don't misidentify e.g. FN-1 as
+      // referencing FN-10 just because the id string appears inside a JSON
+      // array containing "FN-10".
+      const targetTask = await store.createTask({ description: "Target" }); // e.g. FN-001
+      const similarId = `${targetTask.id}X`; // definitely not a real task id
+      const other = await store.createTask({ description: "Other" });
+      await store.updateTask(other.id, { dependencies: [similarId] });
+
+      // Should NOT throw — the LIKE probe's string match is disambiguated by
+      // JSON.parse + array.includes.
+      await expect(store.deleteTask(targetTask.id)).resolves.toMatchObject({ id: targetTask.id });
     });
 
     it("deleting a task cascades agent log entry deletion", async () => {

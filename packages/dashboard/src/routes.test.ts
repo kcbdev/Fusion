@@ -1434,6 +1434,115 @@ describe("POST /subtasks/*", () => {
       validatorModelId: undefined,
     }));
   });
+
+  it("drops a subtask dependency that references the parent task being split", async () => {
+    // Regression: the AI/UI sometimes emits `dependsOn: ["<parentId>"]` on a
+    // child. Previously the child was created with a reference to the
+    // parent id (via an existing-task lookup), then the parent was deleted,
+    // leaving the child permanently blocked. We now drop parent-id deps and
+    // surface them in the response.
+    const parentTask = {
+      ...FAKE_TASK_DETAIL,
+      id: "FN-PARENT",
+      title: "Parent",
+      column: "triage",
+    };
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(parentTask);
+    (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ...FAKE_TASK_DETAIL,
+      id: "FN-CHILD",
+      title: "Child",
+      column: "triage",
+    });
+    (store.deleteTask as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+    const start = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/subtasks/start-streaming",
+      JSON.stringify({ description: "Break this feature into subtasks" }),
+      { "Content-Type": "application/json" },
+    );
+
+    const createRes = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/subtasks/create-tasks",
+      JSON.stringify({
+        sessionId: start.body.sessionId,
+        parentTaskId: "FN-PARENT",
+        subtasks: [
+          { tempId: "subtask-1", title: "Child", description: "Do it", dependsOn: ["FN-PARENT"] },
+        ],
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(createRes.status).toBe(201);
+    // Dependencies must NOT contain the parent id.
+    // updateTask either isn't called for deps, or is called with an empty array.
+    const depUpdateCalls = (store.updateTask as ReturnType<typeof vi.fn>).mock.calls
+      .filter((args: unknown[]) => {
+        const patch = args[1] as { dependencies?: string[] } | undefined;
+        return patch?.dependencies !== undefined;
+      });
+    for (const call of depUpdateCalls) {
+      expect((call[1] as { dependencies: string[] }).dependencies).not.toContain("FN-PARENT");
+    }
+    // The response surfaces the dropped dep instead of silently swallowing it.
+    expect(createRes.body.droppedDependencies).toEqual([
+      { taskId: "FN-CHILD", dropped: ["FN-PARENT"] },
+    ]);
+  });
+
+  it("surfaces parent close errors when deleteTask refuses due to live dependents", async () => {
+    // If a child still references the parent after the drop step (shouldn't
+    // happen post-fix, but could via race or caller mistake), store.deleteTask
+    // throws. The endpoint must not swallow that silently — parentTaskClosed
+    // is false AND parentTaskCloseError names the reason.
+    const parentTask = {
+      ...FAKE_TASK_DETAIL,
+      id: "FN-STUBBORN",
+      title: "Parent",
+      column: "triage",
+    };
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(parentTask);
+    (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ...FAKE_TASK_DETAIL,
+      id: "FN-CHILD",
+      title: "Child",
+      column: "triage",
+    });
+    (store.deleteTask as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("Cannot delete task FN-STUBBORN: still referenced as a dependency by FN-OTHER."),
+    );
+
+    const start = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/subtasks/start-streaming",
+      JSON.stringify({ description: "Break this feature into subtasks" }),
+      { "Content-Type": "application/json" },
+    );
+
+    const createRes = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/subtasks/create-tasks",
+      JSON.stringify({
+        sessionId: start.body.sessionId,
+        parentTaskId: "FN-STUBBORN",
+        subtasks: [
+          { tempId: "subtask-1", title: "Child", description: "Do it", dependsOn: [] },
+        ],
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.parentTaskClosed).toBe(false);
+    expect(createRes.body.parentTaskCloseError).toContain("FN-OTHER");
+  });
 });
 
 describe("POST /tasks/:id/retry", () => {

@@ -1275,6 +1275,146 @@ describe("taskCreate tool model inheritance", () => {
       }));
     });
 
+    it("task_create rejects a dependency on the parent task being split", async () => {
+      // Regression: triage used to accept any id in `dependencies`. If the AI
+      // named the parent, the parent got deleted after the split and the child
+      // was blocked forever by a nonexistent dep (FN-2163/FN-2164 incident).
+      const parentTask: Task = {
+        id: "FN-600",
+        description: "Parent about to be split",
+        column: "triage",
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+
+      const store = createMockStore({
+        getTask: vi.fn().mockResolvedValue(parentTask),
+        createTask: vi.fn(),
+      });
+      const processor = new TriageProcessor(store, "/test/root");
+      const createdSubtasksRef = { current: [] };
+
+      const tools = (processor as any).createTriageTools({
+        parentTaskId: "FN-600",
+        allowTaskCreate: true,
+        createdSubtasksRef,
+      });
+      const taskCreateTool = tools.find((t: any) => t.name === "task_create");
+
+      const result = await taskCreateTool.execute("call-1", {
+        description: "Child that tries to wait for the parent",
+        dependencies: ["FN-600"],
+      });
+
+      const text = result.content[0].text;
+      expect(text).toContain("ERROR");
+      expect(text).toContain("FN-600");
+      expect(text).toContain("parent task is deleted after splitting");
+      // Must not create the child — the caller has to fix the deps and retry.
+      expect(store.createTask).not.toHaveBeenCalled();
+      expect(createdSubtasksRef.current).toEqual([]);
+    });
+
+    it("task_create accepts dependencies on sibling subtasks created earlier in the same split", async () => {
+      // The valid case: two siblings where the second depends on the first.
+      const parentTask: Task = {
+        id: "FN-700",
+        description: "Parent to split",
+        column: "triage",
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+      const sibling1: Task = { ...parentTask, id: "FN-701", description: "Sibling 1" };
+      const sibling2: Task = { ...parentTask, id: "FN-702", description: "Sibling 2" };
+
+      const createTaskMock = vi
+        .fn()
+        .mockResolvedValueOnce(sibling1)
+        .mockResolvedValueOnce(sibling2);
+
+      const store = createMockStore({
+        getTask: vi.fn().mockResolvedValue(parentTask),
+        createTask: createTaskMock,
+      });
+      const processor = new TriageProcessor(store, "/test/root");
+      const createdSubtasksRef = { current: [] };
+
+      const tools = (processor as any).createTriageTools({
+        parentTaskId: "FN-700",
+        allowTaskCreate: true,
+        createdSubtasksRef,
+      });
+      const taskCreateTool = tools.find((t: any) => t.name === "task_create");
+
+      const firstRes = await taskCreateTool.execute("c1", {
+        description: "Sibling 1",
+        dependencies: [],
+      });
+      expect(firstRes.content[0].text).toContain("Created child task FN-701");
+
+      const secondRes = await taskCreateTool.execute("c2", {
+        description: "Sibling 2 depending on sibling 1",
+        dependencies: ["FN-701"],
+      });
+      expect(secondRes.content[0].text).toContain("Created child task FN-702");
+      expect(secondRes.content[0].text).not.toContain("ERROR");
+
+      // The second createTask call should have the resolved sibling id preserved.
+      expect(createTaskMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ dependencies: ["FN-701"] }),
+      );
+      expect(createdSubtasksRef.current).toEqual(["FN-701", "FN-702"]);
+    });
+
+    it("task_create rejects an unknown dependency id that is neither sibling nor existing task", async () => {
+      const parentTask: Task = {
+        id: "FN-800",
+        description: "Parent",
+        column: "triage",
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+      // getTask returns the parent when asked, but throws for unknown ids.
+      const store = createMockStore({
+        getTask: vi.fn(async (id: string) => {
+          if (id === "FN-800") return parentTask;
+          throw new Error(`Task ${id} not found`);
+        }) as unknown as TaskStore["getTask"],
+        createTask: vi.fn(),
+      });
+      const processor = new TriageProcessor(store, "/test/root");
+      const createdSubtasksRef = { current: [] };
+
+      const tools = (processor as any).createTriageTools({
+        parentTaskId: "FN-800",
+        allowTaskCreate: true,
+        createdSubtasksRef,
+      });
+      const taskCreateTool = tools.find((t: any) => t.name === "task_create");
+
+      const result = await taskCreateTool.execute("c1", {
+        description: "Child naming a nonexistent dep",
+        dependencies: ["FN-9999"],
+      });
+
+      expect(result.content[0].text).toContain("ERROR");
+      expect(result.content[0].text).toContain("FN-9999");
+      expect(result.content[0].text).toContain("task not found");
+      expect(store.createTask).not.toHaveBeenCalled();
+    });
+
     it("closes parent after proactive split even when breakIntoSubtasks is undefined", async () => {
       // Test that the post-session closure path doesn't gate on breakIntoSubtasks.
       // Strategy: capture the customTools from createFnAgent, then have

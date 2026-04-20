@@ -85,6 +85,30 @@ export interface TaskStoreEvents {
   "agent:log": [entry: AgentLogEntry];
 }
 
+/**
+ * Thrown by {@link TaskStore.deleteTask} when the target task is still
+ * referenced by at least one other live task's `dependencies` array.
+ *
+ * Callers that intend to split a task into children (e.g. triage, the
+ * dashboard subtask-breakdown endpoint) must rewrite or drop those
+ * references *before* deleting the parent — otherwise the dependents
+ * would be permanently blocked by a nonexistent id.
+ */
+export class TaskHasDependentsError extends Error {
+  readonly taskId: string;
+  readonly dependentIds: string[];
+
+  constructor(taskId: string, dependentIds: string[]) {
+    super(
+      `Cannot delete task ${taskId}: still referenced as a dependency by ${dependentIds.join(", ")}. ` +
+        `Rewrite or remove these dependencies before deleting.`,
+    );
+    this.name = "TaskHasDependentsError";
+    this.taskId = taskId;
+    this.dependentIds = dependentIds;
+  }
+}
+
 export class TaskStore extends EventEmitter<TaskStoreEvents> {
   static async getOrCreateForProject(
     projectId?: string,
@@ -290,6 +314,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       stuckKillCount: row.stuckKillCount ?? undefined,
       postReviewFixCount: row.postReviewFixCount ?? undefined,
       recoveryRetryCount: row.recoveryRetryCount ?? undefined,
+      taskDoneRetryCount: row.taskDoneRetryCount ?? undefined,
       nextRecoveryAt: row.nextRecoveryAt || undefined,
       error: row.error || undefined,
       summary: row.summary || undefined,
@@ -539,7 +564,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       "modelPresetId", "modelProvider", "modelId",
       "validatorModelProvider", "validatorModelId",
       "planningModelProvider", "planningModelId",
-      "mergeRetries", "workflowStepRetries", "stuckKillCount", "postReviewFixCount", "recoveryRetryCount", "nextRecoveryAt",
+      "mergeRetries", "workflowStepRetries", "stuckKillCount", "postReviewFixCount", "recoveryRetryCount", "taskDoneRetryCount", "nextRecoveryAt",
       "error", "summary", "thinkingLevel",
       "createdAt", "updatedAt", "columnMovedAt",
       "dependencies", "steps", "comments", "workflowStepResults", "steeringComments",
@@ -557,7 +582,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       "modelPresetId", "modelProvider", "modelId",
       "validatorModelProvider", "validatorModelId",
       "planningModelProvider", "planningModelId",
-      "mergeRetries", "workflowStepRetries", "stuckKillCount", "postReviewFixCount", "recoveryRetryCount", "nextRecoveryAt",
+      "mergeRetries", "workflowStepRetries", "stuckKillCount", "postReviewFixCount", "recoveryRetryCount", "taskDoneRetryCount", "nextRecoveryAt",
       "error", "summary", "thinkingLevel",
       "createdAt", "updatedAt", "columnMovedAt",
       "dependencies", "steps", "attachments", "steeringComments",
@@ -598,14 +623,14 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         id, title, description, "column", status, size, reviewLevel, currentStep,
         worktree, blockedBy, paused, baseBranch, branch, baseCommitSha, modelPresetId, modelProvider,
         modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, mergeRetries,
-        workflowStepRetries, stuckKillCount, postReviewFixCount, recoveryRetryCount, nextRecoveryAt, error,
+        workflowStepRetries, stuckKillCount, postReviewFixCount, recoveryRetryCount, taskDoneRetryCount, nextRecoveryAt, error,
         summary, thinkingLevel, createdAt, updatedAt, columnMovedAt,
         dependencies, steps, log, attachments, steeringComments,
         comments, workflowStepResults, prInfo, issueInfo, mergeDetails,
         breakIntoSubtasks, enabledWorkflowSteps, modifiedFiles, missionId, sliceId, assignedAgentId, assigneeUserId, checkedOutBy, checkedOutAt
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
@@ -633,6 +658,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         stuckKillCount = excluded.stuckKillCount,
         postReviewFixCount = excluded.postReviewFixCount,
         recoveryRetryCount = excluded.recoveryRetryCount,
+        taskDoneRetryCount = excluded.taskDoneRetryCount,
         nextRecoveryAt = excluded.nextRecoveryAt,
         error = excluded.error,
         summary = excluded.summary,
@@ -686,6 +712,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.stuckKillCount ?? 0,
       task.postReviewFixCount ?? 0,
       task.recoveryRetryCount ?? null,
+      task.taskDoneRetryCount ?? 0,
       task.nextRecoveryAt ?? null,
       task.error ?? null,
       task.summary ?? null,
@@ -726,6 +753,33 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const row = this.db.prepare(`SELECT ${selectClause} FROM tasks WHERE id = ?`).get(id);
     if (!row) return undefined;
     return this.rowToTask(row);
+  }
+
+  /**
+   * Return the ids of live tasks whose `dependencies` array contains `id`.
+   *
+   * Uses a SQL LIKE probe as a cheap pre-filter then parses the JSON column
+   * to rule out false positives (substring matches on similar ids, matches
+   * inside escaped strings, etc.).
+   */
+  private findLiveDependents(id: string): string[] {
+    const rows = this.db
+      .prepare(`SELECT id, dependencies FROM tasks WHERE dependencies LIKE ? AND id != ?`)
+      .all(`%${id}%`, id) as Array<{ id: string; dependencies: string | null }>;
+
+    const dependents: string[] = [];
+    for (const row of rows) {
+      if (!row.dependencies) continue;
+      try {
+        const deps = JSON.parse(row.dependencies) as unknown;
+        if (Array.isArray(deps) && deps.includes(id)) {
+          dependents.push(row.id);
+        }
+      } catch {
+        // Malformed JSON — skip; nothing we can verify.
+      }
+    }
+    return dependents;
   }
 
   /**
@@ -2109,7 +2163,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   async updateTask(
     id: string,
-    updates: { title?: string; description?: string; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; blockedBy?: string | null; assignedAgentId?: string | null; assigneeUserId?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; paused?: boolean; baseBranch?: string | null; branch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
+    updates: { title?: string; description?: string; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; blockedBy?: string | null; assignedAgentId?: string | null; assigneeUserId?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; paused?: boolean; baseBranch?: string | null; branch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
     runContext?: RunMutationContext,
   ): Promise<Task> {
     return this.withTaskLock(id, async () => {
@@ -2218,6 +2272,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         task.recoveryRetryCount = undefined;
       } else if (updates.recoveryRetryCount !== undefined) {
         task.recoveryRetryCount = updates.recoveryRetryCount;
+      }
+      if (updates.taskDoneRetryCount === null) {
+        task.taskDoneRetryCount = undefined;
+      } else if (updates.taskDoneRetryCount !== undefined) {
+        task.taskDoneRetryCount = updates.taskDoneRetryCount;
       }
       if (updates.nextRecoveryAt === null) {
         task.nextRecoveryAt = undefined;
@@ -2787,6 +2846,16 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       const task = this.readTaskFromDb(id);
       if (!task) {
         throw new Error(`Task ${id} not found`);
+      }
+
+      // Refuse to delete a task that is still referenced as a dependency
+      // by another live task. Scheduler treats missing-dep ids as unmet,
+      // so silently deleting a task with live dependents would permanently
+      // block them. Callers that want to split/replace a task must rewrite
+      // or drop the incoming references first.
+      const dependentIds = this.findLiveDependents(id);
+      if (dependentIds.length > 0) {
+        throw new TaskHasDependentsError(id, dependentIds);
       }
 
       // Clean up the task's branch before deleting from DB

@@ -1096,6 +1096,28 @@ export class TaskExecutor {
       }
     }
 
+    // Drift detection: a task that is already in-progress (i.e. we're not
+    // dispatching it fresh from todo) should always carry a `worktree`. If it
+    // doesn't, some prior update — most likely a partial pause/abort sequence
+    // where updateTask({ worktree: null }) succeeded but the subsequent
+    // moveTask()/status write failed — left the row in a half-state. The
+    // executor can still recover by falling through to the fresh-worktree
+    // path below, but we emit a loud audit record so these states stop being
+    // silent.
+    if (task.column === "in-progress" && !task.worktree) {
+      executorLog.error(
+        `${task.id}: drift detected — task is in-progress with no worktree. ` +
+          `Recovering by creating a fresh worktree. This usually indicates a partial ` +
+          `updateTask/moveTask sequence failed somewhere upstream.`,
+      );
+      await this.store.logEntry(
+        task.id,
+        "Drift detected: in-progress with no worktree — creating fresh worktree to recover",
+        undefined,
+        this.currentRunContext,
+      );
+    }
+
     // Hoist worktreePath so it's accessible in the catch block for dep-abort cleanup
     // Determine worktree name based on settings
     let worktreePath: string;
@@ -1410,8 +1432,8 @@ export class TaskExecutor {
               return;
             }
 
-            // Reset workflowStepRetries counter on success
-            await this.store.updateTask(task.id, { workflowStepRetries: undefined });
+            // Reset retry counters on success
+            await this.store.updateTask(task.id, { workflowStepRetries: undefined, taskDoneRetryCount: null });
 
             await this.store.moveTask(task.id, "in-review");
             // Audit trail: record task move (FN-1404)
@@ -1880,8 +1902,8 @@ export class TaskExecutor {
               return;
             }
 
-            // Reset workflowStepRetries counter on success
-            await this.store.updateTask(task.id, { workflowStepRetries: undefined });
+            // Reset retry counters on success
+            await this.store.updateTask(task.id, { workflowStepRetries: undefined, taskDoneRetryCount: null });
 
             await this.store.moveTask(task.id, "in-review");
             executorLog.log(`✓ ${task.id} completed → in-review`);
@@ -1979,6 +2001,9 @@ export class TaskExecutor {
                 await this.sendTaskBackForFix(task, worktreePath, workflowResult.feedback, workflowResult.stepName || "Unknown", "Workflow step failed on retry");
                 return;
               }
+
+              // Reset retry counters on success
+              await this.store.updateTask(task.id, { workflowStepRetries: undefined, taskDoneRetryCount: null });
 
               await this.store.moveTask(task.id, "in-review");
               executorLog.log(`✓ ${task.id} completed on retry → in-review`);

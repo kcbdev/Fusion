@@ -187,6 +187,7 @@ When the task includes \`breakIntoSubtasks: true\`, first decide whether it shou
 
 - Split only when the work is meaningfully decomposable into 2-5 independently executable child tasks.
 - If splitting: use the \`task_create\` tool to create child tasks in triage, include clear descriptions and dependencies between them, then stop. Do NOT write a PROMPT.md for the parent task.
+- **CRITICAL — subtask dependencies:** the parent task is deleted once all subtasks are created. \`dependencies\` on a new subtask may ONLY reference sibling subtasks you have created earlier in this same split (or unrelated existing tasks). **Never depend on the parent task's id.** If a child conceptually "waits for the parent's remaining work", create a sibling subtask that does that work and depend on the sibling instead. The \`task_create\` tool will reject parent-id dependencies with an error.
 - If not splitting: proceed with a normal PROMPT.md specification.
 
 ## Proactive Subtask Breakdown for M/L Tasks
@@ -835,8 +836,24 @@ export class TriageProcessor {
               task.id,
               `Converted into subtasks: ${childTaskIds}`,
             );
-            await this.store.deleteTask(task.id);
-            triageLog.log(`✓ ${task.id} split into subtasks (${childTaskIds}) and closed`);
+            try {
+              await this.store.deleteTask(task.id);
+              triageLog.log(`✓ ${task.id} split into subtasks (${childTaskIds}) and closed`);
+            } catch (err: unknown) {
+              // deleteTask refuses when live tasks still depend on this id.
+              // If task_create's validation worked correctly this branch is
+              // unreachable, but we keep it as defense-in-depth: leaving the
+              // parent alive is always safer than stranding dependents.
+              const msg = err instanceof Error ? err.message : String(err);
+              triageLog.error(
+                `${task.id}: cannot close parent after split (${msg}). ` +
+                  `Parent kept alive to avoid orphaning dependents; subtasks were still created.`,
+              );
+              await this.store.logEntry(
+                task.id,
+                `Split-close aborted: ${msg}. Subtasks created but parent kept alive to avoid orphaning dependents.`,
+              );
+            }
             return;
           }
 
@@ -1220,7 +1237,10 @@ export class TriageProcessor {
         "Use this when the work can be split into 2-5 independently executable tasks, " +
         "either because the user requested subtask breakdown or because the task is " +
         "oversized (8+ steps, 3+ packages, multiple independent deliverables). " +
-        "The created task will be a child of the current task being triaged.",
+        "The created task will be a child of the current task being triaged. " +
+        "IMPORTANT: `dependencies` may ONLY reference other subtasks you have created " +
+        "in this same triage session. Never depend on the parent task — the parent is " +
+        "deleted after splitting, and stale dependency ids permanently block the dependent.",
       parameters: taskCreateParams,
       execute: async (
         _callId: string,
@@ -1229,6 +1249,57 @@ export class TriageProcessor {
         // task_create is always available during triage to support both
         // explicit breakIntoSubtasks and proactive splitting of oversized tasks.
         try {
+          // Validate dependencies before creating the child:
+          //   1. Cannot depend on the parent (it's about to be deleted).
+          //   2. Each id must either (a) already exist in the store, or
+          //      (b) reference a sibling created earlier in this split.
+          // This is the load-bearing guard that prevents the AI from stranding
+          // children behind a never-to-exist parent id.
+          const requestedDeps = params.dependencies || [];
+          const siblings = new Set(options.createdSubtasksRef.current);
+          const validDeps: string[] = [];
+          const rejected: Array<{ id: string; reason: string }> = [];
+
+          for (const depId of requestedDeps) {
+            if (depId === options.parentTaskId) {
+              rejected.push({
+                id: depId,
+                reason: "parent task is deleted after splitting; depend on a sibling child task instead",
+              });
+              continue;
+            }
+            if (siblings.has(depId)) {
+              validDeps.push(depId);
+              continue;
+            }
+            try {
+              await store.getTask(depId);
+              validDeps.push(depId);
+            } catch {
+              rejected.push({
+                id: depId,
+                reason: "task not found (only existing tasks or siblings created earlier in this split are allowed)",
+              });
+            }
+          }
+
+          if (rejected.length > 0) {
+            const summary = rejected
+              .map((r) => `  - ${r.id}: ${r.reason}`)
+              .join("\n");
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text:
+                    `ERROR: task_create rejected. Invalid dependencies:\n${summary}\n\n` +
+                    `Remove or replace these ids and call task_create again.`,
+                },
+              ],
+              details: { rejectedDependencies: rejected },
+            };
+          }
+
           // Fetch parent task to inherit model settings
           let parentTask: Awaited<ReturnType<typeof store.getTask>> | undefined;
           try {
@@ -1243,7 +1314,7 @@ export class TriageProcessor {
           const newTask = await store.createTask({
             title: params.title,
             description: params.description,
-            dependencies: params.dependencies || [],
+            dependencies: validDeps,
             column: "triage",
             // Inherit parent's model settings if available
             modelProvider: parentTask?.modelProvider,
@@ -1798,6 +1869,8 @@ The user has requested that this task be broken into smaller subtasks if it is c
 4. After creating all subtasks, stop — do NOT write a PROMPT.md for the parent task
 5. If NOT splitting: proceed with a normal PROMPT.md specification for this task
 
+**Subtask dependencies rule:** \`dependencies\` on a child may only reference **sibling subtasks created earlier in this same split** or **pre-existing tasks in the store**. They must NEVER reference the parent task being split — the parent is deleted after the split completes, and a dependency on a deleted task permanently blocks the dependent. If a child "needs the rest of the parent's work to finish first", create another sibling subtask for that remaining work and depend on the sibling. The \`task_create\` tool rejects parent-id dependencies.
+
 **Important:** If you create subtasks, this parent task will be closed and replaced by the children. Make sure each child is a complete, executable task.`;
   } else {
     subtaskSection = `
@@ -1823,6 +1896,7 @@ The user did not explicitly request subtask breakdown, so you should first asses
 
 **How to decide:**
 - If you choose to split: use the \\\`task_create\\\` tool to create the child tasks, set dependencies where needed, and then stop without writing a PROMPT.md for the parent task.
+- **Subtask dependencies must only reference sibling subtasks created earlier in this same split, or pre-existing tasks. NEVER depend on the parent task being split — the parent is deleted after splitting, and the tool will reject parent-id dependencies.**
 - If the work appears to be Size S, or if an M/L task genuinely has 5 or fewer focused steps with a clear scope, proceed with a normal PROMPT.md specification.
 - If size is uncertain at first, make a quick assessment from the available context before deciding.`;
   }

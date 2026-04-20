@@ -8448,33 +8448,80 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         }
       }
 
+      // Resolve each subtask's dependsOn list:
+      //   - map tempIds to the newly-created sibling task ids
+      //   - drop any reference to the parent being split (would be a dangling id after delete)
+      //   - record dropped ids so the caller can surface them instead of silently losing them
+      const droppedDependencies: Array<{ taskId: string; dropped: string[] }> = [];
+      const normalizedParentId = typeof parentTaskId === "string" ? parentTaskId.trim() : "";
+
       for (let index = 0; index < subtasks.length; index++) {
         const item = subtasks[index]!;
         const created = createdTasks[index]!;
-        const resolvedDependencies = Array.isArray(item.dependsOn)
-          ? item.dependsOn.map((dep) => tempIdToTaskId.get(dep)).filter((dep): dep is string => Boolean(dep))
-          : [];
+        const rawDeps = Array.isArray(item.dependsOn) ? item.dependsOn : [];
+        const resolvedDependencies: string[] = [];
+        const dropped: string[] = [];
+
+        for (const dep of rawDeps) {
+          if (typeof dep !== "string" || !dep) continue;
+          if (normalizedParentId && dep === normalizedParentId) {
+            // Parent is about to be deleted — depending on it would permanently
+            // block the dependent.
+            dropped.push(dep);
+            continue;
+          }
+          const siblingId = tempIdToTaskId.get(dep);
+          if (siblingId) {
+            resolvedDependencies.push(siblingId);
+            continue;
+          }
+          // Not a sibling tempId and not the parent — it could be an existing
+          // task id. Keep it only if it resolves to a live task; otherwise drop.
+          try {
+            await scopedStore.getTask(dep);
+            resolvedDependencies.push(dep);
+          } catch {
+            dropped.push(dep);
+          }
+        }
 
         if (resolvedDependencies.length > 0) {
           const updated = await scopedStore.updateTask(created.id, { dependencies: resolvedDependencies });
           createdTasks[index] = updated;
+        }
+        if (dropped.length > 0) {
+          droppedDependencies.push({ taskId: created.id, dropped });
+          await scopedStore.logEntry(
+            created.id,
+            `Subtask breakdown: dropped invalid dependencies [${dropped.join(", ")}] (parent-id or unknown task id)`,
+          );
         }
 
         await scopedStore.logEntry(created.id, "Created via subtask breakdown", `Source: ${session.initialDescription.slice(0, 200)}`);
       }
 
       let parentTaskClosed = false;
-      if (typeof parentTaskId === "string" && parentTaskId.trim()) {
+      let parentTaskCloseError: string | undefined;
+      if (normalizedParentId) {
         try {
-          await scopedStore.deleteTask(parentTaskId);
+          await scopedStore.deleteTask(normalizedParentId);
           parentTaskClosed = true;
-        } catch {
+        } catch (err: unknown) {
+          // deleteTask refuses when live tasks still reference the parent id.
+          // Keep the parent alive and surface the reason; silently failing here
+          // is what left FN-2164 blocked by the ghost of FN-2163.
           parentTaskClosed = false;
+          parentTaskCloseError = err instanceof Error ? err.message : String(err);
         }
       }
 
       cleanupSubtaskSession(sessionId);
-      res.status(201).json({ tasks: createdTasks, parentTaskClosed });
+      res.status(201).json({
+        tasks: createdTasks,
+        parentTaskClosed,
+        parentTaskCloseError,
+        droppedDependencies,
+      });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;
