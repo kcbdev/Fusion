@@ -11,7 +11,7 @@
  * - Text length validation (201-2000 characters)
  */
 
-import { getKbAgent, type AgentMessage } from "./ai-engine-loader.js";
+import { getFnAgent, type AgentMessage } from "./ai-engine-loader.js";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -209,7 +209,7 @@ export async function summarizeTitle(
     return null; // Too short for summarization
   }
 
-  const createFnAgent = await getKbAgent();
+  const createFnAgent = await getFnAgent();
   if (!createFnAgent) {
     if (DEBUG) console.log("[ai-summarize] AI engine not available");
     throw new AiServiceError("AI engine not available");

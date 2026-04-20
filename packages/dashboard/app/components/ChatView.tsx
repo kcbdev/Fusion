@@ -109,11 +109,11 @@ function formatModelTag(provider?: string | null, modelId?: string | null): stri
 }
 
 /**
- * Constant agent ID for the built-in kb agent.
+ * Constant agent ID for the built-in fn agent.
  * The chat system always uses createFnAgent with CHAT_SYSTEM_PROMPT regardless
  * of the agentId stored on the session. This ID serves as metadata only.
  */
-const KB_AGENT_ID = "__kb_agent__";
+const FN_AGENT_ID = "__fn_agent__";
 
 function getSkillTriggerMatch(value: string): { filter: string; start: number; end: number } | null {
   const triggerMatch = /(^|[\s])\/([^\s]*)$/.exec(value);
@@ -211,7 +211,7 @@ function NewChatDialog({ onClose, onCreate }: NewChatDialogProps) {
     if (slashIdx <= 0) return;
     const modelProvider = selectedModel.slice(0, slashIdx);
     const modelId = selectedModel.slice(slashIdx + 1);
-    onCreate({ agentId: KB_AGENT_ID, modelProvider, modelId });
+    onCreate({ agentId: FN_AGENT_ID, modelProvider, modelId });
   };
 
   const isSubmitDisabled =
@@ -870,7 +870,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
 
   const agentName =
     agentsMap.get(activeSession?.agentId ?? "")?.name ||
-    (activeSession?.agentId === KB_AGENT_ID
+    (activeSession?.agentId === FN_AGENT_ID
       ? "Fusion"
       : (activeSession?.agentId?.slice(0, 30) ?? "Fusion"));
 
@@ -942,7 +942,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
                   {session.lastMessagePreview || "No messages"}
                 </div>
                 <div className="chat-session-meta">
-                  <span>{agentsMap.get(session.agentId)?.name || (session.agentId === KB_AGENT_ID ? "Fusion" : session.agentId.slice(0, 30))}</span>
+                  <span>{agentsMap.get(session.agentId)?.name || (session.agentId === FN_AGENT_ID ? "Fusion" : session.agentId.slice(0, 30))}</span>
                   <span>{session.updatedAt ? formatRelativeTime(session.updatedAt) : ""}</span>
                 </div>
               </div>
@@ -1012,7 +1012,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
           )}
           <Bot size={16} />
           <span className="chat-thread-header-title">
-            {activeSession?.agentId === KB_AGENT_ID
+            {activeSession?.agentId === FN_AGENT_ID
               ? "Fusion"
               : activeSession?.title || agentsMap.get(activeSession?.agentId ?? "")?.name || activeSession?.agentId || "Chat"}
           </span>

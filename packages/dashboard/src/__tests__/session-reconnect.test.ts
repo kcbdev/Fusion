@@ -17,7 +17,7 @@ import { request, get } from "../test-request.js";
 import { AiSessionStore, type AiSessionRow } from "../ai-session-store.js";
 import {
   __resetPlanningState,
-  __setCreateKbAgent,
+  __setCreateFnAgent,
   createSession,
   submitResponse,
   setAiSessionStore as setPlanningAiSessionStore,
@@ -36,12 +36,12 @@ import {
   setAiSessionStore as setMissionAiSessionStore,
 } from "../mission-interview.js";
 
-const { mockCreateKbAgent } = vi.hoisted(() => ({
-  mockCreateKbAgent: vi.fn(),
+const { mockCreateFnAgent } = vi.hoisted(() => ({
+  mockCreateFnAgent: vi.fn(),
 }));
 
 vi.mock("@fusion/engine", () => ({
-  createFnAgent: mockCreateKbAgent,
+  createFnAgent: mockCreateFnAgent,
 }));
 
 function makePlanningAgent(responses: string[]) {
@@ -105,7 +105,7 @@ describe("session reconnect + replay", () => {
   });
 
   afterEach(async () => {
-    __setCreateKbAgent(undefined as any);
+    __setCreateFnAgent(undefined as any);
     __resetPlanningState();
     __resetSubtaskBreakdownState();
     __resetMissionInterviewState();
@@ -140,7 +140,7 @@ describe("session reconnect + replay", () => {
       }),
     ];
 
-    __setCreateKbAgent(async () => makePlanningAgent(planningResponses));
+    __setCreateFnAgent(async () => makePlanningAgent(planningResponses));
 
     const { sessionId } = await createSession("127.0.0.11", "Build reconnect tests", undefined, "/tmp/project");
     await submitResponse(sessionId, { "q-1": "medium" }, "/tmp/project");
@@ -163,7 +163,7 @@ describe("session reconnect + replay", () => {
   });
 
   it("replays subtask buffered events using Last-Event-ID header", async () => {
-    mockCreateKbAgent.mockImplementation(async () =>
+    mockCreateFnAgent.mockImplementation(async () =>
       makePlanningAgent([
         JSON.stringify({
           subtasks: [
@@ -205,7 +205,7 @@ describe("session reconnect + replay", () => {
   });
 
   it("replays mission interview buffered events using query lastEventId", async () => {
-    mockCreateKbAgent.mockImplementation(async () =>
+    mockCreateFnAgent.mockImplementation(async () =>
       makePlanningAgent([
         JSON.stringify({
           type: "question",

@@ -14,7 +14,7 @@ vi.mock("../project-context.js", () => ({
 import { runAgentExport } from "./agent-export.js";
 
 describe("agent-export", () => {
-  const tmpRoot = join(tmpdir(), `kb-agent-export-test-${process.pid}`);
+  const tmpRoot = join(tmpdir(), `fn-agent-export-test-${process.pid}`);
   let projectDir: string;
   let outputDir: string;
 

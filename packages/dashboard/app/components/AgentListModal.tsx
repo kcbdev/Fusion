@@ -41,12 +41,12 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
   const [filterState, setFilterState] = useState<AgentState | "all">("all");
   const [view, setView] = useState<"board" | "list">(() => {
     if (typeof window === "undefined") return "list";
-    const saved = getScopedItem("kb-agent-view", projectId);
+    const saved = getScopedItem("fn-agent-view", projectId);
     return (saved === "board" || saved === "list") ? saved : "list";
   });
 
   useEffect(() => {
-    const saved = getScopedItem("kb-agent-view", projectId);
+    const saved = getScopedItem("fn-agent-view", projectId);
     if (saved === "board" || saved === "list") {
       setView(saved);
       return;
@@ -56,7 +56,7 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
 
   // Persist view preference to localStorage
   useEffect(() => {
-    setScopedItem("kb-agent-view", view, projectId);
+    setScopedItem("fn-agent-view", view, projectId);
   }, [projectId, view]);
 
   const [editingRoleForAgent, setEditingRoleForAgent] = useState<string | null>(null);

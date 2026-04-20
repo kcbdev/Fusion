@@ -117,7 +117,7 @@ import { createFnAgent } from "./pi.js";
 import { execSync } from "node:child_process";
 import { type TaskStore, type Task, type MergeResult, DEFAULT_SETTINGS } from "@fusion/core";
 
-const mockedCreateHaiAgent = vi.mocked(createFnAgent);
+const mockedCreateFnAgent = vi.mocked(createFnAgent);
 const mockedExecSync = vi.mocked(execSync);
 const { existsSync: mockedExistsSyncRaw, readFileSync: mockedReadFileSyncRaw } = await import("node:fs");
 const mockedExistsSync = vi.mocked(mockedExistsSyncRaw);
@@ -246,7 +246,7 @@ describe("aiMergeTask — conditional worktree cleanup", () => {
     vi.clearAllMocks();
     mockedExistsSync.mockReturnValue(true);
     setupHappyPathExecSync();
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -333,7 +333,7 @@ describe("aiMergeTask — task.branch field", () => {
     vi.clearAllMocks();
     mockedExistsSync.mockReturnValue(true);
     setupHappyPathExecSync();
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -402,7 +402,7 @@ describe("aiMergeTask — empty squash merge (branch already merged via dep)", (
 
     expect(result.merged).toBe(true);
     // Agent should NOT have been spawned
-    expect(mockedCreateHaiAgent).not.toHaveBeenCalled();
+    expect(mockedCreateFnAgent).not.toHaveBeenCalled();
     // Task should still be moved to done
     expect(store.moveTask).toHaveBeenCalledWith("FN-050", "done");
   });
@@ -444,7 +444,7 @@ describe("push-after-merge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedExistsSync.mockReturnValue(true);
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -662,7 +662,7 @@ describe("push-after-merge", () => {
     let rebaseInProgress = false;
     let hasConflicts = false;
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn(async () => {
           hasConflicts = false;
@@ -709,7 +709,7 @@ describe("push-after-merge", () => {
     });
 
     expect(result.pushed).toBe(true);
-    expect(mockedCreateHaiAgent).toHaveBeenCalled();
+    expect(mockedCreateFnAgent).toHaveBeenCalled();
   });
 
   it("retries push once after non-fast-forward rejection", async () => {
@@ -755,7 +755,7 @@ describe("push-after-merge", () => {
   it("aborts rebase when conflicts remain unresolved", async () => {
     let rebaseInProgress = false;
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -808,7 +808,7 @@ describe("aiMergeTask — includeTaskIdInCommit setting", () => {
     vi.clearAllMocks();
     mockedExistsSync.mockReturnValue(true);
     setupHappyPathExecSync();
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -824,7 +824,7 @@ describe("aiMergeTask — includeTaskIdInCommit setting", () => {
 
     await aiMergeTask(store, "/tmp/root", "FN-050");
 
-    const agentCall = mockedCreateHaiAgent.mock.calls[0][0] as any;
+    const agentCall = mockedCreateFnAgent.mock.calls[0][0] as any;
     expect(agentCall.systemPrompt).toContain("<type>(<scope>): <summary>");
     expect(agentCall.systemPrompt).toContain("the task ID");
   });
@@ -841,7 +841,7 @@ describe("aiMergeTask — includeTaskIdInCommit setting", () => {
 
     await aiMergeTask(store, "/tmp/root", "FN-050");
 
-    const agentCall = mockedCreateHaiAgent.mock.calls[0][0] as any;
+    const agentCall = mockedCreateFnAgent.mock.calls[0][0] as any;
     expect(agentCall.systemPrompt).toContain("<type>: <summary>");
     expect(agentCall.systemPrompt).not.toContain("<type>(<scope>): <summary>");
     expect(agentCall.systemPrompt).toContain("Do NOT include a scope");
@@ -917,7 +917,7 @@ describe("aiMergeTask — model settings threading", () => {
     vi.clearAllMocks();
     mockedExistsSync.mockReturnValue(true);
     setupHappyPathExecSync();
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -938,8 +938,8 @@ describe("aiMergeTask — model settings threading", () => {
 
     await aiMergeTask(store, "/tmp/root", "FN-050");
 
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(1);
-    const opts = mockedCreateHaiAgent.mock.calls[0][0] as any;
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
+    const opts = mockedCreateFnAgent.mock.calls[0][0] as any;
     expect(opts.defaultProvider).toBe("openai");
     expect(opts.defaultModelId).toBe("gpt-4o");
   });
@@ -952,7 +952,7 @@ describe("aiMergeTask — model settings threading", () => {
 
     await aiMergeTask(store, "/tmp/root", "FN-050");
 
-    const opts = mockedCreateHaiAgent.mock.calls[0][0] as any;
+    const opts = mockedCreateFnAgent.mock.calls[0][0] as any;
     expect(opts.defaultProvider).toBeUndefined();
     expect(opts.defaultModelId).toBeUndefined();
   });
@@ -968,7 +968,7 @@ describe("aiMergeTask — agent log persistence", () => {
   it("logs text deltas to store.appendAgentLog", async () => {
     let capturedOnText: ((delta: string) => void) | undefined;
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       capturedOnText = opts.onText;
       return {
         session: {
@@ -995,7 +995,7 @@ describe("aiMergeTask — agent log persistence", () => {
   it("logs tool invocations to store.appendAgentLog", async () => {
     let capturedOnToolStart: ((name: string, args: any) => void) | undefined;
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       capturedOnToolStart = opts.onToolStart;
       return {
         session: {
@@ -1022,7 +1022,7 @@ describe("aiMergeTask — agent log persistence", () => {
     const onAgentText = vi.fn();
     let capturedOnText: ((delta: string) => void) | undefined;
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       capturedOnText = opts.onText;
       return {
         session: {
@@ -1068,7 +1068,7 @@ describe("aiMergeTask — usage limit detection", () => {
     const pauser = new UsageLimitPauser(store);
     const onUsageLimitHitSpy = vi.spyOn(pauser, "onUsageLimitHit");
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockRejectedValue(new Error("rate_limit_error: Rate limit exceeded")),
         dispose: vi.fn(),
@@ -1104,7 +1104,7 @@ describe("aiMergeTask — usage limit detection", () => {
       dispose: vi.fn(),
       state: { error: "429 Too Many Requests" },
     };
-    mockedCreateHaiAgent.mockResolvedValue({ session: mockSession } as any);
+    mockedCreateFnAgent.mockResolvedValue({ session: mockSession } as any);
 
     await expect(
       aiMergeTask(store, "/tmp/root", "FN-050", { usageLimitPauser: pauser }),
@@ -1131,7 +1131,7 @@ describe("aiMergeTask — usage limit detection", () => {
     const pauser = new UsageLimitPauser(store);
     const onUsageLimitHitSpy = vi.spyOn(pauser, "onUsageLimitHit");
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockRejectedValue(new Error("connection refused")),
         dispose: vi.fn(),
@@ -1151,7 +1151,7 @@ describe("aiMergeTask — usage limit detection", () => {
       [{ id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050", column: "in-review" } as Task],
     );
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockRejectedValue(new Error("rate_limit_error: Rate limit exceeded")),
         dispose: vi.fn(),
@@ -1172,7 +1172,7 @@ describe("aiMergeTask — usage limit detection", () => {
     const pauser = new UsageLimitPauser(store);
     const onUsageLimitHitSpy = vi.spyOn(pauser, "onUsageLimitHit");
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockRejectedValue(new Error("overloaded_error: Overloaded")),
         dispose: vi.fn(),
@@ -1204,7 +1204,7 @@ describe("aiMergeTask — onSession callback", () => {
       dispose: vi.fn(),
     };
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: mockSession,
     } as any);
 
@@ -1221,7 +1221,7 @@ describe("aiMergeTask — onSession callback", () => {
   });
 
   it("works without onSession callback (backward compatible)", async () => {
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -1594,7 +1594,7 @@ describe("aiMergeTask — retry logic with escalating strategies", () => {
       return Buffer.from("");
     });
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -1680,7 +1680,7 @@ describe("aiMergeTask — retry logic with escalating strategies", () => {
     });
 
     // Agent will be called and will fail
-    mockedCreateHaiAgent.mockImplementation(() => {
+    mockedCreateFnAgent.mockImplementation(() => {
       agentCallCount++;
       return Promise.resolve({
         session: {
@@ -1796,7 +1796,7 @@ describe("aiMergeTask — retry logic with escalating strategies", () => {
     });
 
     // Agent fails on attempt 2 (when called to resolve complex conflicts)
-    mockedCreateHaiAgent.mockImplementation(() => {
+    mockedCreateFnAgent.mockImplementation(() => {
       agentCallCount++;
       if (agentCallCount === 1) {
         // First agent call (attempt 2) fails
@@ -1873,7 +1873,7 @@ describe("aiMergeTask — retry logic with escalating strategies", () => {
     });
 
     // Agent will also fail
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockRejectedValue(new Error("Agent failed")),
         dispose: vi.fn(),
@@ -1936,7 +1936,7 @@ describe("aiMergeTask — retry logic with escalating strategies", () => {
       return Buffer.from("");
     });
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockRejectedValue(new Error("Agent failed")),
         dispose: vi.fn(),
@@ -2062,7 +2062,7 @@ describe("aiMergeTask — retry logic with escalating strategies", () => {
       return Buffer.from("");
     });
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockRejectedValue(new Error(buildFailureMessage)),
         dispose: vi.fn(),
@@ -2154,7 +2154,7 @@ describe("aiMergeTask — retry logic with escalating strategies", () => {
       return Buffer.from("");
     });
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockRejectedValue(new Error("Agent failed on attempt 2")),
         dispose: vi.fn(),
@@ -2268,7 +2268,7 @@ describe("aiMergeTask — reset cleanup failure diagnostics", () => {
       return Buffer.from("");
     });
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockRejectedValue(new Error("Agent failed")),
         dispose: vi.fn(),
@@ -2342,7 +2342,7 @@ describe("aiMergeTask — reset cleanup failure diagnostics", () => {
       return Buffer.from("");
     });
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockRejectedValue(new Error("git merge failed: exit code 128")),
         dispose: vi.fn(),
@@ -2385,7 +2385,7 @@ describe("aiMergeTask — reset cleanup failure diagnostics", () => {
     const warnSpy = vi.spyOn(mergerLog, "warn");
     const resetFailureMessage = "lock file busy";
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       const reportTool = opts.customTools?.find((t: any) => t.name === "report_build_failure");
       return {
         session: {
@@ -2755,7 +2755,7 @@ describe("aiMergeTask — build verification", () => {
 
   it("system prompt contains build verification section", async () => {
     let capturedSystemPrompt: string | undefined;
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       capturedSystemPrompt = opts.systemPrompt;
       return {
         session: {
@@ -2777,7 +2777,7 @@ describe("aiMergeTask — build verification", () => {
   it("includes build command in merge prompt when configured", async () => {
     let capturedArgs: any;
     let capturedPrompt: string | undefined;
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       capturedArgs = opts;
       // Simulate agent committing by returning session that results in clean state
       return {
@@ -2825,7 +2825,7 @@ describe("aiMergeTask — build verification", () => {
   });
 
   it("merge succeeds when build passes (agent reports success)", async () => {
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(async () => {
@@ -2866,7 +2866,7 @@ describe("aiMergeTask — build verification", () => {
 
   it("merge aborts when build fails via report_build_failure tool", async () => {
     // Mock agent that calls the report_build_failure tool execute method
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       const reportTool = opts.customTools?.find((t: any) => t.name === "report_build_failure");
       return {
         session: {
@@ -2941,7 +2941,7 @@ describe("aiMergeTask — build verification", () => {
     const warnSpy = vi.spyOn(mergerLog, "warn");
     const resetFailureMessage = "reset failed: dirty working tree";
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       const reportTool = opts.customTools?.find((t: any) => t.name === "report_build_failure");
       return {
         session: {
@@ -2982,7 +2982,7 @@ describe("aiMergeTask — build verification", () => {
   });
 
   it("merge proceeds normally when no build command is configured", async () => {
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -3002,7 +3002,7 @@ describe("aiMergeTask — build verification", () => {
   });
 
   it("merge proceeds when buildCommand is empty string (treated as undefined)", async () => {
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -3025,7 +3025,7 @@ describe("aiMergeTask — build verification", () => {
   });
 
   it("syncs dependencies before build verification when install state is missing", async () => {
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -3134,7 +3134,7 @@ describe("aiMergeTask — deterministic merge verification", () => {
       return Buffer.from("");
     });
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(async () => {
@@ -3204,7 +3204,7 @@ describe("aiMergeTask — deterministic merge verification", () => {
       return Buffer.from("");
     });
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       return {
         session: {
           prompt: vi.fn().mockResolvedValue(undefined),
@@ -3275,7 +3275,7 @@ describe("aiMergeTask — deterministic merge verification", () => {
       return Buffer.from("");
     });
 
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -3318,7 +3318,7 @@ describe("aiMergeTask — deterministic merge verification", () => {
       return Buffer.from("");
     });
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(async () => {
@@ -3392,7 +3392,7 @@ describe("aiMergeTask — deterministic merge verification", () => {
       return Buffer.from("");
     });
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(async () => {
@@ -3451,7 +3451,7 @@ describe("aiMergeTask — deterministic merge verification", () => {
       return Buffer.from("");
     });
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(async () => {
@@ -3683,7 +3683,7 @@ describe("aiMergeTask — post-merge workflow steps", () => {
     vi.clearAllMocks();
     mockedExistsSync.mockReturnValue(true);
     setupHappyPathExecSync();
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -3773,10 +3773,10 @@ describe("aiMergeTask — post-merge workflow steps", () => {
     // getWorkflowStep may be called but pre-merge steps should not trigger agent creation
     // beyond the merge agent itself. We verify createFnAgent was called only once (merge agent)
     // since pre-merge steps are skipped in the merger
-    const mergeAgentCalls = mockedCreateHaiAgent.mock.calls.filter(
+    const mergeAgentCalls = mockedCreateFnAgent.mock.calls.filter(
       (c: any) => c[0]?.systemPrompt?.includes("You are a merge agent")
     );
-    const postMergeCalls = mockedCreateHaiAgent.mock.calls.filter(
+    const postMergeCalls = mockedCreateFnAgent.mock.calls.filter(
       (c: any) => c[0]?.systemPrompt?.includes("post-merge")
     );
 
@@ -3870,7 +3870,7 @@ describe("aiMergeTask — post-merge workflow steps", () => {
     store.getTask = vi.fn().mockResolvedValue({ ...baseTask, prompt: "# test" });
 
     // Make the post-merge agent throw
-    mockedCreateHaiAgent.mockImplementation((async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation((async (opts: any) => {
       if (opts.systemPrompt?.includes("post-merge")) {
         return {
           session: {
@@ -3968,7 +3968,7 @@ describe("aiMergeTask — merge details collection", () => {
     vi.clearAllMocks();
     mockedExistsSync.mockReturnValue(true);
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -4173,7 +4173,7 @@ describe("aiMergeTask — fresh session and compaction recovery", () => {
     setupFreshSessionExecSync();
 
     const sessionInstances: any[] = [];
-    mockedCreateHaiAgent.mockImplementation(async () => {
+    mockedCreateFnAgent.mockImplementation(async () => {
       const session = {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -4191,7 +4191,7 @@ describe("aiMergeTask — fresh session and compaction recovery", () => {
     await aiMergeTask(store, "/tmp/root", "FN-050");
 
     // Session should be created once for the merge agent
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(1);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
     expect(sessionInstances.length).toBe(1);
   });
 
@@ -4203,7 +4203,7 @@ describe("aiMergeTask — fresh session and compaction recovery", () => {
       prompt: vi.fn().mockResolvedValue(undefined),
       dispose: mockDispose,
     };
-    mockedCreateHaiAgent.mockResolvedValue({ session: mockSession } as any);
+    mockedCreateFnAgent.mockResolvedValue({ session: mockSession } as any);
 
     const store = createMockStore(
       { id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050" },
@@ -4397,7 +4397,7 @@ describe("aiMergeTask — context limit recovery with truncation", () => {
     // Track prompt calls
     const promptCalls: string[] = [];
     let firstCall = true;
-    mockedCreateHaiAgent.mockImplementation(async () => {
+    mockedCreateFnAgent.mockImplementation(async () => {
       const session = {
         prompt: vi.fn().mockImplementation(async (prompt: string) => {
           promptCalls.push(prompt);
@@ -4445,7 +4445,7 @@ describe("aiMergeTask — context limit recovery with truncation", () => {
     // Track prompt calls to verify both original and truncated prompts were tried
     const promptCalls: string[] = [];
 
-    mockedCreateHaiAgent.mockImplementation(async () => {
+    mockedCreateFnAgent.mockImplementation(async () => {
       const session = {
         prompt: vi.fn().mockImplementation(async (prompt: string) => {
           promptCalls.push(prompt);
@@ -4507,7 +4507,7 @@ describe("aiMergeTask — context limit recovery with truncation", () => {
     // Track prompt calls
     const promptCalls: string[] = [];
     let firstCall = true;
-    mockedCreateHaiAgent.mockImplementation(async () => {
+    mockedCreateFnAgent.mockImplementation(async () => {
       const session = {
         prompt: vi.fn().mockImplementation(async (prompt: string) => {
           promptCalls.push(prompt);
@@ -4549,7 +4549,7 @@ describe("aiMergeTask — context limit recovery with truncation", () => {
     vi.mocked(isContextLimitError).mockReturnValue(false);
 
     // Mock non-context error
-    mockedCreateHaiAgent.mockImplementation(async () => {
+    mockedCreateFnAgent.mockImplementation(async () => {
       const session = {
         prompt: vi.fn().mockRejectedValue(new Error("connection refused")),
         dispose: vi.fn(),
@@ -4789,7 +4789,7 @@ describe("aiMergeTask — inferred test command execution", () => {
     vi.clearAllMocks();
     mockedExistsSync.mockReturnValue(true);
     setupHappyPathExecSync();
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -5038,7 +5038,7 @@ describe("aiMergeTask — skill selection resolver contract (FN-1510/FN-1511)", 
       skillSource: "role-fallback",
     });
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn(),
         dispose: vi.fn(),
@@ -5063,9 +5063,9 @@ describe("aiMergeTask — skill selection resolver contract (FN-1510/FN-1511)", 
       agentStore: mockAgentStore as any,
     });
 
-    expect(mockedCreateHaiAgent).toHaveBeenCalled();
+    expect(mockedCreateFnAgent).toHaveBeenCalled();
     // Find the first createFnAgent call (main merger agent)
-    const firstCall = mockedCreateHaiAgent.mock.calls[0];
+    const firstCall = mockedCreateFnAgent.mock.calls[0];
     const opts = firstCall[0];
     expect(opts.skillSelection).toBeDefined();
     expect(opts.skillSelection!.projectRootDir).toBe("/tmp/root");
@@ -5085,7 +5085,7 @@ describe("aiMergeTask — skill selection resolver contract (FN-1510/FN-1511)", 
       skillSource: "assigned-agent",
     });
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn(),
         dispose: vi.fn(),
@@ -5110,8 +5110,8 @@ describe("aiMergeTask — skill selection resolver contract (FN-1510/FN-1511)", 
       agentStore: mockAgentStore as any,
     });
 
-    expect(mockedCreateHaiAgent).toHaveBeenCalled();
-    const firstCall = mockedCreateHaiAgent.mock.calls[0];
+    expect(mockedCreateFnAgent).toHaveBeenCalled();
+    const firstCall = mockedCreateFnAgent.mock.calls[0];
     const opts = firstCall[0];
     expect(opts.skillSelection).toBeDefined();
     expect(opts.skillSelection!.requestedSkillNames).toEqual(["custom-skill", "another-skill"]);
@@ -5125,7 +5125,7 @@ describe("aiMergeTask — skill selection resolver contract (FN-1510/FN-1511)", 
       skillSource: "none",
     });
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn(),
         dispose: vi.fn(),
@@ -5150,15 +5150,15 @@ describe("aiMergeTask — skill selection resolver contract (FN-1510/FN-1511)", 
       agentStore: mockAgentStore as any,
     });
 
-    expect(mockedCreateHaiAgent).toHaveBeenCalled();
-    const firstCall = mockedCreateHaiAgent.mock.calls[0];
+    expect(mockedCreateFnAgent).toHaveBeenCalled();
+    const firstCall = mockedCreateFnAgent.mock.calls[0];
     const opts = firstCall[0];
     // skillSelection should not be present when context is undefined
     expect("skillSelection" in opts).toBe(false);
   });
 
   it("does not pass skillSelection when agentStore is not provided", async () => {
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn(),
         dispose: vi.fn(),
@@ -5178,8 +5178,8 @@ describe("aiMergeTask — skill selection resolver contract (FN-1510/FN-1511)", 
     // No agentStore provided
     await aiMergeTask(store, "/tmp/root", "FN-050");
 
-    expect(mockedCreateHaiAgent).toHaveBeenCalled();
-    const firstCall = mockedCreateHaiAgent.mock.calls[0];
+    expect(mockedCreateFnAgent).toHaveBeenCalled();
+    const firstCall = mockedCreateFnAgent.mock.calls[0];
     const opts = firstCall[0];
     expect("skillSelection" in opts).toBe(false);
   });
@@ -5188,7 +5188,7 @@ describe("aiMergeTask — skill selection resolver contract (FN-1510/FN-1511)", 
     const { buildSessionSkillContext } = await import("./session-skill-context.js");
     vi.mocked(buildSessionSkillContext).mockRejectedValue(new Error("Agent not found"));
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn(),
         dispose: vi.fn(),
@@ -5215,8 +5215,8 @@ describe("aiMergeTask — skill selection resolver contract (FN-1510/FN-1511)", 
     });
 
     expect(result.merged).toBe(true);
-    expect(mockedCreateHaiAgent).toHaveBeenCalled();
-    const firstCall = mockedCreateHaiAgent.mock.calls[0];
+    expect(mockedCreateFnAgent).toHaveBeenCalled();
+    const firstCall = mockedCreateFnAgent.mock.calls[0];
     const opts = firstCall[0];
     expect("skillSelection" in opts).toBe(false);
   });
@@ -5234,7 +5234,7 @@ describe("aiMergeTask — skill selection resolver contract (FN-1510/FN-1511)", 
       skillSource: "assigned-agent",
     });
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn(),
         dispose: vi.fn(),
@@ -5259,8 +5259,8 @@ describe("aiMergeTask — skill selection resolver contract (FN-1510/FN-1511)", 
       agentStore: mockAgentStore as any,
     });
 
-    expect(mockedCreateHaiAgent).toHaveBeenCalled();
-    const firstCall = mockedCreateHaiAgent.mock.calls[0];
+    expect(mockedCreateFnAgent).toHaveBeenCalled();
+    const firstCall = mockedCreateFnAgent.mock.calls[0];
     const opts = firstCall[0];
     expect(opts.skillSelection?.requestedSkillNames).toEqual(resolvedNames);
   });
@@ -5277,7 +5277,7 @@ describe("aiMergeTask — skill selection resolver contract (FN-1510/FN-1511)", 
       skillSource: "role-fallback",
     });
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn(),
         dispose: vi.fn(),
@@ -5302,8 +5302,8 @@ describe("aiMergeTask — skill selection resolver contract (FN-1510/FN-1511)", 
       agentStore: mockAgentStore as any,
     });
 
-    expect(mockedCreateHaiAgent).toHaveBeenCalled();
-    const firstCall = mockedCreateHaiAgent.mock.calls[0];
+    expect(mockedCreateFnAgent).toHaveBeenCalled();
+    const firstCall = mockedCreateFnAgent.mock.calls[0];
     const opts = firstCall[0];
     expect(opts.skillSelection?.sessionPurpose).toBe("merger");
   });
@@ -5338,7 +5338,7 @@ describe("aiMergeTask — skill selection non-fatal diagnostics (FN-1510/FN-1511
       skillSource: "none",
     });
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn(),
         dispose: vi.fn(),
@@ -5380,7 +5380,7 @@ describe("aiMergeTask — skill selection non-fatal diagnostics (FN-1510/FN-1511
       skillSource: "assigned-agent",
     });
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn(),
         dispose: vi.fn(),
@@ -5409,8 +5409,8 @@ describe("aiMergeTask — skill selection non-fatal diagnostics (FN-1510/FN-1511
     expect(result.merged).toBe(true);
 
     // Verify skillSelection was passed with the custom skill
-    expect(mockedCreateHaiAgent).toHaveBeenCalled();
-    const firstCall = mockedCreateHaiAgent.mock.calls[0];
+    expect(mockedCreateFnAgent).toHaveBeenCalled();
+    const firstCall = mockedCreateFnAgent.mock.calls[0];
     const opts = firstCall[0];
     expect(opts.skillSelection?.requestedSkillNames).toEqual(["custom-skill"]);
   });
@@ -5447,7 +5447,7 @@ describe("aiMergeTask — in-merge verification fix", () => {
       return Buffer.from("");
     });
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       const isFixAgent = opts.systemPrompt?.includes("verification fix agent");
       return {
         session: {
@@ -5474,10 +5474,10 @@ describe("aiMergeTask — in-merge verification fix", () => {
     });
 
     // Verify that fix agent was spawned (2 calls: merger + fix)
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
 
     // Verify the fix agent was called with correct options
-    const fixAgentCall = mockedCreateHaiAgent.mock.calls[1];
+    const fixAgentCall = mockedCreateFnAgent.mock.calls[1];
     expect(fixAgentCall[0].tools).toBe("coding");
     expect(fixAgentCall[0].cwd).toBe("/tmp/root");
   });
@@ -5505,7 +5505,7 @@ describe("aiMergeTask — in-merge verification fix", () => {
       return Buffer.from("");
     });
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -5527,7 +5527,7 @@ describe("aiMergeTask — in-merge verification fix", () => {
     });
 
     // Verify fix agent was NOT spawned (only merger)
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(1);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
 
     // Verify no fix attempt was logged
     const logCalls = (store.logEntry as ReturnType<typeof vi.fn>).mock.calls;
@@ -5560,7 +5560,7 @@ describe("aiMergeTask — in-merge verification fix", () => {
       return Buffer.from("");
     });
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       return {
         session: {
           prompt: vi.fn().mockResolvedValue(undefined),
@@ -5586,7 +5586,7 @@ describe("aiMergeTask — in-merge verification fix", () => {
     });
 
     // Verify fix agent uses same model settings
-    const fixAgentCall = mockedCreateHaiAgent.mock.calls[1];
+    const fixAgentCall = mockedCreateFnAgent.mock.calls[1];
     expect(fixAgentCall[0].defaultProvider).toBe("anthropic");
     expect(fixAgentCall[0].defaultModelId).toBe("claude-sonnet-4-5");
   });
@@ -5616,7 +5616,7 @@ describe("aiMergeTask — in-merge verification fix", () => {
       return Buffer.from("");
     });
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       const isFixAgent = opts.systemPrompt?.includes("verification fix agent");
       if (isFixAgent) {
         return {
@@ -5674,7 +5674,7 @@ describe("aiMergeTask — in-merge verification fix", () => {
       return Buffer.from("");
     });
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       return {
         session: {
           prompt: vi.fn().mockResolvedValue(undefined),
@@ -5698,6 +5698,6 @@ describe("aiMergeTask — in-merge verification fix", () => {
     });
 
     // Should have 3 fix attempts (capped at 3) + 1 merger = 4 calls
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(4);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(4);
   });
 });

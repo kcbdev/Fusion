@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import type { Agent } from "../api";
 import { getScopedItem, setScopedItem } from "../utils/projectStorage";
 
-const EXPANDED_KEY = "kb-agent-tree-expanded";
+const EXPANDED_KEY = "fn-agent-tree-expanded";
 
 export interface AgentNode {
   agent: Agent;

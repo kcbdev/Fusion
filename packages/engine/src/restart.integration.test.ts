@@ -101,7 +101,7 @@ import { execSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import type { Task, TaskDetail, TaskStep, Column, Settings, StepStatus } from "@fusion/core";
 
-const mockedCreateHaiAgent = vi.mocked(createFnAgent);
+const mockedCreateFnAgent = vi.mocked(createFnAgent);
 const mockedExecSync = vi.mocked(execSync);
 const mockedExistsSync = vi.mocked(existsSync);
 const mockedReaddirSync = vi.mocked(readdirSync);
@@ -189,7 +189,7 @@ function makeSteps(...statuses: StepStatus[]): TaskStep[] {
 }
 
 function mockAgentSuccess() {
-  mockedCreateHaiAgent.mockResolvedValue({
+  mockedCreateFnAgent.mockResolvedValue({
     session: {
       prompt: vi.fn().mockResolvedValue(undefined),
       dispose: vi.fn(),
@@ -198,7 +198,7 @@ function mockAgentSuccess() {
 }
 
 function mockAgentFailure(error = "agent crashed") {
-  mockedCreateHaiAgent.mockRejectedValue(new Error(error));
+  mockedCreateFnAgent.mockRejectedValue(new Error(error));
 }
 
 /**
@@ -211,7 +211,7 @@ function mockAgentFailure(error = "agent crashed") {
  * multiple tasks execute concurrently.
  */
 function createAgentWithTaskDone() {
-  mockedCreateHaiAgent.mockImplementation((async (opts: { customTools?: Array<{ name: string; execute: (name: string, args: unknown) => unknown }> }) => {
+  mockedCreateFnAgent.mockImplementation((async (opts: { customTools?: Array<{ name: string; execute: (name: string, args: unknown) => unknown }> }) => {
     // Capture tools per-session to avoid race conditions with concurrent tasks
     const localCustomTools = opts?.customTools || [];
     const session = {
@@ -286,7 +286,7 @@ describe("In-progress task resume after restart", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     // Exactly one agent session per in-progress task (no retry inflation)
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
 
     // Both tasks should have received resume log entries (behavioral guarantee)
     expect(store.logEntry).toHaveBeenCalledWith("FN-001", "Resumed after engine restart");
@@ -329,7 +329,7 @@ describe("In-progress task resume after restart", () => {
     }));
 
     let capturedPrompt = "";
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockImplementation(async (prompt: string) => {
           capturedPrompt = prompt;
@@ -467,7 +467,7 @@ describe("In-progress task resume after restart", () => {
     await executor.resumeOrphaned();
 
     expect(executeSpy).not.toHaveBeenCalled();
-    expect(mockedCreateHaiAgent).not.toHaveBeenCalled();
+    expect(mockedCreateFnAgent).not.toHaveBeenCalled();
     expect(store.logEntry).not.toHaveBeenCalledWith("FN-1473", "Resumed after engine restart");
   });
 
@@ -627,7 +627,7 @@ describe("In-review merge handling after restart", () => {
       return Buffer.from("");
     }) as any);
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockRejectedValue(new Error("merge agent crashed")),
         dispose: vi.fn(),
@@ -695,7 +695,7 @@ describe("Triage re-pick after restart", () => {
     // Both triage tasks should have been picked up for specification
     expect(store.updateTask).toHaveBeenCalledWith("FN-060", { status: "specifying" });
     expect(store.updateTask).toHaveBeenCalledWith("FN-061", { status: "specifying" });
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
   });
 
   it("specifyTask() skips task already in processing set (no double-specification)", async () => {
@@ -705,7 +705,7 @@ describe("Triage re-pick after restart", () => {
 
     // Slow agent to keep task in processing
     let resolvePrompt: (() => void) | undefined;
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockImplementation(() => new Promise<void>((r) => { resolvePrompt = r; })),
         dispose: vi.fn(),
@@ -724,7 +724,7 @@ describe("Triage re-pick after restart", () => {
     await triage.specifyTask(task);
 
     // Only one agent created
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(1);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
 
     // Resolve the blocked prompt to clean up
     resolvePrompt!();
@@ -863,7 +863,7 @@ describe("Crash scenario edge cases", () => {
     store.getTask.mockResolvedValue(makeTaskDetail("FN-090", "in-progress"));
 
     // Agent session.prompt rejects (simulating crash mid-step)
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockRejectedValue(new Error("agent died mid-step")),
         dispose: vi.fn(),
@@ -898,7 +898,7 @@ describe("Crash scenario edge cases", () => {
 
     // Exactly one agent created for the re-resume, proving the task was eligible
     // and completed without retry inflation.
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(1);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
 
     // Re-resume should have logged again (behavioral guarantee)
     expect(store.logEntry).toHaveBeenCalledWith("FN-090", "Resumed after engine restart");
@@ -929,7 +929,7 @@ describe("Crash scenario edge cases", () => {
     }) as any);
 
     // Agent prompt rejects (simulating kill during merge)
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockRejectedValue(new Error("killed")),
         dispose: vi.fn(),
@@ -958,7 +958,7 @@ describe("Crash scenario edge cases", () => {
     store.getTask.mockResolvedValue(makeTaskDetail("FN-092", "in-progress"));
 
     let resolvePrompt: (() => void) | undefined;
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockImplementation(() => new Promise<void>((r) => { resolvePrompt = r; })),
         dispose: vi.fn(),
@@ -976,7 +976,7 @@ describe("Crash scenario edge cases", () => {
     await new Promise((r) => setTimeout(r, 20));
 
     // Only one agent should have been created (the executing set guards against double-exec)
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(1);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
 
     // Clean up
     resolvePrompt!();
@@ -997,7 +997,7 @@ describe("Crash scenario edge cases", () => {
     store.getTask.mockResolvedValue(makeTaskDetail("FN-093", "in-progress"));
 
     // Agent creation itself fails
-    mockedCreateHaiAgent.mockRejectedValue(new Error("cannot create agent"));
+    mockedCreateFnAgent.mockRejectedValue(new Error("cannot create agent"));
 
     const onError = vi.fn();
     const executor = new TaskExecutor(store, "/tmp/test", {
@@ -1260,7 +1260,7 @@ describe("Engine pause/unpause cycle", () => {
     store.getTask.mockResolvedValue(makeTaskDetail("FN-EP1", "in-progress"));
 
     // Agent triggers engine pause mid-flight but continues normally (soft pause)
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn().mockImplementation(async () => {
           // Trigger engine pause — session should NOT be terminated
@@ -1289,7 +1289,7 @@ describe("Engine pause/unpause cycle", () => {
     let sessionContinued = false;
 
     // Agent triggers engine pause mid-flight; session should NOT be disposed
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn().mockImplementation(async () => {
           store._trigger("settings:updated", {
@@ -1368,7 +1368,7 @@ describe("Engine pause/unpause cycle", () => {
     const store = createMockStore();
     store.getTask.mockResolvedValue(makeTaskDetail("FN-EP5", "in-progress"));
 
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn().mockImplementation(async () => {
           // Trigger engine pause while the agent holds the semaphore slot

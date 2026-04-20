@@ -11,7 +11,7 @@ import { MessageSquare, Send, Square, X } from "lucide-react";
 import { fetchModels, type Agent, type ModelInfo } from "../api";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { AgentMentionPopup } from "./AgentMentionPopup";
-import { KB_AGENT_ID, useQuickChat, type ChatMessageInfo } from "../hooks/useQuickChat";
+import { FN_AGENT_ID, useQuickChat, type ChatMessageInfo } from "../hooks/useQuickChat";
 import { useAgents } from "../hooks/useAgents";
 import { FileMentionPopup } from "./FileMentionPopup";
 import { useFileMention } from "../hooks/useFileMention";
@@ -402,7 +402,7 @@ export function QuickChatFAB({
   const sessionTargetKey = useMemo(() => {
     if (chatMode === "model") {
       if (parsedModelSelection) {
-        return `${KB_AGENT_ID}::${parsedModelSelection.modelProvider}/${parsedModelSelection.modelId}`;
+        return `${FN_AGENT_ID}::${parsedModelSelection.modelProvider}/${parsedModelSelection.modelId}`;
       }
       return "";
     }

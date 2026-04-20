@@ -645,7 +645,7 @@ import { execSync } from "node:child_process";
 import { AgentSemaphore } from "./concurrency.js";
 import { createLogger } from "./logger.js";
 
-const mockedCreateKbAgent = vi.mocked(createFnAgent);
+const mockedCreateFnAgent = vi.mocked(createFnAgent);
 const mockedExecSync = vi.mocked(execSync);
 const mockedGenerateWorktreeName = vi.mocked(generateWorktreeName);
 const mockedCreateLogger = vi.mocked(createLogger);
@@ -707,7 +707,7 @@ describe("StepSessionExecutor", () => {
       const settings = makeSettings({ maxParallelSteps: 1 });
 
       const session = makeMockSession();
-      mockedCreateKbAgent.mockResolvedValue({ session } as any);
+      mockedCreateFnAgent.mockResolvedValue({ session } as any);
 
       const onStepStart = vi.fn();
       const onStepComplete = vi.fn();
@@ -728,7 +728,7 @@ describe("StepSessionExecutor", () => {
       expect(results.every((r) => r.retries === 0)).toBe(true);
 
       // Verify 3 sessions were created
-      expect(mockedCreateKbAgent).toHaveBeenCalledTimes(3);
+      expect(mockedCreateFnAgent).toHaveBeenCalledTimes(3);
 
       // Verify callbacks
       expect(onStepStart).toHaveBeenCalledTimes(3);
@@ -755,7 +755,7 @@ describe("StepSessionExecutor", () => {
         return Promise.resolve();
       });
 
-      mockedCreateKbAgent.mockResolvedValue({ session } as any);
+      mockedCreateFnAgent.mockResolvedValue({ session } as any);
 
       const executor = new StepSessionExecutor({
         taskDetail: task,
@@ -779,7 +779,7 @@ describe("StepSessionExecutor", () => {
       });
 
       // 3 sessions created for step 0 (2 failures + 1 success) + 1 for step 1
-      expect(mockedCreateKbAgent).toHaveBeenCalledTimes(4);
+      expect(mockedCreateFnAgent).toHaveBeenCalledTimes(4);
     });
 
     it("step failure after max retries: returns failure result", async () => {
@@ -796,7 +796,7 @@ describe("StepSessionExecutor", () => {
       const successSession = makeMockSession();
 
       let createCount = 0;
-      mockedCreateKbAgent.mockImplementation(() => {
+      mockedCreateFnAgent.mockImplementation(() => {
         createCount++;
         if (createCount <= 4) {
           // Step 0: 1 initial + 3 retries = 4 failures
@@ -831,7 +831,7 @@ describe("StepSessionExecutor", () => {
       });
 
       // 4 sessions for step 0 + 1 for step 1
-      expect(mockedCreateKbAgent).toHaveBeenCalledTimes(5);
+      expect(mockedCreateFnAgent).toHaveBeenCalledTimes(5);
     });
 
     it("aborted flag: returns failed result immediately", async () => {
@@ -843,7 +843,7 @@ describe("StepSessionExecutor", () => {
       const settings = makeSettings({ maxParallelSteps: 1 });
 
       const session = makeMockSession();
-      mockedCreateKbAgent.mockResolvedValue({ session } as any);
+      mockedCreateFnAgent.mockResolvedValue({ session } as any);
 
       const executor = new StepSessionExecutor({
         taskDetail: task,
@@ -889,7 +889,7 @@ describe("StepSessionExecutor", () => {
       const semaphore = new AgentSemaphore(2);
 
       const session = makeMockSession();
-      mockedCreateKbAgent.mockResolvedValue({ session } as any);
+      mockedCreateFnAgent.mockResolvedValue({ session } as any);
 
       const acquireSpy = vi.spyOn(semaphore, "acquire");
       const releaseSpy = vi.spyOn(semaphore, "release");
@@ -917,7 +917,7 @@ describe("StepSessionExecutor", () => {
       const settings = makeSettings({ maxParallelSteps: 1 });
       const semaphore = new AgentSemaphore(1);
 
-      mockedCreateKbAgent.mockRejectedValue(new Error("Agent creation failed"));
+      mockedCreateFnAgent.mockRejectedValue(new Error("Agent creation failed"));
 
       const executor = new StepSessionExecutor({
         taskDetail: task,
@@ -956,7 +956,7 @@ describe("StepSessionExecutor", () => {
       const settings = makeSettings({ maxParallelSteps: 2 });
 
       const session = makeMockSession();
-      mockedCreateKbAgent.mockResolvedValue({ session } as any);
+      mockedCreateFnAgent.mockResolvedValue({ session } as any);
       mockedExecSync.mockReturnValue("");
 
       const executor = new StepSessionExecutor({
@@ -998,7 +998,7 @@ describe("StepSessionExecutor", () => {
       const settings = makeSettings({ maxParallelSteps: 2 });
 
       let createCount = 0;
-      mockedCreateKbAgent.mockImplementation(() => {
+      mockedCreateFnAgent.mockImplementation(() => {
         createCount++;
         if (createCount === 1) {
           // Step 0 succeeds
@@ -1055,7 +1055,7 @@ describe("StepSessionExecutor", () => {
       const settings = makeSettings({ maxParallelSteps: 2 });
 
       const session = makeMockSession();
-      mockedCreateKbAgent.mockResolvedValue({ session } as any);
+      mockedCreateFnAgent.mockResolvedValue({ session } as any);
 
       // Make git log return commits, but cherry-pick fails
       mockedExecSync.mockImplementation((cmd: string) => {
@@ -1101,7 +1101,7 @@ describe("StepSessionExecutor", () => {
       const settings = makeSettings({ maxParallelSteps: 2 });
 
       const session = makeMockSession();
-      mockedCreateKbAgent.mockResolvedValue({ session } as any);
+      mockedCreateFnAgent.mockResolvedValue({ session } as any);
 
       mockedExecSync.mockImplementation((cmd: string) => {
         if (typeof cmd === "string" && cmd.includes("git log")) {
@@ -1183,7 +1183,7 @@ describe("StepSessionExecutor", () => {
       const semaphore = new AgentSemaphore(4);
 
       const session = makeMockSession();
-      mockedCreateKbAgent.mockResolvedValue({ session } as any);
+      mockedCreateFnAgent.mockResolvedValue({ session } as any);
       mockedExecSync.mockReturnValue("");
 
       const acquireSpy = vi.spyOn(semaphore, "acquire");
@@ -1245,7 +1245,7 @@ describe("StepSessionExecutor", () => {
         });
         const executionEvents: string[] = [];
 
-        mockedCreateKbAgent.mockImplementation(({ cwd }: any) => {
+        mockedCreateFnAgent.mockImplementation(({ cwd }: any) => {
           if (cwd === "/project/.worktrees/wt-step-0") {
             return Promise.resolve({
               session: makeMockSession(async () => {
@@ -1288,7 +1288,7 @@ describe("StepSessionExecutor", () => {
         expect(results).toHaveLength(2);
         expect(results.map((r) => r.stepIndex)).toEqual([0, 1]);
         expect(results.every((r) => r.success)).toBe(true);
-        expect(mockedCreateKbAgent).toHaveBeenNthCalledWith(
+        expect(mockedCreateFnAgent).toHaveBeenNthCalledWith(
           2,
           expect.objectContaining({ cwd: "/project/.worktrees/main" }),
         );
@@ -1330,7 +1330,7 @@ describe("StepSessionExecutor", () => {
         let maxActivePrimarySteps = 0;
         const cwdOrder: string[] = [];
 
-        mockedCreateKbAgent.mockImplementation(({ cwd }: any) => {
+        mockedCreateFnAgent.mockImplementation(({ cwd }: any) => {
           return Promise.resolve({
             session: makeMockSession(async () => {
               cwdOrder.push(cwd);
@@ -1412,7 +1412,7 @@ describe("StepSessionExecutor", () => {
         let maxActiveParallelSteps = 0;
         const events: string[] = [];
 
-        mockedCreateKbAgent.mockImplementation(({ cwd }: any) => {
+        mockedCreateFnAgent.mockImplementation(({ cwd }: any) => {
           if (cwd === "/project/.worktrees/main") {
             return Promise.resolve({
               session: makeMockSession(async () => {
@@ -1461,7 +1461,7 @@ describe("StepSessionExecutor", () => {
         expect(results.every((r) => r.success)).toBe(true);
         expect(maxActiveParallelSteps).toBe(2);
 
-        const primaryCwdCalls = mockedCreateKbAgent.mock.calls.filter(
+        const primaryCwdCalls = mockedCreateFnAgent.mock.calls.filter(
           ([opts]) => (opts as { cwd?: string }).cwd === "/project/.worktrees/main",
         );
         expect(primaryCwdCalls).toHaveLength(1);
@@ -1498,7 +1498,7 @@ describe("StepSessionExecutor", () => {
           .mockImplementationOnce(() => "wt-success-0")
           .mockImplementationOnce(() => "wt-success-1");
         mockedExecSync.mockReturnValue("");
-        mockedCreateKbAgent.mockImplementation(({ cwd }: any) => {
+        mockedCreateFnAgent.mockImplementation(({ cwd }: any) => {
           return Promise.resolve({
             session: makeMockSession(async () => {
               expect(cwd).not.toBe("/project/.worktrees/main");
@@ -1519,7 +1519,7 @@ describe("StepSessionExecutor", () => {
         expect(results.map((r) => r.stepIndex)).toEqual([0, 1]);
         expect(results.every((r) => r.success)).toBe(true);
 
-        const primaryCwdCalls = mockedCreateKbAgent.mock.calls.filter(
+        const primaryCwdCalls = mockedCreateFnAgent.mock.calls.filter(
           ([opts]) => (opts as { cwd?: string }).cwd === "/project/.worktrees/main",
         );
         expect(primaryCwdCalls).toHaveLength(0);
@@ -1563,7 +1563,7 @@ describe("StepSessionExecutor", () => {
           return "";
         });
 
-        mockedCreateKbAgent.mockResolvedValue({ session: makeMockSession() } as any);
+        mockedCreateFnAgent.mockResolvedValue({ session: makeMockSession() } as any);
 
         const executor = new StepSessionExecutor({
           taskDetail: task,
@@ -1602,7 +1602,7 @@ describe("StepSessionExecutor", () => {
         throw new Error("dispose failed");
       });
 
-      mockedCreateKbAgent.mockResolvedValue({ session: failingSession } as any);
+      mockedCreateFnAgent.mockResolvedValue({ session: failingSession } as any);
 
       const executor = new StepSessionExecutor({
         taskDetail: task,
@@ -1629,7 +1629,7 @@ describe("StepSessionExecutor", () => {
       const session1 = makeMockSession();
 
       let createCount = 0;
-      mockedCreateKbAgent.mockImplementation(() => {
+      mockedCreateFnAgent.mockImplementation(() => {
         createCount++;
         const s = createCount === 1 ? session0 : session1;
         return Promise.resolve({ session: s } as any);
@@ -1697,7 +1697,7 @@ describe("StepSessionExecutor", () => {
       const settings = makeSettings({ maxParallelSteps: 2 });
 
       const session = makeMockSession();
-      mockedCreateKbAgent.mockResolvedValue({ session } as any);
+      mockedCreateFnAgent.mockResolvedValue({ session } as any);
       mockedExecSync.mockReturnValue("");
 
       const executor = new StepSessionExecutor({
@@ -1759,7 +1759,7 @@ describe("StepSessionExecutor", () => {
       const settings = makeSettings({ maxParallelSteps: 2 });
 
       const session = makeMockSession();
-      mockedCreateKbAgent.mockResolvedValue({ session } as any);
+      mockedCreateFnAgent.mockResolvedValue({ session } as any);
       mockedExecSync.mockReturnValue("");
 
       const executor = new StepSessionExecutor({
@@ -1788,7 +1788,7 @@ describe("StepSessionExecutor", () => {
       const settings = makeSettings({ maxParallelSteps: 1 });
 
       const session = makeMockSession();
-      mockedCreateKbAgent.mockResolvedValue({ session } as any);
+      mockedCreateFnAgent.mockResolvedValue({ session } as any);
 
       const executor = new StepSessionExecutor({
         taskDetail: task,
@@ -1825,7 +1825,7 @@ describe("StepSessionExecutor", () => {
         onToolEnd?.("read", false, "ok");
       });
 
-      mockedCreateKbAgent.mockImplementation(async (opts: any) => {
+      mockedCreateFnAgent.mockImplementation(async (opts: any) => {
         onText = opts.onText;
         onToolStart = opts.onToolStart;
         onToolEnd = opts.onToolEnd;
@@ -1859,7 +1859,7 @@ describe("StepSessionExecutor", () => {
       const session = makeMockSession(async () => {
         throw new Error("step failed");
       });
-      mockedCreateKbAgent.mockResolvedValue({ session } as any);
+      mockedCreateFnAgent.mockResolvedValue({ session } as any);
 
       const executor = new StepSessionExecutor({
         store,
@@ -1897,7 +1897,7 @@ describe("StepSessionExecutor", () => {
       const store = { appendAgentLog } as unknown as TaskStore;
 
       // Create session that throws context-limit error on first prompt
-      mockedCreateKbAgent.mockResolvedValue({
+      mockedCreateFnAgent.mockResolvedValue({
         session: makeMockSession(),
       } as any);
 
@@ -1943,7 +1943,7 @@ describe("StepSessionExecutor", () => {
       const appendAgentLog = vi.fn().mockResolvedValue(undefined);
       const store = { appendAgentLog } as unknown as TaskStore;
 
-      mockedCreateKbAgent.mockResolvedValue({
+      mockedCreateFnAgent.mockResolvedValue({
         session: makeMockSession(),
       } as any);
 
@@ -1985,7 +1985,7 @@ describe("StepSessionExecutor", () => {
       const appendAgentLog = vi.fn().mockResolvedValue(undefined);
       const store = { appendAgentLog } as unknown as TaskStore;
 
-      mockedCreateKbAgent.mockResolvedValue({
+      mockedCreateFnAgent.mockResolvedValue({
         session: makeMockSession(),
       } as any);
 
@@ -2085,7 +2085,7 @@ describe("StepSessionExecutor tool availability", () => {
     let captured: any[] = [];
 
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    mockedCreateKbAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       captured = opts.customTools || [];
       return {
         session: {

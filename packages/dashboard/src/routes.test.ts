@@ -15,8 +15,8 @@ import { githubRateLimiter } from "./github-poll.js";
 import type { TaskStore, TaskAttachment, Routine, RoutineCreateInput, RoutineUpdateInput, RoutineExecutionResult } from "@fusion/core";
 import type { TaskDetail } from "@fusion/core";
 import type { AuthStorageLike, ModelRegistryLike } from "./routes.js";
-import { __resetBatchImportRateLimiter, __setCreateKbAgentForRefine } from "./routes.js";
-import { __resetPlanningState, __setCreateKbAgent, planningStreamManager } from "./planning.js";
+import { __resetBatchImportRateLimiter, __setCreateFnAgentForRefine } from "./routes.js";
+import { __resetPlanningState, __setCreateFnAgent, planningStreamManager } from "./planning.js";
 import * as planningModule from "./planning.js";
 import { __resetSubtaskBreakdownState, subtaskStreamManager } from "./subtask-breakdown.js";
 import * as subtaskBreakdownModule from "./subtask-breakdown.js";
@@ -5771,7 +5771,7 @@ describe("projectId store scoping regressions", () => {
   });
 
   afterEach(() => {
-    __setCreateKbAgent(undefined as any);
+    __setCreateFnAgent(undefined as any);
     vi.restoreAllMocks();
   });
 
@@ -7780,7 +7780,7 @@ describe("Planning Mode Routes", () => {
           dispose: vi.fn(),
         },
       };
-      __setCreateKbAgent(async () => mockAgent);
+      __setCreateFnAgent(async () => mockAgent);
     }
 
     beforeEach(() => {
@@ -7791,7 +7791,7 @@ describe("Planning Mode Routes", () => {
     });
 
     afterEach(() => {
-      __setCreateKbAgent(undefined as any);
+      __setCreateFnAgent(undefined as any);
     });
 
     describe("POST /planning/start", () => {
@@ -7892,7 +7892,7 @@ describe("Planning Mode Routes", () => {
         };
 
         const createFnAgentSpy = vi.fn(async () => mockAgent);
-        __setCreateKbAgent(createFnAgentSpy as any);
+        __setCreateFnAgent(createFnAgentSpy as any);
 
         const res = await REQUEST(
           buildApp(),
@@ -7936,7 +7936,7 @@ describe("Planning Mode Routes", () => {
           },
         };
         const createFnAgentSpy = vi.fn(async () => mockAgent);
-        __setCreateKbAgent(createFnAgentSpy as any);
+        __setCreateFnAgent(createFnAgentSpy as any);
 
         const res = await REQUEST(
           buildApp(),
@@ -7970,7 +7970,7 @@ describe("Planning Mode Routes", () => {
           },
         };
         const createFnAgentSpy = vi.fn(async () => mockAgent);
-        __setCreateKbAgent(createFnAgentSpy as any);
+        __setCreateFnAgent(createFnAgentSpy as any);
 
         // Mock project settings with planningProvider + planningModelId
         (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
@@ -8006,7 +8006,7 @@ describe("Planning Mode Routes", () => {
           },
         };
         const createFnAgentSpy = vi.fn(async () => mockAgent);
-        __setCreateKbAgent(createFnAgentSpy as any);
+        __setCreateFnAgent(createFnAgentSpy as any);
 
         // Mock project settings with planningGlobalProvider + planningGlobalModelId (no project lane)
         (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
@@ -8042,7 +8042,7 @@ describe("Planning Mode Routes", () => {
           },
         };
         const createFnAgentSpy = vi.fn(async () => mockAgent);
-        __setCreateKbAgent(createFnAgentSpy as any);
+        __setCreateFnAgent(createFnAgentSpy as any);
 
         // Mock project settings with only defaultProvider + defaultModelId
         (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
@@ -8078,7 +8078,7 @@ describe("Planning Mode Routes", () => {
           },
         };
         const createFnAgentSpy = vi.fn(async () => mockAgent);
-        __setCreateKbAgent(createFnAgentSpy as any);
+        __setCreateFnAgent(createFnAgentSpy as any);
 
         // Mock project settings with no model configuration
         (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({});
@@ -8131,7 +8131,7 @@ describe("Planning Mode Routes", () => {
           },
         };
         const createFnAgentSpy = vi.fn(async () => mockAgent);
-        __setCreateKbAgent(createFnAgentSpy as any);
+        __setCreateFnAgent(createFnAgentSpy as any);
 
         // Mock project settings with partial provider (no modelId)
         (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
@@ -8773,7 +8773,7 @@ describe("Saturated-slot regression: utility AI routes", () => {
         dispose: vi.fn(),
       },
     };
-    __setCreateKbAgent(async () => mockAgent);
+    __setCreateFnAgent(async () => mockAgent);
   }
 
   describe("POST /api/planning/start — utility lane independence", () => {
@@ -8783,7 +8783,7 @@ describe("Saturated-slot regression: utility AI routes", () => {
     });
 
     afterEach(() => {
-      __setCreateKbAgent(undefined as any);
+      __setCreateFnAgent(undefined as any);
     });
 
     it("executes successfully when task-lane is saturated (maxConcurrent=0)", async () => {
@@ -8810,7 +8810,7 @@ describe("Saturated-slot regression: utility AI routes", () => {
     });
 
     afterEach(() => {
-      __setCreateKbAgent(undefined as any);
+      __setCreateFnAgent(undefined as any);
     });
 
     it("executes successfully when task-lane is saturated (maxConcurrent=0)", async () => {
@@ -8832,7 +8832,7 @@ describe("Saturated-slot regression: utility AI routes", () => {
           dispose: vi.fn(),
         },
       };
-      __setCreateKbAgent(async () => mockAgent);
+      __setCreateFnAgent(async () => mockAgent);
 
       const { app } = buildSaturatedApp();
 
@@ -8857,7 +8857,7 @@ describe("Saturated-slot regression: utility AI routes", () => {
     });
 
     afterEach(() => {
-      __setCreateKbAgent(undefined as any);
+      __setCreateFnAgent(undefined as any);
     });
 
     it("executes successfully when task-lane is saturated (maxConcurrent=0)", async () => {
@@ -9489,7 +9489,7 @@ describe("POST /planning/start-streaming with projectId scoping", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-    __setCreateKbAgent(undefined as any);
+    __setCreateFnAgent(undefined as any);
   });
 
   function buildApp() {
@@ -9522,7 +9522,7 @@ describe("POST /planning/start-streaming with projectId scoping", () => {
       },
     };
     const createFnAgentSpy = vi.fn(async () => mockAgent);
-    __setCreateKbAgent(createFnAgentSpy as any);
+    __setCreateFnAgent(createFnAgentSpy as any);
 
     const res = await REQUEST(
       buildApp(),
@@ -9567,7 +9567,7 @@ describe("POST /planning/start-streaming with projectId scoping", () => {
       },
     };
     const createFnAgentSpy = vi.fn(async () => mockAgent);
-    __setCreateKbAgent(createFnAgentSpy as any);
+    __setCreateFnAgent(createFnAgentSpy as any);
 
     const res = await REQUEST(
       buildApp(),
@@ -9612,7 +9612,7 @@ describe("POST /planning/start-streaming with projectId scoping", () => {
       },
     };
     const createFnAgentSpy = vi.fn(async () => mockAgent);
-    __setCreateKbAgent(createFnAgentSpy as any);
+    __setCreateFnAgent(createFnAgentSpy as any);
 
     const res = await REQUEST(
       buildApp(),
@@ -9656,7 +9656,7 @@ describe("POST /planning/start-streaming with projectId scoping", () => {
       },
     };
     const createFnAgentSpy = vi.fn(async () => mockAgent);
-    __setCreateKbAgent(createFnAgentSpy as any);
+    __setCreateFnAgent(createFnAgentSpy as any);
 
     const res = await REQUEST(
       buildApp(),
@@ -13706,7 +13706,7 @@ describe("POST /workflow-steps/:id/refine", () => {
   });
 
   afterEach(() => {
-    __setCreateKbAgentForRefine(undefined);
+    __setCreateFnAgentForRefine(undefined);
   });
 
   function buildApp() {
@@ -13779,7 +13779,7 @@ describe("POST /workflow-steps/:id/refine", () => {
     };
 
     const createFnAgentMock = vi.fn(async () => ({ session }));
-    __setCreateKbAgentForRefine(createFnAgentMock);
+    __setCreateFnAgentForRefine(createFnAgentMock);
 
     const res = await REQUEST(buildApp(), "POST", "/api/workflow-steps/WS-001/refine", JSON.stringify({}), {
       "Content-Type": "application/json",
@@ -13801,7 +13801,7 @@ describe("POST /workflow-steps/:id/refine", () => {
     const updatedWs = { ...ws, prompt: "Check docs" };
     (store.updateWorkflowStep as ReturnType<typeof vi.fn>).mockResolvedValueOnce(updatedWs);
 
-    __setCreateKbAgentForRefine(async () => {
+    __setCreateFnAgentForRefine(async () => {
       throw new Error("AI unavailable");
     });
 
@@ -13844,7 +13844,7 @@ describe("POST /workflow-steps/:id/refine", () => {
       capturedSystemPrompt = options.systemPrompt;
       return { session };
     });
-    __setCreateKbAgentForRefine(createFnAgentMock);
+    __setCreateFnAgentForRefine(createFnAgentMock);
 
     const res = await REQUEST(buildApp(), "POST", "/api/workflow-steps/WS-001/refine", JSON.stringify({}), {
       "Content-Type": "application/json",
@@ -13885,7 +13885,7 @@ describe("POST /workflow-steps/:id/refine", () => {
       capturedSystemPrompt = options.systemPrompt;
       return { session };
     });
-    __setCreateKbAgentForRefine(createFnAgentMock);
+    __setCreateFnAgentForRefine(createFnAgentMock);
 
     const res = await REQUEST(buildApp(), "POST", "/api/workflow-steps/WS-001/refine", JSON.stringify({}), {
       "Content-Type": "application/json",
@@ -13926,7 +13926,7 @@ describe("POST /workflow-steps/:id/refine", () => {
       capturedModel = options;
       return { session };
     });
-    __setCreateKbAgentForRefine(createFnAgentMock);
+    __setCreateFnAgentForRefine(createFnAgentMock);
 
     const res = await REQUEST(buildApp(), "POST", "/api/workflow-steps/WS-001/refine", JSON.stringify({}), {
       "Content-Type": "application/json",
@@ -13960,7 +13960,7 @@ describe("POST /workflow-steps/:id/refine", () => {
       capturedModel = options;
       return { session };
     });
-    __setCreateKbAgentForRefine(createFnAgentMock);
+    __setCreateFnAgentForRefine(createFnAgentMock);
 
     const res = await REQUEST(buildApp(), "POST", "/api/workflow-steps/WS-001/refine", JSON.stringify({}), {
       "Content-Type": "application/json",
@@ -13994,7 +13994,7 @@ describe("POST /workflow-steps/:id/refine", () => {
       capturedModel = options;
       return { session };
     });
-    __setCreateKbAgentForRefine(createFnAgentMock);
+    __setCreateFnAgentForRefine(createFnAgentMock);
 
     const res = await REQUEST(buildApp(), "POST", "/api/workflow-steps/WS-001/refine", JSON.stringify({}), {
       "Content-Type": "application/json",
@@ -14031,7 +14031,7 @@ describe("POST /workflow-steps/:id/refine", () => {
       capturedModel = options;
       return { session };
     });
-    __setCreateKbAgentForRefine(createFnAgentMock);
+    __setCreateFnAgentForRefine(createFnAgentMock);
 
     const res = await REQUEST(buildApp(), "POST", "/api/workflow-steps/WS-001/refine", JSON.stringify({}), {
       "Content-Type": "application/json",
@@ -14061,7 +14061,7 @@ describe("POST /workflow-steps/:id/refine with projectId scoping", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-    __setCreateKbAgentForRefine(undefined);
+    __setCreateFnAgentForRefine(undefined);
   });
 
   function buildApp() {
@@ -14101,7 +14101,7 @@ describe("POST /workflow-steps/:id/refine with projectId scoping", () => {
       capturedSystemPrompt = options.systemPrompt;
       return { session };
     });
-    __setCreateKbAgentForRefine(createFnAgentMock);
+    __setCreateFnAgentForRefine(createFnAgentMock);
 
     const res = await REQUEST(
       buildApp(),
@@ -14150,7 +14150,7 @@ describe("POST /workflow-steps/:id/refine with projectId scoping", () => {
       capturedSystemPrompt = options.systemPrompt;
       return { session };
     });
-    __setCreateKbAgentForRefine(createFnAgentMock);
+    __setCreateFnAgentForRefine(createFnAgentMock);
 
     const res = await REQUEST(
       buildApp(),

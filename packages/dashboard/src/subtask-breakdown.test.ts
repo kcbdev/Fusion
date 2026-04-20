@@ -4,12 +4,12 @@ import { EventEmitter } from "node:events";
 import ts from "typescript";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockCreateKbAgent } = vi.hoisted(() => ({
-  mockCreateKbAgent: vi.fn(),
+const { mockCreateFnAgent } = vi.hoisted(() => ({
+  mockCreateFnAgent: vi.fn(),
 }));
 
 vi.mock("@fusion/engine", () => ({
-  createFnAgent: mockCreateKbAgent,
+  createFnAgent: mockCreateFnAgent,
 }));
 
 import type { AiSessionRow } from "./ai-session-store.js";
@@ -231,8 +231,8 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
-  mockCreateKbAgent.mockReset();
-  mockCreateKbAgent.mockImplementation(async () => createMockSubtaskAgent());
+  mockCreateFnAgent.mockReset();
+  mockCreateFnAgent.mockImplementation(async () => createMockSubtaskAgent());
 });
 
 afterEach(() => {
@@ -546,7 +546,7 @@ describe("subtask session lifecycle", () => {
         dispose: vi.fn(),
       },
     }));
-    mockCreateKbAgent.mockImplementation(createFnAgentSpy);
+    mockCreateFnAgent.mockImplementation(createFnAgentSpy);
 
     const created = await createSubtaskSession(description, undefined, "/tmp/project", promptOverrides);
 
@@ -571,7 +571,7 @@ describe("subtask session lifecycle", () => {
         dispose: vi.fn(),
       },
     }));
-    mockCreateKbAgent.mockImplementation(createFnAgentSpy);
+    mockCreateFnAgent.mockImplementation(createFnAgentSpy);
 
     const created = await createSubtaskSession(description, undefined, "/tmp/project");
 
@@ -597,7 +597,7 @@ describe("subtask session lifecycle", () => {
         dispose: vi.fn(),
       },
     }));
-    mockCreateKbAgent.mockImplementation(createFnAgentSpy);
+    mockCreateFnAgent.mockImplementation(createFnAgentSpy);
 
     const created = await createSubtaskSession(description, undefined, "/tmp/project", promptOverrides);
 
@@ -658,7 +658,7 @@ describe("subtask session lifecycle", () => {
     const customPrompt = "Custom subtask breakdown prompt...";
     const promptOverrides = { "subtask-breakdown-system": customPrompt };
 
-    mockCreateKbAgent.mockReset();
+    mockCreateFnAgent.mockReset();
 
     const createFnAgentSpy = vi.fn().mockImplementation(async () => ({
       session: {
@@ -667,7 +667,7 @@ describe("subtask session lifecycle", () => {
         dispose: vi.fn(),
       },
     }));
-    mockCreateKbAgent.mockImplementation(createFnAgentSpy);
+    mockCreateFnAgent.mockImplementation(createFnAgentSpy);
 
     await retrySubtaskSession(row.id, "/tmp/project", promptOverrides);
 
@@ -687,7 +687,7 @@ describe("subtask session lifecycle", () => {
     store.rows.set(row.id, row);
     setAiSessionStore(store as any);
 
-    mockCreateKbAgent.mockReset();
+    mockCreateFnAgent.mockReset();
 
     const createFnAgentSpy = vi.fn().mockImplementation(async () => ({
       session: {
@@ -696,7 +696,7 @@ describe("subtask session lifecycle", () => {
         dispose: vi.fn(),
       },
     }));
-    mockCreateKbAgent.mockImplementation(createFnAgentSpy);
+    mockCreateFnAgent.mockImplementation(createFnAgentSpy);
 
     await retrySubtaskSession(row.id, "/tmp/project");
 

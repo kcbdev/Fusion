@@ -115,7 +115,7 @@ function extractSSEPayload(sseChunk: string): unknown {
 const mockInit = vi.fn().mockResolvedValue(undefined);
 
 // Create mock functions before vi.mock
-const { mockCreateKbAgent, mockChatStreamManager, mockSendMessage, mockCancelGeneration } = vi.hoisted(() => {
+const { mockCreateFnAgent, mockChatStreamManager, mockSendMessage, mockCancelGeneration } = vi.hoisted(() => {
   // Store subscribers per session for broadcast simulation
   const subscribers = new Map<string, Set<(event: any, eventId?: number) => void>>();
 
@@ -171,7 +171,7 @@ const { mockCreateKbAgent, mockChatStreamManager, mockSendMessage, mockCancelGen
   };
 
   return {
-    mockCreateKbAgent: vi.fn(),
+    mockCreateFnAgent: vi.fn(),
     mockSendMessage: vi.fn(),
     mockCancelGeneration: vi.fn(),
     mockChatStreamManager: chatStreamManager,
@@ -180,7 +180,7 @@ const { mockCreateKbAgent, mockChatStreamManager, mockSendMessage, mockCancelGen
 
 // Mock @fusion/engine to prevent createFnAgent resolution
 vi.mock("@fusion/engine", () => ({
-  createFnAgent: mockCreateKbAgent,
+  createFnAgent: mockCreateFnAgent,
 }));
 
 // Mock ChatStore
@@ -232,7 +232,7 @@ vi.mock("../chat.js", () => {
     chatStreamManager: mockChatStreamManager,
     checkRateLimit: vi.fn().mockReturnValue(true),
     getRateLimitResetTime: vi.fn().mockReturnValue(null),
-    __setCreateKbAgent: vi.fn(),
+    __setCreateFnAgent: vi.fn(),
     __resetChatState: vi.fn(),
   };
 });
@@ -242,7 +242,7 @@ vi.mock("../planning.js", () => {
   return {
     getSession: vi.fn(),
     cleanupSession: vi.fn(),
-    __setCreateKbAgent: vi.fn(),
+    __setCreateFnAgent: vi.fn(),
     __resetPlanningState: vi.fn(),
     setAiSessionStore: vi.fn(),
     rehydrateFromStore: vi.fn().mockReturnValue(0),

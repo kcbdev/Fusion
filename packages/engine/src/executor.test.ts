@@ -177,7 +177,7 @@ import { StepSessionExecutor } from "./step-session-executor.js";
 import { executorLog } from "./logger.js";
 import { withRateLimitRetry } from "./rate-limit-retry.js";
 
-const mockedCreateHaiAgent = vi.mocked(createFnAgent);
+const mockedCreateFnAgent = vi.mocked(createFnAgent);
 const mockedSessionManager = vi.mocked(SessionManager);
 const mockedGenerateWorktreeName = vi.mocked(generateWorktreeName);
 const mockedFindWorktreeUser = vi.mocked(findWorktreeUser);
@@ -248,7 +248,7 @@ describe("TaskExecutor with semaphore", () => {
     const acquireSpy = vi.spyOn(sem, "acquire");
     const releaseSpy = vi.spyOn(sem, "release");
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -279,7 +279,7 @@ describe("TaskExecutor with semaphore", () => {
     const sem = new AgentSemaphore(1);
     const store = createMockStore();
 
-    mockedCreateHaiAgent.mockRejectedValue(new Error("agent failed"));
+    mockedCreateFnAgent.mockRejectedValue(new Error("agent failed"));
 
     const onError = vi.fn();
     const executor = new TaskExecutor(store, "/tmp/test", {
@@ -307,7 +307,7 @@ describe("TaskExecutor with semaphore", () => {
   it("sets task status to 'failed' with error message when execution throws", async () => {
     const store = createMockStore();
 
-    mockedCreateHaiAgent.mockRejectedValue(new Error("agent crashed"));
+    mockedCreateFnAgent.mockRejectedValue(new Error("agent crashed"));
 
     const onError = vi.fn();
     const executor = new TaskExecutor(store, "/tmp/test", { onError });
@@ -336,7 +336,7 @@ describe("TaskExecutor with semaphore", () => {
     let concurrent = 0;
     let maxConcurrent = 0;
 
-    mockedCreateHaiAgent.mockImplementation(async () => {
+    mockedCreateFnAgent.mockImplementation(async () => {
       concurrent++;
       maxConcurrent = Math.max(maxConcurrent, concurrent);
       return {
@@ -398,7 +398,7 @@ describe("TaskExecutor worktreeInitCommand", () => {
     vi.clearAllMocks();
     // Default: worktree does NOT exist (new worktree)
     mockedExistsSync.mockReturnValue(false);
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -494,7 +494,7 @@ describe("TaskExecutor worktreeInitCommand", () => {
     );
 
     // Agent should still have been created
-    expect(mockedCreateHaiAgent).toHaveBeenCalled();
+    expect(mockedCreateFnAgent).toHaveBeenCalled();
   });
 
   it("does NOT run init command on worktree resume", async () => {
@@ -538,7 +538,7 @@ describe("TaskExecutor worktree naming", () => {
     vi.clearAllMocks();
     mockedExistsSync.mockReturnValue(false);
     mockedGenerateWorktreeName.mockReturnValue("swift-falcon");
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -807,7 +807,7 @@ describe("TaskExecutor worktree recovery", () => {
     vi.clearAllMocks();
     mockedExistsSync.mockReturnValue(false);
     mockedGenerateWorktreeName.mockReturnValue("swift-falcon");
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -1523,7 +1523,7 @@ describe("TaskExecutor dependency-based worktree creation", () => {
     vi.clearAllMocks();
     mockedExistsSync.mockReturnValue(false);
     mockedFindWorktreeUser.mockResolvedValue(null);
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -1795,7 +1795,7 @@ describe("TaskExecutor worktree pool integration", () => {
     vi.clearAllMocks();
     // Default: worktree does NOT exist (new worktree)
     mockedExistsSync.mockReturnValue(false);
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -2382,7 +2382,7 @@ describe("buildExecutionPrompt", () => {
     });
 
     const mockPrompt = vi.fn().mockResolvedValue(undefined);
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: mockPrompt,
         dispose: vi.fn(),
@@ -2643,7 +2643,7 @@ describe("TaskExecutor pause behavior", () => {
     const store = createMockStore();
     const disposeFn = vi.fn();
 
-    mockedCreateHaiAgent.mockImplementation(async () => {
+    mockedCreateFnAgent.mockImplementation(async () => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(async () => {
@@ -2679,7 +2679,7 @@ describe("TaskExecutor pause behavior", () => {
   it("does not move to in-review when paused during execution (graceful session end)", async () => {
     const store = createMockStore();
 
-    mockedCreateHaiAgent.mockImplementation(async () => {
+    mockedCreateFnAgent.mockImplementation(async () => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(async () => {
@@ -2716,7 +2716,7 @@ describe("TaskExecutor pause behavior", () => {
     const store = createMockStore();
     const disposeFn = vi.fn();
 
-    mockedCreateHaiAgent.mockImplementation(async () => {
+    mockedCreateFnAgent.mockImplementation(async () => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(async () => {
@@ -2762,7 +2762,7 @@ describe("TaskExecutor pause behavior", () => {
     const disposeFn = vi.fn();
     let promptCallCount = 0;
 
-    mockedCreateHaiAgent.mockImplementation(async () => {
+    mockedCreateFnAgent.mockImplementation(async () => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(async () => {
@@ -2814,7 +2814,7 @@ describe("TaskExecutor pause behavior", () => {
       { id: "FN-002", column: "in-progress", paused: false, title: "Active task", steps: [], description: "", dependencies: [] },
     ]);
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -2833,7 +2833,7 @@ describe("TaskExecutor pause behavior", () => {
     const store = createMockStore();
     const disposeFn = vi.fn();
 
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: disposeFn,
@@ -2863,7 +2863,7 @@ describe("TaskExecutor pause behavior", () => {
 
     // Agent created at least twice: initial resume + retry when agent finishes without task_done
     // (async worktree validation may allow additional retry cycles within the timeout)
-    expect(mockedCreateHaiAgent.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(mockedCreateFnAgent.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(store.logEntry).toHaveBeenCalledWith("FN-001", "Resuming execution after unpause", undefined, undefined);
   });
 
@@ -2883,7 +2883,7 @@ describe("TaskExecutor pause behavior", () => {
       updatedAt: new Date().toISOString(),
     };
 
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -2912,7 +2912,7 @@ describe("TaskExecutor pause behavior", () => {
   it("clears stale failed state before resuming unpaused in-progress task", async () => {
     const store = createMockStore();
 
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -2959,7 +2959,7 @@ describe("TaskExecutor pause behavior", () => {
       },
     ]);
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -2977,7 +2977,7 @@ describe("TaskExecutor pause behavior", () => {
     const store = createMockStore();
     const disposeFn = vi.fn();
 
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn().mockImplementation(async () => {
           // Simulate rapid unpause during execution — should NOT start a second run
@@ -3009,13 +3009,13 @@ describe("TaskExecutor pause behavior", () => {
 
     // At least two agent creations (initial + retry without task_done), but no duplicate from the unpause event
     // (async worktree validation may allow additional retry cycles)
-    expect(mockedCreateHaiAgent.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(mockedCreateFnAgent.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
   it("does not resume unpaused task that is not in-progress", async () => {
     const store = createMockStore();
 
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -3034,7 +3034,7 @@ describe("TaskExecutor pause behavior", () => {
     await new Promise((r) => setTimeout(r, 20));
 
     // No agent should have been created
-    expect(mockedCreateHaiAgent).not.toHaveBeenCalled();
+    expect(mockedCreateFnAgent).not.toHaveBeenCalled();
   });
 
   it("does not resume unpaused task that still has an active session", async () => {
@@ -3044,7 +3044,7 @@ describe("TaskExecutor pause behavior", () => {
     let promptResolve: () => void;
     const promptPromise = new Promise<void>((r) => { promptResolve = r; });
 
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn().mockImplementation(async () => {
           // Simulate unpause while session is still active (should be a no-op)
@@ -3078,14 +3078,14 @@ describe("TaskExecutor pause behavior", () => {
     await executePromise;
 
     // Two agent sessions (initial + retry without task_done) — the unpause during active session was a no-op
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
   });
 
   it("uses SessionManager.create for fresh execution and persists sessionFile", async () => {
     const store = createMockStore();
     const sessionFilePath = "/tmp/sessions/session_123.jsonl";
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -3125,7 +3125,7 @@ describe("TaskExecutor pause behavior", () => {
     // existsSync must return true for the session file
     mockedExistsSync.mockReturnValue(true);
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: resumePromptFn,
         dispose: vi.fn(),
@@ -3152,7 +3152,7 @@ describe("TaskExecutor pause behavior", () => {
     expect(mockedSessionManager.open).toHaveBeenCalledWith(sessionFilePath);
 
     // The first createFnAgent call should use the opened session manager
-    const firstCall = mockedCreateHaiAgent.mock.calls[0][0] as any;
+    const firstCall = mockedCreateFnAgent.mock.calls[0][0] as any;
     expect(firstCall.sessionManager).toBeDefined();
 
     // The log should indicate resume
@@ -3168,7 +3168,7 @@ describe("TaskExecutor pause behavior", () => {
     const store = createMockStore();
     const sessionFilePath = "/tmp/sessions/session_456.jsonl";
 
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn().mockImplementation(async () => {
           // Simulate pause — session ends gracefully
@@ -3212,7 +3212,7 @@ describe("TaskExecutor pause behavior", () => {
       (p) => p !== staleSessionFile,
     );
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -3327,7 +3327,7 @@ describe("swallowed async store failure observability", () => {
       return undefined;
     });
 
-    mockedCreateHaiAgent.mockImplementation((async (opts: { customTools?: typeof capturedCustomTools }) => {
+    mockedCreateFnAgent.mockImplementation((async (opts: { customTools?: typeof capturedCustomTools }) => {
       capturedCustomTools = opts.customTools ?? [];
       return {
         session: {
@@ -3389,7 +3389,7 @@ describe("swallowed async store failure observability", () => {
       return {};
     });
 
-    mockedCreateHaiAgent
+    mockedCreateFnAgent
       .mockResolvedValueOnce({
         session: {
           prompt: vi.fn().mockResolvedValue(undefined),
@@ -3419,7 +3419,7 @@ describe("swallowed async store failure observability", () => {
       updatedAt: new Date().toISOString(),
     })).resolves.toBeUndefined();
 
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("FN-001 failed to persist retry sessionFile: retry sessionFile write failed"),
     );
@@ -3438,7 +3438,7 @@ describe("swallowed async store failure observability", () => {
       return {};
     });
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -3738,7 +3738,7 @@ describe("TaskExecutor global pause behavior", () => {
     const disposeFn2 = vi.fn();
     let callCount = 0;
 
-    mockedCreateHaiAgent.mockImplementation(async () => {
+    mockedCreateFnAgent.mockImplementation(async () => {
       callCount++;
       const dispose = callCount === 1 ? disposeFn1 : disposeFn2;
       return {
@@ -3784,7 +3784,7 @@ describe("TaskExecutor global pause behavior", () => {
   it("moves paused tasks to todo (not marked as failed)", async () => {
     const store = createMockStore();
 
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn().mockImplementation(async () => {
           store._trigger("settings:updated", {
@@ -3811,7 +3811,7 @@ describe("TaskExecutor global pause behavior", () => {
   it("finalizes to in-review when global pause hits after task_done", async () => {
     const store = createMockStore();
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       const customTools = opts.customTools || [];
       return {
         session: {
@@ -3850,7 +3850,7 @@ describe("TaskExecutor global pause behavior", () => {
     const store = createMockStore();
     const disposeFn = vi.fn();
 
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn().mockImplementation(async () => {
           // Trigger settings:updated but globalPause stays false
@@ -3878,7 +3878,7 @@ describe("TaskExecutor global pause behavior", () => {
   it("takes no action when globalPause transitions from true to true", async () => {
     const store = createMockStore();
 
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn().mockImplementation(async () => {
           // Trigger settings:updated but globalPause is already true
@@ -3914,7 +3914,7 @@ describe("TaskExecutor enginePaused soft pause (no agent termination)", () => {
     const store = createMockStore();
     const disposeFn = vi.fn();
 
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn().mockImplementation(async () => {
           // Trigger engine pause while the session is active
@@ -3947,7 +3947,7 @@ describe("TaskExecutor enginePaused soft pause (no agent termination)", () => {
   it("does NOT move tasks to todo when enginePaused transitions false→true", async () => {
     const store = createMockStore();
 
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn().mockImplementation(async () => {
           store._trigger("settings:updated", {
@@ -3975,7 +3975,7 @@ describe("TaskExecutor enginePaused soft pause (no agent termination)", () => {
   it("takes no action when enginePaused stays false (false→false)", async () => {
     const store = createMockStore();
 
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn().mockImplementation(async () => {
           store._trigger("settings:updated", {
@@ -4002,7 +4002,7 @@ describe("TaskExecutor enginePaused soft pause (no agent termination)", () => {
   it("takes no action when enginePaused stays true (true→true)", async () => {
     const store = createMockStore();
 
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn().mockImplementation(async () => {
           store._trigger("settings:updated", {
@@ -4047,7 +4047,7 @@ async function captureTools(): Promise<Record<string, (id: string, params: any) 
   mockedExistsSync.mockReturnValue(true);
 
   let capturedTools: any[] = [];
-  mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+  mockedCreateFnAgent.mockImplementation(async (opts: any) => {
     capturedTools = opts.customTools || [];
     return {
       session: {
@@ -4264,7 +4264,7 @@ describe("Code review verdict enforcement - task_update blocking", () => {
   it("EXECUTOR_SYSTEM_PROMPT contains code review enforcement language", async () => {
     // Capture the system prompt passed to createFnAgent
     let capturedSystemPrompt = "";
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       capturedSystemPrompt = opts.systemPrompt || "";
       return {
         session: {
@@ -4357,7 +4357,7 @@ describe("RETHINK verdict handling", () => {
       navigateTree: mockNavigateTree,
     };
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       capturedTools = opts.customTools || [];
       return { session: mockSession } as any;
     });
@@ -4607,7 +4607,7 @@ describe("RETHINK verdict handling", () => {
       navigateTree: mockNavigateTree,
     };
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       capturedTools = opts.customTools || [];
       return { session: mockSession } as any;
     });
@@ -4676,7 +4676,7 @@ describe("Plan RETHINK verdict handling", () => {
       navigateTree: mockNavigateTree,
     };
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       capturedTools = opts.customTools || [];
       return { session: mockSession } as any;
     });
@@ -4908,7 +4908,7 @@ describe("E2E review pipeline — multi-verdict sequence", () => {
       navigateTree: mockNavigateTree,
     };
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       capturedTools = opts.customTools || [];
       return { session: mockSession } as any;
     });
@@ -5163,7 +5163,7 @@ describe("task_add_dep tool", () => {
     mockedExistsSync.mockReturnValue(true);
 
     let capturedTools: any[] = [];
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       capturedTools = opts.customTools || [];
       return {
         session: {
@@ -5360,7 +5360,7 @@ describe("task_add_dep tool", () => {
     const disposeFn = vi.fn();
     let capturedTools: any[] = [];
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       capturedTools = opts.customTools || [];
       return {
         session: {
@@ -5433,7 +5433,7 @@ describe("TaskExecutor usage limit detection", () => {
     const pauser = new UsageLimitPauser(store);
     const onUsageLimitHitSpy = vi.spyOn(pauser, "onUsageLimitHit");
 
-    mockedCreateHaiAgent.mockRejectedValue(new Error("rate_limit_error: Rate limit exceeded"));
+    mockedCreateFnAgent.mockRejectedValue(new Error("rate_limit_error: Rate limit exceeded"));
 
     const onError = vi.fn();
     const executor = new TaskExecutor(store, "/tmp/test", {
@@ -5474,7 +5474,7 @@ describe("TaskExecutor usage limit detection", () => {
     const onUsageLimitHitSpy = vi.spyOn(pauser, "onUsageLimitHit");
     const onError = vi.fn();
 
-    mockedCreateHaiAgent.mockRejectedValue(new Error("connection refused"));
+    mockedCreateFnAgent.mockRejectedValue(new Error("connection refused"));
 
     const executor = new TaskExecutor(store, "/tmp/test", {
       onError,
@@ -5512,7 +5512,7 @@ describe("TaskExecutor usage limit detection", () => {
   it("works without usageLimitPauser (backward compatible)", async () => {
     const store = createMockStore();
 
-    mockedCreateHaiAgent.mockRejectedValue(new Error("rate_limit_error: Rate limit exceeded"));
+    mockedCreateFnAgent.mockRejectedValue(new Error("rate_limit_error: Rate limit exceeded"));
 
     const onError = vi.fn();
     const executor = new TaskExecutor(store, "/tmp/test", { onError });
@@ -5547,7 +5547,7 @@ describe("TaskExecutor usage limit detection", () => {
       dispose: vi.fn(),
       state: { error: "rate_limit_error: Rate limit exceeded" },
     };
-    mockedCreateHaiAgent.mockResolvedValue({ session: mockSession } as any);
+    mockedCreateFnAgent.mockResolvedValue({ session: mockSession } as any);
 
     const onError = vi.fn();
     const executor = new TaskExecutor(store, "/tmp/test", {
@@ -5585,7 +5585,7 @@ describe("TaskExecutor usage limit detection", () => {
     const pauser = new UsageLimitPauser(store);
     const onUsageLimitHitSpy = vi.spyOn(pauser, "onUsageLimitHit");
 
-    mockedCreateHaiAgent.mockRejectedValue(new Error("overloaded_error: Overloaded"));
+    mockedCreateFnAgent.mockRejectedValue(new Error("overloaded_error: Overloaded"));
 
     const executor = new TaskExecutor(store, "/tmp/test", {
       usageLimitPauser: pauser,
@@ -5621,7 +5621,7 @@ describe("TaskExecutor bounded recovery retries", () => {
     const store = createMockStore();
     const onError = vi.fn();
 
-    mockedCreateHaiAgent.mockRejectedValue(new Error("upstream connect error"));
+    mockedCreateFnAgent.mockRejectedValue(new Error("upstream connect error"));
 
     const executor = new TaskExecutor(store, "/tmp/test", { onError });
 
@@ -5648,7 +5648,7 @@ describe("TaskExecutor bounded recovery retries", () => {
 
     // Second failure: count goes from 1 to 2
     vi.clearAllMocks();
-    mockedCreateHaiAgent.mockRejectedValue(new Error("upstream connect error"));
+    mockedCreateFnAgent.mockRejectedValue(new Error("upstream connect error"));
     await executor.execute({
       id: "FN-001",
       title: "Test",
@@ -5674,7 +5674,7 @@ describe("TaskExecutor bounded recovery retries", () => {
     const store = createMockStore();
     const onError = vi.fn();
 
-    mockedCreateHaiAgent.mockRejectedValue(new Error("socket hang up"));
+    mockedCreateFnAgent.mockRejectedValue(new Error("socket hang up"));
 
     const executor = new TaskExecutor(store, "/tmp/test", { onError });
 
@@ -5725,7 +5725,7 @@ describe("TaskExecutor bounded recovery retries", () => {
     };
 
     // Simulate: task gets paused mid-execution → abort error
-    mockedCreateHaiAgent.mockRejectedValue(new Error("Aborted"));
+    mockedCreateFnAgent.mockRejectedValue(new Error("Aborted"));
     (executor as any).pausedAborted.add("FN-001");
 
     await executor.execute(task);
@@ -5741,7 +5741,7 @@ describe("TaskExecutor bounded recovery retries", () => {
 
     const executor = new TaskExecutor(store, "/tmp/test", {});
 
-    mockedCreateHaiAgent.mockRejectedValue(new Error("Aborted"));
+    mockedCreateFnAgent.mockRejectedValue(new Error("Aborted"));
     (executor as any).stuckAborted.set("FN-001", true);
 
     await executor.execute({
@@ -5768,7 +5768,7 @@ describe("TaskExecutor bounded recovery retries", () => {
     const store = createMockStore();
     const executor = new TaskExecutor(store, "/tmp/test", {});
 
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn(async () => {
           executor.markStuckAborted("FN-001", true);
@@ -5791,7 +5791,7 @@ describe("TaskExecutor bounded recovery retries", () => {
       updatedAt: new Date().toISOString(),
     });
 
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(1);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
     expect(store.updateTask).not.toHaveBeenCalledWith(
       "FN-001",
       expect.objectContaining({ status: "failed" }),
@@ -5806,7 +5806,7 @@ describe("TaskExecutor bounded recovery retries", () => {
     const store = createMockStore();
     const executor = new TaskExecutor(store, "/tmp/test", {});
 
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn(async () => {
           // Budget exhausted — shouldRequeue=false
@@ -5843,7 +5843,7 @@ describe("TaskExecutor bounded recovery retries", () => {
     const store = createMockStore();
     const executor = new TaskExecutor(store, "/tmp/test", {});
 
-    mockedCreateHaiAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation(async () => ({
       session: {
         prompt: vi.fn(async () => {
           // Simulate stuck kill
@@ -5883,7 +5883,7 @@ describe("TaskExecutor bounded recovery retries", () => {
       dispose: vi.fn(),
       state: { error: undefined },
     };
-    mockedCreateHaiAgent.mockResolvedValue({ session: mockSession } as any);
+    mockedCreateFnAgent.mockResolvedValue({ session: mockSession } as any);
 
     const executor = new TaskExecutor(store, "/tmp/test", {});
 
@@ -5917,7 +5917,7 @@ describe("Per-task model overrides", () => {
     const store = createMockStore();
     const capturedOptions: any[] = [];
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       capturedOptions.push(opts);
       return {
         session: {
@@ -5971,7 +5971,7 @@ describe("Per-task model overrides", () => {
     const store = createMockStore();
     const capturedOptions: any[] = [];
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       capturedOptions.push(opts);
       return {
         session: {
@@ -6018,7 +6018,7 @@ describe("Per-task model overrides", () => {
     const store = createMockStore();
     const capturedOptions: any[] = [];
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       capturedOptions.push(opts);
       return {
         session: {
@@ -6092,7 +6092,7 @@ describe("Executor lane hierarchy model resolution", () => {
     const store = createMockStore();
     const capturedOptions: any[] = [];
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       capturedOptions.push(opts);
       return {
         session: {
@@ -6157,7 +6157,7 @@ describe("Executor lane hierarchy model resolution", () => {
     const store = createMockStore();
     const capturedOptions: any[] = [];
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       capturedOptions.push(opts);
       return {
         session: {
@@ -6220,7 +6220,7 @@ describe("Executor lane hierarchy model resolution", () => {
     const store = createMockStore();
     const capturedOptions: any[] = [];
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       capturedOptions.push(opts);
       return {
         session: {
@@ -6283,7 +6283,7 @@ describe("Executor lane hierarchy model resolution", () => {
     const store = createMockStore();
     const capturedOptions: any[] = [];
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       capturedOptions.push(opts);
       return {
         session: {
@@ -6354,7 +6354,7 @@ describe("Per-task thinkingLevel override", () => {
   it("uses per-task thinkingLevel when set on the task", async () => {
     const store = createMockStore();
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -6394,7 +6394,7 @@ describe("Per-task thinkingLevel override", () => {
     });
 
     // Should use per-task thinkingLevel override
-    const callArgs = mockedCreateHaiAgent.mock.calls[0];
+    const callArgs = mockedCreateFnAgent.mock.calls[0];
     expect(callArgs).toBeDefined();
     expect(callArgs[0].defaultThinkingLevel).toBe("high");
   });
@@ -6402,7 +6402,7 @@ describe("Per-task thinkingLevel override", () => {
   it("falls back to global defaultThinkingLevel when task has no thinkingLevel", async () => {
     const store = createMockStore();
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -6436,7 +6436,7 @@ describe("Per-task thinkingLevel override", () => {
     });
 
     // Should fall back to global defaultThinkingLevel
-    const callArgs = mockedCreateHaiAgent.mock.calls[0];
+    const callArgs = mockedCreateFnAgent.mock.calls[0];
     expect(callArgs).toBeDefined();
     expect(callArgs[0].defaultThinkingLevel).toBe("medium");
   });
@@ -6444,7 +6444,7 @@ describe("Per-task thinkingLevel override", () => {
   it("uses explicit 'off' thinkingLevel from task over global setting", async () => {
     const store = createMockStore();
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -6494,7 +6494,7 @@ describe("Per-task thinkingLevel override", () => {
     });
 
     // Should use task's explicit "off" instead of global "high"
-    const callArgs = mockedCreateHaiAgent.mock.calls[0];
+    const callArgs = mockedCreateFnAgent.mock.calls[0];
     expect(callArgs).toBeDefined();
     expect(callArgs[0].defaultThinkingLevel).toBe("off");
   });
@@ -6517,7 +6517,7 @@ describe("Invalid transition error handling", () => {
     );
 
     // Mock agent that completes successfully
-    mockedCreateHaiAgent.mockImplementation(async () => {
+    mockedCreateFnAgent.mockImplementation(async () => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(async () => {
@@ -6573,7 +6573,7 @@ describe("Invalid transition error handling", () => {
       new Error("Invalid transition: 'in-progress' → 'in-review'. Valid targets: todo, triage"),
     );
 
-    mockedCreateHaiAgent.mockImplementation(async () => {
+    mockedCreateFnAgent.mockImplementation(async () => {
       return {
         session: {
           prompt: vi.fn().mockResolvedValue(undefined),
@@ -6650,7 +6650,7 @@ describe("TaskExecutor task_done with summary", () => {
     const store = createMockStore();
     let capturedTool: any = null;
 
-    mockedCreateHaiAgent.mockImplementation(async ({ customTools }: any) => {
+    mockedCreateFnAgent.mockImplementation(async ({ customTools }: any) => {
       // Capture the task_done tool
       capturedTool = customTools?.find((t: any) => t.name === "task_done");
       return {
@@ -6698,7 +6698,7 @@ describe("TaskExecutor task_done with summary", () => {
     const store = createMockStore();
     let capturedTool: any = null;
 
-    mockedCreateHaiAgent.mockImplementation(async ({ customTools }: any) => {
+    mockedCreateFnAgent.mockImplementation(async ({ customTools }: any) => {
       capturedTool = customTools?.find((t: any) => t.name === "task_done");
       return {
         session: {
@@ -6770,7 +6770,7 @@ describe("TaskExecutor task_done blockers", () => {
       };
     });
 
-    mockedCreateHaiAgent.mockImplementation(async ({ customTools }: any) => {
+    mockedCreateFnAgent.mockImplementation(async ({ customTools }: any) => {
       capturedTool = customTools?.find((t: any) => t.name === "task_done");
       return {
         session: {
@@ -6820,7 +6820,7 @@ describe("Workflow Steps Execution", () => {
   function createAgentWithTaskDone() {
     let capturedCustomTools: any[] = [];
 
-    mockedCreateHaiAgent.mockImplementation((async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation((async (opts: any) => {
       capturedCustomTools = opts.customTools || [];
       const session = {
         prompt: vi.fn().mockImplementation(async () => {
@@ -6856,7 +6856,7 @@ describe("Workflow Steps Execution", () => {
       updatedAt: new Date().toISOString(),
     });
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -6885,7 +6885,7 @@ describe("Workflow Steps Execution", () => {
     });
 
     // Should have been called twice: initial + retry
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
 
     // Retry still didn't call task_done, so it fails with the retry message
     expect(store.updateTask).toHaveBeenCalledWith("FN-001", {
@@ -6937,7 +6937,7 @@ describe("Workflow Steps Execution", () => {
 
     // First call: main agent with task_done, subsequent calls: simple mocks for workflow step agents
     let callIdx = 0;
-    mockedCreateHaiAgent.mockImplementation((async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation((async (opts: any) => {
       callIdx++;
       if (callIdx === 1) {
         // Main execution — find and trigger task_done
@@ -6986,10 +6986,10 @@ describe("Workflow Steps Execution", () => {
     });
 
     // createFnAgent called twice: main agent + workflow step agent
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
 
     // Second call should be the workflow step with readonly tools
-    const secondCall = mockedCreateHaiAgent.mock.calls[1];
+    const secondCall = mockedCreateFnAgent.mock.calls[1];
     expect(secondCall[0].tools).toBe("readonly");
     expect(secondCall[0].systemPrompt).toContain("Docs Review");
     expect(secondCall[0].systemPrompt).toContain("Review all docs and verify they are complete.");
@@ -7030,7 +7030,7 @@ describe("Workflow Steps Execution", () => {
     });
 
     let callIdx = 0;
-    mockedCreateHaiAgent.mockImplementation((async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation((async (opts: any) => {
       callIdx++;
       if (callIdx === 1) {
         const customTools = opts.customTools || [];
@@ -7074,8 +7074,8 @@ describe("Workflow Steps Execution", () => {
       updatedAt: new Date().toISOString(),
     });
 
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
-    const secondCall = mockedCreateHaiAgent.mock.calls[1];
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
+    const secondCall = mockedCreateFnAgent.mock.calls[1];
     expect(secondCall[0].tools).toBe("coding");
   });
 
@@ -7111,7 +7111,7 @@ describe("Workflow Steps Execution", () => {
     });
 
     let callIdx = 0;
-    mockedCreateHaiAgent.mockImplementation((async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation((async (opts: any) => {
       callIdx++;
       if (callIdx === 1) {
         const customTools = opts.customTools || [];
@@ -7155,8 +7155,8 @@ describe("Workflow Steps Execution", () => {
       updatedAt: new Date().toISOString(),
     });
 
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
-    const secondCall = mockedCreateHaiAgent.mock.calls[1];
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
+    const secondCall = mockedCreateFnAgent.mock.calls[1];
     expect(secondCall[0].tools).toBe("coding");
   });
 
@@ -7208,7 +7208,7 @@ describe("Workflow Steps Execution", () => {
     });
 
     // Should only call createFnAgent once (main execution), skip workflow step
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(1);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
 
     // Should log that it was skipped
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -7256,7 +7256,7 @@ describe("Workflow Steps Execution", () => {
     });
 
     // Only main agent call
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(1);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
     // Task should still move to in-review
     expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-review");
   });
@@ -7292,7 +7292,7 @@ describe("Workflow Steps Execution", () => {
     });
 
     let callIdx = 0;
-    mockedCreateHaiAgent.mockImplementation((async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation((async (opts: any) => {
       callIdx++;
       if (callIdx === 1) {
         // Main execution agent
@@ -7341,10 +7341,10 @@ describe("Workflow Steps Execution", () => {
     });
 
     // createFnAgent called twice: main agent + workflow step agent
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
 
     // Second call should use the workflow step's model override
-    const secondCall = mockedCreateHaiAgent.mock.calls[1];
+    const secondCall = mockedCreateFnAgent.mock.calls[1];
     expect(secondCall[0].defaultProvider).toBe("anthropic");
     expect(secondCall[0].defaultModelId).toBe("claude-sonnet-4-5");
 
@@ -7385,7 +7385,7 @@ describe("Workflow Steps Execution", () => {
     });
 
     let callIdx = 0;
-    mockedCreateHaiAgent.mockImplementation((async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation((async (opts: any) => {
       callIdx++;
       if (callIdx === 1) {
         const customTools = opts.customTools || [];
@@ -7431,10 +7431,10 @@ describe("Workflow Steps Execution", () => {
       updatedAt: new Date().toISOString(),
     });
 
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
 
     // Second call should use settings defaults (no override indicator)
-    const secondCall = mockedCreateHaiAgent.mock.calls[1];
+    const secondCall = mockedCreateFnAgent.mock.calls[1];
     // defaults come from the mock store's getSettings
     expect(secondCall[0].defaultProvider).toBeUndefined();
     expect(secondCall[0].defaultModelId).toBeUndefined();
@@ -7511,7 +7511,7 @@ describe("Workflow Steps Execution", () => {
     });
 
     // Should only call createFnAgent once (main execution — no agent for script mode)
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(1);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
 
     // Should log script execution
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -7869,7 +7869,7 @@ describe("Workflow Steps Execution", () => {
     });
 
     // Should only call createFnAgent once (main execution)
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(1);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
 
     // Should log that it was skipped
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -7911,7 +7911,7 @@ describe("Workflow Steps Execution", () => {
     } as any); // mode field intentionally omitted
 
     let callIdx = 0;
-    mockedCreateHaiAgent.mockImplementation((async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation((async (opts: any) => {
       callIdx++;
       if (callIdx === 1) {
         const customTools = opts.customTools || [];
@@ -7958,10 +7958,10 @@ describe("Workflow Steps Execution", () => {
     });
 
     // createFnAgent called twice: main agent + workflow step agent (prompt mode)
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
 
     // Second call should use prompt mode (readonly tools, agent-based)
-    const secondCall = mockedCreateHaiAgent.mock.calls[1];
+    const secondCall = mockedCreateFnAgent.mock.calls[1];
     expect(secondCall[0].tools).toBe("readonly");
     expect(secondCall[0].systemPrompt).toContain("Legacy Review");
 
@@ -8019,7 +8019,7 @@ describe("Workflow Steps Execution", () => {
 
     // Main agent calls task_done, then a workflow step agent for pre-merge only
     let callIdx = 0;
-    mockedCreateHaiAgent.mockImplementation((async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation((async (opts: any) => {
       callIdx++;
       if (callIdx === 1) {
         const customTools = opts.customTools || [];
@@ -8065,7 +8065,7 @@ describe("Workflow Steps Execution", () => {
     });
 
     // createFnAgent called twice: main agent + 1 pre-merge step (post-merge skipped)
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
 
     // Verify the workflow step results only contain pre-merge
     const updateCalls = store.updateTask.mock.calls;
@@ -8110,7 +8110,7 @@ describe("Workflow Steps Execution", () => {
     });
 
     let callIdx = 0;
-    mockedCreateHaiAgent.mockImplementation((async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation((async (opts: any) => {
       callIdx++;
       if (callIdx === 1) {
         const customTools = opts.customTools || [];
@@ -8156,7 +8156,7 @@ describe("Workflow Steps Execution", () => {
     });
 
     // Legacy step should have been executed (treated as pre-merge)
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
 
     // Verify result has phase: "pre-merge"
     const updateCalls = store.updateTask.mock.calls;
@@ -8216,7 +8216,7 @@ describe("Workflow Steps Execution", () => {
     });
 
     // Only main agent called (no workflow step agent since all are post-merge)
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(1);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
 
     // Task should still move to in-review
     expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-review");
@@ -8256,7 +8256,7 @@ describe("Workflow Steps Execution", () => {
     // Second call: workflow step agent that returns REQUEST REVISION
     let callIdx = 0;
     let subscribeHandler: any;
-    mockedCreateHaiAgent.mockImplementation((async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation((async (opts: any) => {
       callIdx++;
       if (callIdx === 1) {
         // Main execution
@@ -8313,7 +8313,7 @@ describe("Workflow Steps Execution", () => {
     });
 
     // Both agents should be called
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
 
     // Log should show revision was requested
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -8372,7 +8372,7 @@ describe("Workflow Steps Execution", () => {
     });
 
     let callIdx = 0;
-    mockedCreateHaiAgent.mockImplementation((async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation((async (opts: any) => {
       callIdx++;
       if (callIdx === 1) {
         const customTools = opts.customTools || [];
@@ -8420,7 +8420,7 @@ describe("Workflow Steps Execution", () => {
     });
 
     // Both agents called
-    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
 
     // Log should show workflow step passed
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -8447,7 +8447,7 @@ describe("Real-time steering injection", () => {
     const steerFn = vi.fn().mockResolvedValue(undefined);
 
     // Mock session with steer method
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockImplementation(async () => {
           // Simulate execution running
@@ -8493,7 +8493,7 @@ describe("Real-time steering injection", () => {
     let promptResolve: () => void;
     const promptPromise = new Promise<void>(resolve => { promptResolve = resolve; });
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockImplementation(async () => {
           // Wait for signal to complete
@@ -8569,7 +8569,7 @@ describe("Real-time steering injection", () => {
     const store = createMockStore();
     const steerFn = vi.fn().mockResolvedValue(undefined);
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -8634,7 +8634,7 @@ describe("Real-time steering injection", () => {
     let resolvePrompt: () => void;
     const promptPromise = new Promise<void>(resolve => { resolvePrompt = resolve; });
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockImplementation(() => promptPromise),
         dispose: vi.fn(),
@@ -8722,7 +8722,7 @@ describe("Real-time steering injection", () => {
     const store = createMockStore();
     const steerFn = vi.fn().mockResolvedValue(undefined);
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -8790,7 +8790,7 @@ describe("Real-time steering injection", () => {
       updatedAt: new Date().toISOString(),
     });
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockImplementation(() => promptPromise),
         dispose: vi.fn(),
@@ -9165,7 +9165,7 @@ async function captureToolsWithAgentStore(agentStore?: any, settingsOverride?: a
   store.getSettings.mockResolvedValue(mergedSettings);
 
   let capturedTools: any[] = [];
-  mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+  mockedCreateFnAgent.mockImplementation(async (opts: any) => {
     capturedTools = opts.customTools || [];
     // Child agent sessions get a never-resolving prompt so runSpawnedChild
     // doesn't complete and decrement totalSpawnedCount before limit checks.
@@ -9313,10 +9313,10 @@ describe("Agent Spawning", () => {
     });
 
     // createFnAgent is called at least twice: once for parent, once for child
-    expect(mockedCreateHaiAgent.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(mockedCreateFnAgent.mock.calls.length).toBeGreaterThanOrEqual(2);
     
     // Find the child session call
-    const childCall = mockedCreateHaiAgent.mock.calls.find(
+    const childCall = mockedCreateFnAgent.mock.calls.find(
       (call: any) => call[0].systemPrompt?.includes("child agent spawned")
     );
     expect(childCall).toBeDefined();
@@ -9434,7 +9434,7 @@ describe("Agent Spawning - Child Termination", () => {
     const agentStore = createMockAgentStore();
     const mockDispose = vi.fn();
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       return {
         session: {
           prompt: vi.fn().mockResolvedValue(undefined),
@@ -9489,7 +9489,7 @@ describe("Agent Spawning - Child Termination", () => {
     });
 
     const mockDispose = vi.fn();
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: mockDispose,
@@ -9727,7 +9727,7 @@ describe("TaskExecutor agent execution flow (FN-978)", () => {
       dispose: vi.fn(),
     };
 
-    mockedCreateHaiAgent.mockResolvedValue({ session } as any);
+    mockedCreateFnAgent.mockResolvedValue({ session } as any);
 
     const executor = new TaskExecutor(store, "/tmp/test");
 
@@ -9751,7 +9751,7 @@ describe("TaskExecutor agent execution flow (FN-978)", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     // Verify the agent was created and prompt was called
-    expect(mockedCreateHaiAgent).toHaveBeenCalledWith(
+    expect(mockedCreateFnAgent).toHaveBeenCalledWith(
       expect.objectContaining({
         cwd: expect.any(String),
         systemPrompt: expect.any(String),
@@ -9764,7 +9764,7 @@ describe("TaskExecutor agent execution flow (FN-978)", () => {
   it("does not execute task when task:moved event fires with to!='in-progress'", async () => {
     const store = createMockStore();
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: { prompt: vi.fn(), dispose: vi.fn() },
     } as any);
 
@@ -9790,7 +9790,7 @@ describe("TaskExecutor agent execution flow (FN-978)", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     // Verify no agent was created
-    expect(mockedCreateHaiAgent).not.toHaveBeenCalled();
+    expect(mockedCreateFnAgent).not.toHaveBeenCalled();
   });
 
   describe("when task is moved away from in-progress", () => {
@@ -9998,7 +9998,7 @@ describe("TaskExecutor agent execution flow (FN-978)", () => {
       dispose: vi.fn(),
     };
 
-    mockedCreateHaiAgent.mockResolvedValue({ session } as any);
+    mockedCreateFnAgent.mockResolvedValue({ session } as any);
 
     const executor = new TaskExecutor(store, "/tmp/test", {
       stuckTaskDetector: stuckDetector as any,
@@ -10038,7 +10038,7 @@ describe("TaskExecutor agent execution flow (FN-978)", () => {
 
     let capturedOnText: ((delta: string) => void) | undefined;
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       // Capture the onText callback that's passed to createFnAgent
       capturedOnText = opts.onText;
       return {
@@ -10095,7 +10095,7 @@ describe("TaskExecutor agent execution flow (FN-978)", () => {
 
     let capturedOnToolStart: ((name: string, args?: Record<string, unknown>) => void) | undefined;
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       capturedOnToolStart = opts.onToolStart;
       return {
         session: {
@@ -10144,7 +10144,7 @@ describe("TaskExecutor agent execution flow (FN-978)", () => {
       dispose: vi.fn(),
     };
 
-    mockedCreateHaiAgent.mockResolvedValue({ session } as any);
+    mockedCreateFnAgent.mockResolvedValue({ session } as any);
 
     const executor = new TaskExecutor(store, "/tmp/test");
 
@@ -10180,7 +10180,7 @@ describe("TaskExecutor agent execution flow (FN-978)", () => {
 
   it("logs error when execute() fails in task:moved handler", async () => {
     const store = createMockStore();
-    mockedCreateHaiAgent.mockRejectedValue(new Error("model not found"));
+    mockedCreateFnAgent.mockRejectedValue(new Error("model not found"));
 
     const onError = vi.fn();
     const executor = new TaskExecutor(store, "/tmp/test", { onError });
@@ -10287,7 +10287,7 @@ describe("StepSessionExecutor integration", () => {
     // executeAll should have been called
     expect(mockExecuteAll).toHaveBeenCalledOnce();
     // createFnAgent should NOT have been called for step-session path
-    expect(mockedCreateHaiAgent).not.toHaveBeenCalled();
+    expect(mockedCreateFnAgent).not.toHaveBeenCalled();
   });
 
   it("uses single-session path when runStepsInNewSessions is false (default)", async () => {
@@ -10314,7 +10314,7 @@ describe("StepSessionExecutor integration", () => {
       updatedAt: new Date().toISOString(),
     });
 
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -10331,7 +10331,7 @@ describe("StepSessionExecutor integration", () => {
     // Should NOT use step-session executor
     expect(mockedStepSessionExecutor).not.toHaveBeenCalled();
     // Should use the traditional single-session agent
-    expect(mockedCreateHaiAgent).toHaveBeenCalled();
+    expect(mockedCreateFnAgent).toHaveBeenCalled();
   });
 
   it("success path moves task to in-review and calls onComplete", async () => {
@@ -10931,7 +10931,7 @@ describe("TaskExecutor skillSelection regression (FN-1511)", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -10947,7 +10947,7 @@ describe("TaskExecutor skillSelection regression (FN-1511)", () => {
   /**
    * Helper: execute a task and capture createFnAgent call arguments.
    */
-  async function captureCreateKbAgentArgs(options?: {
+  async function captureCreateFnAgentArgs(options?: {
     assignedAgentId?: string;
     assignedAgentSkills?: string[];
     settings?: Record<string, unknown>;
@@ -10985,7 +10985,7 @@ describe("TaskExecutor skillSelection regression (FN-1511)", () => {
     });
 
     let capturedArgs: any = null;
-    mockedCreateHaiAgent.mockImplementationOnce(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementationOnce(async (opts: any) => {
       capturedArgs = opts;
       return {
         session: {
@@ -11020,7 +11020,7 @@ describe("TaskExecutor skillSelection regression (FN-1511)", () => {
 
   describe("single-session mode (runStepsInNewSessions: false)", () => {
     it("passes skillSelection to createFnAgent when assigned agent has skills", async () => {
-      const args = await captureCreateKbAgentArgs({
+      const args = await captureCreateFnAgentArgs({
         assignedAgentId: "agent-001",
         assignedAgentSkills: ["triage", "executor"],
       });
@@ -11036,7 +11036,7 @@ describe("TaskExecutor skillSelection regression (FN-1511)", () => {
     });
 
     it("normalizes whitespace in requestedSkillNames", async () => {
-      const args = await captureCreateKbAgentArgs({
+      const args = await captureCreateFnAgentArgs({
         assignedAgentId: "agent-001",
         assignedAgentSkills: ["  triage  ", " executor ", "reviewer"],
       });
@@ -11049,7 +11049,7 @@ describe("TaskExecutor skillSelection regression (FN-1511)", () => {
     });
 
     it("deduplicates requestedSkillNames while preserving first occurrence", async () => {
-      const args = await captureCreateKbAgentArgs({
+      const args = await captureCreateFnAgentArgs({
         assignedAgentId: "agent-001",
         assignedAgentSkills: ["triage", "executor", "triage", "reviewer", "executor"],
       });
@@ -11063,7 +11063,7 @@ describe("TaskExecutor skillSelection regression (FN-1511)", () => {
     });
 
     it("omits skillSelection when assigned agent has no skills", async () => {
-      const args = await captureCreateKbAgentArgs({
+      const args = await captureCreateFnAgentArgs({
         assignedAgentId: "agent-001",
         assignedAgentSkills: [],
       });
@@ -11074,7 +11074,7 @@ describe("TaskExecutor skillSelection regression (FN-1511)", () => {
     });
 
     it("omits skillSelection when no assigned agent", async () => {
-      const args = await captureCreateKbAgentArgs({});
+      const args = await captureCreateFnAgentArgs({});
 
       expect(args).not.toBeNull();
       // Legacy fallback: no skillSelection when no assigned agent
@@ -11099,7 +11099,7 @@ describe("TaskExecutor skillSelection regression (FN-1511)", () => {
 describe("TaskExecutor messaging tools", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockedCreateHaiAgent.mockResolvedValue({
+    mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn(),
@@ -11124,7 +11124,7 @@ describe("TaskExecutor messaging tools", () => {
     const { messageStore, agentStore, assignedAgentId } = options || {};
     let captured: any[] = [];
 
-    mockedCreateHaiAgent.mockImplementation(async (opts: any) => {
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
       captured = opts.customTools || [];
       return {
         session: {

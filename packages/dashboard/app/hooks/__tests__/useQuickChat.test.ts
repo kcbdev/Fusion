@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatSession } from "@fusion/core";
 import * as apiModule from "../../api";
-import { KB_AGENT_ID, useQuickChat } from "../useQuickChat";
+import { FN_AGENT_ID, useQuickChat } from "../useQuickChat";
 
 vi.mock("../../api", () => ({
   fetchChatSessions: vi.fn(),
@@ -74,7 +74,7 @@ describe("useQuickChat", () => {
     await waitFor(() => {
       expect(mockCreateChatSession).toHaveBeenCalledWith(
         {
-          agentId: KB_AGENT_ID,
+          agentId: FN_AGENT_ID,
           modelProvider: "anthropic",
           modelId: "claude-sonnet-4-5",
         },
@@ -112,7 +112,7 @@ describe("useQuickChat", () => {
     await waitFor(() => {
       expect(mockCreateChatSession).toHaveBeenCalledWith(
         {
-          agentId: KB_AGENT_ID,
+          agentId: FN_AGENT_ID,
           modelProvider: "openai",
           modelId: "gpt-4o",
         },

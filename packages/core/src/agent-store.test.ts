@@ -21,7 +21,7 @@ import { createHash } from "node:crypto";
 import { CheckoutConflictError, type AgentCapability, type AgentState } from "./types.js";
 
 function makeTmpDir(): string {
-  return mkdtempSync(join(tmpdir(), "kb-agent-store-test-"));
+  return mkdtempSync(join(tmpdir(), "fn-agent-store-test-"));
 }
 
 describe("AgentStore", () => {

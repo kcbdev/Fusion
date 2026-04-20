@@ -232,7 +232,7 @@ async function discoverDashboardPiExtensions(cwd: string): Promise<PiExtensionSe
 let createFnAgentForRefine: typeof import("@fusion/engine").createFnAgent | undefined;
 
 /** @internal Inject a mock createFnAgent function for workflow-step refine route tests. */
-export function __setCreateKbAgentForRefine(mock: typeof createFnAgentForRefine): void {
+export function __setCreateFnAgentForRefine(mock: typeof createFnAgentForRefine): void {
   createFnAgentForRefine = mock;
 }
 
@@ -2852,7 +2852,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let createFnAgentForInsights: any;
 
-  async function initCreateKbAgentForInsights(): Promise<void> {
+  async function initCreateFnAgentForInsights(): Promise<void> {
     if (createFnAgentForInsights) return;
     try {
       // Use dynamic import with @vite-ignore to prevent static analysis issues
@@ -2926,7 +2926,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let session: any = null;
     try {
-      await initCreateKbAgentForInsights();
+      await initCreateFnAgentForInsights();
 
       if (!createFnAgentForInsights) {
         throw new ApiError(503, "AI engine not available");

@@ -14,7 +14,7 @@ import { Database } from "@fusion/core";
 import { AiSessionStore } from "../ai-session-store.js";
 import {
   __resetPlanningState,
-  __setCreateKbAgent,
+  __setCreateFnAgent,
   createSession,
   getSession,
   planningStreamManager,
@@ -40,12 +40,12 @@ import {
   submitMissionInterviewResponse,
 } from "../mission-interview.js";
 
-const { mockCreateKbAgent } = vi.hoisted(() => ({
-  mockCreateKbAgent: vi.fn(),
+const { mockCreateFnAgent } = vi.hoisted(() => ({
+  mockCreateFnAgent: vi.fn(),
 }));
 
 vi.mock("@fusion/engine", () => ({
-  createFnAgent: mockCreateKbAgent,
+  createFnAgent: mockCreateFnAgent,
 }));
 
 function makeTmpDir(): string {
@@ -100,7 +100,7 @@ describe("session error recovery", () => {
   });
 
   afterEach(async () => {
-    __setCreateKbAgent(undefined as any);
+    __setCreateFnAgent(undefined as any);
     __resetPlanningState();
     __resetSubtaskBreakdownState();
     __resetMissionInterviewState();
@@ -121,7 +121,7 @@ describe("session error recovery", () => {
     });
     unsubscribe();
 
-    __setCreateKbAgent(
+    __setCreateFnAgent(
       async () =>
         createMockAgent([
           JSON.stringify({
@@ -158,7 +158,7 @@ describe("session error recovery", () => {
     expect(JSON.parse(persistedError?.conversationHistory ?? "[]")).toHaveLength(1);
     expect(errorEvents.length).toBeGreaterThan(0);
 
-    __setCreateKbAgent(
+    __setCreateFnAgent(
       async () =>
         createMockAgent([
           JSON.stringify({
@@ -181,7 +181,7 @@ describe("session error recovery", () => {
   it("captures subtask generation errors, broadcasts SSE error, and retries to completion", async () => {
     const subtaskErrors: string[] = [];
 
-    mockCreateKbAgent.mockImplementationOnce(async () => createMockAgent(["{not-json"]));
+    mockCreateFnAgent.mockImplementationOnce(async () => createMockAgent(["{not-json"]));
 
     const session = await createSubtaskSession("Subtask error flow", undefined, "/tmp/project");
 
@@ -198,7 +198,7 @@ describe("session error recovery", () => {
     expect(String(persistedError?.error).length).toBeGreaterThan(0);
     expect(subtaskErrors.length).toBeGreaterThan(0);
 
-    mockCreateKbAgent.mockImplementationOnce(async () =>
+    mockCreateFnAgent.mockImplementationOnce(async () =>
       createMockAgent([
         JSON.stringify({
           subtasks: [
@@ -226,7 +226,7 @@ describe("session error recovery", () => {
   it("captures mission parse failure with history preserved and recovers via retry", async () => {
     const missionErrors: string[] = [];
 
-    mockCreateKbAgent.mockImplementation(async () =>
+    mockCreateFnAgent.mockImplementation(async () =>
       createMockAgent([
         JSON.stringify({
           type: "question",
@@ -254,7 +254,7 @@ describe("session error recovery", () => {
     expect(JSON.parse(persistedError?.conversationHistory ?? "[]")).toHaveLength(1);
     expect(missionErrors.length).toBeGreaterThan(0);
 
-    mockCreateKbAgent.mockImplementation(async () =>
+    mockCreateFnAgent.mockImplementation(async () =>
       createMockAgent([
         JSON.stringify({
           type: "question",

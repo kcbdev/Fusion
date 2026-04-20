@@ -14,7 +14,7 @@ import { Database } from "@fusion/core";
 import { AiSessionStore, type AiSessionRow } from "../ai-session-store.js";
 import {
   __resetPlanningState,
-  __setCreateKbAgent,
+  __setCreateFnAgent,
   cancelSession,
   createSession,
   setAiSessionStore as setPlanningAiSessionStore,
@@ -33,12 +33,12 @@ import {
   submitMissionInterviewResponse,
 } from "../mission-interview.js";
 
-const { mockCreateKbAgent } = vi.hoisted(() => ({
-  mockCreateKbAgent: vi.fn(),
+const { mockCreateFnAgent } = vi.hoisted(() => ({
+  mockCreateFnAgent: vi.fn(),
 }));
 
 vi.mock("@fusion/engine", () => ({
-  createFnAgent: mockCreateKbAgent,
+  createFnAgent: mockCreateFnAgent,
 }));
 
 function makeTmpDir(): string {
@@ -93,7 +93,7 @@ describe("session persistence round-trip", () => {
   });
 
   afterEach(async () => {
-    __setCreateKbAgent(undefined as any);
+    __setCreateFnAgent(undefined as any);
     __resetPlanningState();
     __resetSubtaskBreakdownState();
     __resetMissionInterviewState();
@@ -108,7 +108,7 @@ describe("session persistence round-trip", () => {
   });
 
   it("persists planning session transitions across generating → awaiting_input → complete", async () => {
-    __setCreateKbAgent(
+    __setCreateFnAgent(
       async () =>
         createMockAgent([
           JSON.stringify({
@@ -226,7 +226,7 @@ describe("session persistence round-trip", () => {
   });
 
   it("persists completed subtask results into AiSessionStore result JSON", async () => {
-    mockCreateKbAgent.mockImplementation(async () =>
+    mockCreateFnAgent.mockImplementation(async () =>
       createMockAgent([
         JSON.stringify({
           subtasks: [
@@ -261,7 +261,7 @@ describe("session persistence round-trip", () => {
   });
 
   it("persists mission interview history and result round-trip", async () => {
-    mockCreateKbAgent.mockImplementation(async () =>
+    mockCreateFnAgent.mockImplementation(async () =>
       createMockAgent([
         JSON.stringify({
           type: "question",
@@ -305,7 +305,7 @@ describe("session persistence round-trip", () => {
   });
 
   it("removes persisted rows when a planning session is cancelled", async () => {
-    __setCreateKbAgent(
+    __setCreateFnAgent(
       async () =>
         createMockAgent([
           JSON.stringify({

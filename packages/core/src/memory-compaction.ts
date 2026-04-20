@@ -15,7 +15,7 @@
 
 import type { ProjectSettings } from "./types.js";
 import type { ScheduledTaskCreateInput } from "./automation.js";
-import { getKbAgent, type AgentMessage } from "./ai-engine-loader.js";
+import { getFnAgent, type AgentMessage } from "./ai-engine-loader.js";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -79,7 +79,7 @@ export async function compactMemoryWithAi(
   provider?: string,
   modelId?: string
 ): Promise<string> {
-  const createFnAgent = await getKbAgent();
+  const createFnAgent = await getFnAgent();
   if (!createFnAgent) {
     if (DEBUG) console.log("[memory-compaction] AI engine not available");
     throw new AiServiceError("AI engine not available");

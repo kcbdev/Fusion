@@ -106,7 +106,7 @@ function createHierarchyCompanyDirectory(basePath: string): string {
 }
 
 describe("agent-import", () => {
-  const tmpDir = join(tmpdir(), `kb-agent-import-test-${process.pid}`);
+  const tmpDir = join(tmpdir(), `fn-agent-import-test-${process.pid}`);
   let createAgentMock: ReturnType<typeof vi.fn>;
   let listAgentsMock: ReturnType<typeof vi.fn>;
   let initMock: ReturnType<typeof vi.fn>;

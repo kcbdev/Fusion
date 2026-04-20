@@ -279,7 +279,7 @@ describe("AgentsView", () => {
       fireEvent.click(screen.getByTitle("Board view"));
 
       await waitFor(() => {
-        expect(localStorage.getItem(scopedKey("kb-agent-view", projectId))).toBe("board");
+        expect(localStorage.getItem(scopedKey("fn-agent-view", projectId))).toBe("board");
       });
     });
 

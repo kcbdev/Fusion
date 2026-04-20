@@ -901,7 +901,7 @@ export function __resetSuggestionState(): void {
 /**
  * Inject a mock createFnAgent function. Used for testing only.
  */
-export function __setCreateKbAgent(mock: typeof createFnAgent): void {
+export function __setCreateFnAgent(mock: typeof createFnAgent): void {
   createFnAgent = mock;
   createFnAgentExplicitlySet = true;
 }

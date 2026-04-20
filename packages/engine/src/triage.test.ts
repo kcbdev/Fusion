@@ -13,9 +13,9 @@ import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import { triageLog } from "./logger.js";
 
-const { mockReviewStep, mockCreateKbAgent } = vi.hoisted(() => ({
+const { mockReviewStep, mockCreateFnAgent } = vi.hoisted(() => ({
   mockReviewStep: vi.fn(),
-  mockCreateKbAgent: vi.fn(),
+  mockCreateFnAgent: vi.fn(),
 }));
 
 vi.mock("./reviewer.js", () => ({
@@ -23,7 +23,7 @@ vi.mock("./reviewer.js", () => ({
 }));
 
 vi.mock("./pi.js", () => ({
-  createFnAgent: mockCreateKbAgent,
+  createFnAgent: mockCreateFnAgent,
   describeModel: vi.fn().mockReturnValue("mock-model"),
   promptWithFallback: vi.fn().mockReturnValue("mock-prompt"),
 }));
@@ -1332,7 +1332,7 @@ describe("taskCreate tool model inheritance", () => {
       // Capture customTools from createFnAgent call
       let capturedCustomTools: any[] = [];
       const mockDispose = vi.fn();
-      mockCreateKbAgent.mockImplementation(async (opts: any) => {
+      mockCreateFnAgent.mockImplementation(async (opts: any) => {
         capturedCustomTools = opts.customTools || [];
         return {
           session: {
@@ -1404,7 +1404,7 @@ describe("taskCreate tool model inheritance", () => {
         getTask: vi.fn().mockResolvedValue({ ...task, attachments: [], comments: [] }),
       });
 
-      mockCreateKbAgent.mockResolvedValue({
+      mockCreateFnAgent.mockResolvedValue({
         session: {
           prompt: vi.fn().mockResolvedValue(undefined),
           dispose: vi.fn(),
@@ -1458,7 +1458,7 @@ describe("taskCreate tool model inheritance", () => {
       });
 
       // Mock createFnAgent to throw a transient error
-      mockCreateKbAgent.mockRejectedValue(new Error("upstream connect error"));
+      mockCreateFnAgent.mockRejectedValue(new Error("upstream connect error"));
 
       await processor.specifyTask(task);
 
@@ -1492,7 +1492,7 @@ describe("taskCreate tool model inheritance", () => {
         onSpecifyError,
       });
 
-      mockCreateKbAgent.mockRejectedValue(new Error("connection reset"));
+      mockCreateFnAgent.mockRejectedValue(new Error("connection reset"));
 
       await processor.specifyTask(task);
 
@@ -1637,7 +1637,7 @@ describe("taskCreate tool model inheritance", () => {
       // after the model log line, so we can verify the appendAgentLog call.
       // The session will be created, model logged, then promptWithFallback
       // throws — but the model log has already been written.
-      mockCreateKbAgent.mockResolvedValue({
+      mockCreateFnAgent.mockResolvedValue({
         session: {
           prompt: mockPrompt,
           dispose: mockDispose,
@@ -1707,7 +1707,7 @@ describe("taskCreate tool model inheritance", () => {
         } as Settings),
       });
 
-      mockCreateKbAgent.mockResolvedValue({
+      mockCreateFnAgent.mockResolvedValue({
         session: {
           prompt: mockPrompt,
           dispose: mockDispose,
@@ -1730,7 +1730,7 @@ describe("taskCreate tool model inheritance", () => {
       await processor.specifyTask(task);
 
       // Per-task override should take precedence over settings
-      expect(mockCreateKbAgent).toHaveBeenCalledWith(
+      expect(mockCreateFnAgent).toHaveBeenCalledWith(
         expect.objectContaining({
           defaultProvider: "google",
           defaultModelId: "gemini-2.5-pro",
@@ -1772,7 +1772,7 @@ describe("taskCreate tool model inheritance", () => {
         } as Settings),
       });
 
-      mockCreateKbAgent.mockResolvedValue({
+      mockCreateFnAgent.mockResolvedValue({
         session: {
           prompt: mockPrompt,
           dispose: mockDispose,
@@ -1795,7 +1795,7 @@ describe("taskCreate tool model inheritance", () => {
       await processor.specifyTask(task);
 
       // Should use settings planning model when no per-task override
-      expect(mockCreateKbAgent).toHaveBeenCalledWith(
+      expect(mockCreateFnAgent).toHaveBeenCalledWith(
         expect.objectContaining({
           defaultProvider: "openai",
           defaultModelId: "gpt-4o",
@@ -1835,7 +1835,7 @@ describe("taskCreate tool model inheritance", () => {
         } as Settings),
       });
 
-      mockCreateKbAgent.mockResolvedValue({
+      mockCreateFnAgent.mockResolvedValue({
         session: {
           prompt: mockPrompt,
           dispose: mockDispose,
@@ -1858,7 +1858,7 @@ describe("taskCreate tool model inheritance", () => {
       await processor.specifyTask(task);
 
       // Should fall back to global defaults
-      expect(mockCreateKbAgent).toHaveBeenCalledWith(
+      expect(mockCreateFnAgent).toHaveBeenCalledWith(
         expect.objectContaining({
           defaultProvider: "anthropic",
           defaultModelId: "claude-sonnet-4-5",
@@ -2117,7 +2117,7 @@ describe("pause-abort status clearing (bug fix)", () => {
 
     let resolveDispose: () => void;
     const disposePromise = new Promise<void>((r) => { resolveDispose = r; });
-    mockCreateKbAgent.mockResolvedValue({
+    mockCreateFnAgent.mockResolvedValue({
       session: {
         state: {},
         sessionManager: {},
@@ -2169,7 +2169,7 @@ describe("stuck task detector integration", () => {
     let mockDispose: ReturnType<typeof vi.fn>;
     const disposePromise = new Promise<void>((r) => { resolveDispose = r; });
     mockDispose = vi.fn().mockImplementation(() => resolveDispose());
-    mockCreateKbAgent.mockResolvedValue({
+    mockCreateFnAgent.mockResolvedValue({
       session: {
         state: {},
         sessionManager: {},
@@ -2216,7 +2216,7 @@ describe("stuck task detector integration", () => {
       parseDependenciesFromPrompt: vi.fn().mockResolvedValue([]),
     } as unknown as TaskStore;
 
-    mockCreateKbAgent.mockResolvedValue({
+    mockCreateFnAgent.mockResolvedValue({
       session: {
         state: {},
         sessionManager: {},
@@ -2260,7 +2260,7 @@ describe("specifyTask — status restore failure diagnostics", () => {
 
     let resolveDispose!: () => void;
     const disposePromise = new Promise<void>((r) => { resolveDispose = r; });
-    mockCreateKbAgent.mockResolvedValue({
+    mockCreateFnAgent.mockResolvedValue({
       session: {
         state: {},
         sessionManager: {},
@@ -2312,7 +2312,7 @@ describe("specifyTask — status restore failure diagnostics", () => {
     let resolveDispose!: () => void;
     const disposePromise = new Promise<void>((r) => { resolveDispose = r; });
     const mockDispose = vi.fn().mockImplementation(() => resolveDispose());
-    mockCreateKbAgent.mockResolvedValue({
+    mockCreateFnAgent.mockResolvedValue({
       session: {
         state: {},
         sessionManager: {},
@@ -2368,7 +2368,7 @@ describe("specifyTask — status restore failure diagnostics", () => {
         }),
       });
 
-      mockCreateKbAgent.mockResolvedValue({
+      mockCreateFnAgent.mockResolvedValue({
         session: {
           state: {},
           sessionManager: { getLeafId: vi.fn().mockReturnValue(null) },
@@ -2423,7 +2423,7 @@ describe("specifyTask — status restore failure diagnostics", () => {
       }),
     });
 
-    mockCreateKbAgent.mockRejectedValueOnce(new Error("upstream connect error"));
+    mockCreateFnAgent.mockRejectedValueOnce(new Error("upstream connect error"));
 
     const processor = new TriageProcessor(store, "/test/root", {
       pollIntervalMs: 100_000,
@@ -2449,7 +2449,7 @@ describe("tool callback behavior (FN-1500)", () => {
     // Access the agentLogger via internal agentWork closure
     // by running specifyTask and intercepting the createFnAgent call
     let capturedOnAgentTool: ((id: string, name: string) => void) | undefined;
-    mockCreateKbAgent.mockImplementation(async (opts: any) => {
+    mockCreateFnAgent.mockImplementation(async (opts: any) => {
       // Capture the onToolStart callback that was passed to createFnAgent
       // This is the onAgentTool from agentLogger
       if (opts.onToolStart) {
@@ -2487,7 +2487,7 @@ describe("tool callback behavior (FN-1500)", () => {
     const processor = new TriageProcessor(store, "/tmp/root");
 
     let capturedOnToolStart: ((name: string, args?: Record<string, unknown>) => void) | undefined;
-    mockCreateKbAgent.mockImplementation(async (opts: any) => {
+    mockCreateFnAgent.mockImplementation(async (opts: any) => {
       if (opts.onToolStart) {
         capturedOnToolStart = opts.onToolStart;
       }
@@ -2528,7 +2528,7 @@ describe("tool callback behavior (FN-1500)", () => {
     const processor = new TriageProcessor(store, "/tmp/root");
 
     let capturedOnToolStart: ((name: string, args?: Record<string, unknown>) => void) | undefined;
-    mockCreateKbAgent.mockImplementation(async (opts: any) => {
+    mockCreateFnAgent.mockImplementation(async (opts: any) => {
       if (opts.onToolStart) {
         capturedOnToolStart = opts.onToolStart;
       }
@@ -2574,7 +2574,7 @@ describe("TriageProcessor skillSelection regression (FN-1511)", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockCreateKbAgent.mockResolvedValue({
+    mockCreateFnAgent.mockResolvedValue({
       session: {
         state: {},
         sessionManager: {},
@@ -2588,7 +2588,7 @@ describe("TriageProcessor skillSelection regression (FN-1511)", () => {
   /**
    * Helper: execute triage on a task and capture createFnAgent call arguments.
    */
-  async function captureCreateKbAgentArgs(options?: {
+  async function captureCreateFnAgentArgs(options?: {
     assignedAgentId?: string;
     assignedAgentSkills?: string[];
   }) {
@@ -2626,7 +2626,7 @@ describe("TriageProcessor skillSelection regression (FN-1511)", () => {
     });
 
     let capturedArgs: any = null;
-    mockCreateKbAgent.mockImplementationOnce(async (opts: any) => {
+    mockCreateFnAgent.mockImplementationOnce(async (opts: any) => {
       capturedArgs = opts;
       return {
         session: {
@@ -2662,7 +2662,7 @@ describe("TriageProcessor skillSelection regression (FN-1511)", () => {
 
   describe("skillSelection context propagation", () => {
     it("passes skillSelection to createFnAgent with correct projectRootDir", async () => {
-      const args = await captureCreateKbAgentArgs({
+      const args = await captureCreateFnAgentArgs({
         assignedAgentId: "agent-001",
         assignedAgentSkills: ["triage"],
       });
@@ -2673,7 +2673,7 @@ describe("TriageProcessor skillSelection regression (FN-1511)", () => {
     });
 
     it("uses 'triage' as sessionPurpose for triage sessions", async () => {
-      const args = await captureCreateKbAgentArgs({
+      const args = await captureCreateFnAgentArgs({
         assignedAgentId: "agent-001",
         assignedAgentSkills: ["triage"],
       });
@@ -2700,7 +2700,7 @@ describe("TriageProcessor skillSelection regression (FN-1511)", () => {
       });
 
       let capturedArgs: any = null;
-      mockCreateKbAgent.mockImplementationOnce(async (opts: any) => {
+      mockCreateFnAgent.mockImplementationOnce(async (opts: any) => {
         capturedArgs = opts;
         return {
           session: {
@@ -2734,7 +2734,7 @@ describe("TriageProcessor skillSelection regression (FN-1511)", () => {
 
   describe("parity with executor paths", () => {
     it("uses same skillSelection field structure as executor", async () => {
-      const args = await captureCreateKbAgentArgs({
+      const args = await captureCreateFnAgentArgs({
         assignedAgentId: "agent-001",
         assignedAgentSkills: ["triage"],
       });

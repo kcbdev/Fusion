@@ -734,9 +734,9 @@ describe("createFnAgent", () => {
         },
       }));
 
-      const { createFnAgent: freshCreateKbAgent } = await import("./pi.js");
+      const { createFnAgent: freshCreateFnAgent } = await import("./pi.js");
 
-      await freshCreateKbAgent({
+      await freshCreateFnAgent({
         cwd: "/tmp",
         systemPrompt: "test",
         tools: "coding",
@@ -809,9 +809,9 @@ describe("createFnAgent", () => {
         },
       }));
 
-      const { createFnAgent: freshCreateKbAgent } = await import("./pi.js");
+      const { createFnAgent: freshCreateFnAgent } = await import("./pi.js");
 
-      await freshCreateKbAgent({
+      await freshCreateFnAgent({
         cwd: "/tmp",
         systemPrompt: "test",
         tools: "coding",
@@ -881,9 +881,9 @@ describe("createFnAgent", () => {
         },
       }));
 
-      const { createFnAgent: freshCreateKbAgent } = await import("./pi.js");
+      const { createFnAgent: freshCreateFnAgent } = await import("./pi.js");
 
-      await freshCreateKbAgent({
+      await freshCreateFnAgent({
         cwd: "/tmp",
         systemPrompt: "test",
         tools: "coding",

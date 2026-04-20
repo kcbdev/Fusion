@@ -16,13 +16,13 @@ import {
 } from "./ai-refine.js";
 
 // Hoisted mock factory
-const { mockCreateKbAgent } = vi.hoisted(() => ({
-  mockCreateKbAgent: vi.fn(),
+const { mockCreateFnAgent } = vi.hoisted(() => ({
+  mockCreateFnAgent: vi.fn(),
 }));
 
 // Mock the engine module to avoid dynamic import issues in tests
 vi.mock("@fusion/engine", () => ({
-  createFnAgent: mockCreateKbAgent,
+  createFnAgent: mockCreateFnAgent,
 }));
 
 describe("ai-refine module", () => {
@@ -30,7 +30,7 @@ describe("ai-refine module", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     __resetRefineState();
     vi.clearAllMocks();
-    mockCreateKbAgent.mockResolvedValue(null);
+    mockCreateFnAgent.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -314,51 +314,51 @@ describe("ai-refine module", () => {
 
     it("uses default prompt when no overrides provided", async () => {
       const mockAgent = createRefineMockAgent("Refined text here");
-      mockCreateKbAgent.mockResolvedValueOnce(mockAgent);
+      mockCreateFnAgent.mockResolvedValueOnce(mockAgent);
 
       await refineText("some text", "clarify", "/tmp/project");
 
-      expect(mockCreateKbAgent).toHaveBeenCalled();
-      const call = mockCreateKbAgent.mock.calls[0];
+      expect(mockCreateFnAgent).toHaveBeenCalled();
+      const call = mockCreateFnAgent.mock.calls[0];
       expect(call[0].systemPrompt).toMatch(/^You are a text refinement assistant/);
     });
 
     it("uses override prompt when promptOverrides provided", async () => {
       const mockAgent = createRefineMockAgent("Refined text here");
-      mockCreateKbAgent.mockResolvedValueOnce(mockAgent);
+      mockCreateFnAgent.mockResolvedValueOnce(mockAgent);
 
       await refineText("some text", "clarify", "/tmp/project", {
         "ai-refine-system": customPrompt,
       });
 
-      expect(mockCreateKbAgent).toHaveBeenCalled();
-      const call = mockCreateKbAgent.mock.calls[0];
+      expect(mockCreateFnAgent).toHaveBeenCalled();
+      const call = mockCreateFnAgent.mock.calls[0];
       expect(call[0].systemPrompt).toBe(customPrompt);
     });
 
     it("falls back to default prompt when override is empty string", async () => {
       const mockAgent = createRefineMockAgent("Refined text here");
-      mockCreateKbAgent.mockResolvedValueOnce(mockAgent);
+      mockCreateFnAgent.mockResolvedValueOnce(mockAgent);
 
       await refineText("some text", "simplify", "/tmp/project", {
         "ai-refine-system": "",
       });
 
-      expect(mockCreateKbAgent).toHaveBeenCalled();
-      const call = mockCreateKbAgent.mock.calls[0];
+      expect(mockCreateFnAgent).toHaveBeenCalled();
+      const call = mockCreateFnAgent.mock.calls[0];
       expect(call[0].systemPrompt).toMatch(/^You are a text refinement assistant/);
     });
 
     it("does not introduce unexpected model/provider override fields in createFnAgent", async () => {
       const mockAgent = createRefineMockAgent("Refined text here");
-      mockCreateKbAgent.mockResolvedValueOnce(mockAgent);
+      mockCreateFnAgent.mockResolvedValueOnce(mockAgent);
 
       await refineText("some text", "expand", "/tmp/project", {
         "ai-refine-system": customPrompt,
       });
 
-      expect(mockCreateKbAgent).toHaveBeenCalled();
-      const call = mockCreateKbAgent.mock.calls[0];
+      expect(mockCreateFnAgent).toHaveBeenCalled();
+      const call = mockCreateFnAgent.mock.calls[0];
       const agentConfig = call[0];
 
       // Verify only expected fields are present
@@ -375,15 +375,15 @@ describe("ai-refine module", () => {
 
     it("prompt overrides do not affect other prompt keys", async () => {
       const mockAgent = createRefineMockAgent("Refined text here");
-      mockCreateKbAgent.mockResolvedValueOnce(mockAgent);
+      mockCreateFnAgent.mockResolvedValueOnce(mockAgent);
 
       // Provide overrides for a different key only
       await refineText("some text", "clarify", "/tmp/project", {
         "workflow-step-refine": "Should not affect AI refine",
       });
 
-      expect(mockCreateKbAgent).toHaveBeenCalled();
-      const call = mockCreateKbAgent.mock.calls[0];
+      expect(mockCreateFnAgent).toHaveBeenCalled();
+      const call = mockCreateFnAgent.mock.calls[0];
       // AI refine should use its own default prompt, not affected by workflow-step-refine override
       expect(call[0].systemPrompt).toMatch(/^You are a text refinement assistant/);
     });

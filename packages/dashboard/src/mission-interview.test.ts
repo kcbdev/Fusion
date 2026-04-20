@@ -2,12 +2,12 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockCreateKbAgent } = vi.hoisted(() => ({
-  mockCreateKbAgent: vi.fn(),
+const { mockCreateFnAgent } = vi.hoisted(() => ({
+  mockCreateFnAgent: vi.fn(),
 }));
 
 vi.mock("@fusion/engine", () => ({
-  createFnAgent: mockCreateKbAgent,
+  createFnAgent: mockCreateFnAgent,
 }));
 
 import {
@@ -176,7 +176,7 @@ describe("mission-interview module", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     __resetMissionInterviewState();
-    mockCreateKbAgent.mockImplementation(async () => createMockAgent([createQuestionJson()]));
+    mockCreateFnAgent.mockImplementation(async () => createMockAgent([createQuestionJson()]));
   });
 
   describe("session lifecycle", () => {
@@ -315,7 +315,7 @@ describe("mission-interview module", () => {
 
   describe("submitMissionInterviewResponse", () => {
     it("processes response and returns completed summary", async () => {
-      mockCreateKbAgent.mockImplementationOnce(async () =>
+      mockCreateFnAgent.mockImplementationOnce(async () =>
         createMockAgent([createQuestionJson("q-plan"), createCompleteJson()]),
       );
 
@@ -355,7 +355,7 @@ describe("mission-interview module", () => {
         }),
       ]);
       const createFnAgentSpy = vi.fn(async () => resumedAgent);
-      mockCreateKbAgent.mockImplementation(createFnAgentSpy);
+      mockCreateFnAgent.mockImplementation(createFnAgentSpy);
 
       const result = await submitMissionInterviewResponse(
         row.id,
@@ -430,7 +430,7 @@ describe("mission-interview module", () => {
       setAiSessionStore(store as any);
 
       const resumedAgent = createMockAgent([createQuestionJson("q-retry")]);
-      mockCreateKbAgent.mockImplementationOnce(async () => resumedAgent);
+      mockCreateFnAgent.mockImplementationOnce(async () => resumedAgent);
 
       await retryMissionInterviewSession(row.id, "/tmp/project");
 
@@ -461,7 +461,7 @@ describe("mission-interview module", () => {
       setAiSessionStore(store as any);
 
       const resumedAgent = createMockAgent([createQuestionJson("q-first")]);
-      mockCreateKbAgent.mockImplementationOnce(async () => resumedAgent);
+      mockCreateFnAgent.mockImplementationOnce(async () => resumedAgent);
 
       await retryMissionInterviewSession(row.id, "/tmp/project");
 
@@ -574,7 +574,7 @@ describe("mission-interview module", () => {
 
     it("uses default prompt when no overrides provided", async () => {
       const mockAgent = createMockAgent([createQuestionJson()]);
-      mockCreateKbAgent.mockImplementationOnce(async () => mockAgent);
+      mockCreateFnAgent.mockImplementationOnce(async () => mockAgent);
 
       await createMissionInterviewSession("192.168.1.1", "Test Mission", "/tmp/project");
 
@@ -582,14 +582,14 @@ describe("mission-interview module", () => {
 
       // The first session starts asynchronously, so we need to wait
       // Check the createFnAgent call was made with default prompt
-      expect(mockCreateKbAgent).toHaveBeenCalled();
-      const lastCall = mockCreateKbAgent.mock.calls[mockCreateKbAgent.mock.calls.length - 1];
+      expect(mockCreateFnAgent).toHaveBeenCalled();
+      const lastCall = mockCreateFnAgent.mock.calls[mockCreateFnAgent.mock.calls.length - 1];
       expect(lastCall[0].systemPrompt).toMatch(/^You are a mission planning assistant/);
     });
 
     it("uses override prompt when promptOverrides provided", async () => {
       const mockAgent = createMockAgent([createQuestionJson()]);
-      mockCreateKbAgent.mockImplementationOnce(async () => mockAgent);
+      mockCreateFnAgent.mockImplementationOnce(async () => mockAgent);
 
       const sessionId = await createMissionInterviewSession(
         "192.168.1.2",
@@ -599,14 +599,14 @@ describe("mission-interview module", () => {
       );
       await waitForCurrentQuestion(sessionId);
 
-      expect(mockCreateKbAgent).toHaveBeenCalled();
-      const lastCall = mockCreateKbAgent.mock.calls[mockCreateKbAgent.mock.calls.length - 1];
+      expect(mockCreateFnAgent).toHaveBeenCalled();
+      const lastCall = mockCreateFnAgent.mock.calls[mockCreateFnAgent.mock.calls.length - 1];
       expect(lastCall[0].systemPrompt).toBe(customPrompt);
     });
 
     it("falls back to default prompt when override is empty string", async () => {
       const mockAgent = createMockAgent([createQuestionJson()]);
-      mockCreateKbAgent.mockImplementationOnce(async () => mockAgent);
+      mockCreateFnAgent.mockImplementationOnce(async () => mockAgent);
 
       const sessionId = await createMissionInterviewSession(
         "192.168.1.3",
@@ -616,8 +616,8 @@ describe("mission-interview module", () => {
       );
       await waitForCurrentQuestion(sessionId);
 
-      expect(mockCreateKbAgent).toHaveBeenCalled();
-      const lastCall = mockCreateKbAgent.mock.calls[mockCreateKbAgent.mock.calls.length - 1];
+      expect(mockCreateFnAgent).toHaveBeenCalled();
+      const lastCall = mockCreateFnAgent.mock.calls[mockCreateFnAgent.mock.calls.length - 1];
       expect(lastCall[0].systemPrompt).toMatch(/^You are a mission planning assistant/);
     });
 
@@ -629,7 +629,7 @@ describe("mission-interview module", () => {
       expect(rehydrateFromStore(store as any)).toBe(1);
 
       const resumedAgent = createMockAgent([createQuestionJson("q-override")]);
-      mockCreateKbAgent.mockImplementationOnce(async () => resumedAgent);
+      mockCreateFnAgent.mockImplementationOnce(async () => resumedAgent);
 
       await submitMissionInterviewResponse(
         row.id,
@@ -638,7 +638,7 @@ describe("mission-interview module", () => {
         { "mission-interview-system": customPrompt },
       );
 
-      expect(mockCreateKbAgent).toHaveBeenCalledWith(
+      expect(mockCreateFnAgent).toHaveBeenCalledWith(
         expect.objectContaining({
           systemPrompt: customPrompt,
         }),
@@ -662,7 +662,7 @@ describe("mission-interview module", () => {
       setAiSessionStore(store as any);
 
       const resumedAgent = createMockAgent([createQuestionJson("q-retry")]);
-      mockCreateKbAgent.mockImplementationOnce(async () => resumedAgent);
+      mockCreateFnAgent.mockImplementationOnce(async () => resumedAgent);
 
       await retryMissionInterviewSession(
         row.id,
@@ -670,7 +670,7 @@ describe("mission-interview module", () => {
         { "mission-interview-system": customPrompt },
       );
 
-      expect(mockCreateKbAgent).toHaveBeenCalledWith(
+      expect(mockCreateFnAgent).toHaveBeenCalledWith(
         expect.objectContaining({
           systemPrompt: customPrompt,
         }),
@@ -679,7 +679,7 @@ describe("mission-interview module", () => {
 
     it("does not introduce unexpected model/provider override fields in createFnAgent", async () => {
       const mockAgent = createMockAgent([createQuestionJson()]);
-      mockCreateKbAgent.mockImplementationOnce(async () => mockAgent);
+      mockCreateFnAgent.mockImplementationOnce(async () => mockAgent);
 
       const sessionId = await createMissionInterviewSession(
         "192.168.1.4",
@@ -689,8 +689,8 @@ describe("mission-interview module", () => {
       );
       await waitForCurrentQuestion(sessionId);
 
-      expect(mockCreateKbAgent).toHaveBeenCalled();
-      const lastCall = mockCreateKbAgent.mock.calls[mockCreateKbAgent.mock.calls.length - 1];
+      expect(mockCreateFnAgent).toHaveBeenCalled();
+      const lastCall = mockCreateFnAgent.mock.calls[mockCreateFnAgent.mock.calls.length - 1];
       const agentConfig = lastCall[0];
 
       // Verify only expected fields are present
@@ -718,7 +718,7 @@ describe("mission-interview module", () => {
 
     it("prompt overrides do not affect other prompt keys", async () => {
       const mockAgent = createMockAgent([createQuestionJson()]);
-      mockCreateKbAgent.mockImplementationOnce(async () => mockAgent);
+      mockCreateFnAgent.mockImplementationOnce(async () => mockAgent);
 
       // Provide overrides for a different key only
       const sessionId = await createMissionInterviewSession(
@@ -729,8 +729,8 @@ describe("mission-interview module", () => {
       );
       await waitForCurrentQuestion(sessionId);
 
-      expect(mockCreateKbAgent).toHaveBeenCalled();
-      const lastCall = mockCreateKbAgent.mock.calls[mockCreateKbAgent.mock.calls.length - 1];
+      expect(mockCreateFnAgent).toHaveBeenCalled();
+      const lastCall = mockCreateFnAgent.mock.calls[mockCreateFnAgent.mock.calls.length - 1];
       // Mission interview should use its own default prompt, not affected by planning-system override
       expect(lastCall[0].systemPrompt).toMatch(/^You are a mission planning assistant/);
     });
@@ -752,11 +752,11 @@ describe("mission-interview module", () => {
       setAiSessionStore(store as any);
 
       const resumedAgent = createMockAgent([createQuestionJson("q-retry")]);
-      mockCreateKbAgent.mockImplementationOnce(async () => resumedAgent);
+      mockCreateFnAgent.mockImplementationOnce(async () => resumedAgent);
 
       await retryMissionInterviewSession(row.id, "/tmp/project", undefined);
 
-      expect(mockCreateKbAgent).toHaveBeenCalledWith(
+      expect(mockCreateFnAgent).toHaveBeenCalledWith(
         expect.objectContaining({
           systemPrompt: expect.stringContaining("mission planning assistant"),
         }),
@@ -771,11 +771,11 @@ describe("mission-interview module", () => {
       expect(rehydrateFromStore(store as any)).toBe(1);
 
       const resumedAgent = createMockAgent([createQuestionJson("q-fallback")]);
-      mockCreateKbAgent.mockImplementationOnce(async () => resumedAgent);
+      mockCreateFnAgent.mockImplementationOnce(async () => resumedAgent);
 
       await submitMissionInterviewResponse(row.id, { "q-2": "Test" }, "/tmp/project", undefined);
 
-      expect(mockCreateKbAgent).toHaveBeenCalledWith(
+      expect(mockCreateFnAgent).toHaveBeenCalledWith(
         expect.objectContaining({
           systemPrompt: expect.stringContaining("mission planning assistant"),
         }),
@@ -784,7 +784,7 @@ describe("mission-interview module", () => {
 
     it("falls back to default prompt when promptOverrides is empty object", async () => {
       const mockAgent = createMockAgent([createQuestionJson()]);
-      mockCreateKbAgent.mockImplementationOnce(async () => mockAgent);
+      mockCreateFnAgent.mockImplementationOnce(async () => mockAgent);
 
       const sessionId = await createMissionInterviewSession(
         "192.168.1.6",
@@ -794,8 +794,8 @@ describe("mission-interview module", () => {
       );
       await waitForCurrentQuestion(sessionId);
 
-      expect(mockCreateKbAgent).toHaveBeenCalled();
-      const lastCall = mockCreateKbAgent.mock.calls[mockCreateKbAgent.mock.calls.length - 1];
+      expect(mockCreateFnAgent).toHaveBeenCalled();
+      const lastCall = mockCreateFnAgent.mock.calls[mockCreateFnAgent.mock.calls.length - 1];
       expect(lastCall[0].systemPrompt).toMatch(/^You are a mission planning assistant/);
     });
   });

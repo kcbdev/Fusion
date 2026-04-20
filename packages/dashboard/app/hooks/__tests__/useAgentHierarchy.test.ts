@@ -21,7 +21,7 @@ const localStorageMock = {
 vi.stubGlobal("localStorage", localStorageMock);
 
 const PROJECT_ID = "proj-123";
-const EXPANDED_STORAGE_KEY = scopedKey("kb-agent-tree-expanded", PROJECT_ID);
+const EXPANDED_STORAGE_KEY = scopedKey("fn-agent-tree-expanded", PROJECT_ID);
 
 function createMockAgent(overrides: Partial<Agent> = {}): Agent {
   return {

@@ -99,7 +99,7 @@ User-visible occurrences include:
 
 ### Finding 3.4 — Legacy `kb-*` localStorage keys are pervasive (**Low/intentional technical debt)
 
-Many dashboard files use keys such as `kb-dashboard-view-mode`, `kb-terminal-tabs`, `kb-agent-view`, etc.
+Many dashboard files use keys such as `kb-dashboard-view-mode`, `kb-terminal-tabs`, `fn-agent-view`, etc.
 
 Assessment:
 - These are not necessarily user-facing inconsistencies.

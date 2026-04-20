@@ -260,14 +260,14 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [agentView, setAgentView] = useState<"board" | "list" | "tree" | "org">(() => {
     if (typeof window === "undefined") return "list";
-    const saved = getScopedItem("kb-agent-view", projectId);
+    const saved = getScopedItem("fn-agent-view", projectId);
     return (saved === "board" || saved === "list" || saved === "tree" || saved === "org") ? saved : "list";
   });
   const [orgTree, setOrgTree] = useState<OrgTreeNode[]>([]);
   const [isOrgTreeLoading, setIsOrgTreeLoading] = useState(false);
 
   useEffect(() => {
-    const saved = getScopedItem("kb-agent-view", projectId);
+    const saved = getScopedItem("fn-agent-view", projectId);
     if (saved === "board" || saved === "list" || saved === "tree" || saved === "org") {
       setAgentView(saved);
       return;
@@ -277,7 +277,7 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
 
   // Persist view preference to localStorage
   useEffect(() => {
-    setScopedItem("kb-agent-view", agentView, projectId);
+    setScopedItem("fn-agent-view", agentView, projectId);
   }, [agentView, projectId]);
 
   const [editingRoleForAgent, setEditingRoleForAgent] = useState<string | null>(null);

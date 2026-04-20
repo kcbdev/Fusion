@@ -8,7 +8,7 @@ import {
   cancelChatResponse,
 } from "../api";
 
-export const KB_AGENT_ID = "__kb_agent__";
+export const FN_AGENT_ID = "__fn_agent__";
 
 export interface ChatMessageInfo {
   id: string;
@@ -68,7 +68,7 @@ function resolveSessionTarget(agentId: string, modelProvider?: string, modelId?:
   const normalizedAgentId = typeof agentId === "string" ? agentId.trim() : "";
   const normalizedModel = normalizeModelSelection(modelProvider, modelId);
 
-  const targetAgentId = normalizedAgentId || (normalizedModel.modelProvider && normalizedModel.modelId ? KB_AGENT_ID : "");
+  const targetAgentId = normalizedAgentId || (normalizedModel.modelProvider && normalizedModel.modelId ? FN_AGENT_ID : "");
   if (!targetAgentId) {
     return null;
   }
@@ -252,7 +252,7 @@ export function useQuickChat(
 
   const startModelChat = useCallback(
     async (modelProvider: string, modelId: string) => {
-      await switchSession(KB_AGENT_ID, modelProvider, modelId);
+      await switchSession(FN_AGENT_ID, modelProvider, modelId);
     },
     [switchSession],
   );

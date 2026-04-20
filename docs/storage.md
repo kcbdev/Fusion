@@ -24,7 +24,7 @@ High-level finding: the dashboard currently uses localStorage extensively for UX
 | `kb-dashboard-color-theme` | `hooks/useTheme.ts` | enum string (color theme id) | settings overlap | **Medium** |
 | `kb-dashboard-current-project` | `hooks/useCurrentProject.ts` | JSON `ProjectInfo` object (includes id/name/path/status/etc.) | project/identity | **Medium** |
 | `kb-terminal-tabs` | `hooks/useTerminalSessions.ts` | JSON array of tab objects (`id`, `sessionId`, `title`, active state, timestamp) | UI preference (operational session state) | **High** |
-| `kb-agent-tree-expanded` | `hooks/useAgentHierarchy.ts` | JSON string[] of expanded agent ids | UI preference | Low |
+| `fn-agent-tree-expanded` | `hooks/useAgentHierarchy.ts` | JSON string[] of expanded agent ids | UI preference | Low |
 | `kb-planning-last-description` | `hooks/modalPersistence.ts` (used by `PlanningModeModal`) | free-text draft | user draft | Medium |
 | `kb-subtask-last-description` | `hooks/modalPersistence.ts` (used by `SubtaskBreakdownModal`) | free-text draft | user draft | Medium |
 | `kb-mission-last-goal` | `hooks/modalPersistence.ts` (used by `MissionInterviewModal`) | free-text draft | user draft | Medium |
@@ -37,7 +37,7 @@ High-level finding: the dashboard currently uses localStorage extensively for UX
 | `kb-quick-entry-text` | `components/QuickEntryBox.tsx` | free-text task draft | user draft | Medium |
 | `kb-quick-entry-expanded` | `components/QuickEntryBox.tsx` (legacy cleanup via `removeItem`) | legacy bool key (no longer used) | UI preference | Low |
 | `kb-inline-create-text` | `components/InlineCreateCard.tsx` | free-text task draft | user draft | Medium |
-| `kb-agent-view` | `components/AgentsView.tsx`, `components/AgentListModal.tsx` | enum string (`board`/`list`/`tree` in view; modal supports board/list) | UI preference | Medium |
+| `fn-agent-view` | `components/AgentsView.tsx`, `components/AgentListModal.tsx` | enum string (`board`/`list`/`tree` in view; modal supports board/list) | UI preference | Medium |
 | `kb-usage-view-mode` | `components/UsageIndicator.tsx` | enum string (`used`/`remaining`) | UI preference | Low |
 | `kb-dashboard-recent-projects` | `components/ProjectOverview.tsx` | JSON array of recent project IDs | project/identity | Low |
 
@@ -248,7 +248,7 @@ Additional backend notes:
    - **Problem:** `GLOBAL_SETTINGS_KEYS` (14) omits `setupComplete`, `favoriteProviders`, `favoriteModels`; `PROJECT_SETTINGS_KEYS` (52) omits 9 project interface keys (`strictScopeEnforcement`, `buildRetryCount`, `buildTimeoutMs`, `autoUnpause*`, `maintenanceIntervalMs`, `scripts`, `setupScript`). This creates scope-classification and patch-filter inconsistencies.  
    - **Recommended fix:** Generate key lists from schema/interface source (or enforce parity tests) to prevent drift.
 
-8. **`kb-agent-view` shared by two UIs with different supported modes**  
+8. **`fn-agent-view` shared by two UIs with different supported modes**  
    - **Severity:** Low  
    - **Affected:** `AgentsView.tsx`, `AgentListModal.tsx`  
    - **Problem:** Both share the same key, but one surface supports `tree` and the modal supports only `board/list`; behavior remains valid but coupling is implicit.  
@@ -294,7 +294,7 @@ Additional backend notes:
 7. **Optional server-backed draft recovery**
    - Keep local fast drafts; add opt-in backend draft sync for cross-browser resilience.
 
-8. **Clarify shared `kb-agent-view` semantics**
+8. **Clarify shared `fn-agent-view` semantics**
    - Either intentionally share and document, or split keys by surface.
 
 9. **Complete FN-1201 workflow-step migration**
@@ -311,7 +311,7 @@ Additional backend notes:
 - [x] ListView state scoping addressed
 - [x] Terminal tab persistence addressed (`kb-terminal-tabs`)
 - [x] QuickEntry expanded key addressed (`kb-quick-entry-expanded` legacy cleanup)
-- [x] Agent hierarchy expand state addressed (`kb-agent-tree-expanded`)
+- [x] Agent hierarchy expand state addressed (`fn-agent-tree-expanded`)
 - [x] Backend settings + API route inventory included
 - [x] SQLite table inventory included
 - [x] Known in-progress FN-1201 called out

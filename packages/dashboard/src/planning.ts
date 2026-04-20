@@ -578,7 +578,7 @@ export async function createSession(
   const systemPrompt = resolvePrompt("planning-system", promptOverrides) || PLANNING_SYSTEM_PROMPT;
 
   // Create AI agent and get the first question
-  // Only await engineReady if createFnAgent hasn't been set externally (e.g., via __setCreateKbAgent)
+  // Only await engineReady if createFnAgent hasn't been set externally (e.g., via __setCreateFnAgent)
   if (!createFnAgent) {
     await ensureEngineReady();
   }
@@ -1566,7 +1566,7 @@ export function __resetPlanningState(): void {
 /**
  * Inject a mock createFnAgent function. Used for testing only.
  */
-export function __setCreateKbAgent(mock: typeof createFnAgent): void {
+export function __setCreateFnAgent(mock: typeof createFnAgent): void {
   createFnAgent = mock;
 }
 

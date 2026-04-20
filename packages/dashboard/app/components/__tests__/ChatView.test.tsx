@@ -95,7 +95,7 @@ const defaultChatState = {
   streamingText: "",
   streamingThinking: "",
   selectSession: vi.fn(),
-  createSession: vi.fn().mockResolvedValue({ id: "session-new", agentId: "__kb_agent__" }),
+  createSession: vi.fn().mockResolvedValue({ id: "session-new", agentId: "__fn_agent__" }),
   archiveSession: vi.fn(),
   deleteSession: vi.fn(),
   sendMessage: vi.fn(),
@@ -275,7 +275,7 @@ describe("ChatView", () => {
   });
 
   it("creates session with model selection (model mode uses KB agent ID)", async () => {
-    const createSession = vi.fn().mockResolvedValue({ id: "session-new", agentId: "__kb_agent__" });
+    const createSession = vi.fn().mockResolvedValue({ id: "session-new", agentId: "__fn_agent__" });
     setupMockChat({ sessions: [], filteredSessions: [], createSession });
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
@@ -295,7 +295,7 @@ describe("ChatView", () => {
 
     await waitFor(() => {
       expect(createSession).toHaveBeenCalledWith({
-        agentId: "__kb_agent__",
+        agentId: "__fn_agent__",
         modelProvider: "anthropic",
         modelId: "claude-sonnet-4-5",
       });
@@ -417,9 +417,9 @@ describe("ChatView", () => {
     expect(within(avatar!).queryByText("Fusion")).not.toBeInTheDocument();
   });
 
-  it("shows Fusion in assistant message avatar for kb agent sessions", () => {
+  it("shows Fusion in assistant message avatar for fn agent sessions", () => {
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "__kb_agent__", status: "active", title: "Fusion Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "__fn_agent__", status: "active", title: "Fusion Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "assistant", content: "Built-in assistant response", createdAt: "2026-04-08T00:00:00.000Z" },
       ],
@@ -1002,20 +1002,20 @@ describe("ChatView", () => {
     expect(within(dialog!).getByText("Delete Conversation?")).toBeInTheDocument();
   });
 
-  it("shows Fusion label for kb agent sessions in sidebar", () => {
+  it("shows Fusion label for fn agent sessions in sidebar", () => {
     setupMockChat({
-      sessions: [{ id: "session-001", agentId: "__kb_agent__", status: "active", title: "My Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
-      filteredSessions: [{ id: "session-001", agentId: "__kb_agent__", status: "active", title: "My Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      sessions: [{ id: "session-001", agentId: "__fn_agent__", status: "active", title: "My Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      filteredSessions: [{ id: "session-001", agentId: "__fn_agent__", status: "active", title: "My Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
     });
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
     const sessionItem = screen.getByTestId("chat-session-session-001");
-    // Should show "Fusion" instead of "__kb_agent__"
+    // Should show "Fusion" instead of "__fn_agent__"
     expect(within(sessionItem).getByText("Fusion")).toBeInTheDocument();
   });
 
-  it("shows agent ID for non-kb agent sessions in sidebar", () => {
+  it("shows agent ID for non-fn agent sessions in sidebar", () => {
     setupMockChat({
       sessions: [{ id: "session-001", agentId: "my-custom-agent", status: "active", title: "Custom Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
       filteredSessions: [{ id: "session-001", agentId: "my-custom-agent", status: "active", title: "Custom Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
@@ -1032,7 +1032,7 @@ describe("ChatView", () => {
     setupMockChat({
       activeSession: {
         id: "session-001",
-        agentId: "__kb_agent__",
+        agentId: "__fn_agent__",
         status: "active",
         title: "Test Chat",
         modelProvider: "anthropic",
@@ -1056,7 +1056,7 @@ describe("ChatView", () => {
     setupMockChat({
       activeSession: {
         id: "session-001",
-        agentId: "__kb_agent__",
+        agentId: "__fn_agent__",
         status: "active",
         title: "Test Chat",
         updatedAt: "2026-04-08T00:00:00.000Z",
@@ -1077,7 +1077,7 @@ describe("ChatView", () => {
     setupMockChat({
       activeSession: {
         id: "session-001",
-        agentId: "__kb_agent__",
+        agentId: "__fn_agent__",
         status: "active",
         title: "Test Chat",
         modelProvider: "openai",
@@ -1113,7 +1113,7 @@ describe("formatModelTag helper function", () => {
     setupMockChat({
       activeSession: {
         id: "session-001",
-        agentId: "__kb_agent__",
+        agentId: "__fn_agent__",
         status: "active",
         title: "Test",
         modelProvider: "anthropic",
@@ -1135,7 +1135,7 @@ describe("formatModelTag helper function", () => {
     setupMockChat({
       activeSession: {
         id: "session-001",
-        agentId: "__kb_agent__",
+        agentId: "__fn_agent__",
         status: "active",
         title: "Test",
         modelProvider: "openai",
@@ -1157,7 +1157,7 @@ describe("formatModelTag helper function", () => {
     setupMockChat({
       activeSession: {
         id: "session-001",
-        agentId: "__kb_agent__",
+        agentId: "__fn_agent__",
         status: "active",
         title: "Test",
         modelProvider: "google",
@@ -1179,7 +1179,7 @@ describe("formatModelTag helper function", () => {
     setupMockChat({
       activeSession: {
         id: "session-001",
-        agentId: "__kb_agent__",
+        agentId: "__fn_agent__",
         status: "active",
         title: "Test",
         modelProvider: "anthropic",
@@ -1200,7 +1200,7 @@ describe("formatModelTag helper function", () => {
     setupMockChat({
       activeSession: {
         id: "session-001",
-        agentId: "__kb_agent__",
+        agentId: "__fn_agent__",
         status: "active",
         title: "Test",
         modelId: "claude-sonnet-4-5",

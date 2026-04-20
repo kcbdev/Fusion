@@ -20,7 +20,7 @@ import { createFnAgent, promptWithFallback } from "./pi.js";
 import { AgentReflectionService } from "./agent-reflection.js";
 import { createReflectOnPerformanceTool, reflectOnPerformanceParams } from "./agent-tools.js";
 
-const mockedCreateKbAgent = vi.mocked(createFnAgent);
+const mockedCreateFnAgent = vi.mocked(createFnAgent);
 const mockedPromptWithFallback = vi.mocked(promptWithFallback);
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
@@ -349,7 +349,7 @@ describe("AgentReflectionService", () => {
       const { agentStore, taskStore, reflectionStore } = createMockDeps();
       const session = createMockSession();
 
-      mockedCreateKbAgent.mockImplementation(async (options: any) => {
+      mockedCreateFnAgent.mockImplementation(async (options: any) => {
         options.onText?.(JSON.stringify({
           insights: ["Strong execution on scoped changes"],
           suggestedImprovements: ["Run tests earlier in the cycle"],
@@ -379,7 +379,7 @@ describe("AgentReflectionService", () => {
         triggerDetail: "manual check",
         taskId: "FN-001",
       }));
-      expect(mockedCreateKbAgent).toHaveBeenCalledWith(expect.objectContaining({
+      expect(mockedCreateFnAgent).toHaveBeenCalledWith(expect.objectContaining({
         tools: "readonly",
       }));
     });
@@ -393,13 +393,13 @@ describe("AgentReflectionService", () => {
       const reflection = await service.generateReflection("agent-1", "manual");
 
       expect(reflection).toBeNull();
-      expect(mockedCreateKbAgent).not.toHaveBeenCalled();
+      expect(mockedCreateFnAgent).not.toHaveBeenCalled();
       expect(reflectionStore.createReflection).not.toHaveBeenCalled();
     });
 
     it("returns null on AI session failure", async () => {
       const { agentStore, taskStore, reflectionStore } = createMockDeps();
-      mockedCreateKbAgent.mockRejectedValue(new Error("AI unavailable"));
+      mockedCreateFnAgent.mockRejectedValue(new Error("AI unavailable"));
 
       const service = new AgentReflectionService({ agentStore, taskStore, reflectionStore, rootDir: tempRoot });
       const reflection = await service.generateReflection("agent-1", "manual");
@@ -412,7 +412,7 @@ describe("AgentReflectionService", () => {
       const { agentStore, taskStore, reflectionStore } = createMockDeps();
       const session = createMockSession();
 
-      mockedCreateKbAgent.mockImplementation(async (options: any) => {
+      mockedCreateFnAgent.mockImplementation(async (options: any) => {
         options.onText?.(JSON.stringify({
           insights: ["Insight A"],
           suggestedImprovements: ["Improve B"],

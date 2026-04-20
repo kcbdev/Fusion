@@ -9,7 +9,7 @@ import {
   ServiceUnavailableError,
   SUGGESTION_TIMEOUT_MS,
   __resetSuggestionState,
-  __setCreateKbAgent,
+  __setCreateFnAgent,
 } from "./roadmap-suggestions";
 
 describe("roadmap-suggestions", () => {
@@ -152,11 +152,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       const suggestions = await generateMilestoneSuggestions(
         "Build a modern e-commerce platform",
@@ -194,15 +194,15 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       await generateMilestoneSuggestions("Test goal", undefined, rootDir);
 
-      expect(mockCreateKbAgent).toHaveBeenCalledWith(
+      expect(mockCreateFnAgent).toHaveBeenCalledWith(
         expect.objectContaining({
           cwd: rootDir,
           systemPrompt: expect.stringContaining("milestone"),
@@ -229,15 +229,15 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       await generateMilestoneSuggestions("Test goal", 3, rootDir);
 
-      expect(mockCreateKbAgent).toHaveBeenCalled();
+      expect(mockCreateFnAgent).toHaveBeenCalled();
     });
 
     it("includes count in user message", async () => {
@@ -259,11 +259,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       await generateMilestoneSuggestions("Build a platform", 5, rootDir);
 
@@ -291,11 +291,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       await generateMilestoneSuggestions("Test", 5, rootDir);
 
@@ -303,7 +303,7 @@ describe("roadmap-suggestions", () => {
     });
 
     it("throws when AI service is unavailable", async () => {
-      __setCreateKbAgent(undefined);
+      __setCreateFnAgent(undefined);
 
       await expect(
         generateMilestoneSuggestions("Test", 5, rootDir)
@@ -319,11 +319,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       await expect(
         generateMilestoneSuggestions("Test", 5)
@@ -349,11 +349,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       const suggestions = await generateMilestoneSuggestions("Test", 5, rootDir);
 
@@ -380,11 +380,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       const suggestions = await generateMilestoneSuggestions("Test", 5, rootDir);
 
@@ -411,11 +411,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       const suggestions = await generateMilestoneSuggestions("Test", 5, rootDir);
 
@@ -443,11 +443,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       const suggestions = await generateMilestoneSuggestions("Test", 2, rootDir);
 
@@ -475,11 +475,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       const suggestions = await generateMilestoneSuggestions("Test", 5, rootDir);
 
@@ -508,11 +508,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       await expect(
         generateMilestoneSuggestions("Test", 5, rootDir)
@@ -538,11 +538,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       await expect(
         generateMilestoneSuggestions("Test", 5, rootDir)
@@ -568,11 +568,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       await expect(
         generateMilestoneSuggestions("Test", 5, rootDir)
@@ -598,11 +598,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       await generateMilestoneSuggestions(
         "Test",
@@ -612,7 +612,7 @@ describe("roadmap-suggestions", () => {
         "gpt-4o"
       );
 
-      expect(mockCreateKbAgent).toHaveBeenCalledWith(
+      expect(mockCreateFnAgent).toHaveBeenCalledWith(
         expect.objectContaining({
           defaultProvider: "openai",
           defaultModelId: "gpt-4o",
@@ -634,11 +634,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       // Use fake timers
       vi.useFakeTimers();
@@ -801,11 +801,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       const suggestions = await generateFeatureSuggestions(
         baseContext,
@@ -844,15 +844,15 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       await generateFeatureSuggestions(baseContext, 5, undefined, rootDir);
 
-      expect(mockCreateKbAgent).toHaveBeenCalledWith(
+      expect(mockCreateFnAgent).toHaveBeenCalledWith(
         expect.objectContaining({
           cwd: rootDir,
           systemPrompt: expect.stringContaining("User Authentication"),
@@ -884,11 +884,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       await generateFeatureSuggestions(
         contextWithExistingFeatures,
@@ -897,7 +897,7 @@ describe("roadmap-suggestions", () => {
         rootDir
       );
 
-      expect(mockCreateKbAgent).toHaveBeenCalledWith(
+      expect(mockCreateFnAgent).toHaveBeenCalledWith(
         expect.objectContaining({
           systemPrompt: expect.stringContaining("Login Form"),
         })
@@ -923,11 +923,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       await generateFeatureSuggestions(
         baseContext,
@@ -960,11 +960,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       await generateFeatureSuggestions(baseContext, 3, undefined, rootDir);
 
@@ -992,11 +992,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       await generateFeatureSuggestions(baseContext, 5, undefined, rootDir);
 
@@ -1004,7 +1004,7 @@ describe("roadmap-suggestions", () => {
     });
 
     it("throws when AI service is unavailable", async () => {
-      __setCreateKbAgent(undefined);
+      __setCreateFnAgent(undefined);
 
       await expect(
         generateFeatureSuggestions(baseContext, 5, undefined, rootDir)
@@ -1020,11 +1020,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       await expect(
         generateFeatureSuggestions(baseContext, 5, undefined)
@@ -1050,11 +1050,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       const suggestions = await generateFeatureSuggestions(
         baseContext,
@@ -1086,11 +1086,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       const suggestions = await generateFeatureSuggestions(
         baseContext,
@@ -1122,11 +1122,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       const suggestions = await generateFeatureSuggestions(
         baseContext,
@@ -1159,11 +1159,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       const suggestions = await generateFeatureSuggestions(
         baseContext,
@@ -1196,11 +1196,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       const suggestions = await generateFeatureSuggestions(
         baseContext,
@@ -1234,11 +1234,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       await expect(
         generateFeatureSuggestions(baseContext, 5, undefined, rootDir)
@@ -1264,11 +1264,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       await expect(
         generateFeatureSuggestions(baseContext, 5, undefined, rootDir)
@@ -1294,11 +1294,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       await expect(
         generateFeatureSuggestions(baseContext, 5, undefined, rootDir)
@@ -1324,11 +1324,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       await generateFeatureSuggestions(
         baseContext,
@@ -1339,7 +1339,7 @@ describe("roadmap-suggestions", () => {
         "gpt-4o"
       );
 
-      expect(mockCreateKbAgent).toHaveBeenCalledWith(
+      expect(mockCreateFnAgent).toHaveBeenCalledWith(
         expect.objectContaining({
           defaultProvider: "openai",
           defaultModelId: "gpt-4o",
@@ -1366,11 +1366,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       const suggestions = await generateFeatureSuggestions(
         baseContext,
@@ -1404,11 +1404,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       await expect(
         generateFeatureSuggestions(baseContext, 5, undefined, rootDir)
@@ -1434,11 +1434,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       const suggestions = await generateFeatureSuggestions(
         baseContext,
@@ -1467,11 +1467,11 @@ describe("roadmap-suggestions", () => {
         },
       };
 
-      const mockCreateKbAgent = vi.fn().mockResolvedValue({
+      const mockCreateFnAgent = vi.fn().mockResolvedValue({
         session: mockSession,
       });
 
-      __setCreateKbAgent(mockCreateKbAgent);
+      __setCreateFnAgent(mockCreateFnAgent);
 
       // Use fake timers
       vi.useFakeTimers();

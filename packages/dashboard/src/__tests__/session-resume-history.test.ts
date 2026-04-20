@@ -14,7 +14,7 @@ import { Database } from "@fusion/core";
 import { AiSessionStore, type AiSessionRow } from "../ai-session-store.js";
 import {
   __resetPlanningState,
-  __setCreateKbAgent,
+  __setCreateFnAgent,
   createSession,
   getSession,
   setAiSessionStore as setPlanningAiSessionStore,
@@ -33,12 +33,12 @@ import {
   submitMissionInterviewResponse,
 } from "../mission-interview.js";
 
-const { mockCreateKbAgent } = vi.hoisted(() => ({
-  mockCreateKbAgent: vi.fn(),
+const { mockCreateFnAgent } = vi.hoisted(() => ({
+  mockCreateFnAgent: vi.fn(),
 }));
 
 vi.mock("@fusion/engine", () => ({
-  createFnAgent: mockCreateKbAgent,
+  createFnAgent: mockCreateFnAgent,
 }));
 
 function makeTmpDir(): string {
@@ -93,7 +93,7 @@ describe("session resume + history restore", () => {
   });
 
   afterEach(async () => {
-    __setCreateKbAgent(undefined as any);
+    __setCreateFnAgent(undefined as any);
     __resetPlanningState();
     __resetSubtaskBreakdownState();
     __resetMissionInterviewState();
@@ -142,7 +142,7 @@ describe("session resume + history restore", () => {
       }),
     ]);
     const createFnAgentSpy = vi.fn(async () => resumedAgent);
-    __setCreateKbAgent(createFnAgentSpy as any);
+    __setCreateFnAgent(createFnAgentSpy as any);
 
     const restored = getSession(row.id);
     expect(restored).toBeDefined();
@@ -198,7 +198,7 @@ describe("session resume + history restore", () => {
       }),
     ]);
     const createFnAgentSpy = vi.fn(async () => resumedAgent);
-    mockCreateKbAgent.mockImplementation(createFnAgentSpy);
+    mockCreateFnAgent.mockImplementation(createFnAgentSpy);
 
     const restored = getMissionInterviewSession(row.id);
     expect(restored).toBeDefined();
@@ -268,7 +268,7 @@ describe("session resume + history restore", () => {
   });
 
   it("starts fresh planning and mission sessions with empty history", async () => {
-    __setCreateKbAgent(
+    __setCreateFnAgent(
       async () =>
         createMockAgent([
           JSON.stringify({
@@ -278,7 +278,7 @@ describe("session resume + history restore", () => {
         ]),
     );
 
-    mockCreateKbAgent.mockImplementation(async () =>
+    mockCreateFnAgent.mockImplementation(async () =>
       createMockAgent([
         JSON.stringify({
           type: "question",

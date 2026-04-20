@@ -20,7 +20,7 @@ import {
   checkRateLimit,
   getRateLimitResetTime,
   __resetPlanningState,
-  __setCreateKbAgent,
+  __setCreateFnAgent,
   rehydrateFromStore,
   setAiSessionStore,
   RateLimitError,
@@ -120,7 +120,7 @@ function getUniqueIp(): string {
  */
 function setupMockAgent(responses?: string[]) {
   const agent = createMockAgent(responses ?? STANDARD_QUESTION_RESPONSES);
-  __setCreateKbAgent(async () => agent);
+  __setCreateFnAgent(async () => agent);
   return agent;
 }
 
@@ -153,7 +153,7 @@ function setupMockStreamingAgent(options?: {
     };
   });
 
-  __setCreateKbAgent(createFnAgentSpy as any);
+  __setCreateFnAgent(createFnAgentSpy as any);
   return { createFnAgentSpy };
 }
 
@@ -264,7 +264,7 @@ describe("planning module", () => {
   });
 
   afterEach(() => {
-    __setCreateKbAgent(undefined as any);
+    __setCreateFnAgent(undefined as any);
   });
 
   describe("createSession", () => {
@@ -333,7 +333,7 @@ describe("planning module", () => {
     });
 
     it("cleans up session on agent failure", async () => {
-      __setCreateKbAgent(async () => {
+      __setCreateFnAgent(async () => {
         throw new Error("Agent creation failed");
       });
 
@@ -379,7 +379,7 @@ describe("planning module", () => {
   describe("createSessionWithAgent", () => {
     it("passes planning model override to createFnAgent when provided", async () => {
       const createFnAgentSpy = vi.fn(async () => createMockAgent(STANDARD_QUESTION_RESPONSES));
-      __setCreateKbAgent(createFnAgentSpy as any);
+      __setCreateFnAgent(createFnAgentSpy as any);
 
       const sessionId = await createSessionWithAgent(
         getUniqueIp(),
@@ -405,7 +405,7 @@ describe("planning module", () => {
 
     it("creates agent without model overrides when none provided", async () => {
       const createFnAgentSpy = vi.fn(async () => createMockAgent(STANDARD_QUESTION_RESPONSES));
-      __setCreateKbAgent(createFnAgentSpy as any);
+      __setCreateFnAgent(createFnAgentSpy as any);
 
       const sessionId = await createSessionWithAgent(getUniqueIp(), "Build auth system", TEST_ROOT_DIR);
 
@@ -422,7 +422,7 @@ describe("planning module", () => {
 
     it("uses custom prompt from promptOverrides when provided", async () => {
       const createFnAgentSpy = vi.fn(async () => createMockAgent(STANDARD_QUESTION_RESPONSES));
-      __setCreateKbAgent(createFnAgentSpy as any);
+      __setCreateFnAgent(createFnAgentSpy as any);
 
       const customPrompt = "Custom planning prompt with specific guidelines...";
       const promptOverrides = { "planning-system": customPrompt };
@@ -448,7 +448,7 @@ describe("planning module", () => {
 
     it("falls back to default prompt when promptOverrides is undefined", async () => {
       const createFnAgentSpy = vi.fn(async () => createMockAgent(STANDARD_QUESTION_RESPONSES));
-      __setCreateKbAgent(createFnAgentSpy as any);
+      __setCreateFnAgent(createFnAgentSpy as any);
 
       const sessionId = await createSessionWithAgent(
         getUniqueIp(),
@@ -471,7 +471,7 @@ describe("planning module", () => {
 
     it("falls back to default prompt when promptOverrides does not contain planning key", async () => {
       const createFnAgentSpy = vi.fn(async () => createMockAgent(STANDARD_QUESTION_RESPONSES));
-      __setCreateKbAgent(createFnAgentSpy as any);
+      __setCreateFnAgent(createFnAgentSpy as any);
 
       // Provide an override for a different key
       const promptOverrides = { "triage-welcome": "Some other prompt" };
@@ -590,7 +590,7 @@ describe("planning module", () => {
         }),
       ]);
       const createFnAgentSpy = vi.fn(async () => resumedAgent);
-      __setCreateKbAgent(createFnAgentSpy as any);
+      __setCreateFnAgent(createFnAgentSpy as any);
 
       const response = await submitResponse(
         row.id,
@@ -735,7 +735,7 @@ describe("planning module", () => {
           },
         }),
       ]);
-      __setCreateKbAgent(async () => resumedAgent);
+      __setCreateFnAgent(async () => resumedAgent);
 
       await retrySession(row.id, TEST_ROOT_DIR);
 
@@ -774,7 +774,7 @@ describe("planning module", () => {
           },
         }),
       ]);
-      __setCreateKbAgent(async () => resumedAgent);
+      __setCreateFnAgent(async () => resumedAgent);
 
       await retrySession(row.id, TEST_ROOT_DIR);
 
@@ -829,7 +829,7 @@ describe("planning module", () => {
         }),
       ]);
       const createFnAgentSpy = vi.fn(async () => resumedAgent);
-      __setCreateKbAgent(createFnAgentSpy as any);
+      __setCreateFnAgent(createFnAgentSpy as any);
 
       await retrySession(row.id, TEST_ROOT_DIR, promptOverrides);
 
@@ -872,7 +872,7 @@ describe("planning module", () => {
         }),
       ]);
       const createFnAgentSpy = vi.fn(async () => resumedAgent);
-      __setCreateKbAgent(createFnAgentSpy as any);
+      __setCreateFnAgent(createFnAgentSpy as any);
 
       await retrySession(row.id, TEST_ROOT_DIR);
 
@@ -1733,7 +1733,7 @@ describe("planning routes lock enforcement", () => {
   });
 
   afterEach(async () => {
-    __setCreateKbAgent(undefined as any);
+    __setCreateFnAgent(undefined as any);
     __resetPlanningState();
 
     try {

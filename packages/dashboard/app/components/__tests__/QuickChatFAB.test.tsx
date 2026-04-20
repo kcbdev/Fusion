@@ -317,7 +317,7 @@ describe("QuickChatFAB", () => {
     await waitFor(() => {
       expect(mockCreateChatSession).toHaveBeenCalledWith(
         {
-          agentId: "__kb_agent__",
+          agentId: "__fn_agent__",
           modelProvider: "anthropic",
           modelId: "claude-sonnet-4-5",
         },
@@ -353,7 +353,7 @@ describe("QuickChatFAB", () => {
     await waitFor(() => {
       expect(mockCreateChatSession).toHaveBeenCalledWith(
         {
-          agentId: "__kb_agent__",
+          agentId: "__fn_agent__",
           modelProvider: "openai",
           modelId: "gpt-4o",
         },
@@ -376,7 +376,7 @@ describe("QuickChatFAB", () => {
     await waitFor(() => {
       expect(mockCreateChatSession).toHaveBeenCalledWith(
         {
-          agentId: "__kb_agent__",
+          agentId: "__fn_agent__",
           modelProvider: "openai",
           modelId: "gpt-4o",
         },
@@ -423,7 +423,7 @@ describe("QuickChatFAB", () => {
     await waitFor(() => {
       expect(mockCreateChatSession).toHaveBeenCalledWith(
         {
-          agentId: "__kb_agent__",
+          agentId: "__fn_agent__",
           modelProvider: "anthropic",
           modelId: "claude-sonnet-4-5",
         },

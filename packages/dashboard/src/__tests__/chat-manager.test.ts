@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   ChatManager,
   __setBuildAgentChatPrompt,
-  __setCreateKbAgent,
+  __setCreateFnAgent,
   __resetChatState,
   chatStreamManager,
 } from "../chat.js";
@@ -207,7 +207,7 @@ describe("ChatManager.sendMessage", () => {
       ]);
 
       let createOptions: any;
-      __setCreateKbAgent(async (options: any) => {
+      __setCreateFnAgent(async (options: any) => {
         createOptions = options;
         return {
           session: {
@@ -241,7 +241,7 @@ describe("ChatManager.sendMessage", () => {
         },
       ]);
 
-      __setCreateKbAgent(async () => {
+      __setCreateFnAgent(async () => {
         return {
           session: {
             prompt: vi.fn().mockResolvedValue(undefined),
@@ -275,7 +275,7 @@ describe("ChatManager.sendMessage", () => {
     let onThinkingCb: ((delta: string) => void) | undefined;
     let onTextCb: ((delta: string) => void) | undefined;
 
-    __setCreateKbAgent(async (options: any) => {
+    __setCreateFnAgent(async (options: any) => {
       onThinkingCb = options.onThinking;
       onTextCb = options.onText;
 
@@ -311,7 +311,7 @@ describe("ChatManager.sendMessage", () => {
 
   it("creates chat agents with the full coding toolset", async () => {
     let createOptions: any;
-    __setCreateKbAgent(async (options: any) => {
+    __setCreateFnAgent(async (options: any) => {
       createOptions = options;
       return {
         session: {
@@ -334,7 +334,7 @@ describe("ChatManager.sendMessage", () => {
     let onThinkingCb: ((delta: string) => void) | undefined;
     let onTextCb: ((delta: string) => void) | undefined;
 
-    __setCreateKbAgent(async (options: any) => {
+    __setCreateFnAgent(async (options: any) => {
       onThinkingCb = options.onThinking;
       onTextCb = options.onText;
 
@@ -367,7 +367,7 @@ describe("ChatManager.sendMessage", () => {
       events.push(event);
     });
 
-    __setCreateKbAgent(async (options: any) => {
+    __setCreateFnAgent(async (options: any) => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(async () => {
@@ -400,7 +400,7 @@ describe("ChatManager.sendMessage", () => {
   });
 
   it("does not persist empty assistant response on immediate failure", async () => {
-    __setCreateKbAgent(async () => {
+    __setCreateFnAgent(async () => {
       return {
         session: {
           prompt: vi.fn().mockRejectedValue(new Error("Immediate failure")),
@@ -418,7 +418,7 @@ describe("ChatManager.sendMessage", () => {
   });
 
   it("persists thinking output even when no text was generated", async () => {
-    __setCreateKbAgent(async (options: any) => {
+    __setCreateFnAgent(async (options: any) => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(async () => {
@@ -448,7 +448,7 @@ describe("ChatManager.sendMessage", () => {
   });
 
   it("uses accumulated text as primary source over state.messages extraction", async () => {
-    __setCreateKbAgent(async (options: any) => {
+    __setCreateFnAgent(async (options: any) => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(async () => {
@@ -479,7 +479,7 @@ describe("ChatManager.sendMessage", () => {
   });
 
   it("falls back to state.messages when accumulated text is empty", async () => {
-    __setCreateKbAgent(async () => {
+    __setCreateFnAgent(async () => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(async () => {
@@ -507,7 +507,7 @@ describe("ChatManager.sendMessage", () => {
   });
 
   it("handles array content format in state.messages extraction", async () => {
-    __setCreateKbAgent(async () => {
+    __setCreateFnAgent(async () => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(async () => {
@@ -541,7 +541,7 @@ describe("ChatManager.sendMessage", () => {
   });
 
   it("persists user message before AI response", async () => {
-    __setCreateKbAgent(async (options: any) => {
+    __setCreateFnAgent(async (options: any) => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(async () => {
@@ -573,7 +573,7 @@ describe("ChatManager.sendMessage", () => {
 
   it("passes enriched system prompt with agent soul when agent context is available", async () => {
     let createOptions: any;
-    __setCreateKbAgent(async (options: any) => {
+    __setCreateFnAgent(async (options: any) => {
       createOptions = options;
       return {
         session: {
@@ -605,7 +605,7 @@ describe("ChatManager.sendMessage", () => {
     });
 
     let createOptions: any;
-    __setCreateKbAgent(async (options: any) => {
+    __setCreateFnAgent(async (options: any) => {
       createOptions = options;
       return {
         session: {
@@ -628,7 +628,7 @@ describe("ChatManager.sendMessage", () => {
     mockAgentStore.getAgent.mockResolvedValue(null);
 
     let createOptions: any;
-    __setCreateKbAgent(async (options: any) => {
+    __setCreateFnAgent(async (options: any) => {
       createOptions = options;
       return {
         session: {
@@ -658,7 +658,7 @@ describe("ChatManager.sendMessage", () => {
       { role: "user", content: "Current question" },
     ]);
 
-    __setCreateKbAgent(async () => {
+    __setCreateFnAgent(async () => {
       return {
         session: {
           prompt: promptSpy,
@@ -686,7 +686,7 @@ describe("ChatManager.sendMessage", () => {
   it("generates title when session has no title", async () => {
     mockSummarizeTitle.mockResolvedValue("Short Title");
 
-    __setCreateKbAgent(async (options: any) => {
+    __setCreateFnAgent(async (options: any) => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(async () => {
@@ -720,7 +720,7 @@ describe("ChatManager.sendMessage", () => {
   it("uses truncated content when summarizeTitle returns null", async () => {
     mockSummarizeTitle.mockResolvedValue(null);
 
-    __setCreateKbAgent(async (options: any) => {
+    __setCreateFnAgent(async (options: any) => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(async () => {
@@ -755,7 +755,7 @@ describe("ChatManager.sendMessage", () => {
       title: "Existing Title",
     });
 
-    __setCreateKbAgent(async (options: any) => {
+    __setCreateFnAgent(async (options: any) => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(async () => {
@@ -813,7 +813,7 @@ describe("ChatManager.sendMessage", () => {
   it("cancelled generation does not persist assistant message", async () => {
     let rejectPrompt: ((reason?: unknown) => void) | undefined;
 
-    __setCreateKbAgent(async () => {
+    __setCreateFnAgent(async () => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(() => {
@@ -846,7 +846,7 @@ describe("ChatManager.sendMessage", () => {
   it("cancelled generation broadcasts error event with cancellation message", async () => {
     let rejectPrompt: ((reason?: unknown) => void) | undefined;
 
-    __setCreateKbAgent(async () => {
+    __setCreateFnAgent(async () => {
       return {
         session: {
           prompt: vi.fn().mockImplementation(() => {
@@ -883,7 +883,7 @@ describe("ChatManager.sendMessage", () => {
       throw new Error("dispose failed");
     });
 
-    __setCreateKbAgent(async () => {
+    __setCreateFnAgent(async () => {
       return {
         session: {
           prompt: vi.fn().mockResolvedValue(undefined),

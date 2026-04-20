@@ -39,7 +39,7 @@ const engineReady: Promise<void> = initEngine();
  * Returns `createFnAgent` from `@fusion/engine`, or `undefined` if the engine
  * could not be loaded (typical in tests or when engine isn't installed).
  */
-export async function getKbAgent(): Promise<CreateFnAgent> {
+export async function getFnAgent(): Promise<CreateFnAgent> {
   await engineReady;
   return createFnAgent;
 }

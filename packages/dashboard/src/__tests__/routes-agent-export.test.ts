@@ -58,7 +58,7 @@ describe("POST /api/agents/export", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    testDir = mkdtempSync(join(tmpdir(), "kb-agent-export-route-"));
+    testDir = mkdtempSync(join(tmpdir(), "fn-agent-export-route-"));
 
     mockInit.mockResolvedValue(undefined);
     mockListAgents.mockResolvedValue([

@@ -2,12 +2,12 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockCreateKbAgent } = vi.hoisted(() => ({
-  mockCreateKbAgent: vi.fn(),
+const { mockCreateFnAgent } = vi.hoisted(() => ({
+  mockCreateFnAgent: vi.fn(),
 }));
 
 vi.mock("@fusion/engine", () => ({
-  createFnAgent: mockCreateKbAgent,
+  createFnAgent: mockCreateFnAgent,
 }));
 
 import {
@@ -110,7 +110,7 @@ function createMockAgent(responses: string[]) {
   };
 
   // Setup mock to capture callbacks
-  mockCreateKbAgent.mockImplementation(async (options: any) => {
+  mockCreateFnAgent.mockImplementation(async (options: any) => {
     thinkingCb = options?.onThinking;
     textCb = options?.onText;
     return agent;
@@ -220,7 +220,7 @@ describe("milestone-slice-interview module", () => {
     // Reset cached createFnAgent to force re-import with mock
     const mod = await import("./milestone-slice-interview.js") as any;
     mod.__resetEngine?.();
-    mockCreateKbAgent.mockImplementation(async () => createMockAgent([createQuestionJson()]));
+    mockCreateFnAgent.mockImplementation(async () => createMockAgent([createQuestionJson()]));
   });
 
   describe("session lifecycle", () => {
@@ -439,7 +439,7 @@ describe("milestone-slice-interview module", () => {
       }));
       setAiSessionStore(store);
 
-      mockCreateKbAgent.mockImplementation(async () => createMockAgent([createQuestionJson()]));
+      mockCreateFnAgent.mockImplementation(async () => createMockAgent([createQuestionJson()]));
 
       await expect(retryTargetInterviewSession(sessionId, "/tmp/project")).resolves.not.toThrow();
     });

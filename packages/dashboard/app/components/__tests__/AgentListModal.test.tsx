@@ -22,7 +22,7 @@ describe("AgentListModal", () => {
   const mockOnClose = vi.fn();
   const mockAddToast = vi.fn();
   const TEST_PROJECT_ID = "proj-123";
-  const AGENT_VIEW_KEY = scopedKey("kb-agent-view", TEST_PROJECT_ID);
+  const AGENT_VIEW_KEY = scopedKey("fn-agent-view", TEST_PROJECT_ID);
 
   const mockAgents: Agent[] = [
     {
