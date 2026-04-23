@@ -385,6 +385,9 @@ describe("MailboxView", () => {
     await waitFor(() => {
       expect(screen.getByTestId("mailbox-header-compose")).toBeDefined();
     });
+
+    const headerComposeButton = screen.getByTestId("mailbox-header-compose");
+    expect(headerComposeButton).toHaveClass("btn", "btn-sm", "btn-primary");
   });
 
   it("shows compose button in header on agents tab", async () => {
@@ -552,6 +555,9 @@ describe("MailboxView", () => {
         expect(screen.getByTestId("mailbox-agent-subtab-inbox")).toBeDefined();
         expect(screen.getByTestId("mailbox-agent-subtab-outbox")).toBeDefined();
       });
+
+      const agentsComposeButton = screen.getByTestId("mailbox-compose-btn");
+      expect(agentsComposeButton).toHaveClass("btn", "btn-sm", "btn-secondary", "mailbox-compose-btn");
     });
 
     it("switches to outbox view when clicking outbox sub-tab", async () => {

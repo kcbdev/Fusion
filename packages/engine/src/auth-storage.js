@@ -1,10 +1,12 @@
+/* eslint-env node */
+
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { getOAuthProvider } from "@mariozechner/pi-ai/oauth";
 function getHomeDir() {
-    return process.env.HOME || process.env.USERPROFILE || homedir();
+    return globalThis.process.env.HOME || globalThis.process.env.USERPROFILE || homedir();
 }
 export function getFusionAuthPath(home = getHomeDir()) {
     return join(home, ".fusion", "agent", "auth.json");
@@ -52,7 +54,7 @@ function readLegacyCredentials(authPaths = getLegacyAuthPaths()) {
 function resolveStoredApiKey(key) {
     if (!key)
         return undefined;
-    return process.env[key] ?? key;
+    return globalThis.process.env[key] ?? key;
 }
 function resolveOAuthApiKey(providerId, credential) {
     if (credential.type !== "oauth" ||

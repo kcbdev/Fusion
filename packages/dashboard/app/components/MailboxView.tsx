@@ -381,7 +381,7 @@ export function MailboxView({
         </div>
         <div className="mailbox-header-actions">
           <button
-            className="btn-sm btn-primary"
+            className="btn btn-sm btn-primary"
             onClick={handleOpenCompose}
             title="Compose message"
             data-testid="mailbox-header-compose"
@@ -650,7 +650,7 @@ export function MailboxView({
                         </select>
                       </div>
                       <button
-                        className="btn-sm btn-secondary mailbox-compose-btn"
+                        className="btn btn-sm btn-secondary mailbox-compose-btn"
                         onClick={handleOpenCompose}
                         data-testid="mailbox-compose-btn"
                       >

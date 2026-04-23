@@ -7085,7 +7085,6 @@ describe("Workflow Steps Execution", () => {
       currentStep: 0,
       taskDoneRetryCount: 3,
       log: [],
-      prompt: "# test\n## Steps\n### Step 0: Preflight\n- [ ] check",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });

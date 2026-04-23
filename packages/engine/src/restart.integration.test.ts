@@ -1397,7 +1397,8 @@ describe("Engine pause/unpause cycle", () => {
     store.getTask.mockResolvedValue(makeTaskDetail("FN-EP1", "in-progress"));
 
     // Agent triggers engine pause mid-flight but continues normally (soft pause)
-    mockedCreateFnAgent.mockImplementation(async () => ({
+    mockedCreateFnAgent.mockImplementation((async (opts: any) => ({
+
       session: {
         prompt: vi.fn().mockImplementation(async () => {
           // Trigger engine pause — session should NOT be terminated
@@ -1405,11 +1406,16 @@ describe("Engine pause/unpause cycle", () => {
             settings: { enginePaused: true },
             previous: { enginePaused: false },
           });
-          // Session continues normally
+
+          // Session continues normally and completes by calling task_done
+          const taskDoneTool = opts?.customTools?.find((t: any) => t.name === "task_done");
+          if (taskDoneTool) {
+            await taskDoneTool.execute("tool-1", {});
+          }
         }),
         dispose: vi.fn(),
       },
-    } as any));
+    }) as any));
 
     const executor = new TaskExecutor(store, "/tmp/test");
     await executor.execute(task);

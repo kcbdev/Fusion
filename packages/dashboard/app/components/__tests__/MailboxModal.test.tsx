@@ -349,6 +349,9 @@ describe("MailboxModal", () => {
     await waitFor(() => {
       expect(screen.getByTestId("mailbox-header-compose")).toBeDefined();
     });
+
+    const headerComposeButton = screen.getByTestId("mailbox-header-compose");
+    expect(headerComposeButton).toHaveClass("btn", "btn-sm", "btn-primary");
   });
 
   it("shows compose button in header on agents tab", async () => {
@@ -365,6 +368,9 @@ describe("MailboxModal", () => {
     await waitFor(() => {
       expect(screen.getByTestId("mailbox-compose-btn")).toBeDefined();
     });
+
+    const agentsComposeButton = screen.getByTestId("mailbox-compose-btn");
+    expect(agentsComposeButton).toHaveClass("btn", "btn-sm", "btn-secondary", "mailbox-compose-btn");
   });
 
   it("compose opened from Agents tab without selected agent shows recipient select", async () => {

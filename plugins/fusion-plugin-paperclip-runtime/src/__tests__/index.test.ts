@@ -1,4 +1,11 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+vi.mock("../pi-module.js", () => ({
+  createFnAgent: vi.fn().mockResolvedValue({ session: {} }),
+  promptWithFallback: vi.fn(),
+  describeModel: vi.fn().mockReturnValue("mock/model"),
+}));
+
 import plugin from "../index.js";
 import { PaperclipRuntimeAdapter } from "../runtime-adapter.js";
 
@@ -51,18 +58,6 @@ describe("paperclip-runtime plugin", () => {
   });
 
   describe("runtime factory invocation", () => {
-    beforeEach(() => {
-      vi.mock("../../../../packages/engine/src/pi.js", () => ({
-        createFnAgent: vi.fn().mockResolvedValue({ session: {} }),
-        promptWithFallback: vi.fn(),
-        describeModel: vi.fn().mockReturnValue("mock/model"),
-      }));
-    });
-
-    afterEach(() => {
-      vi.restoreAllMocks();
-    });
-
     it("should return a PaperclipRuntimeAdapter instance when factory is invoked", async () => {
       const runtime = await plugin.runtime!.factory({} as any);
       expect(runtime).toBeInstanceOf(PaperclipRuntimeAdapter);

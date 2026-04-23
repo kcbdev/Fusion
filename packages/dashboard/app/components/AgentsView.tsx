@@ -291,6 +291,8 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
   const [heartbeatMultiplier, setHeartbeatMultiplier] = useState<number>(1);
   /** Whether the heartbeat multiplier is currently being saved */
   const [isSavingMultiplier, setIsSavingMultiplier] = useState(false);
+  /** Agent IDs with an in-flight state transition (for optimistic update guard) */
+  const [transitioningAgentIds, setTransitioningAgentIds] = useState<Set<string>>(new Set());
 
   // Load heartbeat multiplier from project settings on mount
   useEffect(() => {
@@ -423,11 +425,13 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
   }, [loadAgents]);
 
   const handleStateChange = async (agentId: string, newState: AgentState) => {
+    if (transitioningAgentIds.has(agentId)) return;
+    const previousAgent = agents.find(a => a.id === agentId);
+    setAgents(prev => prev.map(a => a.id === agentId ? { ...a, state: newState } : a));
+    setTransitioningAgentIds(prev => new Set(prev).add(agentId));
     try {
       await updateAgentState(agentId, newState, projectId);
       addToast(`Agent state updated to ${newState}`, "success");
-
-      // When activating an agent, also start a heartbeat run so it shows activity
       if (newState === "active") {
         try {
           await startAgentRun(agentId, projectId);
@@ -435,10 +439,14 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
           addToast(`Agent activated, but failed to start run: ${runErr.message}`, "error");
         }
       }
-
       void loadAgents();
     } catch (err: any) {
+      if (previousAgent) {
+        setAgents(prev => prev.map(a => a.id === agentId ? previousAgent : a));
+      }
       addToast(`Failed to update state: ${err.message}`, "error");
+    } finally {
+      setTransitioningAgentIds(prev => { const next = new Set(prev); next.delete(agentId); return next; });
     }
   };
 
@@ -1114,6 +1122,7 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                         <button
                           className="btn btn--sm"
                           onClick={() => void handleStateChange(agent.id, "active")}
+                          disabled={transitioningAgentIds.has(agent.id)}
                           title="Activate"
                         >
                           <Play size={14} /> Start
@@ -1132,6 +1141,7 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                         <button
                           className="btn btn--sm"
                           onClick={() => void handleRunHeartbeat(agent.id, agent.name)}
+                          disabled={transitioningAgentIds.has(agent.id)}
                           title="Run Now"
                           aria-label={`Run now for ${agent.name}`}
                         >
@@ -1140,6 +1150,7 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                         <button
                           className="btn btn--sm"
                           onClick={() => void handleStateChange(agent.id, "paused")}
+                          disabled={transitioningAgentIds.has(agent.id)}
                           title="Pause"
                         >
                           <Pause size={14} /> Pause
@@ -1150,6 +1161,7 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                       <button
                         className="btn btn--sm"
                         onClick={() => void handleStateChange(agent.id, "active")}
+                        disabled={transitioningAgentIds.has(agent.id)}
                         title="Resume"
                       >
                         <Play size={14} /> Resume
@@ -1168,6 +1180,7 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                         <button
                           className="btn btn--sm"
                           onClick={() => void handleStateChange(agent.id, "paused")}
+                          disabled={transitioningAgentIds.has(agent.id)}
                           title="Pause"
                         >
                           <Pause size={14} /> Pause
@@ -1178,6 +1191,7 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                       <button
                         className="btn btn--sm"
                         onClick={() => void handleStateChange(agent.id, "active")}
+                        disabled={transitioningAgentIds.has(agent.id)}
                         title="Retry"
                       >
                         <Play size={14} /> Retry
@@ -1188,6 +1202,7 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                         <button
                           className="btn btn--sm"
                           onClick={() => void handleStateChange(agent.id, "active")}
+                          disabled={transitioningAgentIds.has(agent.id)}
                           title="Start"
                         >
                           <Play size={14} /> Start

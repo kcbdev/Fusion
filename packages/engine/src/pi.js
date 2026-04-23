@@ -311,8 +311,8 @@ function createReadOnlyPiSettingsView(cwd, agentDir) {
     const fusionProjectSettings = readJsonObject(join(projectRoot, ".fusion", "settings.json"));
     const mergedSettings = { ...globalSettings, ...fusionProjectSettings };
     return {
-        getGlobalSettings: () => structuredClone(globalSettings),
-        getProjectSettings: () => structuredClone(fusionProjectSettings),
+        getGlobalSettings: () => globalThis.structuredClone(globalSettings),
+        getProjectSettings: () => globalThis.structuredClone(fusionProjectSettings),
         getNpmCommand: () => Array.isArray(mergedSettings.npmCommand)
             ? [...mergedSettings.npmCommand]
             : undefined,
@@ -481,9 +481,7 @@ export function wrapToolsWithBoundary(tools, worktreePath, projectRoot) {
         return {
             ...tool,
             execute: async (...args) => {
-                const _toolCallId = args[0];
                 const params = args[1];
-                const _signal = args[2];
                 // Check path argument for file operations
                 const pathArg = params.path;
                 if (pathArg && !isWorktreeAllowedPath(worktreePath, projectRoot, pathArg)) {

@@ -35966,7 +35966,7 @@ html .column.drag-over * {
   border-bottom: 1px solid var(--border);
 }
 
-.pi-ext-manager-header h3 {
+.pi-ext-manager-header .settings-section-heading {
   margin: 0;
 }
 
@@ -36458,12 +36458,27 @@ html .column.drag-over * {
 /* Plugin toggle switch */
 .toggle-switch {
   position: relative;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   cursor: pointer;
 }
 
 .toggle-switch input {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.toggle-switch input:focus-visible + .toggle-slider {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .toggle-switch .toggle-slider {

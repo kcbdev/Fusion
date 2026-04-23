@@ -257,7 +257,6 @@ export function createSkillsOverrideFromSelection(selection, options = {}) {
         }
         // Log diagnostics if any
         if (newDiagnostics.length > 0) {
-            const _purpose = sessionPurpose ? `[${sessionPurpose}]` : "skills";
             for (const diag of newDiagnostics) {
                 piLog.warn(`[skills] ${diag.type}: ${diag.message}`);
             }

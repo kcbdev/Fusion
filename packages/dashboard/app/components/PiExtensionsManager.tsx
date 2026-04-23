@@ -219,7 +219,7 @@ export function PiExtensionsManager({ addToast, projectId }: PiExtensionsManager
   return (
     <div className="pi-ext-manager">
       <div className="pi-ext-manager-header">
-        <h3>Pi Extensions</h3>
+        <h4 className="settings-section-heading">Pi Extensions</h4>
         <div className="pi-ext-manager-actions">
           <button className="btn-icon" onClick={loadSettings} title="Refresh" disabled={loading}>
             <RefreshCw size={16} className={loading ? "spin" : ""} />
@@ -254,7 +254,7 @@ export function PiExtensionsManager({ addToast, projectId }: PiExtensionsManager
                 disabled={installing}
               />
               <button
-                className="btn-primary"
+                className="btn btn-primary"
                 onClick={handleInstall}
                 disabled={installing || !newSource.trim()}
               >
@@ -389,7 +389,7 @@ export function PiExtensionsManager({ addToast, projectId }: PiExtensionsManager
         <div className="pi-ext-discovered-header">
           <h4>Discovered Extensions</h4>
           <button
-            className="btn btn-sm"
+            className="btn-icon"
             onClick={loadExtensions}
             disabled={extensionsLoading}
             title="Refresh extensions"

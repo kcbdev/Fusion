@@ -1,3 +1,5 @@
+/* eslint-env node */
+
 /**
  * Lightweight structured logger for the `@fusion/engine` package.
  *
@@ -27,13 +29,13 @@ export function createLogger(prefix) {
     const tag = `[${prefix}]`;
     return {
         log(message, ...args) {
-            console.error(`${tag} ${message}`, ...args);
+            globalThis.console.error(`${tag} ${message}`, ...args);
         },
         warn(message, ...args) {
-            console.warn(`${tag} ${message}`, ...args);
+            globalThis.console.warn(`${tag} ${message}`, ...args);
         },
         error(message, ...args) {
-            console.error(`${tag} ${message}`, ...args);
+            globalThis.console.error(`${tag} ${message}`, ...args);
         },
     };
 }

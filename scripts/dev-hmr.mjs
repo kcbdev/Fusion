@@ -28,8 +28,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
 const dashboardDir = resolve(repoRoot, "packages/dashboard");
 
-const API_PORT = process.env.FUSION_API_PORT ?? "4040";
-const VITE_PORT = process.env.FUSION_VITE_PORT ?? "5173";
+const API_PORT = globalThis.process.env.FUSION_API_PORT ?? "4040";
+const VITE_PORT = globalThis.process.env.FUSION_VITE_PORT ?? "5173";
 
 const children = [];
 let shuttingDown = false;
@@ -42,7 +42,7 @@ function prefix(label, color) {
     const lines = text.split("\n");
     const last = lines.pop();
     const prefixed = lines.map((l) => `${tag} ${l}`).join("\n");
-    process.stdout.write(prefixed + (prefixed ? "\n" : "") + (last ? `${tag} ${last}` : ""));
+    globalThis.process.stdout.write(prefixed + (prefixed ? "\n" : "") + (last ? `${tag} ${last}` : ""));
   };
 }
 
@@ -68,22 +68,22 @@ function shutdown(exitCode = 0) {
   shuttingDown = true;
   for (const { child } of children) {
     if (!child.killed) {
-      try { child.kill("SIGINT"); } catch {}
+      try { child.kill("SIGINT"); } catch { void 0; }
     }
   }
   // Hard kill after 5s if anyone is still alive.
   setTimeout(() => {
     for (const { child } of children) {
       if (!child.killed) {
-        try { child.kill("SIGKILL"); } catch {}
+        try { child.kill("SIGKILL"); } catch { void 0; }
       }
     }
-    process.exit(exitCode);
+    globalThis.process.exit(exitCode);
   }, 5000).unref();
 }
 
-process.on("SIGINT", () => shutdown(0));
-process.on("SIGTERM", () => shutdown(0));
+globalThis.process.on("SIGINT", () => shutdown(0));
+globalThis.process.on("SIGTERM", () => shutdown(0));
 
 console.log(`[dev-hmr] starting API on :${API_PORT} + vite on :${VITE_PORT}`);
 console.log(`[dev-hmr] open http://localhost:${VITE_PORT} for HMR (not the API URL)`);
@@ -95,7 +95,7 @@ launch(
   "32",
   "pnpm",
   ["dev", "dashboard", "--no-auth", "--port", API_PORT, "--host", "127.0.0.1"],
-  { cwd: repoRoot, env: { ...process.env, FUSION_API_PORT: API_PORT } },
+  { cwd: repoRoot, env: { ...globalThis.process.env, FUSION_API_PORT: API_PORT } },
 );
 
 // Vite: cyan. Starts once; proxies /api (including WS) to the API port.
@@ -104,5 +104,5 @@ launch(
   "36",
   "pnpm",
   ["exec", "vite", "dev", "--port", VITE_PORT],
-  { cwd: dashboardDir, env: { ...process.env, FUSION_API_PORT: API_PORT } },
+  { cwd: dashboardDir, env: { ...globalThis.process.env, FUSION_API_PORT: API_PORT } },
 );
