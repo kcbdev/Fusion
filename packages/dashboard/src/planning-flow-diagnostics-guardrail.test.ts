@@ -27,6 +27,7 @@ const AI_SESSION_FLOW_MODULES = [
   "milestone-slice-interview.ts",
   "subtask-breakdown.ts",
   "agent-generation.ts",
+  "ai-session-store.ts",
 ] as const;
 
 type AiSessionFlowModule = (typeof AI_SESSION_FLOW_MODULES)[number];
