@@ -1,0 +1,14 @@
+{
+  "id": "fusion-plugin-openclaw-runtime",
+  "name": "OpenClaw Runtime Plugin",
+  "version": "0.1.0",
+  "description": "OpenClaw runtime plugin for Fusion with experimental deferred execution",
+  "author": "Fusion Team",
+  "homepage": "https://github.com/gsxdsm/fusion",
+  "runtime": {
+    "runtimeId": "openclaw",
+    "name": "OpenClaw Runtime",
+    "description": "Experimental OpenClaw runtime integration for Fusion tasks (execution deferred)",
+    "version": "0.1.0"
+  }
+}

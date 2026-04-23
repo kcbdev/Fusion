@@ -233,6 +233,7 @@ Fusion supports multiple agent runtimes through a plugin-based runtime system. T
 | `pi` | Default PI Runtime | Built-in runtime using the `pi` agent (default) |
 | `paperclip` | Paperclip Runtime | Plugin-provided runtime (requires `fusion-plugin-paperclip-runtime`) |
 | `hermes` | Hermes Runtime (experimental) | Plugin-provided experimental runtime hint (requires `fusion-plugin-hermes-runtime`; execution deferred to FN-2264) |
+| `openclaw` | OpenClaw Runtime (experimental) | Plugin-provided experimental runtime hint (requires `fusion-plugin-openclaw-runtime`; execution currently deferred placeholder) |
 
 ### Runtime Resolution Order
 
@@ -240,7 +241,7 @@ When creating an agent session, Fusion resolves the runtime as follows:
 
 1. **No `runtimeHint` configured** → Use default `pi` runtime
 2. **`runtimeHint` is `"pi"` or `"default"`** → Use default `pi` runtime
-3. **`runtimeHint` is a plugin runtime ID** (e.g., `"paperclip"` or `"hermes"`) → Look up and instantiate the plugin runtime
+3. **`runtimeHint` is a plugin runtime ID** (e.g., `"paperclip"`, `"hermes"`, or `"openclaw"`) → Look up and instantiate the plugin runtime
 4. **Plugin runtime unavailable** → Fall back to default `pi` runtime (with warning log)
 
 ### Configuring Runtime Selection
@@ -267,7 +268,17 @@ Runtime selection is configured at the **agent level** via `runtimeConfig.runtim
 }
 ```
 
-> ⚠️ `runtimeHint: "hermes"` is currently experimental and deferred. Runtime resolution works, but execution remains intentionally unimplemented until FN-2264.
+```json
+{
+  "name": "OpenClaw Executor",
+  "role": "executor",
+  "runtimeConfig": {
+    "runtimeHint": "openclaw"
+  }
+}
+```
+
+> ⚠️ `runtimeHint: "hermes"` and `runtimeHint: "openclaw"` are currently experimental/deferred placeholders. Runtime resolution works, but execution remains intentionally unimplemented for these runtimes.
 
 **Important:** There is no task-level runtime configuration. Tasks inherit the runtime from their assigned agent's `runtimeConfig`.
 
@@ -283,13 +294,14 @@ The fallback ensures tasks continue executing even if the configured runtime plu
 
 ### Installing Plugin Runtimes
 
-To use plugin-provided runtimes like Paperclip or Hermes:
+To use plugin-provided runtimes like Paperclip, Hermes, or OpenClaw:
 
-1. Install one or both plugins:
+1. Install one or more runtime plugins:
 
 ```bash
 fn plugin add ./plugins/fusion-plugin-paperclip-runtime
 fn plugin add ./plugins/fusion-plugin-hermes-runtime
+fn plugin add ./plugins/fusion-plugin-openclaw-runtime
 ```
 
 2. Create agents with the appropriate `runtimeConfig`:
@@ -314,9 +326,19 @@ fn plugin add ./plugins/fusion-plugin-hermes-runtime
 }
 ```
 
+```json
+{
+  "name": "OpenClaw Executor",
+  "role": "executor",
+  "runtimeConfig": {
+    "runtimeHint": "openclaw"
+  }
+}
+```
+
 3. Assign the agent to tasks that should use this runtime.
 
-For more details, see the [Paperclip Runtime Plugin documentation](../plugins/fusion-plugin-paperclip-runtime/README.md) and [Hermes Runtime Plugin documentation](../plugins/fusion-plugin-hermes-runtime/README.md).
+For more details, see the [Paperclip Runtime Plugin documentation](../plugins/fusion-plugin-paperclip-runtime/README.md), [Hermes Runtime Plugin documentation](../plugins/fusion-plugin-hermes-runtime/README.md), and [OpenClaw Runtime Plugin documentation](../plugins/fusion-plugin-openclaw-runtime/README.md).
 
 ---
 
@@ -448,7 +470,7 @@ To clear all overrides, set `promptOverrides` to `null`:
 
 ### 4) Agent runtime configuration (example agent config)
 
-Runtime selection is configured at the agent level via `runtimeConfig`. These examples show agents configured to use Paperclip and Hermes runtime hints:
+Runtime selection is configured at the agent level via `runtimeConfig`. These examples show agents configured to use Paperclip, Hermes, and OpenClaw runtime hints:
 
 ```json
 {
@@ -470,7 +492,17 @@ Runtime selection is configured at the agent level via `runtimeConfig`. These ex
 }
 ```
 
-> ⚠️ Hermes remains experimental/deferred (FN-2264). Runtime hint selection is available now; full runtime execution behavior is not.
+```json
+{
+  "name": "OpenClaw Executor",
+  "role": "executor",
+  "runtimeConfig": {
+    "runtimeHint": "openclaw"
+  }
+}
+```
+
+> ⚠️ Hermes and OpenClaw remain experimental/deferred placeholders. Runtime hint selection is available now; full runtime execution behavior is not.
 
 To create a Hermes-configured agent via the API:
 

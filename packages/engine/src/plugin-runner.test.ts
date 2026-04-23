@@ -998,6 +998,101 @@ describe("PluginRunner", () => {
     });
   });
 
+  describe("OpenClaw runtime compatibility", () => {
+    it("should resolve openclaw runtime when registered", () => {
+      const openclawRuntime = {
+        metadata: {
+          runtimeId: "openclaw",
+          name: "OpenClaw Runtime",
+          description: "Experimental OpenClaw runtime integration for Fusion tasks (execution deferred)",
+          version: "0.1.0",
+        },
+        factory: vi.fn().mockReturnValue({}),
+      };
+      mockPluginLoader.getPluginRuntimes.mockReturnValue([
+        { pluginId: "fusion-plugin-openclaw-runtime", runtime: openclawRuntime as any },
+      ]);
+
+      const result = pluginRunner.getRuntimeById("openclaw");
+      expect(result).toBeDefined();
+      expect(result?.pluginId).toBe("fusion-plugin-openclaw-runtime");
+      expect(result?.runtime.metadata.runtimeId).toBe("openclaw");
+      expect(result?.runtime.metadata.name).toBe("OpenClaw Runtime");
+      expect(result?.runtime.metadata.description).toBe(
+        "Experimental OpenClaw runtime integration for Fusion tasks (execution deferred)",
+      );
+      expect(result?.runtime.metadata.version).toBe("0.1.0");
+    });
+
+    it("should expose openclaw runtime metadata correctly", () => {
+      const openclawRuntime = {
+        metadata: {
+          runtimeId: "openclaw",
+          name: "OpenClaw Runtime",
+          description: "Experimental OpenClaw runtime integration for Fusion tasks (execution deferred)",
+          version: "0.1.0",
+        },
+        factory: vi.fn().mockReturnValue({}),
+      };
+      mockPluginLoader.getPluginRuntimes.mockReturnValue([
+        { pluginId: "fusion-plugin-openclaw-runtime", runtime: openclawRuntime as any },
+      ]);
+
+      const result = pluginRunner.getRuntimeById("openclaw");
+      expect(result).toBeDefined();
+      expect(result?.pluginId).toBe("fusion-plugin-openclaw-runtime");
+      expect(result?.runtime.metadata).toEqual({
+        runtimeId: "openclaw",
+        name: "OpenClaw Runtime",
+        description: "Experimental OpenClaw runtime integration for Fusion tasks (execution deferred)",
+        version: "0.1.0",
+      });
+    });
+
+    it("should return deferred placeholder object when openclaw factory is invoked", async () => {
+      const openclawPlaceholderRuntime = {
+        runtimeId: "openclaw",
+        version: "0.1.0",
+        status: "deferred",
+        message:
+          "OpenClaw runtime execution is currently deferred. This runtime is registered for discovery and configuration only.",
+        execute: vi.fn().mockRejectedValue(
+          new Error(
+            "OpenClaw runtime is not implemented yet. Runtime discovery and configuration are supported, but execution is deferred.",
+          ),
+        ),
+      };
+      const openclawRuntime = {
+        metadata: {
+          runtimeId: "openclaw",
+          name: "OpenClaw Runtime",
+          description: "Experimental OpenClaw runtime integration for Fusion tasks (execution deferred)",
+          version: "0.1.0",
+        },
+        factory: vi.fn().mockReturnValue(openclawPlaceholderRuntime),
+      };
+      mockPluginLoader.getPluginRuntimes.mockReturnValue([
+        { pluginId: "fusion-plugin-openclaw-runtime", runtime: openclawRuntime as any },
+      ]);
+
+      const result = pluginRunner.getRuntimeById("openclaw");
+      expect(result).toBeDefined();
+
+      const context = { pluginId: "fusion-plugin-openclaw-runtime" };
+      const runtime = await result!.runtime.factory(context as any) as typeof openclawPlaceholderRuntime;
+
+      expect(openclawRuntime.factory).toHaveBeenCalledWith(context);
+      expect(runtime).toBe(openclawPlaceholderRuntime);
+      expect(runtime).toMatchObject({
+        runtimeId: "openclaw",
+        version: "0.1.0",
+        status: "deferred",
+      });
+      expect(runtime.message).toContain("discovery and configuration only");
+      expect(runtime.execute).toBeTypeOf("function");
+    });
+  });
+
   describe("getLoader() / getStore()", () => {
     it("should return the plugin loader", () => {
       const loader = pluginRunner.getLoader();

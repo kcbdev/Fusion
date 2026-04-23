@@ -70,6 +70,32 @@ Configure an agent to use Hermes:
 
 For Hermes-specific details, see the [Hermes Runtime Plugin documentation](../plugins/fusion-plugin-hermes-runtime/README.md).
 
+### Optional: Install the OpenClaw Runtime Plugin (Experimental)
+
+The OpenClaw Runtime Plugin (`fusion-plugin-openclaw-runtime`) registers an experimental runtime hint (`"openclaw"`) so agents can explicitly target OpenClaw in runtime selection.
+
+Install the plugin:
+
+```bash
+fn plugin add ./plugins/fusion-plugin-openclaw-runtime
+```
+
+Configure an agent to use OpenClaw:
+
+```json
+{
+  "name": "OpenClaw Executor",
+  "role": "executor",
+  "runtimeConfig": {
+    "runtimeHint": "openclaw"
+  }
+}
+```
+
+> ⚠️ OpenClaw is currently a deferred placeholder. Runtime registration and selection work, but execution intentionally reports "not implemented".
+
+For OpenClaw-specific details, see the [OpenClaw Runtime Plugin documentation](../plugins/fusion-plugin-openclaw-runtime/README.md).
+
 ## Install Fusion
 
 Install the published CLI package globally:

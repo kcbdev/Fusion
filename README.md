@@ -165,7 +165,7 @@ npx companies.sh add paperclipai/companies/gstack
 
 ## Built on Pi. Compatible with the tools you already use.
 
-Fusion stands on open tools we love. Every **Pi** extension works out of the box. **Hermes** and **Paperclip** both ship as first-class plugins — route any workspace to whichever runtime fits the task. And any Paperclip agent-company imports with a single command.
+Fusion stands on open tools we love. Every **Pi** extension works out of the box. **Hermes**, **Paperclip**, and **OpenClaw** all ship as first-class plugins — route any workspace to whichever runtime fits the task. And any Paperclip agent-company imports with a single command.
 
 <div align="center">
   <img src="./demo/assets/pi-logo.svg" alt="Pi" height="56" />
@@ -193,6 +193,10 @@ pi install npm:@runfusion/fusion
 
 The open-source autonomous agent from **Nous Research**. Install the Hermes plugin and run agents through Hermes for long-running, context-growing work — route any Fusion workspace to it.
 
+### OpenClaw <sub>`experimental`</sub>
+
+OpenClaw runtime support is available as an experimental plugin (`fusion-plugin-openclaw-runtime`) for runtime discovery/configuration parity. Configure agents with `runtimeConfig.runtimeHint: "openclaw"` after installing the plugin.
+
 <br />
 
 <div align="center">
@@ -213,7 +217,7 @@ npx companies.sh add paperclipai/companies/gstack
 
 <br />
 
-> **Hermes** and **Paperclip** are both **experimental** — APIs and wire formats may shift between minor releases. **Pi** is Fusion's stable runtime dependency.
+> **Hermes**, **Paperclip**, and **OpenClaw** are **experimental** runtime plugins — APIs and wire formats may shift between minor releases. **Pi** is Fusion's stable runtime dependency.
 
 ---
 
