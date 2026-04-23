@@ -473,7 +473,7 @@ describe("syncBackupRoutine", () => {
     expect(routine).toBeDefined();
     expect(routine?.name).toBe("Database Backup");
     expect(routine?.trigger).toEqual({ type: "cron", cronExpression: "0 3 * * *" });
-    expect(routine?.command).toBe("fn backup --create");
+    expect(routine?.command).toBe("npx runfusion.ai backup --create");
     expect(routine?.agentId).toBe("");
     expect(routine?.scope).toBe("project");
   });
@@ -494,7 +494,7 @@ describe("syncBackupRoutine", () => {
 
     expect(routines).toHaveLength(1);
     expect(updated?.trigger).toEqual({ type: "cron", cronExpression: "30 4 * * *" });
-    expect(updated?.command).toBe("fn backup --create");
+    expect(updated?.command).toBe("npx runfusion.ai backup --create");
     expect(updated?.enabled).toBe(true);
   });
 

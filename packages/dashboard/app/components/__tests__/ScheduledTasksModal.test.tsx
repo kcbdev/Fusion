@@ -118,7 +118,7 @@ describe("ScheduledTasksModal", () => {
 
   it("shows routine cards and the new automation button when routines exist", async () => {
     mockFetchRoutines.mockResolvedValue([
-      makeRoutine({ name: "Database Backup", command: "fn backup --create" }),
+      makeRoutine({ name: "Database Backup", command: "npx runfusion.ai backup --create" }),
     ]);
 
     render(<ScheduledTasksModal onClose={onClose} addToast={addToast} />);
@@ -126,7 +126,7 @@ describe("ScheduledTasksModal", () => {
     await waitFor(() => {
       expect(screen.getByText("Database Backup")).toBeDefined();
     });
-    expect(screen.getByText("fn backup --create")).toBeDefined();
+    expect(screen.getByText("npx runfusion.ai backup --create")).toBeDefined();
     expect(screen.getByText("New Automation")).toBeDefined();
   });
 

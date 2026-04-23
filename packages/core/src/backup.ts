@@ -420,11 +420,11 @@ export async function syncBackupAutomation(
     throw new Error(`Invalid backup schedule: ${schedule}`);
   }
   
-  // Build the backup command
-  // The CLI command will be: fn backup --auto
-  // The --auto flag indicates this is an automated run (can add special handling if needed)
-  const command = "fn backup --create";
-  
+  // Build the backup command.
+  // Uses `npx runfusion.ai` so backups work even when only the zero-install
+  // path (`npx runfusion.ai`) has been used and `fn` is not on PATH.
+  const command = "npx runfusion.ai backup --create";
+
   if (existingSchedule) {
     // Update existing schedule
     return await automationStore.updateSchedule(existingSchedule.id, {
@@ -474,7 +474,7 @@ export async function syncBackupRoutine(
     throw new Error(`Invalid backup schedule: ${schedule}`);
   }
 
-  const command = "fn backup --create";
+  const command = "npx runfusion.ai backup --create";
   const input = {
     name: BACKUP_SCHEDULE_NAME,
     description: "Automatic database backup based on project settings",

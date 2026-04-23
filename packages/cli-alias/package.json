@@ -23,7 +23,9 @@
   "type": "module",
   "bin": {
     "runfusion.ai": "index.js",
-    "runfusion": "index.js"
+    "runfusion": "index.js",
+    "fn": "index.js",
+    "fusion": "index.js"
   },
   "files": [
     "index.js",

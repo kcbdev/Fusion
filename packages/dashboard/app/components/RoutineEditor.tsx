@@ -674,7 +674,7 @@ export function RoutineEditor({ routine, onSubmit, onCancel, scope: formScope, p
           {simpleActionType === "command" ? (
             <div className="form-group">
               <label htmlFor="routine-command">Command</label>
-              <input id="routine-command" type="text" placeholder="e.g. fn backup --create" value={command} onChange={(e) => setCommand(e.target.value)} aria-invalid={!!errors.command} aria-describedby={errors.command ? commandErrorId : undefined} />
+              <input id="routine-command" type="text" placeholder="e.g. npx runfusion.ai backup --create" value={command} onChange={(e) => setCommand(e.target.value)} aria-invalid={!!errors.command} aria-describedby={errors.command ? commandErrorId : undefined} />
               {errors.command ? <small id={commandErrorId} className="field-error">{errors.command}</small> : <small>Shell command to execute.</small>}
             </div>
           ) : simpleActionType === "ai-prompt" ? (

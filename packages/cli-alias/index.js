@@ -1,16 +1,25 @@
 #!/usr/bin/env node
 // runfusion.ai — tiny alias for @runfusion/fusion.
-// With no args, launches the Fusion dashboard. With args, forwards to the
-// underlying `fn` CLI so `npx runfusion.ai task list` etc. Just Work.
+//
+// Exposes four bins: runfusion.ai, runfusion, fn, fusion. Installing this
+// package globally (`npm i -g runfusion.ai`) therefore also puts `fn` and
+// `fusion` on PATH, even though `@runfusion/fusion` is only a dependency
+// (npm does not link dep bins globally).
+//
+// When invoked as `runfusion.ai` / `runfusion` with no args, defaults to
+// launching the dashboard. When invoked as `fn` / `fusion`, forwards args
+// verbatim so behavior matches the main CLI exactly (e.g. bare `fn` prints
+// help, not `fn dashboard`).
+
+import { basename } from "node:path";
 
 const args = process.argv.slice(2);
+const invokedAs = basename(process.argv[1] || "").replace(/\.(js|cjs|mjs|exe)$/i, "");
+const isAliasInvocation = invokedAs === "runfusion.ai" || invokedAs === "runfusion";
 
-if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
-  // No subcommand → default to dashboard. Keep --help passthrough explicit
-  // so users can discover the full CLI surface via `npx runfusion.ai --help`.
-  if (args.length === 0) {
-    process.argv = [process.argv[0], process.argv[1], "dashboard"];
-  }
+if (isAliasInvocation && args.length === 0) {
+  // No subcommand → default to dashboard.
+  process.argv = [process.argv[0], process.argv[1], "dashboard"];
 }
 
 await import("@runfusion/fusion/dist/bin.js");
