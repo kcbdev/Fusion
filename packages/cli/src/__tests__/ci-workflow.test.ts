@@ -23,12 +23,14 @@ describe("CI workflow (.github/workflows/ci.yml)", () => {
   let workflow: any;
   let content: string;
   let ciSteps: any[];
+  let contributingContent: string;
 
   beforeAll(() => {
     const result = loadWorkflow("ci.yml");
     workflow = result.parsed;
     content = result.content;
     ciSteps = workflow.jobs?.ci?.steps ?? [];
+    contributingContent = readFileSync(join(workspaceRoot, "docs", "contributing.md"), "utf-8");
   });
 
   const findStepByRun = (runSnippet: string) => ciSteps.find((step) => typeof step.run === "string" && step.run.includes(runSnippet));
@@ -72,6 +74,14 @@ describe("CI workflow (.github/workflows/ci.yml)", () => {
     const buildExeIdx = findStepIndexByRun("build:exe");
     expect(verifyIdx).toBeGreaterThanOrEqual(0);
     expect(buildExeIdx).toBeGreaterThan(verifyIdx);
+  });
+
+  it("keeps contributing docs aligned with the clean-worktree verification contract", () => {
+    expect(contributingContent).toContain("pnpm test` must be runnable in a clean worktree without requiring a prior `pnpm build`.");
+    expect(contributingContent).toContain("`pnpm verify:workspace` is the canonical pre-merge gate");
+    expect(contributingContent).toContain("1. `pnpm lint`");
+    expect(contributingContent).toContain("2. `pnpm test`");
+    expect(contributingContent).toContain("3. `pnpm build`");
   });
 
   it("includes binary build step", () => {

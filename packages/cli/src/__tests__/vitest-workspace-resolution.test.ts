@@ -65,15 +65,25 @@ describe("CLI Vitest workspace resolution", () => {
           replacement: join(workspaceRoot, "packages", "engine", "src", "index.ts"),
         },
         {
+          find: String(/^@fusion\/dashboard\/planning$/),
+          replacement: join(workspaceRoot, "packages", "dashboard", "src", "planning.ts"),
+        },
+        {
           find: String(/^@fusion\/dashboard$/),
           replacement: join(workspaceRoot, "packages", "dashboard", "src", "index.ts"),
         },
         {
-          find: String(/^@fusion\/dashboard\/planning$/),
-          replacement: join(workspaceRoot, "packages", "dashboard", "src", "planning.ts"),
+          find: String(/^@fusion\/test-utils$/),
+          replacement: join(workspaceRoot, "packages", "core", "src", "__test-utils__", "workspace.ts"),
         },
       ]),
     );
+
+    for (const entry of normalized) {
+      expect(entry.replacement).toContain(`${join("packages", "")}`);
+      expect(entry.replacement).toContain(`${join("src", "")}`);
+      expect(entry.replacement).not.toContain(`${join("dist", "")}`);
+    }
 
     const coreGhCliIndex = normalized.findIndex((entry) => entry.find === String(/^@fusion\/core\/gh-cli$/));
     const coreIndex = normalized.findIndex((entry) => entry.find === String(/^@fusion\/core$/));
@@ -86,11 +96,25 @@ describe("CLI Vitest workspace resolution", () => {
     expect(dashboardIndex).toBeGreaterThan(planningIndex);
   });
 
-  it("resolves internal workspace imports during CLI tests when dist outputs are absent", async () => {
-    await expect(import("@fusion/core")).resolves.toBeTruthy();
-    await expect(import("@fusion/core/gh-cli")).resolves.toBeTruthy();
-    await expect(import("@fusion/engine")).resolves.toBeTruthy();
-    await expect(import("@fusion/dashboard")).resolves.toBeTruthy();
-    await expect(import("@fusion/dashboard/planning")).resolves.toBeTruthy();
+  it("resolves non-mocked symbols from internal workspace packages when dist outputs are absent", async () => {
+    const [{ tempWorkspace }, { PRIORITY_EXECUTE }, { createRuntimeLogger }, { parseAgentResponse }] = await Promise.all([
+      import("@fusion/test-utils"),
+      import("@fusion/engine"),
+      import("@fusion/dashboard"),
+      import("@fusion/dashboard/planning"),
+    ]);
+
+    expect(typeof tempWorkspace).toBe("function");
+    expect(typeof PRIORITY_EXECUTE).toBe("number");
+    expect(typeof createRuntimeLogger).toBe("function");
+    expect(parseAgentResponse('{"type":"question","data":{"id":"q","type":"confirm","question":"Ok?","description":"desc"}}')).toEqual({
+      type: "question",
+      data: {
+        id: "q",
+        type: "confirm",
+        question: "Ok?",
+        description: "desc",
+      },
+    });
   }, 30_000);
 });
