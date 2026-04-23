@@ -30702,6 +30702,7 @@ html .column.drag-over * {
 }
 
 .agent-import-result-divider {
+  align-self: stretch;
   height: 1px;
   background: var(--border);
   margin: var(--space-md) 0;
@@ -30713,7 +30714,7 @@ html .column.drag-over * {
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  margin-bottom: var(--space-sm);
+  margin: 0 0 var(--space-sm) 0;
 }
 
 /* Agent Import Browse Mode */
