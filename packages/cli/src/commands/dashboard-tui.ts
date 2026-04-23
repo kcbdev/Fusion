@@ -1286,6 +1286,11 @@ export class DashboardTUI {
 export class DashboardLogSink {
   private tui: DashboardTUI | null = null;
   private isTTY: boolean;
+  private originalConsole: {
+    log: typeof console.log;
+    warn: typeof console.warn;
+    error: typeof console.error;
+  } | null = null;
 
   constructor(tui?: DashboardTUI) {
     this.tui = tui ?? null;
@@ -1298,28 +1303,106 @@ export class DashboardLogSink {
   }
 
   log(message: string, prefix?: string): void {
+    const line = prefix ? `[${prefix}] ${message}` : message;
     if (this.tui && this.isTTY) {
       this.tui.log(message, prefix);
+    } else if (this.originalConsole) {
+      // Route through the pre-capture console.log with the correct receiver.
+      this.originalConsole.log.call(console, line);
     } else {
-      console.log(prefix ? `[${prefix}] ${message}` : message);
+      console.log(line);
     }
   }
 
   warn(message: string, prefix?: string): void {
+    const line = prefix ? `[${prefix}] ${message}` : message;
     if (this.tui && this.isTTY) {
       this.tui.warn(message, prefix);
+    } else if (this.originalConsole) {
+      this.originalConsole.warn.call(console, line);
     } else {
-      console.warn(prefix ? `[${prefix}] ${message}` : message);
+      console.warn(line);
     }
   }
 
   error(message: string, prefix?: string): void {
+    const line = prefix ? `[${prefix}] ${message}` : message;
     if (this.tui && this.isTTY) {
       this.tui.error(message, prefix);
+    } else if (this.originalConsole) {
+      this.originalConsole.error.call(console, line);
     } else {
-      console.error(prefix ? `[${prefix}] ${message}` : message);
+      console.error(line);
     }
   }
+
+  /**
+   * Monkey-patch `console.log/warn/error` so everything (including the engine's
+   * createLogger() output, which writes directly to console.error) surfaces in
+   * the TUI's log ring buffer. Without this, most runtime logs render beneath
+   * the alt-screen TUI and are immediately overwritten on the next render,
+   * leaving the Logs tab nearly empty.
+   *
+   * Messages that start with `[prefix] rest` are unpacked so the TUI stores
+   * `prefix="prefix"` and `message="rest"`. Idempotent; call `releaseConsole()`
+   * on TUI shutdown to restore the originals.
+   */
+  captureConsole(): void {
+    if (this.originalConsole) return;
+    // Store the exact function references (not bound wrappers) so
+    // releaseConsole can restore identity. console.log/warn/error are
+    // `this`-independent in Node, so calling them without a receiver is safe.
+    this.originalConsole = {
+      log: console.log,
+      warn: console.warn,
+      error: console.error,
+    };
+    console.log = (...args: unknown[]) => {
+      const { message, prefix } = formatConsoleArgs(args);
+      this.log(message, prefix);
+    };
+    console.warn = (...args: unknown[]) => {
+      const { message, prefix } = formatConsoleArgs(args);
+      this.warn(message, prefix);
+    };
+    console.error = (...args: unknown[]) => {
+      const { message, prefix } = formatConsoleArgs(args);
+      this.error(message, prefix);
+    };
+  }
+
+  /** Restore console.log/warn/error to their pre-capture implementations. */
+  releaseConsole(): void {
+    if (!this.originalConsole) return;
+    console.log = this.originalConsole.log;
+    console.warn = this.originalConsole.warn;
+    console.error = this.originalConsole.error;
+    this.originalConsole = null;
+  }
+}
+
+/**
+ * Format heterogeneous console args into a single string, and extract a
+ * leading `[prefix]` if present. Mirrors `util.format` loosely without
+ * the dependency — objects are JSON-stringified (defensively, falling back
+ * to String()), everything else is coerced via String().
+ */
+export function formatConsoleArgs(args: unknown[]): { message: string; prefix?: string } {
+  const stringified = args.map((arg) => {
+    if (typeof arg === "string") return arg;
+    if (arg instanceof Error) return arg.stack ?? arg.message;
+    if (arg === null || arg === undefined) return String(arg);
+    if (typeof arg === "object") {
+      try { return JSON.stringify(arg); } catch { return String(arg); }
+    }
+    return String(arg);
+  }).join(" ");
+
+  const match = stringified.match(/^\[([^\]]+)\]\s*(.*)$/s);
+  if (match) {
+    return { prefix: match[1], message: match[2] };
+  }
+  return { message: stringified };
 }
 
 // ── String Helpers ────────────────────────────────────────────────────────────

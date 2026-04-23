@@ -388,6 +388,10 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
 
     // Wire the TUI into the log sink so all console output routes through TUI
     logSink.setTUI(tui);
+    // Capture stdlib console.* so engine/scheduler/pi/etc. log lines (which
+    // go straight to console.error via createLogger in @fusion/engine) land
+    // in the TUI's ring buffer instead of being overwritten by the alt screen.
+    logSink.captureConsole();
   }
 
   store = new TaskStore(cwd);
@@ -794,6 +798,10 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
 
     // Stop TUI if active
     if (tui) {
+      // Restore console.* before stopping the TUI so any log lines emitted
+      // during teardown (or by late-firing listeners) go to the real terminal
+      // instead of a ring buffer that's about to disappear.
+      logSink.releaseConsole();
       void tui.stop();
     }
 

@@ -5,6 +5,7 @@ import {
   isTTYAvailable,
   renderHeaderToString,
   DashboardTUI,
+  formatConsoleArgs,
   type SystemInfo,
   type TaskStats,
   type SettingsValues,
@@ -131,6 +132,161 @@ describe("DashboardLogSink", () => {
 
     expect(consoleLogSpy).toHaveBeenCalledWith("");
     consoleLogSpy.mockRestore();
+  });
+});
+
+// ── DashboardLogSink console capture ───────────────────────────────────────
+//
+// Engine subsystems log via createLogger() in @fusion/engine, which writes
+// straight to console.error with a `[prefix]` tag. Under the TUI's alt screen
+// those writes are invisible. captureConsole() bridges them into the ring
+// buffer; releaseConsole() restores the originals on teardown.
+
+describe("DashboardLogSink.captureConsole", () => {
+  let originalLog: typeof console.log;
+  let originalWarn: typeof console.warn;
+  let originalError: typeof console.error;
+
+  beforeEach(() => {
+    originalLog = console.log;
+    originalWarn = console.warn;
+    originalError = console.error;
+  });
+
+  afterEach(() => {
+    // Defensive: even if a test fails mid-way, don't leave console patched.
+    console.log = originalLog;
+    console.warn = originalWarn;
+    console.error = originalError;
+  });
+
+  it("routes console.log to sink.log, splitting a [prefix] tag", () => {
+    const tui = new DashboardTUI();
+    // Use the public addLog-backed log() by setting the TUI mode.
+    const sink = new DashboardLogSink();
+    sink.setTUI(tui);
+    sink.captureConsole();
+
+    console.log("[executor] task moved to in-progress");
+
+    const entries = (tui as unknown as {
+      logBuffer: LogRingBuffer;
+    }).logBuffer.getAll();
+    expect(entries).toHaveLength(1);
+    expect(entries[0].level).toBe("info");
+    expect(entries[0].prefix).toBe("executor");
+    expect(entries[0].message).toBe("task moved to in-progress");
+
+    sink.releaseConsole();
+  });
+
+  it("routes console.warn to sink.warn and preserves level", () => {
+    const tui = new DashboardTUI();
+    const sink = new DashboardLogSink();
+    sink.setTUI(tui);
+    sink.captureConsole();
+
+    console.warn("[merger] retry 2/3");
+
+    const entries = (tui as unknown as {
+      logBuffer: LogRingBuffer;
+    }).logBuffer.getAll();
+    expect(entries[0].level).toBe("warn");
+    expect(entries[0].prefix).toBe("merger");
+
+    sink.releaseConsole();
+  });
+
+  it("routes console.error to sink.error", () => {
+    const tui = new DashboardTUI();
+    const sink = new DashboardLogSink();
+    sink.setTUI(tui);
+    sink.captureConsole();
+
+    console.error("[scheduler] could not claim lease");
+
+    const entries = (tui as unknown as {
+      logBuffer: LogRingBuffer;
+    }).logBuffer.getAll();
+    expect(entries[0].level).toBe("error");
+    expect(entries[0].prefix).toBe("scheduler");
+    expect(entries[0].message).toBe("could not claim lease");
+
+    sink.releaseConsole();
+  });
+
+  it("handles untagged messages without a prefix", () => {
+    const tui = new DashboardTUI();
+    const sink = new DashboardLogSink();
+    sink.setTUI(tui);
+    sink.captureConsole();
+
+    console.log("a raw line with no bracket tag");
+
+    const entries = (tui as unknown as {
+      logBuffer: LogRingBuffer;
+    }).logBuffer.getAll();
+    expect(entries[0].prefix).toBeUndefined();
+    expect(entries[0].message).toBe("a raw line with no bracket tag");
+
+    sink.releaseConsole();
+  });
+
+  it("releaseConsole restores the original console functions", () => {
+    const sink = new DashboardLogSink();
+    sink.captureConsole();
+    expect(console.log).not.toBe(originalLog);
+    expect(console.warn).not.toBe(originalWarn);
+    expect(console.error).not.toBe(originalError);
+
+    sink.releaseConsole();
+    expect(console.log).toBe(originalLog);
+    expect(console.warn).toBe(originalWarn);
+    expect(console.error).toBe(originalError);
+  });
+
+  it("captureConsole is idempotent (calling twice does not double-wrap)", () => {
+    const sink = new DashboardLogSink();
+    sink.captureConsole();
+    const firstPatched = console.log;
+    sink.captureConsole();
+    expect(console.log).toBe(firstPatched);
+    sink.releaseConsole();
+  });
+});
+
+// ── formatConsoleArgs helper ───────────────────────────────────────────────
+
+describe("formatConsoleArgs", () => {
+  it("joins multiple args with a space", () => {
+    const { message, prefix } = formatConsoleArgs(["hello", "world"]);
+    expect(prefix).toBeUndefined();
+    expect(message).toBe("hello world");
+  });
+
+  it("extracts a leading [prefix] tag", () => {
+    const { message, prefix } = formatConsoleArgs(["[executor] starting task FN-123"]);
+    expect(prefix).toBe("executor");
+    expect(message).toBe("starting task FN-123");
+  });
+
+  it("stringifies objects via JSON", () => {
+    const { message } = formatConsoleArgs(["result:", { ok: true, count: 3 }]);
+    expect(message).toBe('result: {"ok":true,"count":3}');
+  });
+
+  it("uses error.stack when given an Error", () => {
+    const err = new Error("boom");
+    const { message } = formatConsoleArgs([err]);
+    expect(message).toContain("boom");
+  });
+
+  it("falls back to String() for circular objects", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const { message } = formatConsoleArgs([circular]);
+    // Specifically: no throw. Exact string is platform-dependent.
+    expect(typeof message).toBe("string");
   });
 });
 
