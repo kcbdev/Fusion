@@ -29,9 +29,6 @@ importers:
 
   packages/cli:
     dependencies:
-      '@fusion/pi-claude-cli':
-        specifier: workspace:*
-        version: link:../pi-claude-cli
       '@mariozechner/pi-ai':
         specifier: ^0.70.0
         version: 0.70.0(@modelcontextprotocol/sdk@1.28.0(zod@4.3.6))(ws@8.20.0)(zod@4.3.6)
@@ -57,6 +54,9 @@ importers:
       '@fusion/engine':
         specifier: workspace:*
         version: link:../engine
+      '@fusion/pi-claude-cli':
+        specifier: workspace:*
+        version: link:../pi-claude-cli
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.15
