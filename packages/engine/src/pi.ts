@@ -113,6 +113,33 @@ async function promptSessionAndCheck(session: AgentSession, prompt: string, opti
 
   const stateError = getSessionStateError(session);
   if (stateError) {
+    // pi-coding-agent swallows its own exceptions into state.errorMessage
+    // without preserving a stack. When the message looks like a generic
+    // TypeError (undefined/null property access), dump the session transcript
+    // shape so the malformed message can be identified next time.
+    if (/Cannot read propert(y|ies) of (undefined|null)/i.test(stateError)) {
+      try {
+        const messages = (session as any).agent?.state?.messages ?? (session as any).state?.messages;
+        if (Array.isArray(messages)) {
+          const recent = messages.slice(-6).map((m: Record<string, unknown>, idx: number) => {
+            const i = messages.length - 6 + idx;
+            const content = m?.content;
+            return {
+              index: i < 0 ? idx : i,
+              role: m?.role,
+              contentType: Array.isArray(content) ? `array(len=${content.length})` : typeof content,
+              toolName: (m as { toolName?: unknown }).toolName,
+              stopReason: (m as { stopReason?: unknown }).stopReason,
+            };
+          });
+          piLog.error(`pi state error — transcript tail (${messages.length} msgs total): ${JSON.stringify(recent)}`);
+        } else {
+          piLog.error(`pi state error — state.messages is not an array: ${typeof messages}`);
+        }
+      } catch (inspectErr) {
+        piLog.warn(`pi state error — failed to inspect transcript: ${inspectErr instanceof Error ? inspectErr.message : String(inspectErr)}`);
+      }
+    }
     throw new Error(stateError);
   }
 }
