@@ -406,7 +406,10 @@ export class AiSessionStore extends EventEmitter<AiSessionStoreEvents> {
     recovered += Number(withoutQuestion.changes ?? 0);
 
     if (recovered > 0) {
-      diagnostics.info("Recovered stale sessions after restart", { recovered });
+      diagnostics.info("Recovered stale sessions after restart", {
+        recovered,
+        operation: "recover-stale-sessions",
+      });
     }
     return recovered;
   }
@@ -478,6 +481,8 @@ export class AiSessionStore extends EventEmitter<AiSessionStoreEvents> {
       terminalDeleted,
       orphanedDeleted,
       totalDeleted,
+      maxAgeMs,
+      operation: "cleanup-stale-sessions",
     });
 
     return {
@@ -497,7 +502,10 @@ export class AiSessionStore extends EventEmitter<AiSessionStoreEvents> {
       try {
         this.cleanupStaleSessions(ttlMs);
       } catch (error) {
-        diagnostics.errorFromException("Scheduled cleanup failed", error, { ttlMs });
+        diagnostics.errorFromException("Scheduled cleanup failed", error, {
+          ttlMs,
+          operation: "scheduled-cleanup",
+        });
       }
     };
 

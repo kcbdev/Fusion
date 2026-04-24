@@ -20,6 +20,9 @@ import { resolve } from "node:path";
 /**
  * List of AI-session modules that must use the shared diagnostics helper.
  * These modules handle AI-session flows and must not use raw console.* diagnostics.
+ *
+ * Keep `agent-generation.ts` and `ai-session-store.ts` in this list — they are
+ * long-lived generation/cleanup surfaces with historical raw-console drift.
  */
 const AI_SESSION_FLOW_MODULES = [
   "planning.ts",
@@ -75,6 +78,11 @@ function findRawConsoleCalls(
 }
 
 describe("AI-Session Diagnostics Guardrail", () => {
+  it("explicitly guards agent-generation and ai-session-store modules", () => {
+    expect(AI_SESSION_FLOW_MODULES).toContain("agent-generation.ts");
+    expect(AI_SESSION_FLOW_MODULES).toContain("ai-session-store.ts");
+  });
+
   /**
    * Test that each AI-session flow module uses the shared diagnostics helper
    * instead of raw console.* calls.

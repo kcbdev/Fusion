@@ -153,6 +153,8 @@ describe("AiSessionStore", () => {
           terminalDeleted: 2,
           orphanedDeleted: 1,
           totalDeleted: 3,
+          maxAgeMs: SESSION_CLEANUP_DEFAULT_MAX_AGE_MS,
+          operation: "cleanup-stale-sessions",
         }),
       }),
     );
@@ -228,6 +230,7 @@ describe("AiSessionStore", () => {
         message: "Scheduled cleanup failed",
         context: expect.objectContaining({
           ttlMs: 60_000,
+          operation: "scheduled-cleanup",
           error: expect.objectContaining({ message: "boom" }),
         }),
       }),
@@ -282,7 +285,10 @@ describe("AiSessionStore", () => {
         level: "info",
         scope: "ai-session-store",
         message: "Recovered stale sessions after restart",
-        context: expect.objectContaining({ recovered: 2 }),
+        context: expect.objectContaining({
+          recovered: 2,
+          operation: "recover-stale-sessions",
+        }),
       }),
     );
   });

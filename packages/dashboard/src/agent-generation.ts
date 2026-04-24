@@ -215,6 +215,8 @@ function cleanupExpiredSessions(): void {
     diagnostics.info("Cleanup completed", {
       cleanedSessions,
       cleanedRateLimits,
+      ttlMs: SESSION_TTL_MS,
+      rateLimitWindowMs: RATE_LIMIT_WINDOW_MS,
       operation: "cleanup-expired",
     });
   }

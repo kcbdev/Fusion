@@ -479,6 +479,8 @@ describe("agent-generation module", () => {
         context: expect.objectContaining({
           cleanedSessions: 1,
           cleanedRateLimits: 2,
+          ttlMs: 30 * 60 * 1000,
+          rateLimitWindowMs: 60 * 60 * 1000,
           operation: "cleanup-expired",
         }),
       });

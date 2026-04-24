@@ -9,9 +9,8 @@
  * - Error isolation (plugin crashes don't crash the loader)
  */
 
-import { randomUUID } from "node:crypto";
-import { copyFile, unlink } from "node:fs/promises";
-import { isAbsolute, parse, resolve } from "node:path";
+import { copyFile, rm } from "node:fs/promises";
+import { basename, dirname, extname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { EventEmitter } from "node:events";
 import type { TaskStore } from "./store.js";
@@ -32,6 +31,7 @@ import { createLogger } from "./logger.js";
 // Minimum Fusion version for plugin compatibility checks (can be expanded later)
 const MINIMUM_FUSION_VERSION = "0.1.0";
 const log = createLogger("plugin-loader");
+let moduleImportVersion = 0;
 
 export interface PluginLoaderOptions {
   /** Plugin store for persistence */
@@ -88,8 +88,6 @@ export class PluginLoader extends EventEmitter<{
   /** Cache of dynamically imported modules */
   private loadedModules: Map<string, unknown> = new Map();
 
-  /** Monotonic nonce to guarantee unique cache-busting import URLs. */
-  private importNonce = 0;
 
   constructor(private options: PluginLoaderOptions) {
     super();
@@ -272,39 +270,28 @@ export class PluginLoader extends EventEmitter<{
       return this.loadedModules.get(path)!;
     }
 
-    let importPath = path;
-    let tempPath: string | null = null;
+    // Dynamic import - normalize to file URL so query params are honored
+    // consistently across Node + Vitest environments.
+    const moduleUrl = pathToFileURL(path).href;
+    let mod: unknown;
 
     if (bypassCache) {
-      const parsed = parse(path);
-      tempPath = resolve(
-        parsed.dir,
-        `${parsed.name}.fusion-import-${process.pid}-${++this.importNonce}-${randomUUID()}${parsed.ext || ".js"}`,
-      );
-      await copyFile(path, tempPath);
-      importPath = tempPath;
-    }
-
-    const fileUrl = pathToFileURL(importPath);
-
-    // Dynamic import - use a unique search param for reload scenarios.
-    // Using file: URLs avoids Vite/Vitest resolver edge cases with bare
-    // absolute filesystem paths plus query params.
-    if (bypassCache) {
-      fileUrl.searchParams.set("t", `${Date.now()}-${this.importNonce}`);
-    }
-
-    try {
-      const mod = await import(fileUrl.href);
-      this.loadedModules.set(path, mod);
-      return mod;
-    } finally {
-      if (tempPath) {
-        void unlink(tempPath).catch(() => {
-          // Best-effort cleanup; a stale temp import file is non-fatal.
-        });
+      moduleImportVersion += 1;
+      const ext = extname(path);
+      const baseName = basename(path, ext);
+      const reloadedPath = resolve(dirname(path), `.${baseName}.reload-${moduleImportVersion}${ext}`);
+      await copyFile(path, reloadedPath);
+      try {
+        mod = await import(pathToFileURL(reloadedPath).href);
+      } finally {
+        await rm(reloadedPath, { force: true }).catch(() => undefined);
       }
+    } else {
+      mod = await import(moduleUrl);
     }
+
+    this.loadedModules.set(path, mod);
+    return mod;
   }
 
   /**

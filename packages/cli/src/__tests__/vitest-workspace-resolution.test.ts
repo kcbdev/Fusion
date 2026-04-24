@@ -28,12 +28,15 @@ function hideInternalPackageDistDirs() {
 function restoreInternalPackageDistDirs() {
   for (let i = movedDistDirs.length - 1; i >= 0; i--) {
     const { from, to } = movedDistDirs[i];
-    if (existsSync(to)) {
-      if (existsSync(from)) {
-        rmSync(from, { recursive: true, force: true });
-      }
-      renameSync(to, from);
+    if (!existsSync(to)) {
+      continue;
     }
+
+    if (existsSync(from)) {
+      rmSync(from, { recursive: true, force: true });
+    }
+
+    renameSync(to, from);
   }
   movedDistDirs.length = 0;
 }
