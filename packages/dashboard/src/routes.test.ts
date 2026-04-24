@@ -2965,7 +2965,9 @@ describe("PATCH /tasks/:id/assign and GET /agents/:id/tasks", () => {
   let agentId: string;
   let store: TaskStore;
 
-  beforeEach(async () => {
+  // Agent store init + createAgent is ~50ms per call; hoisted to beforeAll
+  // because no test in this block mutates the agent row.
+  beforeAll(async () => {
     tempDir = mkdtempSync(join(tmpdir(), "kb-routes-task-assign-"));
     fusionDir = join(tempDir, ".fusion");
     mkdirSync(fusionDir, { recursive: true });
@@ -2978,16 +2980,18 @@ describe("PATCH /tasks/:id/assign and GET /agents/:id/tasks", () => {
       role: "executor",
     });
     agentId = agent.id;
+  }, 30_000);
 
+  beforeEach(() => {
     store = createMockStore({
       getFusionDir: vi.fn().mockReturnValue(fusionDir),
       updateTask: vi.fn(),
       listTasks: vi.fn().mockResolvedValue([]),
       selectNextTaskForAgent: vi.fn().mockResolvedValue(null),
     } as any);
-  }, 30_000);
+  });
 
-  afterEach(() => {
+  afterAll(() => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -3204,7 +3208,9 @@ describe("Task checkout routes", () => {
   let agentBId: string;
   let taskState: TaskDetail;
 
-  beforeEach(async () => {
+  // Agent store init + createAgent is ~50ms per call; hoisted to beforeAll
+  // because no test in this block mutates the agent rows.
+  beforeAll(async () => {
     tempDir = mkdtempSync(join(tmpdir(), "kb-routes-task-checkout-"));
     fusionDir = join(tempDir, ".fusion");
     mkdirSync(fusionDir, { recursive: true });
@@ -3224,7 +3230,9 @@ describe("Task checkout routes", () => {
 
     agentAId = agentA.id;
     agentBId = agentB.id;
+  }, 30_000);
 
+  beforeEach(() => {
     taskState = {
       ...FAKE_TASK_DETAIL,
       id: "FN-300",
@@ -3257,9 +3265,9 @@ describe("Task checkout routes", () => {
       }),
       logEntry: vi.fn().mockResolvedValue(undefined),
     } as any);
-  }, 30_000);
+  });
 
-  afterEach(() => {
+  afterAll(() => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
