@@ -22,7 +22,7 @@
     "verify:workspace": "pnpm lint && pnpm test && pnpm build",
     "build:exe": "pnpm build && pnpm --filter @runfusion/fusion build:exe",
     "build:exe:all": "pnpm build && pnpm --filter @runfusion/fusion build:exe:all",
-    "test": "VITEST_MAX_WORKERS=4 pnpm -r --workspace-concurrency=2 test",
+    "test": "VITEST_MAX_WORKERS=2 pnpm -r --workspace-concurrency=2 test",
     "test:serial": "pnpm -r --workspace-concurrency=1 test",
     "test:fast": "VITEST_MAX_WORKERS=4 pnpm -r --workspace-concurrency=2 test",
     "test:isolated": "node scripts/check-test-isolation.mjs --before && pnpm test && node scripts/check-test-isolation.mjs",
