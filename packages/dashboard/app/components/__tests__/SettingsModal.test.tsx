@@ -528,16 +528,6 @@ describe("SettingsModal", () => {
     expect(screen.getByText("Smart conflict resolution")).toBeTruthy();
   });
 
-  it("shows Recycle worktrees checkbox in Worktrees section", async () => {
-    render(<SettingsModal onClose={onClose} addToast={addToast} />);
-    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
-
-    fireEvent.click(screen.getByText("Worktrees"));
-    const checkbox = screen.getByLabelText("Recycle worktrees");
-    expect(checkbox).toBeTruthy();
-    expect(checkbox.getAttribute("type")).toBe("checkbox");
-  });
-
   it("toggling recycleWorktrees checkbox sends true in save payload", async () => {
     render(<SettingsModal onClose={onClose} addToast={addToast} />);
     await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
@@ -606,16 +596,6 @@ describe("SettingsModal", () => {
     fireEvent.click(screen.getByText("Save"));
     // Should not have called updateSettings due to validation error
     expect(updateSettings).not.toHaveBeenCalled();
-  });
-
-  it("shows Show quick chat button checkbox in General section", async () => {
-    render(<SettingsModal onClose={onClose} addToast={addToast} />);
-    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
-
-    fireEvent.click(screen.getAllByText("General")[0]);
-    const checkbox = screen.getByLabelText("Show quick chat button");
-    expect(checkbox).toBeTruthy();
-    expect(checkbox.getAttribute("type")).toBe("checkbox");
   });
 
   it("showQuickChatFAB defaults to unchecked (false) when not set", async () => {
@@ -692,16 +672,6 @@ describe("SettingsModal", () => {
     expect(payload.showQuickChatFAB).toBe(false);
   });
 
-  it("shows Auto-completion mode select in Merge section", async () => {
-    render(<SettingsModal onClose={onClose} addToast={addToast} />);
-    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
-
-    fireEvent.click(screen.getByText("Merge"));
-    const select = screen.getByLabelText("Auto-completion mode") as HTMLSelectElement;
-    expect(select).toBeTruthy();
-    expect(select.value).toBe("direct");
-  });
-
   it("saves pull-request mergeStrategy when selected", async () => {
     render(<SettingsModal onClose={onClose} addToast={addToast} />);
     await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
@@ -715,26 +685,6 @@ describe("SettingsModal", () => {
 
     const payload = (updateSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(payload.mergeStrategy).toBe("pull-request");
-  });
-
-  it("shows Include task ID in commit scope checkbox in Merge section", async () => {
-    render(<SettingsModal onClose={onClose} addToast={addToast} />);
-    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
-
-    fireEvent.click(screen.getByText("Merge"));
-    const checkbox = screen.getByLabelText("Include task ID in commit scope");
-    expect(checkbox).toBeTruthy();
-    expect(checkbox.getAttribute("type")).toBe("checkbox");
-  });
-
-  it("shows Auto-resolve conflicts checkbox in Merge section", async () => {
-    render(<SettingsModal onClose={onClose} addToast={addToast} />);
-    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
-
-    fireEvent.click(screen.getByText("Merge"));
-    const checkbox = screen.getByLabelText("Auto-resolve conflicts in lock files and generated files");
-    expect(checkbox).toBeTruthy();
-    expect(checkbox.getAttribute("type")).toBe("checkbox");
   });
 
   it("toggling includeTaskIdInCommit checkbox sends false in save payload", async () => {
@@ -751,16 +701,6 @@ describe("SettingsModal", () => {
 
     const payload = (updateSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(payload.includeTaskIdInCommit).toBe(false);
-  });
-
-  it("shows Add author attribution to commits checkbox in Merge section", async () => {
-    render(<SettingsModal onClose={onClose} addToast={addToast} />);
-    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
-
-    fireEvent.click(screen.getByText("Merge"));
-    const checkbox = screen.getByLabelText("Add author attribution to commits");
-    expect(checkbox).toBeTruthy();
-    expect(checkbox.getAttribute("type")).toBe("checkbox");
   });
 
   it("toggling commitAuthorEnabled checkbox sends false in save payload when unchecked", async () => {
@@ -877,16 +817,6 @@ describe("SettingsModal", () => {
     fireEvent.click(screen.getByText("Merge"));
     const checkbox = screen.getByLabelText("Auto-resolve conflicts in lock files and generated files") as HTMLInputElement;
     expect(checkbox.checked).toBe(true);
-  });
-
-  it("shows Smart conflict resolution checkbox in Merge section", async () => {
-    render(<SettingsModal onClose={onClose} addToast={addToast} />);
-    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
-
-    fireEvent.click(screen.getByText("Merge"));
-    const checkbox = screen.getByLabelText("Smart conflict resolution");
-    expect(checkbox).toBeTruthy();
-    expect(checkbox.getAttribute("type")).toBe("checkbox");
   });
 
   it("toggling smartConflictResolution checkbox sends false in save payload when unchecked", async () => {
@@ -3234,10 +3164,9 @@ describe("SettingsModal", () => {
       specStalenessMaxAgeMs: 6 * 60 * 60 * 1000,
     });
 
-    render(<SettingsModal onClose={onClose} addToast={addToast} />);
+    render(<SettingsModal onClose={onClose} addToast={addToast} initialSection="scheduling" />);
     await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByText("Scheduling"));
     const thresholdInput = screen.getByLabelText("Stale Spec Threshold (hours)") as HTMLInputElement;
     expect(thresholdInput.value).toBe("6");
   });

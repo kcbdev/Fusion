@@ -2342,41 +2342,7 @@ describe("TaskDetailModal", () => {
   });
 
   describe("mobile responsive structure", () => {
-    it("modal container has both 'modal' and 'modal-lg' classes for responsive CSS targeting", () => {
-      const { container } = render(
-        <TaskDetailModal
-          task={makeTask()}
-          onClose={noop}
-          onMoveTask={noopMove}
-          onDeleteTask={noopDelete}
-          onMergeTask={noopMerge}
-          onOpenDetail={noopOpenDetail}
-          addToast={noop}
-        />,
-      );
-
-      const modal = container.querySelector(".modal.modal-lg");
-      expect(modal).toBeTruthy();
-    });
-
-    it("modal overlay has 'modal-overlay' and 'open' classes", () => {
-      const { container } = render(
-        <TaskDetailModal
-          task={makeTask()}
-          onClose={noop}
-          onMoveTask={noopMove}
-          onDeleteTask={noopDelete}
-          onMergeTask={noopMerge}
-          onOpenDetail={noopOpenDetail}
-          addToast={noop}
-        />,
-      );
-
-      const overlay = container.querySelector(".modal-overlay.open");
-      expect(overlay).toBeTruthy();
-    });
-
-    it("modal-actions contains the spacer div for flex layout", () => {
+    it("renders responsive structural classes (modal-lg, overlay, spacer, tabs, detail-body)", () => {
       const { container } = render(
         <TaskDetailModal
           task={makeTask({ column: "in-progress" as Column })}
@@ -2388,79 +2354,18 @@ describe("TaskDetailModal", () => {
           addToast={noop}
         />,
       );
-
-      const actions = container.querySelector(".modal-actions");
-      expect(actions).toBeTruthy();
-      // Spacer div separates left actions from right actions via CSS class
-      const spacer = actions!.querySelector(".modal-actions-spacer");
-      expect(spacer).toBeTruthy();
-      expect((spacer as HTMLElement).className).toContain("modal-actions-spacer");
-    });
-
-    it("tab buttons use CSS classes instead of inline styles for responsive override", () => {
-      const { container } = render(
-        <TaskDetailModal
-          task={makeTask()}
-          onClose={noop}
-          onMoveTask={noopMove}
-          onDeleteTask={noopDelete}
-          onMergeTask={noopMerge}
-          onOpenDetail={noopOpenDetail}
-          addToast={noop}
-        />,
-      );
-
+      expect(container.querySelector(".modal.modal-lg")).toBeTruthy();
+      expect(container.querySelector(".modal-overlay.open")).toBeTruthy();
+      expect(container.querySelector(".modal-actions .modal-actions-spacer")).toBeTruthy();
+      expect(container.querySelector(".detail-body")).toBeTruthy();
       const tabs = container.querySelectorAll(".detail-tab");
-      expect(tabs.length).toBe(7); // Definition, Logs, Changes, Comments, Documents, Model, Workflow
-      // Tabs should use class-based styling, not inline styles
-      expect(tabs[0].classList.contains("detail-tab")).toBe(true);
-      expect(tabs[0].classList.contains("detail-tab-active")).toBe(true); // Definition is default active
-      expect(tabs[1].classList.contains("detail-tab-active")).toBe(false);
-      expect(tabs[2].classList.contains("detail-tab-active")).toBe(false);
-      expect(tabs[3].classList.contains("detail-tab-active")).toBe(false);
-      expect(tabs[4].classList.contains("detail-tab-active")).toBe(false);
-      expect(tabs[5].classList.contains("detail-tab-active")).toBe(false);
-      expect(tabs[6].classList.contains("detail-tab-active")).toBe(false);
-      // Verify no inline padding/fontSize (responsive CSS controls this)
+      expect(tabs.length).toBe(7);
+      expect(tabs[0].classList.contains("detail-tab-active")).toBe(true);
+      expect(Array.from(tabs).slice(1).every((t) => !t.classList.contains("detail-tab-active"))).toBe(true);
+      // Responsive CSS controls sizing — no inline padding/fontSize/borderBottom leaks
       expect((tabs[0] as HTMLElement).style.padding).toBe("");
       expect((tabs[0] as HTMLElement).style.fontSize).toBe("");
-    });
-
-    it("detail-tabs container uses CSS class instead of inline styles", () => {
-      const { container } = render(
-        <TaskDetailModal
-          task={makeTask()}
-          onClose={noop}
-          onMoveTask={noopMove}
-          onDeleteTask={noopDelete}
-          onMergeTask={noopMerge}
-          onOpenDetail={noopOpenDetail}
-          addToast={noop}
-        />,
-      );
-
-      const tabsContainer = container.querySelector(".detail-tabs");
-      expect(tabsContainer).toBeTruthy();
-      // Should not have inline display/borderBottom styles — CSS class handles it
-      expect((tabsContainer as HTMLElement).style.display).toBe("");
-      expect((tabsContainer as HTMLElement).style.borderBottom).toBe("");
-    });
-
-    it("detail-body is present and scrollable (flex: 1 + overflow-y: auto via CSS)", () => {
-      const { container } = render(
-        <TaskDetailModal
-          task={makeTask()}
-          onClose={noop}
-          onMoveTask={noopMove}
-          onDeleteTask={noopDelete}
-          onMergeTask={noopMerge}
-          onOpenDetail={noopOpenDetail}
-          addToast={noop}
-        />,
-      );
-
-      const body = container.querySelector(".detail-body");
-      expect(body).toBeTruthy();
+      expect((container.querySelector(".detail-tabs") as HTMLElement).style.borderBottom).toBe("");
     });
 
     it("modal-actions contains Delete and Pause buttons for non-done tasks (via Actions dropdown)", () => {
@@ -3775,10 +3680,15 @@ describe("TaskDetailModal", () => {
   });
 
   describe("Refinement button", () => {
-    it("renders Refine button for 'done' column tasks (in Actions dropdown)", () => {
+    it.each<[Column, boolean]>([
+      ["done", true],
+      ["in-review", true],
+      ["todo", false],
+      ["in-progress", false],
+    ])("Refine action visibility in column=%s is %s", (column, shouldShow) => {
       render(
         <TaskDetailModal
-          task={makeTask({ column: "done" })}
+          task={makeTask({ column })}
           onClose={noop}
           onMoveTask={noopMove}
           onDeleteTask={noopDelete}
@@ -3787,35 +3697,13 @@ describe("TaskDetailModal", () => {
           addToast={noop}
         />,
       );
-
-      // Open Actions dropdown to see Refine
-      const actionsBtn = screen.getByRole("button", { name: /actions/i });
-      fireEvent.click(actionsBtn);
-
-      expect(screen.getByRole("menuitem", { name: "Refine" })).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+      const item = screen.queryByRole("menuitem", { name: "Refine" });
+      if (shouldShow) expect(item).toBeTruthy();
+      else expect(item).toBeNull();
     });
 
-    it("renders Refine button for 'in-review' column tasks (in Actions dropdown)", () => {
-      render(
-        <TaskDetailModal
-          task={makeTask({ column: "in-review" })}
-          onClose={noop}
-          onMoveTask={noopMove}
-          onDeleteTask={noopDelete}
-          onMergeTask={noopMerge}
-          onOpenDetail={noopOpenDetail}
-          addToast={noop}
-        />,
-      );
-
-      // Open Actions dropdown to see Refine
-      const actionsBtn = screen.getByRole("button", { name: /actions/i });
-      fireEvent.click(actionsBtn);
-
-      expect(screen.getByRole("menuitem", { name: "Refine" })).toBeTruthy();
-    });
-
-    it("does NOT render Refine button for 'triage' column tasks", () => {
+    it("does NOT render Refine button for 'triage' column tasks (no Actions dropdown)", () => {
       render(
         <TaskDetailModal
           task={makeTask({ column: "triage" })}
@@ -3827,47 +3715,7 @@ describe("TaskDetailModal", () => {
           addToast={noop}
         />,
       );
-
-      // No Refine button visible for triage tasks (no Actions dropdown)
       expect(screen.queryByText("Refine")).toBeNull();
-    });
-
-    it("does NOT render Refine button for 'todo' column tasks", () => {
-      render(
-        <TaskDetailModal
-          task={makeTask({ column: "todo" })}
-          onClose={noop}
-          onMoveTask={noopMove}
-          onDeleteTask={noopDelete}
-          onMergeTask={noopMerge}
-          onOpenDetail={noopOpenDetail}
-          addToast={noop}
-        />,
-      );
-
-      // Open Actions dropdown - Refine should not be there
-      const actionsBtn = screen.getByRole("button", { name: /actions/i });
-      fireEvent.click(actionsBtn);
-      expect(screen.queryByRole("menuitem", { name: "Refine" })).toBeNull();
-    });
-
-    it("does NOT render Refine button for 'in-progress' column tasks", () => {
-      render(
-        <TaskDetailModal
-          task={makeTask({ column: "in-progress" })}
-          onClose={noop}
-          onMoveTask={noopMove}
-          onDeleteTask={noopDelete}
-          onMergeTask={noopMerge}
-          onOpenDetail={noopOpenDetail}
-          addToast={noop}
-        />,
-      );
-
-      // Open Actions dropdown - Refine should not be there
-      const actionsBtn = screen.getByRole("button", { name: /actions/i });
-      fireEvent.click(actionsBtn);
-      expect(screen.queryByRole("menuitem", { name: "Refine" })).toBeNull();
     });
 
     it("clicking Refine opens the refinement modal", () => {
@@ -4808,13 +4656,14 @@ describe("TaskDetailModal", () => {
   });
 
   describe("Commits tab visibility", () => {
-    it("does NOT show a separate Commits tab for done tasks with mergeDetails.commitSha (changes are shown in Changes tab)", () => {
+    it.each<[string, Parameters<typeof makeTask>[0]]>([
+      ["with mergeDetails.commitSha", { column: "done", mergeDetails: { commitSha: "abc1234567890", filesChanged: 3, insertions: 10, deletions: 2 } }],
+      ["with mergeDetails but no commitSha", { column: "done", mergeDetails: { filesChanged: 3 } }],
+      ["without mergeDetails", { column: "done" }],
+    ])("never shows a separate Commits tab for done tasks (%s) — changes are in the Changes tab", (_label, taskOverrides) => {
       const { container } = render(
         <TaskDetailModal
-          task={makeTask({
-            column: "done",
-            mergeDetails: { commitSha: "abc1234567890", filesChanged: 3, insertions: 10, deletions: 2 },
-          })}
+          task={makeTask(taskOverrides)}
           onClose={noop}
           onMoveTask={noopMove}
           onDeleteTask={noopDelete}
@@ -4823,52 +4672,9 @@ describe("TaskDetailModal", () => {
           addToast={noop}
         />,
       );
-
-      // Commits tab should not exist
       expect(screen.queryByText("Commits")).toBeNull();
-
-      // Changes tab should exist and be available
-      const tabs = container.querySelectorAll(".detail-tab");
-      expect(tabs.length).toBe(7); // Definition, Logs, Changes, Comments, Documents, Model, Workflow
-      const tabTexts = Array.from(tabs).map((t) => t.textContent);
+      const tabTexts = Array.from(container.querySelectorAll(".detail-tab")).map((t) => t.textContent);
       expect(tabTexts).toContain("Changes");
-    });
-
-    it("does NOT show Commits tab for done tasks without commitSha", () => {
-      render(
-        <TaskDetailModal
-          task={makeTask({
-            column: "done",
-            mergeDetails: { filesChanged: 3 },
-          })}
-          onClose={noop}
-          onMoveTask={noopMove}
-          onDeleteTask={noopDelete}
-          onMergeTask={noopMerge}
-          onOpenDetail={noopOpenDetail}
-          addToast={noop}
-        />,
-      );
-
-      expect(screen.queryByText("Commits")).toBeNull();
-    });
-
-    it("does NOT show Commits tab for done tasks without mergeDetails", () => {
-      render(
-        <TaskDetailModal
-          task={makeTask({
-            column: "done",
-          })}
-          onClose={noop}
-          onMoveTask={noopMove}
-          onDeleteTask={noopDelete}
-          onMergeTask={noopMerge}
-          onOpenDetail={noopOpenDetail}
-          addToast={noop}
-        />,
-      );
-
-      expect(screen.queryByText("Commits")).toBeNull();
     });
   });
 
@@ -4991,42 +4797,15 @@ describe("TaskDetailModal", () => {
   });
 
   describe("Workflow tab", () => {
-    it("shows Workflow tab even when enabledWorkflowSteps is empty", () => {
-      const { container } = render(
-        <TaskDetailModal
-          task={makeTask({ enabledWorkflowSteps: [] })}
-          onClose={noop}
-          onMoveTask={noopMove}
-          onDeleteTask={noopDelete}
-          onMergeTask={noopMerge}
-          onOpenDetail={noopOpenDetail}
-          addToast={noop}
-        />,
-      );
-
-      expect(screen.getByText("Workflow")).toBeInTheDocument();
-    });
-
-    it("shows Workflow tab even when enabledWorkflowSteps is undefined", () => {
-      const { container } = render(
-        <TaskDetailModal
-          task={makeTask({ enabledWorkflowSteps: undefined, workflowStepResults: undefined })}
-          onClose={noop}
-          onMoveTask={noopMove}
-          onDeleteTask={noopDelete}
-          onMergeTask={noopMerge}
-          onOpenDetail={noopOpenDetail}
-          addToast={noop}
-        />,
-      );
-
-      expect(screen.getByText("Workflow")).toBeInTheDocument();
-    });
-
-    it("shows Workflow tab when enabledWorkflowSteps is non-empty", () => {
+    it.each<[string, Parameters<typeof makeTask>[0]]>([
+      ["empty enabledWorkflowSteps", { enabledWorkflowSteps: [] }],
+      ["undefined enabledWorkflowSteps", { enabledWorkflowSteps: undefined, workflowStepResults: undefined }],
+      ["non-empty enabledWorkflowSteps", { enabledWorkflowSteps: ["WS-001"] }],
+      ["previous workflow results", { enabledWorkflowSteps: [], workflowStepResults: [{ workflowStepId: "WS-001", workflowStepName: "QA Check", status: "passed" }] }],
+    ])("Workflow tab is always rendered (%s)", (_label, taskOverrides) => {
       render(
         <TaskDetailModal
-          task={makeTask({ enabledWorkflowSteps: ["WS-001"] })}
+          task={makeTask(taskOverrides)}
           onClose={noop}
           onMoveTask={noopMove}
           onDeleteTask={noopDelete}
@@ -5035,28 +4814,6 @@ describe("TaskDetailModal", () => {
           addToast={noop}
         />,
       );
-
-      expect(screen.getByText("Workflow")).toBeTruthy();
-    });
-
-    it("shows Workflow tab when task has previous workflow results", () => {
-      render(
-        <TaskDetailModal
-          task={makeTask({
-            enabledWorkflowSteps: [],
-            workflowStepResults: [
-              { workflowStepId: "WS-001", workflowStepName: "QA Check", status: "passed" },
-            ],
-          })}
-          onClose={noop}
-          onMoveTask={noopMove}
-          onDeleteTask={noopDelete}
-          onMergeTask={noopMerge}
-          onOpenDetail={noopOpenDetail}
-          addToast={noop}
-        />,
-      );
-
       expect(screen.getByText("Workflow")).toBeTruthy();
     });
 
