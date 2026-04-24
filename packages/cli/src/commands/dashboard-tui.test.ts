@@ -10,6 +10,7 @@ import {
   type TaskStats,
   type SettingsValues,
 } from "./dashboard-tui.js";
+import { createLogger } from "@fusion/engine";
 
 // ── LogRingBuffer Tests ────────────────────────────────────────────────────
 
@@ -197,7 +198,7 @@ describe("DashboardLogSink.captureConsole", () => {
     sink.releaseConsole();
   });
 
-  it("routes console.error to sink.error", () => {
+  it("keeps raw console.error lines as error", () => {
     const tui = new DashboardTUI();
     const sink = new DashboardLogSink();
     sink.setTUI(tui);
@@ -211,6 +212,46 @@ describe("DashboardLogSink.captureConsole", () => {
     expect(entries[0].level).toBe("error");
     expect(entries[0].prefix).toBe("scheduler");
     expect(entries[0].message).toBe("could not claim lease");
+
+    sink.releaseConsole();
+  });
+
+  it("treats structured logger.log routed via console.error as info", () => {
+    const tui = new DashboardTUI();
+    const sink = new DashboardLogSink();
+    sink.setTUI(tui);
+    sink.captureConsole();
+
+    const logger = createLogger("executor");
+    logger.log("task moved to in-progress");
+
+    const entries = (tui as unknown as {
+      logBuffer: LogRingBuffer;
+    }).logBuffer.getAll();
+    expect(entries).toHaveLength(1);
+    expect(entries[0].level).toBe("info");
+    expect(entries[0].prefix).toBe("executor");
+    expect(entries[0].message).toBe("task moved to in-progress");
+
+    sink.releaseConsole();
+  });
+
+  it("keeps structured logger.error as error", () => {
+    const tui = new DashboardTUI();
+    const sink = new DashboardLogSink();
+    sink.setTUI(tui);
+    sink.captureConsole();
+
+    const logger = createLogger("executor");
+    logger.error("task failed");
+
+    const entries = (tui as unknown as {
+      logBuffer: LogRingBuffer;
+    }).logBuffer.getAll();
+    expect(entries).toHaveLength(1);
+    expect(entries[0].level).toBe("error");
+    expect(entries[0].prefix).toBe("executor");
+    expect(entries[0].message).toBe("task failed");
 
     sink.releaseConsole();
   });
@@ -255,19 +296,57 @@ describe("DashboardLogSink.captureConsole", () => {
   });
 });
 
+describe("DashboardTUI log icon rendering", () => {
+  it("shows info icon (✓) instead of error icon (✗) for structured logger.log entries", () => {
+    const tui = new DashboardTUI();
+    const sink = new DashboardLogSink();
+    sink.setTUI(tui);
+    sink.captureConsole();
+
+    const stdoutWriteSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    (tui as any).activeSection = "logs";
+    (tui as any).isRunning = true;
+
+    try {
+      const logger = createLogger("executor");
+      logger.log("task moved to in-progress");
+
+      stdoutWriteSpy.mockClear();
+      (tui as any).renderLogsSection();
+      const rendered = stdoutWriteSpy.mock.calls.map(([chunk]) => String(chunk)).join("");
+      const stripped = rendered.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+
+      expect(stripped).toContain("✓ [executor] task moved to in-progress");
+      expect(stripped).not.toContain("✗ [executor] task moved to in-progress");
+    } finally {
+      stdoutWriteSpy.mockRestore();
+      sink.releaseConsole();
+    }
+  });
+});
+
 // ── formatConsoleArgs helper ───────────────────────────────────────────────
 
 describe("formatConsoleArgs", () => {
   it("joins multiple args with a space", () => {
-    const { message, prefix } = formatConsoleArgs(["hello", "world"]);
+    const { message, prefix, level } = formatConsoleArgs(["hello", "world"]);
     expect(prefix).toBeUndefined();
+    expect(level).toBe("info");
     expect(message).toBe("hello world");
   });
 
   it("extracts a leading [prefix] tag", () => {
-    const { message, prefix } = formatConsoleArgs(["[executor] starting task FN-123"]);
+    const { message, prefix, level } = formatConsoleArgs(["[executor] starting task FN-123"], "warn");
     expect(prefix).toBe("executor");
+    expect(level).toBe("warn");
     expect(message).toBe("starting task FN-123");
+  });
+
+  it("strips the internal severity marker and returns explicit level", () => {
+    const { message, prefix, level } = formatConsoleArgs(["\u0000fnlvl=error\u0000[executor] task failed"], "info");
+    expect(prefix).toBe("executor");
+    expect(level).toBe("error");
+    expect(message).toBe("task failed");
   });
 
   it("stringifies objects via JSON", () => {

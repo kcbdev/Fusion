@@ -22,6 +22,13 @@ export interface Logger {
   error(message: string, ...args: unknown[]): void;
 }
 
+const LOG_LEVEL_MARKER_PREFIX = "\u0000fnlvl=";
+const LOG_LEVEL_MARKER_SUFFIX = "\u0000";
+
+function withSeverityMarker(level: "info" | "warn" | "error", payload: string): string {
+  return `${LOG_LEVEL_MARKER_PREFIX}${level}${LOG_LEVEL_MARKER_SUFFIX}${payload}`;
+}
+
 /**
  * Create a structured logger that prefixes every message with `[prefix]`.
  *
@@ -29,18 +36,22 @@ export interface Logger {
  * @returns A `Logger` whose output is prefixed and sent to stderr. Keeping
  *          engine logs off stdout prevents command/test output consumers from
  *          receiving Fusion execution chatter.
+ *
+ *          The logger prepends an internal control-character severity marker
+ *          so dashboard TUI console-capture can preserve info/warn/error
+ *          semantics even when `log()` is transported via `console.error`.
  */
 export function createLogger(prefix: string): Logger {
   const tag = `[${prefix}]`;
   return {
     log(message: string, ...args: unknown[]) {
-      console.error(`${tag} ${message}`, ...args);
+      console.error(withSeverityMarker("info", `${tag} ${message}`), ...args);
     },
     warn(message: string, ...args: unknown[]) {
-      console.warn(`${tag} ${message}`, ...args);
+      console.warn(withSeverityMarker("warn", `${tag} ${message}`), ...args);
     },
     error(message: string, ...args: unknown[]) {
-      console.error(`${tag} ${message}`, ...args);
+      console.error(withSeverityMarker("error", `${tag} ${message}`), ...args);
     },
   };
 }

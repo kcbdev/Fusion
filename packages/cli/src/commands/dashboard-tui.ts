@@ -1339,9 +1339,11 @@ export class DashboardLogSink {
   /**
    * Monkey-patch `console.log/warn/error` so everything (including the engine's
    * createLogger() output, which writes directly to console.error) surfaces in
-   * the TUI's log ring buffer. Without this, most runtime logs render beneath
-   * the alt-screen TUI and are immediately overwritten on the next render,
-   * leaving the Logs tab nearly empty.
+   * the TUI's log ring buffer. Structured logger calls carry an internal
+   * severity marker so `logger.log(...)` still lands as info even when routed
+   * through console.error transport. Without capture, most runtime logs render
+   * beneath the alt-screen TUI and are immediately overwritten on the next
+   * render, leaving the Logs tab nearly empty.
    *
    * Messages that start with `[prefix] rest` are unpacked so the TUI stores
    * `prefix="prefix"` and `message="rest"`. Idempotent; call `releaseConsole()`
@@ -1358,16 +1360,16 @@ export class DashboardLogSink {
       error: console.error,
     };
     console.log = (...args: unknown[]) => {
-      const { message, prefix } = formatConsoleArgs(args);
-      this.log(message, prefix);
+      const { message, prefix, level } = formatConsoleArgs(args, "info");
+      this.writeCapturedConsoleLog(level, message, prefix);
     };
     console.warn = (...args: unknown[]) => {
-      const { message, prefix } = formatConsoleArgs(args);
-      this.warn(message, prefix);
+      const { message, prefix, level } = formatConsoleArgs(args, "warn");
+      this.writeCapturedConsoleLog(level, message, prefix);
     };
     console.error = (...args: unknown[]) => {
-      const { message, prefix } = formatConsoleArgs(args);
-      this.error(message, prefix);
+      const { message, prefix, level } = formatConsoleArgs(args, "error");
+      this.writeCapturedConsoleLog(level, message, prefix);
     };
   }
 
@@ -1379,15 +1381,33 @@ export class DashboardLogSink {
     console.error = this.originalConsole.error;
     this.originalConsole = null;
   }
+
+  private writeCapturedConsoleLog(level: LogEntry["level"], message: string, prefix?: string): void {
+    if (level === "error") {
+      this.error(message, prefix);
+      return;
+    }
+    if (level === "warn") {
+      this.warn(message, prefix);
+      return;
+    }
+    this.log(message, prefix);
+  }
 }
 
+const LOG_LEVEL_MARKER_REGEX = /^\u0000fnlvl=(info|warn|error)\u0000\s*/;
+
 /**
- * Format heterogeneous console args into a single string, and extract a
- * leading `[prefix]` if present. Mirrors `util.format` loosely without
- * the dependency — objects are JSON-stringified (defensively, falling back
- * to String()), everything else is coerced via String().
+ * Format heterogeneous console args into a single string, extracting a
+ * leading internal severity marker and `[prefix]` tag when present.
+ * Mirrors `util.format` loosely without the dependency — objects are
+ * JSON-stringified (defensively, falling back to String()), everything
+ * else is coerced via String().
  */
-export function formatConsoleArgs(args: unknown[]): { message: string; prefix?: string } {
+export function formatConsoleArgs(
+  args: unknown[],
+  fallbackLevel: LogEntry["level"] = "info",
+): { message: string; prefix?: string; level: LogEntry["level"] } {
   const stringified = args.map((arg) => {
     if (typeof arg === "string") return arg;
     if (arg instanceof Error) return arg.stack ?? arg.message;
@@ -1398,11 +1418,15 @@ export function formatConsoleArgs(args: unknown[]): { message: string; prefix?: 
     return String(arg);
   }).join(" ");
 
-  const match = stringified.match(/^\[([^\]]+)\]\s*(.*)$/s);
+  const markerMatch = stringified.match(LOG_LEVEL_MARKER_REGEX);
+  const level = markerMatch?.[1] as LogEntry["level"] | undefined;
+  const withoutMarker = markerMatch ? stringified.replace(LOG_LEVEL_MARKER_REGEX, "") : stringified;
+
+  const match = withoutMarker.match(/^\[([^\]]+)\]\s*(.*)$/s);
   if (match) {
-    return { prefix: match[1], message: match[2] };
+    return { prefix: match[1], message: match[2], level: level ?? fallbackLevel };
   }
-  return { message: stringified };
+  return { message: withoutMarker, level: level ?? fallbackLevel };
 }
 
 // ── String Helpers ────────────────────────────────────────────────────────────

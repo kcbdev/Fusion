@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { existsSync, renameSync } from "node:fs";
+import { existsSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import vitestConfig from "../../vitest.config";
 
@@ -17,6 +17,9 @@ function hideInternalPackageDistDirs() {
     }
 
     const hiddenPath = `${distPath}.__fn2360-hidden-${process.pid}`;
+    if (existsSync(hiddenPath)) {
+      rmSync(hiddenPath, { recursive: true, force: true });
+    }
     renameSync(distPath, hiddenPath);
     movedDistDirs.push({ from: distPath, to: hiddenPath });
   }
@@ -26,6 +29,9 @@ function restoreInternalPackageDistDirs() {
   for (let i = movedDistDirs.length - 1; i >= 0; i--) {
     const { from, to } = movedDistDirs[i];
     if (existsSync(to)) {
+      if (existsSync(from)) {
+        rmSync(from, { recursive: true, force: true });
+      }
       renameSync(to, from);
     }
   }
