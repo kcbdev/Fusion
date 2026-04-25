@@ -57,11 +57,6 @@ const AgentsView = lazy(() => import("./components/AgentsView").then((m) => ({ d
 const DocumentsView = lazy(() => import("./components/DocumentsView").then((m) => ({ default: m.DocumentsView })));
 const InsightsView = lazy(() => import("./components/InsightsView").then((m) => ({ default: m.InsightsView })));
 const NodesView = lazy(() => import("./components/NodesView").then((m) => ({ default: m.NodesView })));
-// ChatView's CSS is imported eagerly here (rather than via the lazy
-// component) so the styles are bundled into the main CSS file. Without
-// this, the lazy JS chunk loaded its own CSS link asynchronously, which
-// produced a brief flash of unstyled chat UI on first render.
-import "./components/ChatView.css";
 const ChatView = lazy(() => import("./components/ChatView").then((m) => ({ default: m.ChatView })));
 const RoadmapsView = lazy(() => import("./components/RoadmapsView").then((m) => ({ default: m.RoadmapsView })));
 const SkillsView = lazy(() => import("./components/SkillsView").then((m) => ({ default: m.SkillsView })));
