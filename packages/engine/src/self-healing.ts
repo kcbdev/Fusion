@@ -661,7 +661,7 @@ export class SelfHealingManager {
     if (!recoverFn) return 0;
 
     try {
-      const tasks = await this.store.listTasks({ column: "in-progress" });
+      const tasks = await this.store.listTasks({ column: "in-progress", slim: true });
       const executingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
 
       const stuckCompleted = tasks.filter((t) =>
@@ -704,7 +704,7 @@ export class SelfHealingManager {
    */
   async recoverMergeableReviewTasks(): Promise<number> {
     try {
-      const tasks = await this.store.listTasks({ column: "in-review" });
+      const tasks = await this.store.listTasks({ column: "in-review", slim: true });
 
       const mergeable = tasks.filter((t) =>
         t.column === "in-review" &&
@@ -770,7 +770,7 @@ export class SelfHealingManager {
       const maxFixes = settings.maxPostReviewFixes ?? 1;
       if (!Number.isFinite(maxFixes) || maxFixes <= 0) return 0;
 
-      const tasks = await this.store.listTasks({ column: "in-review" });
+      const tasks = await this.store.listTasks({ column: "in-review", slim: true });
       const executingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
 
       const candidates = tasks.filter((task) => {
@@ -858,7 +858,7 @@ export class SelfHealingManager {
       if (!timeoutMs || timeoutMs <= 0) return 0;
 
       const now = Date.now();
-      const tasks = await this.store.listTasks({ column: "in-review" });
+      const tasks = await this.store.listTasks({ column: "in-review", slim: true });
       const staleIncomplete = tasks.filter((task) =>
         task.column === "in-review" &&
         !task.paused &&
@@ -914,7 +914,7 @@ export class SelfHealingManager {
       const timeoutMs = settings.taskStuckTimeoutMs;
       if (!timeoutMs || timeoutMs <= 0) return 0;
 
-      const tasks = await this.store.listTasks({ column: "in-review" });
+      const tasks = await this.store.listTasks({ column: "in-review", slim: true });
       const candidates = tasks.filter((task) =>
         task.column === "in-review" &&
         Boolean(task.status && ACTIVE_MERGE_STATUSES.has(task.status)) &&
@@ -994,7 +994,7 @@ export class SelfHealingManager {
    */
   async recoverMergedReviewTasks(): Promise<number> {
     try {
-      const tasks = await this.store.listTasks({ column: "in-review" });
+      const tasks = await this.store.listTasks({ column: "in-review", slim: true });
 
       const mergedButNotDone = tasks.filter((t) =>
         t.column === "in-review" &&
@@ -1047,7 +1047,7 @@ export class SelfHealingManager {
    */
   async recoverMisclassifiedFailures(): Promise<number> {
     try {
-      const tasks = await this.store.listTasks({ column: "in-review" });
+      const tasks = await this.store.listTasks({ column: "in-review", slim: true });
 
       const misclassified = tasks.filter((t) =>
         t.column === "in-review" &&
@@ -1096,7 +1096,7 @@ export class SelfHealingManager {
    */
   async recoverOrphanedExecutions(): Promise<number> {
     try {
-      const tasks = await this.store.listTasks({ column: "in-progress" });
+      const tasks = await this.store.listTasks({ column: "in-progress", slim: true });
       const executingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
       const now = Date.now();
 
@@ -1164,7 +1164,7 @@ export class SelfHealingManager {
    */
   async recoverNoProgressNoTaskDoneFailures(): Promise<number> {
     try {
-      const tasks = await this.store.listTasks({ column: "in-progress" });
+      const tasks = await this.store.listTasks({ column: "in-progress", slim: true });
       const executingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
 
       const candidates = tasks.filter((task) =>
@@ -1237,7 +1237,7 @@ export class SelfHealingManager {
    */
   async recoverPartialProgressNoTaskDoneFailures(): Promise<number> {
     try {
-      const tasks = await this.store.listTasks({ column: "in-review" });
+      const tasks = await this.store.listTasks({ column: "in-review", slim: true });
 
       const candidates = tasks.filter((task) =>
         task.column === "in-review" &&
