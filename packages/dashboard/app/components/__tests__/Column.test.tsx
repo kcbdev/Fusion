@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Column } from "../Column";
 import type { Task, Column as ColumnType } from "@fusion/core";
@@ -289,6 +289,130 @@ describe("Column QuickEntryBox", () => {
     render(<Column {...defaultProps} tasks={tasks} onQuickCreate={vi.fn()} />);
     const quickEntry = screen.getByTestId("quick-entry-box");
     expect(quickEntry.getAttribute("data-auto-expand")).toBe("false");
+  });
+});
+
+describe("Column in-progress/in-review bulk actions", () => {
+  it.each(["in-progress", "in-review"] as const)("renders Stop All and Move All to Todo actions for %s", async (column) => {
+    const user = userEvent.setup();
+    render(
+      <Column
+        {...defaultProps}
+        column={column}
+        tasks={[{ ...makeTask("FN-001"), column }]}
+        onPauseTask={vi.fn().mockResolvedValue({} as Task)}
+      />,
+    );
+
+    const menuButton = screen.getByRole("button", { name: `${column === "in-progress" ? "In Progress" : "In Review"} column actions` });
+    expect(menuButton).toHaveAttribute("aria-haspopup", "menu");
+    expect(menuButton).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(menuButton);
+
+    expect(menuButton).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("menu")).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: /Stop All/i })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: /Move All to Todo/i })).toBeTruthy();
+  });
+
+  it.each(["in-progress", "in-review"] as const)("Stop All pauses only non-paused tasks in %s", async (column) => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const onPauseTask = vi.fn().mockResolvedValue({} as Task);
+
+    render(
+      <Column
+        {...defaultProps}
+        column={column}
+        tasks={[
+          { ...makeTask("FN-001"), column, paused: false },
+          { ...makeTask("FN-002"), column, paused: true },
+          { ...makeTask("FN-003"), column, paused: false },
+        ]}
+        onPauseTask={onPauseTask}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: `${column === "in-progress" ? "In Progress" : "In Review"} column actions` }));
+    await user.click(screen.getByRole("menuitem", { name: /Stop All/i }));
+
+    await waitFor(() => {
+      expect(onPauseTask).toHaveBeenCalledTimes(2);
+    });
+    expect(onPauseTask).toHaveBeenCalledWith("FN-001");
+    expect(onPauseTask).toHaveBeenCalledWith("FN-003");
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    confirmSpy.mockRestore();
+  });
+
+  it.each(["in-progress", "in-review"] as const)("disables Stop All when %s is empty", async (column) => {
+    const user = userEvent.setup();
+
+    render(
+      <Column
+        {...defaultProps}
+        column={column}
+        tasks={[]}
+        onPauseTask={vi.fn().mockResolvedValue({} as Task)}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: `${column === "in-progress" ? "In Progress" : "In Review"} column actions` }));
+    expect(screen.getByRole("menuitem", { name: /Stop All/i })).toBeDisabled();
+    expect(screen.getByText("No tasks in this column")).toBeTruthy();
+  });
+
+  it.each(["in-progress", "in-review"] as const)("disables Stop All when all %s tasks are already paused", async (column) => {
+    const user = userEvent.setup();
+
+    render(
+      <Column
+        {...defaultProps}
+        column={column}
+        tasks={[
+          { ...makeTask("FN-010"), column, paused: true },
+          { ...makeTask("FN-011"), column, paused: true },
+        ]}
+        onPauseTask={vi.fn().mockResolvedValue({} as Task)}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: `${column === "in-progress" ? "In Progress" : "In Review"} column actions` }));
+    expect(screen.getByRole("menuitem", { name: /Stop All/i })).toBeDisabled();
+    expect(screen.getByText("All tasks are already paused")).toBeTruthy();
+  });
+
+  it.each(["in-progress", "in-review"] as const)("Move All to Todo moves every task in %s", async (column) => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const onMoveTask = vi.fn().mockResolvedValue({} as Task);
+
+    render(
+      <Column
+        {...defaultProps}
+        column={column}
+        onMoveTask={onMoveTask}
+        tasks={[
+          { ...makeTask("FN-001"), column },
+          { ...makeTask("FN-002"), column },
+        ]}
+        onPauseTask={vi.fn().mockResolvedValue({} as Task)}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: `${column === "in-progress" ? "In Progress" : "In Review"} column actions` }));
+    await user.click(screen.getByRole("menuitem", { name: /Move All to Todo/i }));
+
+    await waitFor(() => {
+      expect(onMoveTask).toHaveBeenCalledTimes(2);
+    });
+    expect(onMoveTask).toHaveBeenCalledWith("FN-001", "todo");
+    expect(onMoveTask).toHaveBeenCalledWith("FN-002", "todo");
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    confirmSpy.mockRestore();
   });
 });
 

@@ -21,6 +21,7 @@ interface ColumnProps {
   projectId?: string;
   maxConcurrent: number;
   onMoveTask: (id: string, column: ColumnType) => Promise<Task>;
+  onPauseTask?: (id: string) => Promise<Task>;
   onOpenDetail: (task: Task | TaskDetail) => void;
   addToast: (message: string, type?: ToastType) => void;
   onQuickCreate?: (input: TaskCreateInput) => Promise<Task | void>;
@@ -65,11 +66,13 @@ interface ColumnProps {
   workflowStepNameLookup?: ReadonlyMap<string, string>;
 }
 
-function ColumnComponent({ column, tasks, projectId, maxConcurrent, onMoveTask, onOpenDetail, addToast, onQuickCreate, onNewTask, autoMerge, onToggleAutoMerge, globalPaused, onUpdateTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, collapsed, onToggleCollapse, allTasks, availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, isSearchActive, taskStuckTimeoutMs, onOpenMission, lastFetchTimeMs, workflowStepNameLookup }: ColumnProps) {
+function ColumnComponent({ column, tasks, projectId, maxConcurrent, onMoveTask, onPauseTask, onOpenDetail, addToast, onQuickCreate, onNewTask, autoMerge, onToggleAutoMerge, globalPaused, onUpdateTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, collapsed, onToggleCollapse, allTasks, availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, isSearchActive, taskStuckTimeoutMs, onOpenMission, lastFetchTimeMs, workflowStepNameLookup }: ColumnProps) {
   const [dragOver, setDragOver] = useState(false);
   const [visibleTaskCount, setVisibleTaskCount] = useState(VISIBLE_TASKS_INITIAL);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isRespecifying, setIsRespecifying] = useState(false);
+  const [isPausingAll, setIsPausingAll] = useState(false);
+  const [isMovingAllToTodo, setIsMovingAllToTodo] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const countFlashing = useFlashOnIncrease(tasks.length);
 
@@ -185,6 +188,65 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, onMoveTask, 
     }
   }, [tasks, onMoveTask, addToast]);
 
+  const pauseEligibleTasks = useMemo(() => tasks.filter((task) => !task.paused), [tasks]);
+  const pauseEligibleCount = pauseEligibleTasks.length;
+  const hasColumnBulkActions = column === "todo" || column === "in-progress" || column === "in-review";
+  const isMenuBusy = isRespecifying || isPausingAll || isMovingAllToTodo;
+
+  const handlePauseAll = useCallback(async () => {
+    if (!onPauseTask) return;
+
+    setIsMenuOpen(false);
+    if (pauseEligibleCount === 0) return;
+
+    const confirmed = window.confirm(
+      `Stop all ${pauseEligibleCount} ${COLUMN_LABELS[column].toLowerCase()} task${pauseEligibleCount === 1 ? "" : "s"}?`,
+    );
+    if (!confirmed) return;
+
+    setIsPausingAll(true);
+    try {
+      const results = await Promise.allSettled(
+        pauseEligibleTasks.map((task) => onPauseTask(task.id)),
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      const paused = results.length - failed;
+      if (failed === 0) {
+        addToast(`Stopped ${paused} task${paused === 1 ? "" : "s"}`, "success");
+      } else {
+        addToast(`Stopped ${paused} of ${results.length} tasks; ${failed} failed`, "error");
+      }
+    } finally {
+      setIsPausingAll(false);
+    }
+  }, [onPauseTask, pauseEligibleCount, column, pauseEligibleTasks, addToast]);
+
+  const handleMoveAllToTodo = useCallback(async () => {
+    setIsMenuOpen(false);
+    if (tasks.length === 0) return;
+
+    const confirmed = window.confirm(
+      `Move all ${tasks.length} ${COLUMN_LABELS[column].toLowerCase()} task${tasks.length === 1 ? "" : "s"} to Todo?`,
+    );
+    if (!confirmed) return;
+
+    setIsMovingAllToTodo(true);
+    try {
+      const results = await Promise.allSettled(
+        tasks.map((task) => onMoveTask(task.id, "todo")),
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      const moved = results.length - failed;
+      if (failed === 0) {
+        addToast(`Moved ${moved} task${moved === 1 ? "" : "s"} to Todo`, "success");
+      } else {
+        addToast(`Moved ${moved} of ${results.length} tasks to Todo; ${failed} failed`, "error");
+      }
+    } finally {
+      setIsMovingAllToTodo(false);
+    }
+  }, [tasks, column, onMoveTask, addToast]);
+
   const handleArchiveAll = useCallback(async () => {
     if (!onArchiveAllDone) return;
     if (tasks.length === 0) return;
@@ -249,7 +311,7 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, onMoveTask, 
             {collapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
           </button>
         )}
-        {column === "todo" && (
+        {hasColumnBulkActions && (
           <div className="column-menu" ref={menuRef}>
             <button
               type="button"
@@ -257,26 +319,60 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, onMoveTask, 
               onClick={() => setIsMenuOpen((v) => !v)}
               aria-haspopup="menu"
               aria-expanded={isMenuOpen}
-              aria-label="Todo column actions"
+              aria-label={`${COLUMN_LABELS[column]} column actions`}
               title="Column actions"
-              disabled={isRespecifying}
+              disabled={isMenuBusy}
             >
               <MoreVertical size={16} />
             </button>
             {isMenuOpen && (
               <div className="column-menu-popover" role="menu">
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="column-menu-item"
-                  onClick={() => void handleRespecifyAll()}
-                  disabled={tasks.length === 0 || isRespecifying}
-                >
-                  Respecify All
-                  <span className="column-menu-item-hint">
-                    Move {tasks.length} task{tasks.length === 1 ? "" : "s"} to Triage
-                  </span>
-                </button>
+                {column === "todo" && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="column-menu-item"
+                    onClick={() => void handleRespecifyAll()}
+                    disabled={tasks.length === 0 || isRespecifying}
+                  >
+                    Respecify All
+                    <span className="column-menu-item-hint">
+                      Move {tasks.length} task{tasks.length === 1 ? "" : "s"} to Triage
+                    </span>
+                  </button>
+                )}
+                {(column === "in-progress" || column === "in-review") && (
+                  <>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="column-menu-item"
+                      onClick={() => void handlePauseAll()}
+                      disabled={pauseEligibleCount === 0 || isPausingAll || !onPauseTask}
+                    >
+                      Stop All
+                      <span className="column-menu-item-hint">
+                        {tasks.length === 0
+                          ? "No tasks in this column"
+                          : pauseEligibleCount === 0
+                            ? "All tasks are already paused"
+                            : `Pause ${pauseEligibleCount} active task${pauseEligibleCount === 1 ? "" : "s"}`}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="column-menu-item"
+                      onClick={() => void handleMoveAllToTodo()}
+                      disabled={tasks.length === 0 || isMovingAllToTodo}
+                    >
+                      Move All to Todo
+                      <span className="column-menu-item-hint">
+                        Move {tasks.length} task{tasks.length === 1 ? "" : "s"} to Todo
+                      </span>
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>

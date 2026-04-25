@@ -299,6 +299,10 @@ export function useTasks(options?: UseTasksOptions) {
     return normalizeTask(await api.moveTask(id, column, projectId));
   }, [projectId]);
 
+  const pauseTask = useCallback(async (id: string): Promise<Task> => {
+    return normalizeTask(await api.pauseTask(id, projectId));
+  }, [projectId]);
+
   const deleteTask = useCallback(async (id: string): Promise<Task> => {
     return normalizeTask(await api.deleteTask(id, projectId));
   }, [projectId]);
@@ -379,5 +383,5 @@ export function useTasks(options?: UseTasksOptions) {
     return normalized;
   }, [projectId]);
 
-  return { tasks, createTask, moveTask, deleteTask, mergeTask, retryTask, duplicateTask, updateTask, archiveTask, unarchiveTask, archiveAllDone, loadArchivedTasks, includeArchived, lastFetchTimeMs: lastFetchTimeMs.current };
+  return { tasks, createTask, moveTask, pauseTask, deleteTask, mergeTask, retryTask, duplicateTask, updateTask, archiveTask, unarchiveTask, archiveAllDone, loadArchivedTasks, includeArchived, lastFetchTimeMs: lastFetchTimeMs.current };
 }
