@@ -3,6 +3,7 @@ import { loadAllAppCss } from "../../test/cssFixture";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { MailboxView } from "../MailboxView";
 import * as apiModule from "../../api";
+import * as viewportModule from "../../hooks/useViewportMode";
 import type { Agent } from "../../api";
 import type { Message } from "@fusion/core";
 
@@ -18,6 +19,10 @@ vi.mock("../../api", () => ({
   fetchConversation: vi.fn(),
   sendMessage: vi.fn(),
   fetchAgents: vi.fn(),
+}));
+
+vi.mock("../../hooks/useViewportMode", () => ({
+  useViewportMode: vi.fn(),
 }));
 
 // Mock lucide-react icons
@@ -49,6 +54,7 @@ const mockMarkAllMessagesRead = vi.mocked(apiModule.markAllMessagesRead);
 const mockDeleteMessage = vi.mocked(apiModule.deleteMessage);
 const mockFetchConversation = vi.mocked(apiModule.fetchConversation);
 const mockSendMessage = vi.mocked(apiModule.sendMessage);
+const mockUseViewportMode = vi.mocked(viewportModule.useViewportMode);
 
 const mockAgents: Agent[] = [
   {
@@ -131,6 +137,7 @@ const defaultProps = {
 describe("MailboxView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseViewportMode.mockReturnValue("desktop");
     mockFetchUnreadCount.mockResolvedValue({ unreadCount: 2 });
     mockFetchAgents.mockResolvedValue(mockAgents);
     mockSendMessage.mockResolvedValue({ ...mockMessage, id: "msg-sent" });
@@ -343,6 +350,82 @@ describe("MailboxView", () => {
     });
   });
 
+  it("keeps list pane visible alongside detail pane on desktop/tablet", async () => {
+    mockFetchInbox.mockResolvedValue({
+      messages: [mockMessage],
+      unreadCount: 1,
+    });
+    mockFetchConversation.mockResolvedValue([mockMessage]);
+    mockMarkMessageRead.mockResolvedValue(undefined);
+
+    render(<MailboxView {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-split-layout")).toBeDefined();
+      expect(screen.getByTestId("mailbox-inbox-list")).toBeDefined();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mailbox-conversation-agent:agent-001"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-message-detail")).toBeDefined();
+      expect(screen.getByTestId("mailbox-inbox-list")).toBeDefined();
+      expect(screen.queryByTestId("mailbox-back-to-list")).toBeNull();
+    });
+  });
+
+  it("shows split-pane empty state when no message is selected on desktop/tablet", async () => {
+    mockFetchInbox.mockResolvedValue({
+      messages: [mockMessage],
+      unreadCount: 1,
+    });
+
+    render(<MailboxView {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-split-empty")).toBeDefined();
+      expect(screen.getByTestId("mailbox-inbox-list")).toBeDefined();
+    });
+  });
+
+  it("keeps mobile single-pane flow for detail open and back navigation", async () => {
+    mockUseViewportMode.mockReturnValue("mobile");
+    mockFetchInbox.mockResolvedValue({
+      messages: [mockMessage],
+      unreadCount: 1,
+    });
+    mockFetchConversation.mockResolvedValue([mockMessage]);
+    mockMarkMessageRead.mockResolvedValue(undefined);
+
+    render(<MailboxView {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("mailbox-split-layout")).toBeNull();
+      expect(screen.getByTestId("mailbox-inbox-list")).toBeDefined();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mailbox-conversation-agent:agent-001"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-message-detail")).toBeDefined();
+      expect(screen.queryByTestId("mailbox-inbox-list")).toBeNull();
+      expect(screen.getByTestId("mailbox-back-to-list")).toBeDefined();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mailbox-back-to-list"));
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("mailbox-message-detail")).toBeNull();
+      expect(screen.getByTestId("mailbox-inbox-list")).toBeDefined();
+    });
+  });
+
   it("shows agent names in message detail participant rows", async () => {
     mockFetchInbox.mockResolvedValue({
       messages: [mockAgentToAgentMessage],
@@ -362,7 +445,7 @@ describe("MailboxView", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Agent: Test Agent 1 (agent-001)")).toBeDefined();
+      expect(screen.getAllByText("Agent: Test Agent 1 (agent-001)").length).toBeGreaterThan(0);
       expect(screen.getByText("Agent: Test Agent 2 (agent-002)")).toBeDefined();
     });
   });
@@ -440,9 +523,8 @@ describe("MailboxView", () => {
       expect(screen.getByTestId("mailbox-message-detail")).toBeDefined();
     });
 
-    const backToListButton = screen.getByTestId("mailbox-back-to-list");
     const deleteButton = screen.getByTestId("mailbox-delete");
-    expect(backToListButton).toHaveClass("btn", "btn-sm", "btn-secondary");
+    expect(screen.queryByTestId("mailbox-back-to-list")).toBeNull();
     expect(deleteButton).toHaveClass("btn", "btn-sm", "btn-secondary");
 
     await act(async () => {
@@ -1042,6 +1124,29 @@ describe("MailboxView", () => {
       expect(viewBlock).toContain("overflow: hidden;");
     });
 
+    it("defines desktop/tablet split-pane selectors under .mailbox-view scope", async () => {
+      const css = loadAllAppCss();
+
+      const splitLayoutBlockMatch = css.match(/\.mailbox-view\s+\.mailbox-split-layout\s*\{([^}]*)\}/);
+      expect(splitLayoutBlockMatch).toBeTruthy();
+      const splitLayoutBlock = splitLayoutBlockMatch![1];
+      expect(splitLayoutBlock).toContain("display: grid;");
+      expect(splitLayoutBlock).toContain("min-height: 0;");
+      expect(splitLayoutBlock).toContain("grid-template-columns");
+
+      const splitPaneBlockMatch = css.match(/\.mailbox-view\s+\.mailbox-split-list-pane,\s*\n\.mailbox-view\s+\.mailbox-split-detail-pane\s*\{([^}]*)\}/);
+      expect(splitPaneBlockMatch).toBeTruthy();
+      const splitPaneBlock = splitPaneBlockMatch![1];
+      expect(splitPaneBlock).toContain("overflow-y: auto;");
+      expect(splitPaneBlock).toContain("border: 1px solid var(--border);");
+      expect(splitPaneBlock).toContain("background: var(--surface);");
+
+      const splitEmptyBlockMatch = css.match(/\.mailbox-view\s+\.mailbox-split-empty\s*\{([^}]*)\}/);
+      expect(splitEmptyBlockMatch).toBeTruthy();
+      expect(splitEmptyBlockMatch![1]).toContain("color: var(--text-muted);");
+      expect(splitEmptyBlockMatch![1]).toContain("color-mix");
+    });
+
     it("keeps mobile .mailbox-view overrides in the dedicated media-query section", async () => {
       const fs = await import("fs");
       const path = await import("path");
@@ -1060,6 +1165,9 @@ describe("MailboxView", () => {
       expect(mailboxMobileSection).toContain(".mailbox-view .mailbox-header");
       expect(mailboxMobileSection).toContain(".mailbox-view .mailbox-tabs");
       expect(mailboxMobileSection).toContain(".mailbox-view .mailbox-content");
+      expect(mailboxMobileSection).toContain(".mailbox-view .mailbox-split-layout");
+      expect(mailboxMobileSection).toContain(".mailbox-view .mailbox-split-list-pane");
+      expect(mailboxMobileSection).toContain(".mailbox-view .mailbox-split-detail-pane");
       expect(mailboxMobileSection).toContain(".mailbox-view .mailbox-empty");
     });
 

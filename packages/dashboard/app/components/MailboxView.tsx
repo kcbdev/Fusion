@@ -30,6 +30,7 @@ import {
 } from "../api";
 import { MessageComposer } from "./MessageComposer";
 import { subscribeSse } from "../sse-bus";
+import { useViewportMode } from "../hooks/useViewportMode";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -169,6 +170,9 @@ export function MailboxView({
     (id: string, type: ParticipantType) => participantLabel(id, type, agentNamesById),
     [agentNamesById],
   );
+  const viewportMode = useViewportMode();
+  const isMobile = viewportMode === "mobile";
+  const isSplitPane = !isMobile;
 
   // ── Data fetching ─────────────────────────────────────────────────────
 
@@ -398,6 +402,344 @@ export function MailboxView({
 
   // ── Render ────────────────────────────────────────────────────────────
 
+  const renderMessageDetail = () => {
+    if (!selectedMessage || showComposer) return null;
+
+    return (
+      <div className="mailbox-message-detail" data-testid="mailbox-message-detail">
+        <div className="mailbox-message-detail-header">
+          {isMobile && (
+            <button
+              className="btn btn-sm btn-secondary"
+              onClick={handleCloseMessage}
+              data-testid="mailbox-back-to-list"
+            >
+              ← Back
+            </button>
+          )}
+          <div className="mailbox-message-detail-meta">
+            <span className="mailbox-message-type">{messageTypeLabel(selectedMessage.type)}</span>
+            <span className="mailbox-message-time">{formatTimestamp(selectedMessage.createdAt)}</span>
+          </div>
+          <div className="mailbox-message-detail-actions">
+            {selectedMessage.fromType === "agent" && (
+              <button
+                className="btn btn-sm btn-secondary"
+                onClick={() => handleReply(selectedMessage)}
+                data-testid="mailbox-reply"
+              >
+                <MessageSquare size={14} />
+                <span>Reply</span>
+              </button>
+            )}
+            <button
+              className="btn btn-sm btn-secondary"
+              onClick={() => handleDeleteMessage(selectedMessage.id)}
+              data-testid="mailbox-delete"
+            >
+              <Trash2 size={14} />
+              <span>Delete</span>
+            </button>
+          </div>
+        </div>
+        <div className="mailbox-message-participants">
+          <div className="mailbox-participant">
+            <span className="mailbox-participant-label">From:</span>
+            <span className="mailbox-participant-value">
+              {selectedMessage.fromType === "agent" ? <Bot size={14} /> : <User size={14} />}
+              {getParticipantLabel(selectedMessage.fromId, selectedMessage.fromType)}
+            </span>
+          </div>
+          <div className="mailbox-participant">
+            <span className="mailbox-participant-label">To:</span>
+            <span className="mailbox-participant-value">
+              {selectedMessage.toType === "agent" ? <Bot size={14} /> : <User size={14} />}
+              {getParticipantLabel(selectedMessage.toId, selectedMessage.toType)}
+            </span>
+          </div>
+        </div>
+        {conversationMessages.length > 1 && (
+          <div className="mailbox-conversation" data-testid="mailbox-conversation">
+            <div className="mailbox-conversation-label">Conversation</div>
+            {conversationMessages.map((msg) => {
+              const replyToId = msg.metadata?.replyTo?.messageId;
+              const replyToMessage = replyToId
+                ? conversationMessages.find((candidate) => candidate.id === replyToId)
+                : undefined;
+
+              return (
+                <div
+                  key={msg.id}
+                  className={`mailbox-conversation-msg ${msg.id === selectedMessage.id ? "current" : ""}`}
+                >
+                  <div className="mailbox-conversation-msg-header">
+                    <span>{getParticipantLabel(msg.fromId, msg.fromType)}</span>
+                    <span className="mailbox-message-time">{formatTimestamp(msg.createdAt)}</span>
+                  </div>
+                  {replyToId && (
+                    <div className="mailbox-reply-context" data-testid={`mailbox-reply-context-${msg.id}`}>
+                      ↪ Replying to {replyToMessage ? messagePreview(replyToMessage.content, 60) : `message ${replyToId}`}
+                    </div>
+                  )}
+                  <div className="mailbox-conversation-msg-body">{msg.content}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {(conversationMessages.length <= 1) && (
+          <>
+            {selectedMessage.metadata?.replyTo?.messageId && (
+              <div className="mailbox-reply-context" data-testid="mailbox-selected-reply-context">
+                ↪ Replying to message {selectedMessage.metadata.replyTo.messageId}
+              </div>
+            )}
+            <div className="mailbox-message-body" data-testid="mailbox-message-body">
+              {selectedMessage.content}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+
+  const renderListPane = () => (
+    <>
+      {activeTab === "inbox" && (
+        <div className="mailbox-list" data-testid="mailbox-inbox-list">
+          {isLoading && !inbox && <MailboxSkeleton />}
+          {inbox && inbox.messages.length === 0 && (
+            <div className="mailbox-empty" data-testid="mailbox-inbox-empty">
+              <InboxIcon size={32} />
+              <p>No messages in your inbox</p>
+            </div>
+          )}
+          {inbox && inbox.messages.length > 0 && (
+            <div className="mailbox-conversations" data-testid="mailbox-conversations">
+              {groupMessagesByConversation(inbox.messages).map((group) => (
+                <div
+                  key={group.key}
+                  className={`mailbox-conversation-group ${group.unreadCount > 0 ? "unread" : ""}`}
+                  onClick={() => handleOpenMessage(group.latestMessage)}
+                  data-testid={`mailbox-conversation-${group.key}`}
+                >
+                  <div className="mailbox-item-avatar">
+                    {group.fromType === "agent" ? <Bot size={16} /> : <User size={16} />}
+                  </div>
+                  <div className="mailbox-item-content">
+                    <div className="mailbox-item-header">
+                      <span className="mailbox-item-from">
+                        {getParticipantLabel(group.fromId, group.fromType)}
+                      </span>
+                      <span className="mailbox-item-time">
+                        {formatTimestamp(group.latestMessage.createdAt)}
+                      </span>
+                    </div>
+                    <div className="mailbox-item-preview">
+                      {group.latestMessage.content.slice(0, 80)}
+                      {group.latestMessage.content.length > 80 ? "…" : ""}
+                    </div>
+                  </div>
+                  {group.unreadCount > 0 && (
+                    <div className="mailbox-group-unread-badge" data-testid={`mailbox-unread-badge-${group.key}`}>
+                      {group.unreadCount > 9 ? "9+" : group.unreadCount}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === "outbox" && (
+        <div className="mailbox-list" data-testid="mailbox-outbox-list">
+          {isLoading && !outbox && <MailboxSkeleton />}
+          {outbox && outbox.messages.length === 0 && (
+            <div className="mailbox-empty" data-testid="mailbox-outbox-empty">
+              <Send size={32} />
+              <p>No sent messages</p>
+            </div>
+          )}
+          {outbox?.messages.map((msg) => (
+            <div
+              key={msg.id}
+              className="mailbox-item"
+              onClick={() => handleOpenMessage(msg)}
+              data-testid={`mailbox-item-${msg.id}`}
+            >
+              <div className="mailbox-item-avatar">
+                {msg.toType === "agent" ? <Bot size={16} /> : <User size={16} />}
+              </div>
+              <div className="mailbox-item-content">
+                <div className="mailbox-item-header">
+                  <span className="mailbox-item-to">
+                    To: {getParticipantLabel(msg.toId, msg.toType)}
+                  </span>
+                  <span className="mailbox-item-time">{formatTimestamp(msg.createdAt)}</span>
+                </div>
+                <div className="mailbox-item-preview">{msg.content.slice(0, 80)}{msg.content.length > 80 ? "…" : ""}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {activeTab === "agents" && (
+        <div className="mailbox-agents" data-testid="mailbox-agents">
+          {agents.length === 0 ? (
+            <div className="mailbox-empty">
+              <Bot size={32} />
+              <p>No agents found</p>
+            </div>
+          ) : (
+            <>
+              <div className="mailbox-agents-header">
+                <div className="mailbox-agents-dropdown">
+                  <select
+                    className="message-composer-select mailbox-agent-select"
+                    value={selectedAgentId ?? ""}
+                    onChange={(e) => { setSelectedAgentId(e.target.value || null); setAgentSubTab("inbox"); }}
+                    data-testid="mailbox-agent-select"
+                  >
+                    <option value="">Select an agent…</option>
+                    {agents.map((agent) => (
+                      <option key={agent.id} value={agent.id}>
+                        {agent.name || agent.id}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  className="btn btn-sm btn-secondary mailbox-compose-btn"
+                  onClick={handleOpenCompose}
+                  data-testid="mailbox-compose-btn"
+                >
+                  <MessageSquare size={14} />
+                  <span>Compose</span>
+                </button>
+              </div>
+
+              {selectedAgentId && (
+                <div className="mailbox-agent-subtabs" data-testid="mailbox-agent-subtabs">
+                  <button
+                    className={`btn btn-sm btn-secondary mailbox-agent-subtab ${agentSubTab === "inbox" ? "active" : ""}`}
+                    onClick={() => setAgentSubTab("inbox")}
+                    data-testid="mailbox-agent-subtab-inbox"
+                  >
+                    <InboxIcon size={12} />
+                    <span>Inbox</span>
+                    {agentMailbox && agentMailbox.unreadCount > 0 && (
+                      <span className="mailbox-tab-badge">{agentMailbox.unreadCount}</span>
+                    )}
+                  </button>
+                  <button
+                    className={`btn btn-sm btn-secondary mailbox-agent-subtab ${agentSubTab === "outbox" ? "active" : ""}`}
+                    onClick={() => setAgentSubTab("outbox")}
+                    data-testid="mailbox-agent-subtab-outbox"
+                  >
+                    <Send size={12} />
+                    <span>Outbox</span>
+                  </button>
+                </div>
+              )}
+              <div className="mailbox-agents-content">
+                {!selectedAgentId && (
+                  <div className="mailbox-empty">
+                    <Bot size={32} />
+                    <p>Select an agent to view their mailbox</p>
+                  </div>
+                )}
+                {selectedAgentId && isLoading && !agentMailbox && <MailboxSkeleton />}
+                {selectedAgentId && agentMailbox && agentSubTab === "inbox" && agentMailbox.inbox.length === 0 && (
+                  <div className="mailbox-empty">
+                    <InboxIcon size={32} />
+                    <p>No received messages for this agent</p>
+                  </div>
+                )}
+                {selectedAgentId && agentMailbox && agentSubTab === "outbox" && agentMailbox.outbox.length === 0 && (
+                  <div className="mailbox-empty">
+                    <Send size={32} />
+                    <p>No sent messages for this agent</p>
+                  </div>
+                )}
+                {selectedAgentId && agentMailbox && agentSubTab === "inbox" && agentMailbox.inbox.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className={`mailbox-item ${!msg.read ? "unread" : ""}`}
+                    onClick={() => handleOpenMessage(msg)}
+                    data-testid={`mailbox-item-${msg.id}`}
+                  >
+                    <div className="mailbox-item-avatar">
+                      {msg.fromType === "agent" ? <Bot size={16} /> : <User size={16} />}
+                    </div>
+                    <div className="mailbox-item-content">
+                      <div className="mailbox-item-header">
+                        <span className="mailbox-item-from">
+                          {getParticipantLabel(msg.fromId, msg.fromType)}
+                        </span>
+                        <span className="mailbox-item-time">{formatTimestamp(msg.createdAt)}</span>
+                      </div>
+                      <div className="mailbox-item-preview">{msg.content.slice(0, 80)}{msg.content.length > 80 ? "…" : ""}</div>
+                    </div>
+                  </div>
+                ))}
+                {selectedAgentId && agentMailbox && agentSubTab === "outbox" && agentMailbox.outbox.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className="mailbox-item"
+                    onClick={() => handleOpenMessage(msg)}
+                    data-testid={`mailbox-item-${msg.id}`}
+                  >
+                    <div className="mailbox-item-avatar">
+                      {msg.toType === "agent" ? <Bot size={16} /> : <User size={16} />}
+                    </div>
+                    <div className="mailbox-item-content">
+                      <div className="mailbox-item-header">
+                        <span className="mailbox-item-to">
+                          To: {getParticipantLabel(msg.toId, msg.toType)}
+                        </span>
+                        <span className="mailbox-item-time">{formatTimestamp(msg.createdAt)}</span>
+                      </div>
+                      <div className="mailbox-item-preview">{msg.content.slice(0, 80)}{msg.content.length > 80 ? "…" : ""}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </>
+  );
+
+  const renderDetailPane = () => {
+    if (showComposer) {
+      return (
+        <MessageComposer
+          recipient={composeRecipient}
+          replyContext={composeReplyContext}
+          agents={agents}
+          projectId={projectId}
+          onSend={handleMessageSent}
+          onCancel={handleComposeCancel}
+          addToast={addToast}
+        />
+      );
+    }
+
+    if (selectedMessage) {
+      return renderMessageDetail();
+    }
+
+    return (
+      <div className="mailbox-split-empty" data-testid="mailbox-split-empty">
+        <Mail size={24} />
+        <p>Select a conversation to read messages</p>
+      </div>
+    );
+  };
+
   return (
     <div className="mailbox-view" data-testid="mailbox-view">
       {/* Header */}
@@ -477,335 +819,34 @@ export function MailboxView({
         </button>
       </div>
 
-      {/* Content */}
       <div className="mailbox-content" data-testid="mailbox-content">
-        {/* Message Detail View */}
-        {selectedMessage && !showComposer && (
-          <div className="mailbox-message-detail" data-testid="mailbox-message-detail">
-            <div className="mailbox-message-detail-header">
-              <button
-                className="btn btn-sm btn-secondary"
-                onClick={handleCloseMessage}
-                data-testid="mailbox-back-to-list"
-              >
-                ← Back
-              </button>
-              <div className="mailbox-message-detail-meta">
-                <span className="mailbox-message-type">{messageTypeLabel(selectedMessage.type)}</span>
-                <span className="mailbox-message-time">{formatTimestamp(selectedMessage.createdAt)}</span>
-              </div>
-              <div className="mailbox-message-detail-actions">
-                {selectedMessage.fromType === "agent" && (
-                  <button
-                    className="btn btn-sm btn-secondary"
-                    onClick={() => handleReply(selectedMessage)}
-                    data-testid="mailbox-reply"
-                  >
-                    <MessageSquare size={14} />
-                    <span>Reply</span>
-                  </button>
-                )}
-                <button
-                  className="btn btn-sm btn-secondary"
-                  onClick={() => handleDeleteMessage(selectedMessage.id)}
-                  data-testid="mailbox-delete"
-                >
-                  <Trash2 size={14} />
-                  <span>Delete</span>
-                </button>
-              </div>
+        {isSplitPane ? (
+          <div className="mailbox-split-layout" data-testid="mailbox-split-layout">
+            <div className="mailbox-split-list-pane" data-testid="mailbox-split-list-pane">
+              {renderListPane()}
             </div>
-            <div className="mailbox-message-participants">
-              <div className="mailbox-participant">
-                <span className="mailbox-participant-label">From:</span>
-                <span className="mailbox-participant-value">
-                  {selectedMessage.fromType === "agent" ? <Bot size={14} /> : <User size={14} />}
-                  {getParticipantLabel(selectedMessage.fromId, selectedMessage.fromType)}
-                </span>
-              </div>
-              <div className="mailbox-participant">
-                <span className="mailbox-participant-label">To:</span>
-                <span className="mailbox-participant-value">
-                  {selectedMessage.toType === "agent" ? <Bot size={14} /> : <User size={14} />}
-                  {getParticipantLabel(selectedMessage.toId, selectedMessage.toType)}
-                </span>
-              </div>
+            <div className="mailbox-split-detail-pane" data-testid="mailbox-split-detail-pane">
+              {renderDetailPane()}
             </div>
-            {/* Conversation thread */}
-            {conversationMessages.length > 1 && (
-              <div className="mailbox-conversation" data-testid="mailbox-conversation">
-                <div className="mailbox-conversation-label">Conversation</div>
-                {conversationMessages.map((msg) => {
-                  const replyToId = msg.metadata?.replyTo?.messageId;
-                  const replyToMessage = replyToId
-                    ? conversationMessages.find((candidate) => candidate.id === replyToId)
-                    : undefined;
-
-                  return (
-                    <div
-                      key={msg.id}
-                      className={`mailbox-conversation-msg ${msg.id === selectedMessage.id ? "current" : ""}`}
-                    >
-                      <div className="mailbox-conversation-msg-header">
-                        <span>{getParticipantLabel(msg.fromId, msg.fromType)}</span>
-                        <span className="mailbox-message-time">{formatTimestamp(msg.createdAt)}</span>
-                      </div>
-                      {replyToId && (
-                        <div className="mailbox-reply-context" data-testid={`mailbox-reply-context-${msg.id}`}>
-                          ↪ Replying to {replyToMessage ? messagePreview(replyToMessage.content, 60) : `message ${replyToId}`}
-                        </div>
-                      )}
-                      <div className="mailbox-conversation-msg-body">{msg.content}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            {/* Full message content */}
-            {(conversationMessages.length <= 1) && (
-              <>
-                {selectedMessage.metadata?.replyTo?.messageId && (
-                  <div className="mailbox-reply-context" data-testid="mailbox-selected-reply-context">
-                    ↪ Replying to message {selectedMessage.metadata.replyTo.messageId}
-                  </div>
-                )}
-                <div className="mailbox-message-body" data-testid="mailbox-message-body">
-                  {selectedMessage.content}
-                </div>
-              </>
-            )}
           </div>
-        )}
-
-        {/* Message Composer */}
-        {showComposer && (
-          <MessageComposer
-            recipient={composeRecipient}
-            replyContext={composeReplyContext}
-            agents={agents}
-            projectId={projectId}
-            onSend={handleMessageSent}
-            onCancel={handleComposeCancel}
-            addToast={addToast}
-          />
-        )}
-
-        {/* Tab Content — message lists */}
-        {!selectedMessage && !showComposer && (
+        ) : (
           <>
-            {/* Inbox Tab - Grouped by conversation */}
-            {activeTab === "inbox" && (
-              <div className="mailbox-list" data-testid="mailbox-inbox-list">
-                {isLoading && !inbox && <MailboxSkeleton />}
-                {inbox && inbox.messages.length === 0 && (
-                  <div className="mailbox-empty" data-testid="mailbox-inbox-empty">
-                    <InboxIcon size={32} />
-                    <p>No messages in your inbox</p>
-                  </div>
-                )}
-                {inbox && inbox.messages.length > 0 && (
-                  <div className="mailbox-conversations" data-testid="mailbox-conversations">
-                    {groupMessagesByConversation(inbox.messages).map((group) => (
-                      <div
-                        key={group.key}
-                        className={`mailbox-conversation-group ${group.unreadCount > 0 ? "unread" : ""}`}
-                        onClick={() => handleOpenMessage(group.latestMessage)}
-                        data-testid={`mailbox-conversation-${group.key}`}
-                      >
-                        <div className="mailbox-item-avatar">
-                          {group.fromType === "agent" ? <Bot size={16} /> : <User size={16} />}
-                        </div>
-                        <div className="mailbox-item-content">
-                          <div className="mailbox-item-header">
-                            <span className="mailbox-item-from">
-                              {getParticipantLabel(group.fromId, group.fromType)}
-                            </span>
-                            <span className="mailbox-item-time">
-                              {formatTimestamp(group.latestMessage.createdAt)}
-                            </span>
-                          </div>
-                          <div className="mailbox-item-preview">
-                            {group.latestMessage.content.slice(0, 80)}
-                            {group.latestMessage.content.length > 80 ? "…" : ""}
-                          </div>
-                        </div>
-                        {group.unreadCount > 0 && (
-                          <div className="mailbox-group-unread-badge" data-testid={`mailbox-unread-badge-${group.key}`}>
-                            {group.unreadCount > 9 ? "9+" : group.unreadCount}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+            {renderMessageDetail()}
+            {showComposer && (
+              <MessageComposer
+                recipient={composeRecipient}
+                replyContext={composeReplyContext}
+                agents={agents}
+                projectId={projectId}
+                onSend={handleMessageSent}
+                onCancel={handleComposeCancel}
+                addToast={addToast}
+              />
             )}
-
-            {/* Outbox Tab */}
-            {activeTab === "outbox" && (
-              <div className="mailbox-list" data-testid="mailbox-outbox-list">
-                {isLoading && !outbox && <MailboxSkeleton />}
-                {outbox && outbox.messages.length === 0 && (
-                  <div className="mailbox-empty" data-testid="mailbox-outbox-empty">
-                    <Send size={32} />
-                    <p>No sent messages</p>
-                  </div>
-                )}
-                {outbox?.messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className="mailbox-item"
-                    onClick={() => handleOpenMessage(msg)}
-                    data-testid={`mailbox-item-${msg.id}`}
-                  >
-                    <div className="mailbox-item-avatar">
-                      {msg.toType === "agent" ? <Bot size={16} /> : <User size={16} />}
-                    </div>
-                    <div className="mailbox-item-content">
-                      <div className="mailbox-item-header">
-                        <span className="mailbox-item-to">
-                          To: {getParticipantLabel(msg.toId, msg.toType)}
-                        </span>
-                        <span className="mailbox-item-time">{formatTimestamp(msg.createdAt)}</span>
-                      </div>
-                      <div className="mailbox-item-preview">{msg.content.slice(0, 80)}{msg.content.length > 80 ? "…" : ""}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Agent Mailboxes Tab */}
-            {activeTab === "agents" && (
-              <div className="mailbox-agents" data-testid="mailbox-agents">
-                {agents.length === 0 ? (
-                  <div className="mailbox-empty">
-                    <Bot size={32} />
-                    <p>No agents found</p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="mailbox-agents-header">
-                      <div className="mailbox-agents-dropdown">
-                        <select
-                          className="message-composer-select mailbox-agent-select"
-                          value={selectedAgentId ?? ""}
-                          onChange={(e) => { setSelectedAgentId(e.target.value || null); setAgentSubTab("inbox"); }}
-                          data-testid="mailbox-agent-select"
-                        >
-                          <option value="">Select an agent…</option>
-                          {agents.map((agent) => (
-                            <option key={agent.id} value={agent.id}>
-                              {agent.name || agent.id}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <button
-                        className="btn btn-sm btn-secondary mailbox-compose-btn"
-                        onClick={handleOpenCompose}
-                        data-testid="mailbox-compose-btn"
-                      >
-                        <MessageSquare size={14} />
-                        <span>Compose</span>
-                      </button>
-                    </div>
-
-                    {/* Agent Sub-Tabs (Inbox/Outbox) */}
-                    {selectedAgentId && (
-                      <div className="mailbox-agent-subtabs" data-testid="mailbox-agent-subtabs">
-                        <button
-                          className={`btn btn-sm btn-secondary mailbox-agent-subtab ${agentSubTab === "inbox" ? "active" : ""}`}
-                          onClick={() => setAgentSubTab("inbox")}
-                          data-testid="mailbox-agent-subtab-inbox"
-                        >
-                          <InboxIcon size={12} />
-                          <span>Inbox</span>
-                          {agentMailbox && agentMailbox.unreadCount > 0 && (
-                            <span className="mailbox-tab-badge">{agentMailbox.unreadCount}</span>
-                          )}
-                        </button>
-                        <button
-                          className={`btn btn-sm btn-secondary mailbox-agent-subtab ${agentSubTab === "outbox" ? "active" : ""}`}
-                          onClick={() => setAgentSubTab("outbox")}
-                          data-testid="mailbox-agent-subtab-outbox"
-                        >
-                          <Send size={12} />
-                          <span>Outbox</span>
-                        </button>
-                      </div>
-                    )}
-                    <div className="mailbox-agents-content">
-                      {!selectedAgentId && (
-                        <div className="mailbox-empty">
-                          <Bot size={32} />
-                          <p>Select an agent to view their mailbox</p>
-                        </div>
-                      )}
-                      {selectedAgentId && isLoading && !agentMailbox && <MailboxSkeleton />}
-                      {selectedAgentId && agentMailbox && agentSubTab === "inbox" && agentMailbox.inbox.length === 0 && (
-                        <div className="mailbox-empty">
-                          <InboxIcon size={32} />
-                          <p>No received messages for this agent</p>
-                        </div>
-                      )}
-                      {selectedAgentId && agentMailbox && agentSubTab === "outbox" && agentMailbox.outbox.length === 0 && (
-                        <div className="mailbox-empty">
-                          <Send size={32} />
-                          <p>No sent messages for this agent</p>
-                        </div>
-                      )}
-                      {selectedAgentId && agentMailbox && agentSubTab === "inbox" && agentMailbox.inbox.map((msg) => (
-                        <div
-                          key={msg.id}
-                          className={`mailbox-item ${!msg.read ? "unread" : ""}`}
-                          onClick={() => handleOpenMessage(msg)}
-                          data-testid={`mailbox-item-${msg.id}`}
-                        >
-                          <div className="mailbox-item-avatar">
-                            {msg.fromType === "agent" ? <Bot size={16} /> : <User size={16} />}
-                          </div>
-                          <div className="mailbox-item-content">
-                            <div className="mailbox-item-header">
-                              <span className="mailbox-item-from">
-                                {getParticipantLabel(msg.fromId, msg.fromType)}
-                              </span>
-                              <span className="mailbox-item-time">{formatTimestamp(msg.createdAt)}</span>
-                            </div>
-                            <div className="mailbox-item-preview">{msg.content.slice(0, 80)}{msg.content.length > 80 ? "…" : ""}</div>
-                          </div>
-                        </div>
-                      ))}
-                      {selectedAgentId && agentMailbox && agentSubTab === "outbox" && agentMailbox.outbox.map((msg) => (
-                        <div
-                          key={msg.id}
-                          className="mailbox-item"
-                          onClick={() => handleOpenMessage(msg)}
-                          data-testid={`mailbox-item-${msg.id}`}
-                        >
-                          <div className="mailbox-item-avatar">
-                            {msg.toType === "agent" ? <Bot size={16} /> : <User size={16} />}
-                          </div>
-                          <div className="mailbox-item-content">
-                            <div className="mailbox-item-header">
-                              <span className="mailbox-item-to">
-                                To: {getParticipantLabel(msg.toId, msg.toType)}
-                              </span>
-                              <span className="mailbox-item-time">{formatTimestamp(msg.createdAt)}</span>
-                            </div>
-                            <div className="mailbox-item-preview">{msg.content.slice(0, 80)}{msg.content.length > 80 ? "…" : ""}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
+            {!selectedMessage && !showComposer && renderListPane()}
           </>
         )}
       </div>
-
     </div>
   );
 }

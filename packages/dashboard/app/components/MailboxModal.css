@@ -492,16 +492,60 @@
 }
 
 .mailbox-view .mailbox-header {
-  padding: var(--space-lg) 20px;
+  padding: var(--space-lg) var(--space-xl);
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
 
 .mailbox-view .mailbox-content {
   flex: 1;
-  overflow-y: auto;
-  padding: 20px;
+  overflow: hidden;
+  padding: var(--space-xl);
   max-height: none;
+}
+
+.mailbox-view .mailbox-split-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 38%) minmax(0, 1fr);
+  gap: var(--space-lg);
+  height: 100%;
+  min-height: 0;
+}
+
+.mailbox-view .mailbox-split-list-pane,
+.mailbox-view .mailbox-split-detail-pane {
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: var(--space-md);
+}
+
+.mailbox-view .mailbox-split-detail-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.mailbox-view .mailbox-split-empty {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  padding: var(--space-xl);
+  border: 1px dashed color-mix(in srgb, var(--text-muted) 45%, transparent);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  text-align: center;
+}
+
+.mailbox-view .mailbox-split-empty p {
+  margin: 0;
 }
 
 /* ── Mailbox — Mobile (≤ 768px) ───────────────────────────────────── */
@@ -616,9 +660,24 @@
 
   .mailbox-view .mailbox-content {
     max-height: none;
+    overflow-y: auto;
     padding: var(--space-md);
     /* Account for mobile nav bar at bottom */
     padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + var(--standalone-bottom-gap) + var(--space-lg));
+  }
+
+  .mailbox-view .mailbox-split-layout {
+    display: block;
+    height: auto;
+  }
+
+  .mailbox-view .mailbox-split-list-pane,
+  .mailbox-view .mailbox-split-detail-pane {
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    padding: 0;
+    overflow: visible;
   }
 
   .mailbox-view .mailbox-message-detail-header {
