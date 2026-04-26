@@ -126,14 +126,20 @@ function isExperimentalFeatureEnabled(features: Record<string, boolean>, key: st
   );
 }
 
-function normalizeExperimentalFeaturesForSave(features?: Record<string, boolean>): Record<string, boolean> {
+function normalizeExperimentalFeaturesForSave(features?: Record<string, boolean>): Record<string, boolean | null> {
   if (!features) {
     return {};
   }
 
-  const normalized: Record<string, boolean> = {};
+  const normalized: Record<string, boolean | null> = {};
   for (const [key, enabled] of Object.entries(features)) {
     normalized[getCanonicalExperimentalFeatureKey(key)] = enabled;
+  }
+
+  for (const [legacyKey, canonicalKey] of Object.entries(EXPERIMENTAL_FEATURE_LEGACY_ALIASES)) {
+    if (normalized[canonicalKey] !== undefined && !(legacyKey in normalized)) {
+      normalized[legacyKey] = null;
+    }
   }
 
   return normalized;

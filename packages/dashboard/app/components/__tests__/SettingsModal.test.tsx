@@ -1191,7 +1191,7 @@ describe("SettingsModal", () => {
       });
     });
 
-    it("normalizes legacy devServer flag to canonical devServerView on save", async () => {
+    it("sends canonical devServerView=false and devServer=null when disabling legacy dev server flag", async () => {
       mockFetchSettings.mockResolvedValue({
         ...defaultSettings,
         experimentalFeatures: { devServer: true },
@@ -1204,6 +1204,9 @@ describe("SettingsModal", () => {
       const devServerToggle = screen.getByLabelText("Dev Server") as HTMLInputElement;
       expect(devServerToggle).toBeChecked();
 
+      await userEvent.click(devServerToggle);
+      expect(devServerToggle).not.toBeChecked();
+
       await userEvent.click(screen.getByText("Save"));
 
       await waitFor(() => {
@@ -1211,7 +1214,27 @@ describe("SettingsModal", () => {
       });
 
       const payload = mockUpdateSettings.mock.calls[0][0];
-      expect(payload.experimentalFeatures).toEqual({ devServerView: true });
+      expect(payload.experimentalFeatures).toEqual({ devServerView: false, devServer: null });
+    });
+
+    it("does not emit legacy alias null deletes when canonical key is absent", async () => {
+      mockFetchSettings.mockResolvedValue({
+        ...defaultSettings,
+        experimentalFeatures: { insights: true },
+      });
+
+      renderModal();
+
+      await openExperimentalFeaturesSection();
+
+      await userEvent.click(screen.getByText("Save"));
+
+      await waitFor(() => {
+        expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
+      });
+
+      const payload = mockUpdateSettings.mock.calls[0][0];
+      expect(payload.experimentalFeatures).toEqual({ insights: true });
       expect(payload.experimentalFeatures.devServer).toBeUndefined();
     });
 
