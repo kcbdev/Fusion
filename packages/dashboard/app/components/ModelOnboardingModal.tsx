@@ -18,6 +18,7 @@ import type { ToastType } from "../hooks/useToast";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { ProviderIcon } from "./ProviderIcon";
 import { ClaudeCliProviderCard } from "./ClaudeCliProviderCard";
+import { LoginInstructions } from "./LoginInstructions";
 import { appendTokenQuery } from "../auth";
 
 /** Provider-specific API key setup metadata for onboarding form rendering */
@@ -1716,12 +1717,10 @@ export function ModelOnboardingModal({
           )}
         </div>
         {authActionInProgress === provider.id && loginInstructions[provider.id] && (
-          <p
-            className="auth-login-instructions"
+          <LoginInstructions
+            instructions={loginInstructions[provider.id]}
             data-testid={`onboarding-login-instructions-${provider.id}`}
-          >
-            {loginInstructions[provider.id]}
-          </p>
+          />
         )}
         {loginOutcomes[provider.id] === "timeout" && authActionInProgress !== provider.id && (
           <p className="onboarding-helper-text onboarding-inline-feedback">
@@ -2140,12 +2139,10 @@ export function ModelOnboardingModal({
                         </button>
                       )}
                       {authActionInProgress === "github" && loginInstructions.github && (
-                        <p
-                          className="auth-login-instructions"
+                        <LoginInstructions
+                          instructions={loginInstructions.github}
                           data-testid="onboarding-login-instructions-github"
-                        >
-                          {loginInstructions.github}
-                        </p>
+                        />
                       )}
                     </div>
                   )}

@@ -17,6 +17,7 @@ const PiExtensionsManager = lazy(() => import("./PiExtensionsManager").then((m) 
 import { ClaudeCliProviderCard } from "./ClaudeCliProviderCard";
 import { PluginSlot } from "./PluginSlot";
 import { AgentPromptsManager } from "./AgentPromptsManager";
+import { LoginInstructions } from "./LoginInstructions";
 import { ProviderIcon } from "./ProviderIcon";
 import { applyPresetToSelection, generateUniquePresetId } from "../utils/modelPresets";
 import { appendTokenQuery } from "../auth";
@@ -3969,12 +3970,10 @@ export function SettingsModal({
                               </button>
                             )}
                             {loginInstructions[provider.id] && (
-                              <p
-                                className="auth-login-instructions"
+                              <LoginInstructions
+                                instructions={loginInstructions[provider.id]}
                                 data-testid={`auth-login-instructions-${provider.id}`}
-                              >
-                                {loginInstructions[provider.id]}
-                              </p>
+                              />
                             )}
                           </div>
                         )}
