@@ -37,6 +37,9 @@ The context provides core cross-cutting plumbing:
 - `register-chat-routes.ts` — chat session/list/mutation/stream routes
 - `register-messaging-scripts.ts` — scripts API and mailbox/message routes
 - `register-git-github.ts` — git/GitHub workflows and related helpers
+  - Git plumbing routes: `/git/remotes*`, `/git/status`, `/git/commits*`, `/git/branches*`, `/git/worktrees`, `/git/fetch|pull|push`, `/git/stashes*`, `/git/diff*`, `/git/changes`, `/git/stage|unstage|commit|discard`
+  - GitHub import/integration routes: `/github/issues/*`, `/github/pulls/*`, `/github/webhooks`, `/github/batch/status` (includes shared batch-import rate limiter state + reset export)
+  - Task-scoped GitHub routes: `/tasks/:id/pr/*` and `/tasks/:id/issue/*` status/refresh/create flows
 - `register-model-routes.ts` — `/models` endpoint, favorites projection, and `useClaudeCli` filtering for `pi-claude-cli` entries
 - `register-auth-routes.ts` — auth/provider domain (`/auth/status`, `/auth/login`, `/auth/logout`, `/auth/api-key`, `/auth/claude-cli`, `/providers/claude-cli/status`)
 - `register-usage-routes.ts` — `/usage` endpoint with `fetchAllProviderUsage(options?.authStorage)` integration
