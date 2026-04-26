@@ -10875,6 +10875,59 @@ describe("StepSessionExecutor integration", () => {
     expect(Number.isNaN(new Date(tokenUsage.lastUsedAt as string).getTime())).toBe(false);
   });
 
+  it("persists tokenUsage incrementally during step execution before in-review transition", async () => {
+    const { store } = createTokenUsageStepSessionStore();
+    const totals = { input: 100, output: 40 };
+
+    mockedStepSessionExecutor.mockImplementationOnce(((options: any) => ({
+      executeAll: vi.fn(async () => {
+        totals.input = 120;
+        totals.output = 50;
+        options.onStepComplete(0, { stepIndex: 0, success: true, retries: 0 });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        totals.input = 150;
+        totals.output = 70;
+        options.onStepComplete(1, { stepIndex: 1, success: true, retries: 0 });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        return [
+          { stepIndex: 0, success: true, retries: 0 },
+          { stepIndex: 1, success: true, retries: 0 },
+        ];
+      }),
+      terminateAllSessions: mockTerminateAllSessions,
+      cleanup: mockCleanup,
+    })) as any);
+
+    const agentStore = {
+      getAgent: vi.fn().mockImplementation(async () => ({
+        id: "agent-001",
+        totalInputTokens: totals.input,
+        totalOutputTokens: totals.output,
+      })),
+    };
+
+    const executor = new TaskExecutor(store, "/tmp/test", { agentStore: agentStore as any });
+    await executor.execute(createTaskWithSteps());
+
+    const tokenUsageUpdates = store.updateTask.mock.calls
+      .filter(([, updates]: [string, Record<string, unknown>]) => updates.tokenUsage)
+      .map(([, updates]: [string, Record<string, unknown>]) => updates.tokenUsage as Record<string, unknown>);
+
+    expect(tokenUsageUpdates.length).toBeGreaterThanOrEqual(2);
+    expect(tokenUsageUpdates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          inputTokens: 20,
+          outputTokens: 10,
+          totalTokens: 30,
+        }),
+      ]),
+    );
+    expect(store.moveTask).toHaveBeenCalledWith("FN-200", "in-review");
+  });
+
   it("persists task tokenUsage on failure paths so partial usage is visible", async () => {
     const { store } = createTokenUsageStepSessionStore();
     const totals = { input: 30, output: 10 };

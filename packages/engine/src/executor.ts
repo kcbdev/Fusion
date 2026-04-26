@@ -1592,6 +1592,9 @@ export class TaskExecutor {
             } catch (err) {
               executorLog.warn(`${task.id}: failed to update step ${stepIndex} status: ${err}`);
             }
+            this.persistTokenUsage(task.id).catch((err) => {
+              executorLog.warn(`${task.id}: failed to persist token usage on step ${stepIndex} complete: ${err}`);
+            });
           },
         });
         this.activeStepExecutors.set(task.id, stepExecutor);
