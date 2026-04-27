@@ -192,6 +192,10 @@ export function fetchDashboardHealth(): Promise<DashboardHealthResponse> {
   return api<DashboardHealthResponse>("/health");
 }
 
+export function checkForUpdates(): Promise<UpdateCheckResponse> {
+  return api<UpdateCheckResponse>("/updates/check");
+}
+
 export function fetchTasks(
   limit?: number,
   offset?: number,
@@ -411,8 +415,8 @@ export function updateSettings(settings: Partial<Settings>, projectId?: string):
 }
 
 export interface UpdateCheckResponse {
-  currentVersion?: string;
-  latestVersion?: string | null;
+  currentVersion: string;
+  latestVersion: string | null;
   updateAvailable: boolean;
   lastChecked?: number;
   disabled?: boolean;

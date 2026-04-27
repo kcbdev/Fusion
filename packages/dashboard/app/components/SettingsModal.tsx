@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense, type MouseEvent } from "react";
-import { Globe, Folder } from "lucide-react";
+import { Globe, Folder, RefreshCw } from "lucide-react";
 import { THINKING_LEVELS, isGlobalSettingsKey, isProjectSettingsKey, getErrorMessage } from "@fusion/core";
 import type { Settings, GlobalSettings, ThemeMode, ColorTheme, ModelPreset, NtfyNotificationEvent, AgentPromptsConfig, ThinkingLevel } from "@fusion/core";
-import { fetchSettings, fetchSettingsByScope, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, saveApiKey, clearApiKey, fetchModels, testNtfyNotification, fetchBackups, createBackup, exportSettings, importSettings, fetchMemoryFile, fetchMemoryFiles, saveMemoryFile, compactMemory, fetchGlobalConcurrency, updateGlobalConcurrency, installQmd, testMemoryRetrieval, fetchGitRemotesDetailed, fetchDashboardHealth, fetchRemoteSettings, updateRemoteSettings, fetchRemoteStatus, activateRemoteProvider, startRemoteTunnel, stopRemoteTunnel, regenerateRemotePersistentToken, generateShortLivedRemoteToken, fetchRemoteQr, fetchRemoteUrl } from "../api";
-import type { AuthProvider, ModelInfo, BackupListResponse, SettingsExportData, MemoryFileInfo, MemoryRetrievalTestResult, GitRemoteDetailed, RemoteSettings, RemoteStatus } from "../api";
+import { fetchSettings, fetchSettingsByScope, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, saveApiKey, clearApiKey, fetchModels, testNtfyNotification, fetchBackups, createBackup, exportSettings, importSettings, fetchMemoryFile, fetchMemoryFiles, saveMemoryFile, compactMemory, fetchGlobalConcurrency, updateGlobalConcurrency, installQmd, testMemoryRetrieval, fetchGitRemotesDetailed, fetchDashboardHealth, checkForUpdates, fetchRemoteSettings, updateRemoteSettings, fetchRemoteStatus, activateRemoteProvider, startRemoteTunnel, stopRemoteTunnel, regenerateRemotePersistentToken, generateShortLivedRemoteToken, fetchRemoteQr, fetchRemoteUrl } from "../api";
+import type { AuthProvider, ModelInfo, BackupListResponse, SettingsExportData, MemoryFileInfo, MemoryRetrievalTestResult, GitRemoteDetailed, RemoteSettings, RemoteStatus, UpdateCheckResponse } from "../api";
 import { useMemoryBackendStatus } from "../hooks/useMemoryBackendStatus";
 import type { ToastType } from "../hooks/useToast";
 import { ThemeSelector } from "./ThemeSelector";
@@ -226,6 +226,8 @@ export function SettingsModal({
       : false,
   );
   const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [updateCheckLoading, setUpdateCheckLoading] = useState(false);
+  const [updateCheckResult, setUpdateCheckResult] = useState<UpdateCheckResponse | null>(null);
   const [prefixError, setPrefixError] = useState<string | null>(null);
   const [overlapPathPickerIndex, setOverlapPathPickerIndex] = useState<number | null>(null);
 
@@ -412,6 +414,30 @@ export function SettingsModal({
       cancelled = true;
     };
   }, []);
+
+  const handleCheckForUpdates = useCallback(async () => {
+    setUpdateCheckLoading(true);
+
+    try {
+      const result = await checkForUpdates();
+      setUpdateCheckResult(result);
+
+      if (result.error) {
+        addToast(result.error, "error");
+      }
+    } catch (error) {
+      const message = getErrorMessage(error) || "Failed to check for updates";
+      setUpdateCheckResult({
+        currentVersion: appVersion ?? "unknown",
+        latestVersion: null,
+        updateAvailable: false,
+        error: message,
+      });
+      addToast(message, "error");
+    } finally {
+      setUpdateCheckLoading(false);
+    }
+  }, [addToast, appVersion]);
 
   // Load auth status when the authentication section is active
   const loadAuthStatus = useCallback(async () => {
@@ -4040,7 +4066,39 @@ export function SettingsModal({
         <div className="modal-header">
           <div className="settings-modal-heading">
             <h3>Settings</h3>
-            {appVersion && <p className="settings-modal-version">Version {appVersion}</p>}
+            <div className="settings-update-check">
+              {appVersion && <p className="settings-modal-version">Version {appVersion}</p>}
+              <button
+                type="button"
+                className="btn btn-icon btn-sm settings-update-btn"
+                onClick={() => {
+                  void handleCheckForUpdates();
+                }}
+                disabled={updateCheckLoading}
+                aria-label="Check for updates"
+                title="Check for updates"
+              >
+                <RefreshCw className={updateCheckLoading ? "spinning" : undefined} />
+              </button>
+              {updateCheckResult && (
+                <span
+                  aria-live="polite"
+                  className={`settings-update-result ${
+                    updateCheckResult.error
+                      ? "settings-update-result--error"
+                      : updateCheckResult.updateAvailable
+                        ? "settings-update-result--available"
+                        : "settings-update-result--up-to-date"
+                  }`}
+                >
+                  {updateCheckResult.error
+                    ? updateCheckResult.error
+                    : updateCheckResult.updateAvailable && updateCheckResult.latestVersion
+                      ? `v${updateCheckResult.latestVersion} available`
+                      : "You're up to date ✓"}
+                </span>
+              )}
+            </div>
           </div>
           <button className="modal-close" onClick={onClose} aria-label="Close">
             &times;

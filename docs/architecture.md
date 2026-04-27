@@ -513,6 +513,7 @@ A `prefetchLazyViews()` function runs once on mount via `requestIdleCallback` to
 | GET | `/api/settings/auth-export` | Export local auth credentials. |
 | GET | `/api/update-check` | Read cached/TTL-guarded npm update status for `@runfusion/fusion` (respects `updateCheckEnabled`). |
 | POST | `/api/update-check/refresh` | Clear cached update data and force a fresh npm update check. |
+| GET | `/api/updates/check` | Perform an on-demand npm registry check for the latest `@runfusion/fusion` version (no cache). |
 
 ### Run Audit API
 The run-audit system records every mutation performed by the engine across three domains:

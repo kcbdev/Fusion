@@ -20,6 +20,43 @@
   font-weight: 500;
 }
 
+.settings-update-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.settings-update-btn {
+  border-radius: var(--radius-sm);
+}
+
+.settings-update-btn svg.spinning {
+  animation: settings-update-spin 1s linear infinite;
+}
+
+.settings-update-result {
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.settings-update-result--up-to-date {
+  color: var(--color-success);
+}
+
+.settings-update-result--available {
+  color: var(--color-info);
+}
+
+.settings-update-result--error {
+  color: var(--text-muted);
+}
+
+@keyframes settings-update-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .settings-layout {
   display: flex;
   flex: 1;
@@ -844,6 +881,11 @@
 
 
 @media (max-width: 768px) {
+  .settings-update-check {
+    flex-wrap: wrap;
+    row-gap: var(--space-xs);
+  }
+
   /* Settings modal: use the section picker as the only mobile navigation */
   .settings-layout {
     flex-direction: column;

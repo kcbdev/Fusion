@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SettingsModal } from "../SettingsModal";
-import type { SettingsExportData } from "../../api";
+import type { SettingsExportData, UpdateCheckResponse } from "../../api";
 
 // --- API mocks ---
 const mockFetchSettings = vi.fn();
@@ -29,6 +29,7 @@ const mockTestMemoryRetrieval = vi.fn();
 const mockInstallQmd = vi.fn();
 const mockFetchGitRemotesDetailed = vi.fn();
 const mockFetchDashboardHealth = vi.fn();
+const mockCheckForUpdates = vi.fn();
 const mockFetchRemoteSettings = vi.fn();
 const mockUpdateRemoteSettings = vi.fn();
 const mockFetchRemoteStatus = vi.fn();
@@ -66,6 +67,7 @@ vi.mock("../../api", () => ({
   installQmd: (...args: unknown[]) => mockInstallQmd(...args),
   fetchGitRemotesDetailed: (...args: unknown[]) => mockFetchGitRemotesDetailed(...args),
   fetchDashboardHealth: (...args: unknown[]) => mockFetchDashboardHealth(...args),
+  checkForUpdates: (...args: unknown[]) => mockCheckForUpdates(...args),
   fetchRemoteSettings: (...args: unknown[]) => mockFetchRemoteSettings(...args),
   updateRemoteSettings: (...args: unknown[]) => mockUpdateRemoteSettings(...args),
   fetchRemoteStatus: (...args: unknown[]) => mockFetchRemoteStatus(...args),
@@ -83,6 +85,16 @@ const mockUseMemoryBackendStatus = vi.fn();
 vi.mock("../../hooks/useMemoryBackendStatus", () => ({
   useMemoryBackendStatus: (...args: unknown[]) => mockUseMemoryBackendStatus(...args),
 }));
+
+vi.mock("lucide-react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("lucide-react")>();
+  return {
+    ...actual,
+    Globe: () => <span data-testid="icon-globe" />,
+    Folder: () => <span data-testid="icon-folder" />,
+    RefreshCw: ({ className }: { className?: string }) => <span data-testid="icon-refresh" className={className} />,
+  };
+});
 
 vi.mock("../PluginManager", () => ({
   PluginManager: () => <div data-testid="plugin-manager">Plugin manager content</div>,
@@ -198,6 +210,7 @@ describe("SettingsModal", () => {
     });
     mockFetchGitRemotesDetailed.mockResolvedValue([]);
     mockFetchDashboardHealth.mockResolvedValue({ status: "ok", version: "1.2.3", uptime: 123 });
+    mockCheckForUpdates.mockResolvedValue(undefined);
     mockFetchRemoteSettings.mockResolvedValue({
       settings: {
         remoteActiveProvider: null,
@@ -368,6 +381,72 @@ describe("SettingsModal", () => {
       await userEvent.click(screen.getByText("Scheduling"));
       expect(await screen.findByLabelText("Max Concurrent Tasks")).toBeInTheDocument();
       expect(addToast).not.toHaveBeenCalled();
+    });
+
+    it("renders check for updates button in header", async () => {
+      renderModal();
+      await waitForSettingsModalReady();
+
+      expect(screen.getByRole("button", { name: "Check for updates" })).toBeInTheDocument();
+    });
+
+    it("clicking check for updates shows up-to-date message", async () => {
+      mockCheckForUpdates.mockResolvedValueOnce({
+        currentVersion: "1.2.3",
+        latestVersion: "1.2.3",
+        updateAvailable: false,
+      });
+
+      renderModal();
+      await waitForSettingsModalReady();
+
+      await userEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+
+      expect(await screen.findByText("You're up to date ✓")).toBeInTheDocument();
+    });
+
+    it("clicking check for updates shows update available message", async () => {
+      mockCheckForUpdates.mockResolvedValueOnce({
+        currentVersion: "1.0.0",
+        latestVersion: "2.0.0",
+        updateAvailable: true,
+      });
+
+      renderModal();
+      await waitForSettingsModalReady();
+
+      await userEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+
+      expect(await screen.findByText("v2.0.0 available")).toBeInTheDocument();
+    });
+
+    it("disables button while checking", async () => {
+      let resolveCheck: ((result: UpdateCheckResponse) => void) | undefined;
+      const pendingCheck = new Promise<UpdateCheckResponse>((resolve) => {
+        resolveCheck = resolve;
+      });
+      mockCheckForUpdates.mockReturnValueOnce(pendingCheck);
+
+      renderModal();
+      await waitForSettingsModalReady();
+
+      const button = screen.getByRole("button", { name: "Check for updates" });
+      expect(button).not.toBeDisabled();
+
+      fireEvent.click(button);
+      await waitFor(() => {
+        expect(button).toBeDisabled();
+      });
+
+      resolveCheck?.({
+        currentVersion: "1.2.3",
+        latestVersion: "1.2.3",
+        updateAvailable: false,
+      });
+
+      await waitFor(() => {
+        expect(button).not.toBeDisabled();
+      });
     });
   });
 

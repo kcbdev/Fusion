@@ -68,6 +68,52 @@ const PACKAGE_VERSION = (() => {
   return process.env.npm_package_version ?? "0.0.0";
 })();
 
+const CLI_PACKAGE_VERSION = (() => {
+  try {
+    const packageJsonPath = join(__dirname, "..", "..", "cli", "package.json");
+    const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8")) as {
+      version?: unknown;
+    };
+
+    if (typeof packageJson.version === "string" && packageJson.version.length > 0) {
+      return packageJson.version;
+    }
+  } catch {
+    // Fall through to environment fallback.
+  }
+
+  return process.env.npm_package_version ?? "0.0.0";
+})();
+
+function parseVersion(version: string): number[] {
+  return version
+    .split(".")
+    .slice(0, 3)
+    .map((part) => Number.parseInt(part, 10))
+    .map((value) => (Number.isFinite(value) ? value : 0));
+}
+
+function isRemoteVersionNewer(remoteVersion: string, currentVersion: string): boolean {
+  const remote = parseVersion(remoteVersion);
+  const current = parseVersion(currentVersion);
+  const maxLength = Math.max(remote.length, current.length, 3);
+
+  for (let i = 0; i < maxLength; i += 1) {
+    const remotePart = remote[i] ?? 0;
+    const currentPart = current[i] ?? 0;
+
+    if (remotePart > currentPart) {
+      return true;
+    }
+
+    if (remotePart < currentPart) {
+      return false;
+    }
+  }
+
+  return false;
+}
+
 const DEFAULT_AI_SESSION_TTL_MS = SESSION_CLEANUP_DEFAULT_MAX_AGE_MS;
 const MIN_AI_SESSION_TTL_MS = 10 * 60 * 1000;
 const MAX_AI_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -919,6 +965,45 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
       version: PACKAGE_VERSION,
       uptime: Math.floor(process.uptime()),
     });
+  });
+
+  app.get("/api/updates/check", async (_req, res) => {
+    const currentVersion = CLI_PACKAGE_VERSION;
+    res.set("Cache-Control", "no-store");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+
+    try {
+      const response = await fetch("https://registry.npmjs.org/@runfusion/fusion/latest", {
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`registry request failed: ${response.status}`);
+      }
+
+      const payload = (await response.json()) as { version?: unknown };
+      if (typeof payload.version !== "string" || payload.version.trim().length === 0) {
+        throw new Error("registry response missing version");
+      }
+
+      const latestVersion = payload.version;
+      res.json({
+        currentVersion,
+        latestVersion,
+        updateAvailable: isRemoteVersionNewer(latestVersion, currentVersion),
+      });
+    } catch {
+      res.status(200).json({
+        currentVersion,
+        latestVersion: null,
+        updateAvailable: false,
+        error: "Failed to check for updates",
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
   });
 
   app.get("/remote-login", async (req, res) => {
