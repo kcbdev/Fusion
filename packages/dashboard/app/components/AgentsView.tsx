@@ -707,6 +707,8 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
     return getAgentHealthStatus(agent);
   };
 
+  const showInitialAgentsLoading = isLoading && agents.length === 0;
+
   return (
     <div className="agents-view">
       <div className="agents-view-header">
@@ -913,7 +915,12 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
         />
 
         {/* Agent Collection */}
-        {agentView === "tree" ? (
+        {showInitialAgentsLoading ? (
+          <div className="agents-view-loading" role="status" aria-live="polite">
+            <RefreshCw size={18} className="spin" />
+            <span>Loading agents...</span>
+          </div>
+        ) : agentView === "tree" ? (
           <div className="agent-tree__view">
             {displayAgents.length === 0 ? (
               <AgentEmptyState onCtaClick={() => setIsCreating(true)} />
@@ -1005,7 +1012,7 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
               return (
                 <div key={agent.id} className={`agent-card ${stateCardClass}`}>
                   <div className="agent-card-header">
-                    <div 
+                    <div
                       className="agent-info agent-info--clickable"
                       onClick={() => setSelectedAgentId(agent.id)}
                       role="button"

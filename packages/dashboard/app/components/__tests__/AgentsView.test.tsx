@@ -144,6 +144,76 @@ describe("AgentsView", () => {
       });
     });
 
+    it("shows a loading indicator while the initial agents fetch is pending", async () => {
+      let resolveAgents: ((value: Agent[]) => void) | undefined;
+      mockFetchAgents.mockImplementationOnce(
+        () =>
+          new Promise<Agent[]>((resolve) => {
+            resolveAgents = resolve;
+          }),
+      );
+
+      render(<AgentsView addToast={mockAddToast} />);
+
+      const loadingStatus = await screen.findByRole("status");
+      expect(loadingStatus).toHaveTextContent("Loading agents...");
+      expect(loadingStatus.getAttribute("aria-live")).toBe("polite");
+
+      resolveAgents?.(mockAgents);
+      await waitFor(() => {
+        expect(screen.queryByText("Loading agents...")).toBeNull();
+      });
+    });
+
+    it("hides the loading indicator once agents finish loading", async () => {
+      let resolveAgents: ((value: Agent[]) => void) | undefined;
+      mockFetchAgents.mockImplementationOnce(
+        () =>
+          new Promise<Agent[]>((resolve) => {
+            resolveAgents = resolve;
+          }),
+      );
+
+      render(<AgentsView addToast={mockAddToast} />);
+
+      expect(await screen.findByText("Loading agents...")).toBeTruthy();
+
+      resolveAgents?.(mockAgents);
+
+      await waitFor(() => {
+        expect(screen.queryByText("Loading agents...")).toBeNull();
+        expect(screen.getAllByText("Test Agent 1").length).toBeGreaterThan(0);
+      });
+    });
+
+    it("keeps existing agents visible during refresh loads", async () => {
+      render(<AgentsView addToast={mockAddToast} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("Test Agent 1").length).toBeGreaterThan(0);
+      });
+
+      let resolveRefresh: ((value: Agent[]) => void) | undefined;
+      mockFetchAgents.mockImplementationOnce(
+        () =>
+          new Promise<Agent[]>((resolve) => {
+            resolveRefresh = resolve;
+          }),
+      );
+
+      fireEvent.click(screen.getByTitle("Refresh"));
+
+      await waitFor(() => {
+        expect(screen.queryByText("Loading agents...")).toBeNull();
+        expect(screen.getAllByText("Test Agent 1").length).toBeGreaterThan(0);
+      });
+
+      resolveRefresh?.(mockAgents);
+      await waitFor(() => {
+        expect(mockFetchAgents).toHaveBeenCalledTimes(2);
+      });
+    });
+
     it("keeps New Agent directly accessible while controls live in popup", async () => {
       render(<AgentsView addToast={mockAddToast} />);
 
