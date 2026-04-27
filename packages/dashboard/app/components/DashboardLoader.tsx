@@ -55,7 +55,7 @@ export function DashboardLoader({ stage }: DashboardLoaderProps) {
         <h1 className="dashboard-loader__logo">Fusion</h1>
         {isVersionUpdate ? (
           <p className="dashboard-loader__message dashboard-loader__message--update">
-            Updating to a new version...
+            Updating to a new frontend version...
           </p>
         ) : (
           <p className="dashboard-loader__message">Initializing dashboard...</p>
