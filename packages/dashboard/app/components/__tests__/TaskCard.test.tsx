@@ -503,7 +503,7 @@ describe("TaskCard", () => {
     expect(timer?.getAttribute("aria-label")).toContain("Completed processing duration 2h");
   });
 
-  it("renders files-changed metadata and timer chip in the same footer row", () => {
+  it("renders files-changed metadata in footer row and timer chip in header", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-25T18:00:00.000Z"));
 
@@ -529,17 +529,19 @@ describe("TaskCard", () => {
       />,
     );
 
+    const header = container.querySelector(".card-header");
     const footerRow = container.querySelector(".card-footer-row");
     const filesChanged = container.querySelector(".card-session-files");
     const timer = container.querySelector(".card-time-indicator");
 
+    expect(header).not.toBeNull();
     expect(footerRow).not.toBeNull();
     expect(filesChanged).not.toBeNull();
     expect(timer).not.toBeNull();
     expect(footerRow?.contains(filesChanged)).toBe(true);
-    expect(footerRow?.contains(timer)).toBe(true);
-    expect(filesChanged?.nextElementSibling).toBe(timer);
-    expect(Array.from(footerRow?.children ?? [])).toEqual([filesChanged, timer]);
+    expect(footerRow?.contains(timer)).toBe(false);
+    expect(header?.contains(timer)).toBe(true);
+    expect(Array.from(footerRow?.children ?? [])).toEqual([filesChanged]);
   });
   it.each(["triage", "todo", "in-review", "archived"] as const)(
     "does not render timer chip for %s cards",

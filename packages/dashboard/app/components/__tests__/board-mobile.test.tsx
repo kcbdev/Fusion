@@ -95,6 +95,25 @@ function expectRuleToContain(section: string, selectorFragment: string, declarat
   expect(foundDeclaration).toBe(true);
 }
 
+function expectRuleNotToContain(section: string, selectorFragment: string, declaration: string): void {
+  const pattern = /([^{}]+)\{([\s\S]*?)\}/g;
+  let foundSelector = false;
+
+  for (const match of section.matchAll(pattern)) {
+    const selector = match[1];
+    const block = match[2];
+
+    if (!selector.includes(selectorFragment)) {
+      continue;
+    }
+
+    foundSelector = true;
+    expect(block.includes(declaration)).toBe(false);
+  }
+
+  expect(foundSelector).toBe(true);
+}
+
 function createTask(overrides: Partial<Task> & { id?: string } = {}): Task {
   return {
     id: overrides.id ?? "FN-1139",
@@ -255,9 +274,10 @@ describe("TaskCard mobile", () => {
     expectRuleToContain(css, ".card-footer-row", "flex-wrap: nowrap;");
   });
 
-  it("keeps TaskCard timer chip right-aligned with files metadata", () => {
+  it("keeps TaskCard timer chip in-flow and reserves right alignment for header actions", () => {
     const css = loadAllAppCss();
-    expectRuleToContain(css, ".card-time-indicator", "margin-left: auto;");
+    expectRuleNotToContain(css, ".card-time-indicator", "margin-left: auto;");
+    expectRuleToContain(css, ".card-header-actions", "margin-left: auto;");
   });
 
   it("truncates TaskCard files-changed text instead of wrapping", () => {
