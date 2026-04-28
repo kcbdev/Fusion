@@ -3913,13 +3913,33 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       if (currentModified <= this.lastKnownModified) return;
       this.lastKnownModified = currentModified;
 
-      // Detect deletions cheaply: compare ID sets without loading full rows
+      // Detect deletions cheaply: compare ID sets without loading full rows.
+      // A row missing from `tasks` can mean two things: the task was actually
+      // deleted, OR it was archived (archiveTask removes it from `tasks` after
+      // copying into `archived_tasks`). Other TaskStore instances polling the
+      // same DB can't tell the difference from this view alone — without the
+      // archive check below they emit spurious task:deleted events for every
+      // archived task, which the activity log records as a deletion.
       const idRows = this.db.prepare('SELECT id FROM tasks').all() as Array<{ id: string }>;
       const currentIds = new Set(idRows.map((r) => r.id));
-      for (const [id, cached] of this.taskCache) {
-        if (!currentIds.has(id)) {
+      const missingIds: string[] = [];
+      for (const id of this.taskCache.keys()) {
+        if (!currentIds.has(id)) missingIds.push(id);
+      }
+      if (missingIds.length > 0) {
+        const archivedSet = this.archiveDb.filterArchived(missingIds);
+        for (const id of missingIds) {
+          const cached = this.taskCache.get(id);
+          if (!cached) continue;
           this.taskCache.delete(id);
-          this.emit("task:deleted", cached);
+          if (archivedSet.has(id)) {
+            // Task moved to archive — emit task:moved (matching what
+            // archiveTask emits in-process) so the activity-log listener
+            // records it correctly.
+            this.emit("task:moved", { task: cached, from: cached.column, to: "archived" as Column });
+          } else {
+            this.emit("task:deleted", cached);
+          }
         }
       }
 

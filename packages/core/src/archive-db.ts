@@ -124,6 +124,29 @@ export class ArchiveDatabase {
     return row ? JSON.parse(row.taskJson) as ArchivedTaskEntry : undefined;
   }
 
+  /**
+   * Return the subset of `ids` that are present in archived_tasks.
+   * Used by TaskStore.checkForChanges to distinguish a real deletion from
+   * an archive (both look like "row gone from tasks table" to the polling
+   * loop). Single-shot query — much cheaper than N `get()` calls when many
+   * tasks are archived in a batch.
+   */
+  filterArchived(ids: readonly string[]): Set<string> {
+    if (ids.length === 0) return new Set();
+    // SQLite parameter limit defaults to 32766; chunk to be safe.
+    const result = new Set<string>();
+    const CHUNK = 500;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      const placeholders = chunk.map(() => "?").join(",");
+      const rows = this.db
+        .prepare(`SELECT id FROM archived_tasks WHERE id IN (${placeholders})`)
+        .all(...chunk) as Array<{ id: string }>;
+      for (const row of rows) result.add(row.id);
+    }
+    return result;
+  }
+
   delete(id: string): void {
     this.db.prepare("DELETE FROM archived_tasks WHERE id = ?").run(id);
   }
