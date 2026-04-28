@@ -164,6 +164,8 @@ describe("QuickChatFAB", () => {
       models: mockModels,
       favoriteProviders: [],
       favoriteModels: [],
+      defaultProvider: undefined,
+      defaultModelId: undefined,
     });
     createMockStreamResponse();
   });
@@ -183,6 +185,63 @@ describe("QuickChatFAB", () => {
     });
     expect(screen.queryByTestId("quick-chat-mode-toggle")).toBeNull();
     expect(screen.queryByTestId("quick-chat-agent-select")).toBeNull();
+  });
+
+  it("auto-selects configured default model when no agents exist", async () => {
+    mockAgentsHook([]);
+    mockFetchModels.mockResolvedValue({
+      models: mockModels,
+      favoriteProviders: [],
+      favoriteModels: [],
+      defaultProvider: "openai",
+      defaultModelId: "gpt-4o",
+    });
+
+    render(<QuickChatFAB addToast={addToast} />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("quick-chat-model-tag")).toHaveTextContent("GPT-4o");
+    });
+  });
+
+  it("auto-selects configured default model and switches to model mode when agents exist", async () => {
+    mockAgentsHook(mockAgents);
+    mockFetchModels.mockResolvedValue({
+      models: mockModels,
+      favoriteProviders: [],
+      favoriteModels: [],
+      defaultProvider: "openai",
+      defaultModelId: "gpt-4o",
+    });
+
+    render(<QuickChatFAB addToast={addToast} />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("quick-chat-model-select")).toBeDefined();
+      expect(screen.getByTestId("quick-chat-model-tag")).toHaveTextContent("GPT-4o");
+    });
+  });
+
+  it("preserves existing behavior when no default model is configured and agents exist", async () => {
+    mockAgentsHook(mockAgents);
+    mockFetchModels.mockResolvedValue({
+      models: mockModels,
+      favoriteProviders: [],
+      favoriteModels: [],
+      defaultProvider: undefined,
+      defaultModelId: undefined,
+    });
+
+    render(<QuickChatFAB addToast={addToast} />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("quick-chat-agent-select")).toBeDefined();
+    });
+    expect(screen.queryByTestId("quick-chat-model-select")).toBeNull();
+    expect(screen.queryByTestId("quick-chat-model-tag")).toBeNull();
   });
 
   it("renders FAB button when agents exist", () => {

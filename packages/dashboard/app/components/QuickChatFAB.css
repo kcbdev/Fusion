@@ -188,6 +188,28 @@
   color: var(--text);
 }
 
+.quick-chat-panel-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.quick-chat-model-tag {
+  display: inline-flex;
+  align-items: center;
+  max-width: 18ch;
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in srgb, var(--todo) 35%, var(--border));
+  background: color-mix(in srgb, var(--todo) 14%, transparent);
+  color: var(--text);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .quick-chat-panel-header-actions {
   display: inline-flex;
   align-items: center;

@@ -487,6 +487,7 @@ describe("ActivityLogModal", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("activity-log-modal")).toBeTruthy();
+      expect(screen.getAllByTestId("activity-entry").length).toBeGreaterThan(0);
     });
 
     // Verify key structural classes that the mobile CSS targets

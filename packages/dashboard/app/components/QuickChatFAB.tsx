@@ -46,29 +46,6 @@ interface ParsedModelSelection {
   modelId: string;
 }
 
-const modelTagStyle = {
-  display: "inline-flex",
-  alignItems: "center",
-  maxWidth: "180px",
-  padding: "var(--space-xs) var(--space-sm)",
-  borderRadius: "var(--radius-pill)",
-  border: "1px solid color-mix(in srgb, var(--todo) 35%, var(--border))",
-  background: "color-mix(in srgb, var(--todo) 14%, transparent)",
-  color: "var(--text)",
-  fontSize: "11px",
-  whiteSpace: "nowrap",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-} as const;
-
-const headerTitleWrapStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: "var(--space-sm)",
-  minWidth: 0,
-} as const;
-
-
 function getAgentLabel(agent: Agent): string {
   const base = agent.name?.trim() || agent.id;
   return `${base} (${agent.role})`;
@@ -807,8 +784,27 @@ export function QuickChatFAB({
       .then((response) => {
         const loadedModels = response.models ?? [];
         setModels(loadedModels);
-        // Auto-select first model when no agents exist and no model selected yet
-        if (agents.length === 0 && loadedModels.length > 0 && !selectedModel) {
+
+        if (selectedModel || loadedModels.length === 0) {
+          return;
+        }
+
+        const defaultProvider = response.defaultProvider;
+        const defaultModelId = response.defaultModelId;
+        if (defaultProvider && defaultModelId) {
+          const defaultSelection = `${defaultProvider}/${defaultModelId}`;
+          const hasDefaultModel = loadedModels.some(
+            (model) => `${model.provider}/${model.id}` === defaultSelection,
+          );
+          if (hasDefaultModel) {
+            setSelectedModel(defaultSelection);
+            setChatMode("model");
+            return;
+          }
+        }
+
+        // Fallback: auto-select first model only when no agents exist.
+        if (agents.length === 0) {
           const firstModel = loadedModels[0];
           if (firstModel) {
             setSelectedModel(`${firstModel.provider}/${firstModel.id}`);
@@ -1353,10 +1349,10 @@ export function QuickChatFAB({
           )}
 
           <div className="quick-chat-panel-header">
-            <div style={headerTitleWrapStyle}>
+            <div className="quick-chat-panel-title-wrap">
               <h3>Quick Chat</h3>
               {selectedModelTag && (
-                <span style={modelTagStyle} data-testid="quick-chat-model-tag" title={selectedModelTag}>
+                <span className="quick-chat-model-tag" data-testid="quick-chat-model-tag" title={selectedModelTag}>
                   {selectedModelTag}
                 </span>
               )}
