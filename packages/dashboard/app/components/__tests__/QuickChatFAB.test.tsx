@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { Agent, ChatSession } from "../../api";
+import type { Agent } from "../../api";
+import type { ChatSession } from "@fusion/core";
 import * as apiModule from "../../api";
 import { useAgents } from "../../hooks/useAgents";
 import { QuickChatFAB } from "../QuickChatFAB";
@@ -54,6 +55,10 @@ const mockSession: ChatSession = {
   id: "session-001",
   agentId: "agent-001",
   status: "active",
+  title: null,
+  projectId: null,
+  modelProvider: null,
+  modelId: null,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 };
@@ -217,6 +222,8 @@ describe("QuickChatFAB", () => {
           sessionId: "session-001",
           role: "user",
           content: "**User** plain",
+          thinkingOutput: null,
+          metadata: null,
           createdAt: new Date().toISOString(),
         },
         {
@@ -224,6 +231,8 @@ describe("QuickChatFAB", () => {
           sessionId: "session-001",
           role: "assistant",
           content: "**Bold** one",
+          thinkingOutput: null,
+          metadata: null,
           createdAt: new Date().toISOString(),
         },
         {
@@ -231,6 +240,8 @@ describe("QuickChatFAB", () => {
           sessionId: "session-001",
           role: "assistant",
           content: "**Bold** two",
+          thinkingOutput: null,
+          metadata: null,
           createdAt: new Date().toISOString(),
         },
       ],
@@ -275,6 +286,8 @@ describe("QuickChatFAB", () => {
           sessionId: "session-001",
           role: "assistant",
           content: "**Persisted** message",
+          thinkingOutput: null,
+          metadata: null,
           createdAt: new Date().toISOString(),
         },
       ],
@@ -493,6 +506,8 @@ describe("QuickChatFAB", () => {
       agentId: "__fn_agent__",
       modelProvider: "anthropic",
       modelId: "claude-sonnet-4-5",
+      title: null,
+      projectId: null,
       status: "active",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -502,6 +517,8 @@ describe("QuickChatFAB", () => {
       agentId: "__fn_agent__",
       modelProvider: "anthropic",
       modelId: "claude-sonnet-4-5",
+      title: null,
+      projectId: null,
       status: "active",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -927,6 +944,10 @@ describe("QuickChatFAB", () => {
       id: "session-agent-001",
       agentId: "agent-001",
       status: "active",
+      title: null,
+      projectId: null,
+      modelProvider: null,
+      modelId: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -934,6 +955,10 @@ describe("QuickChatFAB", () => {
       id: "session-agent-002",
       agentId: "agent-002",
       status: "active",
+      title: null,
+      projectId: null,
+      modelProvider: null,
+      modelId: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -944,6 +969,8 @@ describe("QuickChatFAB", () => {
         sessionId: "session-agent-001",
         role: "user" as const,
         content: "Hello from agent 1",
+        thinkingOutput: null,
+        metadata: null,
         createdAt: new Date().toISOString(),
       },
       {
@@ -951,6 +978,8 @@ describe("QuickChatFAB", () => {
         sessionId: "session-agent-001",
         role: "assistant" as const,
         content: "Hello from agent 1 assistant",
+        thinkingOutput: null,
+        metadata: null,
         createdAt: new Date().toISOString(),
       },
     ];
@@ -960,6 +989,8 @@ describe("QuickChatFAB", () => {
         sessionId: "session-agent-002",
         role: "user" as const,
         content: "Hello from agent 2",
+        thinkingOutput: null,
+        metadata: null,
         createdAt: new Date().toISOString(),
       },
       {
@@ -967,6 +998,8 @@ describe("QuickChatFAB", () => {
         sessionId: "session-agent-002",
         role: "assistant" as const,
         content: "Agent 2 response",
+        thinkingOutput: null,
+        metadata: null,
         createdAt: new Date().toISOString(),
       },
     ];

@@ -10,6 +10,7 @@ const CREATED_TASK: Task = {
   status: "pending",
   column: "triage",
   steps: [],
+  currentStep: 0,
   dependencies: [],
   log: [],
   attachments: [],

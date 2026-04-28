@@ -4,6 +4,8 @@ import { useBatchBadgeFetch, __resetBatchBadgeStoreForTests } from "../useBatchB
 import * as api from "../../api";
 import type { BatchStatusResult } from "@fusion/core";
 
+type BatchEntry = { result: BatchStatusResult[string]; timestamp: number };
+
 // Mock the API module
 vi.mock("../../api", () => ({
   fetchBatchStatus: vi.fn(),
@@ -241,7 +243,7 @@ describe("useBatchBadgeFetch", () => {
     });
 
     // Verify data was stored - access result in the same act block
-    let storedData;
+    let storedData: BatchEntry | undefined;
     act(() => {
       storedData = result.current.getBatchData("FN-001");
     });
@@ -278,7 +280,7 @@ describe("useBatchBadgeFetch", () => {
     });
 
     // Second hook should see the data via getBatchData
-    let sharedData;
+    let sharedData: BatchEntry | undefined;
     act(() => {
       sharedData = hook2.result.current.getBatchData("FN-001");
     });

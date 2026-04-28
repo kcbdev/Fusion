@@ -7,13 +7,13 @@ vi.mock("../../sse-bus", () => ({
   subscribeSse: vi.fn(),
 }));
 
-import { subscribeSse } from "../../sse-bus";
+import { subscribeSse, type SseSubscription } from "../../sse-bus";
 
 describe("useRemoteNodeEvents", () => {
   // Captured subscribeSse calls for inspection
   let capturedConfigs: Array<{
     url: string;
-    config: Parameters<typeof subscribeSse>[1];
+    config: SseSubscription;
     unsubscribe: ReturnType<typeof subscribeSse>;
   }> = [];
 
@@ -22,7 +22,7 @@ describe("useRemoteNodeEvents", () => {
 
   beforeEach(() => {
     capturedConfigs = [];
-    mockSubscribeSse.mockImplementation((url: string, config: Parameters<typeof subscribeSse>[1]) => {
+    mockSubscribeSse.mockImplementation((url: string, config: SseSubscription = {}) => {
       const unsubscribe = createMockUnsubscribe();
       capturedConfigs.push({ url, config, unsubscribe });
       return unsubscribe;

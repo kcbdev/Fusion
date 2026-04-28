@@ -24,6 +24,7 @@ vi.mock("@fusion/core", () => ({}));
 function makeRoutine(overrides: Partial<Routine> = {}): Routine {
   return {
     id: "routine-001",
+    agentId: "agent-001",
     name: "Test Routine",
     description: "A test routine",
     trigger: { type: "cron", cronExpression: "0 * * * *" },

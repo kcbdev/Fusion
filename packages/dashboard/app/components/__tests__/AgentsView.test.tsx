@@ -1175,16 +1175,12 @@ describe("AgentsView", () => {
       });
 
       // Find the active agent card
-      const agentCards = document.querySelectorAll(".agent-card");
-      let activeCard: Element | null = null;
-      agentCards.forEach(card => {
-        if (card.textContent?.includes("agent-002")) {
-          activeCard = card;
-        }
-      });
+      const activeCard = Array.from(document.querySelectorAll(".agent-card")).find(
+        (card) => card.textContent?.includes("agent-002")
+      ) ?? null;
       expect(activeCard).toBeTruthy();
 
-      const pauseButton = activeCard?.querySelector('[title="Pause"]') as HTMLElement;
+      const pauseButton = (activeCard as Element | null)?.querySelector('[title="Pause"]') as HTMLElement;
       expect(pauseButton).toBeTruthy();
       fireEvent.click(pauseButton);
 
@@ -1210,7 +1206,7 @@ describe("AgentsView", () => {
     });
 
     it("optimistically updates the card state before state API resolves", async () => {
-      let resolveTransition: (() => void) | null = null;
+      let resolveTransition!: () => void;
       const transitionPromise = new Promise<Agent>((resolve) => {
         resolveTransition = () => resolve({ ...mockAgents[0], state: "active" });
       });
@@ -1238,7 +1234,7 @@ describe("AgentsView", () => {
     });
 
     it("rolls back optimistic state when the state API fails", async () => {
-      let rejectTransition: ((error: Error) => void) | null = null;
+      let rejectTransition!: (error: Error) => void;
       const transitionPromise = new Promise<Agent>((_, reject) => {
         rejectTransition = reject;
       });
@@ -1273,7 +1269,7 @@ describe("AgentsView", () => {
     });
 
     it("prevents concurrent state transitions for the same agent", async () => {
-      let resolveTransition: (() => void) | null = null;
+      let resolveTransition!: () => void;
       const transitionPromise = new Promise<Agent>((resolve) => {
         resolveTransition = () => resolve({ ...mockAgents[0], state: "active" });
       });
@@ -1338,15 +1334,11 @@ describe("AgentsView", () => {
       });
 
       // Find the active agent card
-      const agentCards = document.querySelectorAll(".agent-card");
-      let activeCard: Element | null = null;
-      agentCards.forEach(card => {
-        if (card.textContent?.includes("agent-002")) {
-          activeCard = card;
-        }
-      });
+      const activeCard = Array.from(document.querySelectorAll(".agent-card")).find(
+        (card) => card.textContent?.includes("agent-002")
+      ) ?? null;
 
-      const pauseButton = activeCard?.querySelector('[title="Pause"]') as HTMLElement;
+      const pauseButton = (activeCard as Element | null)?.querySelector('[title="Pause"]') as HTMLElement;
       fireEvent.click(pauseButton);
 
       await waitFor(() => {
@@ -1439,17 +1431,13 @@ describe("AgentsView", () => {
 
       await waitFor(() => {
         // Find the active agent card (agent-002)
-        const agentCards = document.querySelectorAll(".agent-card");
-        let activeCard: Element | null = null;
-        let pausedCard: Element | null = null;
-        agentCards.forEach(card => {
-          if (card.textContent?.includes("agent-002")) activeCard = card;
-          if (card.textContent?.includes("agent-003")) pausedCard = card;
-        });
+        const allCards = Array.from(document.querySelectorAll(".agent-card"));
+        const activeCard = allCards.find((card) => card.textContent?.includes("agent-002")) ?? null;
+        const pausedCard = allCards.find((card) => card.textContent?.includes("agent-003")) ?? null;
 
         // Active and paused agents should not have delete buttons
-        expect(activeCard?.querySelector('[title="Delete"]')).toBeFalsy();
-        expect(pausedCard?.querySelector('[title="Delete"]')).toBeFalsy();
+        expect((activeCard as Element | null)?.querySelector('[title="Delete"]')).toBeFalsy();
+        expect((pausedCard as Element | null)?.querySelector('[title="Delete"]')).toBeFalsy();
       });
     });
 
@@ -1466,12 +1454,10 @@ describe("AgentsView", () => {
       await waitFor(() => {
         expect(screen.getAllByText("Test Agent 4").length).toBeGreaterThan(0);
         // Click the delete button for the terminated agent (agent-004)
-        const agentCards = document.querySelectorAll(".agent-card");
-        let terminatedCard: Element | null = null;
-        agentCards.forEach(card => {
-          if (card.textContent?.includes("agent-004")) terminatedCard = card;
-        });
-        const terminatedDeleteBtn = terminatedCard?.querySelector('[title="Delete"]') as HTMLElement;
+        const terminatedCard = Array.from(document.querySelectorAll(".agent-card")).find(
+          (card) => card.textContent?.includes("agent-004")
+        ) ?? null;
+        const terminatedDeleteBtn = (terminatedCard as Element | null)?.querySelector('[title="Delete"]') as HTMLElement;
         expect(terminatedDeleteBtn).toBeTruthy();
         fireEvent.click(terminatedDeleteBtn);
       });
@@ -1498,12 +1484,10 @@ describe("AgentsView", () => {
       });
 
       // Find the delete button for terminated agent (agent-004)
-      const agentCards = document.querySelectorAll(".agent-card");
-      let terminatedCard: Element | null = null;
-      agentCards.forEach(card => {
-        if (card.textContent?.includes("agent-004")) terminatedCard = card;
-      });
-      const terminatedDeleteBtn = terminatedCard?.querySelector('[title="Delete"]') as HTMLElement;
+      const terminatedCard = Array.from(document.querySelectorAll(".agent-card")).find(
+        (card) => card.textContent?.includes("agent-004")
+      ) ?? null;
+      const terminatedDeleteBtn = (terminatedCard as Element | null)?.querySelector('[title="Delete"]') as HTMLElement;
       fireEvent.click(terminatedDeleteBtn);
 
       await waitFor(() => {
@@ -1526,12 +1510,10 @@ describe("AgentsView", () => {
       });
 
       // Find the delete button for idle agent (agent-001)
-      const agentCards = document.querySelectorAll(".agent-card");
-      let idleCard: Element | null = null;
-      agentCards.forEach(card => {
-        if (card.textContent?.includes("agent-001")) idleCard = card;
-      });
-      const idleDeleteBtn = idleCard?.querySelector('[title="Delete"]') as HTMLElement;
+      const idleCard = Array.from(document.querySelectorAll(".agent-card")).find(
+        (card) => card.textContent?.includes("agent-001")
+      ) ?? null;
+      const idleDeleteBtn = (idleCard as Element | null)?.querySelector('[title="Delete"]') as HTMLElement;
       fireEvent.click(idleDeleteBtn);
 
       await waitFor(() => {

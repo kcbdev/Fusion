@@ -927,7 +927,7 @@ describe("Header", () => {
       const { container } = renderHeader({ onSearchChange: vi.fn(), view: "board" });
       const wrapper = container.querySelector(".header-wrapper");
       expect(wrapper).not.toBeNull();
-      expect(wrapper.querySelector("header.header")).not.toBeNull();
+      expect(wrapper!.querySelector("header.header")).not.toBeNull();
     });
 
     it("toggling search twice reopens the search (use close button to dismiss)", () => {
@@ -1009,14 +1009,14 @@ describe("Header", () => {
           { id: "2", name: "Project Two", path: "/path/two", status: "active" as const },
         ],
         currentProject: { id: "1", name: "Project One", path: "/path/one", status: "active" as const },
-      }, true);
+      }, "mobile");
       expect(container.querySelector(".header-project-selector")).toBeDefined();
     });
 
     it("does not show project selector on mobile with single project", () => {
       const { container } = renderHeader({
         projects: [{ id: "1", name: "Project One", path: "/path/one", status: "active" as const }],
-      }, true);
+      }, "mobile");
       expect(container.querySelector(".header-project-selector")).toBeNull();
     });
 
@@ -1024,7 +1024,7 @@ describe("Header", () => {
       const { container } = renderHeader({
         currentProject: { id: "1", name: "Project One", path: "/path/one", status: "active" as const },
         onViewAllProjects: vi.fn(),
-      }, true);
+      }, "mobile");
       expect(container.querySelector(".header-back-button")).toBeDefined();
     });
 

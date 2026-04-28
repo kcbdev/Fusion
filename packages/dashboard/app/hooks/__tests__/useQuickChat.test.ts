@@ -400,6 +400,8 @@ describe("useQuickChat", () => {
             sessionId: existingSession.id,
             role: "user",
             content: "Hello",
+            thinkingOutput: null,
+            metadata: null,
             createdAt: new Date().toISOString(),
           },
         ],

@@ -369,7 +369,7 @@ describe("NewTaskModal", () => {
         ],
         autoSelectModelPreset: false,
         defaultPresetBySize: {},
-      });
+      } as any);
 
       const { props } = renderNewTaskModal();
 
@@ -411,7 +411,7 @@ describe("NewTaskModal", () => {
         ],
         autoSelectModelPreset: false,
         defaultPresetBySize: {},
-      });
+      } as any);
 
       const { props } = renderNewTaskModal();
 
@@ -449,7 +449,7 @@ describe("NewTaskModal", () => {
     it("sends selected enabledWorkflowSteps in create payload", async () => {
       const { fetchWorkflowSteps } = await import("../../api");
       vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-        { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, createdAt: "", updatedAt: "" },
+        { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
       ]);
 
       const { props } = renderNewTaskModal();
@@ -476,8 +476,8 @@ describe("NewTaskModal", () => {
     it("sends ordered enabledWorkflowSteps in create payload when steps are selected in order", async () => {
       const { fetchWorkflowSteps } = await import("../../api");
       vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-        { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, createdAt: "", updatedAt: "" },
-        { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", enabled: true, createdAt: "", updatedAt: "" },
+        { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
+        { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
       ]);
 
       const { props } = renderNewTaskModal();
@@ -509,8 +509,8 @@ describe("NewTaskModal", () => {
     it("sends reordered enabledWorkflowSteps after user reorders steps", async () => {
       const { fetchWorkflowSteps } = await import("../../api");
       vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-        { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, createdAt: "", updatedAt: "" },
-        { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", enabled: true, createdAt: "", updatedAt: "" },
+        { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
+        { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
       ]);
 
       const { props } = renderNewTaskModal();
@@ -552,7 +552,7 @@ describe("NewTaskModal", () => {
     it("keeps More options collapsed by default even when defaultOn workflow steps are auto-applied", async () => {
       const { fetchWorkflowSteps } = await import("../../api");
       vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-        { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, defaultOn: true, createdAt: "", updatedAt: "" },
+        { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, defaultOn: true, createdAt: "", updatedAt: "" },
       ]);
 
       renderNewTaskModal();
@@ -578,7 +578,7 @@ describe("NewTaskModal", () => {
     it("sends undefined enabledWorkflowSteps when no defaultOn steps and user hasn't interacted", async () => {
       const { fetchWorkflowSteps } = await import("../../api");
       vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-        { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, createdAt: "", updatedAt: "" },
+        { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
       ]);
 
       const { props } = renderNewTaskModal();
@@ -603,7 +603,7 @@ describe("NewTaskModal", () => {
     it("sends empty array when user explicitly deselects all defaultOn steps", async () => {
       const { fetchWorkflowSteps } = await import("../../api");
       vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-        { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, defaultOn: true, createdAt: "", updatedAt: "" },
+        { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, defaultOn: true, createdAt: "", updatedAt: "" },
       ]);
 
       const { props } = renderNewTaskModal();
@@ -637,8 +637,8 @@ describe("NewTaskModal", () => {
     it("sends defaultOn step IDs when user doesn't modify the auto-selected steps", async () => {
       const { fetchWorkflowSteps } = await import("../../api");
       vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-        { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, defaultOn: true, createdAt: "", updatedAt: "" },
-        { id: "WS-002", name: "Security", description: "Check security", prompt: "Check", enabled: true, defaultOn: false, createdAt: "", updatedAt: "" },
+        { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, defaultOn: true, createdAt: "", updatedAt: "" },
+        { id: "WS-002", name: "Security", description: "Check security", prompt: "Check", mode: "prompt" as const, enabled: true, defaultOn: false, createdAt: "", updatedAt: "" },
       ]);
 
       const { props } = renderNewTaskModal();
@@ -812,7 +812,7 @@ describe("NewTaskModal", () => {
     it("shows dropdown when agent button is clicked", async () => {
       const { fetchAgents } = await import("../../api");
       vi.mocked(fetchAgents).mockResolvedValueOnce([
-        { id: "agent-1", name: "Executor Bot", role: "executor", state: "active" as const, createdAt: "", updatedAt: "" },
+        { id: "agent-1", name: "Executor Bot", role: "executor", state: "active" as const, metadata: {}, createdAt: "", updatedAt: "" },
       ]);
 
       renderNewTaskModal();
@@ -828,8 +828,8 @@ describe("NewTaskModal", () => {
     it("excludes terminated agents from picker", async () => {
       const { fetchAgents } = await import("../../api");
       vi.mocked(fetchAgents).mockResolvedValueOnce([
-        { id: "agent-1", name: "Active Agent", role: "executor", state: "active" as const, createdAt: "", updatedAt: "" },
-        { id: "agent-2", name: "Terminated Agent", role: "executor", state: "terminated" as const, createdAt: "", updatedAt: "" },
+        { id: "agent-1", name: "Active Agent", role: "executor", state: "active" as const, metadata: {}, createdAt: "", updatedAt: "" },
+        { id: "agent-2", name: "Terminated Agent", role: "executor", state: "terminated" as const, metadata: {}, createdAt: "", updatedAt: "" },
       ]);
 
       renderNewTaskModal();
@@ -845,7 +845,7 @@ describe("NewTaskModal", () => {
     it("shows selected agent name in button", async () => {
       const { fetchAgents } = await import("../../api");
       vi.mocked(fetchAgents).mockResolvedValueOnce([
-        { id: "agent-1", name: "Executor Bot", role: "executor", state: "active" as const, createdAt: "", updatedAt: "" },
+        { id: "agent-1", name: "Executor Bot", role: "executor", state: "active" as const, metadata: {}, createdAt: "", updatedAt: "" },
       ]);
 
       renderNewTaskModal();
@@ -866,7 +866,7 @@ describe("NewTaskModal", () => {
     it("includes assignedAgentId in payload when agent is selected", async () => {
       const { fetchAgents } = await import("../../api");
       vi.mocked(fetchAgents).mockResolvedValueOnce([
-        { id: "agent-1", name: "Executor Bot", role: "executor", state: "active" as const, createdAt: "", updatedAt: "" },
+        { id: "agent-1", name: "Executor Bot", role: "executor", state: "active" as const, metadata: {}, createdAt: "", updatedAt: "" },
       ]);
 
       const { props } = renderNewTaskModal();
@@ -914,7 +914,7 @@ describe("NewTaskModal", () => {
     it("omits assignedAgentId from payload after clearing selection", async () => {
       const { fetchAgents } = await import("../../api");
       vi.mocked(fetchAgents).mockResolvedValueOnce([
-        { id: "agent-1", name: "Executor Bot", role: "executor", state: "active" as const, createdAt: "", updatedAt: "" },
+        { id: "agent-1", name: "Executor Bot", role: "executor", state: "active" as const, metadata: {}, createdAt: "", updatedAt: "" },
       ]);
 
       const { props } = renderNewTaskModal();
@@ -955,7 +955,7 @@ describe("NewTaskModal", () => {
     it("triggers dirty state when agent is selected", async () => {
       const { fetchAgents } = await import("../../api");
       vi.mocked(fetchAgents).mockResolvedValueOnce([
-        { id: "agent-1", name: "Executor Bot", role: "executor", state: "active" as const, createdAt: "", updatedAt: "" },
+        { id: "agent-1", name: "Executor Bot", role: "executor", state: "active" as const, metadata: {}, createdAt: "", updatedAt: "" },
       ]);
 
       renderNewTaskModal();
@@ -984,7 +984,7 @@ describe("NewTaskModal", () => {
     it("resets agent selection after successful task creation", async () => {
       const { fetchAgents } = await import("../../api");
       vi.mocked(fetchAgents).mockResolvedValueOnce([
-        { id: "agent-1", name: "Executor Bot", role: "executor", state: "active" as const, createdAt: "", updatedAt: "" },
+        { id: "agent-1", name: "Executor Bot", role: "executor", state: "active" as const, metadata: {}, createdAt: "", updatedAt: "" },
       ]);
 
       renderNewTaskModal();

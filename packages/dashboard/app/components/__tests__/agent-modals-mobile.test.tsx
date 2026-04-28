@@ -119,18 +119,18 @@ describe("agent modal mobile CSS structure", () => {
     mockFetchAgentRuns.mockResolvedValue([]);
     mockFetchAgentRunDetail.mockResolvedValue(undefined as any);
     mockStartAgentRun.mockResolvedValue({ id: "run-001", status: "active" } as any);
-    mockStopAgentRun.mockResolvedValue(undefined);
+    mockStopAgentRun.mockResolvedValue({ ok: true });
     mockUpdateAgentInstructions.mockResolvedValue(mockAgent as any);
     mockUpdateAgentSoul.mockResolvedValue(mockAgent as any);
     mockUpdateAgentMemory.mockResolvedValue(mockAgent as any);
     mockFetchAgentMemoryFiles.mockResolvedValue({ files: [] } as any);
     mockFetchAgentMemoryFile.mockResolvedValue({ content: "" } as any);
-    mockSaveAgentMemoryFile.mockResolvedValue(undefined);
+    mockSaveAgentMemoryFile.mockResolvedValue({ success: true });
     mockFetchAgentTasks.mockResolvedValue([]);
     mockFetchChainOfCommand.mockResolvedValue([mockAgent] as any);
     mockFetchWorkspaceFileContent.mockResolvedValue({ content: "" } as any);
-    mockSaveWorkspaceFileContent.mockResolvedValue(undefined);
-    mockFetchModels.mockResolvedValue([]);
+    mockSaveWorkspaceFileContent.mockResolvedValue({ success: true, mtime: "2026-01-01T00:00:00.000Z", size: 0 });
+    mockFetchModels.mockResolvedValue({ models: [], favoriteProviders: [], favoriteModels: [] });
 
     mockFetchAgents.mockResolvedValue([
       {

@@ -547,6 +547,7 @@ describe("TaskForm", () => {
         description: "Verify in browser",
         prompt: "Run browser verification",
         templateId: "browser-verification",
+        mode: "prompt" as const,
         enabled: true,
         createdAt: "",
         updatedAt: "",
@@ -689,7 +690,7 @@ describe("TaskForm preset selection (FN-819)", () => {
       ],
       autoSelectModelPreset: false,
       defaultPresetBySize: {},
-    });
+    } as any);
 
     renderTaskForm();
 
@@ -717,7 +718,7 @@ describe("TaskForm preset selection (FN-819)", () => {
       ],
       autoSelectModelPreset: false,
       defaultPresetBySize: {},
-    });
+    } as any);
 
     const onPresetModeChange = vi.fn();
     const onSelectedPresetIdChange = vi.fn();
@@ -756,7 +757,7 @@ describe("TaskForm preset selection (FN-819)", () => {
       ],
       autoSelectModelPreset: false,
       defaultPresetBySize: {},
-    });
+    } as any);
 
     const onPresetModeChange = vi.fn();
     const onSelectedPresetIdChange = vi.fn();
@@ -794,7 +795,7 @@ describe("TaskForm preset selection (FN-819)", () => {
       ],
       autoSelectModelPreset: false,
       defaultPresetBySize: {},
-    });
+    } as any);
 
     const onPresetModeChange = vi.fn();
     const onSelectedPresetIdChange = vi.fn();
@@ -826,7 +827,7 @@ describe("TaskForm preset selection (FN-819)", () => {
       ],
       autoSelectModelPreset: false,
       defaultPresetBySize: {},
-    });
+    } as any);
 
     const onPresetModeChange = vi.fn();
 
@@ -855,7 +856,7 @@ describe("TaskForm preset selection (FN-819)", () => {
       ],
       autoSelectModelPreset: false,
       defaultPresetBySize: {},
-    });
+    } as any);
 
     renderTaskForm({
       presetMode: "preset",
@@ -881,7 +882,7 @@ describe("TaskForm preset selection (FN-819)", () => {
       ],
       autoSelectModelPreset: false,
       defaultPresetBySize: {},
-    });
+    } as any);
 
     renderTaskForm({
       presetMode: "preset",
@@ -913,8 +914,8 @@ describe("TaskForm workflow step reordering (FN-836)", () => {
   it("shows reorder controls when two or more steps are selected", async () => {
     const { fetchWorkflowSteps } = await import("../../api");
     vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, createdAt: "", updatedAt: "" },
-      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
     ]);
 
     renderTaskForm({ selectedWorkflowSteps: ["WS-001", "WS-002"] });
@@ -930,8 +931,8 @@ describe("TaskForm workflow step reordering (FN-836)", () => {
   it("shows numbered execution order", async () => {
     const { fetchWorkflowSteps } = await import("../../api");
     vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, createdAt: "", updatedAt: "" },
-      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
     ]);
 
     renderTaskForm({ selectedWorkflowSteps: ["WS-001", "WS-002"] });
@@ -945,8 +946,8 @@ describe("TaskForm workflow step reordering (FN-836)", () => {
   it("disables move-up button on first step", async () => {
     const { fetchWorkflowSteps } = await import("../../api");
     vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, createdAt: "", updatedAt: "" },
-      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
     ]);
 
     renderTaskForm({ selectedWorkflowSteps: ["WS-001", "WS-002"] });
@@ -962,8 +963,8 @@ describe("TaskForm workflow step reordering (FN-836)", () => {
   it("disables move-down button on last step", async () => {
     const { fetchWorkflowSteps } = await import("../../api");
     vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, createdAt: "", updatedAt: "" },
-      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
     ]);
 
     renderTaskForm({ selectedWorkflowSteps: ["WS-001", "WS-002"] });
@@ -979,8 +980,8 @@ describe("TaskForm workflow step reordering (FN-836)", () => {
   it("calls onWorkflowStepsChange with swapped order when move-up is clicked", async () => {
     const { fetchWorkflowSteps } = await import("../../api");
     vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, createdAt: "", updatedAt: "" },
-      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
     ]);
 
     const onWorkflowStepsChange = vi.fn();
@@ -998,8 +999,8 @@ describe("TaskForm workflow step reordering (FN-836)", () => {
   it("calls onWorkflowStepsChange with swapped order when move-down is clicked", async () => {
     const { fetchWorkflowSteps } = await import("../../api");
     vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, createdAt: "", updatedAt: "" },
-      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
     ]);
 
     const onWorkflowStepsChange = vi.fn();
@@ -1017,8 +1018,8 @@ describe("TaskForm workflow step reordering (FN-836)", () => {
   it("calls onWorkflowStepsChange with step removed when remove button is clicked", async () => {
     const { fetchWorkflowSteps } = await import("../../api");
     vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, createdAt: "", updatedAt: "" },
-      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
     ]);
 
     const onWorkflowStepsChange = vi.fn();
@@ -1036,7 +1037,7 @@ describe("TaskForm workflow step reordering (FN-836)", () => {
   it("falls back to raw step ID in reorder list when metadata is missing", async () => {
     const { fetchWorkflowSteps } = await import("../../api");
     vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
     ]);
 
     renderTaskForm({ selectedWorkflowSteps: ["WS-001", "WS-999"] });
@@ -1057,9 +1058,9 @@ describe("TaskForm workflow step reordering (FN-836)", () => {
   it("preserves order when adding a new step via checkbox after reorder", async () => {
     const { fetchWorkflowSteps } = await import("../../api");
     vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, createdAt: "", updatedAt: "" },
-      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", enabled: true, createdAt: "", updatedAt: "" },
-      { id: "WS-003", name: "Doc Review", description: "Check docs", prompt: "Check docs", enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-003", name: "Doc Review", description: "Check docs", prompt: "Check docs", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
     ]);
 
     const onWorkflowStepsChange = vi.fn();
@@ -1080,9 +1081,9 @@ describe("TaskForm workflow step reordering (FN-836)", () => {
   it("preserves order when removing a step via remove action (not reorder remove)", async () => {
     const { fetchWorkflowSteps } = await import("../../api");
     vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, createdAt: "", updatedAt: "" },
-      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", enabled: true, createdAt: "", updatedAt: "" },
-      { id: "WS-003", name: "Doc Review", description: "Check docs", prompt: "Check docs", enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-003", name: "Doc Review", description: "Check docs", prompt: "Check docs", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
     ]);
 
     const onWorkflowStepsChange = vi.fn();
@@ -1101,8 +1102,8 @@ describe("TaskForm workflow step reordering (FN-836)", () => {
   it("shows phase badge for workflow steps with phase info", async () => {
     const { fetchWorkflowSteps } = await import("../../api");
     vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", phase: "pre-merge", enabled: true, createdAt: "", updatedAt: "" },
-      { id: "WS-002", name: "Post-merge Notify", description: "Notify team", prompt: "Notify", phase: "post-merge", enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, phase: "pre-merge", enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-002", name: "Post-merge Notify", description: "Notify team", prompt: "Notify", mode: "prompt" as const, phase: "post-merge", enabled: true, createdAt: "", updatedAt: "" },
     ]);
 
     renderTaskForm({ selectedWorkflowSteps: [] });
@@ -1116,7 +1117,7 @@ describe("TaskForm workflow step reordering (FN-836)", () => {
   it("shows Pre-merge phase badge for legacy steps without phase", async () => {
     const { fetchWorkflowSteps } = await import("../../api");
     vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-      { id: "WS-001", name: "Legacy Check", description: "No phase field", prompt: "Check", enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-001", name: "Legacy Check", description: "No phase field", prompt: "Check", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
     ]);
 
     renderTaskForm({ selectedWorkflowSteps: [] });
@@ -1135,8 +1136,8 @@ describe("TaskForm defaultOn auto-selection (FN-883)", () => {
   it("auto-selects defaultOn workflow steps in create mode", async () => {
     const { fetchWorkflowSteps } = await import("../../api");
     vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, defaultOn: true, createdAt: "", updatedAt: "" },
-      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", enabled: true, defaultOn: false, createdAt: "", updatedAt: "" },
+      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, defaultOn: true, createdAt: "", updatedAt: "" },
+      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", mode: "prompt" as const, enabled: true, defaultOn: false, createdAt: "", updatedAt: "" },
     ]);
 
     const onWorkflowStepsChange = vi.fn();
@@ -1192,7 +1193,7 @@ describe("TaskForm defaultOn auto-selection (FN-883)", () => {
   it("does not auto-select workflow steps in edit mode", async () => {
     const { fetchWorkflowSteps } = await import("../../api");
     vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, defaultOn: true, createdAt: "", updatedAt: "" },
+      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, defaultOn: true, createdAt: "", updatedAt: "" },
     ]);
 
     const onWorkflowStepsChange = vi.fn();
@@ -1215,8 +1216,8 @@ describe("TaskForm defaultOn auto-selection (FN-883)", () => {
   it("does not re-apply defaults after user changes workflow steps", async () => {
     const { fetchWorkflowSteps } = await import("../../api");
     vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, defaultOn: true, createdAt: "", updatedAt: "" },
-      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", enabled: true, defaultOn: false, createdAt: "", updatedAt: "" },
+      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, defaultOn: true, createdAt: "", updatedAt: "" },
+      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", mode: "prompt" as const, enabled: true, defaultOn: false, createdAt: "", updatedAt: "" },
     ]);
 
     let currentSteps: string[] = [];
@@ -1277,8 +1278,8 @@ describe("TaskForm defaultOn auto-selection (FN-883)", () => {
   it("does not auto-select when no steps have defaultOn", async () => {
     const { fetchWorkflowSteps } = await import("../../api");
     vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, createdAt: "", updatedAt: "" },
-      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
+      { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
     ]);
 
     const onWorkflowStepsChange = vi.fn();

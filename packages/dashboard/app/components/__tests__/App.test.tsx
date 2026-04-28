@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
-import type { Settings } from "@fusion/core";
+import type { NodeConfig, Settings } from "@fusion/core";
+import type { ProjectInfo } from "../../api";
 import { scopedKey } from "../../utils/projectStorage";
 
 // No mock needed - tests use localStorage directly
@@ -18,10 +19,12 @@ const defaultSettings: Settings = {
   experimentalFeatures: { insights: true, roadmap: true, skillsView: true, agentsView: true, memoryView: true },
 };
 
-const mockSubscribeSse = vi.fn(() => vi.fn());
+ 
+const mockSubscribeSse = vi.fn((..._args: any[]) => vi.fn());
 
 vi.mock("../../sse-bus", () => ({
-  subscribeSse: (...args: unknown[]) => mockSubscribeSse(...args),
+   
+  subscribeSse: (...args: any[]) => mockSubscribeSse(...args),
 }));
 
 vi.mock("../../api", async (importOriginal) => {
@@ -76,7 +79,7 @@ const mockUseTasks = vi.fn(() => ({
 
 // Accept both old and new hook signatures
 vi.mock("../../hooks/useTasks", () => ({
-  useTasks: (options?: { projectId?: string; searchQuery?: string; sseEnabled?: boolean }) => mockUseTasks(options),
+  useTasks: (_options?: { projectId?: string; searchQuery?: string; sseEnabled?: boolean }) => mockUseTasks(),
 }));
 
 // Mock useRemoteNodeData
@@ -100,7 +103,13 @@ vi.mock("../../hooks/useRemoteNodeEvents", () => ({
 }));
 
 // Mock NodeContext - default to local mode
-const mockNodeContextValue = {
+const mockNodeContextValue: {
+  currentNode: NodeConfig | null;
+  currentNodeId: string | null;
+  isRemote: boolean;
+  setCurrentNode: ReturnType<typeof vi.fn>;
+  clearCurrentNode: ReturnType<typeof vi.fn>;
+} = {
   currentNode: null,
   currentNodeId: null,
   isRemote: false,
@@ -169,8 +178,13 @@ const DEFAULT_PROJECT_ID = "proj_123";
 const taskViewStorageKey = (projectId = DEFAULT_PROJECT_ID) =>
   scopedKey("kb-dashboard-task-view", projectId);
 
-const mockCurrentProjectState = {
-  currentProject: { id: DEFAULT_PROJECT_ID, name: "Test Project", path: "/test", status: "active", isolationMode: "in-process", createdAt: "", updatedAt: "" },
+const mockCurrentProjectState: {
+  currentProject: ProjectInfo | null;
+  setCurrentProject: ReturnType<typeof vi.fn>;
+  clearCurrentProject: ReturnType<typeof vi.fn>;
+  loading: boolean;
+} = {
+  currentProject: { id: DEFAULT_PROJECT_ID, name: "Test Project", path: "/test", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" },
   setCurrentProject: vi.fn(),
   clearCurrentProject: vi.fn(),
   loading: false,
@@ -257,7 +271,7 @@ beforeEach(() => {
   mockProjectsState.error = null;
   mockRefreshProjects.mockReset();
   mockRefreshProjects.mockImplementation(async () => {});
-  mockCurrentProjectState.currentProject = { id: DEFAULT_PROJECT_ID, name: "Test Project", path: "/test", status: "active", isolationMode: "in-process", createdAt: "", updatedAt: "" };
+  mockCurrentProjectState.currentProject = { id: DEFAULT_PROJECT_ID, name: "Test Project", path: "/test", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" };
   mockCurrentProjectState.setCurrentProject.mockClear();
   mockCurrentProjectState.clearCurrentProject.mockClear();
   // Reset node context mocks
@@ -459,8 +473,8 @@ describe("App deep link handling", () => {
   });
 
   it("switches project and opens task when both project and task params are present", async () => {
-    const project1 = { id: "proj_123", name: "Test Project", path: "/test", status: "active", isolationMode: "in-process" as const, createdAt: "", updatedAt: "" };
-    const project2 = { id: "proj_456", name: "Other Project", path: "/other", status: "active", isolationMode: "in-process" as const, createdAt: "", updatedAt: "" };
+    const project1 = { id: "proj_123", name: "Test Project", path: "/test", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" };
+    const project2 = { id: "proj_456", name: "Other Project", path: "/other", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" };
     mockProjectsState.projects = [project1, project2];
     mockCurrentProjectState.currentProject = project1;
 
@@ -509,7 +523,7 @@ describe("App deep link handling", () => {
   });
 
   it("does not call setCurrentProject when project param matches current project", async () => {
-    const project = { id: "proj_123", name: "Test Project", path: "/test", status: "active", isolationMode: "in-process" as const, createdAt: "", updatedAt: "" };
+    const project = { id: "proj_123", name: "Test Project", path: "/test", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" };
     mockProjectsState.projects = [project];
     mockCurrentProjectState.currentProject = project;
 
@@ -576,8 +590,8 @@ describe("App deep link handling", () => {
   });
 
   it("prevents double-fetch when project switch triggers effect re-run", async () => {
-    const project1 = { id: "proj_123", name: "Test Project", path: "/test", status: "active", isolationMode: "in-process" as const, createdAt: "", updatedAt: "" };
-    const project2 = { id: "proj_456", name: "Other Project", path: "/other", status: "active", isolationMode: "in-process" as const, createdAt: "", updatedAt: "" };
+    const project1 = { id: "proj_123", name: "Test Project", path: "/test", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" };
+    const project2 = { id: "proj_456", name: "Other Project", path: "/other", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" };
     mockProjectsState.projects = [project1, project2];
     mockCurrentProjectState.currentProject = project1;
 
@@ -598,8 +612,8 @@ describe("App deep link handling", () => {
   });
 
   it("fetches task from the project param's project even when current project differs", async () => {
-    const project1 = { id: "proj_123", name: "Test Project", path: "/test", status: "active", isolationMode: "in-process" as const, createdAt: "", updatedAt: "" };
-    const project2 = { id: "proj_456", name: "Other Project", path: "/other", status: "active", isolationMode: "in-process" as const, createdAt: "", updatedAt: "" };
+    const project1 = { id: "proj_123", name: "Test Project", path: "/test", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" };
+    const project2 = { id: "proj_456", name: "Other Project", path: "/other", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" };
     mockProjectsState.projects = [project1, project2];
     mockCurrentProjectState.currentProject = project1;
 
@@ -651,7 +665,7 @@ describe("App deep link handling", () => {
   });
 
   it("preserves project param when removing task param on dismiss", async () => {
-    const project = { id: "proj_456", name: "Other Project", path: "/other", status: "active", isolationMode: "in-process" as const, createdAt: "", updatedAt: "" };
+    const project = { id: "proj_456", name: "Other Project", path: "/other", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" };
     mockProjectsState.projects = [project];
     mockCurrentProjectState.currentProject = project;
 
@@ -693,7 +707,7 @@ describe("App deep link handling", () => {
     const tasksHook = mockUseTasks();
     const task = { id: "FN-999", title: "Manual Task" };
     await act(async () => {
-      tasksHook.tasks = [task];
+      (tasksHook.tasks as unknown[]) = [task];
     });
 
     // Simulate opening the task detail from the board
@@ -715,7 +729,7 @@ describe("App deep link handling", () => {
     });
 
     // Capture call count after initial fetch (may be 1 or 2 due to Strict Mode)
-    const callCountAfterInitialFetch = fetchTaskDetail.mock.calls.length;
+    const callCountAfterInitialFetch = vi.mocked(fetchTaskDetail).mock.calls.length;
 
     await waitFor(() => {
       expect(screen.getByText("Task FN-123")).toBeTruthy();
@@ -733,7 +747,7 @@ describe("App deep link handling", () => {
     // The deepLinkFetchedRef prevents additional fetches after dismissal.
     // Note: May be called multiple times due to React Strict Mode and effect dependencies,
     // but the key behavior is that the modal opens and closes correctly.
-    expect(fetchTaskDetail.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(vi.mocked(fetchTaskDetail).mock.calls.length).toBeGreaterThanOrEqual(1);
   });
 });
 

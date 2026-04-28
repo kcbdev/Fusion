@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { AgentDetailView } from "../AgentDetailView";
 import type { AgentCapability, AgentDetail } from "../../api";
+import type { AgentLogEntry } from "@fusion/core";
 import { DEFAULT_HEARTBEAT_INTERVAL_MS } from "../../utils/heartbeatIntervals";
 
 // Mock the API functions
@@ -127,14 +128,7 @@ const MOCK_SKILLS = [
 ];
 
 describe("AgentDetailView", () => {
-  const createMockAgent = (overrides: Partial<{
-    id: string;
-    name: string;
-    role: AgentCapability;
-    state: "idle" | "active" | "paused" | "terminated";
-    taskId?: string;
-    runtimeConfig?: Record<string, unknown>;
-  }> = {}): AgentDetail => ({
+  const createMockAgent = (overrides: Partial<AgentDetail> = {}): AgentDetail => ({
     id: "agent-001",
     name: "Test Agent",
     role: "executor" as AgentCapability,
@@ -188,16 +182,16 @@ describe("AgentDetailView", () => {
     mockFetchAgentChildren.mockResolvedValue([]);
     mockFetchAgentTasks.mockResolvedValue([]);
     mockFetchChainOfCommand.mockResolvedValue([mockAgent]);
-    mockFetchAgentLogsWithMeta.mockResolvedValue({ entries: [], truncated: false, hasMore: false });
+    mockFetchAgentLogsWithMeta.mockResolvedValue({ entries: [], total: 0, hasMore: false });
     // Default: no budget limit configured
     mockFetchAgentBudgetStatus.mockResolvedValue({
       agentId: "agent-001",
       currentUsage: 0,
       budgetLimit: null,
-      usagePercent: 0,
+      usagePercent: null,
+      thresholdPercent: null,
       isOverBudget: false,
       isOverThreshold: false,
-      budgetPeriod: "lifetime",
       lastResetAt: null,
       nextResetAt: null,
     });
@@ -551,7 +545,7 @@ describe("AgentDetailView", () => {
   });
 
   it("optimistically updates the detail header state before API resolves", async () => {
-    let resolveTransition: (() => void) | null = null;
+    let resolveTransition!: () => void;
     const transitionPromise = new Promise<AgentDetail>((resolve) => {
       resolveTransition = () => resolve(createMockAgent({ state: "paused" }));
     });
@@ -580,7 +574,7 @@ describe("AgentDetailView", () => {
   });
 
   it("rolls back optimistic detail state when API call fails", async () => {
-    let rejectTransition: ((error: Error) => void) | null = null;
+    let rejectTransition!: (error: Error) => void;
     const transitionPromise = new Promise<AgentDetail>((_, reject) => {
       rejectTransition = reject;
     });
@@ -609,7 +603,7 @@ describe("AgentDetailView", () => {
   });
 
   it("disables lifecycle transition buttons while state transition is in-flight", async () => {
-    let resolveTransition: (() => void) | null = null;
+    let resolveTransition!: () => void;
     const transitionPromise = new Promise<AgentDetail>((resolve) => {
       resolveTransition = () => resolve(createMockAgent({ state: "paused" }));
     });
@@ -2460,9 +2454,9 @@ describe("AgentDetailView", () => {
         currentUsage: 40000,
         budgetLimit: 50000,
         usagePercent: 80,
+        thresholdPercent: 0.8,
         isOverBudget: false,
         isOverThreshold: true,
-        budgetPeriod: "monthly",
         lastResetAt: "2026-01-01T00:00:00.000Z",
         nextResetAt: null,
       });
@@ -2488,10 +2482,10 @@ describe("AgentDetailView", () => {
         agentId: "agent-001",
         currentUsage: 10000,
         budgetLimit: null,
-        usagePercent: 0,
+        usagePercent: null,
+        thresholdPercent: null,
         isOverBudget: false,
         isOverThreshold: false,
-        budgetPeriod: "lifetime",
         lastResetAt: null,
         nextResetAt: null,
       });
@@ -2520,9 +2514,9 @@ describe("AgentDetailView", () => {
         currentUsage: 30000,
         budgetLimit: 50000,
         usagePercent: 60,
+        thresholdPercent: 0.8,
         isOverBudget: false,
         isOverThreshold: false,
-        budgetPeriod: "lifetime",
         lastResetAt: "2026-01-01T00:00:00.000Z",
         nextResetAt: null,
       });
@@ -2551,9 +2545,9 @@ describe("AgentDetailView", () => {
         currentUsage: 30000,
         budgetLimit: 50000,
         usagePercent: 60,
+        thresholdPercent: 0.8,
         isOverBudget: false,
         isOverThreshold: false,
-        budgetPeriod: "lifetime",
         lastResetAt: "2026-01-01T00:00:00.000Z",
         nextResetAt: null,
       });
@@ -2563,9 +2557,9 @@ describe("AgentDetailView", () => {
         currentUsage: 0,
         budgetLimit: 50000,
         usagePercent: 0,
+        thresholdPercent: 0.8,
         isOverBudget: false,
         isOverThreshold: false,
-        budgetPeriod: "lifetime",
         lastResetAt: "2026-04-10T00:00:00.000Z",
         nextResetAt: null,
       });
@@ -2625,7 +2619,7 @@ describe("AgentDetailView", () => {
     });
 
     it("fetches and displays logs when clicking a completed run", async () => {
-      const mockLogs = [
+      const mockLogs: AgentLogEntry[] = [
         { timestamp: "2024-01-01T00:01:00.000Z", taskId: "FN-001", text: "Starting task execution", type: "text" },
         { timestamp: "2024-01-01T00:02:00.000Z", taskId: "FN-001", text: "Read file: src/index.ts", type: "tool" },
       ];

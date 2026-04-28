@@ -286,6 +286,7 @@ function AuthOnboardingHarness({ openModelOnboardingSpy, openSettingsSpy }: Auth
 
   useAuthOnboarding({
     projectId: "project-onboarding-flow",
+    setupWizardOpen: false,
     openModelOnboarding,
     openSettings,
   });

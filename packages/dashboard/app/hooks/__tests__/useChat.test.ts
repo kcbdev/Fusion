@@ -58,9 +58,10 @@ function makeSession(overrides: Partial<ChatSession> & Pick<ChatSession, "id" | 
     id: overrides.id,
     agentId: overrides.agentId,
     status: overrides.status ?? "active",
-    title: overrides.title,
-    modelProvider: overrides.modelProvider,
-    modelId: overrides.modelId,
+    title: overrides.title ?? null,
+    projectId: overrides.projectId ?? null,
+    modelProvider: overrides.modelProvider ?? null,
+    modelId: overrides.modelId ?? null,
     createdAt: overrides.createdAt ?? "2026-04-08T00:00:00.000Z",
     updatedAt: overrides.updatedAt ?? "2026-04-08T00:00:00.000Z",
   };
@@ -72,7 +73,8 @@ function makeMessage(overrides: Partial<ChatMessage> & Pick<ChatMessage, "id" | 
     sessionId: overrides.sessionId,
     role: overrides.role,
     content: overrides.content,
-    thinkingOutput: overrides.thinkingOutput,
+    thinkingOutput: overrides.thinkingOutput ?? null,
+    metadata: overrides.metadata ?? null,
     createdAt: overrides.createdAt ?? "2026-04-08T00:00:00.000Z",
   };
 }

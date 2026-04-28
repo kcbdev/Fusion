@@ -196,7 +196,8 @@ describe("useDocuments", () => {
     });
 
     await waitFor(() => {
-      const urls = globalThis.fetch.mock.calls.map((call) => String(call[0]));
+      const mockFetch = globalThis.fetch as ReturnType<typeof vi.fn>;
+      const urls = mockFetch.mock.calls.map((call: unknown[]) => String(call[0]));
       expect(urls.some((url) => url.includes("/documents?q=readme"))).toBe(true);
       expect(urls.some((url) => url.includes("/files/markdown-list") && !url.includes("q=readme"))).toBe(true);
       expect(urls.some((url) => url.includes("/project-files/md"))).toBe(false);
@@ -216,7 +217,8 @@ describe("useDocuments", () => {
     });
 
     await waitFor(() => {
-      const urls = globalThis.fetch.mock.calls.map((call) => String(call[0]));
+      const mockFetch = globalThis.fetch as ReturnType<typeof vi.fn>;
+      const urls = mockFetch.mock.calls.map((call: unknown[]) => String(call[0]));
       expect(urls.some((url) => url.includes("/documents") && url.includes("projectId=proj-123"))).toBe(true);
       expect(urls.some((url) => url.includes("/files/markdown-list") && url.includes("projectId=proj-123"))).toBe(true);
     });

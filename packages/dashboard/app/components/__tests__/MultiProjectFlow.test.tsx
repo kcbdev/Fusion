@@ -79,10 +79,10 @@ describe("MultiProjectFlow", () => {
     };
     
     selectProject(projects[0]);
-    expect(currentProject?.id).toBe("proj_1");
-    
+    expect((currentProject as unknown as ProjectInfo)?.id).toBe("proj_1");
+
     selectProject(projects[1]);
-    expect(currentProject?.status).toBe("paused");
+    expect((currentProject as unknown as ProjectInfo)?.status).toBe("paused");
   });
 
   it("can track view mode transitions", () => {

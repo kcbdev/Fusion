@@ -200,7 +200,7 @@ describe("ListView", () => {
     expect(screen.queryByText("FN-002")).toBeNull();
 
     // Re-render with empty searchQuery
-    rerender(<ListView {...renderListView} tasks={tasks} searchQuery="" />);
+    rerender(<ListView tasks={tasks} searchQuery="" onMoveTask={vi.fn()} onOpenDetail={vi.fn()} addToast={mockAddToast} />);
 
     // Both tasks should be visible again
     expect(screen.getByText("FN-001")).toBeDefined();
@@ -2159,8 +2159,8 @@ describe("ListView - Bulk Selection", () => {
       updated: [
         {
           ...tasks[0],
-          modelProvider: null,
-          modelId: null,
+          modelProvider: undefined,
+          modelId: undefined,
         },
       ],
       count: 1,

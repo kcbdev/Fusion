@@ -6,7 +6,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgentPromptsManager } from "../AgentPromptsManager";
 import { BUILTIN_AGENT_PROMPTS } from "../../utils/builtinPrompts";
-import type { AgentPromptsConfig } from "@fusion/core";
+import type { AgentPromptsConfig, PromptKey } from "@fusion/core";
 
 // Mock the builtinPrompts utility to avoid importing the large prompt texts
 vi.mock("../../utils/builtinPrompts", () => ({
@@ -64,6 +64,33 @@ vi.mock("../../utils/builtinPrompts", () => ({
 
 const defaultConfig: AgentPromptsConfig = {};
 
+/** All known prompt keys — keep in sync with PromptKey union. */
+const ALL_PROMPT_KEYS: PromptKey[] = [
+  "executor-welcome",
+  "executor-guardrails",
+  "executor-spawning",
+  "executor-completion",
+  "triage-welcome",
+  "triage-context",
+  "reviewer-verdict",
+  "merger-conflicts",
+  "agent-generation-system",
+  "workflow-step-refine",
+  "planning-system",
+  "subtask-breakdown-system",
+  "mission-interview-system",
+  "ai-refine-system",
+];
+
+/**
+ * Build a valid `Record<PromptKey, string | null>` for test mocks.
+ * All keys default to `null`; pass specific keys to override.
+ */
+function makePromptOverrides(overrides: Partial<Record<PromptKey, string | null>> = {}): Record<PromptKey, string | null> {
+  const base = Object.fromEntries(ALL_PROMPT_KEYS.map((k) => [k, null])) as Record<PromptKey, string | null>;
+  return { ...base, ...overrides };
+}
+
 const onChange = vi.fn();
 const onPromptOverridesChange = vi.fn();
 
@@ -88,7 +115,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={defaultConfig}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -103,7 +130,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={defaultConfig}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -117,7 +144,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={defaultConfig}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -139,7 +166,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={defaultConfig}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -158,7 +185,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={defaultConfig}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -182,7 +209,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={defaultConfig}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -200,7 +227,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={defaultConfig}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -218,7 +245,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={defaultConfig}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -232,7 +259,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={defaultConfig}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -246,7 +273,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={defaultConfig}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -266,7 +293,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={defaultConfig}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -309,7 +336,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={config}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -337,7 +364,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={config}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -369,7 +396,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={config}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -401,7 +428,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={config}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -423,7 +450,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={defaultConfig}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -442,7 +469,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={defaultConfig}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -461,7 +488,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={defaultConfig}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -492,7 +519,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={config}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -517,7 +544,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={defaultConfig}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -534,7 +561,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={defaultConfig}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -552,7 +579,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={defaultConfig}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -575,7 +602,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={defaultConfig}
           onChange={onChange}
-          promptOverrides={{}}
+          promptOverrides={undefined}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -611,9 +638,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={defaultConfig}
           onChange={onChange}
-          promptOverrides={{
-            "executor-welcome": "Custom text",
-          }}
+          promptOverrides={makePromptOverrides({ "executor-welcome": "Custom text" })}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -638,9 +663,7 @@ describe("AgentPromptsManager", () => {
         <AgentPromptsManager
           value={defaultConfig}
           onChange={onChange}
-          promptOverrides={{
-            "executor-welcome": "Custom text",
-          }}
+          promptOverrides={makePromptOverrides({ "executor-welcome": "Custom text" })}
           onPromptOverridesChange={onPromptOverridesChange}
         />,
       );
@@ -671,7 +694,7 @@ describe("AgentPromptsManager", () => {
           <AgentPromptsManager
             value={defaultConfig}
             onChange={onChange}
-            promptOverrides={{}}
+          promptOverrides={undefined}
             onPromptOverridesChange={onPromptOverridesChange}
           />,
         );
@@ -695,7 +718,7 @@ describe("AgentPromptsManager", () => {
           <AgentPromptsManager
             value={defaultConfig}
             onChange={onChange}
-            promptOverrides={{}}
+          promptOverrides={undefined}
             onPromptOverridesChange={onPromptOverridesChange}
           />,
         );
@@ -724,9 +747,7 @@ describe("AgentPromptsManager", () => {
           <AgentPromptsManager
             value={defaultConfig}
             onChange={onChange}
-            promptOverrides={{
-              "executor-welcome": "My custom welcome message",
-            }}
+            promptOverrides={makePromptOverrides({ "executor-welcome": "My custom welcome message" })}
             onPromptOverridesChange={onPromptOverridesChange}
           />,
         );
@@ -755,7 +776,7 @@ describe("AgentPromptsManager", () => {
           <AgentPromptsManager
             value={defaultConfig}
             onChange={onChange}
-            promptOverrides={{}}
+          promptOverrides={undefined}
             onPromptOverridesChange={onPromptOverridesChange}
           />,
         );
@@ -789,7 +810,7 @@ describe("AgentPromptsManager", () => {
           <AgentPromptsManager
             value={defaultConfig}
             onChange={onChange}
-            promptOverrides={{}}
+          promptOverrides={undefined}
             onPromptOverridesChange={onPromptOverridesChange}
           />,
         );
@@ -824,7 +845,7 @@ describe("AgentPromptsManager", () => {
           <AgentPromptsManager
             value={defaultConfig}
             onChange={onChange}
-            promptOverrides={{}}
+          promptOverrides={undefined}
             onPromptOverridesChange={onPromptOverridesChange}
           />,
         );
@@ -862,7 +883,7 @@ describe("AgentPromptsManager", () => {
           <AgentPromptsManager
             value={defaultConfig}
             onChange={onChange}
-            promptOverrides={{}}
+          promptOverrides={undefined}
             onPromptOverridesChange={onPromptOverridesChange}
           />,
         );
@@ -886,7 +907,7 @@ describe("AgentPromptsManager", () => {
           <AgentPromptsManager
             value={defaultConfig}
             onChange={onChange}
-            promptOverrides={{}}
+          promptOverrides={undefined}
             onPromptOverridesChange={onPromptOverridesChange}
           />,
         );
@@ -905,7 +926,7 @@ describe("AgentPromptsManager", () => {
           <AgentPromptsManager
             value={defaultConfig}
             onChange={onChange}
-            promptOverrides={{}}
+          promptOverrides={undefined}
             onPromptOverridesChange={onPromptOverridesChange}
           />,
         );
@@ -928,7 +949,7 @@ describe("AgentPromptsManager", () => {
           <AgentPromptsManager
             value={defaultConfig}
             onChange={onChange}
-            promptOverrides={{}}
+          promptOverrides={undefined}
             onPromptOverridesChange={onPromptOverridesChange}
           />,
         );
@@ -963,7 +984,7 @@ describe("AgentPromptsManager", () => {
           <AgentPromptsManager
             value={config}
             onChange={onChange}
-            promptOverrides={{}}
+          promptOverrides={undefined}
             onPromptOverridesChange={onPromptOverridesChange}
           />,
         );
@@ -977,7 +998,7 @@ describe("AgentPromptsManager", () => {
           <AgentPromptsManager
             value={defaultConfig}
             onChange={onChange}
-            promptOverrides={{}}
+          promptOverrides={undefined}
             onPromptOverridesChange={onPromptOverridesChange}
           />,
         );
@@ -1014,7 +1035,7 @@ describe("AgentPromptsManager", () => {
           <AgentPromptsManager
             value={config}
             onChange={onChange}
-            promptOverrides={{}}
+          promptOverrides={undefined}
             onPromptOverridesChange={onPromptOverridesChange}
           />,
         );
@@ -1041,7 +1062,7 @@ describe("AgentPromptsManager", () => {
           <AgentPromptsManager
             value={defaultConfig}
             onChange={onChange}
-            promptOverrides={{}}
+          promptOverrides={undefined}
             onPromptOverridesChange={onPromptOverridesChange}
           />,
         );
@@ -1066,7 +1087,7 @@ describe("AgentPromptsManager", () => {
           <AgentPromptsManager
             value={defaultConfig}
             onChange={onChange}
-            promptOverrides={{}}
+          promptOverrides={undefined}
             onPromptOverridesChange={onPromptOverridesChange}
           />,
         );
@@ -1084,7 +1105,7 @@ describe("AgentPromptsManager", () => {
           <AgentPromptsManager
             value={defaultConfig}
             onChange={onChange}
-            promptOverrides={{}}
+          promptOverrides={undefined}
             onPromptOverridesChange={onPromptOverridesChange}
           />,
         );
@@ -1108,7 +1129,7 @@ describe("AgentPromptsManager", () => {
           <AgentPromptsManager
             value={defaultConfig}
             onChange={onChange}
-            promptOverrides={{}}
+          promptOverrides={undefined}
             onPromptOverridesChange={onPromptOverridesChange}
           />,
         );
@@ -1136,7 +1157,7 @@ describe("AgentPromptsManager", () => {
           <AgentPromptsManager
             value={defaultConfig}
             onChange={onChange}
-            promptOverrides={{}}
+          promptOverrides={undefined}
             onPromptOverridesChange={onPromptOverridesChange}
           />,
         );
@@ -1165,7 +1186,7 @@ describe("AgentPromptsManager", () => {
           <AgentPromptsManager
             value={defaultConfig}
             onChange={onChange}
-            promptOverrides={{}}
+          promptOverrides={undefined}
             onPromptOverridesChange={onPromptOverridesChange}
           />,
         );

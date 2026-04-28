@@ -148,7 +148,7 @@ describe("InsightsView", () => {
 
     it("should render loading state", () => {
       mockUseInsights.mockReturnValue({
-        ...mockUseInsights({ projectId: "test" }),
+        ...mockUseInsights("test"),
         loading: true,
       });
       // Use default mock

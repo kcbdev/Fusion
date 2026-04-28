@@ -168,7 +168,7 @@ describe("NewAgentDialog", () => {
     mockFetchAgents.mockResolvedValue(MOCK_MANAGER_AGENTS as any);
     mockCreateAgent.mockResolvedValue({} as any);
     mockFetchPluginRuntimes.mockResolvedValue(MOCK_PLUGIN_RUNTIMES);
-    mockUpdateGlobalSettings.mockResolvedValue({});
+    mockUpdateGlobalSettings.mockResolvedValue({} as unknown as import("@fusion/core").Settings);
     mockFetchDiscoveredSkills.mockResolvedValue(MOCK_SKILLS_RESPONSE);
   });
 

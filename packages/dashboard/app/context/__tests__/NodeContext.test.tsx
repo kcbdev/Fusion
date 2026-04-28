@@ -17,6 +17,10 @@ const mockRemoteNode: NodeConfig = {
   type: "remote",
   url: "https://remote.example.com",
   apiKey: "test-key",
+  status: "online",
+  maxConcurrent: 4,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
 describe("NodeContext", () => {

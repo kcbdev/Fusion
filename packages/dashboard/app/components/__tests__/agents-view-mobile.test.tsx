@@ -99,9 +99,11 @@ describe("AgentsView mobile adaptations", () => {
 
     vi.mocked(fetchAgents).mockResolvedValue(mockAgents);
     vi.mocked(fetchAgentStats).mockResolvedValue({
-      total: 2,
-      byState: { active: 1, idle: 1 },
-      byRole: { executor: 1, reviewer: 1 },
+      activeCount: 1,
+      assignedTaskCount: 1,
+      completedRuns: 0,
+      failedRuns: 0,
+      successRate: 1,
     });
     vi.mocked(updateAgent).mockResolvedValue(mockAgents[0]);
     vi.mocked(updateAgentState).mockResolvedValue(mockAgents[0]);

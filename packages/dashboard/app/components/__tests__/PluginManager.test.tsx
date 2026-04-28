@@ -14,10 +14,13 @@ const mockPlugins: PluginInstallation[] = [
     description: "A test plugin",
     author: "Test Author",
     homepage: "https://example.com",
+    path: "/plugins/plugin-a",
     settings: { apiKey: "test-key" },
     settingsSchema: {
       apiKey: { type: "string", label: "API Key", description: "The API key", required: true },
     },
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
   },
   {
     id: "plugin-b",
@@ -26,8 +29,11 @@ const mockPlugins: PluginInstallation[] = [
     state: "stopped",
     enabled: false,
     description: "Another test plugin",
+    path: "/plugins/plugin-b",
     settings: {},
     settingsSchema: {},
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
   },
 ];
 
@@ -40,8 +46,11 @@ vi.mock("../../api", () => ({
     version: "1.0.0",
     state: "started" as const,
     enabled: true,
+    path: "/plugins/plugin-a",
     settings: {},
     settingsSchema: {},
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
   })),
   enablePlugin: vi.fn(() => Promise.resolve({
     id: "plugin-a",
@@ -49,8 +58,11 @@ vi.mock("../../api", () => ({
     version: "1.0.0",
     state: "started" as const,
     enabled: true,
+    path: "/plugins/plugin-a",
     settings: {},
     settingsSchema: {},
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
   })),
   disablePlugin: vi.fn(() => Promise.resolve({
     id: "plugin-a",
@@ -58,8 +70,11 @@ vi.mock("../../api", () => ({
     version: "1.0.0",
     state: "stopped" as const,
     enabled: false,
+    path: "/plugins/plugin-a",
     settings: {},
     settingsSchema: {},
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
   })),
   uninstallPlugin: vi.fn(() => Promise.resolve()),
   fetchPluginSettings: vi.fn(() => Promise.resolve({ apiKey: "test-key" })),
@@ -70,8 +85,11 @@ vi.mock("../../api", () => ({
     version: "1.0.0",
     state: "started" as const,
     enabled: true,
+    path: "/plugins/plugin-a",
     settings: {},
     settingsSchema: {},
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
   })),
   browseDirectory: vi.fn(() => Promise.resolve({
     currentPath: "/home",
@@ -121,8 +139,11 @@ beforeEach(() => {
     version: "1.0.0",
     state: "started" as const,
     enabled: true,
+    path: "/plugins/plugin-a",
     settings: {},
     settingsSchema: {},
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
   });
   vi.mocked(enablePlugin).mockResolvedValue({
     id: "plugin-a",
@@ -130,8 +151,11 @@ beforeEach(() => {
     version: "1.0.0",
     state: "started" as const,
     enabled: true,
+    path: "/plugins/plugin-a",
     settings: {},
     settingsSchema: {},
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
   });
   vi.mocked(disablePlugin).mockResolvedValue({
     id: "plugin-a",
@@ -139,8 +163,11 @@ beforeEach(() => {
     version: "1.0.0",
     state: "stopped" as const,
     enabled: false,
+    path: "/plugins/plugin-a",
     settings: {},
     settingsSchema: {},
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
   });
   vi.mocked(uninstallPlugin).mockResolvedValue();
   vi.mocked(fetchPluginSettings).mockResolvedValue({ apiKey: "test-key" });
@@ -165,9 +192,9 @@ beforeEach(() => {
     eventSourceInstance.url = url;
     return eventSourceInstance;
   }) as unknown as typeof EventSource;
-  MockEventSource.CONNECTING = 0;
-  MockEventSource.OPEN = 1;
-  MockEventSource.CLOSED = 2;
+  (MockEventSource as unknown as { CONNECTING: number; OPEN: number; CLOSED: number }).CONNECTING = 0;
+  (MockEventSource as unknown as { CONNECTING: number; OPEN: number; CLOSED: number }).OPEN = 1;
+  (MockEventSource as unknown as { CONNECTING: number; OPEN: number; CLOSED: number }).CLOSED = 2;
   vi.stubGlobal("EventSource", MockEventSource);
   
   // Store reference for tests that need to trigger events
@@ -733,6 +760,7 @@ describe("PluginManager", () => {
       state: "started",
       enabled: true,
       description: "A plugin with password, multiline, and array settings",
+      path: "/plugins/plugin-new-types",
       settings: {
         apiSecret: "secret123",
         customMessage: "Hello\nWorld",
@@ -745,6 +773,8 @@ describe("PluginManager", () => {
         tags: { type: "array", label: "Tags", itemType: "string" },
         counts: { type: "array", label: "Counts", itemType: "number" },
       },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
     };
 
     it("renders password input for password type", async () => {
@@ -973,7 +1003,7 @@ describe("PluginManager", () => {
       expect(toggleSwitch).toBeTruthy();
 
       // Find the checkbox inside
-      const checkbox = toggleSwitch?.querySelector('input[type="checkbox"]');
+      const checkbox = toggleSwitch?.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
       expect(checkbox).toBeTruthy();
       expect(checkbox?.checked).toBe(true);
     });
@@ -992,7 +1022,7 @@ describe("PluginManager", () => {
       expect(toggleSwitch).toBeTruthy();
 
       // Find the checkbox inside
-      const checkbox = toggleSwitch?.querySelector('input[type="checkbox"]');
+      const checkbox = toggleSwitch?.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
       expect(checkbox).toBeTruthy();
       expect(checkbox?.checked).toBe(false);
     });

@@ -80,8 +80,8 @@ describe("useWorkspaceFileEditor", () => {
     mockFetchWorkspaceFileContent.mockResolvedValueOnce(response);
 
     const { result, rerender } = renderHook(
-      ({ workspace, filePath, enabled }) => useWorkspaceFileEditor(workspace, filePath, enabled),
-      { initialProps: { workspace: "FN-123", filePath: "src/index.ts", enabled: true } },
+      ({ workspace, filePath, enabled }: { workspace: string; filePath: string | null; enabled: boolean }) => useWorkspaceFileEditor(workspace, filePath, enabled),
+      { initialProps: { workspace: "FN-123", filePath: "src/index.ts" as string | null, enabled: true } },
     );
 
     await waitFor(() => expect(result.current.loading).toBe(false));

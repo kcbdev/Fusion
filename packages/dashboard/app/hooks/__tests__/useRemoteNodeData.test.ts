@@ -50,6 +50,7 @@ describe("useRemoteNodeData search query propagation", () => {
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
         columnMovedAt: "2026-01-01T00:00:00.000Z",
+        log: [],
       },
     ];
     mockFetchRemoteNodeTasks.mockResolvedValueOnce(mockTasks);
@@ -97,6 +98,7 @@ describe("useRemoteNodeData search query propagation", () => {
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
         columnMovedAt: "2026-01-01T00:00:00.000Z",
+        log: [],
       },
     ];
     const filteredTasks = [
@@ -113,6 +115,7 @@ describe("useRemoteNodeData search query propagation", () => {
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
         columnMovedAt: "2026-01-01T00:00:00.000Z",
+        log: [],
       },
     ];
 
@@ -123,7 +126,7 @@ describe("useRemoteNodeData search query propagation", () => {
     const { result, rerender } = renderHook(
       ({ searchQuery }: { searchQuery?: string }) =>
         useRemoteNodeData("node_abc", { projectId: "proj_001", searchQuery }),
-      { initialProps: { searchQuery: undefined } },
+      { initialProps: { searchQuery: undefined as string | undefined } },
     );
 
     await waitFor(() => {
@@ -161,6 +164,7 @@ describe("useRemoteNodeData search query propagation", () => {
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
         columnMovedAt: "2026-01-01T00:00:00.000Z",
+        log: [],
       },
     ];
     const allTasks = [
@@ -177,6 +181,7 @@ describe("useRemoteNodeData search query propagation", () => {
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
         columnMovedAt: "2026-01-01T00:00:00.000Z",
+        log: [],
       },
       {
         id: "FN-002",
@@ -191,6 +196,7 @@ describe("useRemoteNodeData search query propagation", () => {
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
         columnMovedAt: "2026-01-01T00:00:00.000Z",
+        log: [],
       },
     ];
 
@@ -239,6 +245,7 @@ describe("useRemoteNodeData search query propagation", () => {
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
         columnMovedAt: "2026-01-01T00:00:00.000Z",
+        log: [],
       },
     ];
 
@@ -369,12 +376,17 @@ describe("useRemoteNodeData", () => {
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
           columnMovedAt: "2026-01-01T00:00:00.000Z",
+          log: [],
         },
       ];
       const mockProjectHealth = {
+        projectId: "proj_001",
         activeTaskCount: 5,
         inFlightAgentCount: 2,
         status: "active" as const,
+        totalTasksCompleted: 0,
+        totalTasksFailed: 0,
+        updatedAt: "2026-01-01T00:00:00.000Z",
       };
 
       mockFetchRemoteNodeHealth.mockResolvedValueOnce(mockHealth);

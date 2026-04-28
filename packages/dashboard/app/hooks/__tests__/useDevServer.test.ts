@@ -94,7 +94,7 @@ describe("useDevServer", () => {
     mockSetDevServerPreviewUrl.mockResolvedValue(createState({ manualUrl: "http://localhost:3000" }));
 
     mockSubscribeSse.mockImplementation((_url, sub) => {
-      activeSubscription = sub;
+      activeSubscription = sub ?? null;
       return unsubscribeSpy;
     });
   });

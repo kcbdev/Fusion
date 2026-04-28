@@ -2,8 +2,20 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, within, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ModelSelectorTab } from "../ModelSelectorTab";
-import type { Task } from "@fusion/core";
+import type { Settings, Task } from "@fusion/core";
 import * as api from "../../api";
+
+/** Build a minimal valid Settings object with required fields, allowing partial overrides. */
+function makeSettings(overrides: Partial<Settings> = {}): Settings {
+  return {
+    maxConcurrent: 2,
+    maxWorktrees: 4,
+    pollIntervalMs: 15000,
+    groupOverlappingFiles: false,
+    autoMerge: true,
+    ...overrides,
+  };
+}
 
 vi.mock("../../api", async () => {
   const actual = await vi.importActual<typeof api>("../../api");
@@ -167,10 +179,10 @@ describe("ModelSelectorTab", () => {
       <ModelSelectorTab
         task={FAKE_TASK}
         addToast={mockAddToast}
-        settings={{
+        settings={makeSettings({
           defaultProvider: "anthropic",
           defaultModelId: "claude-sonnet-4-5",
-        }}
+        })}
       />,
     );
 
@@ -195,12 +207,12 @@ describe("ModelSelectorTab", () => {
       <ModelSelectorTab
         task={FAKE_TASK}
         addToast={mockAddToast}
-        settings={{
+        settings={makeSettings({
           validatorProvider: "openai",
           validatorModelId: "gpt-4o",
           defaultProvider: "anthropic",
           defaultModelId: "claude-sonnet-4-5",
-        }}
+        })}
       />,
     );
 
@@ -215,12 +227,12 @@ describe("ModelSelectorTab", () => {
       <ModelSelectorTab
         task={FAKE_TASK}
         addToast={mockAddToast}
-        settings={{
+        settings={makeSettings({
           planningProvider: "google",
           planningModelId: "gemini-2.5-pro",
           defaultProvider: "anthropic",
           defaultModelId: "claude-sonnet-4-5",
-        }}
+        })}
       />,
     );
 
@@ -235,10 +247,10 @@ describe("ModelSelectorTab", () => {
       <ModelSelectorTab
         task={FAKE_TASK}
         addToast={mockAddToast}
-        settings={{
+        settings={makeSettings({
           defaultProvider: "anthropic",
           defaultModelId: "claude-sonnet-4-5",
-        }}
+        })}
       />,
     );
 
@@ -251,10 +263,10 @@ describe("ModelSelectorTab", () => {
       <ModelSelectorTab
         task={FAKE_TASK}
         addToast={mockAddToast}
-        settings={{
+        settings={makeSettings({
           defaultProvider: "openai",
           defaultModelId: "gpt-4o",
-        }}
+        })}
       />,
     );
 
@@ -1119,7 +1131,7 @@ describe("ModelSelectorTab", () => {
         <ModelSelectorTab
           task={FAKE_TASK}
           addToast={mockAddToast}
-          settings={{ defaultThinkingLevel: "high" }}
+          settings={makeSettings({ defaultThinkingLevel: "high" })}
         />,
       );
 
@@ -1135,7 +1147,7 @@ describe("ModelSelectorTab", () => {
           <ModelSelectorTab
             task={FAKE_TASK}
             addToast={mockAddToast}
-            settings={{ defaultThinkingLevel: level }}
+            settings={makeSettings({ defaultThinkingLevel: level })}
           />,
         );
 
@@ -1160,7 +1172,7 @@ describe("ModelSelectorTab", () => {
         <ModelSelectorTab
           task={taskWithThinking}
           addToast={mockAddToast}
-          settings={{ defaultThinkingLevel: "high" }}
+          settings={makeSettings({ defaultThinkingLevel: "high" })}
         />,
       );
 

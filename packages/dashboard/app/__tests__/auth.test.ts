@@ -155,7 +155,7 @@ describe("installAuthFetch", () => {
 
   it("is idempotent and only installs one fetch wrapper", async () => {
     window.localStorage.setItem("fn.authToken", "daemon-token");
-    const fetchSpy = vi.fn(async () => new Response("ok", { status: 200 }));
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response("ok", { status: 200 }));
     window.fetch = fetchSpy as unknown as typeof window.fetch;
 
     const { installAuthFetch } = await loadAuthModule();

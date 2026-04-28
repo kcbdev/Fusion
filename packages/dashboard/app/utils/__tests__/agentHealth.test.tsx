@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { JSX } from "react";
 import { getAgentHealthStatus, getAgentHealthColorVar } from "../agentHealth";
 import type { Agent } from "../../api";
 

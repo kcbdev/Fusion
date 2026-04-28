@@ -111,10 +111,7 @@ describe("Board", () => {
 
   describe("search functionality", () => {
     const createTask = (overrides: Partial<Task> & { id: string; description: string }): Task => ({
-      id: overrides.id,
-      title: overrides.title,
-      description: overrides.description,
-      column: overrides.column ?? "todo",
+      column: "todo",
       dependencies: [],
       steps: [],
       currentStep: 0,

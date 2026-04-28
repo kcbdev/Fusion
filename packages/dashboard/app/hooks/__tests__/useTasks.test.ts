@@ -1448,7 +1448,7 @@ describe("useTasks", () => {
       const { result, rerender } = renderHook(
         ({ projectId, searchQuery }: { projectId?: string; searchQuery?: string }) =>
           useTasks({ projectId, searchQuery }),
-        { initialProps: { projectId: "project-a", searchQuery: undefined } }
+        { initialProps: { projectId: "project-a", searchQuery: undefined as string | undefined } }
       );
 
       await waitFor(() => {

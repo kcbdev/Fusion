@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import type { JSX } from "react";
 import { NodeCard } from "../NodeCard";
 import type { NodeInfo, ProjectInfo } from "../../api";
 import type { ComputedNodeSyncStatus } from "../../hooks/useNodeSettingsSync";

@@ -41,15 +41,15 @@ vi.mock("lucide-react", () => ({
 }));
 
 // Mock usePluginUiSlots hook
-const mockUsePluginUiSlots = vi.fn(() => ({
-  slots: [],
-  getSlotsForId: vi.fn(() => []),
+const mockUsePluginUiSlots = vi.fn((_projectId?: string) => ({
+  slots: [] as import("../../api").PluginUiSlotEntry[],
+  getSlotsForId: vi.fn((_slotId: string) => [] as import("../../api").PluginUiSlotEntry[]),
   loading: false,
   error: null,
 }));
 
 vi.mock("../../hooks/usePluginUiSlots", () => ({
-  usePluginUiSlots: (...args: unknown[]) => mockUsePluginUiSlots(...args),
+  usePluginUiSlots: (projectId?: string) => mockUsePluginUiSlots(projectId),
 }));
 
 const mockConfirm = vi.fn();
@@ -537,7 +537,7 @@ describe("Column PluginSlot integration", () => {
   it("renders PluginSlot for board-column-footer", () => {
     mockUsePluginUiSlots.mockReturnValue({
       slots: [{ pluginId: "test-plugin", slot: { slotId: "board-column-footer", label: "Column Footer", componentPath: "./test.js" } }],
-      getSlotsForId: (id: string) => id === "board-column-footer" ? [{ pluginId: "test-plugin", slot: { slotId: "board-column-footer", label: "Column Footer", componentPath: "./test.js" } }] : [],
+      getSlotsForId: vi.fn((id: string) => id === "board-column-footer" ? [{ pluginId: "test-plugin", slot: { slotId: "board-column-footer", label: "Column Footer", componentPath: "./test.js" } }] : []),
       loading: false,
       error: null,
     });

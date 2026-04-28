@@ -200,7 +200,7 @@ describe("useModalManager", () => {
 
     expect(result.current.detailTask?.id).toBe("FN-456");
     // Should not have prompt field (plain Task)
-    expect("prompt" in (result.current.detailTask as Record<string, unknown>)).toBe(false);
+    expect("prompt" in (result.current.detailTask as unknown as Record<string, unknown>)).toBe(false);
     expect(result.current.detailTaskInitialTab).toBe("definition");
   });
 

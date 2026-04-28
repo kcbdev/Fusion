@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { type ComponentProps, useState } from "react";
 import { ScheduleStepsEditor } from "../ScheduleStepsEditor";
 import type { AutomationStep } from "@fusion/core";
+
+type ScheduleStepsEditorProps = ComponentProps<typeof ScheduleStepsEditor>;
 
 // Mock @fusion/core
 vi.mock("@fusion/core", () => ({}));

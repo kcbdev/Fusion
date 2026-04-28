@@ -1985,14 +1985,13 @@ describe("Git Management API", () => {
 
   describe("mergeTask", () => {
     it("sends POST to merge endpoint and returns MergeResult", async () => {
-      const mergeResult: MergeResult = {
-        source: "FN-001",
-        target: "FN-002",
-        details: {
-          mergedFields: ["description", "steps"],
-          sourceDeleted: true,
-        },
-      };
+      const mergeResult = {
+        task: { id: "FN-001", description: "", column: "done", dependencies: [], steps: [], currentStep: 0, log: [], createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+        branch: "fn/FN-001",
+        merged: true,
+        worktreeRemoved: true,
+        branchDeleted: true,
+      } as unknown as MergeResult;
       globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, mergeResult));
 
       const response = await mergeTask("FN-001");
@@ -4494,8 +4493,8 @@ describe("saveMemoryInsights", () => {
     expect(result).toEqual({ success: true });
     const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit?];
     expect(call[0]).toContain("/api/memory/insights");
-    expect(call[1].method).toBe("PUT");
-    expect(call[1].body).toBe(JSON.stringify({ content: "## Patterns\n- New insight" }));
+    expect(call[1]!.method).toBe("PUT");
+    expect(call[1]!.body).toBe(JSON.stringify({ content: "## Patterns\n- New insight" }));
     fetchSpy.mockRestore();
   });
 
@@ -4518,7 +4517,7 @@ describe("saveMemoryInsights", () => {
     const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit?];
     expect(call[0]).toContain("/api/memory/insights");
     expect(call[0]).toContain("projectId=proj_abc");
-    expect(call[1].method).toBe("PUT");
+    expect(call[1]!.method).toBe("PUT");
     fetchSpy.mockRestore();
   });
 });
@@ -4542,7 +4541,7 @@ describe("triggerInsightExtraction", () => {
     expect(result).toEqual({ success: true, summary: "Extracted 3 insights", insightCount: 3, pruned: false });
     const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit?];
     expect(call[0]).toContain("/api/memory/extract");
-    expect(call[1].method).toBe("POST");
+    expect(call[1]!.method).toBe("POST");
     fetchSpy.mockRestore();
   });
 
@@ -4565,7 +4564,7 @@ describe("triggerInsightExtraction", () => {
     const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit?];
     expect(call[0]).toContain("/api/memory/extract");
     expect(call[0]).toContain("projectId=proj_abc");
-    expect(call[1].method).toBe("POST");
+    expect(call[1]!.method).toBe("POST");
     fetchSpy.mockRestore();
   });
 });

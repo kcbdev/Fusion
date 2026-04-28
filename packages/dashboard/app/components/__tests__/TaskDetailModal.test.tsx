@@ -60,19 +60,19 @@ vi.mock("lucide-react", () => ({
 }));
 
 vi.mock("../../hooks/useAgentLogs", () => ({
-  useAgentLogs: vi.fn(() => ({ entries: [], loading: false, clear: vi.fn() })),
+  useAgentLogs: vi.fn(() => ({ entries: [], loading: false, clear: vi.fn(), loadMore: vi.fn(async () => {}), hasMore: false, total: null, loadingMore: false })),
 }));
 
 // Mock usePluginUiSlots hook
-const mockUsePluginUiSlots = vi.fn(() => ({
-  slots: [],
-  getSlotsForId: vi.fn(() => []),
+const mockUsePluginUiSlots = vi.fn((_projectId?: string) => ({
+  slots: [] as any[],
+  getSlotsForId: vi.fn((_id: string) => [] as any[]),
   loading: false,
   error: null,
 }));
 
 vi.mock("../../hooks/usePluginUiSlots", () => ({
-  usePluginUiSlots: (...args: unknown[]) => mockUsePluginUiSlots(...args),
+  usePluginUiSlots: (projectId?: string) => mockUsePluginUiSlots(projectId),
 }));
 
 const mockConfirm = vi.fn();
@@ -1057,7 +1057,7 @@ describe("TaskDetailModal", () => {
       mockUpload.mockResolvedValueOnce(
         new Promise((resolve) => {
           resolveUpload = resolve;
-        }),
+        }) as any,
       );
 
       render(
@@ -1787,6 +1787,10 @@ describe("TaskDetailModal", () => {
         entries: [mockLogEntry],
         loading: false,
         clear: vi.fn(),
+        loadMore: vi.fn(async () => {}),
+        hasMore: false,
+        total: null,
+        loadingMore: false,
       });
 
       return render(
@@ -1817,6 +1821,10 @@ describe("TaskDetailModal", () => {
         entries: [mockLogEntry],
         loading: false,
         clear: vi.fn(),
+        loadMore: vi.fn(async () => {}),
+        hasMore: false,
+        total: null,
+        loadingMore: false,
       });
 
       return render(
@@ -1938,6 +1946,10 @@ describe("TaskDetailModal", () => {
         entries: [mockLogEntry],
         loading: false,
         clear: vi.fn(),
+        loadMore: vi.fn(async () => {}),
+        hasMore: false,
+        total: null,
+        loadingMore: false,
       });
 
       const { container } = render(
@@ -2002,6 +2014,10 @@ describe("TaskDetailModal", () => {
           ],
           loading: false,
           clear: vi.fn(),
+          loadMore: vi.fn(async () => {}),
+          hasMore: false,
+          total: null,
+          loadingMore: false,
         });
 
         const { container } = render(
@@ -2043,6 +2059,10 @@ describe("TaskDetailModal", () => {
           entries: [mockLogEntry],
           loading: false,
           clear: vi.fn(),
+          loadMore: vi.fn(async () => {}),
+          hasMore: false,
+          total: null,
+          loadingMore: false,
         });
 
         const { container } = render(
@@ -2114,6 +2134,10 @@ describe("TaskDetailModal", () => {
           entries: [mockLogEntry],
           loading: false,
           clear: vi.fn(),
+          loadMore: vi.fn(async () => {}),
+          hasMore: false,
+          total: null,
+          loadingMore: false,
         });
 
         const { container } = render(
@@ -2161,6 +2185,10 @@ describe("TaskDetailModal", () => {
           ],
           loading: false,
           clear: vi.fn(),
+          loadMore: vi.fn(async () => {}),
+          hasMore: false,
+          total: null,
+          loadingMore: false,
         });
 
         const { container } = render(
@@ -3095,7 +3123,7 @@ describe("TaskDetailModal", () => {
 
     it("requesting AI revision works and closes modal", async () => {
       const { requestSpecRevision } = await import("../../api");
-      vi.mocked(requestSpecRevision).mockResolvedValueOnce({});
+      vi.mocked(requestSpecRevision).mockResolvedValueOnce({} as any);
       const onClose = vi.fn();
       const addToast = vi.fn();
 
@@ -5210,8 +5238,8 @@ describe("TaskDetailModal", () => {
       const mockUpdate = vi.mocked(updateTask);
       mockUpdate.mockResolvedValueOnce({ id: "FN-001" } as Task);
       vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-        { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, createdAt: "", updatedAt: "" },
-        { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", enabled: true, createdAt: "", updatedAt: "" },
+        { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
+        { id: "WS-002", name: "Security Audit", description: "Check security", prompt: "Check security", mode: "prompt" as const, enabled: true, createdAt: "", updatedAt: "" },
       ]);
 
       const { container } = render(
@@ -5316,7 +5344,7 @@ describe("TaskDetailModal", () => {
       const { fetchWorkflowResults } = await import("../../api");
       const mockFetch = vi.mocked(fetchWorkflowResults);
       // Never resolve to keep loading state
-      mockFetch.mockResolvedValueOnce(new Promise(() => {}));
+      mockFetch.mockResolvedValueOnce(new Promise(() => {}) as any);
 
       render(
         <TaskDetailModal
@@ -5717,7 +5745,7 @@ describe("TaskDetailModal", () => {
       const { fetchTaskDetail } = await import("../../api");
       const mockFetch = vi.mocked(fetchTaskDetail);
       // Set up a pending promise so loading state persists
-      mockFetch.mockResolvedValueOnce(new Promise(() => {}));
+      mockFetch.mockResolvedValueOnce(new Promise(() => {}) as any);
 
       const task: Task = {
         id: "FN-203",
@@ -5864,14 +5892,14 @@ describe("TaskDetailModal", () => {
       const strippedTask: Task = {
         id: "FN-LOG-1",
         description: "SSE stripped task",
-        column: "doing",
+        column: "in-progress",
         dependencies: [],
         steps: [],
         currentStep: 0,
         log: [],
         createdAt: "2026-01-01T00:00:00Z",
         updatedAt: "2026-01-01T00:00:00Z",
-      } as Task;
+      };
 
       mockFetch.mockResolvedValueOnce({
         ...strippedTask,
@@ -5968,7 +5996,7 @@ describe("TaskDetailModal", () => {
         ] : [],
         loading: false,
         error: null,
-      });
+      } as any);
 
       render(
         <TaskDetailModal
@@ -5997,7 +6025,7 @@ describe("TaskDetailModal", () => {
         ] : [],
         loading: false,
         error: null,
-      });
+      } as any);
 
       const { container } = render(
         <TaskDetailModal

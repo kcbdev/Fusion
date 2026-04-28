@@ -27,6 +27,7 @@ describe("PreviewIframe", () => {
         embedStatus="unknown"
         onEmbedStatusChange={vi.fn()}
         iframeRef={createRef<HTMLIFrameElement>()}
+        blockReason={null}
         embedContext={null}
       />,
     );
@@ -41,6 +42,7 @@ describe("PreviewIframe", () => {
         embedStatus="embedded"
         onEmbedStatusChange={vi.fn()}
         iframeRef={createRef<HTMLIFrameElement>()}
+        blockReason={null}
         embedContext={null}
       />,
     );
@@ -63,6 +65,7 @@ describe("PreviewIframe", () => {
         embedStatus="unknown"
         onEmbedStatusChange={onEmbedStatusChange}
         iframeRef={createRef<HTMLIFrameElement>()}
+        blockReason={null}
         embedContext={null}
       />,
     );
@@ -81,6 +84,7 @@ describe("PreviewIframe", () => {
         embedStatus="loading"
         onEmbedStatusChange={onEmbedStatusChange}
         iframeRef={createRef<HTMLIFrameElement>()}
+        blockReason={null}
         embedContext={null}
       />,
     );
@@ -99,6 +103,7 @@ describe("PreviewIframe", () => {
         embedStatus="loading"
         onEmbedStatusChange={onEmbedStatusChange}
         iframeRef={createRef<HTMLIFrameElement>()}
+        blockReason={null}
         embedContext={null}
       />,
     );
@@ -115,6 +120,7 @@ describe("PreviewIframe", () => {
         embedStatus="embedded"
         onEmbedStatusChange={vi.fn()}
         iframeRef={createRef<HTMLIFrameElement>()}
+        blockReason={null}
         embedContext={null}
         className="custom-class"
       />,
@@ -130,6 +136,7 @@ describe("PreviewIframe", () => {
         embedStatus="blocked"
         onEmbedStatusChange={vi.fn()}
         iframeRef={createRef<HTMLIFrameElement>()}
+        blockReason="The server may block iframe embedding..."
         embedContext="The server may block iframe embedding..."
       />,
     );
@@ -146,6 +153,7 @@ describe("PreviewIframe", () => {
         embedStatus="blocked"
         onEmbedStatusChange={vi.fn()}
         iframeRef={createRef<HTMLIFrameElement>()}
+        blockReason="The server may block iframe embedding..."
         embedContext="The server may block iframe embedding..."
       />,
     );
@@ -164,6 +172,7 @@ describe("PreviewIframe", () => {
         embedStatus="blocked"
         onEmbedStatusChange={vi.fn()}
         iframeRef={createRef<HTMLIFrameElement>()}
+        blockReason="The server may block iframe embedding..."
         embedContext="The server may block iframe embedding..."
         onRetry={onRetry}
       />,
@@ -181,6 +190,7 @@ describe("PreviewIframe", () => {
         embedStatus="error"
         onEmbedStatusChange={vi.fn()}
         iframeRef={createRef<HTMLIFrameElement>()}
+        blockReason="The preview URL could not be loaded..."
         embedContext="The preview URL could not be loaded..."
       />,
     );
@@ -199,6 +209,7 @@ describe("PreviewIframe", () => {
         embedStatus="error"
         onEmbedStatusChange={vi.fn()}
         iframeRef={createRef<HTMLIFrameElement>()}
+        blockReason="The preview URL could not be loaded..."
         embedContext="The preview URL could not be loaded..."
         onRetry={onRetry}
       />,
@@ -216,6 +227,7 @@ describe("PreviewIframe", () => {
         embedStatus="loading"
         onEmbedStatusChange={vi.fn()}
         iframeRef={createRef<HTMLIFrameElement>()}
+        blockReason={null}
         embedContext={null}
       />,
     );

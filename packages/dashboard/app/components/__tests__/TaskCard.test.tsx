@@ -171,7 +171,7 @@ describe("TaskCard", () => {
         task={makeTask({
           steps: [
             { name: "Step 0", status: "done" },
-            { name: "Step 1", status: "failed" },
+            { name: "Step 1", status: "failed" as any },
           ],
           enabledWorkflowSteps: ["WS-001", "WS-002", "WS-003"],
           workflowStepResults: [

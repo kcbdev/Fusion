@@ -134,6 +134,16 @@ const defaultProps = {
   addToast: vi.fn(),
 };
 
+/** Build a valid InboxResponse shape — `total` defaults to `messages.length` */
+function makeInboxResponse(messages: Message[], unreadCount = 0) {
+  return { messages, unreadCount, total: messages.length };
+}
+
+/** Build a valid OutboxResponse shape (no unreadCount) */
+function makeOutboxResponse(messages: Message[]) {
+  return { messages, total: messages.length };
+}
+
 describe("MailboxView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -147,6 +157,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [],
       unreadCount: 0,
+      total: 0,
     });
 
     render(<MailboxView {...defaultProps} />);
@@ -159,6 +170,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [mockMessage],
       unreadCount: 1,
+      total: 1,
     });
 
     render(<MailboxView {...defaultProps} />);
@@ -172,6 +184,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [],
       unreadCount: 0,
+      total: 0,
     });
 
     render(<MailboxView {...defaultProps} />);
@@ -185,6 +198,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [],
       unreadCount: 0,
+      total: 0,
     });
 
     render(<MailboxView {...defaultProps} />);
@@ -197,6 +211,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [mockMessage, mockReadMessage],
       unreadCount: 1,
+      total: 1,
     });
 
     render(<MailboxView {...defaultProps} />);
@@ -210,6 +225,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [mockMessage, mockReadMessage],
       unreadCount: 1,
+      total: 1,
     });
 
     render(<MailboxView {...defaultProps} />);
@@ -223,6 +239,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [mockMessage],
       unreadCount: 1,
+      total: 1,
     });
 
     render(<MailboxView {...defaultProps} />);
@@ -236,6 +253,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [mockUnknownAgentMessage],
       unreadCount: 1,
+      total: 1,
     });
 
     render(<MailboxView {...defaultProps} />);
@@ -250,6 +268,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [mockMessage, secondMessage], // Same sender, both unread
       unreadCount: 2,
+      total: 2,
     });
 
     render(<MailboxView {...defaultProps} />);
@@ -266,6 +285,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [mockMessage],
       unreadCount: 1,
+      total: 1,
     });
 
     render(<MailboxView {...defaultProps} />);
@@ -279,6 +299,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [mockReadMessage],
       unreadCount: 0,
+      total: 0,
     });
 
     render(<MailboxView {...defaultProps} />);
@@ -292,10 +313,11 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [],
       unreadCount: 0,
+      total: 0,
     });
     mockFetchOutbox.mockResolvedValue({
       messages: [],
-      unreadCount: 0,
+      total: 0,
     });
 
     render(<MailboxView {...defaultProps} />);
@@ -312,6 +334,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [],
       unreadCount: 0,
+      total: 0,
     });
 
     render(<MailboxView {...defaultProps} />);
@@ -330,10 +353,11 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [mockMessage],
       unreadCount: 1,
+      total: 1,
     });
     mockFetchConversation.mockResolvedValue([mockMessage]);
     // Mock markMessageRead to return undefined (simulating no read update needed)
-    mockMarkMessageRead.mockResolvedValue(undefined);
+    mockMarkMessageRead.mockResolvedValue({ ...mockMessage, read: true });
 
     render(<MailboxView {...defaultProps} />);
 
@@ -354,9 +378,10 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [mockMessage],
       unreadCount: 1,
+      total: 1,
     });
     mockFetchConversation.mockResolvedValue([mockMessage]);
-    mockMarkMessageRead.mockResolvedValue(undefined);
+    mockMarkMessageRead.mockResolvedValue({ ...mockMessage, read: true });
 
     render(<MailboxView {...defaultProps} />);
 
@@ -380,6 +405,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [mockMessage],
       unreadCount: 1,
+      total: 1,
     });
 
     render(<MailboxView {...defaultProps} />);
@@ -395,9 +421,10 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [mockMessage],
       unreadCount: 1,
+      total: 1,
     });
     mockFetchConversation.mockResolvedValue([mockMessage]);
-    mockMarkMessageRead.mockResolvedValue(undefined);
+    mockMarkMessageRead.mockResolvedValue({ ...mockMessage, read: true });
 
     render(<MailboxView {...defaultProps} />);
 
@@ -430,9 +457,10 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [mockAgentToAgentMessage],
       unreadCount: 1,
+      total: 1,
     });
     mockFetchConversation.mockResolvedValue([mockAgentToAgentMessage]);
-    mockMarkMessageRead.mockResolvedValue(undefined);
+    mockMarkMessageRead.mockResolvedValue({ ...mockMessage, read: true });
 
     render(<MailboxView {...defaultProps} />);
 
@@ -454,6 +482,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [mockMessage],
       unreadCount: 1,
+      total: 1,
     });
     mockMarkMessageRead.mockResolvedValue({ ...mockMessage, read: true });
     mockFetchConversation.mockResolvedValue([mockMessage]);
@@ -478,6 +507,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [mockMessage],
       unreadCount: 1,
+      total: 1,
     });
     mockMarkAllMessagesRead.mockResolvedValue({ markedAsRead: 1 });
 
@@ -505,6 +535,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [mockMessage],
       unreadCount: 1,
+      total: 1,
     });
     mockDeleteMessage.mockResolvedValue(undefined);
     mockFetchConversation.mockResolvedValue([mockMessage]);
@@ -540,9 +571,10 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [mockMessage],
       unreadCount: 1,
+      total: 1,
     });
     mockFetchConversation.mockResolvedValue([mockMessage]);
-    mockMarkMessageRead.mockResolvedValue(undefined);
+    mockMarkMessageRead.mockResolvedValue({ ...mockMessage, read: true });
 
     render(<MailboxView {...defaultProps} />);
 
@@ -613,9 +645,10 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [agentMessage],
       unreadCount: 1,
+      total: 1,
     });
     mockFetchConversation.mockResolvedValue([agentMessage, userReply]);
-    mockMarkMessageRead.mockResolvedValue(undefined);
+    mockMarkMessageRead.mockResolvedValue({ ...mockMessage, read: true });
 
     render(<MailboxView {...defaultProps} />);
 
@@ -648,6 +681,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [replyMessage],
       unreadCount: 0,
+      total: 0,
     });
     mockFetchConversation.mockResolvedValue([replyMessage]);
 
@@ -673,6 +707,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [],
       unreadCount: 0,
+      total: 0,
     });
 
     render(<MailboxView {...defaultProps} />);
@@ -689,6 +724,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [],
       unreadCount: 0,
+      total: 0,
     });
 
     render(<MailboxView {...defaultProps} />);
@@ -707,6 +743,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [],
       unreadCount: 0,
+      total: 0,
     });
     mockFetchAgentMailbox.mockResolvedValue({
       ownerId: "agent-001",
@@ -751,6 +788,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [],
       unreadCount: 0,
+      total: 0,
     });
 
     render(<MailboxView {...defaultProps} />);
@@ -764,6 +802,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [],
       unreadCount: 0,
+      total: 0,
     });
 
     render(<MailboxView {...defaultProps} projectId="test-project" />);
@@ -781,6 +820,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [],
       unreadCount: 0,
+      total: 0,
     });
 
     render(<MailboxView {...defaultProps} projectId="test-project" />);
@@ -800,6 +840,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [],
       unreadCount: 5,
+      total: 5,
     });
 
     const onUnreadCountChange = vi.fn();
@@ -814,6 +855,7 @@ describe("MailboxView", () => {
     mockFetchInbox.mockResolvedValue({
       messages: [],
       unreadCount: 0,
+      total: 0,
     });
 
     render(<MailboxView {...defaultProps} />);
@@ -849,6 +891,7 @@ describe("MailboxView", () => {
       mockFetchInbox.mockResolvedValue({
         messages: [],
         unreadCount: 0,
+      total: 0,
       });
       mockFetchAgentMailbox.mockResolvedValue({
         ownerId: "agent-001",
@@ -906,6 +949,7 @@ describe("MailboxView", () => {
       mockFetchInbox.mockResolvedValue({
         messages: [],
         unreadCount: 0,
+      total: 0,
       });
       mockFetchAgentMailbox.mockResolvedValue({
         ownerId: "agent-001",
@@ -934,6 +978,7 @@ describe("MailboxView", () => {
       mockFetchInbox.mockResolvedValue({
         messages: [],
         unreadCount: 0,
+      total: 0,
       });
       mockFetchAgentMailbox.mockResolvedValue({
         ownerId: "agent-001",
@@ -974,6 +1019,7 @@ describe("MailboxView", () => {
       mockFetchInbox.mockResolvedValue({
         messages: [],
         unreadCount: 0,
+      total: 0,
       });
       mockFetchAgentMailbox.mockResolvedValue({
         ownerId: "agent-001",
@@ -1024,6 +1070,7 @@ describe("MailboxView", () => {
       mockFetchInbox.mockResolvedValue({
         messages: [],
         unreadCount: 0,
+      total: 0,
       });
       mockFetchAgentMailbox.mockResolvedValue({
         ownerId: "agent-001",
@@ -1081,6 +1128,7 @@ describe("MailboxView", () => {
       mockFetchInbox.mockResolvedValue({
         messages: [],
         unreadCount: 0,
+      total: 0,
       });
       mockFetchAgentMailbox.mockResolvedValue({
         ownerId: "agent-001",
@@ -1225,6 +1273,7 @@ describe("MailboxView", () => {
       mockFetchInbox.mockResolvedValue({
         messages: [mockMessage],
         unreadCount: 1,
+      total: 1,
       });
 
       const { container } = render(<MailboxView {...defaultProps} />);

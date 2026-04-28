@@ -40,8 +40,8 @@ vi.mock("../../api", () => ({
   moveFile: (...args: any[]) => mockMoveFile(...args),
   deleteFile: (...args: any[]) => mockDeleteFile(...args),
   renameFile: (...args: any[]) => mockRenameFile(...args),
-  downloadFileUrl: (...args: any[]) => mockDownloadFileUrl(...args),
-  downloadZipUrl: (...args: any[]) => mockDownloadZipUrl(...args),
+  downloadFileUrl: (workspace: string, filePath: string) => mockDownloadFileUrl(workspace, filePath),
+  downloadZipUrl: (workspace: string, filePath: string) => mockDownloadZipUrl(workspace, filePath),
 }));
 
 // ── Test Data ───────────────────────────────────────────────────────────
@@ -73,7 +73,14 @@ const defaultProps = {
   projectId: "project-1",
 };
 
-function renderFileBrowser(overrides: Partial<typeof defaultProps> = {}) {
+/** Props accepted by renderFileBrowser — superset of defaultProps with FileBrowser optional fields. */
+type FileBrowserTestOverrides = Partial<typeof defaultProps> & {
+  loading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
+};
+
+function renderFileBrowser(overrides: FileBrowserTestOverrides = {}) {
   const props = { ...defaultProps, ...overrides };
   return render(<FileBrowser {...props} />);
 }
@@ -356,7 +363,7 @@ describe("FileBrowser", () => {
     });
 
     const nativeGetRect = HTMLElement.prototype.getBoundingClientRect;
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       if (this.classList?.contains("file-browser-context-menu")) {
         return {
           x: 0,

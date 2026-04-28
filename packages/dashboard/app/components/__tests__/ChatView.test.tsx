@@ -13,6 +13,7 @@ import { loadAllAppCss } from "../../test/cssFixture";
 // Mock scrollIntoView for JSDOM
 Element.prototype.scrollIntoView = vi.fn();
 import * as useChatModule from "../../hooks/useChat";
+import type { UseChatReturn, ChatSessionInfo, ChatMessageInfo, ToolCallInfo } from "../../hooks/useChat";
 import * as apiModule from "../../api";
 
 // Mock the hooks
@@ -84,7 +85,7 @@ vi.mock("../../api", () => ({
   searchFiles: vi.fn().mockResolvedValue({ files: [] }),
 }));
 
-const defaultChatState = {
+const defaultChatState: UseChatReturn = {
   sessions: [],
   activeSession: null,
   sessionsLoading: false,
@@ -95,7 +96,7 @@ const defaultChatState = {
   streamingThinking: "",
   streamingToolCalls: [],
   selectSession: vi.fn(),
-  createSession: vi.fn().mockResolvedValue({ id: "session-new", agentId: "__fn_agent__" }),
+  createSession: vi.fn().mockResolvedValue({ id: "session-new", agentId: "__fn_agent__", status: "active", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" } satisfies ChatSessionInfo),
   archiveSession: vi.fn(),
   deleteSession: vi.fn(),
   sendMessage: vi.fn(),
@@ -111,11 +112,12 @@ const defaultChatState = {
   agentsMap: new Map(),
 };
 
-const activeSessionFixture = {
+const activeSessionFixture: ChatSessionInfo = {
   id: "session-001",
   agentId: "agent-001",
   status: "active",
   title: "Test Chat",
+  createdAt: "2026-04-08T00:00:00.000Z",
   updatedAt: "2026-04-08T00:00:00.000Z",
 };
 
@@ -135,9 +137,9 @@ function createMockSkill(overrides: Partial<DiscoveredSkill>): DiscoveredSkill {
   };
 }
 
-function setupMockChat(overrides: Partial<typeof defaultChatState> = {}) {
-  const state = { ...defaultChatState, ...overrides };
-  mockUseChat.mockReturnValue(state as any);
+function setupMockChat(overrides: Partial<UseChatReturn> = {}) {
+  const state: UseChatReturn = { ...defaultChatState, ...overrides };
+  mockUseChat.mockReturnValue(state);
 }
 
 function ensureMatchMedia() {
@@ -188,12 +190,12 @@ describe("ChatView", () => {
   it("renders session list in sidebar", () => {
     setupMockChat({
       sessions: [
-        { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
-        { id: "session-002", agentId: "agent-002", status: "active", title: "Another Chat", updatedAt: "2026-04-07T00:00:00.000Z" },
+        { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+        { id: "session-002", agentId: "agent-002", status: "active", title: "Another Chat", createdAt: "2026-04-07T00:00:00.000Z", updatedAt: "2026-04-07T00:00:00.000Z" },
       ],
       filteredSessions: [
-        { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
-        { id: "session-002", agentId: "agent-002", status: "active", title: "Another Chat", updatedAt: "2026-04-07T00:00:00.000Z" },
+        { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+        { id: "session-002", agentId: "agent-002", status: "active", title: "Another Chat", createdAt: "2026-04-07T00:00:00.000Z", updatedAt: "2026-04-07T00:00:00.000Z" },
       ],
     });
 
@@ -206,8 +208,8 @@ describe("ChatView", () => {
   it("calls selectSession when clicking a session", async () => {
     const selectSession = vi.fn();
     setupMockChat({
-      sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
-      filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
       selectSession,
     });
 
@@ -220,9 +222,9 @@ describe("ChatView", () => {
 
   it("highlights active session", () => {
     setupMockChat({
-      sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
-      filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
     });
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
@@ -240,7 +242,7 @@ describe("ChatView", () => {
     await userEvent.click(screen.getByTestId("chat-new-btn"));
 
     // Dialog should be open - check for dialog content
-    const dialog = document.querySelector(".chat-new-dialog");
+    const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
     expect(dialog).toBeInTheDocument();
     // Should show mode toggle with Agent and Model buttons
     expect(within(dialog!).getByTestId("chat-new-dialog-mode-toggle")).toBeInTheDocument();
@@ -256,7 +258,7 @@ describe("ChatView", () => {
 
     await userEvent.click(screen.getByTestId("chat-new-btn"));
 
-    const dialog = document.querySelector(".chat-new-dialog");
+    const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
 
     // Create button should be disabled initially (no agent selected)
     const createBtn = within(dialog!).getByText("Create") as HTMLButtonElement;
@@ -285,7 +287,7 @@ describe("ChatView", () => {
 
     await userEvent.click(screen.getByTestId("chat-new-btn"));
 
-    const dialog = document.querySelector(".chat-new-dialog");
+    const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
 
     // Click on a different agent
     await userEvent.click(within(dialog!).getByTestId("agent-option-agent-002"));
@@ -307,7 +309,7 @@ describe("ChatView", () => {
 
     await userEvent.click(screen.getByTestId("chat-new-btn"));
 
-    const dialog = document.querySelector(".chat-new-dialog");
+    const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
 
     // Switch to model mode
     await userEvent.click(within(dialog!).getByTestId("chat-new-dialog-mode-model"));
@@ -335,7 +337,7 @@ describe("ChatView", () => {
 
     await userEvent.click(screen.getByTestId("chat-new-btn"));
 
-    const dialog = document.querySelector(".chat-new-dialog");
+    const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
 
     // Agent mode is default — just select an agent and create
     await userEvent.click(within(dialog!).getByTestId("agent-option-agent-001"));
@@ -356,7 +358,7 @@ describe("ChatView", () => {
 
     await userEvent.click(screen.getByTestId("chat-new-btn"));
 
-    const dialog = document.querySelector(".chat-new-dialog");
+    const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
 
     // Agent mode is active by default — agent list visible, model section hidden
     await waitFor(() => {
@@ -372,7 +374,7 @@ describe("ChatView", () => {
 
     await userEvent.click(screen.getByTestId("chat-new-btn"));
 
-    const dialog = document.querySelector(".chat-new-dialog");
+    const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
 
     // Switch to model mode
     await userEvent.click(within(dialog!).getByTestId("chat-new-dialog-mode-model"));
@@ -391,7 +393,7 @@ describe("ChatView", () => {
 
     await userEvent.click(screen.getByTestId("chat-new-btn"));
 
-    const dialog = document.querySelector(".chat-new-dialog");
+    const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
 
     // Select an agent in agent mode
     await userEvent.click(within(dialog!).getByTestId("agent-option-agent-001"));
@@ -410,7 +412,7 @@ describe("ChatView", () => {
 
   it("renders messages for active session", () => {
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "user", content: "Hello", createdAt: "2026-04-08T00:00:00.000Z" },
         { id: "msg-002", sessionId: "session-001", role: "assistant", content: "Hi there!", createdAt: "2026-04-08T00:01:00.000Z" },
@@ -425,7 +427,7 @@ describe("ChatView", () => {
 
   it("does not render markdown/plain toggle controls in the thread header", () => {
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "Hello", createdAt: "2026-04-08T00:00:00.000Z" }],
     });
 
@@ -437,7 +439,7 @@ describe("ChatView", () => {
 
   it("renders per-message eye toggles for assistant bubbles on desktop and isolates toggles by message", async () => {
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "assistant", content: "**First** item", createdAt: "2026-04-08T00:00:00.000Z" },
         { id: "msg-002", sessionId: "session-001", role: "assistant", content: "**Second** item", createdAt: "2026-04-08T00:01:00.000Z" },
@@ -467,7 +469,7 @@ describe("ChatView", () => {
 
   it("uses a dedicated streaming toggle sentinel without affecting persisted assistant messages", async () => {
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "**Persisted**", createdAt: "2026-04-08T00:00:00.000Z" }],
       isStreaming: true,
       streamingText: "**Live** stream",
@@ -494,7 +496,7 @@ describe("ChatView", () => {
 
   it("renders tool calls from persisted messages", () => {
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Tool Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Tool Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [
         {
           id: "msg-002",
@@ -518,13 +520,13 @@ describe("ChatView", () => {
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
     expect(screen.getByText("read")).toBeInTheDocument();
-    const preview = document.querySelector(".chat-tool-call-preview");
+    const preview = document.querySelector(".chat-tool-call-preview") as HTMLElement | null;
     expect(preview).toHaveTextContent("result: contents");
   });
 
   it("renders streaming tool calls", () => {
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Tool Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Tool Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [{ id: "msg-001", sessionId: "session-001", role: "user", content: "Use tools", createdAt: "2026-04-08T00:00:00.000Z" }],
       isStreaming: true,
       streamingText: "Working...",
@@ -540,7 +542,7 @@ describe("ChatView", () => {
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const streamingBubble = document.querySelector(".chat-message--streaming");
+    const streamingBubble = document.querySelector(".chat-message--streaming") as HTMLElement | null;
     expect(streamingBubble).toBeInTheDocument();
     expect(within(streamingBubble as HTMLElement).getByText("read")).toBeInTheDocument();
     const preview = (streamingBubble as HTMLElement).querySelector(".chat-tool-call-preview");
@@ -549,7 +551,7 @@ describe("ChatView", () => {
 
   it("completed tool calls are collapsed by default", () => {
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Tool Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Tool Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [
         {
           id: "msg-002",
@@ -578,7 +580,7 @@ describe("ChatView", () => {
 
   it("running tool calls show running indicator", () => {
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Tool Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Tool Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [
         {
           id: "msg-002",
@@ -604,7 +606,7 @@ describe("ChatView", () => {
 
   it("error tool calls show error styling", () => {
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Tool Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Tool Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [
         {
           id: "msg-002",
@@ -631,7 +633,7 @@ describe("ChatView", () => {
 
   it("shows resolved agent name in assistant message avatar", async () => {
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Agent Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Agent Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "assistant", content: "Hello from Alpha", createdAt: "2026-04-08T00:00:00.000Z" },
       ],
@@ -639,7 +641,7 @@ describe("ChatView", () => {
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const avatar = document.querySelector(".chat-message-avatar");
+    const avatar = document.querySelector(".chat-message-avatar") as HTMLElement | null;
     expect(avatar).toBeInTheDocument();
 
     await waitFor(() => {
@@ -650,7 +652,7 @@ describe("ChatView", () => {
 
   it("shows Fusion in assistant message avatar for fn agent sessions", () => {
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "__fn_agent__", status: "active", title: "Fusion Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "__fn_agent__", status: "active", title: "Fusion Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "assistant", content: "Built-in assistant response", createdAt: "2026-04-08T00:00:00.000Z" },
       ],
@@ -658,7 +660,7 @@ describe("ChatView", () => {
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const avatar = document.querySelector(".chat-message-avatar");
+    const avatar = document.querySelector(".chat-message-avatar") as HTMLElement | null;
     expect(avatar).toBeInTheDocument();
     expect(within(avatar!).getByText("Fusion")).toBeInTheDocument();
   });
@@ -672,7 +674,7 @@ describe("ChatView", () => {
         title: "Fusion Chat",
         modelProvider: "anthropic",
         modelId: "claude-sonnet-4-5",
-        updatedAt: "2026-04-08T00:00:00.000Z",
+        createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z",
       },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "assistant", content: "Built-in assistant response", createdAt: "2026-04-08T00:00:00.000Z" },
@@ -681,7 +683,7 @@ describe("ChatView", () => {
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const avatar = document.querySelector(".chat-message-avatar");
+    const avatar = document.querySelector(".chat-message-avatar") as HTMLElement | null;
     expect(avatar).toBeInTheDocument();
 
     await waitFor(() => {
@@ -693,7 +695,7 @@ describe("ChatView", () => {
 
   it("shows resolved agent name in streaming assistant avatar", async () => {
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Agent Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Agent Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "user", content: "Think", createdAt: "2026-04-08T00:00:00.000Z" },
       ],
@@ -703,7 +705,7 @@ describe("ChatView", () => {
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const avatar = document.querySelector(".chat-message--streaming .chat-message-avatar");
+    const avatar = document.querySelector(".chat-message--streaming .chat-message-avatar") as HTMLElement | null;
     expect(avatar).toBeInTheDocument();
 
     await waitFor(() => {
@@ -714,7 +716,7 @@ describe("ChatView", () => {
   it("sends message on Enter key", async () => {
     const sendMessage = vi.fn();
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [],
       sendMessage,
     });
@@ -730,7 +732,7 @@ describe("ChatView", () => {
   it("does not send on Shift+Enter", async () => {
     const sendMessage = vi.fn();
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [],
       sendMessage,
     });
@@ -984,7 +986,7 @@ describe("ChatView", () => {
 
   it("disables send button when input is empty", () => {
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [],
     });
 
@@ -996,7 +998,7 @@ describe("ChatView", () => {
 
   it("renders stop button when streaming", () => {
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [],
       isStreaming: true,
     });
@@ -1010,7 +1012,7 @@ describe("ChatView", () => {
   it("clicking stop button calls stopStreaming", async () => {
     const stopStreaming = vi.fn();
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [],
       isStreaming: true,
       stopStreaming,
@@ -1024,7 +1026,7 @@ describe("ChatView", () => {
 
   it("renders send button when not streaming", () => {
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [],
       isStreaming: false,
     });
@@ -1037,7 +1039,7 @@ describe("ChatView", () => {
   it("renders pending message indicator and dismisses it", async () => {
     const clearPendingMessage = vi.fn();
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [],
       pendingMessage: "Queued while streaming",
       clearPendingMessage,
@@ -1053,7 +1055,7 @@ describe("ChatView", () => {
 
   it("textarea is enabled during streaming", () => {
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "user", content: "Hello", createdAt: "2026-04-08T00:00:00.000Z" },
       ],
@@ -1069,7 +1071,7 @@ describe("ChatView", () => {
 
   it("user can type while streaming", async () => {
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "user", content: "Hello", createdAt: "2026-04-08T00:00:00.000Z" },
       ],
@@ -1088,7 +1090,7 @@ describe("ChatView", () => {
 
   it("shows streaming indicator when isStreaming is true", () => {
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "user", content: "Hello", createdAt: "2026-04-08T00:00:00.000Z" },
       ],
@@ -1099,14 +1101,14 @@ describe("ChatView", () => {
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
     // Streaming message should show
-    const streamingMessage = document.querySelector(".chat-message--streaming");
+    const streamingMessage = document.querySelector(".chat-message--streaming") as HTMLElement | null;
     expect(streamingMessage).toBeInTheDocument();
     expect(streamingMessage?.textContent).toContain("Typing");
   });
 
   it("shows thinking blocks collapsed by default", () => {
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "assistant", content: "Here's my response", thinkingOutput: "I need to think about this...", createdAt: "2026-04-08T00:00:00.000Z" },
       ],
@@ -1123,7 +1125,7 @@ describe("ChatView", () => {
   describe("streaming states", () => {
     it("shows waiting indicator when streaming starts before text arrives", () => {
       setupMockChat({
-        activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+        activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
         messages: [
           { id: "msg-001", sessionId: "session-001", role: "user", content: "Hello", createdAt: "2026-04-08T00:00:00.000Z" },
         ],
@@ -1135,7 +1137,7 @@ describe("ChatView", () => {
       render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
       // Streaming message should show with "Connecting..." text
-      const streamingMessage = document.querySelector(".chat-message--streaming");
+      const streamingMessage = document.querySelector(".chat-message--streaming") as HTMLElement | null;
       expect(streamingMessage).toBeInTheDocument();
       expect(streamingMessage?.textContent).toContain("Connecting");
 
@@ -1151,7 +1153,7 @@ describe("ChatView", () => {
 
     it("shows thinking indicator when streaming thinking arrives before text", () => {
       setupMockChat({
-        activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+        activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
         messages: [
           { id: "msg-001", sessionId: "session-001", role: "user", content: "Hello", createdAt: "2026-04-08T00:00:00.000Z" },
         ],
@@ -1163,7 +1165,7 @@ describe("ChatView", () => {
       render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
       // Streaming message should show with "Thinking..." text
-      const streamingMessage = document.querySelector(".chat-message--streaming");
+      const streamingMessage = document.querySelector(".chat-message--streaming") as HTMLElement | null;
       expect(streamingMessage).toBeInTheDocument();
       expect(streamingMessage?.textContent).toContain("Thinking");
 
@@ -1181,11 +1183,11 @@ describe("ChatView", () => {
   it("filters sessions by search query", async () => {
     setupMockChat({
       sessions: [
-        { id: "session-001", agentId: "agent-001", status: "active", title: "Frontend work", updatedAt: "2026-04-08T00:00:00.000Z" },
-        { id: "session-002", agentId: "agent-002", status: "active", title: "Backend API", updatedAt: "2026-04-07T00:00:00.000Z" },
+        { id: "session-001", agentId: "agent-001", status: "active", title: "Frontend work", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+        { id: "session-002", agentId: "agent-002", status: "active", title: "Backend API", createdAt: "2026-04-07T00:00:00.000Z", updatedAt: "2026-04-07T00:00:00.000Z" },
       ],
       filteredSessions: [
-        { id: "session-001", agentId: "agent-001", status: "active", title: "Frontend work", updatedAt: "2026-04-08T00:00:00.000Z" },
+        { id: "session-001", agentId: "agent-001", status: "active", title: "Frontend work", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       ],
       searchQuery: "frontend",
       setSearchQuery: vi.fn(),
@@ -1204,7 +1206,7 @@ describe("ChatView", () => {
 
     expect(screen.getByText("Start a new conversation")).toBeInTheDocument();
     // Find the New Chat button in the empty state section
-    const emptyState = document.querySelector(".chat-empty-state");
+    const emptyState = document.querySelector(".chat-empty-state") as HTMLElement | null;
     expect(within(emptyState!).getByRole("button", { name: /new chat/i })).toBeInTheDocument();
     // Should NOT have an agent selector in empty state
     expect(emptyState?.querySelector("select")).toBeNull();
@@ -1212,8 +1214,8 @@ describe("ChatView", () => {
 
   it("shows context menu on right-click", async () => {
     setupMockChat({
-      sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
-      filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
     });
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
@@ -1229,8 +1231,8 @@ describe("ChatView", () => {
   it("calls archiveSession when clicking Archive in context menu", async () => {
     const archiveSession = vi.fn();
     setupMockChat({
-      sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
-      filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
       archiveSession,
     });
 
@@ -1246,8 +1248,8 @@ describe("ChatView", () => {
 
   it("shows delete confirmation dialog", async () => {
     setupMockChat({
-      sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
-      filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
     });
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
@@ -1258,7 +1260,7 @@ describe("ChatView", () => {
     await userEvent.click(screen.getByTestId("chat-context-delete"));
 
     // Dialog should be open
-    const dialog = document.querySelector(".chat-new-dialog");
+    const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
     expect(dialog).toBeInTheDocument();
     expect(within(dialog!).getByText("Delete Conversation?")).toBeInTheDocument();
   });
@@ -1273,6 +1275,7 @@ describe("ChatView", () => {
         modelProvider: "anthropic",
         modelId: "claude-sonnet-4-5",
         updatedAt: "2026-04-08T00:00:00.000Z",
+        createdAt: "2026-04-08T00:00:00.000Z",
       }],
       filteredSessions: [{
         id: "session-001",
@@ -1282,6 +1285,7 @@ describe("ChatView", () => {
         modelProvider: "anthropic",
         modelId: "claude-sonnet-4-5",
         updatedAt: "2026-04-08T00:00:00.000Z",
+        createdAt: "2026-04-08T00:00:00.000Z",
       }],
     });
 
@@ -1294,8 +1298,8 @@ describe("ChatView", () => {
 
   it("shows Fusion fallback for fn agent sessions in sidebar without model info", () => {
     setupMockChat({
-      sessions: [{ id: "session-001", agentId: "__fn_agent__", status: "active", title: "My Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
-      filteredSessions: [{ id: "session-001", agentId: "__fn_agent__", status: "active", title: "My Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      sessions: [{ id: "session-001", agentId: "__fn_agent__", status: "active", title: "My Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      filteredSessions: [{ id: "session-001", agentId: "__fn_agent__", status: "active", title: "My Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
     });
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
@@ -1306,8 +1310,8 @@ describe("ChatView", () => {
 
   it("shows agent ID for non-fn agent sessions in sidebar", () => {
     setupMockChat({
-      sessions: [{ id: "session-001", agentId: "my-custom-agent", status: "active", title: "Custom Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
-      filteredSessions: [{ id: "session-001", agentId: "my-custom-agent", status: "active", title: "Custom Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      sessions: [{ id: "session-001", agentId: "my-custom-agent", status: "active", title: "Custom Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      filteredSessions: [{ id: "session-001", agentId: "my-custom-agent", status: "active", title: "Custom Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
     });
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
@@ -1326,7 +1330,7 @@ describe("ChatView", () => {
         title: "Test Chat",
         modelProvider: "anthropic",
         modelId: "claude-sonnet-4-5",
-        updatedAt: "2026-04-08T00:00:00.000Z",
+        createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z",
       },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "assistant", content: "Hi!", createdAt: "2026-04-08T00:00:00.000Z" },
@@ -1335,7 +1339,7 @@ describe("ChatView", () => {
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const title = document.querySelector(".chat-thread-header-title");
+    const title = document.querySelector(".chat-thread-header-title") as HTMLElement | null;
     expect(title).toBeInTheDocument();
     expect(title).toHaveTextContent("Claude Sonnet 4.5");
     expect(title).not.toHaveTextContent("Fusion");
@@ -1350,7 +1354,7 @@ describe("ChatView", () => {
         title: "Agent Chat",
         modelProvider: "anthropic",
         modelId: "claude-sonnet-4-5",
-        updatedAt: "2026-04-08T00:00:00.000Z",
+        createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z",
       },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "user", content: "Hello", createdAt: "2026-04-08T00:00:00.000Z" },
@@ -1360,7 +1364,7 @@ describe("ChatView", () => {
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const headerModelTag = document.querySelector(".chat-thread-header .chat-model-tag");
+    const headerModelTag = document.querySelector(".chat-thread-header .chat-model-tag") as HTMLElement | null;
     expect(headerModelTag).toBeInTheDocument();
     expect(headerModelTag?.textContent).toContain("Claude");
   });
@@ -1374,7 +1378,7 @@ describe("ChatView", () => {
         title: "Test Chat",
         modelProvider: "anthropic",
         modelId: "claude-sonnet-4-5",
-        updatedAt: "2026-04-08T00:00:00.000Z",
+        createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z",
       },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "assistant", content: "Hi!", createdAt: "2026-04-08T00:00:00.000Z" },
@@ -1383,10 +1387,10 @@ describe("ChatView", () => {
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const title = document.querySelector(".chat-thread-header-title");
+    const title = document.querySelector(".chat-thread-header-title") as HTMLElement | null;
     expect(title).toHaveTextContent("Claude Sonnet 4.5");
 
-    const headerModelTag = document.querySelector(".chat-thread-header .chat-model-tag");
+    const headerModelTag = document.querySelector(".chat-thread-header .chat-model-tag") as HTMLElement | null;
     expect(headerModelTag).toBeNull();
   });
 
@@ -1397,7 +1401,7 @@ describe("ChatView", () => {
         agentId: "__fn_agent__",
         status: "active",
         title: "Test Chat",
-        updatedAt: "2026-04-08T00:00:00.000Z",
+        createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z",
       },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "user", content: "Hello", createdAt: "2026-04-08T00:00:00.000Z" },
@@ -1407,7 +1411,7 @@ describe("ChatView", () => {
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const modelTag = document.querySelector(".chat-model-tag");
+    const modelTag = document.querySelector(".chat-model-tag") as HTMLElement | null;
     expect(modelTag).not.toBeInTheDocument();
   });
 
@@ -1420,7 +1424,7 @@ describe("ChatView", () => {
         title: "Agent Chat",
         modelProvider: "openai",
         modelId: "gpt-4o",
-        updatedAt: "2026-04-08T00:00:00.000Z",
+        createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z",
       },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "assistant", content: "Hi!", createdAt: "2026-04-08T00:01:00.000Z" },
@@ -1429,7 +1433,7 @@ describe("ChatView", () => {
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const avatar = document.querySelector(".chat-message-avatar");
+    const avatar = document.querySelector(".chat-message-avatar") as HTMLElement | null;
     expect(avatar).toBeInTheDocument();
     expect(avatar?.querySelector(".chat-model-tag")?.textContent).toContain("GPT");
   });
@@ -1443,7 +1447,7 @@ describe("ChatView", () => {
         title: "Test Chat",
         modelProvider: "openai",
         modelId: "gpt-4o",
-        updatedAt: "2026-04-08T00:00:00.000Z",
+        createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z",
       },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "assistant", content: "Hi!", createdAt: "2026-04-08T00:01:00.000Z" },
@@ -1452,7 +1456,7 @@ describe("ChatView", () => {
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const avatar = document.querySelector(".chat-message-avatar");
+    const avatar = document.querySelector(".chat-message-avatar") as HTMLElement | null;
     expect(avatar).toBeInTheDocument();
     expect(within(avatar!).getByText("GPT-4o")).toBeInTheDocument();
     expect(avatar?.querySelector(".chat-model-tag")).toBeNull();
@@ -1472,7 +1476,7 @@ describe("formatModelTag helper function", () => {
         title: "Test",
         modelProvider: "anthropic",
         modelId: "claude-sonnet-4-5",
-        updatedAt: "2026-04-08T00:00:00.000Z",
+        createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z",
       },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "assistant", content: "Hi!", createdAt: "2026-04-08T00:00:00.000Z" },
@@ -1481,7 +1485,7 @@ describe("formatModelTag helper function", () => {
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const modelTag = document.querySelector(".chat-model-tag");
+    const modelTag = document.querySelector(".chat-model-tag") as HTMLElement | null;
     expect(modelTag?.textContent).toContain("Claude Sonnet");
   });
 
@@ -1494,7 +1498,7 @@ describe("formatModelTag helper function", () => {
         title: "Test",
         modelProvider: "openai",
         modelId: "gpt-4o",
-        updatedAt: "2026-04-08T00:00:00.000Z",
+        createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z",
       },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "assistant", content: "Hi!", createdAt: "2026-04-08T00:00:00.000Z" },
@@ -1503,7 +1507,7 @@ describe("formatModelTag helper function", () => {
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const modelTag = document.querySelector(".chat-model-tag");
+    const modelTag = document.querySelector(".chat-model-tag") as HTMLElement | null;
     expect(modelTag?.textContent).toContain("GPT-4o");
   });
 
@@ -1516,7 +1520,7 @@ describe("formatModelTag helper function", () => {
         title: "Test",
         modelProvider: "google",
         modelId: "gemini-2.5-pro",
-        updatedAt: "2026-04-08T00:00:00.000Z",
+        createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z",
       },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "assistant", content: "Hi!", createdAt: "2026-04-08T00:00:00.000Z" },
@@ -1525,7 +1529,7 @@ describe("formatModelTag helper function", () => {
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const modelTag = document.querySelector(".chat-model-tag");
+    const modelTag = document.querySelector(".chat-model-tag") as HTMLElement | null;
     expect(modelTag?.textContent).toContain("Gemini");
   });
 
@@ -1537,7 +1541,7 @@ describe("formatModelTag helper function", () => {
         status: "active",
         title: "Test",
         modelProvider: "anthropic",
-        updatedAt: "2026-04-08T00:00:00.000Z",
+        createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z",
       },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "assistant", content: "Hi!", createdAt: "2026-04-08T00:00:00.000Z" },
@@ -1546,7 +1550,7 @@ describe("formatModelTag helper function", () => {
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const modelTag = document.querySelector(".chat-model-tag");
+    const modelTag = document.querySelector(".chat-model-tag") as HTMLElement | null;
     expect(modelTag).not.toBeInTheDocument();
   });
 
@@ -1558,7 +1562,7 @@ describe("formatModelTag helper function", () => {
         status: "active",
         title: "Test",
         modelId: "claude-sonnet-4-5",
-        updatedAt: "2026-04-08T00:00:00.000Z",
+        createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z",
       },
       messages: [
         { id: "msg-001", sessionId: "session-001", role: "assistant", content: "Hi!", createdAt: "2026-04-08T00:00:00.000Z" },
@@ -1567,7 +1571,7 @@ describe("formatModelTag helper function", () => {
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const modelTag = document.querySelector(".chat-model-tag");
+    const modelTag = document.querySelector(".chat-model-tag") as HTMLElement | null;
     expect(modelTag).not.toBeInTheDocument();
   });
 });
@@ -1576,12 +1580,12 @@ describe("Chat Session Delete Button", () => {
   it("renders delete button on each session item", () => {
     setupMockChat({
       sessions: [
-        { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat 1", updatedAt: "2026-04-08T00:00:00.000Z" },
-        { id: "session-002", agentId: "agent-002", status: "active", title: "Test Chat 2", updatedAt: "2026-04-08T00:00:00.000Z" },
+        { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat 1", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+        { id: "session-002", agentId: "agent-002", status: "active", title: "Test Chat 2", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       ],
       filteredSessions: [
-        { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat 1", updatedAt: "2026-04-08T00:00:00.000Z" },
-        { id: "session-002", agentId: "agent-002", status: "active", title: "Test Chat 2", updatedAt: "2026-04-08T00:00:00.000Z" },
+        { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat 1", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+        { id: "session-002", agentId: "agent-002", status: "active", title: "Test Chat 2", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       ],
     });
 
@@ -1593,8 +1597,8 @@ describe("Chat Session Delete Button", () => {
 
   it("clicking delete button shows confirmation dialog", async () => {
     setupMockChat({
-      sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
-      filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
     });
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
@@ -1603,7 +1607,7 @@ describe("Chat Session Delete Button", () => {
     await userEvent.click(deleteButton);
 
     // Dialog should be open
-    const dialog = document.querySelector(".chat-new-dialog");
+    const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
     expect(dialog).toBeInTheDocument();
     expect(within(dialog!).getByText("Delete Conversation?")).toBeInTheDocument();
   });
@@ -1611,8 +1615,8 @@ describe("Chat Session Delete Button", () => {
   it("clicking delete button does not select the session", async () => {
     const selectSession = vi.fn();
     setupMockChat({
-      sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
-      filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
       selectSession,
     });
 
@@ -1627,8 +1631,8 @@ describe("Chat Session Delete Button", () => {
   it("confirming delete calls deleteSession", async () => {
     const deleteSession = vi.fn();
     setupMockChat({
-      sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
-      filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
       deleteSession,
     });
 
@@ -1638,7 +1642,7 @@ describe("Chat Session Delete Button", () => {
     await userEvent.click(deleteButton);
 
     // Click confirm in dialog
-    const dialog = document.querySelector(".chat-new-dialog");
+    const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
     await userEvent.click(within(dialog!).getByText("Delete"));
 
     expect(deleteSession).toHaveBeenCalledWith("session-001");
@@ -1742,7 +1746,7 @@ describe("ChatView project-scoped agent fetching", () => {
       expect(apiModule.fetchAgents).toHaveBeenCalledWith(undefined, "proj-001");
     });
 
-    const callsBeforeRerender = apiModule.fetchAgents.mock.calls.length;
+    const callsBeforeRerender = vi.mocked(apiModule.fetchAgents).mock.calls.length;
 
     // Rerender with proj-002
     rerender(<ChatView projectId="proj-002" addToast={vi.fn()} />);
@@ -1752,7 +1756,7 @@ describe("ChatView project-scoped agent fetching", () => {
     });
 
     // Should have made an additional fetch call
-    expect(apiModule.fetchAgents.mock.calls.length).toBeGreaterThan(callsBeforeRerender);
+    expect(vi.mocked(apiModule.fetchAgents).mock.calls.length).toBeGreaterThan(callsBeforeRerender);
   });
 
   it("refetches agents when projectId changes in NewChatDialog", async () => {
@@ -1771,7 +1775,7 @@ describe("ChatView project-scoped agent fetching", () => {
     rerender(<ChatView projectId="proj-002" addToast={vi.fn()} />);
 
     // Close and reopen dialog
-    const closeBtn = document.querySelector(".chat-new-dialog-backdrop");
+    const closeBtn = document.querySelector(".chat-new-dialog-backdrop") as HTMLElement | null;
     if (closeBtn) {
       await userEvent.click(closeBtn);
     }
@@ -1821,19 +1825,19 @@ describe("ChatView sidebar structure", () => {
 
     await userEvent.click(screen.getByTestId("chat-new-btn-mobile"));
 
-    const dialog = document.querySelector(".chat-new-dialog");
+    const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
     expect(dialog).toBeInTheDocument();
   });
 
   it("session list has both chat-session-list and chat-sidebar-list classes", () => {
     setupMockChat({
-      sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
-      filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
     });
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const sessionList = document.querySelector(".chat-session-list");
+    const sessionList = document.querySelector(".chat-session-list") as HTMLElement | null;
     expect(sessionList).toBeInTheDocument();
     expect(sessionList).toHaveClass("chat-sidebar-list");
   });
@@ -1949,8 +1953,8 @@ describe("ChatView mobile behavior", () => {
     const restoreMatchMedia = mockMobileViewport();
     try {
       setupMockChat({
-        sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
-        filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
+        sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
+        filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
         activeSession: null,
       });
 
@@ -1961,7 +1965,7 @@ describe("ChatView mobile behavior", () => {
       // Back button should not be visible
       expect(screen.queryByTestId("chat-back-btn")).not.toBeInTheDocument();
     } finally {
-      restoreMatchMedia();
+      restoreMatchMedia.mockRestore();
     }
   });
 
@@ -1969,7 +1973,7 @@ describe("ChatView mobile behavior", () => {
     const restoreMatchMedia = mockMobileViewport();
     try {
       setupMockChat({
-        activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+        activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
         messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "Hello", createdAt: "2026-04-08T00:00:00.000Z" }],
       });
 
@@ -1980,7 +1984,7 @@ describe("ChatView mobile behavior", () => {
       // Back button should be visible in mobile thread view
       expect(screen.getByTestId("chat-back-btn")).toBeInTheDocument();
     } finally {
-      restoreMatchMedia();
+      restoreMatchMedia.mockRestore();
     }
   });
 
@@ -1989,7 +1993,7 @@ describe("ChatView mobile behavior", () => {
     const selectSession = vi.fn();
     try {
       setupMockChat({
-        activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+        activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
         messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "Hello", createdAt: "2026-04-08T00:00:00.000Z" }],
         selectSession,
       });
@@ -2002,7 +2006,7 @@ describe("ChatView mobile behavior", () => {
       // Back button should trigger selectSession("") to return to list view
       expect(selectSession).toHaveBeenCalledWith("");
     } finally {
-      restoreMatchMedia();
+      restoreMatchMedia.mockRestore();
     }
   });
 
@@ -2060,7 +2064,7 @@ describe("ChatView mobile behavior", () => {
         expect(thread.style.getPropertyValue("--vv-height")).toBe("");
       });
     } finally {
-      restoreMatchMedia();
+      restoreMatchMedia.mockRestore();
     }
   });
 
@@ -2107,7 +2111,7 @@ describe("ChatView mobile behavior", () => {
         expect(messagesContainer.scrollTop).toBe(900);
       });
     } finally {
-      restoreMatchMedia();
+      restoreMatchMedia.mockRestore();
     }
   });
 
@@ -2121,8 +2125,8 @@ describe("ChatView mobile behavior", () => {
     try {
       setupMockChat({
         activeSession: null,
-        sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
-        filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
+        sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
+        filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
       });
 
       render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
@@ -2131,7 +2135,7 @@ describe("ChatView mobile behavior", () => {
         expect(mockVV.addEventListener).not.toHaveBeenCalled();
       });
     } finally {
-      restoreMatchMedia();
+      restoreMatchMedia.mockRestore();
     }
   });
 
@@ -2139,8 +2143,8 @@ describe("ChatView mobile behavior", () => {
     const restoreMatchMedia = mockDesktopViewport();
     try {
       setupMockChat({
-        sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
-        filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" }],
+        sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
+        filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
         activeSession: null,
       });
 
@@ -2153,7 +2157,7 @@ describe("ChatView mobile behavior", () => {
       // Should show empty state
       expect(screen.getByText("Start a new conversation")).toBeInTheDocument();
     } finally {
-      restoreMatchMedia();
+      restoreMatchMedia.mockRestore();
     }
   });
 
@@ -2161,7 +2165,7 @@ describe("ChatView mobile behavior", () => {
     const restoreMatchMedia = mockDesktopViewport();
     try {
       setupMockChat({
-        activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", updatedAt: "2026-04-08T00:00:00.000Z" },
+        activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
         messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "Hello", createdAt: "2026-04-08T00:00:00.000Z" }],
       });
 
@@ -2172,7 +2176,7 @@ describe("ChatView mobile behavior", () => {
       // Back button should not be visible in desktop mode
       expect(screen.queryByTestId("chat-back-btn")).not.toBeInTheDocument();
     } finally {
-      restoreMatchMedia();
+      restoreMatchMedia.mockRestore();
     }
   });
 });

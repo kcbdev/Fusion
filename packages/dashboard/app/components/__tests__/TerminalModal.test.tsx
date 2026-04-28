@@ -26,7 +26,7 @@ const mockFitAddonFit = vi.fn();
 const mockTerminalInstance = {
   loadAddon: vi.fn(),
   open: vi.fn(),
-  onData: vi.fn(() => ({ dispose: vi.fn() })),
+  onData: vi.fn((_cb: (data: string) => void) => ({ dispose: vi.fn() })),
   dispose: vi.fn(),
   write: vi.fn(),
   clear: vi.fn(),
@@ -1559,11 +1559,14 @@ describe("TerminalModal — mobile layout contract", () => {
     tabs: createManyTabs(),
     activeTab: createManyTabs()[0],
     isReady: true,
+    bootstrapError: null,
     createTab: vi.fn(),
     closeTab: vi.fn(),
     setActiveTab: vi.fn(),
     updateTabTitle: vi.fn(),
     restartActiveTab: vi.fn(),
+    retryBootstrap: vi.fn(),
+    replaceActiveTabSession: vi.fn().mockResolvedValue(undefined),
   };
 
   beforeEach(() => {
@@ -1853,7 +1856,7 @@ describe("TerminalModal — new tab while modal open", () => {
       createdAt: Date.now(),
     };
 
-    const { result, rerender } = renderWithTabs([firstTab], firstTab);
+    const { rerender } = renderWithTabs([firstTab], firstTab);
 
     // Wait for initial xterm to be created
     await waitFor(() => {
@@ -2158,7 +2161,7 @@ describe("TerminalModal — FN-1234 mobile tab switch with keyboard", () => {
   const createTerminalInstance = (cols: number, rows: number) => ({
     loadAddon: vi.fn(),
     open: vi.fn(),
-    onData: vi.fn(() => ({ dispose: vi.fn() })),
+    onData: vi.fn((_cb: (data: string) => void) => ({ dispose: vi.fn() })),
     dispose: vi.fn(),
     write: vi.fn(),
     clear: vi.fn(),
@@ -2515,11 +2518,13 @@ describe("TerminalModal — virtual keyboard overlap handling", () => {
     tabs: [defaultTab],
     activeTab: defaultTab,
     isReady: true,
+    bootstrapError: null,
     createTab: vi.fn(),
     closeTab: vi.fn(),
     setActiveTab: vi.fn(),
     updateTabTitle: vi.fn(),
     restartActiveTab: vi.fn(),
+    retryBootstrap: vi.fn(),
     replaceActiveTabSession: vi.fn().mockResolvedValue(undefined),
   };
 
@@ -3495,7 +3500,8 @@ describe("TerminalModal — FN-872 real-device keyboard overlap refinement", () 
     // Mock fit and resize to be trackable
     const mockFit = vi.fn();
     const mockFitAddon = { fit: mockFit, dispose: vi.fn() };
-    vi.mocked(await import("@xterm/addon-fit")).FitAddon.mockImplementation(() => mockFitAddon as any);
+    const fitAddonModule = await import("@xterm/addon-fit");
+    (fitAddonModule.FitAddon as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => mockFitAddon);
 
     mockUseTerminal.mockReturnValue(
       createMockTerminalState({ connectionStatus: "connected" })

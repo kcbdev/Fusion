@@ -23,7 +23,7 @@ vi.mock("../../api", async () => {
     skipMilestoneInterview: (...args: any[]) => mockSkipMilestoneInterview(...args),
     skipSliceInterview: (...args: any[]) => mockSkipSliceInterview(...args),
     triageFeature: (...args: any[]) => mockTriageFeature(...args),
-    fetchMilestoneValidationTelemetry: (...args: any[]) => actual.fetchMilestoneValidationTelemetry(...args),
+    fetchMilestoneValidationTelemetry: (milestoneId: string, projectId?: string) => actual.fetchMilestoneValidationTelemetry(milestoneId, projectId),
     fetchModels: () => Promise.resolve({ models: [], favoriteProviders: [], favoriteModels: [] }),
   };
 });
@@ -928,7 +928,7 @@ describe("MissionManager", () => {
   });
 
   it("loads more mission activity events", async () => {
-    globalThis.fetch = createDetailFetchMock(mockMissionEventsPaged);
+    globalThis.fetch = createDetailFetchMock(mockMissionEventsPaged as unknown as typeof mockMissionEvents);
     render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
 
     await waitFor(() => {

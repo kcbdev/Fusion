@@ -35,7 +35,7 @@ describe("AgentReflectionsTab", () => {
       id: "ref-001",
       agentId: "agent-001",
       timestamp: new Date(Date.now() - 3_600_000).toISOString(),
-      trigger: "periodic",
+      trigger: "periodic" as const,
       metrics: {
         tasksCompleted: 5,
         tasksFailed: 1,

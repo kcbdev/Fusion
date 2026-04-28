@@ -99,7 +99,7 @@ describe("agent-presets", () => {
       AGENT_PRESETS.forEach((preset) => {
         expect(preset.description).toBeTruthy();
         expect(typeof preset.description).toBe("string");
-        expect(preset.description.length).toBeGreaterThan(10);
+        expect(preset.description!.length).toBeGreaterThan(10);
       });
     });
 

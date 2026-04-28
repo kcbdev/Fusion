@@ -237,6 +237,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -254,6 +255,7 @@ describe("PlanningModeModal", () => {
           isOpen={false}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -267,6 +269,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -280,6 +283,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -299,6 +303,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -403,6 +408,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
           initialPlan="Build a login system from new task dialog"
         />
@@ -425,6 +431,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
           initialPlan="Pre-filled plan from new task"
         />
@@ -444,6 +451,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -473,6 +481,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -537,6 +546,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />,
       );
@@ -585,6 +595,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -1075,6 +1086,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -1113,6 +1125,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />,
       );
@@ -1188,6 +1201,7 @@ describe("PlanningModeModal", () => {
             isOpen={true}
             onClose={mockOnClose}
             onTaskCreated={mockOnTaskCreated}
+            onTasksCreated={vi.fn()}
             tasks={mockTasks}
           />
         );
@@ -1336,6 +1350,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -1428,6 +1443,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -1567,6 +1583,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -1600,6 +1617,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -1635,6 +1653,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -1711,6 +1730,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -1751,6 +1771,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -1770,6 +1791,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -1808,6 +1830,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -1835,6 +1858,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -1872,6 +1896,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -1909,6 +1934,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -1942,6 +1968,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />
       );
@@ -1972,13 +1999,14 @@ describe("PlanningModeModal", () => {
         favoriteProviders: ["anthropic"],
         favoriteModels: [],
       });
-      vi.mocked(api.updateGlobalSettings).mockResolvedValue({});
+      vi.mocked(api.updateGlobalSettings).mockResolvedValue({} as any);
 
       render(
         <PlanningModeModal
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />,
       );
@@ -1993,7 +2021,7 @@ describe("PlanningModeModal", () => {
         expect(document.body.querySelector('[data-testid="model-combobox-portal"]')).not.toBeNull();
       });
 
-      const portal = document.body.querySelector('[data-testid="model-combobox-portal"]')!;
+      const portal = document.body.querySelector('[data-testid="model-combobox-portal"]') as HTMLElement;
       // When provider is favorited, the optgroup header shows "Remove" button
       const removeButton = within(portal).queryByRole("button", { name: "Remove anthropic from favorites" });
       expect(removeButton).not.toBeNull();
@@ -2011,13 +2039,14 @@ describe("PlanningModeModal", () => {
         favoriteProviders: [],
         favoriteModels: ["anthropic/claude-sonnet-4-5"],
       });
-      vi.mocked(api.updateGlobalSettings).mockResolvedValue({});
+      vi.mocked(api.updateGlobalSettings).mockResolvedValue({} as any);
 
       render(
         <PlanningModeModal
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />,
       );
@@ -2032,7 +2061,7 @@ describe("PlanningModeModal", () => {
         expect(document.body.querySelector('[data-testid="model-combobox-portal"]')).not.toBeNull();
       });
 
-      const portal = document.body.querySelector('[data-testid="model-combobox-portal"]')!;
+      const portal = document.body.querySelector('[data-testid="model-combobox-portal"]') as HTMLElement;
       // When model is favorited, it appears as a pinned row with "Remove" button
       // There may be duplicates (in pinned row + provider group), use first one
       const removeButtons = within(portal).queryAllByRole("button", { name: "Remove Claude Sonnet 4.5 from favorites" });
@@ -2051,13 +2080,14 @@ describe("PlanningModeModal", () => {
         favoriteProviders: [],
         favoriteModels: [],
       });
-      vi.mocked(api.updateGlobalSettings).mockResolvedValue({});
+      vi.mocked(api.updateGlobalSettings).mockResolvedValue({} as any);
 
       render(
         <PlanningModeModal
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />,
       );
@@ -2072,7 +2102,7 @@ describe("PlanningModeModal", () => {
         expect(document.body.querySelector('[data-testid="model-combobox-portal"]')).not.toBeNull();
       });
 
-      const portal = document.body.querySelector('[data-testid="model-combobox-portal"]')!;
+      const portal = document.body.querySelector('[data-testid="model-combobox-portal"]') as HTMLElement;
       const addButton = within(portal).getByRole("button", { name: "Add anthropic to favorites" });
       fireEvent.click(addButton);
 
@@ -2095,6 +2125,7 @@ describe("PlanningModeModal", () => {
           isOpen={true}
           onClose={mockOnClose}
           onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
           tasks={mockTasks}
         />,
       );
@@ -2109,7 +2140,7 @@ describe("PlanningModeModal", () => {
         expect(document.body.querySelector('[data-testid="model-combobox-portal"]')).not.toBeNull();
       });
 
-      const portal = document.body.querySelector('[data-testid="model-combobox-portal"]')!;
+      const portal = document.body.querySelector('[data-testid="model-combobox-portal"]') as HTMLElement;
       const removeButton = within(portal).getByRole("button", { name: "Remove anthropic from favorites" });
       fireEvent.click(removeButton);
 
@@ -2119,7 +2150,7 @@ describe("PlanningModeModal", () => {
       });
 
       // After rollback, the provider should still show as favorited (★ button with "Remove" aria-label)
-      const portalAfterRollback = document.body.querySelector('[data-testid="model-combobox-portal"]')!;
+      const portalAfterRollback = document.body.querySelector('[data-testid="model-combobox-portal"]') as HTMLElement;
       expect(within(portalAfterRollback).getByRole("button", { name: "Remove anthropic from favorites" })).toBeTruthy();
     });
   });

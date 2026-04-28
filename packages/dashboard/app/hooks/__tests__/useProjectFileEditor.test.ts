@@ -215,8 +215,8 @@ describe("useProjectFileEditor", () => {
     mockFetchWorkspaceFileContent.mockResolvedValueOnce(loadResponse);
 
     const { result, rerender } = renderHook(
-      ({ filePath }) => useProjectFileEditor("/project", filePath, true),
-      { initialProps: { filePath: "file.txt" } }
+      ({ filePath }: { filePath: string | null }) => useProjectFileEditor("/project", filePath, true),
+      { initialProps: { filePath: "file.txt" as string | null } }
     );
 
     await waitFor(() => expect(result.current.loading).toBe(false));

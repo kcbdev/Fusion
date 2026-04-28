@@ -41,18 +41,18 @@ vi.mock("lucide-react", () => ({
   Plus: ({ size, ...props }: { size?: number }) => (
     <svg data-testid="plus-icon" {...props}>{`Plus ${size || 16}`}</svg>
   ),
-  Pencil: (props: unknown) => <span data-testid="pencil-icon" {...props}>Edit</span>,
-  Trash2: (props: unknown) => <span data-testid="trash-icon" {...props}>Delete</span>,
-  Check: (props: unknown) => <span data-testid="check-icon" {...props}>Check</span>,
-  X: (props: unknown) => <span data-testid="x-icon" {...props}>X</span>,
-  GripVertical: (props: unknown) => <span data-testid="grip-icon" {...props}>Grip</span>,
-  Sparkles: (props: unknown) => <span data-testid="sparkles-icon" {...props}>Sparkles</span>,
-  Download: (props: unknown) => <span data-testid="download-icon" {...props}>Download</span>,
-  Copy: (props: unknown) => <span data-testid="copy-icon" {...props}>Copy</span>,
-  Loader: (props: unknown) => <span data-testid="loader-icon" {...props}>Loader</span>,
-  ArrowLeft: (props: unknown) => <span data-testid="arrow-left-icon" {...props}>ArrowLeft</span>,
-  ChevronLeft: (props: unknown) => <span data-testid="chevron-left-icon" {...props}>ChevronLeft</span>,
-  ChevronUp: (props: unknown) => <span data-testid="chevron-up-icon" {...props}>ChevronUp</span>,
+  Pencil: (props: Record<string, unknown>) => <span data-testid="pencil-icon" {...props}>Edit</span>,
+  Trash2: (props: Record<string, unknown>) => <span data-testid="trash-icon" {...props}>Delete</span>,
+  Check: (props: Record<string, unknown>) => <span data-testid="check-icon" {...props}>Check</span>,
+  X: (props: Record<string, unknown>) => <span data-testid="x-icon" {...props}>X</span>,
+  GripVertical: (props: Record<string, unknown>) => <span data-testid="grip-icon" {...props}>Grip</span>,
+  Sparkles: (props: Record<string, unknown>) => <span data-testid="sparkles-icon" {...props}>Sparkles</span>,
+  Download: (props: Record<string, unknown>) => <span data-testid="download-icon" {...props}>Download</span>,
+  Copy: (props: Record<string, unknown>) => <span data-testid="copy-icon" {...props}>Copy</span>,
+  Loader: (props: Record<string, unknown>) => <span data-testid="loader-icon" {...props}>Loader</span>,
+  ArrowLeft: (props: Record<string, unknown>) => <span data-testid="arrow-left-icon" {...props}>ArrowLeft</span>,
+  ChevronLeft: (props: Record<string, unknown>) => <span data-testid="chevron-left-icon" {...props}>ChevronLeft</span>,
+  ChevronUp: (props: Record<string, unknown>) => <span data-testid="chevron-up-icon" {...props}>ChevronUp</span>,
 }));
 
 // Viewport mode mock helper
