@@ -14,7 +14,8 @@
 /* Keep the GitHub Star and Help buttons at matching heights regardless of
    their differing icon sizes (provider icon 16px vs. HelpCircle 13px). */
 .settings-header-actions > .settings-github-star-btn,
-.settings-header-actions > .btn {
+.settings-header-actions > .btn,
+.settings-header-actions > .settings-update-btn {
   height: 26px;
   box-sizing: border-box;
 }
@@ -957,11 +958,6 @@
 
 
 @media (max-width: 768px) {
-  .settings-update-check {
-    flex-wrap: wrap;
-    row-gap: var(--space-xs);
-  }
-
   /* Settings modal: use the section picker as the only mobile navigation */
   .settings-layout {
     flex-direction: column;

@@ -4465,18 +4465,6 @@ export function SettingsModal({
             <h3>Settings</h3>
             <div className="settings-update-check">
               {appVersion && <p className="settings-modal-version">Version {appVersion}</p>}
-              <button
-                type="button"
-                className="btn btn-icon btn-sm settings-update-btn"
-                onClick={() => {
-                  void handleCheckForUpdates();
-                }}
-                disabled={updateCheckLoading}
-                aria-label="Check for updates"
-                title="Check for updates"
-              >
-                <RefreshCw className={updateCheckLoading ? "spinning" : undefined} />
-              </button>
               {updateCheckResult && (
                 <span
                   aria-live="polite"
@@ -4494,6 +4482,18 @@ export function SettingsModal({
             </div>
           </div>
           <div className="settings-header-actions">
+            <button
+              type="button"
+              className="btn btn-icon btn-sm settings-update-btn"
+              onClick={() => {
+                void handleCheckForUpdates();
+              }}
+              disabled={updateCheckLoading}
+              aria-label="Check for updates"
+              title="Check for updates"
+            >
+              <RefreshCw size={14} className={updateCheckLoading ? "spinning" : undefined} />
+            </button>
             {form.showGitHubStarButton !== false && (
               <a
                 href="https://github.com/Runfusion/Fusion"
