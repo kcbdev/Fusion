@@ -1117,6 +1117,23 @@ export interface GlobalSettings {
    *  ?project=<id>&task=<id> so the dashboard opens the correct project first.
    *  Example: "http://localhost:3000" or "https://fusion.example.com" */
   ntfyDashboardHost?: string;
+  /** When true, enables webhook notifications for task lifecycle events.
+   *  Requires webhookUrl to be set. Default: false. */
+  webhookEnabled?: boolean;
+  /** URL to send webhook notifications to.
+   *  Must be an http:// or https:// URL. */
+  webhookUrl?: string;
+  /** Format of the webhook payload.
+   *  - "slack": Slack incoming webhook format ({ text: message })
+   *  - "discord": Discord webhook format ({ content: message })
+   *  - "generic": Structured JSON with event/task/timestamp fields
+   *  Default: "generic". */
+  webhookFormat?: "slack" | "discord" | "generic";
+  /** List of notification events to send via webhook.
+   *  When webhookEnabled is true, only events in this list trigger webhooks.
+   *  If undefined or empty when webhookEnabled is true, all events are sent.
+   *  Default: [] (all events). */
+  webhookEvents?: string[];
   /** Pluggable notification providers configuration. Additive to legacy ntfy
    *  settings so existing ntfy configuration continues working unchanged. */
   notificationProviders?: NotificationProviderConfig[];

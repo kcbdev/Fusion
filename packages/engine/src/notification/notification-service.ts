@@ -11,6 +11,7 @@ import { NotificationDispatcher } from "@fusion/core";
 import { DEFAULT_NTFY_EVENTS } from "../notifier.js";
 import { schedulerLog } from "../logger.js";
 import { NtfyNotificationProvider } from "./ntfy-provider.js";
+import { WebhookNotificationProvider } from "./webhook-provider.js";
 
 export interface NotificationServiceOptions {
   /** Project identifier for notification deep links */
@@ -29,8 +30,9 @@ export class NotificationService {
   private readonly dispatcher = new NotificationDispatcher();
   private readonly notifiedEvents = new Set<string>();
   private started = false;
-  private ntfyEnabled = false;
+  private notificationsEnabled = false;
   private ntfyProvider?: NtfyNotificationProvider;
+  private webhookProvider?: WebhookNotificationProvider;
 
   constructor(
     private readonly store: NotificationServiceStore,
@@ -47,7 +49,9 @@ export class NotificationService {
     }
 
     const settings = await this.store.getSettings();
+    this.setNotificationsEnabledFromSettings(settings);
     await this.syncNtfyProvider(settings);
+    await this.syncWebhookProvider(settings);
 
     await this.dispatcher.initializeAll();
 
@@ -79,7 +83,7 @@ export class NotificationService {
   }
 
   private handleTaskMoved = (data: { task: Task; from: Column; to: Column }): void => {
-    if (!this.ntfyEnabled || data.to !== "in-review") {
+    if (!this.notificationsEnabled || data.to !== "in-review") {
       return;
     }
 
@@ -88,7 +92,7 @@ export class NotificationService {
   };
 
   private handleTaskUpdated = (task: Task): void => {
-    if (!this.ntfyEnabled) {
+    if (!this.notificationsEnabled) {
       return;
     }
 
@@ -114,7 +118,7 @@ export class NotificationService {
   };
 
   private handleTaskMerged = (result: MergeResult): void => {
-    if (!this.ntfyEnabled || !result.merged) {
+    if (!this.notificationsEnabled || !result.merged) {
       return;
     }
 
@@ -127,6 +131,7 @@ export class NotificationService {
 
   private handleSettingsUpdated = async (data: { settings: Settings; previous: Settings }): Promise<void> => {
     const { settings, previous } = data;
+    this.setNotificationsEnabledFromSettings(settings);
 
     if (
       settings.ntfyEnabled !== previous.ntfyEnabled ||
@@ -154,11 +159,20 @@ export class NotificationService {
         schedulerLog.log("NotificationService ntfy events updated");
       }
     }
+
+    if (
+      settings.webhookEnabled !== previous.webhookEnabled ||
+      settings.webhookUrl !== previous.webhookUrl ||
+      settings.webhookFormat !== previous.webhookFormat ||
+      JSON.stringify(settings.webhookEvents) !== JSON.stringify(previous.webhookEvents)
+    ) {
+      await this.syncWebhookProvider(settings);
+      schedulerLog.log("WebhookNotificationProvider config updated");
+    }
   };
 
   private async syncNtfyProvider(settings: Settings): Promise<void> {
     const enabled = Boolean(settings.ntfyEnabled && settings.ntfyTopic);
-    this.ntfyEnabled = enabled;
 
     if (!enabled) {
       if (this.ntfyProvider) {
@@ -181,6 +195,37 @@ export class NotificationService {
       events: settings.ntfyEvents ?? [...DEFAULT_NTFY_EVENTS],
       projectId: this.options.projectId,
     });
+  }
+
+  private async syncWebhookProvider(settings: Settings): Promise<void> {
+    const enabled = Boolean(settings.webhookEnabled && settings.webhookUrl);
+
+    if (!enabled) {
+      if (this.webhookProvider) {
+        await this.webhookProvider.shutdown?.();
+        this.dispatcher.unregisterProvider(this.webhookProvider.getProviderId());
+        this.webhookProvider = undefined;
+      }
+      return;
+    }
+
+    if (!this.webhookProvider) {
+      this.webhookProvider = new WebhookNotificationProvider();
+      this.registerProvider(this.webhookProvider);
+    }
+
+    await this.webhookProvider.initialize?.({
+      webhookUrl: settings.webhookUrl,
+      webhookFormat: settings.webhookFormat ?? "generic",
+      events: settings.webhookEvents ?? [],
+    });
+  }
+
+  private setNotificationsEnabledFromSettings(settings: Settings): void {
+    this.notificationsEnabled = Boolean(
+      (settings.ntfyEnabled && settings.ntfyTopic) ||
+      (settings.webhookEnabled && settings.webhookUrl),
+    );
   }
 
   private createTaskPayload(task: Task, event: NotificationEvent): NotificationPayload {
