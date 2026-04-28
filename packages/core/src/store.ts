@@ -1079,6 +1079,33 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     this.db.bumpLastModified();
   }
 
+  private upsertTaskWithFtsRecovery(task: Task): void {
+    try {
+      this.upsertTask(task);
+      return;
+    } catch (error) {
+      if (!this.db.isFts5CorruptionError(error)) {
+        throw error;
+      }
+
+      console.warn(`[fusion:store] FTS5 corruption detected during upsert for task ${task.id}; rebuilding index and retrying once`);
+
+      try {
+        this.db.rebuildFts5Index();
+      } catch (rebuildError) {
+        console.warn("[fusion:store] FTS5 rebuild failed; propagating original upsert error", rebuildError);
+        throw error;
+      }
+
+      try {
+        this.upsertTask(task);
+      } catch (retryError) {
+        console.warn("[fusion:store] Upsert retry after FTS5 rebuild failed; propagating original upsert error", retryError);
+        throw error;
+      }
+    }
+  }
+
   /**
    * Read a task from SQLite by ID.
    */
@@ -1330,7 +1357,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    * for backward compatibility and debugging.
    */
   private async atomicWriteTaskJson(dir: string, task: Task): Promise<void> {
-    this.upsertTask(task);
+    this.upsertTaskWithFtsRecovery(task);
     // Also write to disk for backward compatibility
     await this.writeTaskJsonFile(dir, task);
   }
@@ -1350,7 +1377,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   ): Promise<void> {
     this.db.transaction(() => {
       // Upsert the task
-      this.upsertTask(task);
+      this.upsertTaskWithFtsRecovery(task);
 
       // Optionally record the audit event in the same transaction
       if (auditInput) {
@@ -5598,7 +5625,7 @@ ${stepsSection}`;
     try {
       // Simple query to verify database responsiveness
       this.db.prepare("SELECT 1").get();
-      return true;
+      return this.db.checkFts5Integrity();
     } catch {
       return false;
     }

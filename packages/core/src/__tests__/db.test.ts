@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Database, createDatabase, toJson, toJsonNullable, fromJson, normalizeTaskComments } from "../db.js";
 import { DEFAULT_PROJECT_SETTINGS } from "../types.js";
 import { mkdtempSync, existsSync } from "node:fs";
@@ -1444,6 +1444,88 @@ describe("FTS5 full-text search", () => {
     const ftsRow = ftsRows.find((r) => r.id === "FN-FTS-005");
     expect(ftsRow).toBeDefined();
     expect(ftsRow.comments).toContain("xylophone");
+  });
+
+  it("rebuildFts5Index recreates and repopulates the FTS table", () => {
+    db.prepare(`
+      INSERT INTO tasks (id, title, description, "column", createdAt, updatedAt)
+      VALUES ('FN-FTS-REBUILD', 'Rebuild title', 'Rebuild description', 'todo', '2025-01-01T00:00:00.000Z', '2025-01-01T00:00:00.000Z')
+    `).run();
+
+    db.exec("DROP TRIGGER IF EXISTS tasks_fts_ai");
+    db.exec("DROP TRIGGER IF EXISTS tasks_fts_au");
+    db.exec("DROP TRIGGER IF EXISTS tasks_fts_ad");
+    db.exec("DROP TABLE IF EXISTS tasks_fts");
+    db.exec(`
+      CREATE VIRTUAL TABLE tasks_fts USING fts5(
+        id,
+        title,
+        description,
+        comments,
+        content='tasks',
+        content_rowid='rowid'
+      )
+    `);
+
+    const missingTrigger = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='trigger' AND name='tasks_fts_ai'"
+    ).get() as { name: string } | undefined;
+    expect(missingTrigger).toBeUndefined();
+
+    expect(db.rebuildFts5Index()).toBe(true);
+
+    const searchRows = db.prepare(`
+      SELECT t.id FROM tasks t
+      JOIN tasks_fts fts ON t.rowid = fts.rowid
+      WHERE tasks_fts MATCH 'Rebuild'
+    `).all() as Array<{ id: string }>;
+    expect(searchRows.some((row) => row.id === "FN-FTS-REBUILD")).toBe(true);
+  });
+
+  it("checkFts5Integrity returns true for healthy index", () => {
+    expect(db.checkFts5Integrity()).toBe(true);
+  });
+
+  it("checkFts5Integrity returns false when integrity-check command fails", () => {
+    const execSpy = vi.spyOn((db as any).db, "exec");
+    execSpy.mockImplementation((sql: string) => {
+      if (sql.includes("integrity-check")) {
+        throw new Error("corruption found reading blob");
+      }
+      return undefined as any;
+    });
+
+    expect(db.checkFts5Integrity()).toBe(false);
+  });
+
+  it("isFts5CorruptionError detects known corruption signatures", () => {
+    expect(db.isFts5CorruptionError(new Error("database disk image is malformed"))).toBe(true);
+    expect(db.isFts5CorruptionError(new Error("FTS5 index corrupt at segment 4"))).toBe(true);
+    expect(db.isFts5CorruptionError(new Error("some other sqlite error"))).toBe(false);
+  });
+});
+
+describe("Database FTS5 guard behavior", () => {
+  it("rebuildFts5Index returns false when FTS5 is unavailable", async () => {
+    const prevEnv = process.env.FUSION_DISABLE_FTS5;
+    process.env.FUSION_DISABLE_FTS5 = "1";
+
+    const tmpDir = makeTmpDir();
+    const fusionDir = join(tmpDir, ".fusion");
+    const localDb = new Database(fusionDir);
+
+    try {
+      localDb.init();
+      expect(localDb.rebuildFts5Index()).toBe(false);
+    } finally {
+      localDb.close();
+      await rm(tmpDir, { recursive: true, force: true });
+      if (prevEnv === undefined) {
+        delete process.env.FUSION_DISABLE_FTS5;
+      } else {
+        process.env.FUSION_DISABLE_FTS5 = prevEnv;
+      }
+    }
   });
 });
 

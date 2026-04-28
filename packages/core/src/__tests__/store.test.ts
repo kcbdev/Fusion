@@ -10081,6 +10081,43 @@ describe("RunMutationContext", () => {
   });
   });
 
+  describe("FTS5 corruption recovery during upsert", () => {
+    it("rebuilds FTS5 and retries once when upsert fails with an FTS corruption error", async () => {
+      const db = store.getDatabase();
+      const rebuildSpy = vi.spyOn(db, "rebuildFts5Index").mockReturnValue(true);
+
+      const upsertSpy = vi.spyOn(store as any, "upsertTask");
+      const originalUpsert = upsertSpy.getMockImplementation();
+      upsertSpy
+        .mockImplementationOnce(() => {
+          throw new Error("SQLITE_CORRUPT: corruption found reading blob in fts5");
+        })
+        .mockImplementation((task: Task) => {
+          if (originalUpsert) {
+            return originalUpsert(task);
+          }
+          return (TaskStore.prototype as any).upsertTask.call(store, task);
+        });
+
+      const created = await store.createTask({ description: "Recover from FTS corruption" });
+
+      expect(created.id).toBeDefined();
+      expect(rebuildSpy).toHaveBeenCalledTimes(1);
+      expect(upsertSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("propagates non-FTS errors without rebuild", async () => {
+      const db = store.getDatabase();
+      const rebuildSpy = vi.spyOn(db, "rebuildFts5Index").mockReturnValue(true);
+      vi.spyOn(store as any, "upsertTask").mockImplementationOnce(() => {
+        throw new Error("constraint failed");
+      });
+
+      await expect(store.createTask({ description: "Should fail" })).rejects.toThrow("constraint failed");
+      expect(rebuildSpy).not.toHaveBeenCalled();
+    });
+  });
+
   describe("clearStaleBaseBranchReferences (FN-2165)", () => {
     it("nulls baseBranch on live tasks that reference a deleted branch", async () => {
       const upstream = await store.createTask({ description: "Upstream" });

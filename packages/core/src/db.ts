@@ -705,6 +705,86 @@ export class Database {
   }
 
   /**
+   * Rebuild the task FTS5 index and maintenance triggers from scratch.
+   * Returns false when FTS5 is unavailable in this runtime.
+   */
+  rebuildFts5Index(): boolean {
+    if (!this._fts5Available) {
+      return false;
+    }
+
+    try {
+      this.db.exec("DROP TRIGGER IF EXISTS tasks_fts_ai");
+      this.db.exec("DROP TRIGGER IF EXISTS tasks_fts_au");
+      this.db.exec("DROP TRIGGER IF EXISTS tasks_fts_ad");
+      this.db.exec("DROP TABLE IF EXISTS tasks_fts");
+
+      this.db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts USING fts5(
+          id,
+          title,
+          description,
+          comments,
+          content='tasks',
+          content_rowid='rowid'
+        )
+      `);
+
+      this.db.exec(`
+        CREATE TRIGGER IF NOT EXISTS tasks_fts_ai AFTER INSERT ON tasks BEGIN
+          INSERT INTO tasks_fts(rowid, id, title, description, comments)
+          VALUES (new.rowid, new.id, COALESCE(new.title, ''), new.description, COALESCE(new.comments, '[]'));
+        END
+      `);
+
+      const hasTaskTitle = this.hasColumn("tasks", "title");
+      const updateColumns = hasTaskTitle
+        ? "id, title, description, comments"
+        : "id, description, comments";
+      const oldTitle = hasTaskTitle ? "COALESCE(old.title, '')" : "''";
+      const newTitle = hasTaskTitle ? "COALESCE(new.title, '')" : "''";
+
+      this.db.exec(`
+        CREATE TRIGGER IF NOT EXISTS tasks_fts_au AFTER UPDATE OF ${updateColumns} ON tasks BEGIN
+          INSERT INTO tasks_fts(tasks_fts, rowid, id, title, description, comments)
+            VALUES('delete', old.rowid, old.id, ${oldTitle}, old.description, COALESCE(old.comments, '[]'));
+          INSERT INTO tasks_fts(rowid, id, title, description, comments)
+            VALUES (new.rowid, new.id, ${newTitle}, new.description, COALESCE(new.comments, '[]'));
+        END
+      `);
+
+      this.db.exec(`
+        CREATE TRIGGER IF NOT EXISTS tasks_fts_ad AFTER DELETE ON tasks BEGIN
+          INSERT INTO tasks_fts(tasks_fts, rowid, id, title, description, comments)
+            VALUES('delete', old.rowid, old.id, COALESCE(old.title, ''), old.description, COALESCE(old.comments, '[]'));
+        END
+      `);
+
+      this.db.exec("INSERT INTO tasks_fts(tasks_fts) VALUES('rebuild')");
+      return true;
+    } catch (error) {
+      console.warn("[fusion:db] Failed to rebuild FTS5 index", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Run FTS5 integrity check. Returns true when healthy or unavailable.
+   */
+  checkFts5Integrity(): boolean {
+    if (!this._fts5Available) {
+      return true;
+    }
+
+    try {
+      this.db.exec("INSERT INTO tasks_fts(tasks_fts) VALUES('integrity-check')");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Initialize the database: create tables if they don't exist
    * and seed meta values.
    */
@@ -1883,6 +1963,19 @@ export class Database {
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
       .get(table) as { name: string } | undefined;
     return Boolean(row);
+  }
+
+  /**
+   * Check whether an error appears to be an FTS5 corruption/integrity failure.
+   */
+  isFts5CorruptionError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error ?? "");
+    const lower = message.toLowerCase();
+    return (
+      lower.includes("corruption found reading blob") ||
+      lower.includes("database disk image is malformed") ||
+      (lower.includes("fts5") && lower.includes("corrupt"))
+    );
   }
 
   /**
