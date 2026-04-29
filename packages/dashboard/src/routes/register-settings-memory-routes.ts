@@ -473,6 +473,29 @@ export function registerSettingsMemoryRoutes(ctx: ApiRoutesContext, deps: Settin
         throw new ApiError(409, "No active provider configured", { code: "NO_ACTIVE_PROVIDER" });
       }
 
+      // For tailscale we always funnel the dashboard's *actual* listen port
+      // — the port this very request landed on. The user-facing UI no
+      // longer collects a target port; relying on a stored value risks
+      // silently funneling the wrong process if the dashboard later binds
+      // a different port (EADDRINUSE fallback, daemon restart, etc.).
+      if (provider === "tailscale" && settings.remoteAccess) {
+        const livePort = req.socket?.localPort;
+        if (Number.isFinite(livePort) && (livePort ?? 0) > 0 && livePort !== settings.remoteAccess.providers.tailscale.targetPort) {
+          await scopedStore.updateSettings({
+            remoteAccess: {
+              ...settings.remoteAccess,
+              providers: {
+                ...settings.remoteAccess.providers,
+                tailscale: {
+                  ...settings.remoteAccess.providers.tailscale,
+                  targetPort: livePort as number,
+                },
+              },
+            },
+          });
+        }
+      }
+
       if (!engine) {
         res.json({ state: "starting", provider });
         return;

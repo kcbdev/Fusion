@@ -4114,14 +4114,10 @@ export function SettingsModal({
                     remoteActiveProvider: activeProvider,
                     remoteTailscaleEnabled: activeProvider === "tailscale",
                     remoteTailscaleHostname: String(formState.remoteTailscaleHostname ?? ""),
-                    remoteTailscaleTargetPort: (() => {
-                      const livePort = typeof window !== "undefined" ? Number(window.location.port) : NaN;
-                      if (Number.isFinite(livePort) && livePort > 0) return livePort;
-                      const proto = typeof window !== "undefined" ? window.location.protocol : "";
-                      if (proto === "https:") return 443;
-                      if (proto === "http:") return 80;
-                      return Number(formState.remoteTailscaleTargetPort ?? 4040);
-                    })(),
+                    // Server overrides this with req.socket.localPort
+                    // when starting the tunnel; the value sent here is
+                    // only a fallback if that override doesn't fire.
+                    remoteTailscaleTargetPort: Number(formState.remoteTailscaleTargetPort ?? 4040),
                     remoteTailscaleAcceptRoutes: Boolean(formState.remoteTailscaleAcceptRoutes),
                     remoteCloudflareEnabled: activeProvider === "cloudflare",
                     remoteCloudflareQuickTunnel: Boolean(formState.remoteCloudflareQuickTunnel ?? true),
