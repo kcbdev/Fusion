@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   summarizeTitle,
   summarizeCommitBody,
+  sanitizeCommitSubject,
+  MAX_COMMIT_SUBJECT_LENGTH,
   checkRateLimit,
   getRateLimitResetTime,
   validateDescription,
@@ -265,6 +267,63 @@ describe("ai-summarize", () => {
   });
 
   // ── State Reset ───────────────────────────────────────────────────────────
+
+  describe("sanitizeCommitSubject", () => {
+    it("returns null for empty / whitespace input", () => {
+      expect(sanitizeCommitSubject("")).toBeNull();
+      expect(sanitizeCommitSubject("   \n  ")).toBeNull();
+    });
+
+    it("keeps a clean subject as-is", () => {
+      expect(sanitizeCommitSubject("add unavailable-node validation")).toBe(
+        "add unavailable-node validation",
+      );
+    });
+
+    it("uses only the first non-empty line", () => {
+      expect(sanitizeCommitSubject("add validation\n\nbody text here")).toBe(
+        "add validation",
+      );
+      expect(sanitizeCommitSubject("\n\n  refactor merger\nignored second line")).toBe(
+        "refactor merger",
+      );
+    });
+
+    it("strips surrounding quotes and backticks", () => {
+      expect(sanitizeCommitSubject('"add tests for store"')).toBe("add tests for store");
+      expect(sanitizeCommitSubject("'fix race in heartbeat'")).toBe("fix race in heartbeat");
+      expect(sanitizeCommitSubject("`add caching layer`")).toBe("add caching layer");
+    });
+
+    it("strips a leading bullet marker", () => {
+      expect(sanitizeCommitSubject("- add caching layer")).toBe("add caching layer");
+      expect(sanitizeCommitSubject("* fix bug")).toBe("fix bug");
+    });
+
+    it("drops a leading conventional-commit prefix the model adds back", () => {
+      expect(sanitizeCommitSubject("feat: add validation")).toBe("add validation");
+      expect(sanitizeCommitSubject("feat(FN-123): add validation")).toBe("add validation");
+      expect(sanitizeCommitSubject("fix(scope): something")).toBe("something");
+      expect(sanitizeCommitSubject("FEAT: shouty")).toBe("shouty");
+    });
+
+    it("drops a trailing period", () => {
+      expect(sanitizeCommitSubject("add validation.")).toBe("add validation");
+      expect(sanitizeCommitSubject("add validation...")).toBe("add validation");
+    });
+
+    it("hard-caps at MAX_COMMIT_SUBJECT_LENGTH", () => {
+      const long = "a".repeat(MAX_COMMIT_SUBJECT_LENGTH + 20);
+      const result = sanitizeCommitSubject(long);
+      expect(result).not.toBeNull();
+      expect(result!.length).toBeLessThanOrEqual(MAX_COMMIT_SUBJECT_LENGTH);
+    });
+
+    it("returns null when stripping leaves nothing", () => {
+      expect(sanitizeCommitSubject('""')).toBeNull();
+      expect(sanitizeCommitSubject("feat:   ")).toBeNull();
+    });
+  });
 
   describe("__resetSummarizeState", () => {
     it("should clear all rate limit entries", () => {

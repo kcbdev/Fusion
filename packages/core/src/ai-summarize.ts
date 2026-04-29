@@ -493,6 +493,204 @@ export async function summarizeCommitBody(
   }
 }
 
+// ── Commit Subject Summarization ─────────────────────────────────────────
+
+/** System prompt for merge commit subject generation. */
+export const COMMIT_SUBJECT_SYSTEM_PROMPT = `You write commit message subjects for merge commits.
+
+Your job is to summarize what landed — using the branch's step commit subjects (when provided) and the \`git diff --stat\` — into a single subject line that conveys the change's essence at a glance.
+
+## Guidelines
+- Output ONLY the subject text — no quotes, no markdown, no body, no trailing period
+- Do NOT include any \`feat:\`, \`fix:\`, scope, or task-id prefix — the caller adds that
+- Imperative mood ("add X", "fix Y", "refactor Z") and lower-case first word
+- Hard cap: 60 characters; aim for 40–55
+- Be specific: name the most consequential module/feature/behavior that changed
+- If the branch has one clear theme, describe it; if it's mixed, lead with the largest change
+- Do not invent details that aren't in the input`;
+
+/** Maximum output length for the generated commit subject, in characters. */
+export const MAX_COMMIT_SUBJECT_LENGTH = 60;
+
+/**
+ * Default timeout for commit subject summarization, in milliseconds. Tighter
+ * than the body timeout because the subject is short and we don't want it
+ * meaningfully slowing down merges.
+ */
+export const DEFAULT_COMMIT_SUBJECT_TIMEOUT_MS = 15_000;
+
+/**
+ * Summarize a `git diff --stat` (and optional commit log) into a short commit
+ * subject via AI.
+ *
+ * Used by the merger to replace the legacy `merge <branch>` subject with one
+ * that actually describes what landed. The caller is responsible for adding
+ * the conventional-commit prefix (e.g. `feat(FN-123): `) — this function
+ * returns only the summary portion.
+ *
+ * Best-effort: returns null on any failure (no AI runtime, timeout, empty
+ * response, error). Caller falls back to the legacy `merge <branch>` form.
+ *
+ * @param diffStat - Output of `git diff --stat` describing what changed.
+ * @param rootDir - Project root directory for AI agent context.
+ * @param provider - AI model provider (typically the title-summarizer lane).
+ * @param modelId - AI model ID.
+ * @param opts - Optional context (branch, taskId), abort signal, timeout.
+ * @returns The generated subject (≤60 chars, no prefix), or null on failure.
+ */
+export async function summarizeCommitSubject(
+  diffStat: string,
+  rootDir: string,
+  provider?: string,
+  modelId?: string,
+  opts?: {
+    branch?: string;
+    taskId?: string;
+    commitLog?: string;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+  },
+): Promise<string | null> {
+  const trimmedStat = (diffStat ?? "").trim();
+  const trimmedCommitLog = (opts?.commitLog ?? "").trim();
+  if (trimmedStat.length === 0 && trimmedCommitLog.length === 0) {
+    return null;
+  }
+
+  const truncatedStat = trimmedStat.length > MAX_COMMIT_BODY_INPUT_LENGTH
+    ? trimmedStat.slice(0, MAX_COMMIT_BODY_INPUT_LENGTH) + "\n…(truncated)"
+    : trimmedStat;
+  const truncatedCommitLog = trimmedCommitLog.length > MAX_COMMIT_BODY_INPUT_LENGTH
+    ? trimmedCommitLog.slice(0, MAX_COMMIT_BODY_INPUT_LENGTH) + "\n…(truncated)"
+    : trimmedCommitLog;
+
+  const userPromptParts: string[] = [];
+  if (opts?.branch) userPromptParts.push(`Branch: ${opts.branch}`);
+  if (opts?.taskId) userPromptParts.push(`Task: ${opts.taskId}`);
+  if (userPromptParts.length > 0) userPromptParts.push("");
+  if (truncatedCommitLog.length > 0) {
+    userPromptParts.push("Step commits being merged in (most recent first):");
+    userPromptParts.push(truncatedCommitLog);
+    userPromptParts.push("");
+  }
+  if (truncatedStat.length > 0) {
+    userPromptParts.push("Files changed (`git diff --stat`):");
+    userPromptParts.push(truncatedStat);
+    userPromptParts.push("");
+  }
+  userPromptParts.push("Write the commit subject now.");
+  const userPrompt = userPromptParts.join("\n");
+
+  const timeoutMs = opts?.timeoutMs ?? DEFAULT_COMMIT_SUBJECT_TIMEOUT_MS;
+  const aborter = new AbortController();
+  const timer = setTimeout(() => aborter.abort(), timeoutMs);
+  if (opts?.signal) {
+    if (opts.signal.aborted) aborter.abort();
+    else opts.signal.addEventListener("abort", () => aborter.abort(), { once: true });
+  }
+
+  let session: Awaited<ReturnType<NonNullable<Awaited<ReturnType<typeof getFnAgent>>>>>["session"] | undefined;
+  try {
+    const createFnAgent = await getFnAgent();
+    if (!createFnAgent) {
+      if (DEBUG) console.log("[ai-summarize] AI engine not available for commit subject");
+      return null;
+    }
+
+    const agentOptions: {
+      cwd: string;
+      systemPrompt: string;
+      tools: "readonly";
+      defaultProvider?: string;
+      defaultModelId?: string;
+    } = {
+      cwd: rootDir,
+      systemPrompt: COMMIT_SUBJECT_SYSTEM_PROMPT,
+      tools: "readonly",
+    };
+    if (provider && modelId) {
+      agentOptions.defaultProvider = provider;
+      agentOptions.defaultModelId = modelId;
+    }
+
+    const agentResult = await createFnAgent(agentOptions);
+    if (!agentResult?.session) return null;
+    session = agentResult.session;
+
+    await session.prompt(userPrompt);
+    if (aborter.signal.aborted) return null;
+
+    if (session.state?.error) {
+      if (DEBUG) console.log(`[ai-summarize] Commit-subject session error: ${session.state.error}`);
+      return null;
+    }
+
+    const messages: AgentMessage[] = session.state?.messages ?? [];
+    const assistant = messages.filter((m: AgentMessage) => m.role === "assistant").pop();
+    if (!assistant?.content) return null;
+
+    let raw = "";
+    if (typeof assistant.content === "string") {
+      raw = assistant.content;
+    } else if (Array.isArray(assistant.content)) {
+      raw = assistant.content
+        .filter((c: { type: string; text?: string }): c is { type: "text"; text: string } =>
+          c.type === "text" && typeof c.text === "string",
+        )
+        .map((c) => c.text)
+        .join("");
+    }
+
+    return sanitizeCommitSubject(raw);
+  } catch (err) {
+    if (DEBUG) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.log(`[ai-summarize] Commit-subject generation failed: ${message}`);
+    }
+    return null;
+  } finally {
+    clearTimeout(timer);
+    try {
+      session?.dispose?.();
+    } catch {
+      // ignore disposal errors
+    }
+  }
+}
+
+/**
+ * Sanitize a raw AI subject response into a clean commit subject:
+ * - first non-empty line only
+ * - strip surrounding quotes / backticks / markdown bullets
+ * - drop conventional-commit prefixes the model may have re-added
+ *   (e.g. `feat:`, `feat(FN-123):`, `fix(scope):`)
+ * - drop trailing period
+ * - hard cap at MAX_COMMIT_SUBJECT_LENGTH
+ *
+ * Exported for unit testing; merger calls this only via
+ * `summarizeCommitSubject`.
+ */
+export function sanitizeCommitSubject(raw: string): string | null {
+  if (!raw) return null;
+  const firstLine = raw.split(/\r?\n/).map((l) => l.trim()).find((l) => l.length > 0);
+  if (!firstLine) return null;
+
+  let subject = firstLine
+    .replace(/^[-*]\s+/, "")
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .trim();
+  // Strip a leading `type(scope): ` or `type: ` prefix the model may add back.
+  subject = subject.replace(/^[a-z]+(?:\([^)]+\))?:\s*/i, "").trim();
+  // Drop trailing period.
+  subject = subject.replace(/\.+$/, "").trim();
+  if (!subject) return null;
+
+  if (subject.length > MAX_COMMIT_SUBJECT_LENGTH) {
+    subject = subject.slice(0, MAX_COMMIT_SUBJECT_LENGTH).trim();
+  }
+  return subject || null;
+}
+
 // ── Test Helpers ───────────────────────────────────────────────────────────
 
 /**

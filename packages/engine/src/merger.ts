@@ -139,6 +139,7 @@ import {
   resolveProjectDefaultModel,
   resolveAgentPrompt,
   summarizeCommitBody,
+  summarizeCommitSubject,
   type TaskStore,
   type MergeResult,
   type MergeDetails,
@@ -1079,7 +1080,7 @@ async function buildDeterministicMergeMessage(params: {
 }): Promise<{ subjectArg: string; bodyArg: string }> {
   const { taskId, branch, commitLog, diffStat, includeTaskId, rootDir, settings, signal } = params;
   const prefix = includeTaskId ? `feat(${taskId})` : "feat";
-  const subject = `${prefix}: merge ${branch}`;
+  const fallbackSubject = `${prefix}: merge ${branch}`;
 
   const trimmedCommitLog = commitLog?.trim() ?? "";
   const trimmedDiffStat = diffStat?.trim() ?? "";
@@ -1091,7 +1092,10 @@ async function buildDeterministicMergeMessage(params: {
   // Best-effort AI summary using the title-summarizer lane (small/fast model).
   // Falls back to the project default when not configured. Any failure (no
   // runtime, timeout, empty response) returns null and we skip the summary.
+  // Subject and body are generated in parallel so the extra subject call
+  // doesn't serialize merge time.
   let aiSummary: string | null = null;
+  let aiSubject: string | null = null;
   if (rootDir && settings && (trimmedCommitLog.length > 0 || trimmedDiffStat.length > 0)) {
     const useTitleSummarizer =
       !!settings.titleSummarizerProvider && !!settings.titleSummarizerModelId;
@@ -1106,12 +1110,32 @@ async function buildDeterministicMergeMessage(params: {
           ? settings.defaultModelIdOverride
           : settings.defaultModelId);
 
-    aiSummary = await summarizeCommitBody(trimmedDiffStat, rootDir, provider, modelId, {
-      branch,
-      taskId,
-      commitLog: trimmedCommitLog,
-      signal,
-    }).catch(() => null);
+    const [bodyResult, subjectResult] = await Promise.all([
+      summarizeCommitBody(trimmedDiffStat, rootDir, provider, modelId, {
+        branch,
+        taskId,
+        commitLog: trimmedCommitLog,
+        signal,
+      }).catch(() => null),
+      summarizeCommitSubject(trimmedDiffStat, rootDir, provider, modelId, {
+        branch,
+        taskId,
+        commitLog: trimmedCommitLog,
+        signal,
+      }).catch(() => null),
+    ]);
+    aiSummary = bodyResult;
+    aiSubject = subjectResult;
+  }
+
+  // Compose subject: prefer the AI summary; fall back to the legacy
+  // `merge <branch>` form on any failure so a wedged summarizer can never
+  // block a merge. Hard cap at 72 chars (subject + prefix) — git's soft
+  // limit is 72; the AI is already capped at 60 by sanitizeCommitSubject.
+  let subject = fallbackSubject;
+  if (aiSubject && aiSubject.length > 0) {
+    const candidate = `${prefix}: ${aiSubject}`;
+    subject = candidate.length > 72 ? candidate.slice(0, 72).trimEnd() : candidate;
   }
 
   const sections: string[] = [];
@@ -1214,11 +1238,26 @@ async function commitOrAmendMergeWithFixes(
       return false;
     }
 
+    // Build the message from the actual commit content rather than the
+    // wide-range branch context that was gathered before merge. The
+    // pre-merge commitLog/diffStat use `merge-base(branch, main)` as base,
+    // which under squash-merge workflows can predate already-merged sibling
+    // tasks — leading to messages that describe files not in the diff.
+    // `preAttemptHeadSha` is the integration target (main's tip just before
+    // this merge), so diffing against it gives content truth.
+    const actualContext = await computeActualMergeCommitContext({
+      rootDir,
+      integrationTargetSha: preAttemptHeadSha,
+      branch,
+    });
+    const messageCommitLog = actualContext.commitLog || commitLog;
+    const messageDiffStat = actualContext.diffStat || diffStat;
+
     const { subjectArg, bodyArg } = await buildDeterministicMergeMessage({
       taskId,
       branch,
-      commitLog,
-      diffStat,
+      commitLog: messageCommitLog,
+      diffStat: messageDiffStat,
       includeTaskId,
       rootDir,
       settings,
@@ -2044,6 +2083,89 @@ async function collectPatchIds(
     // "no duplicates found, proceed without stripping".
   }
   return ids;
+}
+
+/**
+ * Compute the actual content of the merge commit being finalized, expressed as
+ * `{ commitLog, diffStat }` ready to feed into `buildDeterministicMergeMessage`.
+ *
+ * The wide-range values gathered before merge (`baseCommitSha..branch`) are
+ * unreliable as commit-message context in a squash-merge workflow: when an
+ * earlier task is squash-merged onto `main`, branches that forked off the
+ * pre-squash `main` no longer share ancestry with it, so `merge-base(branch,
+ * main)` resolves to a point *before* the earlier task — and the resulting
+ * diffstat/commitLog describe work that was already merged via the prior
+ * squash. The commit message then talks about files that aren't in the diff.
+ *
+ * This helper computes truth from content:
+ * - `diffStat` = `git diff --cached <integrationTargetSha> --stat` when there
+ *   are staged changes (covers both the pre-commit and amend-with-staged
+ *   paths), otherwise `git diff <integrationTargetSha> HEAD --stat` (covers
+ *   the message-only amend path where the commit already exists).
+ * - `commitLog` = subjects of `git log integrationTarget..branch`, with
+ *   already-squashed commits filtered out by patch-id (using
+ *   `collectPatchIds` / `commitPatchId`, the same primitives the rest of the
+ *   merger uses for orphan detection).
+ *
+ * Best-effort: any git failure returns an empty string for that field, and
+ * the caller's downstream fallback (`buildDeterministicMergeMessage`) handles
+ * empty inputs gracefully.
+ */
+async function computeActualMergeCommitContext(params: {
+  rootDir: string;
+  integrationTargetSha: string;
+  branch: string;
+}): Promise<{ commitLog: string; diffStat: string }> {
+  const { rootDir, integrationTargetSha, branch } = params;
+  const targetArg = quoteArg(integrationTargetSha);
+
+  let diffStat = "";
+  try {
+    const { stdout: stagedStat } = await execAsync(
+      `git diff --cached ${targetArg} --stat`,
+      { cwd: rootDir, encoding: "utf-8" },
+    );
+    diffStat = stagedStat.trim();
+    if (diffStat.length === 0) {
+      const { stdout: headStat } = await execAsync(
+        `git diff ${targetArg} HEAD --stat`,
+        { cwd: rootDir, encoding: "utf-8" },
+      );
+      diffStat = headStat.trim();
+    }
+  } catch {
+    // best-effort
+  }
+
+  let commitLog = "";
+  try {
+    const targetPatchIds = await collectPatchIds(rootDir, integrationTargetSha, 200);
+    const { stdout: branchShas } = await execAsync(
+      `git log ${targetArg}..${quoteArg(branch)} --format=%H`,
+      { cwd: rootDir, encoding: "utf-8" },
+    );
+    const shas = branchShas.trim().split("\n").filter(Boolean);
+    const lines: string[] = [];
+    for (const sha of shas) {
+      const pid = await commitPatchId(rootDir, sha);
+      if (pid && targetPatchIds.has(pid)) continue;
+      try {
+        const { stdout: subj } = await execAsync(
+          `git log -1 ${quoteArg(sha)} --format=%s`,
+          { cwd: rootDir, encoding: "utf-8" },
+        );
+        const s = subj.trim();
+        if (s) lines.push(`- ${s}`);
+      } catch {
+        // skip this commit on failure
+      }
+    }
+    commitLog = lines.join("\n");
+  } catch {
+    // best-effort
+  }
+
+  return { commitLog, diffStat };
 }
 
 /**
@@ -4292,11 +4414,32 @@ async function executeMergeAttempt(
     // of mergeDetails surface. Subject keeps the conventional-commit shape.
     try {
       const authorArg = getCommitAuthorArg(params.settings);
+      // Recompute context against the AI commit's parent (= integration
+      // target) so the message describes only what this commit actually
+      // adds — not the wide branch range, which under squash-merge can
+      // include work already landed via prior task merges.
+      let integrationTargetSha: string | undefined;
+      try {
+        const { stdout } = await execAsync("git rev-parse HEAD~1", {
+          cwd: rootDir,
+          encoding: "utf-8",
+        });
+        integrationTargetSha = stdout.trim() || undefined;
+      } catch {
+        // Root commit / detached state — fall through to wide-range values.
+      }
+      const actualContext = integrationTargetSha
+        ? await computeActualMergeCommitContext({
+            rootDir,
+            integrationTargetSha,
+            branch,
+          })
+        : { commitLog: "", diffStat: "" };
       const { subjectArg, bodyArg } = await buildDeterministicMergeMessage({
         taskId,
         branch,
-        commitLog,
-        diffStat,
+        commitLog: actualContext.commitLog || commitLog,
+        diffStat: actualContext.diffStat || diffStat,
         includeTaskId,
         rootDir,
         settings: params.settings,
