@@ -1694,9 +1694,6 @@ export interface ProjectSettings {
   /** When true, automatically poll and update PR status badges for tasks linked to GitHub PRs.
    *  Default: false. */
   autoUpdatePrStatus?: boolean;
-  /** When true, automatically create GitHub PRs for completed tasks.
-   *  Default: false. */
-  autoCreatePr?: boolean;
   /** When true, automatically post a comment to the originating GitHub issue
    *  when an imported task is moved to done. Default: false. */
   githubCommentOnDone?: boolean;

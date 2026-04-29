@@ -139,7 +139,6 @@ export const DEFAULT_PROJECT_SETTINGS = {
   autoArchiveDoneAfterMs: 48 * 60 * 60 * 1000,
   archiveAgentLogMode: "compact",
   autoUpdatePrStatus: false,
-  autoCreatePr: false,
   githubCommentOnDone: false,
   githubCommentTemplate: undefined,
   autoBackupEnabled: false,

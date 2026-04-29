@@ -53,6 +53,26 @@ export function getTaskBranchName(taskId: string): string {
 }
 
 /**
+ * Push the per-task branch to origin so `gh pr create --head <branch>`
+ * can find it. Idempotent: creates the remote branch on first push and
+ * fast-forwards thereafter. Required because the GitHub PR-create flow
+ * does not implicitly publish the local branch.
+ */
+async function pushTaskBranchToOrigin(cwd: string, branch: string): Promise<void> {
+  try {
+    await execAsync(`git push -u origin "${branch}"`, {
+      cwd,
+      timeout: 60_000,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Failed to push branch "${branch}" to origin before PR creation: ${message}`,
+    );
+  }
+}
+
+/**
  * Build the PR title for a task.
  * Format: "{taskId}: {title}" or just "{taskId}" if no title.
  */
@@ -173,6 +193,12 @@ export async function processPullRequestMergeTask(
     await store.updateTask(task.id, { status: "creating-pr" });
 
     const existingPr = await github.findPrForBranch({ head: branch, state: "all" });
+    if (!existingPr) {
+      // gh pr create / GitHub REST require the head branch to exist on
+      // origin. Nothing else in the merge path publishes the per-task
+      // branch, so we push it here right before creating the PR.
+      await pushTaskBranchToOrigin(cwd, branch);
+    }
     prInfo = existingPr ?? await github.createPr({
       title: buildPullRequestTitle(task),
       body: buildPullRequestBody(task),
