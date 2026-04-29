@@ -4,7 +4,6 @@ import type { MergeDetails, Column } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
 import { fetchTaskDiff, type TaskDiff } from "../api";
 import { highlightDiff } from "../utils/highlightDiff";
-import { truncateMiddle } from "../utils/truncatePath";
 import { ChangesDiffModal } from "./ChangesDiffModal";
 import "./TaskDiffShared.css";
 import "./TaskChangesTab.css";
@@ -244,7 +243,7 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
                     {getStatusLabel("unknown")}
                   </span>
                   <span className="changes-file-path" title={path}>
-                    {truncateMiddle(path, 40)}
+                    <bdo dir="ltr">{path}</bdo>
                   </span>
                 </div>
               </div>
@@ -381,7 +380,7 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
                   {getStatusLabel(file.status)}
                 </span>
                 <span className="changes-file-path" title={file.path}>
-                  {truncateMiddle(file.path, 40)}
+                  <bdo dir="ltr">{file.path}</bdo>
                 </span>
                 <span
                   className="changes-file-stat"

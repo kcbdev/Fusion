@@ -177,6 +177,37 @@ describe("ChangesDiffModal", () => {
     });
   });
 
+  describe("file path display", () => {
+    it("renders full path text inside bdo dir=ltr wrappers", () => {
+      render(<ChangesDiffModal {...defaultProps} />);
+
+      const pathNodes = document.querySelectorAll(".changes-diff-file-path");
+      expect(pathNodes.length).toBeGreaterThan(0);
+
+      for (const node of Array.from(pathNodes)) {
+        const bdo = node.querySelector("bdo");
+        expect(bdo).toBeTruthy();
+        expect(bdo?.getAttribute("dir")).toBe("ltr");
+      }
+
+      expect(screen.getAllByText("src/app.ts").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("src/new-file.ts").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("src/deleted.ts").length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("sets title tooltips on diff file path elements", () => {
+      const { container } = render(<ChangesDiffModal {...defaultProps} />);
+
+      const firstPath = container.querySelector('.changes-diff-file-path[title="src/app.ts"]');
+      const secondPath = container.querySelector('.changes-diff-file-path[title="src/new-file.ts"]');
+      const thirdPath = container.querySelector('.changes-diff-file-path[title="src/deleted.ts"]');
+
+      expect(firstPath).toBeTruthy();
+      expect(secondPath).toBeTruthy();
+      expect(thirdPath).toBeTruthy();
+    });
+  });
+
   describe("file selection", () => {
     it("selects a file when clicking in sidebar", () => {
       render(<ChangesDiffModal {...defaultProps} />);

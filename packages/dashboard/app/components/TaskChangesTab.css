@@ -17,6 +17,11 @@
   margin-left: var(--space-xs);
 }
 
+.task-changes-file-list--compact .changes-file-path {
+  direction: rtl;
+  text-overflow: ellipsis;
+}
+
 .changes-file-header--static {
   cursor: default;
 }

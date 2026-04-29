@@ -972,6 +972,77 @@ describe("TaskChangesTab — compact spacing class", () => {
   });
 });
 
+describe("TaskChangesTab — file path display", () => {
+  it("renders short file paths as full text in bdo wrappers with title tooltips", async () => {
+    mockFetchTaskDiff.mockResolvedValue(DONE_TASK_DIFF);
+
+    const { container } = render(
+      <TaskChangesTab
+        taskId="FN-001"
+        worktree={undefined}
+        column="done"
+        mergeDetails={MERGE_DETAILS}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("src/app.ts")).toBeTruthy();
+    });
+
+    const pathSpan = container.querySelector('.changes-file-path[title="src/app.ts"]');
+    expect(pathSpan).toBeTruthy();
+
+    const bdo = pathSpan?.querySelector("bdo");
+    expect(bdo).toBeTruthy();
+    expect(bdo?.getAttribute("dir")).toBe("ltr");
+    expect(bdo?.textContent).toBe("src/app.ts");
+  });
+
+  it("keeps full long path text inside the bdo element", async () => {
+    const longPath = "packages/dashboard/app/components/VeryLongComponentNameGoesHere.tsx";
+
+    mockFetchTaskDiff.mockResolvedValue({
+      files: [
+        {
+          path: longPath,
+          status: "modified",
+          additions: 1,
+          deletions: 0,
+          patch: "@@ -1 +1,2 @@",
+        },
+      ],
+      stats: { filesChanged: 1, additions: 1, deletions: 0 },
+    });
+
+    const { container } = render(
+      <TaskChangesTab
+        taskId="FN-001"
+        worktree={undefined}
+        column="done"
+        mergeDetails={MERGE_DETAILS}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(longPath)).toBeTruthy();
+    });
+
+    const pathSpan = container.querySelector(`.changes-file-path[title="${longPath}"]`);
+    expect(pathSpan).toBeTruthy();
+    expect(pathSpan?.querySelector("bdo")?.textContent).toBe(longPath);
+  });
+
+  it("applies RTL ellipsis CSS for left truncation", () => {
+    const css = loadAllAppCss();
+    const ruleMatch = css.match(/\.task-changes-file-list--compact\s+\.changes-file-path\s*\{([^}]*)\}/);
+    expect(ruleMatch).toBeTruthy();
+
+    const rule = ruleMatch![1];
+    expect(rule).toContain("direction: rtl;");
+    expect(rule).toContain("text-overflow: ellipsis;");
+  });
+});
+
 describe("TaskChangesTab — action button sizing", () => {
   it("keeps Refresh and expand buttons on the same compact height", () => {
     const css = loadAllAppCss();
