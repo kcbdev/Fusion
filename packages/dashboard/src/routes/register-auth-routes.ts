@@ -37,48 +37,73 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
    */
   const loginInProgress = new Map<string, AbortController>();
 
-  function isSecureRequest(req: { secure?: boolean; headers?: Record<string, string | string[] | undefined> }): boolean {
-    const forwardedProto = req.headers?.["x-forwarded-proto"];
-    const normalizedProto = Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto;
-    return Boolean(req.secure) || normalizedProto === "https";
+  const OAUTH_SESSION_TTL_MS = 5 * 60 * 1000;
+  const oauthSessions = new Map<string, { port: number; path: string; originalRedirectUri: string; expiresAt: number }>();
+
+  function isLocalhostOrigin(origin: string): boolean {
+    try {
+      const url = new URL(origin);
+      return url.hostname === "localhost" || url.hostname === "127.0.0.1";
+    } catch {
+      return false;
+    }
   }
 
-  function rewriteRedirectUri(authUrl: string, reqHost: string, secure: boolean): string {
-    const trimmedHost = reqHost.trim();
-    if (!trimmedHost) {
-      return authUrl;
-    }
+  function simpleErrorHtml(title: string, detail?: string): string {
+    const safeTitle = String(title);
+    const safeDetail = detail ? String(detail) : "";
+    return `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>${safeTitle}</title></head><body><h2>${safeTitle}</h2>${safeDetail ? `<p>${safeDetail}</p>` : ""}<p>You can close this tab.</p></body></html>`;
+  }
 
-    let authUrlObj: URL;
-    try {
-      authUrlObj = new URL(authUrl);
-    } catch {
-      return authUrl;
+  function cleanupExpiredOauthSessions(): void {
+    const now = Date.now();
+    for (const [state, session] of oauthSessions.entries()) {
+      if (session.expiresAt <= now) {
+        oauthSessions.delete(state);
+      }
     }
+  }
 
+  function setOauthSession(state: string, details: { port: number; path: string; originalRedirectUri: string }): void {
+    cleanupExpiredOauthSessions();
+    oauthSessions.set(state, { ...details, expiresAt: Date.now() + OAUTH_SESSION_TTL_MS });
+    const timeout = setTimeout(() => {
+      const current = oauthSessions.get(state);
+      if (current && current.expiresAt <= Date.now()) {
+        oauthSessions.delete(state);
+      }
+    }, OAUTH_SESSION_TTL_MS + 1_000);
+    timeout.unref();
+  }
+
+  function rewriteAuthUrl(authUrl: string, origin: string): { url: string; state: string; originalRedirectUri: string; port: number; path: string } {
+    const authUrlObj = new URL(authUrl);
+    const state = authUrlObj.searchParams.get("state");
     const redirectUri = authUrlObj.searchParams.get("redirect_uri");
+
+    if (!state) {
+      throw badRequest("OAuth provider did not return state in auth URL");
+    }
     if (!redirectUri) {
-      return authUrl;
+      throw badRequest("OAuth provider did not return redirect_uri in auth URL");
     }
 
-    let redirectUriUrl: URL;
-    try {
-      redirectUriUrl = new URL(redirectUri);
-    } catch {
-      return authUrl;
+    const redirectUriUrl = new URL(redirectUri);
+    const port = Number.parseInt(redirectUriUrl.port, 10);
+    if (!Number.isFinite(port) || port <= 0) {
+      throw badRequest("OAuth provider returned invalid callback redirect_uri");
     }
 
-    if (redirectUriUrl.hostname !== "localhost" && redirectUriUrl.hostname !== "127.0.0.1") {
-      return authUrl;
-    }
+    const newRedirectUri = new URL("/api/auth/oauth-callback", origin).toString();
+    authUrlObj.searchParams.set("redirect_uri", newRedirectUri);
 
-    const hostUrl = new URL(`http://${trimmedHost}`);
-    redirectUriUrl.hostname = hostUrl.hostname;
-    redirectUriUrl.port = hostUrl.port;
-    redirectUriUrl.protocol = secure ? "https:" : "http:";
-
-    authUrlObj.searchParams.set("redirect_uri", redirectUriUrl.toString());
-    return authUrlObj.toString();
+    return {
+      url: authUrlObj.toString(),
+      state,
+      originalRedirectUri: redirectUriUrl.toString(),
+      port,
+      path: `${redirectUriUrl.pathname}${redirectUriUrl.search}`,
+    };
   }
 
   /**
@@ -306,9 +331,12 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
    */
   router.post("/auth/login", async (req, res) => {
     try {
-      const { provider } = req.body;
+      const { provider, origin } = req.body;
       if (!provider || typeof provider !== "string") {
         throw badRequest("provider is required");
+      }
+      if (origin !== undefined && typeof origin !== "string") {
+        throw badRequest("origin must be a string when provided");
       }
 
       // Prevent concurrent logins for the same provider
@@ -370,10 +398,18 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
       const authInfo = await authUrlPromise;
       clearTimeout(timeout);
 
-      const reqHost = req.get("host");
-      const rewrittenUrl = reqHost ? rewriteRedirectUri(authInfo.url, reqHost, isSecureRequest(req)) : authInfo.url;
+      let responseUrl = authInfo.url;
+      if (origin && !isLocalhostOrigin(origin)) {
+        const rewritten = rewriteAuthUrl(authInfo.url, origin);
+        setOauthSession(rewritten.state, {
+          port: rewritten.port,
+          path: rewritten.path,
+          originalRedirectUri: rewritten.originalRedirectUri,
+        });
+        responseUrl = rewritten.url;
+      }
 
-      res.json({ url: rewrittenUrl, instructions: authInfo.instructions });
+      res.json({ url: responseUrl, instructions: authInfo.instructions });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;
@@ -381,6 +417,46 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
       // Clean up on error
       const provider = req.body?.provider;
       if (provider) loginInProgress.delete(provider);
+      rethrowAsApiError(err);
+    }
+  });
+
+  router.get("/auth/oauth-callback", async (req, res) => {
+    try {
+      const error = typeof req.query.error === "string" ? req.query.error : undefined;
+      const code = typeof req.query.code === "string" ? req.query.code : undefined;
+      const state = typeof req.query.state === "string" ? req.query.state : undefined;
+
+      if (error) {
+        return res.status(400).type("text/html").send(simpleErrorHtml("OAuth failed", error));
+      }
+
+      if (!code || !state) {
+        return res.status(400).type("text/html").send(simpleErrorHtml("Missing OAuth parameters"));
+      }
+
+      cleanupExpiredOauthSessions();
+      const session = oauthSessions.get(state);
+      if (!session || session.expiresAt <= Date.now()) {
+        oauthSessions.delete(state);
+        return res.status(400).type("text/html").send(simpleErrorHtml("OAuth session expired or not found"));
+      }
+
+      const callbackUrl = new URL(`http://localhost:${session.port}${session.path}`);
+      callbackUrl.searchParams.set("code", code);
+      callbackUrl.searchParams.set("state", state);
+
+      const callbackResponse = await fetch(callbackUrl, { method: "GET" });
+      const responseBody = await callbackResponse.text();
+      const contentType = callbackResponse.headers.get("content-type") ?? "text/html";
+
+      oauthSessions.delete(state);
+
+      return res.status(callbackResponse.status).type(contentType).send(responseBody);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
       rethrowAsApiError(err);
     }
   });

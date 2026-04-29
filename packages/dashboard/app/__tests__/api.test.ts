@@ -948,7 +948,7 @@ describe("loginProvider", () => {
     expect(globalThis.fetch).toHaveBeenCalledWith("/api/auth/login", {
       headers: { "Content-Type": "application/json" },
       method: "POST",
-      body: JSON.stringify({ provider: "anthropic" }),
+      body: JSON.stringify({ provider: "anthropic", origin: window.location.origin }),
     });
   });
 

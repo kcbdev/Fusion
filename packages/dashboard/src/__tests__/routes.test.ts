@@ -4810,49 +4810,55 @@ describe("POST /auth/login", () => {
     expect(res.body.instructions).toBe("Open in browser");
   });
 
-  it("rewrites localhost redirect_uri to request hostname", async () => {
+  it("rewrites redirect_uri to dashboard oauth proxy when origin is non-localhost", async () => {
     (authStorage.login as ReturnType<typeof vi.fn>).mockImplementation((_provider: string, callbacks: any) => {
       callbacks.onAuth({
-        url: "https://accounts.example.com/o/oauth2/v2/auth?redirect_uri=http%3A%2F%2Flocalhost%3A4040%2Fapi%2Fauth%2Fcallback",
+        url: "https://accounts.example.com/o/oauth2/v2/auth?state=test-state&redirect_uri=http%3A%2F%2Flocalhost%3A8085%2Foauth2callback",
         instructions: "Open in browser",
       });
       return Promise.resolve();
     });
 
-    const res = await REQUEST(buildApp(), "POST", "/api/auth/login", JSON.stringify({ provider: "anthropic" }), {
-      "Content-Type": "application/json",
-      Host: "192.168.1.2:8080",
-    });
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/auth/login",
+      JSON.stringify({ provider: "anthropic", origin: "https://my-host.example.com" }),
+      { "Content-Type": "application/json" },
+    );
 
     expect(res.status).toBe(200);
     const returnedUrl = new URL(res.body.url);
-    const redirectUri = new URL(returnedUrl.searchParams.get("redirect_uri") ?? "");
-    expect(redirectUri.toString()).toBe("http://192.168.1.2:8080/api/auth/callback");
+    expect(returnedUrl.searchParams.get("redirect_uri")).toBe("https://my-host.example.com/api/auth/oauth-callback");
   });
 
-  it("rewrites redirect_uri protocol to https when request is secure", async () => {
-    (authStorage.login as ReturnType<typeof vi.fn>).mockImplementation((_provider: string, callbacks: any) => {
-      callbacks.onAuth({
-        url: "https://accounts.example.com/o/oauth2/v2/auth?redirect_uri=http%3A%2F%2Flocalhost%3A4040%2Fapi%2Fauth%2Fcallback",
+  it.each(["http://localhost:4040", "http://127.0.0.1:4040"])(
+    "does not rewrite redirect_uri when origin is local (%s)",
+    async (origin) => {
+      const unchangedUrl =
+        "https://accounts.example.com/o/oauth2/v2/auth?state=test-state&redirect_uri=http%3A%2F%2Flocalhost%3A8085%2Foauth2callback";
+
+      (authStorage.login as ReturnType<typeof vi.fn>).mockImplementation((_provider: string, callbacks: any) => {
+        callbacks.onAuth({ url: unchangedUrl });
+        return Promise.resolve();
       });
-      return Promise.resolve();
-    });
 
-    const res = await REQUEST(buildApp(), "POST", "/api/auth/login", JSON.stringify({ provider: "anthropic" }), {
-      "Content-Type": "application/json",
-      Host: "dashboard.example.com",
-      "X-Forwarded-Proto": "https",
-    });
+      const res = await REQUEST(
+        buildApp(),
+        "POST",
+        "/api/auth/login",
+        JSON.stringify({ provider: "anthropic", origin }),
+        { "Content-Type": "application/json" },
+      );
 
-    expect(res.status).toBe(200);
-    const returnedUrl = new URL(res.body.url);
-    const redirectUri = new URL(returnedUrl.searchParams.get("redirect_uri") ?? "");
-    expect(redirectUri.toString()).toBe("https://dashboard.example.com/api/auth/callback");
-  });
+      expect(res.status).toBe(200);
+      expect(res.body.url).toBe(unchangedUrl);
+    },
+  );
 
-  it("leaves auth URL unchanged when redirect_uri is not localhost", async () => {
+  it("does not rewrite redirect_uri when origin is missing", async () => {
     const unchangedUrl =
-      "https://accounts.example.com/o/oauth2/v2/auth?redirect_uri=https%3A%2F%2Fdashboard.example.com%2Fapi%2Fauth%2Fcallback";
+      "https://accounts.example.com/o/oauth2/v2/auth?state=test-state&redirect_uri=http%3A%2F%2Flocalhost%3A8085%2Foauth2callback";
 
     (authStorage.login as ReturnType<typeof vi.fn>).mockImplementation((_provider: string, callbacks: any) => {
       callbacks.onAuth({ url: unchangedUrl });
@@ -4861,31 +4867,11 @@ describe("POST /auth/login", () => {
 
     const res = await REQUEST(buildApp(), "POST", "/api/auth/login", JSON.stringify({ provider: "anthropic" }), {
       "Content-Type": "application/json",
-      Host: "192.168.1.2:8080",
     });
 
     expect(res.status).toBe(200);
     expect(res.body.url).toBe(unchangedUrl);
   });
-
-  it("leaves auth URL unchanged when Host header is missing", async () => {
-    const unchangedUrl =
-      "https://accounts.example.com/o/oauth2/v2/auth?redirect_uri=http%3A%2F%2Flocalhost%3A4040%2Fapi%2Fauth%2Fcallback";
-
-    (authStorage.login as ReturnType<typeof vi.fn>).mockImplementation((_provider: string, callbacks: any) => {
-      callbacks.onAuth({ url: unchangedUrl });
-      return Promise.resolve();
-    });
-
-    const res = await REQUEST(buildApp(), "POST", "/api/auth/login", JSON.stringify({ provider: "anthropic" }), {
-      "Content-Type": "application/json",
-      Host: "",
-    });
-
-    expect(res.status).toBe(200);
-    expect(res.body.url).toBe(unchangedUrl);
-  });
-
   it("returns 400 when provider is missing", async () => {
     const res = await REQUEST(buildApp(), "POST", "/api/auth/login", JSON.stringify({}), {
       "Content-Type": "application/json",
@@ -4945,6 +4931,76 @@ describe("POST /auth/login", () => {
 
     expect(res.status).toBe(500);
     expect(res.body.error).toBe("OAuth failed");
+  });
+});
+
+describe("GET /auth/oauth-callback", () => {
+  let store: TaskStore;
+  let authStorage: AuthStorageLike;
+
+  beforeEach(() => {
+    store = createMockStore();
+    authStorage = createMockAuthStorage();
+  });
+
+  function buildApp() {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store, { authStorage }));
+    return app;
+  }
+
+  it("proxies callback request to original localhost callback server", async () => {
+    const callbackServer = express();
+    callbackServer.get("/oauth2callback", (req, res) => {
+      res.status(200).type("text/html").send(`proxied:${String(req.query.code)}:${String(req.query.state)}`);
+    });
+
+    const callbackListener = await new Promise<import("node:http").Server>((resolve) => {
+      const listener = callbackServer.listen(0, () => resolve(listener));
+    });
+
+    try {
+      const address = callbackListener.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      expect(port).toBeGreaterThan(0);
+
+      (authStorage.login as ReturnType<typeof vi.fn>).mockImplementation((_provider: string, callbacks: any) => {
+        callbacks.onAuth({
+          url: `https://accounts.example.com/o/oauth2/v2/auth?state=test-state&redirect_uri=${encodeURIComponent(`http://localhost:${port}/oauth2callback`)}`,
+        });
+        return Promise.resolve();
+      });
+
+      const app = buildApp();
+      const loginRes = await REQUEST(
+        app,
+        "POST",
+        "/api/auth/login",
+        JSON.stringify({ provider: "anthropic", origin: "https://remote.example.com" }),
+        { "Content-Type": "application/json" },
+      );
+      expect(loginRes.status).toBe(200);
+
+      const res = await REQUEST(app, "GET", "/api/auth/oauth-callback?code=test-code&state=test-state");
+      expect(res.status).toBe(200);
+      expect(String(res.body)).toContain("proxied:test-code:test-state");
+    } finally {
+      await new Promise<void>((resolve, reject) => callbackListener.close((err) => (err ? reject(err) : resolve())));
+    }
+  });
+
+  it("returns 400 for unknown state", async () => {
+    const res = await REQUEST(buildApp(), "GET", "/api/auth/oauth-callback?code=test-code&state=unknown");
+    expect(res.status).toBe(400);
+    expect(String(res.body)).toContain("OAuth session expired or not found");
+  });
+
+  it("returns 400 with error page when oauth provider reports error", async () => {
+    const res = await REQUEST(buildApp(), "GET", "/api/auth/oauth-callback?error=access_denied&state=test-state");
+    expect(res.status).toBe(400);
+    expect(String(res.body)).toContain("OAuth failed");
+    expect(String(res.body)).toContain("access_denied");
   });
 });
 

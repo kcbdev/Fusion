@@ -1505,7 +1505,7 @@ export function fetchAuthStatus(): Promise<{
 export function loginProvider(provider: string): Promise<{ url: string; instructions?: string }> {
   return api<{ url: string; instructions?: string }>("/auth/login", {
     method: "POST",
-    body: JSON.stringify({ provider }),
+    body: JSON.stringify({ provider, origin: window.location.origin }),
   });
 }
 
