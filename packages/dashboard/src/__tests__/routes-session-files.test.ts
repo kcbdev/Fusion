@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 import type { Task } from "@fusion/core";
+import { createServer } from "../server.js";
 
 vi.mock("node:fs", async () => {
   const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
@@ -101,7 +102,6 @@ describe("GET /api/tasks/:id/session-files", () => {
   it("returns error when task not found", async () => {
     const store = new MockStore();
 
-    const { createServer } = await import("../server.js");
     const app = createServer(store as any);
     const response = await requestSessionFiles(app, "NONEXISTENT");
 
@@ -113,7 +113,6 @@ describe("GET /api/tasks/:id/session-files", () => {
     const store = new MockStore();
     store.addTask(createTask({ id: "FN-675-missing", worktree: undefined }));
 
-    const { createServer } = await import("../server.js");
     const app = createServer(store as any);
     const response = await requestSessionFiles(app, "FN-675-missing");
 
@@ -128,7 +127,6 @@ describe("GET /api/tasks/:id/session-files", () => {
     store.addTask(taskWithMissingWorktree);
     mockExistsSync.mockReturnValue(false);
 
-    const { createServer } = await import("../server.js");
     const app = createServer(store as any);
     const response = await requestSessionFiles(app, "FN-675-noexist");
 

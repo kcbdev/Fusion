@@ -3376,3 +3376,14 @@ export { PROMPT_KEY_CATALOG } from "./prompt-overrides.js";
 // Re-exported here so the dashboard's `@fusion/core` → types.ts alias resolves
 // client-side consumers (see packages/dashboard/vite.config.ts).
 export { getErrorMessage } from "./error-message.js";
+export {
+  resolveExecutionSettingsModel,
+  resolvePlanningSettingsModel,
+  resolveProjectDefaultModel,
+  resolveTaskExecutionModel,
+  resolveTaskPlanningModel,
+  resolveTaskValidatorModel,
+  resolveTitleSummarizerSettingsModel,
+  resolveValidatorSettingsModel,
+} from "./model-resolution.js";
+export type { ResolvedModelSelection } from "./model-resolution.js";

@@ -1875,6 +1875,20 @@ describe("TaskDetailModal", () => {
       expect(header.textContent).toContain("anthropic/claude-sonnet-4-5");
     });
 
+    it("shows the project default override before the global default", async () => {
+      const { container } = await setupModelTest({
+        defaultProviderOverride: "openai",
+        defaultModelIdOverride: "gpt-4o",
+        defaultProvider: "anthropic",
+        defaultModelId: "claude-sonnet-4-5",
+      });
+
+      const header = await openAgentLogAndExpandModelDetails(container);
+      const matches = header.textContent!.match(/openai\/gpt-4o/g);
+      expect(matches).toHaveLength(3);
+      expect(header.textContent).not.toContain("anthropic/claude-sonnet-4-5");
+    });
+
     it("shows resolved validator from project validator settings when task has no validator override", async () => {
       const { container } = await setupModelTest({
         defaultProvider: "anthropic",

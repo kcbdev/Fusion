@@ -1,4 +1,4 @@
-import type { TaskStore, PlanningSummary } from "@fusion/core";
+import { resolvePlanningSettingsModel, type TaskStore, type PlanningSummary } from "@fusion/core";
 import { ApiError, badRequest, notFound, rateLimited } from "../api-error.js";
 import { writeSSEEvent, type SessionBufferedEvent } from "../sse-buffer.js";
 import type { AiSessionStore } from "../ai-session-store.js";
@@ -457,21 +457,18 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
       const rootDir = scopedStore.getRootDir();
 
       // Resolve planning model using canonical lane hierarchy:
-      // 1. Request body planning override (planningModelProvider + planningModelId)
-      // 2. Project planning override (settings.planningProvider + settings.planningModelId)
-      // 3. Global planning lane (settings.planningGlobalProvider + settings.planningGlobalModelId)
-      // 4. Default pair (settings.defaultProvider + settings.defaultModelId)
+      // 1. Request body planning override
+      // 2. Project/global planning lane
+      // 3. Project default override
+      // 4. Global default
+      const resolvedPlanningSettings = resolvePlanningSettingsModel(settings);
       const resolvedPlanningProvider =
         (planningModelProvider && planningModelId ? planningModelProvider : undefined) ||
-        (settings.planningProvider && settings.planningModelId ? settings.planningProvider : undefined) ||
-        (settings.planningGlobalProvider && settings.planningGlobalModelId ? settings.planningGlobalProvider : undefined) ||
-        settings.defaultProvider;
+        resolvedPlanningSettings.provider;
 
       const resolvedPlanningModelId =
         (planningModelProvider && planningModelId ? planningModelId : undefined) ||
-        (settings.planningProvider && settings.planningModelId ? settings.planningModelId : undefined) ||
-        (settings.planningGlobalProvider && settings.planningGlobalModelId ? settings.planningGlobalModelId : undefined) ||
-        settings.defaultModelId;
+        resolvedPlanningSettings.modelId;
 
       const { createSessionWithAgent, RateLimitError: _RateLimitError2 } = await import("../planning.js");
       const sessionId = await createSessionWithAgent(

@@ -1,6 +1,11 @@
 import { createReadStream } from "node:fs";
 import type { TaskStore, Task, TaskDetail, Column } from "@fusion/core";
-import { COLUMNS, VALID_TRANSITIONS, validateNodeOverrideChange } from "@fusion/core";
+import {
+  COLUMNS,
+  VALID_TRANSITIONS,
+  resolveTitleSummarizerSettingsModel,
+  validateNodeOverrideChange,
+} from "@fusion/core";
 import { ApiError, badRequest, notFound } from "../api-error.js";
 import type { ApiRoutesContext } from "./types.js";
 
@@ -143,18 +148,13 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
               const { summarizeTitle } = await import("@fusion/core");
 
               // Resolve model selection hierarchy for summarization:
-              // 1. Project titleSummarizer override (titleSummarizerProvider + titleSummarizerModelId)
-              // 2. Global summarization lane (titleSummarizerGlobalProvider + titleSummarizerGlobalModelId)
-              // 3. Default pair (defaultProvider + defaultModelId)
-              const resolvedProvider =
-                (settings.titleSummarizerProvider && settings.titleSummarizerModelId ? settings.titleSummarizerProvider : undefined) ||
-                (settings.titleSummarizerGlobalProvider && settings.titleSummarizerGlobalModelId ? settings.titleSummarizerGlobalProvider : undefined) ||
-                (settings.defaultProvider && settings.defaultModelId ? settings.defaultProvider : undefined);
-
-              const resolvedModelId =
-                (settings.titleSummarizerProvider && settings.titleSummarizerModelId ? settings.titleSummarizerModelId : undefined) ||
-                (settings.titleSummarizerGlobalProvider && settings.titleSummarizerGlobalModelId ? settings.titleSummarizerGlobalModelId : undefined) ||
-                (settings.defaultProvider && settings.defaultModelId ? settings.defaultModelId : undefined);
+              // 1. Project title summarizer lane
+              // 2. Global title summarizer lane
+              // 3. Project planning lane
+              // 4. Project default override
+              // 5. Global default
+              const { provider: resolvedProvider, modelId: resolvedModelId } =
+                resolveTitleSummarizerSettingsModel(settings);
 
               return await summarizeTitle(desc, scopedStore.getRootDir(), resolvedProvider, resolvedModelId);
             } catch (err) {

@@ -3,7 +3,12 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { fetchModels, updateTask, updateGlobalSettings } from "../api";
 import type { ModelInfo } from "../api";
 import type { Settings, Task, TaskDetail } from "@fusion/core";
-import { getErrorMessage } from "@fusion/core";
+import {
+  getErrorMessage,
+  resolveTaskExecutionModel,
+  resolveTaskPlanningModel,
+  resolveTaskValidatorModel,
+} from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { ProviderIcon } from "./ProviderIcon";
@@ -49,45 +54,21 @@ function resolveEffectiveExecutor(
   task: Task | TaskDetail,
   settings?: Settings,
 ): ModelSelection {
-  if (task.modelProvider && task.modelId) {
-    return { provider: task.modelProvider, modelId: task.modelId };
-  }
-  if (settings?.defaultProvider && settings.defaultModelId) {
-    return { provider: settings.defaultProvider, modelId: settings.defaultModelId };
-  }
-  return {};
+  return resolveTaskExecutionModel(task, settings);
 }
 
 function resolveEffectiveValidator(
   task: Task | TaskDetail,
   settings?: Settings,
 ): ModelSelection {
-  if (task.validatorModelProvider && task.validatorModelId) {
-    return { provider: task.validatorModelProvider, modelId: task.validatorModelId };
-  }
-  if (settings?.validatorProvider && settings.validatorModelId) {
-    return { provider: settings.validatorProvider, modelId: settings.validatorModelId };
-  }
-  if (settings?.defaultProvider && settings.defaultModelId) {
-    return { provider: settings.defaultProvider, modelId: settings.defaultModelId };
-  }
-  return {};
+  return resolveTaskValidatorModel(task, settings);
 }
 
 function resolveEffectivePlanning(
   task: Task | TaskDetail,
   settings?: Settings,
 ): ModelSelection {
-  if (task.planningModelProvider && task.planningModelId) {
-    return { provider: task.planningModelProvider, modelId: task.planningModelId };
-  }
-  if (settings?.planningProvider && settings.planningModelId) {
-    return { provider: settings.planningProvider, modelId: settings.planningModelId };
-  }
-  if (settings?.defaultProvider && settings.defaultModelId) {
-    return { provider: settings.defaultProvider, modelId: settings.defaultModelId };
-  }
-  return {};
+  return resolveTaskPlanningModel(task, settings);
 }
 
 function parseModelValue(value: string): ModelSelection {

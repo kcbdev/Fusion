@@ -196,6 +196,17 @@ export {
   AiServiceError,
   __resetSummarizeState,
 } from "./ai-summarize.js";
+export {
+  resolveExecutionSettingsModel,
+  resolvePlanningSettingsModel,
+  resolveProjectDefaultModel,
+  resolveTaskExecutionModel,
+  resolveTaskPlanningModel,
+  resolveTaskValidatorModel,
+  resolveTitleSummarizerSettingsModel,
+  resolveValidatorSettingsModel,
+} from "./model-resolution.js";
+export type { ResolvedModelSelection } from "./model-resolution.js";
 
 // ── Memory Compaction ─────────────────────────────────────────────────
 

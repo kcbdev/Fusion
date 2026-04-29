@@ -1,9 +1,8 @@
-import { execFile } from "node:child_process";
 import * as fsPromises from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
-import { promisify } from "node:util";
 import { ensureMemoryFileWithBackend } from "@fusion/core";
 import { ApiError, badRequest, notFound } from "../api-error.js";
+import { execFileAsync } from "../exec-file.js";
 import { getOrCreateProjectStore } from "../project-store-resolver.js";
 import type { ApiRouteRegistrar } from "./types.js";
 
@@ -14,8 +13,6 @@ const {
   readdir,
   rm,
 } = fsPromises;
-
-const execFileAsync = promisify(execFile);
 
 export const registerProjectRoutes: ApiRouteRegistrar = (ctx) => {
   const { router, options, runtimeLogger, prioritizeProjectsForCurrentDirectory, rethrowAsApiError } = ctx;

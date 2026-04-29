@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { loadAllAppCss } from "../../test/cssFixture";
 import { resolve } from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -94,18 +93,21 @@ function makePromptOverrides(overrides: Partial<Record<PromptKey, string | null>
 const onChange = vi.fn();
 const onPromptOverridesChange = vi.fn();
 
-const stylesContent = loadAllAppCss();
 const testStylesId = "agent-prompts-manager-test-styles";
+
+function ensureTestStyles(): void {
+  if (document.getElementById(testStylesId)) {
+    return;
+  }
+
+  const styleElement = document.createElement("style");
+  styleElement.id = testStylesId;
+  styleElement.textContent = loadAllAppCss();
+  document.head.appendChild(styleElement);
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
-
-  if (!document.getElementById(testStylesId)) {
-    const styleElement = document.createElement("style");
-    styleElement.id = testStylesId;
-    styleElement.textContent = stylesContent;
-    document.head.appendChild(styleElement);
-  }
 });
 
 describe("AgentPromptsManager", () => {
@@ -223,6 +225,8 @@ describe("AgentPromptsManager", () => {
     });
 
     it("template preview area has scrollable overflow", () => {
+      ensureTestStyles();
+
       render(
         <AgentPromptsManager
           value={defaultConfig}

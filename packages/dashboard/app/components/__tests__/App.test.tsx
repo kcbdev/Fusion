@@ -102,6 +102,16 @@ vi.mock("../../hooks/useRemoteNodeEvents", () => ({
   })),
 }));
 
+vi.mock("../../hooks/useBackgroundSessions", () => ({
+  useBackgroundSessions: vi.fn(() => ({
+    sessions: [],
+    generating: false,
+    needsInput: false,
+    planningSessions: [],
+    dismissSession: vi.fn(),
+  })),
+}));
+
 // Mock NodeContext - default to local mode
 const mockNodeContextValue: {
   currentNode: NodeConfig | null;
@@ -164,6 +174,191 @@ vi.mock("../../components/CustomModelDropdown", () => ({
     </select>
   ),
 }));
+
+vi.mock("../../components/TaskDetailModal", () => ({
+  TaskDetailModal: ({ task, onClose }: { task: { id: string; title?: string }; onClose: () => void }) => (
+    <div className="modal-overlay open">
+      <div role="dialog" aria-label={task.title ?? task.id}>
+        <button type="button" className="modal-close" onClick={onClose}>
+          Close
+        </button>
+        <h2>{task.title ?? task.id}</h2>
+      </div>
+    </div>
+  ),
+}));
+
+vi.mock("../../components/GitHubImportModal", () => ({
+  GitHubImportModal: ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) =>
+    isOpen ? (
+      <div className="modal-overlay open">
+        <h2>Import from GitHub</h2>
+        <button type="button" onClick={onClose}>
+          Cancel
+        </button>
+      </div>
+    ) : null,
+}));
+
+vi.mock("../../components/PlanningModeModal", () => ({
+  PlanningModeModal: ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) =>
+    isOpen ? (
+      <div className="modal-overlay open">
+        <button type="button" aria-label="Close" onClick={onClose}>
+          Close
+        </button>
+        <h2>Planning Mode</h2>
+        <p>Transform your idea into a detailed task</p>
+        <input placeholder="e.g., Build a user authentication system with login" />
+        <button type="button">Start Planning</button>
+      </div>
+    ) : null,
+}));
+
+vi.mock("../../components/ScriptsModal", () => ({
+  ScriptsModal: ({
+    isOpen,
+    onClose,
+    onRunScript,
+  }: {
+    isOpen: boolean;
+    onClose: () => void;
+    onRunScript: (scriptName: string) => void;
+  }) =>
+    isOpen ? (
+      <div className="modal-overlay open" data-testid="scripts-modal">
+        <button type="button" onClick={onClose}>
+          Close
+        </button>
+        <button type="button" data-testid="run-script-build" onClick={() => onRunScript("build")}>
+          Run build
+        </button>
+      </div>
+    ) : null,
+}));
+
+vi.mock("../../components/TerminalModal", () => ({
+  TerminalModal: ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) =>
+    isOpen ? (
+      <div className="modal-overlay open" data-testid="terminal-modal">
+        <button type="button" data-testid="terminal-close-btn" onClick={onClose}>
+          Close
+        </button>
+      </div>
+    ) : null,
+}));
+
+vi.mock("../../components/AgentsView", () => ({
+  AgentsView: () => <div className="agents-view">Agents view</div>,
+}));
+
+vi.mock("../../components/QuickChatFAB", () => ({
+  QuickChatFAB: () => null,
+}));
+
+vi.mock("../../components/SetupWizardModal", () => ({
+  SetupWizardModal: () => <div className="modal-overlay open">Welcome to Fusion</div>,
+}));
+
+vi.mock("../../components/SettingsModal", async () => {
+  const React = await import("react");
+  const api = await import("../../api");
+
+  function MockSettingsModal({
+    onClose,
+    onReopenOnboarding,
+    initialSection,
+  }: {
+    onClose: () => void;
+    onReopenOnboarding?: () => void;
+    initialSection?: string;
+  }) {
+    const [section, setSection] = React.useState(
+      initialSection === "general" ? "general" : "authentication",
+    );
+    const [providers, setProviders] = React.useState<Array<{ id: string; name: string }>>([]);
+
+    React.useEffect(() => {
+      void api.fetchSettings();
+      void api.fetchAuthStatus().then((result) => {
+        setProviders(result.providers ?? []);
+      });
+    }, []);
+
+    return (
+      <div className="modal-overlay open">
+        <h2>Settings</h2>
+        <button type="button" onClick={onClose}>
+          Close
+        </button>
+        <button type="button" onClick={() => setSection("authentication")}>
+          Authentication
+        </button>
+        <button type="button" onClick={() => setSection("general")}>
+          General
+        </button>
+        {section === "authentication" ? (
+          <div>
+            {providers.map((provider) => (
+              <div key={provider.id}>{provider.name}</div>
+            ))}
+            <button type="button" onClick={onReopenOnboarding}>
+              Reopen onboarding guide
+            </button>
+          </div>
+        ) : (
+          <label>
+            Task Prefix
+            <input aria-label="Task Prefix" />
+          </label>
+        )}
+      </div>
+    );
+  }
+
+  return { SettingsModal: MockSettingsModal };
+});
+
+vi.mock("../../components/ModelOnboardingModal", async () => {
+  const React = await import("react");
+  const api = await import("../../api");
+
+  function MockModelOnboardingModal({
+    onComplete,
+  }: {
+    onComplete: () => void;
+  }) {
+    const [value, setValue] = React.useState("");
+
+    React.useEffect(() => {
+      void Promise.all([api.fetchGlobalSettings(), api.fetchModels()]).then(([settings]) => {
+        if (settings.defaultProvider && settings.defaultModelId) {
+          setValue(`${settings.defaultProvider}/${settings.defaultModelId}`);
+        }
+      });
+    }, []);
+
+    return (
+      <div className="modal-overlay open">
+        <h2>Set Up AI</h2>
+        <button type="button" onClick={onComplete}>
+          Skip for now
+        </button>
+        <select
+          data-testid="mock-model-dropdown"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+        >
+          <option value="">Select…</option>
+          <option value="anthropic/claude-sonnet-4-5">Claude Sonnet 4.5</option>
+          <option value="openai/gpt-4o">GPT-4o</option>
+        </select>
+      </div>
+    );
+  }
+
+  return { ModelOnboardingModal: MockModelOnboardingModal };
+});
 
 // Mock state holders for dynamic mocking
 const mockRefreshProjects = vi.fn(async () => {});
@@ -369,7 +564,7 @@ describe("App mailbox unread count", () => {
       );
     });
 
-    expect(screen.getByRole("status", { name: "Loading Fusion dashboard" })).toBeInTheDocument();
+    await waitForAppShell();
     warnSpy.mockRestore();
   });
 

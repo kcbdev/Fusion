@@ -166,9 +166,27 @@ async function waitForSettingsModalReady() {
   });
 }
 
+const MODEL_FIXTURE = [
+  { provider: "anthropic", id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", reasoning: true, contextWindow: 200000 },
+  { provider: "openai", id: "gpt-4o", name: "GPT-4o", reasoning: false, contextWindow: 128000 },
+];
+
 describe("SettingsModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
     mockFetchSettings.mockResolvedValue(defaultSettings);
     mockFetchSettingsByScope.mockResolvedValue({ global: defaultSettings, project: {} });
     mockFetchAuthStatus.mockResolvedValue({ providers: [] });
@@ -368,6 +386,85 @@ describe("SettingsModal", () => {
         );
         expect(enabledCallSeen).toBe(true);
       });
+    });
+  });
+
+  describe("Project Models", () => {
+    it("renders a project-scoped default model lane", async () => {
+      mockFetchSettings.mockResolvedValue({
+        ...defaultSettings,
+        defaultProvider: "anthropic",
+        defaultModelId: "claude-sonnet-4-5",
+      });
+      mockFetchSettingsByScope.mockResolvedValue({
+        global: {
+          ...defaultSettings,
+          defaultProvider: "anthropic",
+          defaultModelId: "claude-sonnet-4-5",
+        },
+        project: {},
+      });
+      mockFetchModels.mockResolvedValue({
+        models: MODEL_FIXTURE,
+        favoriteProviders: [],
+        favoriteModels: [],
+      });
+
+      renderModal();
+      await waitForSettingsModalReady();
+
+      await userEvent.click(screen.getByRole("button", { name: "Project Models" }));
+
+      const defaultSection = screen.getByLabelText("Default Model").closest(".form-group");
+      expect(defaultSection).toBeTruthy();
+      expect(within(defaultSection as HTMLElement).getByText("Inherited (Global)")).toBeInTheDocument();
+    });
+
+    it("saves the project default model override under project scope keys", async () => {
+      mockFetchSettings.mockResolvedValue({
+        ...defaultSettings,
+        defaultProvider: "anthropic",
+        defaultModelId: "claude-sonnet-4-5",
+      });
+      mockFetchSettingsByScope.mockResolvedValue({
+        global: {
+          ...defaultSettings,
+          defaultProvider: "anthropic",
+          defaultModelId: "claude-sonnet-4-5",
+        },
+        project: {},
+      });
+      mockFetchModels.mockResolvedValue({
+        models: MODEL_FIXTURE,
+        favoriteProviders: [],
+        favoriteModels: [],
+      });
+
+      renderModal();
+      await waitForSettingsModalReady();
+
+      await userEvent.click(screen.getByRole("button", { name: "Project Models" }));
+      await userEvent.click(screen.getByLabelText("Default Model"));
+      await userEvent.click(screen.getByText("GPT-4o"));
+      await userEvent.click(screen.getByText("Save"));
+
+      await waitFor(() => {
+        expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
+      });
+
+      expect(mockUpdateSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          defaultProviderOverride: "openai",
+          defaultModelIdOverride: "gpt-4o",
+        }),
+        undefined,
+      );
+
+      if (mockUpdateGlobalSettings.mock.calls.length > 0) {
+        const [globalPayload] = mockUpdateGlobalSettings.mock.calls[0] as [Record<string, unknown>];
+        expect(globalPayload).not.toHaveProperty("defaultProviderOverride");
+        expect(globalPayload).not.toHaveProperty("defaultModelIdOverride");
+      }
     });
   });
 

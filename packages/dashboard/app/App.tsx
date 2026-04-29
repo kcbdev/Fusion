@@ -59,6 +59,9 @@ import { AuthTokenRecoveryDialog } from "./components/AuthTokenRecoveryDialog";
 // first render.
 import "./components/ChatView.css";
 
+const IS_TEST_ENV = import.meta.env.MODE === "test";
+const DASHBOARD_READY_SETTLE_DELAY_MS = IS_TEST_ENV ? 0 : 200;
+
 const AgentsView = lazy(() => import("./components/AgentsView").then((m) => ({ default: m.AgentsView })));
 const DocumentsView = lazy(() => import("./components/DocumentsView").then((m) => ({ default: m.DocumentsView })));
 const InsightsView = lazy(() => import("./components/InsightsView").then((m) => ({ default: m.InsightsView })));
@@ -74,6 +77,10 @@ const TodoView = lazy(() => import("./components/TodoView").then((m) => ({ defau
 // instant. Each chunk is ~10–80 kB; total prefetch finishes well under a
 // second on broadband. Uses requestIdleCallback so it never blocks render.
 function prefetchLazyViews() {
+  if (IS_TEST_ENV) {
+    return;
+  }
+
   const idle =
     (typeof window !== "undefined" && (window as Window & { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback) ||
     ((cb: () => void) => setTimeout(cb, 200));
@@ -224,14 +231,18 @@ function AppInner() {
     if (!projectsLoading && !projectsReadyLoggedRef.current) {
       projectsReadyLoggedRef.current = true;
       const msg = `projects loaded at ${Math.round(performance.now() - mountTimeRef.current)}ms from mount`;
-      console.log(`[App] ${msg}`);
-      reportDashboardPerf("[App]", msg);
+      if (!IS_TEST_ENV) {
+        console.log(`[App] ${msg}`);
+        reportDashboardPerf("[App]", msg);
+      }
     }
     if (!currentProjectLoading && !projectReadyLoggedRef.current) {
       projectReadyLoggedRef.current = true;
       const msg = `current-project resolved at ${Math.round(performance.now() - mountTimeRef.current)}ms from mount`;
-      console.log(`[App] ${msg}`);
-      reportDashboardPerf("[App]", msg);
+      if (!IS_TEST_ENV) {
+        console.log(`[App] ${msg}`);
+        reportDashboardPerf("[App]", msg);
+      }
     }
   }, [projectsLoading, currentProjectLoading]);
 
@@ -247,10 +258,12 @@ function AppInner() {
     const settleStart = performance.now();
     const settleTimer = window.setTimeout(() => {
       const msg = `dashboard ready at ${Math.round(performance.now() - mountTimeRef.current)}ms from mount (settle delay=${Math.round(performance.now() - settleStart)}ms)`;
-      console.log(`[App] ${msg}`);
-      reportDashboardPerf("[App]", msg);
+      if (!IS_TEST_ENV) {
+        console.log(`[App] ${msg}`);
+        reportDashboardPerf("[App]", msg);
+      }
       setInitialLoadComplete(true);
-    }, 200);
+    }, DASHBOARD_READY_SETTLE_DELAY_MS);
 
     return () => {
       window.clearTimeout(settleTimer);

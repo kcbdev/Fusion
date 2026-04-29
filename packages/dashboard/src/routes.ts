@@ -13,7 +13,24 @@ import os from "node:os";
 import v8 from "node:v8";
 
 import type { TaskStore, ScheduleType, ActivityEventType, ModelPreset, RoutineTriggerType } from "@fusion/core";
-import { type Task, type PiExtensionEntry, type PiExtensionSettings, AutomationStore, RoutineStore, isWebhookTrigger, MemoryBackendError, listAgentMemoryFiles, readAgentMemoryFile, writeAgentMemoryFile, discoverPiExtensions, getFusionAgentDir, getLegacyPiAgentDir } from "@fusion/core";
+import {
+  type Task,
+  type PiExtensionEntry,
+  type PiExtensionSettings,
+  AutomationStore,
+  MemoryBackendError,
+  RoutineStore,
+  discoverPiExtensions,
+  getFusionAgentDir,
+  getLegacyPiAgentDir,
+  isWebhookTrigger,
+  listAgentMemoryFiles,
+  readAgentMemoryFile,
+  resolvePlanningSettingsModel,
+  resolveProjectDefaultModel,
+  resolveTitleSummarizerSettingsModel,
+  writeAgentMemoryFile,
+} from "@fusion/core";
 import type { ServerOptions } from "./server.js";
 import { verifyWebhookSignature } from "./github-webhooks.js";
 import { AiSessionStore, SESSION_CLEANUP_DEFAULT_MAX_AGE_MS } from "./ai-session-store.js";
@@ -1576,23 +1593,22 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
       // Resolve model selection hierarchy for summarization:
       // 1. Request body provider+modelId (request override)
-      // 2. Project titleSummarizer override (titleSummarizerProvider + titleSummarizerModelId)
-      // 3. Global summarization lane (titleSummarizerGlobalProvider + titleSummarizerGlobalModelId)
-      // 4. Default pair (defaultProvider + defaultModelId)
-      // 5. Automatic model resolution (no explicit model)
+      // 2. Project title summarizer lane
+      // 3. Global title summarizer lane
+      // 4. Project planning lane
+      // 5. Project default override
+      // 6. Global default
+      // 7. Automatic model resolution (no explicit model)
       const settings = await scopedStore.getSettings();
+      const resolvedSummarySettings = resolveTitleSummarizerSettingsModel(settings);
 
       const resolvedProvider =
         (provider && modelId ? provider : undefined) ||
-        (settings.titleSummarizerProvider && settings.titleSummarizerModelId ? settings.titleSummarizerProvider : undefined) ||
-        (settings.titleSummarizerGlobalProvider && settings.titleSummarizerGlobalModelId ? settings.titleSummarizerGlobalProvider : undefined) ||
-        (settings.defaultProvider && settings.defaultModelId ? settings.defaultProvider : undefined);
+        resolvedSummarySettings.provider;
 
       const resolvedModelId =
         (provider && modelId ? modelId : undefined) ||
-        (settings.titleSummarizerProvider && settings.titleSummarizerModelId ? settings.titleSummarizerModelId : undefined) ||
-        (settings.titleSummarizerGlobalProvider && settings.titleSummarizerGlobalModelId ? settings.titleSummarizerGlobalModelId : undefined) ||
-        (settings.defaultProvider && settings.defaultModelId ? settings.defaultModelId : undefined);
+        resolvedSummarySettings.modelId;
 
       if (process.env.FUSION_DEBUG_AI) {
         summarizeDiagnostics.info("Summarize title model resolved", {
@@ -2717,24 +2733,18 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         if (!createFnAgent) {
           throw new Error("createFnAgent is not available");
         }
+        const planningModel = resolvePlanningSettingsModel(settings);
         const { session } = await createFnAgent({
           cwd: scopedStore.getRootDir(),
           systemPrompt,
           tools: "readonly",
           // Resolve planning model using canonical lane hierarchy:
-          // 1. Project planning override (planningProvider + planningModelId)
-          // 2. Global planning lane (planningGlobalProvider + planningGlobalModelId)
-          // 3. Default pair (defaultProvider + defaultModelId)
-          defaultProvider: (settings.planningProvider && settings.planningModelId
-            ? settings.planningProvider
-            : (settings.planningGlobalProvider && settings.planningGlobalModelId
-                ? settings.planningGlobalProvider
-                : settings.defaultProvider)),
-          defaultModelId: (settings.planningProvider && settings.planningModelId
-            ? settings.planningModelId
-            : (settings.planningGlobalProvider && settings.planningGlobalModelId
-                ? settings.planningGlobalModelId
-                : settings.defaultModelId)),
+          // 1. Project planning lane
+          // 2. Global planning lane
+          // 3. Project default override
+          // 4. Global default
+          defaultProvider: planningModel.provider,
+          defaultModelId: planningModel.modelId,
           defaultThinkingLevel: settings.defaultThinkingLevel,
         });
 
@@ -4071,8 +4081,9 @@ async function executeAiPromptStep(
 
   const { createFnAgent, promptWithFallback } = await import("@fusion/engine");
   const settings = await taskStore.getSettings();
-  const modelProvider = step.modelProvider?.trim() || settings.defaultProvider;
-  const modelId = step.modelId?.trim() || settings.defaultModelId;
+  const defaultModel = resolveProjectDefaultModel(settings);
+  const modelProvider = step.modelProvider?.trim() || defaultModel.provider;
+  const modelId = step.modelId?.trim() || defaultModel.modelId;
   let responseText = "";
 
   const { session } = await createFnAgent({
@@ -4263,4 +4274,3 @@ async function executeScheduleSteps(
     stepResults,
   };
 }
-

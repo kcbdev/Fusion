@@ -1,8 +1,16 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import type { TaskStore } from "@fusion/core";
-import type { AutomationStore } from "@fusion/core";
-import type { ScheduledTask, AutomationRunResult, AutomationStep, AutomationStepResult, Column, TaskCreateInput } from "@fusion/core";
+import {
+  resolveProjectDefaultModel,
+  type TaskStore,
+  type AutomationStore,
+  type ScheduledTask,
+  type AutomationRunResult,
+  type AutomationStep,
+  type AutomationStepResult,
+  type Column,
+  type TaskCreateInput,
+} from "@fusion/core";
 import { createLogger } from "./logger.js";
 import { defaultShell } from "./shell-utils.js";
 import { createFnAgent, promptWithFallback } from "./pi.js";
@@ -494,10 +502,11 @@ export class CronRunner {
       };
     }
 
-    // Resolve model: step override → settings default
+    // Resolve model: step override → project default override → global default
     const settings = await this.store.getSettings();
-    const modelProvider = step.modelProvider?.trim() || settings.defaultProvider;
-    const modelId = step.modelId?.trim() || settings.defaultModelId;
+    const defaultModel = resolveProjectDefaultModel(settings);
+    const modelProvider = step.modelProvider?.trim() || defaultModel.provider;
+    const modelId = step.modelId?.trim() || defaultModel.modelId;
 
     const model = modelProvider && modelId
       ? `${modelProvider}/${modelId}`

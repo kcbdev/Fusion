@@ -1,6 +1,14 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense, type MouseEvent } from "react";
 import { Globe, Folder, RefreshCw, Star, HelpCircle, Loader2 } from "lucide-react";
-import { THINKING_LEVELS, isGlobalSettingsKey, isProjectSettingsKey, getErrorMessage } from "@fusion/core";
+import {
+  THINKING_LEVELS,
+  getErrorMessage,
+  isGlobalSettingsKey,
+  isProjectSettingsKey,
+  resolvePlanningSettingsModel,
+  resolveProjectDefaultModel,
+  resolveTitleSummarizerSettingsModel,
+} from "@fusion/core";
 import type { Settings, GlobalSettings, ThemeMode, ColorTheme, ModelPreset, NtfyNotificationEvent, AgentPromptsConfig, ThinkingLevel } from "@fusion/core";
 import { fetchSettings, fetchSettingsByScope, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, saveApiKey, clearApiKey, fetchModels, testNotification, fetchBackups, createBackup, exportSettings, importSettings, fetchMemoryFile, fetchMemoryFiles, saveMemoryFile, compactMemory, fetchGlobalConcurrency, updateGlobalConcurrency, installQmd, testMemoryRetrieval, triggerMemoryDreams, fetchGitRemotesDetailed, fetchDashboardHealth, checkForUpdates, fetchRemoteSettings, updateRemoteSettings, fetchRemoteStatus, startRemoteTunnel, stopRemoteTunnel, regenerateRemotePersistentToken, generateShortLivedRemoteToken, fetchRemoteQr, fetchRemoteUrl } from "../api";
 import type { AuthProvider, ModelInfo, BackupListResponse, SettingsExportData, MemoryFileInfo, MemoryRetrievalTestResult, GitRemoteDetailed, RemoteSettings, RemoteStatus, UpdateCheckResponse } from "../api";
@@ -1122,7 +1130,7 @@ export function SettingsModal({
       projectProviderKey: "titleSummarizerProvider",
       projectModelKey: "titleSummarizerModelId",
       helperText: "AI model used for auto-generating task titles from descriptions.",
-      fallbackOrder: "Project override → Global summarization lane → Global planning lane → Global default lane → Automatic resolution",
+        fallbackOrder: "Project override → Global summarization lane → Project planning lane → Project default lane → Global default lane → Automatic resolution",
     },
   ];
 
@@ -1862,11 +1870,18 @@ export function SettingsModal({
         const presetOptions = presets.map((preset) => ({ id: preset.id, name: preset.name }));
         const inUsePresetIds = new Set(Object.values(form.defaultPresetBySize || {}).filter(Boolean));
 
-        // Filter model lanes to show in project scope (execution, planning, validator, summarization)
-        // Default lane is global-only
+        // Filter model lanes to show in project scope.
         const projectModelLanes = MODEL_LANES.filter(
-          (lane) => lane.laneId === "execution" || lane.laneId === "planning" || lane.laneId === "validator" || lane.laneId === "summarization",
+          (lane) =>
+            lane.laneId === "default"
+            || lane.laneId === "execution"
+            || lane.laneId === "planning"
+            || lane.laneId === "validator"
+            || lane.laneId === "summarization",
         );
+        const resolvedPlanningModel = resolvePlanningSettingsModel(form);
+        const resolvedDefaultModel = resolveProjectDefaultModel(form);
+        const resolvedTitleSummarizerModel = resolveTitleSummarizerSettingsModel(form);
 
         return (
           <>
@@ -2301,11 +2316,17 @@ export function SettingsModal({
                   <small>
                     {form.titleSummarizerProvider && form.titleSummarizerModelId
                       ? "Using explicitly configured model"
-                      : form.planningProvider && form.planningModelId
-                        ? "(using planning model)"
-                        : form.defaultProvider && form.defaultModelId
-                          ? "(using default model)"
-                          : "(using automatic model selection)"}
+                      : resolvedTitleSummarizerModel.provider && resolvedTitleSummarizerModel.modelId
+                        ? resolvedTitleSummarizerModel.provider === resolvedPlanningModel.provider
+                          && resolvedTitleSummarizerModel.modelId === resolvedPlanningModel.modelId
+                          ? "(using planning model)"
+                          : resolvedTitleSummarizerModel.provider === resolvedDefaultModel.provider
+                            && resolvedTitleSummarizerModel.modelId === resolvedDefaultModel.modelId
+                            ? form.defaultProviderOverride && form.defaultModelIdOverride
+                              ? "(using project default model)"
+                              : "(using global default model)"
+                            : "(using global summarization model)"
+                        : "(using automatic model selection)"}
                   </small>
                 </div>
 
@@ -2317,11 +2338,11 @@ export function SettingsModal({
                       onClick={() =>
                         setForm((f) => ({
                           ...f,
-                          titleSummarizerProvider: f.planningProvider,
-                          titleSummarizerModelId: f.planningModelId,
+                          titleSummarizerProvider: resolvedPlanningModel.provider,
+                          titleSummarizerModelId: resolvedPlanningModel.modelId,
                         }))
                       }
-                      disabled={!form.planningProvider || !form.planningModelId}
+                      disabled={!resolvedPlanningModel.provider || !resolvedPlanningModel.modelId}
                     >
                       Use planning model
                     </button>
@@ -2331,11 +2352,11 @@ export function SettingsModal({
                       onClick={() =>
                         setForm((f) => ({
                           ...f,
-                          titleSummarizerProvider: f.defaultProvider,
-                          titleSummarizerModelId: f.defaultModelId,
+                          titleSummarizerProvider: resolvedDefaultModel.provider,
+                          titleSummarizerModelId: resolvedDefaultModel.modelId,
                         }))
                       }
-                      disabled={!form.defaultProvider || !form.defaultModelId}
+                      disabled={!resolvedDefaultModel.provider || !resolvedDefaultModel.modelId}
                     >
                       Use default model
                     </button>

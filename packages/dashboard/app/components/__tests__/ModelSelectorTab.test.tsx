@@ -192,6 +192,27 @@ describe("ModelSelectorTab", () => {
     expect(within(executorSection!).getByText("Using default (anthropic/claude-sonnet-4-5)")).toBeInTheDocument();
   });
 
+  it("prefers the project default override over the global default in resolved badges", async () => {
+    render(
+      <ModelSelectorTab
+        task={FAKE_TASK}
+        addToast={mockAddToast}
+        settings={makeSettings({
+          defaultProviderOverride: "openai",
+          defaultModelIdOverride: "gpt-4o",
+          defaultProvider: "anthropic",
+          defaultModelId: "claude-sonnet-4-5",
+        })}
+      />,
+    );
+
+    await waitForSelectors();
+
+    expect(within(getSection("Executor Model")!).getByText("Using default (openai/gpt-4o)")).toBeInTheDocument();
+    expect(within(getSection("Reviewer Model")!).getByText("Using default (openai/gpt-4o)")).toBeInTheDocument();
+    expect(within(getSection("Planning Model")!).getByText("Using default (openai/gpt-4o)")).toBeInTheDocument();
+  });
+
   it("shows 'Using default' without resolution when settings prop is undefined", async () => {
     render(<ModelSelectorTab task={FAKE_TASK} addToast={mockAddToast} />);
 

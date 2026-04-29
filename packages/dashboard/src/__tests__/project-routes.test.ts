@@ -6,7 +6,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Task } from "@fusion/core";
 import { request } from "../test-request.js";
-import { createServer } from "../server.js";
 
 // Use vi.hoisted() for mock functions that need to be accessible in hoisted vi.mock calls
 const {
@@ -15,7 +14,7 @@ const {
   mockFsReaddir,
   mockFsMkdir,
   mockFsRm,
-  mockExecFile,
+  mockExecFileAsync,
   mockListProjects,
   mockGetProject,
   mockRegisterProject,
@@ -38,10 +37,7 @@ const {
   mockFsReaddir: vi.fn().mockResolvedValue([]),
   mockFsMkdir: vi.fn().mockResolvedValue(undefined),
   mockFsRm: vi.fn().mockResolvedValue(undefined),
-  mockExecFile: vi.fn((_file, _args, optsOrCallback, maybeCallback) => {
-    const callback = typeof optsOrCallback === "function" ? optsOrCallback : maybeCallback;
-    callback?.(null, "", "");
-  }),
+  mockExecFileAsync: vi.fn().mockResolvedValue({ stdout: "", stderr: "" }),
   mockListProjects: vi.fn().mockResolvedValue([]),
   mockGetProject: vi.fn().mockResolvedValue(null),
   mockRegisterProject: vi.fn().mockResolvedValue({
@@ -117,13 +113,9 @@ vi.mock("node:fs/promises", async () => {
   };
 });
 
-vi.mock("node:child_process", async () => {
-  const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
-  return {
-    ...actual,
-    execFile: mockExecFile,
-  };
-});
+vi.mock("../exec-file.js", () => ({
+  execFileAsync: (...args: unknown[]) => mockExecFileAsync(...args),
+}));
 
 vi.mock("@fusion/core", async () => {
   const actual = await vi.importActual<typeof import("@fusion/core")>("@fusion/core");
@@ -192,6 +184,11 @@ function mockFetchResponse(
     json: () => Promise.resolve(body),
     text: () => Promise.resolve(bodyText),
   } as unknown as Response);
+}
+
+async function createApp(store: unknown) {
+  const { createServer } = await import("../server.js");
+  return createServer(store as any);
 }
 
 describe("Project Routes API Functions", () => {
@@ -602,10 +599,7 @@ describe("POST /api/projects route handler", () => {
     mockFsReaddir.mockResolvedValue([]);
     mockFsMkdir.mockResolvedValue(undefined);
     mockFsRm.mockResolvedValue(undefined);
-    mockExecFile.mockImplementation((_file, _args, optsOrCallback, maybeCallback) => {
-      const callback = typeof optsOrCallback === "function" ? optsOrCallback : maybeCallback;
-      callback?.(null, "", "");
-    });
+    mockExecFileAsync.mockResolvedValue({ stdout: "", stderr: "" });
 
     // Reset mocks to default values for route handler tests
     mockRegisterProject.mockResolvedValue({
@@ -631,7 +625,7 @@ describe("POST /api/projects route handler", () => {
 
   it("calls updateProject with status 'active' after registration", async () => {
     const store = new MockStoreForRoutes();
-    const app = createServer(store as any);
+    const app = await createApp(store);
 
     const res = await request(
       app,
@@ -653,7 +647,7 @@ describe("POST /api/projects route handler", () => {
 
   it("passes nodeId to registerProject when provided", async () => {
     const store = new MockStoreForRoutes();
-    const app = createServer(store as any);
+    const app = await createApp(store);
 
     const res = await request(
       app,
@@ -678,7 +672,7 @@ describe("POST /api/projects route handler", () => {
 
   it("calls ensureMemoryFileWithBackend after project activation", async () => {
     const store = new MockStoreForRoutes();
-    const app = createServer(store as any);
+    const app = await createApp(store);
     mockEnsureMemoryFileWithBackend.mockResolvedValue(true);
 
     const res = await request(
@@ -697,7 +691,7 @@ describe("POST /api/projects route handler", () => {
 
   it("returns 201 even when memory bootstrap fails", async () => {
     const store = new MockStoreForRoutes();
-    const app = createServer(store as any);
+    const app = await createApp(store);
     mockEnsureMemoryFileWithBackend.mockRejectedValue(new Error("disk full"));
 
     const res = await request(
@@ -715,7 +709,7 @@ describe("POST /api/projects route handler", () => {
 
   it("clones and registers when cloneUrl is provided", async () => {
     const store = new MockStoreForRoutes();
-    const app = createServer(store as any);
+    const app = await createApp(store);
 
     const tempRoot = mkdtempSync(join(tmpdir(), "fn-2310-clone-"));
     const bareRepo = join(tempRoot, "remote.git");
@@ -750,13 +744,12 @@ describe("POST /api/projects route handler", () => {
 
   it("returns clone failure and skips registration when git clone fails", async () => {
     const store = new MockStoreForRoutes();
-    const app = createServer(store as any);
-
-    mockExecFile.mockImplementation((_file, _args, optsOrCallback, maybeCallback) => {
-      const callback = typeof optsOrCallback === "function" ? optsOrCallback : maybeCallback;
-      const cloneError = Object.assign(new Error("git exited with code 128"), { stderr: "fatal: repository not found" });
-      callback?.(cloneError, "", "fatal: repository not found");
-    });
+    const app = await createApp(store);
+    mockExecFileAsync.mockRejectedValueOnce(
+      Object.assign(new Error("git exited with code 128"), {
+        stderr: "fatal: repository not found",
+      }),
+    );
 
     const res = await request(
       app,
@@ -778,7 +771,7 @@ describe("POST /api/projects route handler", () => {
 
   it("rejects clone mode when destination directory is non-empty", async () => {
     const store = new MockStoreForRoutes();
-    const app = createServer(store as any);
+    const app = await createApp(store);
 
     mockFsStat.mockResolvedValue({ isDirectory: () => true } as import("node:fs").Stats);
     mockFsReaddir.mockResolvedValue(["README.md"]);
@@ -797,13 +790,13 @@ describe("POST /api/projects route handler", () => {
 
     expect(res.status).toBe(400);
     expect((res.body as { error?: string }).error).toContain("Clone destination must be empty");
-    expect(mockExecFile).not.toHaveBeenCalled();
+    expect(mockExecFileAsync).not.toHaveBeenCalled();
     expect(mockRegisterProject).not.toHaveBeenCalled();
   });
 
   it("rejects clone mode when cloneUrl is blank", async () => {
     const store = new MockStoreForRoutes();
-    const app = createServer(store as any);
+    const app = await createApp(store);
 
     const res = await request(
       app,
@@ -819,12 +812,12 @@ describe("POST /api/projects route handler", () => {
 
     expect(res.status).toBe(400);
     expect((res.body as { error?: string }).error).toContain("cloneUrl must be a non-empty string");
-    expect(mockExecFile).not.toHaveBeenCalled();
+    expect(mockExecFileAsync).not.toHaveBeenCalled();
   });
 
   it("rejects clone mode destination path with null-byte input", async () => {
     const store = new MockStoreForRoutes();
-    const app = createServer(store as any);
+    const app = await createApp(store);
 
     const res = await request(
       app,
@@ -840,7 +833,7 @@ describe("POST /api/projects route handler", () => {
 
     expect(res.status).toBe(400);
     expect((res.body as { error?: string }).error).toContain("path cannot contain null bytes");
-    expect(mockExecFile).not.toHaveBeenCalled();
+    expect(mockExecFileAsync).not.toHaveBeenCalled();
   });
 });
 
@@ -851,7 +844,7 @@ describe("GET /api/projects route handler", () => {
 
   it("calls reconcileProjectStatuses before listing projects", async () => {
     const store = new MockStoreForRoutes();
-    const app = createServer(store as any);
+    const app = await createApp(store);
 
     mockReconcileProjectStatuses.mockResolvedValue([]);
     mockListProjects.mockResolvedValue([
@@ -877,7 +870,7 @@ describe("GET /api/projects route handler", () => {
 
   it("returns healed status after reconciliation promotes stale projects", async () => {
     const store = new MockStoreForRoutes();
-    const app = createServer(store as any);
+    const app = await createApp(store);
 
     // Simulate reconciliation promoting one stale project
     mockReconcileProjectStatuses.mockResolvedValue([
@@ -910,7 +903,7 @@ describe("PUT /api/global-concurrency route handler", () => {
 
   it("updates the central global concurrency limit", async () => {
     const store = new MockStoreForRoutes();
-    const app = createServer(store as any);
+    const app = await createApp(store);
 
     const res = await request(
       app,
@@ -927,7 +920,7 @@ describe("PUT /api/global-concurrency route handler", () => {
 
   it("rejects globalMaxConcurrent above 10000", async () => {
     const store = new MockStoreForRoutes();
-    const app = createServer(store as any);
+    const app = await createApp(store);
 
     const res = await request(
       app,
@@ -997,7 +990,7 @@ describe("GET /api/projects/:id/health route handler", () => {
     });
 
     const defaultStore = new MockStoreForRoutes();
-    const app = createServer(defaultStore as any);
+    const app = await createApp(defaultStore);
 
     const res = await request(app, "GET", "/api/projects/proj_a/health");
 
@@ -1039,7 +1032,7 @@ describe("GET /api/projects/:id/health route handler", () => {
     });
 
     const defaultStore = new MockStoreForRoutes();
-    const app = createServer(defaultStore as any);
+    const app = await createApp(defaultStore);
 
     // Request health for project A
     mockGetProject.mockResolvedValue({
@@ -1132,7 +1125,7 @@ describe("GET /api/projects/:id/health route handler", () => {
     });
 
     const defaultStore = new MockStoreForRoutes();
-    const app = createServer(defaultStore as any);
+    const app = await createApp(defaultStore);
 
     // Should NOT return 404 - should synthesize valid health from project store
     const res = await request(app, "GET", "/api/projects/proj_new/health");
@@ -1176,7 +1169,7 @@ describe("GET /api/projects/:id/health route handler", () => {
     });
 
     const defaultStore = new MockStoreForRoutes();
-    const app = createServer(defaultStore as any);
+    const app = await createApp(defaultStore);
 
     const res = await request(app, "GET", "/api/projects/proj_test/health");
 

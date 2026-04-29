@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import type { Task } from "@fusion/core";
+import { createServer } from "../server.js";
 import { resolveDiffBase } from "../routes.js";
 import { resolveTaskDiffBaseRef } from "../../../engine/src/merger.js";
 
@@ -107,7 +108,6 @@ describe("GET /api/tasks/:id/file-diffs", () => {
   it("returns error when task not found", async () => {
     const store = new MockStore();
 
-    const { createServer } = await import("../server.js");
     const app = createServer(store as any);
     const response = await requestFileDiffs(app, "NONEXISTENT");
 
@@ -119,7 +119,6 @@ describe("GET /api/tasks/:id/file-diffs", () => {
     const store = new MockStore();
     store.addTask(createTask({ worktree: undefined }));
 
-    const { createServer } = await import("../server.js");
     const app = createServer(store as any);
     const response = await requestFileDiffs(app);
 
@@ -134,7 +133,6 @@ describe("GET /api/tasks/:id/file-diffs", () => {
     store.addTask(taskWithMissingWorktree);
     mockExistsSync.mockReturnValue(false);
 
-    const { createServer } = await import("../server.js");
     const app = createServer(store as any);
     const response = await requestFileDiffs(app);
 
@@ -146,7 +144,6 @@ describe("GET /api/tasks/:id/file-diffs", () => {
     const store = new MockStore();
     store.addTask(createTask({ baseBranch: "main", baseCommitSha: "taskbase456" }));
 
-    const { createServer } = await import("../server.js");
     const app = createServer(store as any);
     const response = await requestFileDiffs(app);
 
@@ -162,7 +159,6 @@ describe("GET /api/tasks/:id/file-diffs", () => {
       worktree: undefined,
     }));
 
-    const { createServer } = await import("../server.js");
     const app = createServer(store as any);
     const response = await requestFileDiffs(app);
 

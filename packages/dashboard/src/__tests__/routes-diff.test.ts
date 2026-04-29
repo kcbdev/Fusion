@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 import type { Task } from "@fusion/core";
 import * as fs from "node:fs";
+import { createServer } from "../server.js";
 
 vi.mock("node:fs", async () => {
   const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
@@ -98,7 +99,6 @@ describe("GET /api/tasks/:id/diff", () => {
   it("returns 404 when task not found", async () => {
     const store = new MockStore();
 
-    const { createServer } = await import("../server.js");
     const app = createServer(store as any);
     const response = await requestDiff(app, "NONEXISTENT");
 
@@ -109,7 +109,6 @@ describe("GET /api/tasks/:id/diff", () => {
     const store = new MockStore();
     store.addTask(createTask({ baseBranch: "develop" }));
 
-    const { createServer } = await import("../server.js");
     const app = createServer(store as any);
     const response = await requestDiff(app);
 
@@ -135,7 +134,6 @@ describe("GET /api/tasks/:id/diff — done tasks", () => {
       mergeDetails: { commitSha: "broken_sha" },
     }));
 
-    const { createServer } = await import("../server.js");
     const app = createServer(store as any);
     const response = await requestDiff(app);
 
@@ -150,7 +148,6 @@ describe("GET /api/tasks/:id/diff — done tasks", () => {
       mergeDetails: undefined,
     }));
 
-    const { createServer } = await import("../server.js");
     const app = createServer(store as any);
     const response = await requestDiff(app);
 
@@ -176,7 +173,6 @@ describe("GET /api/tasks/:id/diff — in-progress tasks without valid worktree",
       worktree: null as any,
     }));
 
-    const { createServer } = await import("../server.js");
     const app = createServer(store as any);
     const response = await requestDiff(app);
 
@@ -194,7 +190,6 @@ describe("GET /api/tasks/:id/diff — in-progress tasks without valid worktree",
       worktree: undefined,
     }));
 
-    const { createServer } = await import("../server.js");
     const app = createServer(store as any);
     const response = await requestDiff(app);
 
@@ -220,7 +215,6 @@ describe("GET /api/tasks/:id/diff — in-progress tasks without valid worktree",
       return true;
     });
 
-    const { createServer } = await import("../server.js");
     const app = createServer(store as any);
     const response = await requestDiff(app);
 
@@ -240,7 +234,6 @@ describe("GET /api/tasks/:id/diff — in-progress tasks without valid worktree",
 
     mockExistsSync.mockReturnValue(true);
 
-    const { createServer } = await import("../server.js");
     const app = createServer(store as any);
     const response = await requestDiff(app);
 
@@ -263,7 +256,6 @@ describe("GET /api/tasks/:id/diff — in-progress tasks without valid worktree",
       return true;
     });
 
-    const { createServer } = await import("../server.js");
     const app = createServer(store as any);
     const response = await requestDiff(app, "FN-679", "/tmp/query-worktree-does-not-exist");
 

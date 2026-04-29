@@ -23,6 +23,8 @@ import {
   readProjectMemoryFileContent,
   refreshQmdProjectMemoryIndex,
   resolveMemoryBackend,
+  resolvePlanningSettingsModel,
+  resolveTitleSummarizerSettingsModel,
   scheduleQmdProjectMemoryRefresh,
   searchProjectMemory,
   syncBackupRoutine,
@@ -932,19 +934,13 @@ export function registerSettingsMemoryRoutes(ctx: ApiRoutesContext, deps: Settin
       }
 
       // Resolve model selection hierarchy for compaction:
-      // 1. Project titleSummarizer override (titleSummarizerProvider + titleSummarizerModelId)
-      // 2. Planning lane settings (planningProvider + planningModelId)
-      // 3. Default pair (defaultProvider + defaultModelId)
-      // 4. Automatic model resolution (no explicit model)
-      const resolvedProvider =
-        (settings.titleSummarizerProvider && settings.titleSummarizerModelId ? settings.titleSummarizerProvider : undefined) ||
-        (settings.planningProvider && settings.planningModelId ? settings.planningProvider : undefined) ||
-        (settings.defaultProvider && settings.defaultModelId ? settings.defaultProvider : undefined);
-
-      const resolvedModelId =
-        (settings.titleSummarizerProvider && settings.titleSummarizerModelId ? settings.titleSummarizerModelId : undefined) ||
-        (settings.planningProvider && settings.planningModelId ? settings.planningModelId : undefined) ||
-        (settings.defaultProvider && settings.defaultModelId ? settings.defaultModelId : undefined);
+      // 1. Project title summarizer lane
+      // 2. Global title summarizer lane
+      // 3. Project planning lane
+      // 4. Project default override
+      // 5. Global default
+      const { provider: resolvedProvider, modelId: resolvedModelId } =
+        resolveTitleSummarizerSettingsModel(settings);
 
       // Import and call the compaction service
       const { compactMemoryWithAi } = await import("@fusion/core");
@@ -1005,15 +1001,8 @@ export function registerSettingsMemoryRoutes(ctx: ApiRoutesContext, deps: Settin
         throw new ApiError(400, "Memory dreams are disabled. Enable dream processing in memory settings first.");
       }
 
-      const resolvedProvider =
-        (settings.titleSummarizerProvider && settings.titleSummarizerModelId ? settings.titleSummarizerProvider : undefined) ||
-        (settings.planningProvider && settings.planningModelId ? settings.planningProvider : undefined) ||
-        (settings.defaultProvider && settings.defaultModelId ? settings.defaultProvider : undefined);
-
-      const resolvedModelId =
-        (settings.titleSummarizerProvider && settings.titleSummarizerModelId ? settings.titleSummarizerModelId : undefined) ||
-        (settings.planningProvider && settings.planningModelId ? settings.planningModelId : undefined) ||
-        (settings.defaultProvider && settings.defaultModelId ? settings.defaultModelId : undefined);
+      const { provider: resolvedProvider, modelId: resolvedModelId } =
+        resolveTitleSummarizerSettingsModel(settings);
 
       const executePrompt: DreamPromptExecutor = async (prompt: string) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1183,14 +1172,13 @@ export function registerSettingsMemoryRoutes(ctx: ApiRoutesContext, deps: Settin
       // Build the extraction prompt
       const extractionPrompt = buildInsightExtractionPrompt(workingMemory, existingInsights ?? "");
 
-      // Resolve model selection hierarchy for insight extraction
-      const resolvedProvider =
-        (settings.planningProvider && settings.planningModelId ? settings.planningProvider : undefined) ||
-        (settings.defaultProvider && settings.defaultModelId ? settings.defaultProvider : undefined);
-
-      const resolvedModelId =
-        (settings.planningProvider && settings.planningModelId ? settings.planningModelId : undefined) ||
-        (settings.defaultProvider && settings.defaultModelId ? settings.defaultModelId : undefined);
+      // Resolve model selection hierarchy for insight extraction:
+      // 1. Project planning lane
+      // 2. Global planning lane
+      // 3. Project default override
+      // 4. Global default
+      const { provider: resolvedProvider, modelId: resolvedModelId } =
+        resolvePlanningSettingsModel(settings);
 
       // Create AI agent session for extraction
       const agentResult = await createFnAgentForInsights({

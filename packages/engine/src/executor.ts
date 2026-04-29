@@ -6,7 +6,13 @@ import { isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext } from "@fusion/core";
-import { buildExecutionMemoryInstructions, getTaskMergeBlocker, resolveAgentPrompt, type RunCommandResult } from "@fusion/core";
+import {
+  buildExecutionMemoryInstructions,
+  getTaskMergeBlocker,
+  resolveAgentPrompt,
+  resolveProjectDefaultModel,
+  type RunCommandResult,
+} from "@fusion/core";
 import { findWorktreeUser } from "./merger.js";
 import { generateWorktreeName, slugify } from "./worktree-names.js";
 import { Type, type Static } from "@mariozechner/pi-ai";
@@ -3967,11 +3973,13 @@ and show an appropriate message to the user.\`
     });
 
     // Determine primary model and an explicit fallback. The workflow step's
-    // own override takes precedence; otherwise we use the global default. The
+    // own override takes precedence; otherwise we use the project default
+    // override before falling through to the global default. The
     // fallback is the per-step override's missing-counterpart settings, then
     // the global validator/fallback pair, then the executor's `fallbackProvider`.
-    const primaryProvider = workflowStep.modelProvider || settings.defaultProvider;
-    const primaryModelId = workflowStep.modelId || settings.defaultModelId;
+    const defaultModel = resolveProjectDefaultModel(settings);
+    const primaryProvider = workflowStep.modelProvider || defaultModel.provider;
+    const primaryModelId = workflowStep.modelId || defaultModel.modelId;
     const useOverride = !!(workflowStep.modelProvider && workflowStep.modelId);
 
     type ModelTuple = { provider?: string; modelId?: string };

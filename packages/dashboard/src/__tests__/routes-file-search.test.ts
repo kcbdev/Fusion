@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
+import { createServer } from "../server.js";
 import { get, request } from "../test-request.js";
 
 // ── Mock file-service for searchWorkspaceFiles ─────────────────────────
 
-const mockSearchWorkspaceFiles = vi.fn();
+const { mockSearchWorkspaceFiles } = vi.hoisted(() => ({
+  mockSearchWorkspaceFiles: vi.fn(),
+}));
 
 vi.mock("../file-service.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../file-service.js")>();
@@ -43,12 +46,10 @@ describe("GET /api/files/search", () => {
   let store: MockStore;
   let app: ReturnType<typeof import("../server.js").createServer>;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
     mockSearchWorkspaceFiles.mockReset();
     store = new MockStore();
-
-    const { createServer } = await import("../server.js");
     app = createServer(store);
   });
 

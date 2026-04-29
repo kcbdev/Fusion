@@ -5,10 +5,18 @@ import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { Task, TaskDetail, TaskAttachment, Column, MergeResult, Settings, AgentLogEntry, Agent, TaskPriority, TaskSourceIssue } from "@fusion/core";
-import { COLUMN_LABELS, DEFAULT_TASK_PRIORITY, TASK_PRIORITIES, VALID_TRANSITIONS, getErrorMessage } from "@fusion/core";
+import type { Task, TaskDetail, TaskAttachment, Column, MergeResult, Settings, AgentLogEntry, Agent, TaskPriority, TaskSourceIssue, WorkflowStepResult } from "@fusion/core";
+import {
+  COLUMN_LABELS,
+  DEFAULT_TASK_PRIORITY,
+  TASK_PRIORITIES,
+  VALID_TRANSITIONS,
+  getErrorMessage,
+  resolveTaskExecutionModel,
+  resolveTaskPlanningModel,
+  resolveTaskValidatorModel,
+} from "@fusion/core";
 import { uploadAttachment, deleteAttachment, updateTask, pauseTask, unpauseTask, fetchTaskDetail, fetchSettings, requestSpecRevision, rebuildTaskSpec, approvePlan, rejectPlan, refineTask, fetchWorkflowResults, assignTask, fetchAgents, fetchAgent } from "../api";
-import type { WorkflowStepResult } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
 import { useAgentLogs } from "../hooks/useAgentLogs";
 import { useConfirm } from "../hooks/useConfirm";
@@ -42,41 +50,25 @@ const ACTIVE_STATUSES = new Set(["planning", "researching", "executing", "finali
 /**
  * Resolve the effective executor model following the engine's resolution order:
  * 1. Per-task modelProvider/modelId (both must be set)
- * 2. Global settings defaultProvider/defaultModelId
+ * 2. Project/global execution lane fallback
  */
 function resolveEffectiveExecutor(
   task: Task | TaskDetail,
   settings?: Settings,
 ): ModelSelection {
-  if (task.modelProvider && task.modelId) {
-    return { provider: task.modelProvider, modelId: task.modelId };
-  }
-  if (settings?.defaultProvider && settings.defaultModelId) {
-    return { provider: settings.defaultProvider, modelId: settings.defaultModelId };
-  }
-  return {};
+  return resolveTaskExecutionModel(task, settings);
 }
 
 /**
  * Resolve the effective validator model following the engine's resolution order:
  * 1. Per-task validatorModelProvider/validatorModelId (both must be set)
- * 2. Project settings validatorProvider/validatorModelId
- * 3. Global settings defaultProvider/defaultModelId
+ * 2. Project/global validator lane fallback
  */
 function resolveEffectiveValidator(
   task: Task | TaskDetail,
   settings?: Settings,
 ): ModelSelection {
-  if (task.validatorModelProvider && task.validatorModelId) {
-    return { provider: task.validatorModelProvider, modelId: task.validatorModelId };
-  }
-  if (settings?.validatorProvider && settings.validatorModelId) {
-    return { provider: settings.validatorProvider, modelId: settings.validatorModelId };
-  }
-  if (settings?.defaultProvider && settings.defaultModelId) {
-    return { provider: settings.defaultProvider, modelId: settings.defaultModelId };
-  }
-  return {};
+  return resolveTaskValidatorModel(task, settings);
 }
 
 /**
@@ -102,8 +94,7 @@ function extractPlanningModelFromLog(entries: AgentLogEntry[]): { provider: stri
  * Resolve the effective planning model following the resolution order:
  * 1. Per-task planningModelProvider/planningModelId override
  * 2. Runtime triage model from agent log marker (if present)
- * 3. Project settings planningProvider/planningModelId
- * 4. Global settings defaultProvider/defaultModelId
+ * 3. Project/global planning lane fallback
  */
 function resolveEffectivePlanning(
   task: Task | TaskDetail,
@@ -119,15 +110,7 @@ function resolveEffectivePlanning(
   if (fromLog) {
     return fromLog;
   }
-  // 3. Project settings planningProvider/planningModelId
-  if (settings?.planningProvider && settings.planningModelId) {
-    return { provider: settings.planningProvider, modelId: settings.planningModelId };
-  }
-  // 4. Global settings defaultProvider/defaultModelId
-  if (settings?.defaultProvider && settings.defaultModelId) {
-    return { provider: settings.defaultProvider, modelId: settings.defaultModelId };
-  }
-  return {};
+  return resolveTaskPlanningModel(task, settings);
 }
 
 function getStepStatusColor(status: string): string {

@@ -1662,6 +1662,41 @@ describe("POST /tasks", () => {
       }),
     );
   });
+
+  it("passes correct settings to onSummarize callback when project default override is configured", async () => {
+    (store.getSettingsFast as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      autoSummarizeTitles: true,
+      defaultProviderOverride: "openai",
+      defaultModelIdOverride: "gpt-4o",
+      defaultProvider: "mistral",
+      defaultModelId: "mistral-large",
+    });
+
+    const createdTask = {
+      ...FAKE_TASK_DETAIL,
+      column: "triage",
+    };
+    (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValue(createdTask);
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/tasks",
+      JSON.stringify({
+        description: "x".repeat(300),
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(store.createTask).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        settings: { autoSummarizeTitles: true },
+        onSummarize: expect.any(Function),
+      }),
+    );
+  });
 });
 
 describe("POST /subtasks/*", () => {
@@ -11231,6 +11266,37 @@ describe("POST /api/ai/summarize-title", () => {
       }
     }
   });
+
+  it("uses the project default override for summarize-title when no higher lane is configured", async () => {
+    const fusionCore = await import("@fusion/core");
+    const summarizeTitleSpy = vi
+      .spyOn(fusionCore, "summarizeTitle")
+      .mockResolvedValueOnce("Generated title");
+
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      defaultProviderOverride: "openai",
+      defaultModelIdOverride: "gpt-4o",
+      defaultProvider: "anthropic",
+      defaultModelId: "claude-sonnet-4-5",
+    });
+
+    const description = "x".repeat(300);
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/ai/summarize-title",
+      JSON.stringify({ description }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(summarizeTitleSpy).toHaveBeenCalledWith(
+      description,
+      "/test/project",
+      "openai",
+      "gpt-4o",
+    );
+  });
 });
 
 describe("POST /planning/start-streaming with projectId scoping", () => {
@@ -16547,6 +16613,41 @@ describe("POST /workflow-steps/:id/refine", () => {
     expect(createFnAgentMock).toHaveBeenCalledTimes(1);
     expect(capturedModel.defaultProvider).toBe("mistral");
     expect(capturedModel.defaultModelId).toBe("mistral-large");
+  });
+
+  it("falls back to the project default override before the global default lane", async () => {
+    const ws = { id: "WS-001", name: "Docs", description: "Check docs", mode: "prompt", prompt: "", enabled: true, createdAt: "2026-01-01", updatedAt: "2026-01-01" };
+    (store.getWorkflowStep as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ws);
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      defaultProviderOverride: "openai",
+      defaultModelIdOverride: "gpt-4o",
+      defaultProvider: "mistral",
+      defaultModelId: "mistral-large",
+    });
+
+    const updatedWs = { ...ws, prompt: "Refined prompt from AI" };
+    (store.updateWorkflowStep as ReturnType<typeof vi.fn>).mockResolvedValueOnce(updatedWs);
+
+    let capturedModel: { defaultProvider?: string; defaultModelId?: string } = {};
+    const session = {
+      on: vi.fn(),
+      prompt: vi.fn(async () => {}),
+      dispose: vi.fn(),
+    };
+
+    const createFnAgentMock = vi.fn(async (options: { defaultProvider?: string; defaultModelId?: string }) => {
+      capturedModel = options;
+      return { session };
+    });
+    __setCreateFnAgentForRefine(createFnAgentMock);
+
+    const res = await REQUEST(buildApp(), "POST", "/api/workflow-steps/WS-001/refine", JSON.stringify({}), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(capturedModel.defaultProvider).toBe("openai");
+    expect(capturedModel.defaultModelId).toBe("gpt-4o");
   });
 
   it("ignores partial project lane (provider only, no modelId)", async () => {
