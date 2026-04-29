@@ -750,10 +750,15 @@ function StatusModeGrid({
   const logsShare = Math.max(1, middleHeight - SYSTEM_HEIGHT - bottomShare);
   // LogsPanel chrome: border 2 + title 1 + filter 1 = 4.
   const logsAvailableRows = Math.max(1, logsShare - 4);
-  // On very wide terminals, lift Stats up next to Logs so the bottom row only
-  // holds Utilities + Settings. Logs gets the row budget that Stats vacated.
+  // On very wide terminals, the left column stacks Stats + Utilities + Settings
+  // and Logs takes the full right column for its full height. Stats absorbs
+  // whatever vertical room Utilities/Settings don't claim.
   const wideLayout = cols >= 150;
   const wideLogsAvailableRows = Math.max(1, logsShare + bottomShare - 4);
+  // Fixed heights for Utilities (7 actions + 3 chrome) and Settings (9 keys +
+  // 3 chrome). Stats flex-grows above these so it gets the leftover space.
+  const UTILITIES_HEIGHT = 10;
+  const SETTINGS_HEIGHT = 12;
   tuiDebug("StatusModeGrid", { cols, rows, middleHeight, logsShare, bottomShare, focused, wideLayout });
 
   return (
@@ -770,10 +775,20 @@ function StatusModeGrid({
         </Box>
         {wideLayout ? (
           <>
-            {/* Wide: Stats sits left of Logs and absorbs the bottom-row height. */}
+            {/* Wide: left column stacks Stats / Utilities / Settings; Logs fills
+                the right column for the full middle-area height. Stats flex-grows
+                so it claims any space Utilities/Settings don't need. */}
             <Box flexGrow={1} flexShrink={0} flexDirection="row" overflow="hidden">
               <Box flexDirection="column" width="30%" flexShrink={0} overflow="hidden">
-                <StatsPanel state={state} isFocused={focused === "stats"} />
+                <Box flexGrow={1} flexShrink={1} flexDirection="column" overflow="hidden">
+                  <StatsPanel state={state} isFocused={focused === "stats"} />
+                </Box>
+                <Box height={UTILITIES_HEIGHT} flexShrink={0} flexDirection="column" overflow="hidden">
+                  <UtilitiesPanel state={state} isFocused={focused === "utilities"} />
+                </Box>
+                <Box height={SETTINGS_HEIGHT} flexShrink={0} flexDirection="column" overflow="hidden">
+                  <SettingsPanel state={state} isFocused={focused === "settings"} />
+                </Box>
               </Box>
               <Box flexGrow={1} flexDirection="column" overflow="hidden">
                 <LogsPanel
@@ -781,14 +796,6 @@ function StatusModeGrid({
                   isFocused={focused === "logs"}
                   availableRows={wideLogsAvailableRows}
                 />
-              </Box>
-            </Box>
-            <Box flexDirection="row" flexShrink={2} overflow="hidden">
-              <Box flexDirection="column" flexGrow={1} flexBasis={0} overflow="hidden">
-                <UtilitiesPanel state={state} isFocused={focused === "utilities"} />
-              </Box>
-              <Box flexDirection="column" flexGrow={1} flexBasis={0} overflow="hidden">
-                <SettingsPanel state={state} isFocused={focused === "settings"} />
               </Box>
             </Box>
           </>
