@@ -549,6 +549,158 @@ describe("ChatView", () => {
     expect(preview).toHaveTextContent("path=foo.ts");
   });
 
+  it("renders grouped summary for multiple completed tool calls and keeps it collapsed", () => {
+    setupMockChat({
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Tool Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+      messages: [
+        {
+          id: "msg-002",
+          sessionId: "session-001",
+          role: "assistant",
+          content: "Done",
+          toolCalls: [
+            {
+              toolName: "read",
+              isError: false,
+              result: "contents",
+              status: "completed",
+            },
+            {
+              toolName: "grep",
+              isError: false,
+              result: "matches",
+              status: "completed",
+            },
+          ],
+          createdAt: "2026-04-08T00:01:00.000Z",
+        },
+      ],
+    });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    const group = document.querySelector(".chat-tool-calls-group") as HTMLDetailsElement | null;
+    expect(group).toBeInTheDocument();
+    expect(group?.open).toBe(false);
+    expect(screen.getByText("2 tool calls")).toBeInTheDocument();
+    expect(screen.getByText("2 completed")).toBeInTheDocument();
+  });
+
+  it("auto-opens grouped tool calls when any tool call is running", () => {
+    setupMockChat({
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Tool Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+      messages: [
+        {
+          id: "msg-002",
+          sessionId: "session-001",
+          role: "assistant",
+          content: "Running",
+          toolCalls: [
+            {
+              toolName: "read",
+              isError: false,
+              status: "running",
+            },
+            {
+              toolName: "grep",
+              isError: false,
+              result: "done",
+              status: "completed",
+            },
+          ],
+          createdAt: "2026-04-08T00:01:00.000Z",
+        },
+      ],
+    });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    const group = document.querySelector(".chat-tool-calls-group") as HTMLDetailsElement | null;
+    expect(group).toBeInTheDocument();
+    expect(group?.open).toBe(true);
+  });
+
+  it("shows grouped tool-call status breakdown", () => {
+    setupMockChat({
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Tool Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+      messages: [
+        {
+          id: "msg-002",
+          sessionId: "session-001",
+          role: "assistant",
+          content: "Mixed",
+          toolCalls: [
+            {
+              toolName: "read",
+              isError: false,
+              result: "contents",
+              status: "completed",
+            },
+            {
+              toolName: "grep",
+              isError: false,
+              status: "running",
+            },
+            {
+              toolName: "write",
+              isError: true,
+              result: "failed",
+              status: "completed",
+            },
+          ],
+          createdAt: "2026-04-08T00:01:00.000Z",
+        },
+      ],
+    });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    expect(screen.getByText("1 completed")).toBeInTheDocument();
+    expect(screen.getByText("1 running")).toBeInTheDocument();
+    expect(screen.getByText("1 error")).toBeInTheDocument();
+  });
+
+  it("expands grouped tool calls to reveal individual tool items", async () => {
+    setupMockChat({
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Tool Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+      messages: [
+        {
+          id: "msg-002",
+          sessionId: "session-001",
+          role: "assistant",
+          content: "Done",
+          toolCalls: [
+            {
+              toolName: "read",
+              isError: false,
+              result: "contents",
+              status: "completed",
+            },
+            {
+              toolName: "grep",
+              isError: false,
+              result: "matches",
+              status: "completed",
+            },
+          ],
+          createdAt: "2026-04-08T00:01:00.000Z",
+        },
+      ],
+    });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    const group = document.querySelector(".chat-tool-calls-group") as HTMLDetailsElement;
+    expect(group.open).toBe(false);
+
+    const summary = group.querySelector(".chat-tool-calls-group-summary") as HTMLElement;
+    await userEvent.click(summary);
+
+    expect(group.open).toBe(true);
+    expect(screen.getByText("read")).toBeInTheDocument();
+    expect(screen.getByText("grep")).toBeInTheDocument();
+  });
+
   it("completed tool calls are collapsed by default", () => {
     setupMockChat({
       activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Tool Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },

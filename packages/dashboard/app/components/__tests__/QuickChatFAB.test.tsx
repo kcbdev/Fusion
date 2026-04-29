@@ -995,10 +995,91 @@ describe("QuickChatFAB", () => {
     expect(preview).toHaveTextContent("result: contents");
   });
 
-  it("shows streaming tool calls during generation", async () => {
+  it("renders grouped summary for multiple tool calls in compact mode", async () => {
+    mockFetchChatMessages.mockResolvedValueOnce({
+      messages: [
+        {
+          id: "msg-tools",
+          sessionId: "session-001",
+          role: "assistant",
+          content: "Used tools",
+          toolCalls: [
+            { toolName: "read", status: "completed", isError: false, result: "contents" },
+            { toolName: "grep", status: "completed", isError: false, result: "matches" },
+          ],
+          metadata: {
+            toolCalls: [
+              { toolName: "read", status: "completed", isError: false, result: "contents" },
+              { toolName: "grep", status: "completed", isError: false, result: "matches" },
+            ],
+          },
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    });
+
+    render(<QuickChatFAB addToast={addToast} projectId="proj-123" />);
+
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    await waitFor(() => {
+      expect(screen.getByText("2 tool calls")).toBeInTheDocument();
+    });
+
+    const toolCallsContainer = document.querySelector(".chat-tool-calls") as HTMLElement | null;
+    expect(toolCallsContainer).toHaveClass("chat-tool-calls--compact");
+    expect(screen.getByText("2 completed")).toBeInTheDocument();
+  });
+
+  it("expands grouped tool calls to reveal individual quick chat tool items", async () => {
+    mockFetchChatMessages.mockResolvedValueOnce({
+      messages: [
+        {
+          id: "msg-tools",
+          sessionId: "session-001",
+          role: "assistant",
+          content: "Used tools",
+          toolCalls: [
+            { toolName: "read", status: "completed", isError: false, result: "contents" },
+            { toolName: "grep", status: "completed", isError: false, result: "matches" },
+          ],
+          metadata: {
+            toolCalls: [
+              { toolName: "read", status: "completed", isError: false, result: "contents" },
+              { toolName: "grep", status: "completed", isError: false, result: "matches" },
+            ],
+          },
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    });
+
+    render(<QuickChatFAB addToast={addToast} projectId="proj-123" />);
+
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const group = (await waitFor(() => {
+      const details = document.querySelector(".chat-tool-calls-group") as HTMLDetailsElement | null;
+      if (!details) throw new Error("group not rendered yet");
+      return details;
+    })) as HTMLDetailsElement;
+
+    expect(group.open).toBe(false);
+
+    const summary = group.querySelector(".chat-tool-calls-group-summary") as HTMLElement;
+    fireEvent.click(summary);
+
+    expect(group.open).toBe(true);
+    expect(screen.getByText("read")).toBeInTheDocument();
+    expect(screen.getByText("grep")).toBeInTheDocument();
+  });
+
+  it("streaming grouped tool calls auto-expand when a tool is running", async () => {
     mockStreamChatResponse.mockImplementation((_sessionId, _content, handlers) => {
       handlers.onText?.("Still working");
       handlers.onToolStart?.({ toolName: "read", args: { path: "foo.ts" } });
+      handlers.onToolEnd?.({ toolName: "read", isError: false, result: "contents" });
+      handlers.onToolStart?.({ toolName: "grep", args: { pattern: "foo" } });
 
       return {
         close: vi.fn(),
@@ -1019,9 +1100,13 @@ describe("QuickChatFAB", () => {
 
     await waitFor(() => {
       const streamingMessage = screen.getByTestId("quick-chat-streaming-message");
-      expect(within(streamingMessage).getByText("read")).toBeInTheDocument();
+      expect(within(streamingMessage).getByText("2 tool calls")).toBeInTheDocument();
+      expect(within(streamingMessage).getByText("1 completed")).toBeInTheDocument();
+      expect(within(streamingMessage).getByText("1 running")).toBeInTheDocument();
+      const group = streamingMessage.querySelector(".chat-tool-calls-group") as HTMLDetailsElement | null;
+      expect(group).toBeTruthy();
+      expect(group?.open).toBe(true);
       expect(streamingMessage.querySelector(".chat-tool-call--running")).toBeTruthy();
-      expect(streamingMessage.querySelector(".chat-tool-call-preview")).toHaveTextContent("path=foo.ts");
     });
   });
 

@@ -12,7 +12,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
-import { Eye, EyeOff, MessageSquare, Send, Square, Wrench, X } from "lucide-react";
+import { Eye, EyeOff, MessageSquare, Send, Square, X } from "lucide-react";
 import { fetchModels, type Agent, type ModelInfo } from "../api";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { AgentMentionPopup } from "./AgentMentionPopup";
@@ -21,6 +21,7 @@ import { useAgents } from "../hooks/useAgents";
 import { FileMentionPopup } from "./FileMentionPopup";
 import { useFileMention } from "../hooks/useFileMention";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
+import { ChatToolCalls } from "./ChatToolCalls";
 
 interface QuickChatFABProps {
   projectId?: string;
@@ -81,109 +82,8 @@ function formatModelTagName(modelInfo: ModelInfo | null, parsedSelection: Parsed
     .trim();
 }
 
-function truncateValue(value: string, maxLength: number): string {
-  return value.length > maxLength ? `${value.slice(0, maxLength)}…` : value;
-}
-
-function formatToolArgsSummary(args?: Record<string, unknown>): string | null {
-  if (!args) return null;
-
-  const entries = Object.entries(args);
-  if (entries.length === 0) return null;
-
-  return entries
-    .map(([key, value]) => {
-      let stringValue = "";
-      if (typeof value === "string") {
-        stringValue = value;
-      } else {
-        try {
-          stringValue = JSON.stringify(value);
-        } catch {
-          stringValue = String(value);
-        }
-      }
-      return `${key}=${truncateValue(stringValue, 50)}`;
-    })
-    .join(", ");
-}
-
-function formatToolResultSummary(result: unknown): string | null {
-  if (result === undefined) {
-    return null;
-  }
-
-  if (typeof result === "string") {
-    return truncateValue(result, 200);
-  }
-
-  try {
-    return truncateValue(JSON.stringify(result), 200);
-  } catch {
-    return truncateValue(String(result), 200);
-  }
-}
-
 function renderToolCalls(toolCalls?: ToolCallInfo[], compact = false): ReactNode {
-  if (!toolCalls || toolCalls.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className={`chat-tool-calls${compact ? " chat-tool-calls--compact" : ""}`} data-testid="chat-tool-calls">
-      <div className="chat-tool-calls-header">
-        <Wrench size={12} aria-hidden="true" />
-        <span>Tool calls</span>
-      </div>
-      {toolCalls.map((toolCall, index) => {
-        const isRunning = toolCall.status === "running";
-        const isError = toolCall.status === "completed" && toolCall.isError;
-        const argsSummary = formatToolArgsSummary(toolCall.args);
-        const resultSummary = formatToolResultSummary(toolCall.result);
-        const summaryPreview = isRunning
-          ? argsSummary
-          : resultSummary
-            ? `result: ${resultSummary}`
-            : argsSummary
-              ? `args: ${argsSummary}`
-              : null;
-        const statusLabel = isRunning ? "running" : isError ? "error" : "completed";
-
-        return (
-          <details
-            key={`${toolCall.toolName}-${index}`}
-            className={`chat-tool-call${isRunning ? " chat-tool-call--running" : ""}${isError ? " chat-tool-call--error" : ""}`}
-            open={isRunning}
-          >
-            <summary>
-              <span className="chat-tool-call-status-dot" aria-hidden="true" />
-              <span className="chat-tool-call-name">{toolCall.toolName}</span>
-              {summaryPreview && (
-                <span className="chat-tool-call-preview" title={summaryPreview}>
-                  {summaryPreview}
-                </span>
-              )}
-              <span className="chat-tool-call-status-text">{statusLabel}</span>
-            </summary>
-            <div className="chat-tool-call-content">
-              {argsSummary && (
-                <div className="chat-tool-call-row">
-                  <span className="chat-tool-call-label">args</span>
-                  <span className="chat-tool-call-value">{argsSummary}</span>
-                </div>
-              )}
-              {resultSummary && (
-                <div className={`chat-tool-call-row${isError ? " chat-tool-call-row--error" : ""}`}>
-                  <span className="chat-tool-call-label">result</span>
-                  <span className="chat-tool-call-value">{resultSummary}</span>
-                </div>
-              )}
-            </div>
-          </details>
-        );
-      })}
-    </div>
-  );
+  return <ChatToolCalls toolCalls={toolCalls} compact={compact} />;
 }
 
 const quickChatMarkdownComponents: Components = {
