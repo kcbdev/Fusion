@@ -704,7 +704,7 @@ function HelpOverlay() {
 
 // ── Status mode grid layout ────────────────────────────────────────────────────
 
-const PANEL_ORDER: SectionId[] = ["system", "logs", "utilities", "stats", "settings"];
+const PANEL_ORDER: SectionId[] = ["system", "logs", "stats", "utilities", "settings"];
 
 function StatusModeGrid({
   state,
@@ -3921,8 +3921,8 @@ export function DashboardApp({ controller }: DashboardAppProps) {
     const sectionForNumber: Record<string, SectionId | undefined> = {
       "1": "system",
       "2": "logs",
-      "3": "utilities",
-      "4": "stats",
+      "3": "stats",
+      "4": "utilities",
       "5": "settings",
     };
     const targetSection = sectionForNumber[input];
