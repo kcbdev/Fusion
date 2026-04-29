@@ -47,7 +47,7 @@ describe("useQuickChat", () => {
     mockCancelChatResponse.mockResolvedValue({ success: true });
   });
 
-  it("sendMessage is synchronous and returns void", async () => {
+  it("sendMessage returns a promise that resolves on stream completion", async () => {
     const session = makeSession({ id: "session-001", agentId: "agent-001" });
     mockFetchResumeChatSession.mockResolvedValue({ session });
     mockFetchChatMessages.mockResolvedValue({ messages: [] });
@@ -62,9 +62,15 @@ describe("useQuickChat", () => {
       expect(result.current.activeSession).not.toBeNull();
     });
 
-    // sendMessage should return void (undefined), not a Promise
+    mockStreamChatResponse.mockImplementation((_sessionId, _content, handlers) => {
+      setTimeout(() => {
+        handlers.onDone?.({ messageId: "msg-001" });
+      }, 0);
+      return { close: vi.fn(), isConnected: () => true };
+    });
+
     const sendResult = result.current.sendMessage("Hello");
-    expect(sendResult).toBeUndefined();
+    await expect(sendResult).resolves.toBeUndefined();
   });
 
   it("startModelChat creates a KB session with provider/model override", async () => {

@@ -12,7 +12,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
-import { Eye, EyeOff, MessageSquare, Send, Square, X } from "lucide-react";
+import { Eye, EyeOff, MessageSquare, Paperclip, Send, Square, X } from "lucide-react";
 import { fetchModels, type Agent, type ModelInfo } from "../api";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { AgentMentionPopup } from "./AgentMentionPopup";
@@ -22,6 +22,12 @@ import { FileMentionPopup } from "./FileMentionPopup";
 import { useFileMention } from "../hooks/useFileMention";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
 import { ChatToolCalls } from "./ChatToolCalls";
+
+interface PendingAttachment {
+  file: File;
+  /** Object URL for image previews; empty string for non-image attachments. */
+  previewUrl: string;
+}
 
 interface QuickChatFABProps {
   projectId?: string;
@@ -141,6 +147,49 @@ const QUICK_CHAT_DEFAULT_PANEL_SIZE: PanelSize = {
   width: 320,
   height: 400,
 };
+
+const ALLOWED_ATTACHMENT_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "text/plain",
+  "application/json",
+  "text/yaml",
+  "text/x-log",
+  "text/csv",
+  "application/xml",
+  "text/markdown",
+]);
+
+const ALLOWED_ATTACHMENT_EXTENSIONS = [
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".txt",
+  ".json",
+  ".yaml",
+  ".yml",
+  ".log",
+  ".csv",
+  ".xml",
+  ".md",
+];
+
+function isImageAttachment(file: File): boolean {
+  return file.type.startsWith("image/");
+}
+
+function isAllowedAttachment(file: File): boolean {
+  if (ALLOWED_ATTACHMENT_TYPES.has(file.type)) {
+    return true;
+  }
+
+  const lowerName = file.name.toLowerCase();
+  return ALLOWED_ATTACHMENT_EXTENSIONS.some((extension) => lowerName.endsWith(extension));
+}
 
 const QUICK_CHAT_MIN_PANEL_SIZE: PanelSize = {
   width: 280,
@@ -566,6 +615,9 @@ export function QuickChatFAB({
   const [mentionHighlightIndex, setMentionHighlightIndex] = useState(0);
   const [mentionStartPos, setMentionStartPos] = useState(-1);
   const [plainTextMessageIds, setPlainTextMessageIds] = useState<Set<string>>(() => new Set());
+  /** Pending attachments staged in the composer before being sent. */
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [isAttachmentDragOver, setIsAttachmentDragOver] = useState(false);
 
   // File mention state and hook
   const [, setFileMentionPopupVisible] = useState(false);
@@ -593,6 +645,7 @@ export function QuickChatFAB({
   const prevSessionTargetRef = useRef("");
   const mentionCursorPosRef = useRef(0);
   const hideMentionPopupTimeoutRef = useRef<number | null>(null);
+  const dragDepthRef = useRef(0);
 
   // Draggable hook for FAB positioning
   const {
@@ -631,6 +684,8 @@ export function QuickChatFAB({
   const fabRef = useRef<HTMLButtonElement | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingAttachmentsRef = useRef<PendingAttachment[]>([]);
 
   const parsedModelSelection = useMemo(() => parseModelSelection(selectedModel), [selectedModel]);
   const selectedModelInfo = useMemo(
@@ -770,7 +825,28 @@ export function QuickChatFAB({
     setMentionPopupVisible(false);
     setMentionFilter("");
     setMentionStartPos(-1);
+    pendingAttachmentsRef.current.forEach((attachment) => {
+      if (attachment.previewUrl) {
+        URL.revokeObjectURL(attachment.previewUrl);
+      }
+    });
+    setPendingAttachments([]);
   }, [isOpen]);
+
+  useEffect(() => {
+    pendingAttachmentsRef.current = pendingAttachments;
+  }, [pendingAttachments]);
+
+  // Attachment object URLs must be revoked when the composer unmounts.
+  useEffect(() => {
+    return () => {
+      pendingAttachmentsRef.current.forEach((attachment) => {
+        if (attachment.previewUrl) {
+          URL.revokeObjectURL(attachment.previewUrl);
+        }
+      });
+    };
+  }, []);
 
   const handleAgentChange = useCallback((agentId: string) => {
     setSelectedAgentId(agentId);
@@ -878,16 +954,96 @@ export function QuickChatFAB({
     ? `${pendingMessage.slice(0, 50)}…`
     : pendingMessage;
 
-  const handleSendMessage = useCallback(() => {
+  /**
+   * Capture file selections from picker, paste, or drop and stage them in composer state.
+   */
+  const handleAttachmentFiles = useCallback((files: FileList | null | undefined) => {
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    const newAttachments: PendingAttachment[] = [];
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      if (!isAllowedAttachment(file)) {
+        continue;
+      }
+
+      newAttachments.push({
+        file,
+        previewUrl: isImageAttachment(file) ? URL.createObjectURL(file) : "",
+      });
+    }
+
+    if (newAttachments.length > 0) {
+      setPendingAttachments((previous) => [...previous, ...newAttachments]);
+    }
+  }, []);
+
+  const removeAttachment = useCallback((index: number) => {
+    setPendingAttachments((previous) => {
+      const removed = previous[index];
+      if (removed?.previewUrl) {
+        URL.revokeObjectURL(removed.previewUrl);
+      }
+      return previous.filter((_, attachmentIndex) => attachmentIndex !== index);
+    });
+  }, []);
+
+  const handlePaste = useCallback((event: React.ClipboardEvent<HTMLInputElement>) => {
+    handleAttachmentFiles(event.clipboardData?.files);
+  }, [handleAttachmentFiles]);
+
+  const handleSendMessage = useCallback(async () => {
     const trimmed = messageInput.trim();
-    if (!trimmed || inputDisabled) return;
+    const attachmentsToSend = pendingAttachmentsRef.current;
+    if (!trimmed && attachmentsToSend.length === 0) return;
+    if (inputDisabled) return;
 
     setMessageInput("");
     setMentionPopupVisible(false);
     setMentionFilter("");
     setMentionStartPos(-1);
-    sendMessage(trimmed);
+
+    try {
+      await sendMessage(trimmed, attachmentsToSend.map((attachment) => attachment.file));
+      attachmentsToSend.forEach((attachment) => {
+        if (attachment.previewUrl) {
+          URL.revokeObjectURL(attachment.previewUrl);
+        }
+      });
+      setPendingAttachments((previous) => previous.filter((attachment) => !attachmentsToSend.includes(attachment)));
+    } catch {
+      // Keep pending attachments on failure so user can retry.
+    }
   }, [sendMessage, inputDisabled, messageInput]);
+
+  const handleAttachmentDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    setIsAttachmentDragOver(true);
+  }, []);
+
+  const handleAttachmentDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setIsAttachmentDragOver(true);
+  }, []);
+
+  const handleAttachmentDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setIsAttachmentDragOver(false);
+    }
+  }, []);
+
+  const handleAttachmentDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    dragDepthRef.current = 0;
+    setIsAttachmentDragOver(false);
+    handleAttachmentFiles(event.dataTransfer?.files);
+  }, [handleAttachmentFiles]);
 
   const updateMentionState = useCallback((value: string, cursorPos: number) => {
     const mentionTriggerMatch = getMentionTriggerMatch(value, cursorPos);
@@ -1433,8 +1589,61 @@ export function QuickChatFAB({
             )}
           </div>
 
+          {pendingAttachments.length > 0 && (
+            <div className="quick-chat-attachment-previews" data-testid="quick-chat-attachment-previews">
+              {pendingAttachments.map((attachment, index) => (
+                <div
+                  key={`${attachment.file.name}-${index}`}
+                  className="quick-chat-attachment-preview"
+                  data-testid={`quick-chat-attachment-preview-${index}`}
+                >
+                  {attachment.previewUrl
+                    ? <img src={attachment.previewUrl} alt={attachment.file.name} />
+                    : <span className="quick-chat-attachment-preview-name">{attachment.file.name}</span>}
+                  <button
+                    type="button"
+                    className="quick-chat-attachment-remove"
+                    data-testid={`quick-chat-attachment-remove-${index}`}
+                    aria-label={`Remove ${attachment.file.name}`}
+                    onClick={() => removeAttachment(index)}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="quick-chat-panel-input">
-            <div className="quick-chat-input-wrapper">
+            <div
+              className={`quick-chat-input-wrapper${isAttachmentDragOver ? " quick-chat-input-wrapper--dragover" : ""}`}
+              onDragEnter={handleAttachmentDragEnter}
+              onDragOver={handleAttachmentDragOver}
+              onDragLeave={handleAttachmentDragLeave}
+              onDrop={handleAttachmentDrop}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,.txt,.json,.yaml,.yml,.log,.csv,.xml,.md"
+                multiple
+                tabIndex={-1}
+                aria-hidden="true"
+                className="quick-chat-attachment-input"
+                onChange={(event) => {
+                  handleAttachmentFiles(event.target.files);
+                  event.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                className="btn-icon"
+                data-testid="quick-chat-attach-btn"
+                aria-label="Attach files"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Paperclip size={16} />
+              </button>
               <input
                 ref={inputRef}
                 type="text"
@@ -1445,6 +1654,7 @@ export function QuickChatFAB({
                 onClick={handleInputSelectionChange}
                 onBlur={handleInputBlur}
                 onFocus={handleInputFocus}
+                onPaste={handlePaste}
                 placeholder={inputPlaceholder}
                 disabled={inputDisabled}
                 data-testid="quick-chat-input"
@@ -1499,8 +1709,10 @@ export function QuickChatFAB({
             ) : (
               <button
                 type="button"
-                onClick={() => void handleSendMessage()}
-                disabled={inputDisabled || messageInput.trim().length === 0}
+                onClick={() => {
+                  void handleSendMessage();
+                }}
+                disabled={inputDisabled || (messageInput.trim().length === 0 && pendingAttachments.length === 0)}
                 data-testid="quick-chat-send"
               >
                 <Send size={16} />

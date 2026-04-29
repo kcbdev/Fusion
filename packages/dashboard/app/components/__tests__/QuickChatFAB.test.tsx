@@ -154,6 +154,11 @@ describe("QuickChatFAB", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: vi.fn(() => "blob:mock-preview"),
+      revokeObjectURL: vi.fn(),
+    });
     mockAgentsHook(mockAgents);
     mockFetchResumeChatSession.mockResolvedValue({ session: null });
     mockFetchChatSessions.mockResolvedValue({ sessions: [] });
@@ -590,7 +595,7 @@ describe("QuickChatFAB", () => {
         "session-001",
         "Hello model",
         expect.any(Object),
-        undefined,
+        [],
         "proj-123",
       );
     });
@@ -681,7 +686,7 @@ describe("QuickChatFAB", () => {
         "session-model-002",
         "fresh thread message",
         expect.any(Object),
-        undefined,
+        [],
         "proj-123",
       );
     });
@@ -784,7 +789,7 @@ describe("QuickChatFAB", () => {
           onDone: expect.any(Function),
           onError: expect.any(Function),
         }),
-        undefined,
+        [],
         "proj-123",
       );
     });
@@ -2236,6 +2241,128 @@ describe("QuickChatFAB", () => {
       const fabBottom = parseFloat(fab.style.bottom);
       const panelBottom = parseFloat(panel.style.bottom);
       expect(panelBottom - fabBottom).toBe(60);
+    });
+  });
+
+  describe("attachments", () => {
+    it("shows paperclip button and triggers hidden file input click", async () => {
+      render(<QuickChatFAB addToast={addToast} />);
+      fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+      const attachBtn = await screen.findByTestId("quick-chat-attach-btn");
+      const clickSpy = vi.spyOn(HTMLInputElement.prototype, "click");
+
+      fireEvent.click(attachBtn);
+      expect(clickSpy).toHaveBeenCalled();
+      clickSpy.mockRestore();
+    });
+
+    it("adds/removes previews for selected attachments and filters unsupported files", async () => {
+      render(<QuickChatFAB addToast={addToast} />);
+      fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+      const fileInput = document.querySelector(".quick-chat-attachment-input") as HTMLInputElement;
+      const imageFile = new File(["img"], "photo.png", { type: "image/png" });
+      const textFile = new File(["{}"], "data.json", { type: "application/json" });
+      const invalidFile = new File(["bin"], "payload.bin", { type: "application/octet-stream" });
+
+      fireEvent.change(fileInput, { target: { files: [imageFile, textFile, invalidFile] } });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("quick-chat-attachment-preview-0")).toBeInTheDocument();
+        expect(screen.getByTestId("quick-chat-attachment-preview-1")).toBeInTheDocument();
+        expect(screen.queryByTestId("quick-chat-attachment-preview-2")).toBeNull();
+      });
+
+      fireEvent.click(screen.getByTestId("quick-chat-attachment-remove-0"));
+      await waitFor(() => {
+        expect(screen.queryByTestId("quick-chat-attachment-preview-1")).toBeNull();
+      });
+    });
+
+    it("supports paste and drag-drop attachment capture", async () => {
+      render(<QuickChatFAB addToast={addToast} />);
+      fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+      const input = await screen.findByTestId("quick-chat-input");
+      const pastedFile = new File(["image"], "paste.webp", { type: "image/webp" });
+      fireEvent.paste(input, { clipboardData: { files: [pastedFile] } });
+
+      const wrapper = input.closest(".quick-chat-input-wrapper") as HTMLElement;
+      const droppedFile = new File(["drop"], "drop.png", { type: "image/png" });
+      fireEvent.drop(wrapper, { dataTransfer: { files: [droppedFile] } });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("quick-chat-attachment-preview-0")).toBeInTheDocument();
+        expect(screen.getByTestId("quick-chat-attachment-preview-1")).toBeInTheDocument();
+      });
+    });
+
+    it("sends attachments and clears previews only after success", async () => {
+      mockStreamChatResponse.mockImplementation((_sessionId, _content, handlers, attachments) => {
+        setTimeout(() => {
+          handlers.onDone?.({ messageId: "msg-success" });
+        }, 0);
+
+        return { close: vi.fn(), isConnected: vi.fn(() => true) };
+      });
+
+      render(<QuickChatFAB addToast={addToast} />);
+      fireEvent.click(screen.getByTestId("quick-chat-fab"));
+      const input = await screen.findByTestId("quick-chat-input");
+
+      const fileInput = document.querySelector(".quick-chat-attachment-input") as HTMLInputElement;
+      const imageFile = new File(["img"], "photo.png", { type: "image/png" });
+      fireEvent.change(fileInput, { target: { files: [imageFile] } });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("quick-chat-attachment-preview-0")).toBeInTheDocument();
+      });
+
+      expect(screen.getByTestId("quick-chat-send")).not.toBeDisabled();
+      fireEvent.click(screen.getByTestId("quick-chat-send"));
+
+      await waitFor(() => {
+        expect(mockStreamChatResponse).toHaveBeenCalled();
+      });
+      const call = mockStreamChatResponse.mock.calls.at(-1);
+      expect(call?.[3]).toEqual([imageFile]);
+
+      await waitFor(() => {
+        expect(screen.queryByTestId("quick-chat-attachment-preview-0")).toBeNull();
+      });
+      expect((input as HTMLInputElement).value).toBe("");
+    });
+
+    it("preserves attachments when send fails", async () => {
+      mockStreamChatResponse.mockImplementation((_sessionId, _content, handlers) => {
+        setTimeout(() => {
+          handlers.onError?.("failed");
+        }, 0);
+
+        return { close: vi.fn(), isConnected: vi.fn(() => true) };
+      });
+
+      render(<QuickChatFAB addToast={addToast} />);
+      fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+      const fileInput = document.querySelector(".quick-chat-attachment-input") as HTMLInputElement;
+      const imageFile = new File(["img"], "photo.png", { type: "image/png" });
+      fireEvent.change(fileInput, { target: { files: [imageFile] } });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("quick-chat-input")).not.toBeDisabled();
+      });
+
+      fireEvent.click(screen.getByTestId("quick-chat-send"));
+
+      await waitFor(() => {
+        expect(mockStreamChatResponse).toHaveBeenCalled();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("quick-chat-attachment-preview-0")).toBeInTheDocument();
+      });
     });
   });
 });

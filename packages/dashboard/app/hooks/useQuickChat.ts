@@ -54,7 +54,7 @@ export interface UseQuickChatReturn {
   pendingMessage: string;
 
   // Operations
-  sendMessage: (content: string) => void;
+  sendMessage: (content: string, attachments?: File[]) => Promise<void>;
   stopStreaming: () => void;
   clearPendingMessage: () => void;
   switchSession: (agentId: string, modelProvider?: string, modelId?: string) => Promise<void>;
@@ -167,6 +167,7 @@ export function useQuickChat(
   const streamRef = useRef<{ close: () => void } | null>(null);
   const cancelledByUserRef = useRef(false);
   const pendingMessageRef = useRef("");
+  const sendCompletionRef = useRef<{ resolve: () => void; reject: (error?: unknown) => void } | null>(null);
 
   // Track the current selected chat target for session management
   const currentSessionKeyRef = useRef<string>("");
@@ -373,48 +374,62 @@ export function useQuickChat(
     setPendingMessage("");
   }, []);
 
-  // Send a message using SSE streaming
+  /**
+   * Send a message using SSE streaming.
+   * @param content message text content
+   * @param attachments optional files to send with the message; sent as multipart payload
+   * @returns resolves after backend confirms message completion (`done`), rejects on stream error
+   */
   const sendMessage = useCallback(
-    (content: string) => {
-      if (!activeSession || !content.trim()) return;
+    (content: string, attachments?: File[]) => {
+      if (!activeSession || (!content.trim() && (!attachments || attachments.length === 0))) {
+        return Promise.resolve();
+      }
 
       if (isStreaming) {
+        if (attachments && attachments.length > 0) {
+          return Promise.reject(new Error("Cannot send attachments while a response is streaming"));
+        }
+
         pendingMessageRef.current = content;
         setPendingMessage(content);
-        return;
+        return Promise.resolve();
       }
 
-      cancelledByUserRef.current = false;
+      const completionPromise = new Promise<void>((resolve, reject) => {
+        sendCompletionRef.current = { resolve, reject };
 
-      // Close any existing stream
-      if (streamRef.current) {
-        streamRef.current.close();
-        streamRef.current = null;
-      }
+        cancelledByUserRef.current = false;
 
-      // Optimistically add user message
-      const tempId = `temp-${Date.now()}`;
-      const userMessage: ChatMessageInfo = {
-        id: tempId,
-        sessionId: activeSession.id,
-        role: "user",
-        content,
-        createdAt: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, userMessage]);
+        // Close any existing stream
+        if (streamRef.current) {
+          streamRef.current.close();
+          streamRef.current = null;
+        }
 
-      // Clear streaming state
-      setStreamingText("");
-      setStreamingThinking("");
-      setStreamingToolCalls([]);
-      setIsStreaming(true);
+        // Optimistically add user message
+        const tempId = `temp-${Date.now()}`;
+        const userMessage: ChatMessageInfo = {
+          id: tempId,
+          sessionId: activeSession.id,
+          role: "user",
+          content,
+          createdAt: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, userMessage]);
 
-      // Accumulate streaming text and tool calls in local variables
-      let capturedText = "";
-      let capturedThinking = "";
-      let capturedToolCalls: ToolCallInfo[] = [];
+        // Clear streaming state
+        setStreamingText("");
+        setStreamingThinking("");
+        setStreamingToolCalls([]);
+        setIsStreaming(true);
 
-      const textHandlers = {
+        // Accumulate streaming text and tool calls in local variables
+        let capturedText = "";
+        let capturedThinking = "";
+        let capturedToolCalls: ToolCallInfo[] = [];
+
+        const textHandlers = {
         onThinking: (data: string) => {
           capturedThinking += data;
           setStreamingThinking(capturedThinking);
@@ -463,7 +478,7 @@ export function useQuickChat(
           ];
           setStreamingToolCalls(capturedToolCalls);
         },
-        onDone: (data: { messageId: string }) => {
+          onDone: (data: { messageId: string }) => {
           const assistantMessage: ChatMessageInfo = {
             id: data.messageId || `msg-${Date.now()}`,
             sessionId: activeSession.id,
@@ -474,45 +489,55 @@ export function useQuickChat(
             createdAt: new Date().toISOString(),
           };
 
-          // Preserve user message and add assistant message
-          setMessages((prev) => [...prev, assistantMessage]);
+            // Preserve user message and add assistant message
+            setMessages((prev) => [...prev, assistantMessage]);
 
-          setStreamingText("");
-          setStreamingThinking("");
-          setStreamingToolCalls([]);
-          setIsStreaming(false);
-          streamRef.current = null;
+            setStreamingText("");
+            setStreamingThinking("");
+            setStreamingToolCalls([]);
+            setIsStreaming(false);
+            streamRef.current = null;
+            sendCompletionRef.current?.resolve();
+            sendCompletionRef.current = null;
 
-          const queuedMessage = pendingMessageRef.current.trim();
-          if (queuedMessage) {
-            pendingMessageRef.current = "";
-            setPendingMessage("");
-            sendMessage(queuedMessage);
-          }
-        },
-        onError: (data: string) => {
-          setStreamingText("");
-          setStreamingThinking("");
-          setStreamingToolCalls([]);
-          setIsStreaming(false);
-          streamRef.current = null;
-          console.error("[useQuickChat] Stream error:", data);
-          addToast?.("Failed to get response", "error");
-
-          if (!cancelledByUserRef.current) {
             const queuedMessage = pendingMessageRef.current.trim();
             if (queuedMessage) {
               pendingMessageRef.current = "";
               setPendingMessage("");
-              sendMessage(queuedMessage);
+              void sendMessage(queuedMessage);
             }
-          }
+          },
+          onError: (data: string) => {
+            setStreamingText("");
+            setStreamingThinking("");
+            setStreamingToolCalls([]);
+            setIsStreaming(false);
+            streamRef.current = null;
+            console.error("[useQuickChat] Stream error:", data);
+            addToast?.("Failed to get response", "error");
+            sendCompletionRef.current?.reject(new Error(typeof data === "string" ? data : "Failed to get response"));
+            sendCompletionRef.current = null;
 
-          void reloadMessages();
-        },
-      };
+            if (!cancelledByUserRef.current) {
+              const queuedMessage = pendingMessageRef.current.trim();
+              if (queuedMessage) {
+                pendingMessageRef.current = "";
+                setPendingMessage("");
+                void sendMessage(queuedMessage);
+              }
+            }
 
-      streamRef.current = streamChatResponse(activeSession.id, content, textHandlers, undefined, projectId);
+            void reloadMessages();
+          },
+        };
+
+        streamRef.current = streamChatResponse(activeSession.id, content, textHandlers, attachments, projectId);
+      });
+
+      // Preserve rejection semantics for awaiters while preventing unhandled rejection noise
+      // when legacy call sites intentionally fire-and-forget.
+      void completionPromise.catch(() => {});
+      return completionPromise;
     },
     [activeSession, isStreaming, projectId, addToast, reloadMessages],
   );

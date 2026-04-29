@@ -7305,7 +7305,8 @@ export function cancelChatResponse(
  *
  *  Since `EventSource` only supports GET requests, this function uses `fetch()`
  *  with a ReadableStream to parse SSE events from the POST response body.
- *  When attachments are provided, the request body is sent as multipart form data.
+ *  When attachments are provided, the request body is sent as multipart form data;
+ *  otherwise it uses the existing JSON payload path.
  */
 export function streamChatResponse(
   sessionId: string,
