@@ -70,6 +70,30 @@ function getFusionDir(cwd: string): string {
   return join(resolveProjectRoot(cwd), ".fusion");
 }
 
+/**
+ * Validate an agent id supplied to task create/update tools.
+ * Returns null on success, or an error message describing why the id was rejected.
+ *
+ * Rejects unknown agents and ephemeral/runtime-managed agents — mirrors fn_delegate
+ * so callers can't park hallucinated or task-worker IDs in `task.assignedAgentId`.
+ */
+async function validateAssignableAgentId(
+  cwd: string,
+  agentId: string,
+): Promise<string | null> {
+  const { AgentStore, isEphemeralAgent } = await import("@fusion/core");
+  const agentStore = new AgentStore({ rootDir: getFusionDir(cwd) });
+  await agentStore.init();
+  const agent = await agentStore.getAgent(agentId);
+  if (!agent) {
+    return `Agent ${agentId} not found`;
+  }
+  if (isEphemeralAgent(agent)) {
+    return `Cannot assign task to ephemeral/runtime agent ${agentId}`;
+  }
+  return null;
+}
+
 function formatTaskLine(t: Task): string {
   const label =
     t.title || t.description.slice(0, 60) + (t.description.length > 60 ? "…" : "");
@@ -167,6 +191,18 @@ export default function kbExtension(pi: ExtensionAPI) {
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const store = await getStore(ctx.cwd);
+
+      if (params.agentId !== undefined) {
+        const error = await validateAssignableAgentId(ctx.cwd, params.agentId);
+        if (error) {
+          return {
+            content: [{ type: "text", text: error }],
+            isError: true,
+            details: { error },
+          };
+        }
+      }
+
       const task = await store.createTask({
         description: params.description.trim(),
         dependencies: params.depends,
@@ -273,6 +309,16 @@ export default function kbExtension(pi: ExtensionAPI) {
         updatedFields.push("dependencies");
       }
       if (params.agentId !== undefined) {
+        if (params.agentId !== null) {
+          const error = await validateAssignableAgentId(ctx.cwd, params.agentId);
+          if (error) {
+            return {
+              content: [{ type: "text", text: error }],
+              isError: true,
+              details: { error },
+            };
+          }
+        }
         updates.assignedAgentId = params.agentId;
         updatedFields.push("agentId");
       }

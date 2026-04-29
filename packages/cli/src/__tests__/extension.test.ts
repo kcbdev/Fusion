@@ -27,7 +27,7 @@ vi.mock("../commands/task.js", () => ({
 }));
 
 import kbExtension from "../extension.js";
-import { TaskStore } from "@fusion/core";
+import { TaskStore, AgentStore } from "@fusion/core";
 import { isGhAvailable, isGhAuthenticated, runGhJsonAsync } from "@fusion/core/gh-cli";
 import { runTaskPlan } from "../commands/task.js";
 
@@ -78,6 +78,20 @@ function createMockAPI() {
 
 function makeCtx(cwd: string) {
   return { cwd } as any;
+}
+
+async function seedAgent(
+  cwd: string,
+  overrides: { ephemeral?: boolean; name?: string } = {},
+): Promise<string> {
+  const agentStore = new AgentStore({ rootDir: join(cwd, ".fusion") });
+  await agentStore.init();
+  const agent = await agentStore.createAgent({
+    name: overrides.name ?? "test-agent",
+    role: "executor",
+    metadata: overrides.ephemeral ? { agentKind: "task-worker" } : {},
+  });
+  return agent.id;
 }
 
 async function removeDirWithRetries(path: string) {
@@ -250,23 +264,53 @@ describe.skip("fn pi extension", () => {
     });
 
     it("creates a task with assigned agent ID", async () => {
+      const agentId = await seedAgent(tmpDir);
       const tool = api.tools.get("fn_task_create")!;
       const result = await tool.execute(
         "call-1",
-        { description: "Task with assignee", agentId: "agent-abc123" },
+        { description: "Task with assignee", agentId },
         undefined,
         undefined,
         makeCtx(tmpDir),
       );
 
       expect(result.details.taskId).toBe("FN-001");
-      expect(result.details.assignedAgentId).toBe("agent-abc123");
-      expect(result.content[0].text).toContain("Assigned to: agent-abc123");
+      expect(result.details.assignedAgentId).toBe(agentId);
+      expect(result.content[0].text).toContain(`Assigned to: ${agentId}`);
 
       // Verify persistence via show
       const showTool = api.tools.get("fn_task_show")!;
       const show = await showTool.execute("s1", { id: "FN-001" }, undefined, undefined, makeCtx(tmpDir));
-      expect(show.details.task.assignedAgentId).toBe("agent-abc123");
+      expect(show.details.task.assignedAgentId).toBe(agentId);
+    });
+
+    it("rejects unknown agent IDs", async () => {
+      const tool = api.tools.get("fn_task_create")!;
+      const result = await tool.execute(
+        "call-1",
+        { description: "Task with bogus assignee", agentId: "agent-does-not-exist" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Agent agent-does-not-exist not found");
+    });
+
+    it("rejects ephemeral/runtime-managed agents", async () => {
+      const ephemeralId = await seedAgent(tmpDir, { ephemeral: true, name: "task-worker" });
+      const tool = api.tools.get("fn_task_create")!;
+      const result = await tool.execute(
+        "call-1",
+        { description: "Task with worker assignee", agentId: ephemeralId },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("ephemeral/runtime agent");
     });
 
     it("creates a task without assigned agent ID by default", async () => {
@@ -364,10 +408,11 @@ describe.skip("fn pi extension", () => {
       const createTool = api.tools.get("fn_task_create")!;
       await createTool.execute("c1", { description: "Original" }, undefined, undefined, makeCtx(tmpDir));
 
+      const agentId = await seedAgent(tmpDir);
       const updateTool = api.tools.get("fn_task_update")!;
       const result = await updateTool.execute(
         "u1",
-        { id: "FN-001", agentId: "agent-abc123" },
+        { id: "FN-001", agentId },
         undefined,
         undefined,
         makeCtx(tmpDir),
@@ -379,14 +424,32 @@ describe.skip("fn pi extension", () => {
 
       const showTool = api.tools.get("fn_task_show")!;
       const show = await showTool.execute("s1", { id: "FN-001" }, undefined, undefined, makeCtx(tmpDir));
-      expect(show.details.task.assignedAgentId).toBe("agent-abc123");
+      expect(show.details.task.assignedAgentId).toBe(agentId);
+    });
+
+    it("rejects unknown agent IDs on update", async () => {
+      const createTool = api.tools.get("fn_task_create")!;
+      await createTool.execute("c1", { description: "Original" }, undefined, undefined, makeCtx(tmpDir));
+
+      const updateTool = api.tools.get("fn_task_update")!;
+      const result = await updateTool.execute(
+        "u1",
+        { id: "FN-001", agentId: "agent-does-not-exist" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Agent agent-does-not-exist not found");
     });
 
     it("clears task assigned agent ID with null", async () => {
+      const agentId = await seedAgent(tmpDir);
       const createTool = api.tools.get("fn_task_create")!;
       await createTool.execute(
         "c1",
-        { description: "Original", agentId: "agent-abc123" },
+        { description: "Original", agentId },
         undefined,
         undefined,
         makeCtx(tmpDir),

@@ -119,7 +119,7 @@ describe("CLI bundle output", () => {
   it("pi-claude-cli source imports spawn from node:child_process", () => {
     const processManagerSource = readFileSync(join(cliRoot, "dist", "pi-claude-cli", "src", "process-manager.ts"), "utf-8");
 
-    expect(processManagerSource).toMatch(/import\s+\{\s*spawn[\s\S]*\}\s+from\s*["']node:child_process["']/);
+    expect(processManagerSource).toMatch(/import\s+\{[^}]*\bspawn\b[^}]*\}\s+from\s*["']node:child_process["']/);
   });
 
   it("pi-claude-cli package.json does not require cross-spawn dependency", () => {

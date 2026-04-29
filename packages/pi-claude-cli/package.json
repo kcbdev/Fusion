@@ -23,9 +23,6 @@
     "@mariozechner/pi-ai": "*",
     "@mariozechner/pi-coding-agent": "*"
   },
-  "dependencies": {
-    "cross-spawn": "^7.0.6"
-  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0",
