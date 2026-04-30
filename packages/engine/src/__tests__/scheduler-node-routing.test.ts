@@ -61,9 +61,9 @@ function createMockStore(task: Task, settings: Record<string, unknown> = {}): Ta
   } as unknown as TaskStore;
 }
 
-function createMockNodeHealthMonitor(healthMap: Record<string, NodeStatus | undefined>) {
+function createMockHealthMonitor(statusMap: Record<string, NodeStatus | undefined>) {
   return {
-    getNodeHealth: vi.fn((id: string) => healthMap[id]),
+    getNodeHealth: vi.fn((id: string) => statusMap[id]),
   } as unknown as import("../node-health-monitor.js").NodeHealthMonitor;
 }
 
@@ -137,7 +137,7 @@ describe("Scheduler node routing", () => {
   it("blocks dispatch when node is unhealthy and policy is block", async () => {
     const task = createMockTask({ id: "FN-104", nodeId: "node-offline" });
     const store = createMockStore(task, { maxConcurrent: 1, maxWorktrees: 1, unavailableNodePolicy: "block" });
-    const healthMonitor = createMockNodeHealthMonitor({ "node-offline": "offline" });
+    const healthMonitor = createMockHealthMonitor({ "node-offline": "offline" });
     const scheduler = new Scheduler(store, { nodeHealthMonitor: healthMonitor });
     (scheduler as unknown as { running: boolean }).running = true;
 
@@ -146,13 +146,13 @@ describe("Scheduler node routing", () => {
     expect(store.updateTask).not.toHaveBeenCalled();
     expect(store.moveTask).not.toHaveBeenCalled();
     expect(store.logEntry).toHaveBeenCalledWith(task.id, "Node node-offline is offline; policy is block");
-    expect(schedulerLog.warn).toHaveBeenCalledWith("Task FN-104 blocked: Node node-offline is offline; policy is block");
+    expect(schedulerLog.log).toHaveBeenCalledWith("Task FN-104 dispatch blocked — Node node-offline is offline; policy is block");
   });
 
   it("deduplicates blocked log entries across polling cycles", async () => {
     const task = createMockTask({ id: "FN-105", nodeId: "node-offline" });
     const store = createMockStore(task, { maxConcurrent: 1, maxWorktrees: 1, unavailableNodePolicy: "block" });
-    const healthMonitor = createMockNodeHealthMonitor({ "node-offline": "offline" });
+    const healthMonitor = createMockHealthMonitor({ "node-offline": "offline" });
     const scheduler = new Scheduler(store, { nodeHealthMonitor: healthMonitor });
     (scheduler as unknown as { running: boolean }).running = true;
 
@@ -168,7 +168,7 @@ describe("Scheduler node routing", () => {
   it("falls back to local dispatch when node is unhealthy and policy is fallback-local", async () => {
     const task = createMockTask({ id: "FN-106", nodeId: "node-error" });
     const store = createMockStore(task, { maxConcurrent: 1, maxWorktrees: 1, unavailableNodePolicy: "fallback-local" });
-    const healthMonitor = createMockNodeHealthMonitor({ "node-error": "error" });
+    const healthMonitor = createMockHealthMonitor({ "node-error": "error" });
     const scheduler = new Scheduler(store, { nodeHealthMonitor: healthMonitor });
     (scheduler as unknown as { running: boolean }).running = true;
 
@@ -184,7 +184,7 @@ describe("Scheduler node routing", () => {
   it("dispatches normally when node is online with block policy", async () => {
     const task = createMockTask({ id: "FN-107", nodeId: "node-online" });
     const store = createMockStore(task, { maxConcurrent: 1, maxWorktrees: 1, unavailableNodePolicy: "block" });
-    const healthMonitor = createMockNodeHealthMonitor({ "node-online": "online" });
+    const healthMonitor = createMockHealthMonitor({ "node-online": "online" });
     const scheduler = new Scheduler(store, { nodeHealthMonitor: healthMonitor });
     (scheduler as unknown as { running: boolean }).running = true;
 
@@ -199,7 +199,7 @@ describe("Scheduler node routing", () => {
   it("dispatches normally when node health is unknown", async () => {
     const task = createMockTask({ id: "FN-108", nodeId: "node-unknown" });
     const store = createMockStore(task, { maxConcurrent: 1, maxWorktrees: 1, unavailableNodePolicy: "block" });
-    const healthMonitor = createMockNodeHealthMonitor({ "node-unknown": undefined });
+    const healthMonitor = createMockHealthMonitor({ "node-unknown": undefined });
     const scheduler = new Scheduler(store, { nodeHealthMonitor: healthMonitor });
     (scheduler as unknown as { running: boolean }).running = true;
 
@@ -251,7 +251,7 @@ describe("Scheduler node routing", () => {
   it("never queries health for local tasks", async () => {
     const task = createMockTask({ id: "FN-111", nodeId: undefined });
     const store = createMockStore(task, { maxConcurrent: 1, maxWorktrees: 1 });
-    const healthMonitor = createMockNodeHealthMonitor({});
+    const healthMonitor = createMockHealthMonitor({});
     const scheduler = new Scheduler(store, { nodeHealthMonitor: healthMonitor });
     (scheduler as unknown as { running: boolean }).running = true;
 

@@ -8,11 +8,30 @@ function effectiveNode(nodeId: string | undefined, source: EffectiveNode["source
 }
 
 describe("applyUnavailableNodePolicy", () => {
-  it("always allows local execution regardless of policy or health", () => {
+  it.each<[
+    UnavailableNodePolicy | undefined,
+    NodeStatus | undefined
+  ]>([
+    ["block", "online"],
+    ["block", "offline"],
+    ["block", "error"],
+    ["block", "connecting"],
+    ["block", undefined],
+    ["fallback-local", "online"],
+    ["fallback-local", "offline"],
+    ["fallback-local", "error"],
+    ["fallback-local", "connecting"],
+    ["fallback-local", undefined],
+    [undefined, "online"],
+    [undefined, "offline"],
+    [undefined, "error"],
+    [undefined, "connecting"],
+    [undefined, undefined],
+  ])("always allows local execution (policy=%s, health=%s)", (policy, nodeHealth) => {
     const result = applyUnavailableNodePolicy({
       effectiveNode: effectiveNode(undefined, "local"),
-      nodeHealth: "offline",
-      policy: "block",
+      nodeHealth,
+      policy,
     });
 
     expect(result).toEqual({ allowed: true, fallbackToLocal: false });

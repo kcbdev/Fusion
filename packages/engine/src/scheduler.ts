@@ -762,7 +762,7 @@ export class Scheduler {
         schedulerLog.log(`Task ${task.id} routed to node=${effectiveNode.nodeId ?? "local"} (source=${effectiveNode.source})`);
 
         // Enforce unavailable-node policy
-        if (effectiveNode.nodeId && this.options.nodeHealthMonitor) {
+        if (effectiveNode.nodeId !== undefined && this.options.nodeHealthMonitor) {
           const nodeHealth = this.options.nodeHealthMonitor.getNodeHealth(effectiveNode.nodeId);
           const decision = applyUnavailableNodePolicy({
             effectiveNode,
@@ -773,14 +773,16 @@ export class Scheduler {
           if (!decision.allowed) {
             if (!this.wasNodeBlocked.has(task.id)) {
               this.wasNodeBlocked.add(task.id);
-              schedulerLog.warn(`Task ${task.id} blocked: ${decision.reason}`);
+              schedulerLog.log(`Task ${task.id} dispatch blocked — ${decision.reason}`);
               await this.store.logEntry(task.id, decision.reason);
             }
             continue;
           }
 
+          this.wasNodeBlocked.delete(task.id);
+
           if (decision.fallbackToLocal) {
-            schedulerLog.log(`Task ${task.id} falling back to local: ${decision.reason}`);
+            schedulerLog.log(`Task ${task.id} falling back to local — ${decision.reason}`);
             await this.store.logEntry(task.id, decision.reason);
             effectiveNode = { nodeId: undefined, source: "local" };
           }
