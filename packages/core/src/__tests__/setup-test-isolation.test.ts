@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mkdirSync, writeFileSync } from "node:fs";
 import * as fsPromises from "node:fs/promises";
+import { execSync, spawnSync } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -82,5 +83,23 @@ describe("test isolation setup", () => {
     expect(() => new Database(join(repoRoot, ".fusion"))).toThrow(
       "targeted protected repo .fusion directory",
     );
+  });
+
+  it("blocks real AI CLI subprocesses from running in tests", () => {
+    expect(() => spawnSync("droid", ["--version"])).toThrow(
+      "Real AI CLI launch blocked during tests",
+    );
+    expect(() => execSync("claude --version", { encoding: "utf-8" })).toThrow(
+      "Real AI CLI launch blocked during tests",
+    );
+  });
+
+  it("still allows bounded local subprocesses", () => {
+    const result = spawnSync(process.execPath, ["-e", "process.exit(0)"], {
+      encoding: "utf-8",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.error).toBeUndefined();
   });
 });

@@ -12,6 +12,7 @@
  * case where workers are killed (SIGKILL) and never run their exit handlers.
  */
 
+import { afterEach, expect } from "vitest";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -20,11 +21,29 @@ import { assertOutsideRealFusionPath } from "../test-safety.js";
 
 type FsModule = typeof import("node:fs");
 type FsPromisesModule = typeof import("node:fs/promises");
+type ChildProcessModule = typeof import("node:child_process");
+type ChildProcess = import("node:child_process").ChildProcess;
+type SpawnOptions = import("node:child_process").SpawnOptions;
+type SpawnSyncOptions = import("node:child_process").SpawnSyncOptions;
+type ExecOptions = import("node:child_process").ExecOptions;
+type ExecFileOptions = import("node:child_process").ExecFileOptions;
+type ExecSyncOptions = import("node:child_process").ExecSyncOptions;
+type ExecFileSyncOptions = import("node:child_process").ExecFileSyncOptions;
+type ForkOptions = import("node:child_process").ForkOptions;
 
 const requireFromHere = createRequire(import.meta.url);
 const fs = requireFromHere("node:fs") as FsModule;
 const fsPromises = requireFromHere("node:fs/promises") as FsPromisesModule;
+const childProcess = requireFromHere("node:child_process") as ChildProcessModule;
 const { mkdtempSync, mkdirSync, rmSync, realpathSync, existsSync } = fs;
+
+const TEST_HOME_PREFIX = "fn-test-home-";
+const DEFAULT_TEST_SUBPROCESS_TIMEOUT_MS = Math.max(
+  1_000,
+  Number.parseInt(process.env.FUSION_TEST_SUBPROCESS_TIMEOUT_MS ?? "30000", 10) || 30_000,
+);
+const BLOCKED_TEST_CLI_PATTERN =
+  /(^|[\s"'\\/])(?:claude|droid|paperclipai|hermes|openclaw)(?:\.(?:cmd|bat|ps1|exe))?(?=$|[\s"'\\/])/i;
 
 const originalCwd = process.cwd.bind(process);
 
@@ -78,6 +97,26 @@ process.env.FUSION_TEST_REAL_ROOT = repoRoot;
 const WORKER_ROOT = join(tmpdir(), "fusion-test-workers");
 try { mkdirSync(WORKER_ROOT, { recursive: true }); } catch { /* ignore */ }
 process.env.FUSION_TEST_WORKER_ROOT = WORKER_ROOT;
+
+function ensureIsolatedHome(): void {
+  const existingHome = process.env.HOME ?? process.env.USERPROFILE;
+  if (existingHome && existingHome.includes(tmpdir()) && existingHome.includes(TEST_HOME_PREFIX)) {
+    return;
+  }
+
+  const tempHome = realpathSync(mkdtempSync(join(WORKER_ROOT, `${TEST_HOME_PREFIX}${process.pid}-`)));
+  process.env.HOME = tempHome;
+  process.env.USERPROFILE = tempHome;
+  if (process.platform === "win32") {
+    const match = tempHome.match(/^([A-Za-z]:)(.*)$/);
+    if (match) {
+      process.env.HOMEDRIVE = match[1];
+      process.env.HOMEPATH = match[2] || "\\";
+    }
+  }
+}
+
+ensureIsolatedHome();
 
 let workerTempDir: string | null = null;
 if (isMainThread) {
@@ -334,7 +373,223 @@ process.chdir = (target: string) => {
   originalChdir(target);
 };
 
+type TrackedSubprocess = {
+  commandLine: string;
+  startedAt: number;
+  timeoutTimer: NodeJS.Timeout | null;
+  timedOut: boolean;
+  testName: string | null;
+};
+
+const originalChildProcess = {
+  spawn: childProcess.spawn.bind(childProcess),
+  spawnSync: childProcess.spawnSync.bind(childProcess),
+  exec: childProcess.exec.bind(childProcess),
+  execFile: childProcess.execFile.bind(childProcess),
+  execSync: childProcess.execSync.bind(childProcess),
+  execFileSync: childProcess.execFileSync.bind(childProcess),
+  fork: childProcess.fork.bind(childProcess),
+};
+
+const trackedSubprocesses = new Map<ChildProcess, TrackedSubprocess>();
+const completedSubprocessFailures: string[] = [];
+
+function describeTestSubprocessCommand(command: string, args?: readonly string[]): string {
+  return [command, ...(args ?? [])].join(" ").trim();
+}
+
+function currentTestName(): string | null {
+  return expect.getState().currentTestName ?? null;
+}
+
+function shouldBlockRealTestCli(commandLine: string): boolean {
+  if (process.env.FUSION_TEST_ALLOW_REAL_AI_CLI === "1") {
+    return false;
+  }
+  return BLOCKED_TEST_CLI_PATTERN.test(commandLine);
+}
+
+function blockedCliError(commandLine: string): Error {
+  return new Error(
+    `Real AI CLI launch blocked during tests: ${commandLine}\n` +
+    "Mock node:child_process for this case, or set FUSION_TEST_ALLOW_REAL_AI_CLI=1 for an explicitly bounded integration test.",
+  );
+}
+
+function withDefaultTimeout<T extends { timeout?: number | undefined }>(options: T | undefined): T {
+  if (typeof options?.timeout === "number" && Number.isFinite(options.timeout)) {
+    return options;
+  }
+  return {
+    ...(options ?? {}),
+    timeout: DEFAULT_TEST_SUBPROCESS_TIMEOUT_MS,
+  } as T;
+}
+
+function cleanupTrackedSubprocess(proc: ChildProcess): void {
+  const tracked = trackedSubprocesses.get(proc);
+  if (!tracked) return;
+  if (tracked.timeoutTimer) {
+    clearTimeout(tracked.timeoutTimer);
+    tracked.timeoutTimer = null;
+  }
+  trackedSubprocesses.delete(proc);
+}
+
+function registerTrackedSubprocess(proc: ChildProcess, commandLine: string): void {
+  const tracked: TrackedSubprocess = {
+    commandLine,
+    startedAt: Date.now(),
+    timeoutTimer: null,
+    timedOut: false,
+    testName: currentTestName(),
+  };
+  trackedSubprocesses.set(proc, tracked);
+
+  tracked.timeoutTimer = setTimeout(() => {
+    tracked.timedOut = true;
+    completedSubprocessFailures.push(
+      `Timed out after ${DEFAULT_TEST_SUBPROCESS_TIMEOUT_MS}ms: ${tracked.commandLine}${tracked.testName ? ` (${tracked.testName})` : ""}`,
+    );
+    try {
+      proc.kill("SIGKILL");
+    } catch {
+      // Ignore — the process may have already exited.
+    }
+  }, DEFAULT_TEST_SUBPROCESS_TIMEOUT_MS);
+
+  const finish = () => cleanupTrackedSubprocess(proc);
+  proc.once("close", finish);
+  proc.once("error", finish);
+}
+
+function installChildProcessGuards(): void {
+  const guardState = globalThis as typeof globalThis & { __fusionTestChildProcessGuardInstalled?: boolean };
+  if (guardState.__fusionTestChildProcessGuardInstalled) return;
+  guardState.__fusionTestChildProcessGuardInstalled = true;
+
+  const mutableChildProcess = childProcess as unknown as Record<string, unknown>;
+
+  mutableChildProcess.spawn = ((command: string, argsOrOptions?: readonly string[] | SpawnOptions, maybeOptions?: SpawnOptions) => {
+    const args = Array.isArray(argsOrOptions) ? [...argsOrOptions] : [];
+    const options = Array.isArray(argsOrOptions) ? (maybeOptions ?? {}) : (argsOrOptions ?? {});
+    const commandLine = describeTestSubprocessCommand(command, args);
+    if (shouldBlockRealTestCli(commandLine)) {
+      throw blockedCliError(commandLine);
+    }
+    const proc = originalChildProcess.spawn(command, args, options);
+    registerTrackedSubprocess(proc, commandLine);
+    return proc;
+  }) as ChildProcessModule["spawn"];
+
+  mutableChildProcess.spawnSync = ((command: string, argsOrOptions?: readonly string[] | SpawnSyncOptions, maybeOptions?: SpawnSyncOptions) => {
+    const args = Array.isArray(argsOrOptions) ? [...argsOrOptions] : [];
+    const options = Array.isArray(argsOrOptions) ? withDefaultTimeout(maybeOptions) : withDefaultTimeout(argsOrOptions);
+    const commandLine = describeTestSubprocessCommand(command, args);
+    if (shouldBlockRealTestCli(commandLine)) {
+      throw blockedCliError(commandLine);
+    }
+    return originalChildProcess.spawnSync(command, args, options);
+  }) as ChildProcessModule["spawnSync"];
+
+  mutableChildProcess.execSync = ((command: string, options?: ExecSyncOptions) => {
+    if (shouldBlockRealTestCli(command)) {
+      throw blockedCliError(command);
+    }
+    return originalChildProcess.execSync(command, withDefaultTimeout(options));
+  }) as ChildProcessModule["execSync"];
+
+  mutableChildProcess.execFileSync = ((file: string, argsOrOptions?: readonly string[] | ExecFileSyncOptions, maybeOptions?: ExecFileSyncOptions) => {
+    const args = Array.isArray(argsOrOptions) ? [...argsOrOptions] : [];
+    const options = Array.isArray(argsOrOptions) ? withDefaultTimeout(maybeOptions) : withDefaultTimeout(argsOrOptions);
+    const commandLine = describeTestSubprocessCommand(file, args);
+    if (shouldBlockRealTestCli(commandLine)) {
+      throw blockedCliError(commandLine);
+    }
+    return originalChildProcess.execFileSync(file, args, options);
+  }) as ChildProcessModule["execFileSync"];
+
+  mutableChildProcess.exec = ((command: string, optionsOrCallback?: ExecOptions | ((error: Error | null, stdout: string, stderr: string) => void), maybeCallback?: (error: Error | null, stdout: string, stderr: string) => void) => {
+    if (shouldBlockRealTestCli(command)) {
+      throw blockedCliError(command);
+    }
+    const options = typeof optionsOrCallback === "function" ? undefined : optionsOrCallback;
+    const callback = typeof optionsOrCallback === "function" ? optionsOrCallback : maybeCallback;
+    const proc = originalChildProcess.exec(command, withDefaultTimeout(options), callback);
+    registerTrackedSubprocess(proc, command);
+    return proc;
+  }) as ChildProcessModule["exec"];
+
+  mutableChildProcess.execFile = ((file: string, argsOrOptions?: readonly string[] | ExecFileOptions | ((error: Error | null, stdout: string, stderr: string) => void), optionsOrCallback?: ExecFileOptions | ((error: Error | null, stdout: string, stderr: string) => void), maybeCallback?: (error: Error | null, stdout: string, stderr: string) => void) => {
+    const args = Array.isArray(argsOrOptions) ? [...argsOrOptions] : [];
+    const commandLine = describeTestSubprocessCommand(file, args);
+    if (shouldBlockRealTestCli(commandLine)) {
+      throw blockedCliError(commandLine);
+    }
+    const options = Array.isArray(argsOrOptions)
+      ? (typeof optionsOrCallback === "function" ? undefined : optionsOrCallback)
+      : (typeof argsOrOptions === "function" ? undefined : argsOrOptions);
+    const callback = Array.isArray(argsOrOptions)
+      ? (typeof optionsOrCallback === "function" ? optionsOrCallback : maybeCallback)
+      : (typeof argsOrOptions === "function" ? argsOrOptions : typeof optionsOrCallback === "function" ? optionsOrCallback : maybeCallback);
+    const proc = originalChildProcess.execFile(file, args, withDefaultTimeout(options), callback);
+    registerTrackedSubprocess(proc, commandLine);
+    return proc;
+  }) as ChildProcessModule["execFile"];
+
+  mutableChildProcess.fork = ((modulePath: string, argsOrOptions?: readonly string[] | ForkOptions, maybeOptions?: ForkOptions) => {
+    const args = Array.isArray(argsOrOptions) ? [...argsOrOptions] : [];
+    const options = Array.isArray(argsOrOptions) ? maybeOptions : argsOrOptions;
+    const commandLine = describeTestSubprocessCommand(modulePath, args);
+    if (shouldBlockRealTestCli(commandLine)) {
+      throw blockedCliError(commandLine);
+    }
+    const proc = originalChildProcess.fork(modulePath, args, options);
+    registerTrackedSubprocess(proc, commandLine);
+    return proc;
+  }) as ChildProcessModule["fork"];
+
+  syncBuiltinESMExports();
+}
+
+installChildProcessGuards();
+
+afterEach(() => {
+  const failures = [...completedSubprocessFailures];
+  completedSubprocessFailures.length = 0;
+
+  for (const [proc, tracked] of trackedSubprocesses) {
+    const stillRunning = proc.exitCode === null && proc.signalCode === null;
+    if (stillRunning) {
+      failures.push(
+        `Left running at end of test: ${tracked.commandLine}${tracked.testName ? ` (${tracked.testName})` : ""}`,
+      );
+      try {
+        proc.kill("SIGKILL");
+      } catch {
+        // Ignore — the process may have already exited.
+      }
+    }
+    cleanupTrackedSubprocess(proc);
+  }
+
+  if (failures.length > 0) {
+    throw new Error(
+      "Test subprocess guard detected unsafe child-process usage:\n" +
+      failures.map((failure) => `- ${failure}`).join("\n"),
+    );
+  }
+});
+
 process.on("exit", () => {
+  for (const [proc] of trackedSubprocesses) {
+    try {
+      proc.kill("SIGKILL");
+    } catch {
+      // Ignore — the process may have already exited.
+    }
+    cleanupTrackedSubprocess(proc);
+  }
   if (!workerTempDir) return;
   try {
     originalChdir(tmpdir());
