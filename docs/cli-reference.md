@@ -313,10 +313,11 @@ fn task show FN-001
 fn task logs FN-001 --follow --limit 50 --type tool
 ```
 
-`fn task show <id>` includes routing context when available:
+`fn task show <id>` includes routing and provenance context when available:
 - task node override
 - project default node fallback
 - unavailable-node policy value
+- source provenance line (`Source: <origin>`), including parent task / GitHub issue URL context when present
 
 ### Execution and status
 

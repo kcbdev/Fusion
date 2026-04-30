@@ -18,6 +18,57 @@ import { findNodeByNameOrId } from "./node.js";
 
 const STEP_STATUSES: StepStatus[] = ["pending", "in-progress", "done", "skipped"];
 
+function getGitHubIssueUrl(sourceMetadata: unknown): string | undefined {
+  if (!sourceMetadata || typeof sourceMetadata !== "object") return undefined;
+  const issueUrl = (sourceMetadata as { issueUrl?: unknown }).issueUrl;
+  return typeof issueUrl === "string" && issueUrl.length > 0 ? issueUrl : undefined;
+}
+
+function formatTaskSource(task: {
+  sourceType?: string;
+  sourceAgentId?: string;
+  sourceParentTaskId?: string;
+  sourceMetadata?: unknown;
+}): string | null {
+  switch (task.sourceType) {
+    case "dashboard_ui":
+      return "Dashboard";
+    case "quick_chat":
+      return "Quick Chat";
+    case "chat_session":
+      return "Chat Session";
+    case "agent_heartbeat":
+      return task.sourceAgentId ? `Agent (${task.sourceAgentId})` : "Agent";
+    case "automation":
+      return "Automation";
+    case "cron":
+      return "Scheduled Task";
+    case "workflow_step":
+      return "Workflow Step";
+    case "github_import": {
+      const issueUrl = getGitHubIssueUrl(task.sourceMetadata);
+      return issueUrl ? `GitHub Import (${issueUrl})` : "GitHub Import";
+    }
+    case "task_refine":
+      return task.sourceParentTaskId
+        ? `Refinement of ${task.sourceParentTaskId}`
+        : "Refinement";
+    case "task_duplicate":
+      return task.sourceParentTaskId
+        ? `Duplicate of ${task.sourceParentTaskId}`
+        : "Duplicate";
+    case "cli":
+      return "CLI";
+    case "api":
+      return "API";
+    case "recovery":
+      return "Recovery";
+    case "unknown":
+    default:
+      return null;
+  }
+}
+
 interface CommandContext {
   store: TaskStore;
   projectPath: string;
@@ -518,6 +569,10 @@ export async function runTaskShow(id: string, projectName?: string) {
   console.log(`  Node: ${nodeSummary}`);
   if (settings.unavailableNodePolicy) {
     console.log(`  Unavailable Node Policy: ${settings.unavailableNodePolicy}`);
+  }
+  const sourceSummary = formatTaskSource(task);
+  if (sourceSummary) {
+    console.log(`  Source: ${sourceSummary}`);
   }
   console.log();
 

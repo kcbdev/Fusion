@@ -113,6 +113,13 @@ function makeTask(overrides: Record<string, unknown> = {}) {
 describe("runTaskShow", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
 
+  const mockTaskStoreGetTask = (task: Record<string, unknown>) => {
+    (TaskStore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      init: vi.fn(),
+      getTask: vi.fn().mockResolvedValue(task),
+    }));
+  };
+
   beforeEach(() => {
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
   });
@@ -125,10 +132,7 @@ describe("runTaskShow", () => {
     const longDesc = "A".repeat(120); // well over 60 chars
     const task = makeTask({ description: longDesc });
 
-    (TaskStore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-      init: vi.fn(),
-      getTask: vi.fn().mockResolvedValue(task),
-    }));
+    mockTaskStoreGetTask(task);
 
     await runTaskShow("FN-001");
 
@@ -148,10 +152,7 @@ describe("runTaskShow", () => {
       description: "This is the full description that should not appear in the header",
     });
 
-    (TaskStore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-      init: vi.fn(),
-      getTask: vi.fn().mockResolvedValue(task),
-    }));
+    mockTaskStoreGetTask(task);
 
     await runTaskShow("FN-001");
 
@@ -161,6 +162,33 @@ describe("runTaskShow", () => {
     expect(headerLine).toBeDefined();
     expect(headerLine![0]).toContain("My Task Title");
     expect(headerLine![0]).not.toContain("This is the full description");
+  });
+
+  it.each([
+    [{ sourceType: "dashboard_ui" }, "Source: Dashboard"],
+    [{ sourceType: "agent_heartbeat", sourceAgentId: "agent-123" }, "Source: Agent (agent-123)"],
+    [{ sourceType: "task_refine", sourceParentTaskId: "FN-2904" }, "Source: Refinement of FN-2904"],
+    [{ sourceType: "task_duplicate", sourceParentTaskId: "FN-2905" }, "Source: Duplicate of FN-2905"],
+    [
+      { sourceType: "github_import", sourceMetadata: { issueUrl: "https://github.com/owner/repo/issues/42" } },
+      "Source: GitHub Import (https://github.com/owner/repo/issues/42)",
+    ],
+  ] as const)("prints provenance line for %o", async (overrides, expectedLine) => {
+    mockTaskStoreGetTask(makeTask(overrides));
+
+    await runTaskShow("FN-001");
+
+    const output = logSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(output).toContain(expectedLine);
+  });
+
+  it.each([{ sourceType: "unknown" }, {}])("omits provenance line for %o", async (overrides) => {
+    mockTaskStoreGetTask(makeTask(overrides));
+
+    await runTaskShow("FN-001");
+
+    const output = logSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(output).not.toContain("Source:");
   });
 });
 

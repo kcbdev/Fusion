@@ -1,6 +1,6 @@
 import "./TaskDetailModal.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pencil, Bot, X, ChevronDown, ChevronRight } from "lucide-react";
+import { Pencil, Bot, X, ChevronDown, ChevronRight, GitBranch } from "lucide-react";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import ReactMarkdown from "react-markdown";
@@ -222,6 +222,64 @@ function normalizeExecutionModeValue(executionMode: Task["executionMode"]): "sta
   return executionMode === "fast" ? "fast" : "standard";
 }
 
+interface ProvenanceDisplay {
+  label: string;
+  parentTaskId?: string;
+  contextInfo?: string;
+}
+
+function getIssueUrlFromMetadata(metadata: Task["sourceMetadata"]): string | undefined {
+  const issueUrl = metadata?.issueUrl;
+  return typeof issueUrl === "string" && issueUrl.length > 0 ? issueUrl : undefined;
+}
+
+function getProvenanceLabel(task: Task | TaskDetail): ProvenanceDisplay | null {
+  switch (task.sourceType) {
+    case "dashboard_ui":
+      return { label: "Dashboard" };
+    case "quick_chat":
+      return { label: "Quick Chat" };
+    case "chat_session":
+      return { label: "Chat Session" };
+    case "agent_heartbeat":
+      return {
+        label: task.sourceAgentId ? `Agent (${task.sourceAgentId})` : "Agent",
+      };
+    case "automation":
+      return { label: "Automation" };
+    case "cron":
+      return { label: "Scheduled Task" };
+    case "workflow_step":
+      return { label: "Workflow Step" };
+    case "github_import": {
+      const issueUrl = getIssueUrlFromMetadata(task.sourceMetadata);
+      return {
+        label: "GitHub Import",
+        contextInfo: issueUrl,
+      };
+    }
+    case "task_refine":
+      return {
+        label: "Refinement",
+        parentTaskId: task.sourceParentTaskId,
+      };
+    case "task_duplicate":
+      return {
+        label: "Duplicate",
+        parentTaskId: task.sourceParentTaskId,
+      };
+    case "cli":
+      return { label: "CLI" };
+    case "api":
+      return { label: "API" };
+    case "recovery":
+      return { label: "Recovery" };
+    case "unknown":
+    default:
+      return null;
+  }
+}
+
 const DESCRIPTION_TRUNCATE_LENGTH = 200;
 
 const EDITABLE_COLUMNS: Set<Column> = new Set(["triage", "todo"]);
@@ -301,6 +359,7 @@ export function TaskDetailModal({
     (task.stuckKillCount ?? 0) > 0 ||
     (task.recoveryRetryCount ?? 0) > 0 ||
     Boolean(task.nextRecoveryAt);
+  const provenanceDisplay = getProvenanceLabel(workingTask);
 
   // Sync activeTab when the caller changes initialTab (e.g. opening a different tab)
   useEffect(() => {
@@ -1488,6 +1547,27 @@ export function TaskDetailModal({
                 <span className={`detail-priority-chip detail-priority-chip--${normalizeTaskPriorityValue(task.priority)}`}>
                   Priority: {normalizeTaskPriorityValue(task.priority)}
                 </span>
+                {provenanceDisplay && (
+                  <div className="detail-provenance">
+                    <GitBranch aria-hidden="true" />
+                    <span>
+                      Created via {provenanceDisplay.label}
+                      {provenanceDisplay.parentTaskId && (
+                        <>
+                          {" "}of{" "}
+                          <button
+                            type="button"
+                            className="detail-provenance-link"
+                            onClick={() => handleDepClick(provenanceDisplay.parentTaskId!)}
+                          >
+                            {provenanceDisplay.parentTaskId}
+                          </button>
+                        </>
+                      )}
+                      {provenanceDisplay.contextInfo ? ` (${provenanceDisplay.contextInfo})` : ""}
+                    </span>
+                  </div>
+                )}
               </div>
             </>
           )}

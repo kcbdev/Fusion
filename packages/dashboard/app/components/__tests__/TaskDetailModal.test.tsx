@@ -13,7 +13,7 @@ vi.mock("../../api", () => ({
   uploadAttachment: vi.fn(),
   deleteAttachment: vi.fn(),
   updateTask: vi.fn().mockResolvedValue({}),
-  fetchTaskDetail: vi.fn(),
+  fetchTaskDetail: vi.fn().mockResolvedValue(makeTask()),
   fetchAgentLogs: vi.fn().mockResolvedValue([]),
   requestSpecRevision: vi.fn().mockResolvedValue({}),
   approvePlan: vi.fn().mockResolvedValue({}),
@@ -57,6 +57,7 @@ vi.mock("lucide-react", () => ({
   CircleDot: () => null,
   XCircle: () => null,
   GitMerge: () => null,
+  GitBranch: () => null,
 }));
 
 vi.mock("../../hooks/useAgentLogs", () => ({
@@ -134,6 +135,84 @@ describe("TaskDetailModal", () => {
   afterEach(() => {
     clearAuthToken();
     localStorage.removeItem("fn.authToken");
+  });
+
+  describe("provenance display", () => {
+    it.each([
+      ["dashboard_ui", undefined, "Created via Dashboard"],
+      ["agent_heartbeat", "agent-123", "Created via Agent (agent-123)"],
+    ] as const)("renders provenance text for %s", (sourceType, sourceAgentId, expectedText) => {
+      render(
+        <TaskDetailModal
+          task={makeTask({ sourceType, sourceAgentId })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      expect(screen.getByText(expectedText)).toBeInTheDocument();
+    });
+
+    it("renders parent task link for refinement provenance", async () => {
+      render(
+        <TaskDetailModal
+          task={makeTask({ sourceType: "task_refine", sourceParentTaskId: "FN-001" })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      expect(screen.getByText(/Created via Refinement/)).toBeInTheDocument();
+      const link = screen.getByRole("button", { name: "FN-001" });
+      expect(link).toBeInTheDocument();
+      await userEvent.click(link);
+      await waitFor(() => {
+        expect(noopOpenDetail).toHaveBeenCalled();
+      });
+    });
+
+    it("renders issue URL for github import provenance", () => {
+      render(
+        <TaskDetailModal
+          task={makeTask({
+            sourceType: "github_import",
+            sourceMetadata: { issueUrl: "https://github.com/owner/repo/issues/42" },
+          })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      expect(screen.getByText("Created via GitHub Import (https://github.com/owner/repo/issues/42)")).toBeInTheDocument();
+    });
+
+    it.each(["unknown", undefined] as const)("omits provenance for %s source", (sourceType) => {
+      render(
+        <TaskDetailModal
+          task={makeTask({ sourceType })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      expect(screen.queryByText(/Created via/)).not.toBeInTheDocument();
+    });
   });
 
   it("styles detail-body scrollbar rules", () => {
