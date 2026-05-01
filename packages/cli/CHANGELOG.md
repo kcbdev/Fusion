@@ -1,5 +1,11 @@
 # @runfusion/fusion
 
+## 0.14.1
+
+### Patch Changes
+
+- cafe986: Fix readonly `createFnAgent` sessions to preserve caller-supplied engine custom tools while still excluding host extensions. This restores delegation and memory tools for no-task heartbeat/reviewer readonly sessions without reopening host extension tool injection in summarizer flows.
+
 ## 0.14.0
 
 ### Minor Changes

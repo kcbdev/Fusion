@@ -2,6 +2,44 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
+## 0.14.1
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- @fusion/core@0.14.1
+- @fusion/engine@0.14.1
+- @fusion-plugin-examples/hermes-runtime@0.2.17
+- @fusion-plugin-examples/openclaw-runtime@0.2.17
+- @fusion-plugin-examples/paperclip-runtime@0.2.17
+
+### @fusion/engine
+
+#### Patch Changes
+
+- @fusion/core@0.14.1
+- @fusion/pi-claude-cli@0.14.1
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- @fusion/core@0.14.1
+
+### @runfusion/fusion
+
+#### Patch Changes
+
+- cafe986: Fix readonly `createFnAgent` sessions to preserve caller-supplied engine custom tools while still excluding host extensions. This restores delegation and memory tools for no-task heartbeat/reviewer readonly sessions without reopening host extension tool injection in summarizer flows.
+
+### runfusion.ai
+
+#### Patch Changes
+
+- Updated dependencies [cafe986]
+  - @runfusion/fusion@0.14.1
+
 ## 0.14.0
 
 ### @fusion/dashboard
