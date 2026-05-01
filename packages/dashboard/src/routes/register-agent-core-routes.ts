@@ -3,6 +3,7 @@ import type { Agent, AgentCapability, AgentUpdateInput, TaskStore } from "@fusio
 import { getDefaultHeartbeatProcedurePath } from "@fusion/core";
 import { ApiError, badRequest, notFound } from "../api-error.js";
 import type { ApiRoutesContext } from "./types.js";
+import { ensureDefaultHeartbeatProcedureFile, HEARTBEAT_PROCEDURE } from "@fusion/engine";
 
 interface AgentCoreRouteDeps {
   sanitizeAgentTaskLinks: (agents: Agent[], scopedStore: TaskStore) => Promise<Agent[]>;
@@ -162,7 +163,6 @@ export function registerAgentCoreListCreateRoutes(ctx: ApiRoutesContext, deps: A
       const expectedDefaultPath = getDefaultHeartbeatProcedurePath(agent.id);
       if (agent.heartbeatProcedurePath === expectedDefaultPath) {
         try {
-          const { ensureDefaultHeartbeatProcedureFile, HEARTBEAT_PROCEDURE } = await import("@fusion/engine");
           await ensureDefaultHeartbeatProcedureFile(scopedStore.getRootDir(), expectedDefaultPath, HEARTBEAT_PROCEDURE);
         } catch {
           // Non-fatal — the heartbeat resolver falls back to the in-memory constant.
@@ -491,7 +491,6 @@ export function registerAgentCoreRoutes(ctx: ApiRoutesContext, deps: AgentCoreRo
       }
 
       const targetPath = getDefaultHeartbeatProcedurePath(req.params.id);
-      const { ensureDefaultHeartbeatProcedureFile, HEARTBEAT_PROCEDURE } = await import("@fusion/engine");
       const filePath = await ensureDefaultHeartbeatProcedureFile(
         scopedStore.getRootDir(),
         targetPath,

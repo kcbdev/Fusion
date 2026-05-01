@@ -31,6 +31,7 @@ import {
   nonfatal,
 } from "./ai-session-diagnostics.js";
 import { createFnAgent as engineCreateFnAgent } from "@fusion/engine";
+import * as engineModule from "@fusion/engine";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AgentResult = any;
@@ -133,38 +134,32 @@ async function ensureNtfyHelpersReady(): Promise<void> {
     return;
   }
 
-  try {
-    const engine = await import("@fusion/engine");
+  const hasNotificationService = "NotificationService" in engineModule
+    && typeof engineModule.NotificationService === "function";
 
-    const hasNotificationService = "NotificationService" in engine
-      && typeof engine.NotificationService === "function";
+  const hasAllHelpers =
+    "isNtfyEventEnabled" in engineModule
+    && "buildNtfyClickUrl" in engineModule
+    && "sendNtfyNotification" in engineModule
+    && typeof engineModule.isNtfyEventEnabled === "function"
+    && typeof engineModule.buildNtfyClickUrl === "function"
+    && typeof engineModule.sendNtfyNotification === "function";
 
-    const hasAllHelpers =
-      "isNtfyEventEnabled" in engine
-      && "buildNtfyClickUrl" in engine
-      && "sendNtfyNotification" in engine
-      && typeof engine.isNtfyEventEnabled === "function"
-      && typeof engine.buildNtfyClickUrl === "function"
-      && typeof engine.sendNtfyNotification === "function";
+  if (!hasAllHelpers) {
+    return;
+  }
 
-    if (!hasAllHelpers) {
-      return;
-    }
+  planningNtfyHelpers = {
+    isNtfyEventEnabled: engineModule.isNtfyEventEnabled,
+    buildNtfyClickUrl: engineModule.buildNtfyClickUrl,
+    sendNtfyNotification: engineModule.sendNtfyNotification,
+  };
 
-    planningNtfyHelpers = {
-      isNtfyEventEnabled: engine.isNtfyEventEnabled,
-      buildNtfyClickUrl: engine.buildNtfyClickUrl,
-      sendNtfyNotification: engine.sendNtfyNotification,
-    };
-
-    if (hasNotificationService) {
-      diagnostics.info(
-        "NotificationService abstraction detected in engine",
-        { operation: "notification-service-detection" },
-      );
-    }
-  } catch {
-    // Optional notifier helpers unavailable in this runtime/test context.
+  if (hasNotificationService) {
+    diagnostics.info(
+      "NotificationService abstraction detected in engine",
+      { operation: "notification-service-detection" },
+    );
   }
 }
 

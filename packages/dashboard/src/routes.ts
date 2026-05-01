@@ -275,7 +275,7 @@ async function discoverDashboardPiExtensions(cwd: string): Promise<PiExtensionSe
   };
 }
 
-import { createFnAgent as engineCreateFnAgentForRefine } from "@fusion/engine";
+import { createFnAgent as engineCreateFnAgentForRefine, promptWithFallback as enginePromptWithFallback } from "@fusion/engine";
 
 // Test-injectable override; defaults to the statically imported engine binding.
 let createFnAgentForRefine: typeof import("@fusion/engine").createFnAgent | undefined = engineCreateFnAgentForRefine;
@@ -4121,7 +4121,21 @@ async function executeAiPromptStep(
     };
   }
 
-  const { createFnAgent, promptWithFallback } = await import("@fusion/engine");
+  const createFnAgent = createFnAgentForRefine;
+  const promptWithFallback = enginePromptWithFallback;
+  if (!createFnAgent) {
+    return {
+      stepId: step.id,
+      stepName: step.name,
+      stepIndex: 0,
+      success: false,
+      output: "",
+      error: "AI agent not available",
+      startedAt,
+      completedAt: new Date().toISOString(),
+    };
+  }
+
   const settings = await taskStore.getSettings();
   const defaultModel = resolveProjectDefaultModel(settings);
   const modelProvider = step.modelProvider?.trim() || defaultModel.provider;

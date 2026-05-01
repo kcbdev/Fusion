@@ -1,5 +1,22 @@
 import { ApiError, badRequest, internalError, notFound } from "../api-error.js";
 import type { ApiRoutesContext } from "./types.js";
+import * as engineModule from "@fusion/engine";
+
+type EngineAgentReflectionService = typeof engineModule extends {
+  AgentReflectionService: infer T;
+}
+  ? T
+  : never;
+
+let AgentReflectionServiceBinding: EngineAgentReflectionService | undefined =
+  "AgentReflectionService" in engineModule && typeof engineModule.AgentReflectionService === "function"
+    ? (engineModule.AgentReflectionService as EngineAgentReflectionService)
+    : undefined;
+
+/** @internal test hook for reflection-service-unavailable branches. */
+export function __setAgentReflectionServiceForTests(service: EngineAgentReflectionService | undefined): void {
+  AgentReflectionServiceBinding = service;
+}
 
 export function registerAgentReflectionRatingRoutes(ctx: ApiRoutesContext): void {
   const { router, getProjectContext, rethrowAsApiError } = ctx;
@@ -98,7 +115,6 @@ export function registerAgentReflectionRatingRoutes(ctx: ApiRoutesContext): void
     try {
       const { store: taskStore } = await getProjectContext(req);
       const { AgentStore, ReflectionStore } = await import("@fusion/core");
-      const { AgentReflectionService } = await import("@fusion/engine");
       const agentStore = new AgentStore({ rootDir: taskStore.getFusionDir() });
       const reflectionStore = new ReflectionStore({ rootDir: taskStore.getFusionDir() });
       await agentStore.init();
@@ -113,6 +129,12 @@ export function registerAgentReflectionRatingRoutes(ctx: ApiRoutesContext): void
       const agent = await agentStore.getAgent(agentId);
       if (!agent) {
         throw notFound("Agent not found");
+      }
+
+      const AgentReflectionService = AgentReflectionServiceBinding;
+      if (!AgentReflectionService) {
+        res.status(503).json({ error: "Reflection service not available" });
+        return;
       }
 
       // Create the reflection service and generate a reflection
@@ -205,16 +227,7 @@ export function registerAgentReflectionRatingRoutes(ctx: ApiRoutesContext): void
         throw notFound("Agent not found");
       }
 
-      // Check if AgentReflectionService is available
-      let AgentReflectionService: typeof import("@fusion/engine").AgentReflectionService | undefined;
-      try {
-        const engine = await import("@fusion/engine");
-        AgentReflectionService = engine.AgentReflectionService;
-      } catch {
-        res.status(503).json({ error: "Reflection service not available" });
-        return;
-      }
-
+      const AgentReflectionService = AgentReflectionServiceBinding;
       if (!AgentReflectionService) {
         res.status(503).json({ error: "Reflection service not available" });
         return;

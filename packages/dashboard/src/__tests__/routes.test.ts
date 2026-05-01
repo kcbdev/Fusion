@@ -35,6 +35,7 @@ import { get as performGet, request as performRequest } from "../test-request.js
 import { resetRuntimeLogSink, setRuntimeLogSink } from "../runtime-logger.js";
 import { resetDiagnosticsSink, setDiagnosticsSink, type LogEntry } from "../ai-session-diagnostics.js";
 import * as updateCheckModule from "../update-check.js";
+import { __setAgentReflectionServiceForTests } from "../routes/register-agent-reflection-rating-routes.js";
 
 // Mock @fusion/core for gh CLI auth checks
 const mockCentralListProjects = vi.fn().mockResolvedValue([]);
@@ -18730,6 +18731,15 @@ describe("Agent Reflection routes", () => {
     return app;
   }
 
+  afterEach(async () => {
+    const engine = await import("@fusion/engine");
+    const reflectionService =
+      "AgentReflectionService" in engine && typeof engine.AgentReflectionService === "function"
+        ? (engine.AgentReflectionService as unknown as Parameters<typeof __setAgentReflectionServiceForTests>[0])
+        : undefined;
+    __setAgentReflectionServiceForTests(reflectionService);
+  });
+
   describe("GET /api/agents/:id/reflections", () => {
     it("returns 200 for valid agent (uses real stores)", async () => {
       const res = await GET(buildApp(), `/api/agents/${agentId}/reflections`);
@@ -18780,6 +18790,7 @@ describe("Agent Reflection routes", () => {
 
     it("returns 500 with a clear message when reflection generation returns null", async () => {
       const engine = await import("@fusion/engine");
+      __setAgentReflectionServiceForTests(engine.AgentReflectionService);
       const generateReflectionSpy = vi
         .spyOn(engine.AgentReflectionService.prototype, "generateReflection")
         .mockResolvedValueOnce(null);
@@ -18826,6 +18837,13 @@ describe("Agent Reflection routes", () => {
   });
 
   describe("GET /api/agents/:id/reflection-context", () => {
+    it("returns 503 when reflection service binding is unavailable", async () => {
+      __setAgentReflectionServiceForTests(undefined);
+      const res = await GET(buildApp(), `/api/agents/${agentId}/reflection-context`);
+
+      expect(res.status).toBe(503);
+      expect(res.body.error).toContain("Reflection service not available");
+    });
     it("returns 200 when reflection context is available, otherwise 500/503", async () => {
       const res = await GET(buildApp(), `/api/agents/${agentId}/reflection-context`);
 

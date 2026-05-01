@@ -28,6 +28,7 @@ import {
   badRequest,
   notFound,
 } from "./api-error.js";
+import { createFnAgent, promptWithFallback } from "@fusion/engine";
 
 /**
  * Re-throws an error as an ApiError, converting unknown errors to internal errors.
@@ -251,8 +252,6 @@ export function createInsightsRouter(store: TaskStore): Router {
       const existingInsights = await readInsightsMemory(rootDir);
 
       try {
-        const { createFnAgent, promptWithFallback } = await import("@fusion/engine");
-
         let responseText = "";
         const { session } = await createFnAgent({
           cwd: rootDir,

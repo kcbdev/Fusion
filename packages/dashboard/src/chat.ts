@@ -27,6 +27,7 @@ import { join, resolve, relative } from "node:path";
 import { SessionEventBuffer } from "./sse-buffer.js";
 
 import { createFnAgent as engineCreateFnAgent } from "@fusion/engine";
+import * as engineModule from "@fusion/engine";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AgentResult = any;
@@ -100,13 +101,8 @@ async function ensureEngineReady(): Promise<void> {
     return;
   }
 
-  try {
-    const engine = await import("@fusion/engine");
-    if ("buildAgentChatPrompt" in engine && typeof engine.buildAgentChatPrompt === "function") {
-      buildAgentChatPromptFn = engine.buildAgentChatPrompt;
-    }
-  } catch {
-    // Optional helper unavailable in mocked/test contexts.
+  if ("buildAgentChatPrompt" in engineModule && typeof engineModule.buildAgentChatPrompt === "function") {
+    buildAgentChatPromptFn = engineModule.buildAgentChatPrompt;
   }
 }
 
