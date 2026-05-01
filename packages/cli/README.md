@@ -177,6 +177,19 @@ The pi extension exposes tools to create tasks, check progress, attach files, an
 
 Fusion also works as a standalone CLI outside of pi. See [STANDALONE.md](./STANDALONE.md) for installation and usage without the pi extension.
 
+## Optional provider: Factory AI via Droid CLI
+
+`@runfusion/fusion` now ships a vendored `@fusion/droid-cli` extension in the published CLI bundle.
+
+To use it:
+
+1. Install the `droid` binary and ensure it is on your `PATH`
+2. Authenticate with Droid CLI (`droid auth login`)
+3. In Fusion dashboard, go to **Settings → Authentication** and enable **Factory AI — via Droid CLI**
+4. Restart Fusion when prompted so the extension is loaded into the runtime
+
+Once enabled, `droid-cli` models appear in Fusion model selection.
+
 ## Full documentation
 
 Architecture details, development setup, and contributor info live in the [project README](https://github.com/Runfusion/Fusion#readme).

@@ -34,6 +34,7 @@
     "dist/**/*.js.map",
     "dist/client/**",
     "dist/pi-claude-cli/**",
+    "dist/droid-cli/**",
     "skill/**",
     "README.md"
   ],

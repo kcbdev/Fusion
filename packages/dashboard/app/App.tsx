@@ -12,6 +12,7 @@ import { BackendConnectionErrorPage } from "./components/BackendConnectionErrorP
 import { DashboardLoader, type DashboardLoaderStage } from "./components/DashboardLoader";
 import { ExecutorStatusBar } from "./components/ExecutorStatusBar";
 import { SessionNotificationBanner } from "./components/SessionNotificationBanner";
+import { CliBinaryInstallBanner } from "./components/CliBinaryInstallBanner";
 import { SetupWarningBanner } from "./components/SetupWarningBanner";
 import { UpdateAvailableBanner } from "./components/UpdateAvailableBanner";
 import { OnboardingResumeCard } from "./components/OnboardingResumeCard";
@@ -945,6 +946,11 @@ function AppInner() {
           onResumeSession={handleOpenBackgroundSession}
           onDismissSession={handleDismissNeedingInputSession}
           onDismissAll={handleDismissAllNeedingInputSessions}
+        />
+      )}
+      {viewMode === "project" && currentProject && (
+        <CliBinaryInstallBanner
+          onOpenSettings={() => modalManager.openSettings("general" as SectionId)}
         />
       )}
       {viewMode === "project" && currentProject && showOnboardingResumeCard && (

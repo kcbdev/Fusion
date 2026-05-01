@@ -238,6 +238,15 @@ To revoke/reset access, choose the behavior you want:
 - **Persistent reset:** clear `daemonToken` from `~/.fusion/settings.json` (or rotate it via `fn daemon --token-only`/token rotation workflow), then restart dashboard.
 - **Client logout:** clear `fn.authToken` in browser localStorage so clients must re-authenticate with the current server token.
 
+### Optional provider: Factory AI via Droid CLI
+
+When the published CLI bundle includes the vendored `@fusion/droid-cli` extension, users can enable **Factory AI — via Droid CLI** in **Settings → Authentication**.
+
+Requirements:
+- `droid` binary installed and available on `PATH`
+- successful local login (`droid auth login`)
+- Fusion restart after toggling the provider on (to reload extensions)
+
 ---
 
 ## `fn serve`

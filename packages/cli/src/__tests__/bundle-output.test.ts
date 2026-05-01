@@ -11,6 +11,7 @@ import {
   readClientIndexHtml,
 } from "./bundle-output-helpers";
 import { resolveClaudeCliExtensionFromModuleUrl } from "../commands/claude-cli-extension";
+import { resolveDroidCliExtensionFromModuleUrl } from "../commands/droid-cli-extension";
 
 const tsupConfigPath = join(cliRoot, "tsup.config.ts");
 
@@ -113,6 +114,24 @@ describe("CLI bundle output", () => {
 
   it("dist/pi-claude-cli/ is staged with correct files", () => {
     const stagedRoot = join(cliRoot, "dist", "pi-claude-cli");
+
+    expect(existsSync(join(stagedRoot, "package.json"))).toBe(true);
+    expect(existsSync(join(stagedRoot, "index.ts"))).toBe(true);
+    expect(existsSync(join(stagedRoot, "src", "process-manager.ts"))).toBe(true);
+  });
+
+  it("resolveDroidCliExtension succeeds against the staged dist/ layout", () => {
+    const result = resolveDroidCliExtensionFromModuleUrl(pathToFileURL(bundlePath).href);
+
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.path).toBe(join(cliRoot, "dist", "droid-cli", "index.ts"));
+      expect(result.packageVersion).toMatch(/\d+\.\d+\.\d+/);
+    }
+  });
+
+  it("dist/droid-cli/ is staged with correct files", () => {
+    const stagedRoot = join(cliRoot, "dist", "droid-cli");
 
     expect(existsSync(join(stagedRoot, "package.json"))).toBe(true);
     expect(existsSync(join(stagedRoot, "index.ts"))).toBe(true);

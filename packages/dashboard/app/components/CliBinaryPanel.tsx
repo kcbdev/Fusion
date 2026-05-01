@@ -29,7 +29,7 @@ const STATE_LABELS: Record<FnBinaryStatus["state"], { text: string; tone: "ok" |
  * `npm install -g runfusion.ai` server-side), and two copy-to-clipboard
  * commands so users with non-default npm setups can install themselves.
  */
-export function CliBinaryPanel({ defer = false }: Props): JSX.Element {
+export function CliBinaryPanel({ defer = false }: Props) {
   const [status, setStatus] = useState<FnBinaryStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [installing, setInstalling] = useState(false);

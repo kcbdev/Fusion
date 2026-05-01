@@ -326,6 +326,7 @@ For Capacitor + PWA workflow, see [MOBILE.md](./MOBILE.md).
 Fusion supports OAuth-based authentication for AI providers configured via **Settings → Authentication**. When the dashboard is accessed via a non-localhost host (remote node, LAN host/IP, or reverse proxy), provider login URLs are automatically rewritten to route OAuth callbacks through a bridge endpoint (`/api/auth/openai-codex/callback`), ensuring the redirect reaches the active browser session.
 
 - **OpenAI Codex** — Authenticates via Settings OAuth flow with secure state validation
+- **Factory AI — via Droid CLI** *(optional)* — requires local `droid` install + `droid auth login`, then enable the provider in **Settings → Authentication** and restart Fusion
 - **Other providers** — Authenticate via API key entry in Settings
 - **pi authentication** — Handled separately via the `pi` CLI (`/login`) or `ANTHROPIC_API_KEY` environment variable
 

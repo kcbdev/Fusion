@@ -16,6 +16,20 @@ If you don't have pi set up yet: `npm i -g @mariozechner/pi-coding-agent && pi` 
 
 ## Usage
 
+### Optional provider: Factory AI via Droid CLI
+
+The published `@runfusion/fusion` package includes a vendored `@fusion/droid-cli` provider extension.
+
+To enable it:
+
+1. Install the `droid` CLI binary and confirm it is available on `PATH`
+2. Authenticate with `droid auth login`
+3. Open Fusion dashboard → **Settings → Authentication** and enable **Factory AI — via Droid CLI**
+4. Restart Fusion when prompted to apply provider extension loading
+
+After restart, `droid-cli` models are available in model pickers.
+
+
 ### Start the dashboard
 
 Launch the web UI and AI engine:

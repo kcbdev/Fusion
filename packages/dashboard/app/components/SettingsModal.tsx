@@ -26,6 +26,7 @@ import { useModalResizePersist } from "../hooks/useModalResizePersist";
 const PluginManager = lazy(() => import("./PluginManager").then((m) => ({ default: m.PluginManager })));
 const PiExtensionsManager = lazy(() => import("./PiExtensionsManager").then((m) => ({ default: m.PiExtensionsManager })));
 import { ClaudeCliProviderCard } from "./ClaudeCliProviderCard";
+import { CliBinaryPanel } from "./CliBinaryPanel";
 import { DroidCliProviderCard } from "./DroidCliProviderCard";
 import { HermesRuntimeCard } from "./HermesRuntimeCard";
 import { OpenClawRuntimeCard } from "./OpenClawRuntimeCard";
@@ -1834,6 +1835,7 @@ export function SettingsModal({
                 it hidden even before clicking.
               </small>
             </div>
+            <CliBinaryPanel />
           </>
         );
       case "global-models": {
