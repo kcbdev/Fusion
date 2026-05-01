@@ -95,6 +95,11 @@
   box-sizing: border-box;
 }
 
+.agent-dialog-field--title .input {
+  font-size: calc(var(--space-md) + var(--space-xs) * 0.25);
+  line-height: var(--space-lg);
+}
+
 .agent-dialog-section {
   margin-bottom: var(--space-lg);
 }
@@ -306,7 +311,7 @@
 
 .agent-dialog-summary-row-label {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: calc(var(--space-sm) + var(--space-xs) * 0.75);
 }
 
 .agent-dialog-summary-row-label--fixed {
@@ -332,6 +337,21 @@
 
 .agent-dialog-summary-row-value--capitalize {
   text-transform: capitalize;
+}
+
+.agent-dialog-summary-row--editable {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-xs);
+}
+
+.agent-dialog-summary-row--editable .agent-dialog-summary-row-label {
+  margin-bottom: 0;
+}
+
+.agent-dialog-summary-row--title .input {
+  font-size: calc(var(--space-md) + var(--space-xs) * 0.25);
+  line-height: var(--space-lg);
 }
 
 /* Agent preset quick-start cards */
@@ -539,6 +559,11 @@
   padding: var(--space-sm) 0;
 }
 
+.agent-dialog-field-hint {
+  margin-top: var(--space-xs);
+  font-size: calc(var(--space-sm) + var(--space-xs) * 0.75);
+}
+
 /* === Mobile: fullscreen + scroll === */
 @media (max-width: 768px) {
   /* Drop the overlay padding so the dialog can fill the viewport edge-to-edge.
@@ -604,6 +629,10 @@
        page and trap the user above the footer. */
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
+  }
+
+  .agent-dialog-summary-row--editable .input {
+    min-height: calc(var(--space-lg) + var(--space-xl));
   }
 
   /* Stack the footer buttons full-width — primary on top, cancel below.

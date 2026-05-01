@@ -221,6 +221,28 @@ The New Agent dialog keeps the existing 3-step flow, and step 0 is split into tw
 - **Preset personas** (default) — quick-start persona cards that prefill the same fields and immediately advance to step 1 when selected
 - **Custom agent** — manual setup for identity, configuration, and the Generate with AI entry point
 
+### Onboarding fields (step 0 custom tab)
+
+The custom tab exposes separate fields for:
+
+- **Title** (`title`) — optional role title/description
+- **Soul** (`soul`) — optional personality and communication style guidance
+- **Heartbeat Procedure Path** (`heartbeatProcedurePath`) — optional path to the agent heartbeat markdown file, typically `.fusion/agents/<agent-id>/HEARTBEAT.md`
+- **Instructions Path** (`instructionsPath`) — optional file-backed instructions path
+- **Inline Instructions** (`instructionsText`) — optional inline behavior instructions
+
+### Final review edits (step 2)
+
+Before clicking **Create**, the final review step remains editable for identity/instruction fields so operators can make last-minute corrections without navigating backward. The review step includes edit-in-place controls for:
+
+- Title
+- Soul
+- Heartbeat Procedure Path
+- Instructions Path
+- Inline Instructions
+
+The final `createAgent(...)` call always uses the latest values from these step-2 controls.
+
 The dashboard provides quick-start presets for common agent roles. Each preset includes:
 
 - **Name and icon** - Display identification

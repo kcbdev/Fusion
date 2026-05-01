@@ -50,6 +50,7 @@ export function NewAgentDialog({ isOpen, onClose, onCreated, projectId }: NewAge
   const [reportsTo, setReportsTo] = useState("");
   const [instructionsPath, setInstructionsPath] = useState("");
   const [instructionsText, setInstructionsText] = useState("");
+  const [heartbeatProcedurePath, setHeartbeatProcedurePath] = useState("");
   const [soul, setSoul] = useState("");
   const [memory, setMemory] = useState("");
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig>({
@@ -229,6 +230,7 @@ export function NewAgentDialog({ isOpen, onClose, onCreated, projectId }: NewAge
     setReportsTo("");
     setInstructionsPath("");
     setInstructionsText("");
+    setHeartbeatProcedurePath("");
     setSoul("");
     setMemory("");
     setRuntimeConfig({ model: "", thinkingLevel: "off", maxTurns: 1000 });
@@ -262,6 +264,7 @@ export function NewAgentDialog({ isOpen, onClose, onCreated, projectId }: NewAge
         ...(reportsTo.trim() ? { reportsTo: reportsTo.trim() } : {}),
         ...(instructionsPath.trim() ? { instructionsPath: instructionsPath.trim() } : {}),
         ...(instructionsText.trim() ? { instructionsText: instructionsText.trim() } : {}),
+        ...(heartbeatProcedurePath.trim() ? { heartbeatProcedurePath: heartbeatProcedurePath.trim() } : {}),
         ...(soul.trim() ? { soul: soul.trim() } : {}),
         ...(memory.trim() ? { memory: memory.trim() } : {}),
         ...(Object.keys(runtimeCfg).length > 0 ? { runtimeConfig: runtimeCfg } : {}),
@@ -478,7 +481,7 @@ export function NewAgentDialog({ isOpen, onClose, onCreated, projectId }: NewAge
                         onChange={e => setName(e.target.value)}
                       />
                     </div>
-                    <div className="agent-dialog-field">
+                    <div className="agent-dialog-field agent-dialog-field--title">
                       <label htmlFor="agent-title">Title <span className="agent-dialog-optional">(optional)</span></label>
                       <input
                         id="agent-title"
@@ -568,6 +571,20 @@ export function NewAgentDialog({ isOpen, onClose, onCreated, projectId }: NewAge
                         value={instructionsPath}
                         onChange={e => setInstructionsPath(e.target.value)}
                       />
+                    </div>
+                    <div className="agent-dialog-field">
+                      <label htmlFor="agent-heartbeat-procedure-path">Heartbeat Procedure Path <span className="agent-dialog-optional">(optional)</span></label>
+                      <input
+                        id="agent-heartbeat-procedure-path"
+                        type="text"
+                        className="input"
+                        placeholder="e.g. .fusion/agents/my-agent/HEARTBEAT.md"
+                        value={heartbeatProcedurePath}
+                        onChange={e => setHeartbeatProcedurePath(e.target.value)}
+                      />
+                      <p className="agent-dialog-optional agent-dialog-field-hint">
+                        Path to the agent&apos;s heartbeat markdown file, typically .fusion/agents/&lt;agent-id&gt;/HEARTBEAT.md.
+                      </p>
                     </div>
                     <div className="agent-dialog-field">
                       <label htmlFor="agent-instructions-text">Inline Instructions <span className="agent-dialog-optional">(optional)</span></label>
@@ -662,12 +679,17 @@ export function NewAgentDialog({ isOpen, onClose, onCreated, projectId }: NewAge
                     {name}
                   </span>
                 </div>
-                {title && (
-                  <div className="agent-dialog-summary-row">
-                    <span className="agent-dialog-summary-row-label">Title</span>
-                    <span>{title}</span>
-                  </div>
-                )}
+                <div className="agent-dialog-summary-row agent-dialog-summary-row--editable agent-dialog-summary-row--title">
+                  <label className="agent-dialog-summary-row-label" htmlFor="agent-review-title">Title</label>
+                  <input
+                    id="agent-review-title"
+                    type="text"
+                    className="input"
+                    placeholder="e.g. Senior Code Reviewer"
+                    value={title}
+                    onChange={e => setTitle(e.target.value)}
+                  />
+                </div>
                 <div className="agent-dialog-summary-row">
                   <span className="agent-dialog-summary-row-label">Role</span>
                   <span>{selectedRole?.icon} {selectedRole?.label}</span>
@@ -682,24 +704,50 @@ export function NewAgentDialog({ isOpen, onClose, onCreated, projectId }: NewAge
                     </span>
                   </div>
                 )}
-                {instructionsPath.trim() && (
-                  <div className="agent-dialog-summary-row">
-                    <span className="agent-dialog-summary-row-label">Instructions File</span>
-                    <span>{instructionsPath.trim()}</span>
-                  </div>
-                )}
-                {instructionsText.trim() && (
-                  <div className="agent-dialog-summary-row">
-                    <span className="agent-dialog-summary-row-label">Inline Instructions</span>
-                    <span>{instructionsText.trim().length} chars</span>
-                  </div>
-                )}
-                {soul.trim() && (
-                  <div className="agent-dialog-summary-row">
-                    <span className="agent-dialog-summary-row-label">Soul</span>
-                    <span>{soul.trim().length} chars</span>
-                  </div>
-                )}
+                <div className="agent-dialog-summary-row agent-dialog-summary-row--editable">
+                  <label className="agent-dialog-summary-row-label" htmlFor="agent-review-soul">Soul</label>
+                  <textarea
+                    id="agent-review-soul"
+                    className="input"
+                    rows={2}
+                    placeholder="Describe the agent's personality and communication style..."
+                    value={soul}
+                    onChange={e => setSoul(e.target.value)}
+                  />
+                </div>
+                <div className="agent-dialog-summary-row agent-dialog-summary-row--editable">
+                  <label className="agent-dialog-summary-row-label" htmlFor="agent-review-heartbeat-procedure-path">Heartbeat Procedure Path</label>
+                  <input
+                    id="agent-review-heartbeat-procedure-path"
+                    type="text"
+                    className="input"
+                    placeholder="e.g. .fusion/agents/my-agent/HEARTBEAT.md"
+                    value={heartbeatProcedurePath}
+                    onChange={e => setHeartbeatProcedurePath(e.target.value)}
+                  />
+                </div>
+                <div className="agent-dialog-summary-row agent-dialog-summary-row--editable">
+                  <label className="agent-dialog-summary-row-label" htmlFor="agent-review-instructions-path">Instructions Path</label>
+                  <input
+                    id="agent-review-instructions-path"
+                    type="text"
+                    className="input"
+                    placeholder="e.g. .fusion/agents/reviewer.md"
+                    value={instructionsPath}
+                    onChange={e => setInstructionsPath(e.target.value)}
+                  />
+                </div>
+                <div className="agent-dialog-summary-row agent-dialog-summary-row--editable">
+                  <label className="agent-dialog-summary-row-label" htmlFor="agent-review-instructions-text">Inline Instructions</label>
+                  <textarea
+                    id="agent-review-instructions-text"
+                    className="input"
+                    rows={4}
+                    placeholder="Add custom behavior instructions..."
+                    value={instructionsText}
+                    onChange={e => setInstructionsText(e.target.value)}
+                  />
+                </div>
                 <div className="agent-dialog-summary-row">
                   <span className="agent-dialog-summary-row-label">{runtimeMode === "runtime" ? "Runtime" : "Model"}</span>
                   <span>

@@ -585,6 +585,25 @@ describe("NewAgentDialog", () => {
   });
 
   describe("summary display", () => {
+    it("renders editable review controls for title and instruction fields", async () => {
+      const user = userEvent.setup();
+      render(
+        <NewAgentDialog isOpen={true} onClose={mockOnClose} onCreated={mockOnCreated} />,
+      );
+
+      await waitFor(() => expect(mockFetchModels).toHaveBeenCalledOnce());
+
+      await user.type(getStepZeroField(/Name/), "Review Controls Agent");
+      await user.click(screen.getByText("Next"));
+      await user.click(screen.getByText("Next"));
+
+      expect(screen.getByLabelText("Title")).toBeInTheDocument();
+      expect(screen.getByLabelText("Soul")).toBeInTheDocument();
+      expect(screen.getByLabelText("Heartbeat Procedure Path")).toBeInTheDocument();
+      expect(screen.getByLabelText("Instructions Path")).toBeInTheDocument();
+      expect(screen.getByLabelText("Inline Instructions")).toBeInTheDocument();
+    });
+
     it("shows 'default' in summary when no model selected", async () => {
       const user = userEvent.setup();
       render(
@@ -754,6 +773,78 @@ describe("NewAgentDialog", () => {
         thinkingLevel: "high",
       });
     });
+
+    it("includes heartbeatProcedurePath in createAgent payload when provided", async () => {
+      const user = userEvent.setup();
+      render(
+        <NewAgentDialog isOpen={true} onClose={mockOnClose} onCreated={mockOnCreated} />,
+      );
+
+      await waitFor(() => expect(mockFetchModels).toHaveBeenCalledOnce());
+
+      await user.type(getStepZeroField(/Name/), "Heartbeat Agent");
+      await user.type(
+        getStepZeroField(/Heartbeat Procedure Path/) as HTMLInputElement,
+        ".fusion/agents/heartbeat-agent/HEARTBEAT.md",
+      );
+
+      await user.click(screen.getByText("Next"));
+      await user.click(screen.getByText("Next"));
+      await user.click(screen.getByText("Create"));
+
+      await waitFor(() => {
+        expect(mockCreateAgent).toHaveBeenCalledOnce();
+      });
+
+      expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
+        name: "Heartbeat Agent",
+        heartbeatProcedurePath: ".fusion/agents/heartbeat-agent/HEARTBEAT.md",
+      });
+    });
+
+    it("uses review-step edits for title, soul, heartbeat path, and instructions in create payload", async () => {
+      const user = userEvent.setup();
+      render(
+        <NewAgentDialog isOpen={true} onClose={mockOnClose} onCreated={mockOnCreated} />,
+      );
+
+      await waitFor(() => expect(mockFetchModels).toHaveBeenCalledOnce());
+
+      await user.type(getStepZeroField(/Name/), "Editable Review Agent");
+      await user.type(getStepZeroField(/Title/) as HTMLInputElement, "Initial Title");
+      await user.type(getStepZeroField(/Soul/) as HTMLTextAreaElement, "Initial soul");
+      await user.type(getStepZeroField(/^Heartbeat Procedure Path/) as HTMLInputElement, ".fusion/agents/initial/HEARTBEAT.md");
+      await user.type(getStepZeroField(/^Instructions Path/) as HTMLInputElement, ".fusion/agents/initial.md");
+      await user.type(getStepZeroField(/^Inline Instructions/) as HTMLTextAreaElement, "Initial instructions");
+
+      await user.click(screen.getByText("Next"));
+      await user.click(screen.getByText("Next"));
+
+      await user.clear(screen.getByLabelText("Title"));
+      await user.type(screen.getByLabelText("Title"), "Final Review Title");
+      await user.clear(screen.getByLabelText("Soul"));
+      await user.type(screen.getByLabelText("Soul"), "Final soul");
+      await user.clear(screen.getByLabelText("Heartbeat Procedure Path"));
+      await user.type(screen.getByLabelText("Heartbeat Procedure Path"), ".fusion/agents/final/HEARTBEAT.md");
+      await user.clear(screen.getByLabelText("Instructions Path"));
+      await user.type(screen.getByLabelText("Instructions Path"), ".fusion/agents/final.md");
+      await user.clear(screen.getByLabelText("Inline Instructions"));
+      await user.type(screen.getByLabelText("Inline Instructions"), "Final instructions");
+
+      await user.click(screen.getByText("Create"));
+
+      await waitFor(() => {
+        expect(mockCreateAgent).toHaveBeenCalledOnce();
+      });
+
+      expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
+        title: "Final Review Title",
+        soul: "Final soul",
+        heartbeatProcedurePath: ".fusion/agents/final/HEARTBEAT.md",
+        instructionsPath: ".fusion/agents/final.md",
+        instructionsText: "Final instructions",
+      });
+    });
   });
 
   describe("error handling", () => {
@@ -786,9 +877,13 @@ describe("NewAgentDialog", () => {
 
       await waitFor(() => expect(mockFetchModels).toHaveBeenCalledOnce());
 
-      // Fill in name
+      // Fill in name and heartbeat path
       const nameInput = getStepZeroField(/Name/);
       await user.type(nameInput, "Agent Name");
+      await user.type(
+        getStepZeroField(/Heartbeat Procedure Path/) as HTMLInputElement,
+        ".fusion/agents/agent-name/HEARTBEAT.md",
+      );
 
       // Navigate to step 1 and select model
       await user.click(screen.getByText("Next"));
@@ -810,9 +905,11 @@ describe("NewAgentDialog", () => {
 
       await waitFor(() => expect(mockFetchModels).toHaveBeenCalledTimes(2));
 
-      // Name should be empty
+      // Name and heartbeat path should be empty
       const newNameInput = getStepZeroField(/Name/) as HTMLInputElement;
       expect(newNameInput.value).toBe("");
+      const heartbeatPathInput = getStepZeroField(/Heartbeat Procedure Path/) as HTMLInputElement;
+      expect(heartbeatPathInput.value).toBe("");
     });
   });
 
