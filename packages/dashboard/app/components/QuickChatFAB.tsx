@@ -1343,6 +1343,14 @@ export function QuickChatFAB({
     handleAttachmentFiles(event.clipboardData?.files);
   }, [handleAttachmentFiles]);
 
+  const focusComposerInput = useCallback(() => {
+    if (typeof window === "undefined") return;
+    if (window.innerWidth > QUICK_CHAT_DESKTOP_BREAKPOINT) return;
+    const input = inputRef.current;
+    if (!input || input.disabled) return;
+    input.focus({ preventScroll: true });
+  }, []);
+
   const handleSendMessage = useCallback(async () => {
     const trimmed = messageInput.trim();
     const attachmentsToSend = pendingAttachmentsRef.current;
@@ -1364,8 +1372,10 @@ export function QuickChatFAB({
       setPendingAttachments((previous) => previous.filter((attachment) => !attachmentsToSend.includes(attachment)));
     } catch {
       // Keep pending attachments on failure so user can retry.
+    } finally {
+      focusComposerInput();
     }
-  }, [sendMessage, inputDisabled, messageInput]);
+  }, [sendMessage, inputDisabled, messageInput, focusComposerInput]);
 
   const handleAttachmentDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -2053,6 +2063,7 @@ export function QuickChatFAB({
                     onTouchStart={(event) => {
                       if (typeof window === "undefined" || window.innerWidth > QUICK_CHAT_DESKTOP_BREAKPOINT) return;
                       event.preventDefault();
+                      focusComposerInput();
                       void handleSendMessage();
                     }}
                     onClick={() => {
