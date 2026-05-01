@@ -563,6 +563,15 @@ export class TaskExecutor {
   }>();
   /** Active step-session executors per task (mutually exclusive with activeSessions). */
   private activeStepExecutors = new Map<string, StepSessionExecutor>();
+  /**
+   * Reviewer subagent sessions per task. Reviewers (`reviewer.ts`) create their
+   * own AgentSessions that aren't part of `activeSessions`/`activeStepExecutors`,
+   * so without this map they survive when the parent task is stopped — they
+   * keep producing log entries and step transitions after the user thinks they
+   * killed the task. Disposed alongside the main session in the move-out,
+   * pause, and global-pause handlers below.
+   */
+  private activeSubagentSessions = new Map<string, Set<AgentSession>>();
   /** Tasks that were paused mid-execution (to avoid marking them as "failed"). */
   private pausedAborted = new Set<string>();
   /** Tasks that had a dependency added mid-execution (abort + discard worktree). */
@@ -638,6 +647,52 @@ export class TaskExecutor {
    * Sessions are not disposed here so any near-complete agent loop still has a
    * chance to wrap up during the runtime's graceful drain window.
    */
+
+  /**
+   * Register a subagent session (e.g. reviewer) under its parent task ID so it
+   * can be disposed when the parent stops. Used as the `onSessionCreated`
+   * callback passed to `reviewStep`.
+   */
+  private registerSubagentSession(taskId: string, session: AgentSession): void {
+    let set = this.activeSubagentSessions.get(taskId);
+    if (!set) {
+      set = new Set();
+      this.activeSubagentSessions.set(taskId, set);
+    }
+    set.add(session);
+  }
+
+  /**
+   * Deregister a subagent session that has finished naturally. The reviewer's
+   * own `finally` block disposes the session — this just removes it from the
+   * map.
+   */
+  private unregisterSubagentSession(taskId: string, session: AgentSession): void {
+    const set = this.activeSubagentSessions.get(taskId);
+    if (!set) return;
+    set.delete(session);
+    if (set.size === 0) this.activeSubagentSessions.delete(taskId);
+  }
+
+  /**
+   * Dispose all subagent sessions for a task and remove them from the map.
+   * Called by the kill paths (move-out-of-in-progress, pause, global pause)
+   * so subagents stop alongside the main session.
+   */
+  private disposeSubagentsForTask(taskId: string, reason: string): void {
+    const set = this.activeSubagentSessions.get(taskId);
+    if (!set || set.size === 0) return;
+    executorLog.log(`${taskId}: disposing ${set.size} subagent session(s) — ${reason}`);
+    for (const session of set) {
+      try {
+        session.dispose();
+      } catch (err) {
+        executorLog.warn(`${taskId}: failed to dispose subagent session: ${err}`);
+      }
+    }
+    this.activeSubagentSessions.delete(taskId);
+  }
+
   abortAllSessionBash(): void {
     for (const [taskId, { session }] of this.activeSessions) {
       try {
@@ -713,6 +768,12 @@ export class TaskExecutor {
           );
           this.activeStepExecutors.delete(task.id);
         }
+        // Reviewer subagents run in their own sessions outside `activeSessions`
+        // and `activeStepExecutors`, so the loops above don't reach them.
+        // Without this, a reviewer keeps running (and emitting verdicts that
+        // trigger step transitions) even after the parent task was moved out
+        // of in-progress.
+        this.disposeSubagentsForTask(task.id, `parent moved from in-progress to ${to}`);
         // Clean up all in-memory state for this task so nothing leaks across runs.
         // This prevents zombie state from persisting when a task moves away from
         // in-progress while execute() is still unwinding, or when the scheduler
@@ -746,6 +807,7 @@ export class TaskExecutor {
           this.loopRecoveryState.delete(task.id);
           this.spawnedAgents.delete(task.id);
           this.stuckAborted.delete(task.id);
+          this.disposeSubagentsForTask(task.id, "task paused");
           return;
         }
         if (task.paused && this.activeStepExecutors.has(task.id)) {
@@ -758,6 +820,7 @@ export class TaskExecutor {
           this.loopRecoveryState.delete(task.id);
           this.spawnedAgents.delete(task.id);
           this.stuckAborted.delete(task.id);
+          this.disposeSubagentsForTask(task.id, "task paused");
           return;
         }
 
@@ -895,6 +958,12 @@ export class TaskExecutor {
     // When globalPause transitions from false → true, terminate all active agent sessions.
     store.on("settings:updated", ({ settings, previous }) => {
       if (settings.globalPause && !previous.globalPause) {
+        // Dispose every reviewer subagent across every task. The per-task loops
+        // below handle main + step sessions; reviewers live in their own map
+        // and would otherwise outlive the global pause.
+        for (const taskId of [...this.activeSubagentSessions.keys()]) {
+          this.disposeSubagentsForTask(taskId, "global pause");
+        }
         for (const [taskId, { session }] of this.activeSessions) {
           executorLog.log(`Global pause — terminating agent session for ${taskId}`);
           this.pausedAborted.add(taskId);
@@ -3535,6 +3604,11 @@ export class TaskExecutor {
               agentStore: this.options.agentStore,
               rootDir: this.rootDir,
               settings,
+              // Track the reviewer's session under this task so it's disposed
+              // alongside the main session when the task moves out of
+              // in-progress, is paused, or the engine globally pauses.
+              onSessionCreated: (s) => this.registerSubagentSession(taskId, s),
+              onSessionEnded: (s) => this.unregisterSubagentSession(taskId, s),
             },
           );
           const result = sem

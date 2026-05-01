@@ -489,6 +489,13 @@ export class TriageProcessor {
   private wasEnginePaused = false;
   /** Active agent sessions per task, used to terminate on pause. */
   private activeSessions = new Map<string, { dispose: () => void }>();
+  /**
+   * Reviewer subagent sessions per task. The spec reviewer (`reviewer.ts`)
+   * creates its own AgentSession that isn't part of `activeSessions`, so
+   * without this map it survives a global pause and continues producing
+   * verdicts. Mirrors `TaskExecutor.activeSubagentSessions`.
+   */
+  private activeSubagentSessions = new Map<string, Set<AgentSession>>();
   /** Tasks aborted due to globalPause (to avoid reporting as errors). */
   private pauseAborted = new Set<string>();
   /** Tasks killed by the stuck task detector (to avoid reporting as errors). */
@@ -512,6 +519,11 @@ export class TriageProcessor {
     // When globalPause transitions from false → true, terminate all active triage sessions.
     store.on("settings:updated", ({ settings, previous }) => {
       if (settings.globalPause && !previous.globalPause) {
+        // Dispose every reviewer subagent first so they don't keep streaming
+        // verdicts while the main triage session is being torn down.
+        for (const taskId of [...this.activeSubagentSessions.keys()]) {
+          this.disposeSubagentsForTask(taskId, "global pause");
+        }
         for (const [taskId, session] of this.activeSessions) {
           planLog.log(
             `Global pause — terminating triage session for ${taskId}`,
@@ -610,6 +622,43 @@ export class TriageProcessor {
    */
   markStuckAborted(taskId: string): void {
     this.stuckAborted.add(taskId);
+  }
+
+  /**
+   * Register a reviewer subagent session under its parent task. Used as the
+   * `onSessionCreated` callback passed to `reviewStep`. Mirrors the
+   * TaskExecutor implementation.
+   */
+  private registerSubagentSession(taskId: string, session: AgentSession): void {
+    let set = this.activeSubagentSessions.get(taskId);
+    if (!set) {
+      set = new Set();
+      this.activeSubagentSessions.set(taskId, set);
+    }
+    set.add(session);
+  }
+
+  /** Deregister a reviewer subagent that finished naturally. */
+  private unregisterSubagentSession(taskId: string, session: AgentSession): void {
+    const set = this.activeSubagentSessions.get(taskId);
+    if (!set) return;
+    set.delete(session);
+    if (set.size === 0) this.activeSubagentSessions.delete(taskId);
+  }
+
+  /** Dispose all reviewer subagents for a task and remove them from the map. */
+  private disposeSubagentsForTask(taskId: string, reason: string): void {
+    const set = this.activeSubagentSessions.get(taskId);
+    if (!set || set.size === 0) return;
+    planLog.log(`${taskId}: disposing ${set.size} subagent session(s) — ${reason}`);
+    for (const session of set) {
+      try {
+        session.dispose();
+      } catch (err) {
+        planLog.warn(`${taskId}: failed to dispose subagent session: ${err}`);
+      }
+    }
+    this.activeSubagentSessions.delete(taskId);
   }
 
   /**
@@ -1772,6 +1821,10 @@ export class TriageProcessor {
               userComments: currentUserComments.length > 0 ? currentUserComments : undefined,
               agentStore: this.options.agentStore,
               rootDir,
+              // Track the spec reviewer's session under this task so it's
+              // disposed alongside the main triage session on global pause.
+              onSessionCreated: (s) => this.registerSubagentSession(taskId, s),
+              onSessionEnded: (s) => this.unregisterSubagentSession(taskId, s),
             },
           );
           const result = sem

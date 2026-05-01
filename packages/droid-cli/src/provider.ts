@@ -61,6 +61,15 @@ import { isPiKnownDroidTool } from "./tool-mapping.js";
  * arrives (e.g. someone embeds droid-cli without a stuck detector).
  */
 const INACTIVITY_TIMEOUT_MS = 30 * 60_000;
+
+/**
+ * Cold-start ceiling: kill the subprocess if it hasn't produced a single line
+ * of stdout within this window. Distinct from INACTIVITY_TIMEOUT_MS so a hung
+ * binary (no output ever) is reported with a clear cause instead of being
+ * indistinguishable from a slow-thinking turn. Observed cold-start on a healthy
+ * droid is ~20s; 60s gives 3x headroom for slow machines / cold caches.
+ */
+const FIRST_LINE_TIMEOUT_MS = 60_000;
 function isDebugStreamEnabled(): boolean {
   return process.env.PI_DROID_CLI_DEBUG === "1";
 }
@@ -265,6 +274,19 @@ export function streamViaCli(
       // Start inactivity timer after writing user message
       resetInactivityTimer();
 
+      // Cold-start ceiling: only fires if firstLineReceived stays false. Cleared
+      // when the first line arrives, when proc closes, or on break-early. This
+      // distinguishes "droid never started" from "droid is taking a long time
+      // between thinking deltas" so the inactivity kill carries actionable info.
+      const firstLineTimer: ReturnType<typeof setTimeout> = setTimeout(() => {
+        if (firstLineReceived) return;
+        forceKillProcess(proc!);
+        endStreamWithError(
+          `Droid CLI produced no output within ${FIRST_LINE_TIMEOUT_MS / 1000}s — likely binary hang or auth failure (try \`droid --version\` and \`droid auth status\`)`,
+        );
+      }, FIRST_LINE_TIMEOUT_MS);
+      proc.on("close", () => clearTimeout(firstLineTimer));
+
       // Process NDJSON lines from stdout using event-based callback
       // NOTE: Using 'line' event instead of `for await` because the async
       // iterator batches lines, breaking real-time streaming to pi.
@@ -319,6 +341,7 @@ export function streamViaCli(
             debugLog("break-early triggered at message_stop after pi-known tool_use");
             broken = true; // Set guard BEFORE rl.close() to prevent buffered lines
             clearTimeout(inactivityTimer);
+            clearTimeout(firstLineTimer);
             // Pi will execute these tools. Kill subprocess to prevent CLI from executing them.
             forceKillProcess(proc!);
             rl.close();
@@ -334,14 +357,24 @@ export function streamViaCli(
           }
           // For both success and error: clean up the subprocess
           clearTimeout(inactivityTimer);
+          clearTimeout(firstLineTimer);
           cleanupProcess(proc!);
           rl.close();
         }
       });
 
-      // Wait for readline to close (result received or process ended)
+      // Wait for readline to close (result received or process ended).
+      // Also resolve on subprocess close: if SIGKILL races readline (e.g. after
+      // an external abort or watchdog kill), `rl` may never emit "close" because
+      // its input stream was destroyed mid-buffer. Forcing rl.close() from the
+      // proc close handler guarantees this await unblocks instead of hanging
+      // and triggering the engine's "executor did not unwind within 60s" path.
       await new Promise<void>((resolve) => {
         rl.on("close", resolve);
+        proc!.on("close", () => {
+          try { rl.close(); } catch { /* already closed */ }
+          resolve();
+        });
       });
 
       // Push done event after readline closes (async). Pushing synchronously

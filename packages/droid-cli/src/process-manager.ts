@@ -214,7 +214,7 @@ export function captureStderr(proc: ChildProcess): () => string {
  */
 export function validateCliPresence(): void {
   try {
-    execSync("droid --version", { stdio: "pipe", timeout: 5000 });
+    execSync("droid --version", { stdio: "pipe", timeout: 45000 });
   } catch {
     throw new Error(
       "Droid CLI not found on PATH. Install Droid CLI and then run: droid auth login",
@@ -230,7 +230,7 @@ export function validateCliPresence(): void {
  */
 export function validateCliAuth(): boolean {
   try {
-    execSync("droid auth status", { stdio: "pipe", timeout: 5000 });
+    execSync("droid auth status", { stdio: "pipe", timeout: 45000 });
     return true;
   } catch {
     console.warn(
@@ -251,7 +251,7 @@ export function validateCliAuth(): boolean {
  * This async variant uses spawn so the loop keeps turning while the subprocess
  * starts up.
  */
-function runDroidProbe(args: string[], timeoutMs = 5000): Promise<number> {
+function runDroidProbe(args: string[], timeoutMs = 45000): Promise<number> {
   return new Promise((resolve) => {
     const proc = spawn("droid", args, { stdio: "ignore" });
     const timer = setTimeout(() => {

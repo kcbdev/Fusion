@@ -268,6 +268,19 @@ export interface ReviewOptions {
   settings?: Settings;
   /** Plugin runner for runtime selection. When provided, enables plugin runtime lookup. */
   pluginRunner?: import("./plugin-runner.js").PluginRunner;
+  /**
+   * Fired immediately after the reviewer's `AgentSession` is created. The
+   * caller can register the session in a per-task subagent map so that the
+   * session can be disposed when the parent task moves out of `in-progress`,
+   * is paused, or the engine globally pauses. Without this hook, reviewer
+   * sessions outlive their parent task on a stop signal.
+   */
+  onSessionCreated?: (session: import("@mariozechner/pi-coding-agent").AgentSession) => void;
+  /**
+   * Fired in a `finally` block after the reviewer is fully done (or aborted).
+   * Pair with `onSessionCreated` to deregister from the subagent map.
+   */
+  onSessionEnded?: (session: import("@mariozechner/pi-coding-agent").AgentSession) => void;
 }
 
 /**
@@ -514,6 +527,12 @@ export async function reviewStep(
     await options.store.logEntry(options.taskId, `Reviewer using model: ${describeModel(session)}`);
   }
 
+  // Notify the caller so it can track this session in a per-task subagent map.
+  // If the parent task is later moved out of in-progress, paused, or the engine
+  // is globally paused, the caller will dispose this session — preventing the
+  // reviewer from outliving its parent task.
+  options.onSessionCreated?.(session);
+
   let reviewText = "";
 
   // Capture the reviewer's full text output (still needed for verdict extraction)
@@ -533,6 +552,7 @@ export async function reviewStep(
   } finally {
     if (agentLogger) await agentLogger.flush();
     session.dispose();
+    options.onSessionEnded?.(session);
   }
 
   const verdict = extractVerdict(reviewText);

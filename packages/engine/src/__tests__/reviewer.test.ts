@@ -920,3 +920,57 @@ describe("reviewStep — skill selection resolver contract (FN-1510/FN-1511)", (
     expect(opts.skillSelection?.sessionPurpose).toBe("reviewer");
   });
 });
+
+describe("reviewStep — subagent lifecycle hooks", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("fires onSessionCreated then onSessionEnded with the same session, in order", async () => {
+    const mockSession = createMockSession("### Verdict: APPROVE\n### Summary\nOk.");
+    mockedCreateFnAgent.mockResolvedValue(mockSession);
+
+    const events: Array<{ type: "created" | "ended"; sameSession: boolean }> = [];
+    const onSessionCreated = vi.fn((s: any) => {
+      events.push({ type: "created", sameSession: s === mockSession.session });
+    });
+    const onSessionEnded = vi.fn((s: any) => {
+      events.push({ type: "ended", sameSession: s === mockSession.session });
+    });
+
+    await reviewStep(
+      "/tmp/worktree", "FN-200", 1, "Hook test", "plan", "# prompt",
+      undefined,
+      { onSessionCreated, onSessionEnded },
+    );
+
+    expect(onSessionCreated).toHaveBeenCalledTimes(1);
+    expect(onSessionEnded).toHaveBeenCalledTimes(1);
+    expect(events).toEqual([
+      { type: "created", sameSession: true },
+      { type: "ended", sameSession: true },
+    ]);
+    expect(mockSession.session.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("fires onSessionEnded even when promptWithFallback throws", async () => {
+    const mockSession = createMockSession("");
+    mockedCreateFnAgent.mockResolvedValue(mockSession);
+    const { promptWithFallback } = await import("../pi.js");
+    vi.mocked(promptWithFallback).mockRejectedValueOnce(new Error("boom"));
+
+    const onSessionCreated = vi.fn();
+    const onSessionEnded = vi.fn();
+
+    await expect(
+      reviewStep(
+        "/tmp/worktree", "FN-201", 1, "Error path", "plan", "# prompt",
+        undefined,
+        { onSessionCreated, onSessionEnded },
+      ),
+    ).rejects.toThrow("boom");
+
+    expect(onSessionCreated).toHaveBeenCalledTimes(1);
+    expect(onSessionEnded).toHaveBeenCalledTimes(1);
+  });
+});
