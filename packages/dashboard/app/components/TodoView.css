@@ -214,8 +214,8 @@
 .todo-item {
   position: relative;
   display: flex;
-  flex-direction: row;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   padding: var(--space-sm) var(--space-md);
   border-radius: var(--radius-sm);
   gap: var(--space-sm);
@@ -227,12 +227,20 @@
   background: var(--card-hover);
 }
 
+.todo-item-main-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
 .todo-item-checkbox {
   margin: 0;
   width: var(--space-lg);
   height: var(--space-lg);
   accent-color: var(--todo);
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .todo-item-text {
@@ -260,15 +268,13 @@
 
 .todo-item-actions {
   display: flex;
+  flex-wrap: wrap;
   flex-direction: row;
+  align-items: center;
   gap: var(--space-xs);
-  opacity: 0;
-  transition: opacity var(--transition-fast);
-}
-
-.todo-item:hover .todo-item-actions,
-.todo-item:focus-within .todo-item-actions {
   opacity: 1;
+  transition: opacity var(--transition-fast);
+  margin-left: calc(var(--space-lg) + var(--space-sm));
 }
 
 .todo-item-reorder-btns {
@@ -431,6 +437,14 @@
   .todo-list-item-actions,
   .todo-item-actions {
     opacity: 1;
+  }
+
+  .todo-item-main-row {
+    align-items: center;
+  }
+
+  .todo-item-actions {
+    margin-left: 0;
   }
 
   .todo-item-checkbox {

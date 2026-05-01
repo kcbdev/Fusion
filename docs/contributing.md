@@ -174,6 +174,14 @@ Dashboard icon-only controls should use the shared `.btn-icon` contract instead 
 
 Use component-local overrides only when a surface has a deliberate visual exception; ordinary icon-only actions should inherit the shared contract.
 
+### Todo/list action-row pattern
+
+For dense list rows (for example TodoView items), keep action buttons in a dedicated second row instead of cramming controls beside the primary text line:
+
+- define row-action layout in the component-local stylesheet (for example `TodoView.css`), not `styles.css`
+- use spacing/layout tokens (`--space-*`, `--radius-*`, `--transition-*`) instead of literal spacing values
+- if row actions are hover-revealed on desktop, include a required mobile override under `@media (max-width: 768px)` that forces visibility (`opacity: 1`) so touch devices can always access controls
+
 ### CSS Testing
 
 For CSS regression tests, use the helper at `packages/dashboard/app/test/cssFixture.ts`:

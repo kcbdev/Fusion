@@ -466,6 +466,44 @@ describe("TodoView", () => {
     expect(addToast).toHaveBeenCalledWith("Created FN-234 and assigned to Builder", "success");
   });
 
+  it("renders todo item controls in a dedicated action row", () => {
+    render(<TodoView addToast={addToast} />);
+
+    const todoItem = screen.getByTestId("todo-item-item-1");
+    const actionsRow = screen.getByTestId("todo-item-actions-item-1");
+
+    expect(todoItem.firstElementChild).toHaveClass("todo-item-main-row");
+    expect(actionsRow).toBeInTheDocument();
+    expect(actionsRow).toContainElement(screen.getByTestId("move-up-item-1"));
+    expect(actionsRow).toContainElement(screen.getByTestId("move-down-item-1"));
+    expect(actionsRow).toContainElement(screen.getByTestId("create-task-from-item-1"));
+    expect(actionsRow).toContainElement(screen.getByTestId("assign-agent-for-item-1"));
+    expect(actionsRow).toContainElement(screen.getByTestId("edit-item-item-1"));
+    expect(actionsRow).toContainElement(screen.getByTestId("delete-item-item-1"));
+  });
+
+  it("keeps long item text and action controls together in the same todo item", () => {
+    mockUseTodoLists.mockReturnValue(
+      createMockTodoLists({
+        items: [
+          {
+            id: "item-long",
+            listId: "list-1",
+            text: "Long todo item text that previously cramped the action controls in a single row", 
+            completed: false,
+            sortOrder: 0,
+          },
+        ],
+      }),
+    );
+
+    render(<TodoView addToast={addToast} />);
+
+    const todoItem = screen.getByTestId("todo-item-item-long");
+    expect(todoItem).toContainElement(screen.getByText(/Long todo item text/i));
+    expect(todoItem).toContainElement(screen.getByTestId("todo-item-actions-item-long"));
+  });
+
   it("error handling shows error toast", async () => {
     mockCreateTask.mockRejectedValueOnce(new Error("boom"));
     render(<TodoView addToast={addToast} />);

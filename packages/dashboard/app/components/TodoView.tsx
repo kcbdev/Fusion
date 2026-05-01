@@ -538,44 +538,46 @@ export function TodoView({ projectId, addToast }: TodoViewProps) {
 
                     return (
                       <div className="todo-item" key={item.id} data-testid={`todo-item-${item.id}`}>
-                        <input
-                          type="checkbox"
-                          checked={item.completed}
-                          onChange={() => {
-                            void toggleItem(item.id);
-                          }}
-                          className="todo-item-checkbox"
-                          aria-label={`Toggle ${item.text}`}
-                          data-testid={`toggle-item-${item.id}`}
-                        />
-
-                        {isEditing ? (
+                        <div className="todo-item-main-row">
                           <input
-                            className="input todo-inline-edit-input"
-                            value={editingItemText}
-                            onChange={(event) => setEditingItemText(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") {
-                                void handleSaveEditItem();
-                              }
-                              if (event.key === "Escape") {
-                                handleCancelEditItem();
-                              }
+                            type="checkbox"
+                            checked={item.completed}
+                            onChange={() => {
+                              void toggleItem(item.id);
                             }}
-                            autoFocus
-                            data-testid={`edit-item-input-${item.id}`}
+                            className="todo-item-checkbox"
+                            aria-label={`Toggle ${item.text}`}
+                            data-testid={`toggle-item-${item.id}`}
                           />
-                        ) : (
-                          <button
-                            type="button"
-                            className={`todo-item-text${item.completed ? " todo-item-text--completed" : ""}`}
-                            onClick={() => handleStartEditItem(item)}
-                          >
-                            {item.text}
-                          </button>
-                        )}
 
-                        <div className="todo-item-actions">
+                          {isEditing ? (
+                            <input
+                              className="input todo-inline-edit-input"
+                              value={editingItemText}
+                              onChange={(event) => setEditingItemText(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  void handleSaveEditItem();
+                                }
+                                if (event.key === "Escape") {
+                                  handleCancelEditItem();
+                                }
+                              }}
+                              autoFocus
+                              data-testid={`edit-item-input-${item.id}`}
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              className={`todo-item-text${item.completed ? " todo-item-text--completed" : ""}`}
+                              onClick={() => handleStartEditItem(item)}
+                            >
+                              {item.text}
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="todo-item-actions" data-testid={`todo-item-actions-${item.id}`}>
                           {isEditing ? (
                             <>
                               <button
