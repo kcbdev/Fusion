@@ -196,6 +196,24 @@ There are two ways to provide custom instructions:
 - The editor has an **Unsaved changes** indicator when file content is modified
 - File saves are independent from instruction metadata saves
 
+## Heartbeat Procedure File Access (Agent Detail Modal)
+
+The **Settings** tab in the Agent Detail modal includes a **Heartbeat Procedure** section with an in-modal markdown file viewer/editor.
+
+### How it works
+
+1. The section shows the current `heartbeatProcedurePath`.
+2. When a path exists, use **View Heartbeat Markdown** to load and inspect that file without leaving the modal.
+3. The editor supports both **Edit** and **Preview** modes, with an unsaved-changes indicator and dedicated save action.
+4. Reads/writes are scoped through the workspace file APIs with `projectId` awareness in multi-project mode.
+
+### Relation to upgrade flow
+
+- **Upgrade to Default Heartbeat Procedure** still sets `heartbeatProcedurePath` to:
+  - `.fusion/agents/{agent.id}/HEARTBEAT.md`
+- If the default file does not exist yet, the backend seeds it from the built-in template.
+- After upgrade completes and the agent refreshes, operators can immediately open the seeded per-agent `HEARTBEAT.md` from the same modal section.
+
 ## New Agent Presets (Dashboard UI)
 
 The New Agent dialog keeps the existing 3-step flow, and step 0 is split into two tabs:

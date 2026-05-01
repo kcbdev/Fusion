@@ -22,6 +22,7 @@ vi.mock("../../api", () => ({
   fetchAgentRuns: vi.fn(),
   fetchAgentRunDetail: vi.fn(),
   startAgentRun: vi.fn(),
+  stopAgentRun: vi.fn(),
   updateAgentInstructions: vi.fn(),
   updateAgentSoul: vi.fn(),
   updateAgentMemory: vi.fn(),
@@ -34,6 +35,7 @@ vi.mock("../../api", () => ({
   fetchDiscoveredSkills: vi.fn(),
   fetchModels: vi.fn(),
   fetchPluginRuntimes: vi.fn(),
+  upgradeAgentHeartbeatProcedure: vi.fn(),
 }));
 
 vi.mock("../AgentLogViewer", () => ({
@@ -97,7 +99,7 @@ vi.mock("../../hooks/useConfirm", () => ({
   useConfirm: () => ({ confirm: mockConfirm }),
 }));
 
-import { fetchAgent, fetchAgents, updateAgent, updateAgentState, deleteAgent, fetchAgentChildren, fetchAgentRunLogs, fetchAgentRuns, fetchAgentRunDetail, fetchAgentTasks, fetchChainOfCommand, fetchAgentBudgetStatus, resetAgentBudget, updateAgentInstructions, updateAgentSoul, updateAgentMemory, fetchWorkspaceFileContent, saveWorkspaceFileContent, fetchDiscoveredSkills, fetchModels, fetchPluginRuntimes, fetchAgentLogsWithMeta } from "../../api";
+import { fetchAgent, fetchAgents, updateAgent, updateAgentState, deleteAgent, fetchAgentChildren, fetchAgentRunLogs, fetchAgentRuns, fetchAgentRunDetail, fetchAgentTasks, fetchChainOfCommand, fetchAgentBudgetStatus, resetAgentBudget, updateAgentInstructions, updateAgentSoul, updateAgentMemory, fetchWorkspaceFileContent, saveWorkspaceFileContent, fetchDiscoveredSkills, fetchModels, fetchPluginRuntimes, fetchAgentLogsWithMeta, upgradeAgentHeartbeatProcedure } from "../../api";
 
 const mockFetchAgent = vi.mocked(fetchAgent);
 const mockFetchAgents = vi.mocked(fetchAgents);
@@ -121,6 +123,7 @@ const mockFetchDiscoveredSkills = vi.mocked(fetchDiscoveredSkills);
 const mockFetchModels = vi.mocked(fetchModels);
 const mockFetchPluginRuntimes = vi.mocked(fetchPluginRuntimes);
 const mockFetchAgentLogsWithMeta = vi.mocked(fetchAgentLogsWithMeta);
+const mockUpgradeAgentHeartbeatProcedure = vi.mocked(upgradeAgentHeartbeatProcedure);
 
 const MOCK_SKILLS = [
   { id: "skill-1", name: "Skill One", path: "/path/skill-1", relativePath: "skills/skill-1", enabled: true, metadata: { source: "*", scope: "user" as const, origin: "top-level" as const } },
@@ -214,6 +217,10 @@ describe("AgentDetailView", () => {
       { pluginId: "fusion-plugin-openclaw-runtime", runtimeId: "openclaw", name: "OpenClaw", description: "OpenClaw runtime", version: "1.0.0" },
       { pluginId: "fusion-plugin-hermes-runtime", runtimeId: "hermes", name: "Hermes", description: "Hermes runtime", version: "1.1.0" },
     ]);
+    mockUpgradeAgentHeartbeatProcedure.mockResolvedValue({
+      heartbeatProcedurePath: ".fusion/agents/agent-001/HEARTBEAT.md",
+      procedureFileSeeded: true,
+    });
   });
 
   it("shows loading state initially", () => {
@@ -3853,6 +3860,87 @@ describe("AgentDetailView", () => {
       // Save button should now be enabled
       await waitFor(() => {
         expect(screen.getByText("Save Settings")).not.toBeDisabled();
+      });
+    });
+  });
+
+  describe("Heartbeat procedure file viewer", () => {
+    const openSettings = async (user: ReturnType<typeof userEvent.setup>) => {
+      await waitFor(() => {
+        expect(screen.getByText("Settings")).toBeInTheDocument();
+      });
+      await user.click(screen.getByText("Settings"));
+    };
+
+    it("renders heartbeat markdown view action when heartbeatProcedurePath is set", async () => {
+      mockFetchAgent.mockResolvedValue(createMockAgent({
+        heartbeatProcedurePath: ".fusion/agents/agent-001/HEARTBEAT.md",
+      }));
+
+      const user = userEvent.setup();
+      render(<AgentDetailView agentId="agent-001" onClose={vi.fn()} addToast={vi.fn()} />);
+      await openSettings(user);
+
+      expect(screen.getByRole("button", { name: "View Heartbeat Markdown" })).toBeInTheDocument();
+    });
+
+    it("fetches and displays heartbeat file content from project workspace", async () => {
+      mockFetchAgent.mockResolvedValue(createMockAgent({
+        heartbeatProcedurePath: ".fusion/agents/agent-001/HEARTBEAT.md",
+      }));
+      mockFetchWorkspaceFileContent.mockResolvedValue({ content: "# Heartbeat\n\nDo checks", mtime: "2024-01-01T00:00:00.000Z", size: 20 });
+
+      const user = userEvent.setup();
+      render(<AgentDetailView agentId="agent-001" projectId="proj-1" onClose={vi.fn()} addToast={vi.fn()} />);
+      await openSettings(user);
+      await user.click(screen.getByRole("button", { name: "View Heartbeat Markdown" }));
+
+      await waitFor(() => {
+        expect(mockFetchWorkspaceFileContent).toHaveBeenCalledWith("project", ".fusion/agents/agent-001/HEARTBEAT.md", "proj-1");
+      });
+      expect(screen.getByLabelText("Heartbeat Procedure File")).toHaveValue("# Heartbeat\n\nDo checks");
+    });
+
+    it("shows load error feedback when heartbeat file fetch fails", async () => {
+      const addToast = vi.fn();
+      mockFetchAgent.mockResolvedValue(createMockAgent({
+        heartbeatProcedurePath: ".fusion/agents/agent-001/HEARTBEAT.md",
+      }));
+      mockFetchWorkspaceFileContent.mockRejectedValue(new Error("permission denied"));
+
+      const user = userEvent.setup();
+      render(<AgentDetailView agentId="agent-001" onClose={vi.fn()} addToast={addToast} />);
+      await openSettings(user);
+      await user.click(screen.getByRole("button", { name: "View Heartbeat Markdown" }));
+
+      await waitFor(() => {
+        expect(addToast).toHaveBeenCalledWith("Failed to load heartbeat procedure file: permission denied", "error");
+      });
+      expect(screen.getByText("Failed to load file: permission denied")).toBeInTheDocument();
+    });
+
+    it("refreshes to upgraded heartbeat path and supports immediate viewing", async () => {
+      mockFetchAgent
+        .mockResolvedValueOnce(createMockAgent({ heartbeatProcedurePath: undefined }))
+        .mockResolvedValueOnce(createMockAgent({ heartbeatProcedurePath: ".fusion/agents/agent-001/HEARTBEAT.md" }));
+      mockFetchWorkspaceFileContent.mockResolvedValue({ content: "# Seeded", mtime: "2024-01-01T00:00:00.000Z", size: 8 });
+
+      const user = userEvent.setup();
+      render(<AgentDetailView agentId="agent-001" projectId="proj-2" onClose={vi.fn()} addToast={vi.fn()} />);
+      await openSettings(user);
+      await user.click(screen.getByRole("button", { name: "Upgrade agent to default heartbeat procedure file" }));
+
+      await waitFor(() => {
+        expect(mockUpgradeAgentHeartbeatProcedure).toHaveBeenCalledWith("agent-001", "proj-2");
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "View Heartbeat Markdown" })).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole("button", { name: "View Heartbeat Markdown" }));
+      await waitFor(() => {
+        expect(mockFetchWorkspaceFileContent).toHaveBeenCalledWith("project", ".fusion/agents/agent-001/HEARTBEAT.md", "proj-2");
       });
     });
   });

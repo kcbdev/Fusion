@@ -2521,9 +2521,67 @@ function HeartbeatProcedureSection({
   onSaved: () => Promise<void>;
 }) {
   const [isUpgrading, setIsUpgrading] = useState(false);
+  const [showFileViewer, setShowFileViewer] = useState(false);
+  const [isLoadingFile, setIsLoadingFile] = useState(false);
+  const [isSavingFile, setIsSavingFile] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [fileContent, setFileContent] = useState("");
+  const [fileContentDirty, setFileContentDirty] = useState(false);
+  const [fileLoadError, setFileLoadError] = useState<string | null>(null);
+  const [justSavedFile, setJustSavedFile] = useState(false);
   const currentPath = agent.heartbeatProcedurePath?.trim();
   const expectedDefaultPath = `.fusion/agents/${agent.id}/HEARTBEAT.md`;
   const onDefault = currentPath === expectedDefaultPath;
+  const hasFilePath = Boolean(currentPath);
+
+  const loadHeartbeatFile = useCallback(async (path: string) => {
+    setIsLoadingFile(true);
+    setFileLoadError(null);
+    try {
+      const data = await fetchWorkspaceFileContent("project", path, projectId);
+      setFileContent(data.content);
+      setFileContentDirty(false);
+    } catch (err) {
+      const message = getErrorMessage(err);
+      setFileLoadError(message);
+      addToast(`Failed to load heartbeat procedure file: ${message}`, "error");
+    } finally {
+      setIsLoadingFile(false);
+    }
+  }, [addToast, projectId]);
+
+  useEffect(() => {
+    setShowFileViewer(false);
+    setShowPreview(false);
+    setFileContent("");
+    setFileContentDirty(false);
+    setFileLoadError(null);
+    setIsLoadingFile(false);
+    setIsSavingFile(false);
+    setJustSavedFile(false);
+  }, [agent.id, currentPath]);
+
+  const handleOpenViewer = async () => {
+    if (!currentPath) return;
+    setShowFileViewer(true);
+    await loadHeartbeatFile(currentPath);
+  };
+
+  const handleSaveFile = async () => {
+    if (!currentPath) return;
+    setIsSavingFile(true);
+    try {
+      await saveWorkspaceFileContent("project", currentPath, fileContent, projectId);
+      setFileContentDirty(false);
+      setJustSavedFile(true);
+      addToast("Heartbeat procedure file saved", "success");
+      setTimeout(() => setJustSavedFile(false), 3000);
+    } catch (err) {
+      addToast(`Failed to save heartbeat procedure file: ${getErrorMessage(err)}`, "error");
+    } finally {
+      setIsSavingFile(false);
+    }
+  };
 
   const handleUpgrade = async () => {
     setIsUpgrading(true);
@@ -2556,6 +2614,27 @@ function HeartbeatProcedureSection({
           <span className="config-hint">
             Current path: <code>{currentPath || "(none — using built-in default)"}</code>
           </span>
+          {hasFilePath && (
+            <div className="heartbeat-procedure-actions">
+              <button
+                className="btn btn-sm"
+                onClick={() => void handleOpenViewer()}
+                disabled={isLoadingFile}
+              >
+                {isLoadingFile ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Loading file…
+                  </>
+                ) : (
+                  <>
+                    <FileText size={16} />
+                    View Heartbeat Markdown
+                  </>
+                )}
+              </button>
+            </div>
+          )}
         </div>
         <div className="config-field">
           <button
@@ -2587,6 +2666,105 @@ function HeartbeatProcedureSection({
           </span>
         </div>
       </div>
+
+      {showFileViewer && hasFilePath && currentPath && (
+        <div className="config-fields heartbeat-procedure-viewer">
+          <div className="config-field">
+            <label htmlFor="heartbeat-procedure-file-content">Heartbeat Procedure File</label>
+            <div className="agent-content-toolbar">
+              <div className="agent-content-mode-toggle">
+                <button
+                  className={`btn btn-sm ${!showPreview ? "btn-primary" : ""}`}
+                  onClick={() => setShowPreview(false)}
+                  disabled={!showPreview}
+                  aria-label="Heartbeat file edit mode"
+                >
+                  <FileEdit size={14} />
+                  Edit
+                </button>
+                <button
+                  className={`btn btn-sm ${showPreview ? "btn-primary" : ""}`}
+                  onClick={() => setShowPreview(true)}
+                  disabled={showPreview}
+                  aria-label="Heartbeat file preview mode"
+                >
+                  <Eye size={14} />
+                  Preview
+                </button>
+              </div>
+              {isLoadingFile && (
+                <span className="config-hint heartbeat-procedure-status">
+                  <Loader2 size={12} className="animate-spin" />
+                  Loading...
+                </span>
+              )}
+              {fileContentDirty && !isLoadingFile && (
+                <span className="config-hint heartbeat-procedure-status heartbeat-procedure-status--warning">
+                  Unsaved changes
+                </span>
+              )}
+            </div>
+            {showPreview ? (
+              fileContent.trim() ? (
+                <div className="agent-content-preview markdown-body">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{fileContent}</ReactMarkdown>
+                </div>
+              ) : (
+                <div className="agent-content-preview agent-content-placeholder">
+                  No heartbeat procedure markdown content yet.
+                </div>
+              )
+            ) : (
+              <textarea
+                id="heartbeat-procedure-file-content"
+                className="input"
+                rows={16}
+                value={fileContent}
+                readOnly={isLoadingFile}
+                placeholder="Heartbeat procedure markdown file content will appear here..."
+                onChange={(e) => {
+                  setFileContent(e.target.value);
+                  setFileContentDirty(true);
+                  setJustSavedFile(false);
+                }}
+              />
+            )}
+            {fileLoadError && (
+              <span className="config-error">Failed to load file: {fileLoadError}</span>
+            )}
+            <span className="config-hint">
+              This editor writes directly to <code>{currentPath}</code>.
+            </span>
+          </div>
+          {!showPreview && (
+            <div className="config-actions">
+              <button
+                className="btn btn-task-create"
+                disabled={!fileContentDirty || isSavingFile || isLoadingFile}
+                onClick={() => void handleSaveFile()}
+              >
+                {isSavingFile ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Saving…
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle size={16} />
+                    Save Heartbeat File
+                  </>
+                )}
+              </button>
+              {!fileContentDirty && justSavedFile && (
+                <span className="config-saved-indicator">
+                  <CheckCircle size={14} />
+                  File saved
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

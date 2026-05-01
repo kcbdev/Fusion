@@ -41,6 +41,7 @@ vi.mock("../../api", () => ({
   cancelAgentGeneration: vi.fn(),
   fetchAgentBudgetStatus: vi.fn(),
   resetAgentBudget: vi.fn(),
+  upgradeAgentHeartbeatProcedure: vi.fn(),
 }));
 
 vi.mock("../AgentLogViewer", () => ({

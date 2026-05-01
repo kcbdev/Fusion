@@ -743,6 +743,25 @@
   color: var(--color-success);
 }
 
+.heartbeat-procedure-actions {
+  margin-top: var(--space-sm);
+}
+
+.heartbeat-procedure-viewer {
+  margin-top: var(--space-lg);
+}
+
+.heartbeat-procedure-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-left: auto;
+}
+
+.heartbeat-procedure-status--warning {
+  color: var(--color-warning);
+}
+
 /* === Agent Evaluation Ratings === */
 
 .rating-summary-card {
@@ -1222,6 +1241,10 @@
   .config-actions .btn {
     width: 100%;
     justify-content: center;
+  }
+
+  .heartbeat-procedure-status {
+    margin-left: 0;
   }
 }
 
