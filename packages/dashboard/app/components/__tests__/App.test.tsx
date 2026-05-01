@@ -28,9 +28,8 @@ vi.mock("../../sse-bus", () => ({
 }));
 
 vi.mock("../../api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../api")>();
-  return {
-    ...actual,
+  const { createDashboardApiMock } = await import("../../test/mockApi");
+  return createDashboardApiMock(() => importOriginal<typeof import("../../api")>(), {
     fetchTasks: vi.fn(() => Promise.resolve([])),
     fetchConfig: vi.fn(() => Promise.resolve({ maxConcurrent: 2, rootDir: "/workspace/project" })),
     fetchSettings: vi.fn(() => Promise.resolve({ ...defaultSettings })),
@@ -60,7 +59,7 @@ vi.mock("../../api", async (importOriginal) => {
     fetchScripts: vi.fn(() => Promise.resolve({ build: "npm run build", test: "pnpm test" })),
     runScript: vi.fn(() => Promise.resolve({ sessionId: "sess-script-1", command: "echo hello" })),
     killPtyTerminalSession: vi.fn(() => Promise.resolve({ killed: true })),
-  };
+  });
 });
 
 const mockUseTasks = vi.fn(() => ({

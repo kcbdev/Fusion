@@ -5,11 +5,9 @@ import {
   createTaskDocumentWriteTool,
 } from "../agent-tools.js";
 
-vi.mock("@fusion/core", async () => {
-  const actual = await vi.importActual("@fusion/core");
-  return {
-    ...actual,
-  };
+vi.mock("@fusion/core", async (importOriginal) => {
+  const { createEngineCoreMock } = await import("../test/mockCore.js");
+  return createEngineCoreMock(() => importOriginal<typeof import("@fusion/core")>());
 });
 
 const TASK_ID = "FN-1272";

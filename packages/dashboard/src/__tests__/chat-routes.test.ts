@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 import type { Request, Response } from "express";
 import { request } from "../test-request.js";
+import { createCoreMock, createEngineMock } from "../test/mockCoreEngine.js";
 
 // ── SSE Test Helpers ────────────────────────────────────────────────────────
 
@@ -111,7 +112,7 @@ const { mockCreateFnAgent, mockChatStreamManager, mockSendMessage, mockCancelGen
 });
 
 // Mock @fusion/engine to prevent createFnAgent resolution
-vi.mock("@fusion/engine", () => ({
+vi.mock("@fusion/engine", () => createEngineMock({
   createFnAgent: mockCreateFnAgent,
 }));
 
@@ -132,8 +133,9 @@ const mockAgentStoreInit = vi.fn().mockResolvedValue(undefined);
 const mockAgentStoreGetAgent = vi.fn();
 
 // Mock ChatStore class for vi.mock
-vi.mock("@fusion/core", () => {
-  return {
+vi.mock("@fusion/core", async (importOriginal) => createCoreMock(
+  () => importOriginal<typeof import("@fusion/core")>(),
+  {
     ChatStore: class MockChatStore extends EventEmitter {
       init = mockInit;
       createSession = mockCreateSession;
@@ -151,8 +153,8 @@ vi.mock("@fusion/core", () => {
       init = mockAgentStoreInit;
       getAgent = mockAgentStoreGetAgent;
     },
-  };
-});
+  },
+));
 
 // Mock chat.js - must mock before importing server
 vi.mock("../chat.js", () => {

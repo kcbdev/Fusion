@@ -9,32 +9,34 @@ import { TaskDetailModal } from "../TaskDetailModal";
 import type { TaskDetail, Column, MergeResult, Task } from "@fusion/core";
 import { clearAuthToken } from "../../auth";
 
-vi.mock("../../api", () => ({
-  uploadAttachment: vi.fn(),
-  deleteAttachment: vi.fn(),
-  updateTask: vi.fn().mockResolvedValue({}),
-  fetchTaskDetail: vi.fn().mockResolvedValue(makeTask()),
-  fetchAgentLogs: vi.fn().mockResolvedValue([]),
-  requestSpecRevision: vi.fn().mockResolvedValue({}),
-  approvePlan: vi.fn().mockResolvedValue({}),
-  rejectPlan: vi.fn().mockResolvedValue({}),
-  duplicateTask: vi.fn().mockResolvedValue({}),
-  refineTask: vi.fn().mockResolvedValue({}),
-  addSteeringComment: vi.fn(),
-  assignTask: vi.fn().mockResolvedValue({}),
-  fetchAgents: vi.fn().mockResolvedValue([]),
-  fetchAgent: vi.fn(),
-  // TaskForm dependencies
-  fetchModels: vi.fn().mockResolvedValue({ models: [], favoriteProviders: [] }),
-  fetchSettings: vi.fn().mockResolvedValue({ modelPresets: [], autoSelectModelPreset: false, defaultPresetBySize: {} }),
-  fetchWorkflowSteps: vi.fn().mockResolvedValue([]),
-  refineText: vi.fn(),
-  getRefineErrorMessage: vi.fn((err: any) => err?.message || "Failed to refine"),
-  updateGlobalSettings: vi.fn().mockResolvedValue({}),
-  pauseTask: vi.fn().mockResolvedValue({}),
-  unpauseTask: vi.fn().mockResolvedValue({}),
-  fetchWorkflowResults: vi.fn().mockResolvedValue([]),
-}));
+vi.mock("../../api", async (importOriginal) => {
+  const { createDashboardApiMock } = await import("../../test/mockApi");
+  return createDashboardApiMock(() => importOriginal<typeof import("../../api")>(), {
+    uploadAttachment: vi.fn(),
+    deleteAttachment: vi.fn(),
+    updateTask: vi.fn().mockResolvedValue({}),
+    fetchTaskDetail: vi.fn().mockResolvedValue(makeTask()),
+    fetchAgentLogs: vi.fn().mockResolvedValue([]),
+    requestSpecRevision: vi.fn().mockResolvedValue({}),
+    approvePlan: vi.fn().mockResolvedValue({}),
+    rejectPlan: vi.fn().mockResolvedValue({}),
+    duplicateTask: vi.fn().mockResolvedValue({}),
+    refineTask: vi.fn().mockResolvedValue({}),
+    addSteeringComment: vi.fn(),
+    assignTask: vi.fn().mockResolvedValue({}),
+    fetchAgents: vi.fn().mockResolvedValue([]),
+    fetchAgent: vi.fn(),
+    fetchModels: vi.fn().mockResolvedValue({ models: [], favoriteProviders: [] }),
+    fetchSettings: vi.fn().mockResolvedValue({ modelPresets: [], autoSelectModelPreset: false, defaultPresetBySize: {} }),
+    fetchWorkflowSteps: vi.fn().mockResolvedValue([]),
+    refineText: vi.fn(),
+    getRefineErrorMessage: vi.fn((err: any) => err?.message || "Failed to refine"),
+    updateGlobalSettings: vi.fn().mockResolvedValue({}),
+    pauseTask: vi.fn().mockResolvedValue({}),
+    unpauseTask: vi.fn().mockResolvedValue({}),
+    fetchWorkflowResults: vi.fn().mockResolvedValue([]),
+  });
+});
 
 // Mock lucide-react icons used by TaskDetailModal, TaskForm, PrSection, CustomModelDropdown
 vi.mock("lucide-react", () => ({

@@ -13,10 +13,9 @@ import { createServer } from "../server.js";
 const mockInit = vi.fn().mockResolvedValue(undefined);
 const mockClose = vi.fn().mockResolvedValue(undefined);
 
-vi.mock("@fusion/core", async () => {
-  const actual = await vi.importActual<typeof import("@fusion/core")>("@fusion/core");
-  return {
-    ...actual,
+vi.mock("@fusion/core", async (importOriginal) => {
+  const { createCoreMock } = await import("../test/mockCoreEngine.js");
+  return createCoreMock(() => importOriginal<typeof import("@fusion/core")>(), {
     CentralCore: vi.fn().mockImplementation(() => ({
       init: mockInit,
       close: mockClose,
@@ -42,7 +41,7 @@ vi.mock("@fusion/core", async () => {
       ]),
       updateNode: vi.fn().mockResolvedValue(undefined),
     })),
-  };
+  });
 });
 
 class MockStore extends EventEmitter {

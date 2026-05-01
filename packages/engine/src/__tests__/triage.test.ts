@@ -29,12 +29,11 @@ vi.mock("../pi.js", () => ({
   promptWithFallback: vi.fn().mockReturnValue("mock-prompt"),
 }));
 
-vi.mock("@fusion/core", async () => {
-  const actual = await vi.importActual("@fusion/core");
-  return {
-    ...actual,
+vi.mock("@fusion/core", async (importOriginal) => {
+  const { createEngineCoreMock } = await import("../test/mockCore.js");
+  return createEngineCoreMock(() => importOriginal<typeof import("@fusion/core")>(), {
     resolveAgentPrompt: vi.fn().mockReturnValue(null),
-  };
+  });
 });
 
 async function createTriageFixtureRoot(prefix: string): Promise<string> {

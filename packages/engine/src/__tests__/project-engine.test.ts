@@ -25,19 +25,18 @@ const mocks = vi.hoisted(() => ({
   notificationServiceStop: vi.fn(),
 }));
 
-vi.mock("@fusion/core", async () => {
-  class MockAutomationStore {
-    constructor(_cwd: string) {}
+vi.mock("@fusion/core", async (importOriginal) => {
+  const { createEngineCoreMock } = await import("../test/mockCore.js");
+  return createEngineCoreMock(() => importOriginal<typeof import("@fusion/core")>(), {
+    AutomationStore: class MockAutomationStore {
+      constructor(_cwd: string) {}
 
-    init = mocks.automationStoreInit;
-  }
-
-  return {
-    AutomationStore: MockAutomationStore,
+      init = mocks.automationStoreInit;
+    },
     syncInsightExtractionAutomation: mocks.syncInsightExtractionAutomation,
     syncAutoSummarizeAutomation: mocks.syncAutoSummarizeAutomation,
     syncMemoryDreamsAutomation: mocks.syncMemoryDreamsAutomation,
-  };
+  });
 });
 
 vi.mock("../cron-runner.js", () => {

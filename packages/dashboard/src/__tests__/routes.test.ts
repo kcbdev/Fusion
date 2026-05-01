@@ -65,10 +65,9 @@ vi.mock("node:child_process", async () => {
   };
 });
 
-vi.mock("@fusion/core", async () => {
-  const actual = await vi.importActual<typeof import("@fusion/core")>("@fusion/core");
-  return {
-    ...actual,
+vi.mock("@fusion/core", async (importOriginal) => {
+  const { createCoreMock } = await import("../test/mockCoreEngine.js");
+  return createCoreMock(() => importOriginal<typeof import("@fusion/core")>(), {
     resolveGlobalDir: vi.fn().mockReturnValue("/tmp/fusion-test"),
     isGhAvailable: vi.fn(),
     isGhAuthenticated: vi.fn(),
@@ -79,10 +78,12 @@ vi.mock("@fusion/core", async () => {
       listProjects: mockCentralListProjects,
       reconcileProjectStatuses: mockCentralReconcileProjectStatuses,
     })),
-  };
+  });
 });
 
-vi.mock("@fusion/engine", () => ({
+vi.mock("@fusion/engine", async () => {
+  const { createEngineMock } = await import("../test/mockCoreEngine.js");
+  return createEngineMock({
   createFnAgent: vi.fn(async (options?: { onText?: (delta: string) => void }) => ({
     session: {
       state: {
@@ -122,7 +123,8 @@ vi.mock("@fusion/engine", () => ({
       throw new Error("Reflection service unavailable in route tests");
     }
   },
-}));
+  });
+});
 
 import { AgentStore, Database, RoutineStore, isGhAvailable, isGhAuthenticated } from "@fusion/core";
 import { createFnAgent } from "@fusion/engine";

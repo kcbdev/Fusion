@@ -22,19 +22,22 @@ import * as api from "../../api";
 import type { Task, Column } from "@fusion/core";
 
 // Mock the api module
-vi.mock("../../api", () => ({
-  fetchTasks: vi.fn().mockResolvedValue([]),
-  createTask: vi.fn(),
-  moveTask: vi.fn(),
-  deleteTask: vi.fn(),
-  mergeTask: vi.fn(),
-  retryTask: vi.fn(),
-  duplicateTask: vi.fn(),
-  updateTask: vi.fn(),
-  archiveTask: vi.fn(),
-  unarchiveTask: vi.fn(),
-  archiveAllDone: vi.fn(),
-}));
+vi.mock("../../api", async (importOriginal) => {
+  const { createDashboardApiMock } = await import("../../test/mockApi");
+  return createDashboardApiMock(() => importOriginal<typeof import("../../api")>(), {
+    fetchTasks: vi.fn().mockResolvedValue([]),
+    createTask: vi.fn(),
+    moveTask: vi.fn(),
+    deleteTask: vi.fn(),
+    mergeTask: vi.fn(),
+    retryTask: vi.fn(),
+    duplicateTask: vi.fn(),
+    updateTask: vi.fn(),
+    archiveTask: vi.fn(),
+    unarchiveTask: vi.fn(),
+    archiveAllDone: vi.fn(),
+  });
+});
 
 async function flushPromises(): Promise<void> {
   await Promise.resolve();
