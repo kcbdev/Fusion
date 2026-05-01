@@ -185,7 +185,7 @@ export function SubtaskBreakdownModal({ isOpen, onClose, initialDescription, onT
             needsInput: false,
             owningTabId: sessionTabId,
             type: "subtask",
-            title: localDescription.trim() || "Subtask breakdown",
+            title: localDescription.trim() || undefined,
             projectId: projectId ?? null,
           });
         },
@@ -203,7 +203,7 @@ export function SubtaskBreakdownModal({ isOpen, onClose, initialDescription, onT
             needsInput: true,
             owningTabId: sessionTabId,
             type: "subtask",
-            title: localDescription.trim() || "Subtask breakdown",
+            title: localDescription.trim() || undefined,
             projectId: projectId ?? null,
           });
         },
@@ -220,7 +220,7 @@ export function SubtaskBreakdownModal({ isOpen, onClose, initialDescription, onT
             needsInput: false,
             owningTabId: sessionTabId,
             type: "subtask",
-            title: localDescription.trim() || "Subtask breakdown",
+            title: localDescription.trim() || undefined,
             projectId: projectId ?? null,
           });
           broadcastCompleted({ sessionId: activeSessionId, status: "error" });

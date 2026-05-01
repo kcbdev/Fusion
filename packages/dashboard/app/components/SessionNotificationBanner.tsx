@@ -28,22 +28,36 @@ const TYPE_LABELS = {
 
 const STORAGE_KEY = "fusion:session-banner-dismissed";
 
-function loadDismissedFromStorage(): Map<string, string> {
+function parseUpdatedAtMs(value: string | undefined | null): number {
+  if (!value) return 0;
+  const t = Date.parse(value);
+  return Number.isFinite(t) ? t : 0;
+}
+
+function loadDismissedFromStorage(): Map<string, number> {
   if (typeof window === "undefined") return new Map();
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return new Map();
-    const parsed = JSON.parse(raw) as Record<string, string>;
-    return new Map(Object.entries(parsed));
+    const parsed = JSON.parse(raw) as Record<string, number | string>;
+    const result = new Map<string, number>();
+    for (const [k, v] of Object.entries(parsed)) {
+      // Accept legacy string-based entries (treated as opaque dismissal markers
+      // by parsing as date — yields 0 if not a date, which suppresses banners
+      // until the session next advances).
+      const num = typeof v === "number" ? v : parseUpdatedAtMs(v);
+      result.set(k, num);
+    }
+    return result;
   } catch {
     return new Map();
   }
 }
 
-function persistDismissed(map: Map<string, string>): void {
+function persistDismissed(map: Map<string, number>): void {
   if (typeof window === "undefined") return;
   try {
-    const obj: Record<string, string> = {};
+    const obj: Record<string, number> = {};
     for (const [k, v] of map) obj[k] = v;
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
   } catch {
@@ -51,10 +65,11 @@ function persistDismissed(map: Map<string, string>): void {
   }
 }
 
-// Map of sessionId → the updatedAt at which it was dismissed. The banner
-// re-shows the session when its updatedAt advances past the recorded value
-// (i.e. a new request/question arrived). Persisted to localStorage so
-// dismissals survive page refresh.
+// Map of sessionId → epoch-ms timestamp at which the user dismissed the
+// banner for that session. The banner re-shows the session only when the
+// session's `updatedAt` advances strictly past the recorded dismissal time
+// (i.e. a new question/event arrived after the user dismissed). Persisted
+// to localStorage so dismissals survive page refresh.
 export const dismissedIds = loadDismissedFromStorage();
 
 export function SessionNotificationBanner({
@@ -78,7 +93,7 @@ export function SessionNotificationBanner({
     const sessionById = new Map(sessions.map((session) => [session.id, session]));
     let pruned = false;
 
-    for (const [id, dismissedAt] of dismissedIds) {
+    for (const [id, dismissedAtMs] of dismissedIds) {
       const session = sessionById.get(id);
       if (!session) continue;
       const stillNotifying = session.status === "awaiting_input" || session.status === "error";
@@ -87,7 +102,8 @@ export function SessionNotificationBanner({
         pruned = true;
         continue;
       }
-      if (session.updatedAt && session.updatedAt !== dismissedAt) {
+      const sessionMs = parseUpdatedAtMs(session.updatedAt);
+      if (sessionMs > dismissedAtMs) {
         dismissedIds.delete(id);
         pruned = true;
       }
@@ -100,9 +116,9 @@ export function SessionNotificationBanner({
     () =>
       sessions.filter((session) => {
         if (session.status !== "awaiting_input" && session.status !== "error") return false;
-        const dismissedAt = dismissedIds.get(session.id);
-        if (dismissedAt === undefined) return true;
-        return session.updatedAt !== dismissedAt;
+        const dismissedAtMs = dismissedIds.get(session.id);
+        if (dismissedAtMs === undefined) return true;
+        return parseUpdatedAtMs(session.updatedAt) > dismissedAtMs;
       }),
     [sessions, dismissRevision],
   );
@@ -124,7 +140,12 @@ export function SessionNotificationBanner({
   }
 
   const dismissLocally = (session: AiSessionSummary) => {
-    dismissedIds.set(session.id, session.updatedAt ?? "");
+    // Record dismissal at "now" so any session update strictly newer than
+    // this point will re-surface the banner. Using the session's current
+    // updatedAt was unreliable: lock heartbeats and unrelated server-side
+    // touches advance updatedAt on the same content, which would otherwise
+    // re-show a banner the user just dismissed.
+    dismissedIds.set(session.id, Math.max(parseUpdatedAtMs(session.updatedAt), Date.now()));
     bump();
   };
 
@@ -135,8 +156,9 @@ export function SessionNotificationBanner({
   };
 
   const handleDismissAll = () => {
+    const now = Date.now();
     for (const session of sessionsNeedingInput) {
-      dismissedIds.set(session.id, session.updatedAt ?? "");
+      dismissedIds.set(session.id, Math.max(parseUpdatedAtMs(session.updatedAt), now));
     }
     bump();
     onDismissAll();

@@ -223,7 +223,7 @@ export function MissionInterviewModal({
             needsInput: false,
             owningTabId: sessionTabId,
             type: "mission_interview",
-            title: missionGoal.trim() || "Mission interview",
+            title: missionGoal.trim() || undefined,
             projectId: projectId ?? null,
           });
         },
@@ -241,7 +241,7 @@ export function MissionInterviewModal({
             needsInput: true,
             owningTabId: sessionTabId,
             type: "mission_interview",
-            title: missionGoal.trim() || "Mission interview",
+            title: missionGoal.trim() || undefined,
             projectId: projectId ?? null,
           });
         },
@@ -260,7 +260,7 @@ export function MissionInterviewModal({
             needsInput: false,
             owningTabId: sessionTabId,
             type: "mission_interview",
-            title: missionGoal.trim() || "Mission interview",
+            title: missionGoal.trim() || undefined,
             projectId: projectId ?? null,
           });
         },
@@ -280,7 +280,7 @@ export function MissionInterviewModal({
             needsInput: false,
             owningTabId: sessionTabId,
             type: "mission_interview",
-            title: missionGoal.trim() || "Mission interview",
+            title: missionGoal.trim() || undefined,
             projectId: projectId ?? null,
           });
           broadcastCompleted({ sessionId, status: "error" });
