@@ -771,7 +771,11 @@ function AppInner() {
       return (
         <PageErrorBoundary>
           <Suspense fallback={null}>
-            <TodoView addToast={addToast} projectId={currentProject?.id} />
+            <TodoView
+              addToast={addToast}
+              projectId={currentProject?.id}
+              onPlanningMode={modalManager.openPlanningWithInitialPlan}
+            />
           </Suspense>
         </PageErrorBoundary>
       );

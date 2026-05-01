@@ -114,6 +114,7 @@ import { registerCustomProviderRoutes } from "./routes/register-custom-provider-
 import { registerUsageRoutes } from "./routes/register-usage-routes.js";
 import { registerAuthRoutes } from "./routes/register-auth-routes.js";
 import { registerRuntimeProviderRoutes } from "./routes/register-runtime-provider-routes.js";
+import { registerFnBinaryRoutes } from "./routes/register-fn-binary-routes.js";
 import { registerUpdateCheckRoutes } from "./routes/register-update-check-routes.js";
 import { registerIntegratedRouters, registerIntegratedDevServerRouter } from "./routes/register-integrated-routers.js";
 import { runGitCommand } from "./routes/resolve-diff-base.js";
@@ -1464,6 +1465,9 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
   // ---------- Runtime-plugin probe routes (Hermes / OpenClaw / Paperclip) ----------
   registerRuntimeProviderRoutes(routeContext);
+
+  // ---------- CLI binary install / status routes ----------
+  registerFnBinaryRoutes(routeContext);
 
   /**
    * POST /api/ai/refine-text

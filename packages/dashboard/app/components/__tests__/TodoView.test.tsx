@@ -33,6 +33,7 @@ vi.mock("lucide-react", () => ({
   ListChecks: () => <span data-testid="icon-list-checks" />,
   Bot: () => <span data-testid="icon-bot" />,
   PlusCircle: () => <span data-testid="icon-plus-circle" />,
+  Lightbulb: () => <span data-testid="icon-lightbulb" />,
 }));
 
 function createMockTodoLists(overrides: Record<string, unknown> = {}) {
@@ -407,6 +408,13 @@ describe("TodoView", () => {
     expect(selectedButton.closest(".todo-list-item")).toHaveClass("todo-list-item--active");
   });
 
+  it("Planning button renders for each todo item", () => {
+    render(<TodoView addToast={addToast} />);
+
+    expect(screen.getByTestId("planning-from-item-1")).toBeInTheDocument();
+    expect(screen.getByTestId("planning-from-item-2")).toBeInTheDocument();
+  });
+
   it("Create Task button renders for each todo item", () => {
     render(<TodoView addToast={addToast} />);
 
@@ -419,6 +427,16 @@ describe("TodoView", () => {
 
     expect(screen.getByTestId("assign-agent-for-item-1")).toBeInTheDocument();
     expect(screen.getByTestId("assign-agent-for-item-2")).toBeInTheDocument();
+  });
+
+  it("clicking Planning button calls onPlanningMode with item text", () => {
+    const onPlanningMode = vi.fn();
+    render(<TodoView addToast={addToast} onPlanningMode={onPlanningMode} />);
+
+    fireEvent.click(screen.getByTestId("planning-from-item-1"));
+
+    expect(onPlanningMode).toHaveBeenCalledWith("Buy groceries");
+    expect(mockCreateTask).not.toHaveBeenCalled();
   });
 
   it("clicking Create Task button calls createTask with item text", async () => {
@@ -476,6 +494,7 @@ describe("TodoView", () => {
     expect(actionsRow).toBeInTheDocument();
     expect(actionsRow).toContainElement(screen.getByTestId("move-up-item-1"));
     expect(actionsRow).toContainElement(screen.getByTestId("move-down-item-1"));
+    expect(actionsRow).toContainElement(screen.getByTestId("planning-from-item-1"));
     expect(actionsRow).toContainElement(screen.getByTestId("create-task-from-item-1"));
     expect(actionsRow).toContainElement(screen.getByTestId("assign-agent-for-item-1"));
     expect(actionsRow).toContainElement(screen.getByTestId("edit-item-item-1"));

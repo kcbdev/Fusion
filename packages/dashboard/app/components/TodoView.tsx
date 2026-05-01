@@ -11,6 +11,7 @@ import {
   ListChecks,
   Bot,
   PlusCircle,
+  Lightbulb,
 } from "lucide-react";
 import { getErrorMessage, type Task, type TaskCreateInput, type TodoItem, type TodoList } from "@fusion/core";
 import { createTask, fetchAgents } from "../api";
@@ -22,13 +23,14 @@ import "./TodoView.css";
 interface TodoViewProps {
   projectId?: string;
   addToast: (message: string, type?: "success" | "error" | "info") => void;
+  onPlanningMode?: (initialPlan: string) => void;
 }
 
 function sortItems(items: TodoItem[]): TodoItem[] {
   return [...items].sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
-export function TodoView({ projectId, addToast }: TodoViewProps) {
+export function TodoView({ projectId, addToast, onPlanningMode }: TodoViewProps) {
   const {
     lists,
     items,
@@ -627,6 +629,17 @@ export function TodoView({ projectId, addToast }: TodoViewProps) {
                                   <ChevronDown />
                                 </button>
                               </div>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-icon todo-icon-btn"
+                                onClick={() => {
+                                  onPlanningMode?.(item.text);
+                                }}
+                                aria-label={`Start planning from ${item.text}`}
+                                data-testid={`planning-from-${item.id}`}
+                              >
+                                <Lightbulb />
+                              </button>
                               <button
                                 type="button"
                                 className="btn btn-sm btn-icon todo-icon-btn"

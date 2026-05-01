@@ -22,7 +22,18 @@ Use the 💡 button to open planning mode:
 - Produces summary + key deliverables
 - Create one task or **Break into Tasks** (multi-task generation with dependencies)
 
-### 3) Subtask Breakdown Dialog
+### 3) Todo item → Plan Mode
+
+In **Todos** view, each todo item includes a planning action:
+
+- Click the planning (💡) action on a todo item
+- Opens Planning Mode with that todo text pre-filled as the initial plan
+- Starts an AI planning interview (clarification questions + summary)
+- You can then create one task or break the plan into multiple tasks
+
+This action starts a planning session; it does **not** immediately create a task.
+
+### 4) Subtask Breakdown Dialog
 
 Use the 🌳 button:
 
@@ -31,7 +42,7 @@ Use the 🌳 button:
 - Add dependencies only on earlier items
 - Create tasks in one action
 
-### 4) Expanded Controls
+### 5) Expanded Controls
 
 Expand the creation panel (▼) to access additional controls:
 
@@ -43,7 +54,7 @@ Expand the creation panel (▼) to access additional controls:
 - **Review** — Set review rigor level (None, Plan Only, Plan and Code, Full)
 - **Browser Verify** — Enable browser verification workflow step
 
-### 5) CLI creation
+### 6) CLI creation
 
 ```bash
 fn task create "Fix API timeout handling"

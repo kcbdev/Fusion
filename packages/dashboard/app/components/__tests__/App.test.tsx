@@ -251,6 +251,14 @@ vi.mock("../../components/AgentsView", () => ({
   AgentsView: () => <div className="agents-view">Agents view</div>,
 }));
 
+vi.mock("../../components/TodoView", () => ({
+  TodoView: ({ onPlanningMode }: { onPlanningMode?: (initialPlan: string) => void }) => (
+    <div className="todo-view" data-testid="todo-view">
+      <button type="button" data-testid="todo-planning-button" onClick={() => onPlanningMode?.("Seed from todo")}>Plan from todo</button>
+    </div>
+  ),
+}));
+
 vi.mock("../../components/QuickChatFAB", () => ({
   QuickChatFAB: () => null,
 }));
@@ -1468,6 +1476,33 @@ describe("App view switching", () => {
     expect(screen.getByTitle("List view").className).toContain("active");
 
     // Cleanup
+    localStorage.removeItem(taskViewStorageKey());
+    localStorage.removeItem("kb-dashboard-view-mode");
+  });
+
+  it("opens planning mode when TodoView triggers planning from todo item", async () => {
+    localStorage.setItem("kb-dashboard-view-mode", "project");
+    localStorage.setItem(taskViewStorageKey(), "todos");
+    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ...defaultSettings,
+      experimentalFeatures: {
+        ...defaultSettings.experimentalFeatures,
+        todoView: true,
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("todo-view")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("todo-planning-button"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Planning Mode")).toBeInTheDocument();
+    });
+
     localStorage.removeItem(taskViewStorageKey());
     localStorage.removeItem("kb-dashboard-view-mode");
   });

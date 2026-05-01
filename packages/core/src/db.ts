@@ -86,7 +86,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 57;
+const SCHEMA_VERSION = 58;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -2136,6 +2136,36 @@ export class Database {
           this.db.exec(
             "CREATE INDEX IF NOT EXISTS idxAiSessionsArchived ON ai_sessions(archived)",
           );
+        }
+      });
+    }
+
+    // Rewrite legacy backup automation/routine commands that bake in a
+    // bare `fn` or `kb` binary. Those fail with "command not found" on
+    // hosts where the global bin was never linked. The canonical form
+    // (kept in sync with backup.ts) uses npx so it works zero-install.
+    if (version < 58) {
+      this.applyMigration(58, () => {
+        const newCommand = "npx runfusion.ai backup --create";
+        if (this.hasTable("automations") && this.hasColumn("automations", "command")) {
+          this.db
+            .prepare(
+              `UPDATE automations
+                  SET command = ?, updatedAt = ?
+                WHERE name = 'Database Backup'
+                  AND (command LIKE 'fn backup%' OR command LIKE 'kb backup%' OR command LIKE 'fusion backup%')`,
+            )
+            .run(newCommand, new Date().toISOString());
+        }
+        if (this.hasTable("routines") && this.hasColumn("routines", "command")) {
+          this.db
+            .prepare(
+              `UPDATE routines
+                  SET command = ?, updatedAt = ?
+                WHERE name = 'Database Backup'
+                  AND (command LIKE 'fn backup%' OR command LIKE 'kb backup%' OR command LIKE 'fusion backup%')`,
+            )
+            .run(newCommand, new Date().toISOString());
         }
       });
     }

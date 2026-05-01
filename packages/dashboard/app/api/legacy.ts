@@ -1296,6 +1296,47 @@ export function fetchClaudeCliStatus(): Promise<ClaudeCliStatus> {
   return api<ClaudeCliStatus>("/providers/claude-cli/status");
 }
 
+/**
+ * Status snapshot for the Fusion CLI binary (`fn` / `fusion`). Used by
+ * Settings → General → CLI Binary and the first-launch banner.
+ */
+export interface FnBinaryStatus {
+  binary: {
+    installed: boolean;
+    binary?: "fn" | "fusion";
+    path?: string;
+    version?: string;
+    invocation: string;
+  };
+  expectedVersion: string;
+  state: "installed" | "missing" | "version-mismatch";
+  install: { npm: string; curl: string; package: string };
+}
+
+export interface FnBinaryInstallResult {
+  success: boolean;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  command: string;
+  durationMs: number;
+  permissionsHint?: string;
+}
+
+export interface FnBinaryInstallResponse extends FnBinaryStatus {
+  installResult: FnBinaryInstallResult;
+}
+
+/** Read CLI binary install state. */
+export function fetchFnBinaryStatus(): Promise<FnBinaryStatus> {
+  return api<FnBinaryStatus>("/system/fn-binary/status");
+}
+
+/** Trigger `npm install -g runfusion.ai`. Returns install log + new status. */
+export function installFnBinary(): Promise<FnBinaryInstallResponse> {
+  return api<FnBinaryInstallResponse>("/system/fn-binary/install", { method: "POST" });
+}
+
 /** Probe the local Droid CLI binary + setting + extension state. */
 export function fetchDroidCliStatus(): Promise<DroidCliStatus> {
   return api<DroidCliStatus>("/providers/droid-cli/status");

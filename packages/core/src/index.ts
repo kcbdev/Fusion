@@ -76,6 +76,14 @@ export type { AutomationStoreEvents } from "./automation-store.js";
 export { runCommandAsync } from "./run-command.js";
 export type { RunCommandOptions, RunCommandResult } from "./run-command.js";
 export {
+  detectFnBinary,
+  FN_NPM_PACKAGE,
+  FN_INSTALL_NPM,
+  FN_INSTALL_CURL,
+  FN_NPX_INVOCATION,
+} from "./fn-binary.js";
+export type { FnBinaryStatus, FnBinaryName } from "./fn-binary.js";
+export {
   validateNodeOverrideChange,
   type NodeOverrideValidationResult,
   type NodeOverrideBlockReason,
