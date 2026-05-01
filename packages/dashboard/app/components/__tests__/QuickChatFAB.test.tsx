@@ -2151,6 +2151,7 @@ describe("QuickChatFAB", () => {
         expect(input).not.toBeDisabled();
       });
 
+      fireEvent.focus(input);
       fireEvent.change(input, { target: { value: "send from touch" } });
 
       const sendButton = screen.getByTestId("quick-chat-send");
@@ -2159,6 +2160,8 @@ describe("QuickChatFAB", () => {
       await waitFor(() => {
         expect(mockStreamChatResponse).toHaveBeenCalledTimes(1);
       });
+
+      expect(document.activeElement).toBe(input);
     });
 
     it("does not subscribe to keyboard tracking while panel is closed", async () => {
