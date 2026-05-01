@@ -302,7 +302,12 @@ export function ResearchView({ projectId, addToast, onOpenSettings, readinessVer
           </div>
           <div className="research-view__history" data-testid="research-state-running">
             {runs.map((run) => (
-              <button key={run.id} className={`research-view__history-item${selectedRunId === run.id ? " research-view__history-item--active" : ""}`} onClick={() => setSelectedRunId(run.id)}>
+              <button
+                key={run.id}
+                type="button"
+                className={`research-view__history-item${selectedRunId === run.id ? " research-view__history-item--active" : ""}`}
+                onClick={() => setSelectedRunId(run.id)}
+              >
                 <span className="card-id">{run.id}</span>
                 <span>{run.title}</span>
               </button>

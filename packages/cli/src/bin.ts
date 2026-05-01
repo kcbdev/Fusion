@@ -134,6 +134,7 @@ async function loadCommandHandlers() {
   const { runPluginList, runPluginInstall, runPluginUninstall, runPluginEnable, runPluginDisable } = await import("./commands/plugin.js");
   const { runPluginCreate } = await import("./commands/plugin-scaffold.js");
   const { runSkillsSearch, runSkillsInstall } = await import("./commands/skills.js");
+  const { runResearchCreate, runResearchList, runResearchShow, runResearchExport, runResearchCancel, runResearchRetry } = await import("./commands/research.js");
 
   return {
     runDashboard,
@@ -214,6 +215,12 @@ async function loadCommandHandlers() {
     runPluginCreate,
     runSkillsSearch,
     runSkillsInstall,
+    runResearchCreate,
+    runResearchList,
+    runResearchShow,
+    runResearchExport,
+    runResearchCancel,
+    runResearchRetry,
   };
 }
 
@@ -262,6 +269,17 @@ Usage:
   fn task pr-create <id> [--title <title>] [--base <branch>] [--body <body>]
                          Create a GitHub PR for an in-review task
   fn task import <owner/repo> [opts]  Import GitHub issues as tasks
+  fn research create --query <text> [--wait] [--max-wait-ms <ms>] [--json]
+                                      Create and optionally wait for a research run
+  fn research list | ls [--status <status>] [--limit <n>] [--json]
+                                      List research runs
+  fn research show <run-id> [--json]  Show research run details
+  fn research export <run-id> [--format <json|markdown|pdf>] [--output <path>] [--json]
+                                      Export research run results
+  fn research cancel <run-id> [--json]
+                                      Cancel an active research run
+  fn research retry <run-id> [--json]
+                                      Retry a failed/cancelled research run
   fn mission create [title] [desc]    Create a new mission
   fn mission list | ls                List missions
   fn mission show | info <id>         Show mission details
@@ -489,6 +507,12 @@ async function main() {
     runPluginCreate,
     runSkillsSearch,
     runSkillsInstall,
+    runResearchCreate,
+    runResearchList,
+    runResearchShow,
+    runResearchExport,
+    runResearchCancel,
+    runResearchRetry,
   } = await loadCommandHandlers();
 
   try {
@@ -700,6 +724,85 @@ async function main() {
           default:
             console.error(`Unknown subcommand: mesh ${subcommand || ""}`);
             console.log("Try: fn mesh status");
+            process.exit(1);
+        }
+        break;
+      }
+
+      case "research": {
+        const subcommand = args[1];
+        switch (subcommand) {
+          case "create": {
+            const query = getFlagValue(args, "--query") ?? args.slice(2).filter((value) => !value.startsWith("--")).join(" ").trim();
+            if (!query) {
+              console.error("Usage: fn research create --query <text> [--wait] [--max-wait-ms <ms>] [--json]");
+              process.exit(1);
+            }
+            await runResearchCreate({
+              query,
+              waitForCompletion: args.includes("--wait"),
+              maxWaitMs: getFlagValueNumber(args, "--max-wait-ms"),
+              json: args.includes("--json"),
+              projectName,
+            });
+            break;
+          }
+          case "list":
+          case "ls": {
+            const status = getFlagValue(args, "--status");
+            await runResearchList({
+              status,
+              limit: getFlagValueNumber(args, "--limit"),
+              json: args.includes("--json"),
+              projectName,
+            });
+            break;
+          }
+          case "show": {
+            const runId = args[2];
+            if (!runId) {
+              console.error("Usage: fn research show <run-id> [--json]");
+              process.exit(1);
+            }
+            await runResearchShow(runId, { json: args.includes("--json"), projectName });
+            break;
+          }
+          case "export": {
+            const runId = args[2];
+            if (!runId) {
+              console.error("Usage: fn research export <run-id> [--format <json|markdown|pdf>] [--output <path>] [--json]");
+              process.exit(1);
+            }
+            await runResearchExport({
+              runId,
+              format: getFlagValue(args, "--format"),
+              output: getFlagValue(args, "--output"),
+              json: args.includes("--json"),
+              projectName,
+            });
+            break;
+          }
+          case "cancel": {
+            const runId = args[2];
+            if (!runId) {
+              console.error("Usage: fn research cancel <run-id> [--json]");
+              process.exit(1);
+            }
+            await runResearchCancel(runId, { json: args.includes("--json"), projectName });
+            break;
+          }
+          case "retry": {
+            const runId = args[2];
+            if (!runId) {
+              console.error("Usage: fn research retry <run-id> [--json]");
+              process.exit(1);
+            }
+            await runResearchRetry(runId, { json: args.includes("--json"), projectName });
+            break;
+          }
+          default:
+            console.error(`Unknown subcommand: research ${subcommand || ""}`);
+            console.log("Try: fn research create | list | show | export | cancel | retry");
             process.exit(1);
         }
         break;

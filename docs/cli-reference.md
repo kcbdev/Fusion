@@ -48,6 +48,35 @@ During fresh initialization, Fusion also installs the bundled `fusion` skill int
 
 ---
 
+## `fn research`
+
+Manage persisted research runs from the CLI.
+
+```bash
+fn research create --query "Compare sqlite WAL vs rollback journal"
+fn research create --query "Rust async runtime trade-offs" --wait --max-wait-ms 120000
+fn research list --status failed --limit 20
+fn research show RR-001
+fn research export RR-001 --format json --output ./artifacts/research-RR-001.json
+fn research cancel RR-001
+fn research retry RR-001 --json
+```
+
+| Subcommand | Description |
+|---|---|
+| `fn research create --query <text> [--wait] [--max-wait-ms <ms>] [--json]` | Create a run and optionally wait for completion. |
+| `fn research list \| ls [--status <status>] [--limit <n>] [--json]` | List recent runs (statuses: `pending`, `running`, `completed`, `failed`, `cancelled`). |
+| `fn research show <run-id> [--json]` | Show one run with timestamps, summary, and error details. |
+| `fn research export <run-id> [--format <json\|markdown\|pdf>] [--output <path>] [--json]` | Export run results and persist an export record. |
+| `fn research cancel <run-id> [--json]` | Request cancellation for an active run. |
+| `fn research retry <run-id> [--json]` | Create a new retry run from a failed/cancelled run. |
+
+Disabled/setup behavior mirrors dashboard and agent surfaces:
+- Feature disabled → `feature-disabled` error (enable research in settings)
+- Provider unconfigured → `provider-unavailable` error (configure credentials/provider)
+
+---
+
 ## `fn dashboard`
 
 Start the web dashboard (default port `4040`, bound to `127.0.0.1`).
