@@ -9,6 +9,7 @@ import type {
   ScheduledTask,
   AutomationRunResult,
 } from "@fusion/core";
+import { compareTasksByPriorityThenAgeAndId, sortTasksByPriorityThenAgeAndId } from "@fusion/core";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { InProcessRuntime } from "./runtimes/in-process-runtime.js";
@@ -1017,12 +1018,84 @@ export class ProjectEngine {
     );
   }
 
+  /**
+   * Remove and return the highest-priority taskId from the merge queue.
+   * Ordering: priority (urgent→low), then createdAt ASC, then id ASC — matching
+   * the triage and scheduler comparators. Manual merges (onMerge resolvers) are
+   * preferred over auto-merges so awaited callers aren't starved by a flood of
+   * higher-priority auto-enqueues. IDs whose tasks can't be loaded fall back to
+   * FIFO order so they still drain.
+   */
+  private async pickNextMergeTaskId(store: TaskStore): Promise<string | undefined> {
+    if (this.mergeQueue.length === 0) return undefined;
+    // Fast path: with a single queued task there's nothing to reorder. Avoid an
+    // extra getTask round-trip (and keep callers that mock getTask once happy).
+    if (this.mergeQueue.length === 1) {
+      return this.mergeQueue.shift();
+    }
+
+    // Snapshot the queue before awaiting. While we await store.getTask for
+    // each id, stop() may clear mergeQueue and pause-handling may filter
+    // entries out — so we never trust positional indices afterwards.
+    const queueSnapshot = [...this.mergeQueue];
+    const entries: Array<{ taskId: string; task: Task | undefined; manual: boolean; order: number }> = [];
+    for (let i = 0; i < queueSnapshot.length; i++) {
+      const taskId = queueSnapshot[i]!;
+      const task = (await store.getTask(taskId).catch(() => undefined)) as Task | undefined;
+      entries.push({
+        taskId,
+        task,
+        manual: this.manualMergeResolvers.has(taskId),
+        order: i,
+      });
+    }
+
+    if (this.shuttingDown) return undefined;
+
+    entries.sort((a, b) => {
+      if (a.manual !== b.manual) return a.manual ? -1 : 1;
+      if (a.task && b.task) return compareTasksByPriorityThenAgeAndId(a.task, b.task);
+      if (a.task) return -1;
+      if (b.task) return 1;
+      return a.order - b.order;
+    });
+
+    // Find the highest-priority entry that is still in the live queue.
+    // Concurrent mutations (pause filter, stop) may have removed entries.
+    for (const entry of entries) {
+      const liveIndex = this.mergeQueue.indexOf(entry.taskId);
+      if (liveIndex !== -1) {
+        this.mergeQueue.splice(liveIndex, 1);
+        return entry.taskId;
+      }
+    }
+    return undefined;
+  }
+
   private internalEnqueueMerge(taskId: string): void {
     if (this.shuttingDown) return;
     if (this.mergeActive.has(taskId)) return;
     this.mergeActive.add(taskId);
     this.mergeQueue.push(taskId);
     void this.drainMergeQueue();
+  }
+
+  /**
+   * Filter a sweep's listTasks() result to merge-eligible tasks, sort by
+   * priority (urgent → low, then createdAt ASC, then id ASC), and enqueue.
+   * Sorting before enqueue matters because each enqueue may immediately
+   * trigger drainMergeQueue's single-item fast path, so the first task
+   * pushed wins. listTasks returns createdAt ASC — without this sort an
+   * older low-priority task would start before a later urgent one.
+   */
+  private enqueueEligibleInReviewTasks(tasks: readonly Task[]): number {
+    const eligible = sortTasksByPriorityThenAgeAndId(
+      tasks.filter((t) => !t.paused && this.canMergeTask(t as any)) as Task[],
+    );
+    for (const t of eligible) {
+      this.internalEnqueueMerge(t.id);
+    }
+    return eligible.length;
   }
 
   private async drainMergeQueue(): Promise<void> {
@@ -1034,7 +1107,11 @@ export class ProjectEngine {
       const cwd = this.config.workingDirectory;
 
       while (this.mergeQueue.length > 0 && !this.shuttingDown) {
-        const taskId = this.mergeQueue.shift()!;
+        const taskId = await this.pickNextMergeTaskId(store);
+        if (!taskId) break;
+        // pickNextMergeTaskId awaits store.getTask; re-check shutdown so we
+        // don't start a merge whose queue entry was cleared by stop().
+        if (this.shuttingDown) break;
         const manualResolver = this.manualMergeResolvers.get(taskId);
         try {
           // Manual merges (onMerge) skip auto-merge eligibility checks
@@ -1664,12 +1741,9 @@ export class ProjectEngine {
       if (!settings.autoMerge) return;
 
 
-      const eligible = tasks.filter((t) => !t.paused && this.canMergeTask(t as any));
-      if (eligible.length > 0) {
-        runtimeLog.log(`Auto-merge startup sweep: enqueueing ${eligible.length} task(s)`);
-        for (const t of eligible) {
-          this.internalEnqueueMerge(t.id);
-        }
+      const enqueued = this.enqueueEligibleInReviewTasks(tasks as Task[]);
+      if (enqueued > 0) {
+        runtimeLog.log(`Auto-merge startup sweep: enqueueing ${enqueued} task(s)`);
       }
     } catch (err: unknown) {
       runtimeLog.warn(
@@ -1688,14 +1762,7 @@ export class ProjectEngine {
         const settings = await store.getSettings();
         if (!settings.globalPause && !settings.enginePaused && settings.autoMerge) {
           const tasks = await store.listTasks({ column: "in-review" });
-          for (const t of tasks) {
-            if (t.paused) {
-              continue;
-            }
-            if (this.canMergeTask(t as any)) {
-              this.internalEnqueueMerge(t.id);
-            }
-          }
+          this.enqueueEligibleInReviewTasks(tasks as Task[]);
         }
       } catch (err: unknown) {
         runtimeLog.warn(
@@ -1771,14 +1838,7 @@ export class ProjectEngine {
         if (s.autoMerge) {
           try {
             const tasks = await store.listTasks({ column: "in-review" });
-            for (const t of tasks) {
-              if (t.paused) {
-                continue;
-              }
-              if (this.canMergeTask(t as any)) {
-                this.internalEnqueueMerge(t.id);
-              }
-            }
+            this.enqueueEligibleInReviewTasks(tasks as Task[]);
           } catch (err: unknown) {
             runtimeLog.warn(
               `Global unpause: failed to scan in-review tasks for auto-merge: ${err instanceof Error ? err.message : String(err)}`,
@@ -1816,14 +1876,7 @@ export class ProjectEngine {
         if (s.autoMerge) {
           try {
             const tasks = await store.listTasks({ column: "in-review" });
-            for (const t of tasks) {
-              if (t.paused) {
-                continue;
-              }
-              if (this.canMergeTask(t as any)) {
-                this.internalEnqueueMerge(t.id);
-              }
-            }
+            this.enqueueEligibleInReviewTasks(tasks as Task[]);
           } catch (err: unknown) {
             runtimeLog.warn(
               `Engine unpause: failed to scan in-review tasks for auto-merge: ${err instanceof Error ? err.message : String(err)}`,

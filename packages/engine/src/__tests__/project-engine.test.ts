@@ -1014,6 +1014,248 @@ describe("ProjectEngine shutdown merge handling", () => {
   });
 });
 
+describe("ProjectEngine merge queue priority ordering", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("merges higher-priority tasks before lower-priority ones regardless of enqueue order", async () => {
+    const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
+    const tasksById: Record<string, Record<string, unknown>> = {
+      "FN-low": {
+        id: "FN-low",
+        column: "in-review",
+        paused: false,
+        mergeRetries: 0,
+        status: null,
+        priority: "low",
+        createdAt: "2026-04-01T00:00:00.000Z",
+      },
+      "FN-urgent": {
+        id: "FN-urgent",
+        column: "in-review",
+        paused: false,
+        mergeRetries: 0,
+        status: null,
+        priority: "urgent",
+        createdAt: "2026-04-02T00:00:00.000Z",
+      },
+      "FN-normal": {
+        id: "FN-normal",
+        column: "in-review",
+        paused: false,
+        mergeRetries: 0,
+        status: null,
+        priority: "normal",
+        createdAt: "2026-04-03T00:00:00.000Z",
+      },
+    };
+    mockStore.store.getTask.mockImplementation(async (id: string) => tasksById[id] ?? null);
+    mocks.currentStore = mockStore.store;
+
+    const mergeOrder: string[] = [];
+    mocks.aiMergeTask.mockImplementation(async (...args: unknown[]) => {
+      mergeOrder.push(args[2] as string);
+      return { merged: true } as never;
+    });
+
+    const engine = createEngine();
+    await engine.start();
+
+    // Enqueue lowest priority first, urgent last. Priority-aware dequeue must
+    // still surface FN-urgent before FN-normal regardless of enqueue order.
+    engine.enqueueMerge("FN-low");
+    engine.enqueueMerge("FN-normal");
+    engine.enqueueMerge("FN-urgent");
+
+    await vi.waitFor(() => {
+      expect(mergeOrder).toHaveLength(3);
+    });
+
+    // FN-low may merge first if drainMergeQueue picked it up before the other
+    // enqueues landed (single-item fast path). The contract is that once 2+
+    // tasks are queued together, the higher-priority one wins — so FN-urgent
+    // (enqueued last) must merge before FN-normal (enqueued before it).
+    const urgentIdx = mergeOrder.indexOf("FN-urgent");
+    const normalIdx = mergeOrder.indexOf("FN-normal");
+    expect(urgentIdx).toBeGreaterThanOrEqual(0);
+    expect(normalIdx).toBeGreaterThanOrEqual(0);
+    expect(urgentIdx).toBeLessThan(normalIdx);
+
+    await engine.stop();
+  });
+
+  it("startup sweep merges higher-priority tasks first even though listTasks returns oldest-first", async () => {
+    const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
+    // Tasks returned in createdAt ASC order (matches store.listTasks contract).
+    // Priority order is interleaved so a naive iteration would merge FN-low
+    // first; priority-aware sorting must reorder to urgent → normal → low.
+    const sweptTasks = [
+      {
+        id: "FN-low",
+        column: "in-review",
+        paused: false,
+        mergeRetries: 0,
+        status: null,
+        priority: "low",
+        createdAt: "2026-04-01T00:00:00.000Z",
+      },
+      {
+        id: "FN-urgent",
+        column: "in-review",
+        paused: false,
+        mergeRetries: 0,
+        status: null,
+        priority: "urgent",
+        createdAt: "2026-04-02T00:00:00.000Z",
+      },
+      {
+        id: "FN-normal",
+        column: "in-review",
+        paused: false,
+        mergeRetries: 0,
+        status: null,
+        priority: "normal",
+        createdAt: "2026-04-03T00:00:00.000Z",
+      },
+    ];
+    const tasksById: Record<string, Record<string, unknown>> = Object.fromEntries(
+      sweptTasks.map((t) => [t.id, t]),
+    );
+    mockStore.store.listTasks.mockResolvedValue(sweptTasks);
+    mockStore.store.getTask.mockImplementation(async (id: string) => tasksById[id] ?? null);
+    mocks.currentStore = mockStore.store;
+
+    const mergeOrder: string[] = [];
+    mocks.aiMergeTask.mockImplementation(async (...args: unknown[]) => {
+      mergeOrder.push(args[2] as string);
+      return { merged: true } as never;
+    });
+
+    const engine = createEngine();
+    await engine.start();
+
+    await vi.waitFor(() => {
+      expect(mergeOrder).toHaveLength(3);
+    });
+
+    expect(mergeOrder).toEqual(["FN-urgent", "FN-normal", "FN-low"]);
+
+    await engine.stop();
+  });
+
+  // Direct unit-tests of pickNextMergeTaskId to exercise the multi-item
+  // priority path with concurrent queue mutations during getTask awaits.
+  // These are unreachable through enqueueMerge alone because the first
+  // enqueue always takes the single-item fast path.
+  it("picker falls back to next-priority task when the chosen one is removed from the queue during getTask awaits", async () => {
+    const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
+    const tasksById: Record<string, Record<string, unknown>> = {
+      "FN-urgent": { id: "FN-urgent", column: "in-review", paused: false, mergeRetries: 0, status: null, priority: "urgent", createdAt: "2026-04-01T00:00:00.000Z" },
+      "FN-normal-a": { id: "FN-normal-a", column: "in-review", paused: false, mergeRetries: 0, status: null, priority: "normal", createdAt: "2026-04-02T00:00:00.000Z" },
+      "FN-normal-b": { id: "FN-normal-b", column: "in-review", paused: false, mergeRetries: 0, status: null, priority: "normal", createdAt: "2026-04-03T00:00:00.000Z" },
+    };
+
+    let releaseUrgent: (() => void) = () => {};
+    const urgentHeld = new Promise<void>((resolve) => {
+      releaseUrgent = resolve;
+    });
+    let urgentRequested = false;
+    mockStore.store.getTask.mockImplementation(async (id: string) => {
+      if (id === "FN-urgent") {
+        urgentRequested = true;
+        await urgentHeld;
+      }
+      return tasksById[id] ?? null;
+    });
+    mocks.currentStore = mockStore.store;
+
+    const engine = createEngine();
+    await engine.start();
+    const privateEngine = engine as unknown as {
+      mergeQueue: string[];
+      mergeActive: Set<string>;
+      pickNextMergeTaskId: (store: unknown) => Promise<string | undefined>;
+    };
+
+    privateEngine.mergeQueue = ["FN-urgent", "FN-normal-a", "FN-normal-b"];
+    privateEngine.mergeActive = new Set(["FN-urgent", "FN-normal-a", "FN-normal-b"]);
+
+    const pickPromise = privateEngine.pickNextMergeTaskId(mockStore.store);
+
+    await vi.waitFor(() => {
+      expect(urgentRequested).toBe(true);
+    });
+
+    // Simulate pause-handler removing FN-urgent mid-pick.
+    privateEngine.mergeQueue = privateEngine.mergeQueue.filter((id) => id !== "FN-urgent");
+    privateEngine.mergeActive.delete("FN-urgent");
+
+    releaseUrgent();
+    const chosen = await pickPromise;
+
+    // FN-urgent was yanked; picker must fall back to next-priority survivor.
+    // Both surviving tasks are "normal"; FN-normal-a wins by older createdAt.
+    expect(chosen).toBe("FN-normal-a");
+    expect(privateEngine.mergeQueue).toEqual(["FN-normal-b"]);
+
+    await engine.stop();
+  });
+
+  it("picker returns undefined when shutdown lands during getTask awaits", async () => {
+    const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
+    const tasksById: Record<string, Record<string, unknown>> = {
+      "FN-a": { id: "FN-a", column: "in-review", paused: false, mergeRetries: 0, status: null, priority: "high", createdAt: "2026-04-01T00:00:00.000Z" },
+      "FN-b": { id: "FN-b", column: "in-review", paused: false, mergeRetries: 0, status: null, priority: "normal", createdAt: "2026-04-02T00:00:00.000Z" },
+    };
+
+    let release: (() => void) = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let firstCallSeen = false;
+    mockStore.store.getTask.mockImplementation(async (id: string) => {
+      if (!firstCallSeen) {
+        firstCallSeen = true;
+        await held;
+      }
+      return tasksById[id] ?? null;
+    });
+    mocks.currentStore = mockStore.store;
+
+    const engine = createEngine();
+    await engine.start();
+    const privateEngine = engine as unknown as {
+      mergeQueue: string[];
+      mergeActive: Set<string>;
+      shuttingDown: boolean;
+      pickNextMergeTaskId: (store: unknown) => Promise<string | undefined>;
+    };
+
+    privateEngine.mergeQueue = ["FN-a", "FN-b"];
+    privateEngine.mergeActive = new Set(["FN-a", "FN-b"]);
+
+    const pickPromise = privateEngine.pickNextMergeTaskId(mockStore.store);
+
+    await vi.waitFor(() => {
+      expect(firstCallSeen).toBe(true);
+    });
+
+    // Simulate shutdown while picker is awaiting getTask.
+    privateEngine.shuttingDown = true;
+    privateEngine.mergeQueue = [];
+
+    release();
+    const chosen = await pickPromise;
+
+    expect(chosen).toBeUndefined();
+
+    // Reset so engine.stop() teardown runs cleanly.
+    privateEngine.shuttingDown = false;
+    await engine.stop();
+  });
+});
+
 describe("ProjectEngine paused in-review auto-merge behavior", () => {
   beforeEach(() => {
     vi.clearAllMocks();
