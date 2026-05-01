@@ -901,6 +901,40 @@ export function QuickChatFAB({
   // iOS keeps the keyboard up across that transfer.
   const stealthInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Lock body scroll while the panel is open on mobile. Otherwise iOS
+  // can leave the document scrolled (e.g. after the keyboard was opened
+  // and dismissed once), and on the next open the position:fixed panel
+  // anchors to layout top:0 which is *above* the visible viewport — only
+  // the bottom of the panel (the input bar) pokes into view at the top of
+  // the screen. Locking the body keeps layout-top and visual-top aligned.
+  useEffect(() => {
+    if (!isOpen) return;
+    if (typeof window === "undefined" || typeof document === "undefined") return;
+    if (window.innerWidth > QUICK_CHAT_DESKTOP_BREAKPOINT) return;
+
+    const scrollY = window.scrollY;
+    const body = document.body;
+    const prev = {
+      position: body.style.position,
+      top: body.style.top,
+      width: body.style.width,
+      overflow: body.style.overflow,
+    };
+
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.width = "100%";
+    body.style.overflow = "hidden";
+
+    return () => {
+      body.style.position = prev.position;
+      body.style.top = prev.top;
+      body.style.width = prev.width;
+      body.style.overflow = prev.overflow;
+      window.scrollTo(0, scrollY);
+    };
+  }, [isOpen]);
+
   // Mirror visualViewport.height onto the panel as --vv-height directly,
   // bypassing React state. The panel just shrinks when the iOS keyboard
   // opens — top stays at 0 so the header remains visible.
