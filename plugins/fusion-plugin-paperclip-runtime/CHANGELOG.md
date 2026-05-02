@@ -1,5 +1,11 @@
 # @fusion-plugin-examples/paperclip-runtime
 
+## 0.2.19
+
+### Patch Changes
+
+- @fusion/plugin-sdk@0.14.3
+
 ## 0.2.18
 
 ### Patch Changes
