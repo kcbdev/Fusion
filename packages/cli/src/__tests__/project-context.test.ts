@@ -118,6 +118,16 @@ describe("project-context", () => {
       expect(found?.name).toBe("legacy-project");
     });
 
+    it("should not inherit an unregistered parent project from a nested cwd", async () => {
+      const projectPath = createMockProject("legacy-project");
+      const nestedDir = join(projectPath, "src", "components");
+      mkdirSync(nestedDir, { recursive: true });
+
+      const found = await detectProjectFromCwd(nestedDir, central);
+
+      expect(found).toBeUndefined();
+    });
+
     it("should ignore invalid fusion.db files in the cwd", async () => {
       const projectPath = join(tempDir, "invalid-project");
       mkdirSync(join(projectPath, ".fusion"), { recursive: true });

@@ -180,7 +180,8 @@ export async function detectProjectFromCwd(
   cwd: string,
   central: CentralCore
 ): Promise<RegisteredProject | { id: string; name: string; path: string } | undefined> {
-  let currentDir = resolve(cwd);
+  const startDir = resolve(cwd);
+  let currentDir = startDir;
 
   // Walk up the directory tree
   while (true) {
@@ -192,14 +193,17 @@ export async function detectProjectFromCwd(
       if (project) {
         return project;
       }
-      // Not registered, but has .fusion/fusion.db - still use it as a valid project
-      // This preserves legacy single-project CLI behavior.
-      // Use empty string for id to indicate unregistered status.
-      return {
-        id: "",
-        name: basename(currentDir) || "current-project",
-        path: currentDir,
-      };
+
+      // For unregistered projects, only accept an exact CWD match.
+      // This preserves legacy single-project behavior without accidentally
+      // resolving unrelated parent directories higher in the filesystem.
+      if (currentDir === startDir) {
+        return {
+          id: "",
+          name: basename(currentDir) || "current-project",
+          path: currentDir,
+        };
+      }
     }
 
     // Move up to parent
