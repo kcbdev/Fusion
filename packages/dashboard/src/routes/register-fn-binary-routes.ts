@@ -129,8 +129,44 @@ function runNpmInstall(): Promise<InstallResult> {
   });
 }
 
+/**
+ * Build a status payload for the case where the user has disabled the
+ * fn-binary check via the global setting. We still return a well-formed
+ * response (the UI consumes the same shape regardless) but skip the
+ * subprocess probe entirely. `state: "skipped"` lets the dashboard hide
+ * install / version-mismatch surfaces without inferring "missing".
+ */
+function buildSkippedStatusPayload(expectedVersion: string) {
+  return {
+    binary: {
+      installed: false,
+      invocation: FN_INSTALL_NPM,
+    } satisfies FnBinaryStatus,
+    expectedVersion,
+    state: "skipped" as const,
+    install: {
+      npm: FN_INSTALL_NPM,
+      curl: FN_INSTALL_CURL,
+      package: FN_NPM_PACKAGE,
+    },
+  };
+}
+
 export const registerFnBinaryRoutes: ApiRouteRegistrar = (ctx) => {
-  const { router, rethrowAsApiError } = ctx;
+  const { router, rethrowAsApiError, store } = ctx;
+
+  async function isCheckEnabled(): Promise<boolean> {
+    try {
+      const settings = await store.getSettings();
+      // Default true — only treat an explicit false as opt-out.
+      return settings.fnBinaryCheckEnabled !== false;
+    } catch {
+      // If settings can't be read, fall back to the safe default and
+      // perform the probe so the dashboard's onboarding banner still
+      // renders.
+      return true;
+    }
+  }
 
   /**
    * GET /system/fn-binary/status
@@ -138,11 +174,18 @@ export const registerFnBinaryRoutes: ApiRouteRegistrar = (ctx) => {
    * Probes PATH for `fn` then `fusion`, returning install state and the
    * canonical install commands. No auth — this is read-only introspection
    * the dashboard banner needs before the user signs in.
+   *
+   * Honours `fnBinaryCheckEnabled` (global setting, default true). When
+   * disabled the route returns `state: "skipped"` without spawning a probe.
    */
   router.get("/system/fn-binary/status", async (_req, res) => {
     try {
-      const binary = await detectFnBinary();
       const expectedVersion = getCliPackageVersion();
+      if (!(await isCheckEnabled())) {
+        res.json(buildSkippedStatusPayload(expectedVersion));
+        return;
+      }
+      const binary = await detectFnBinary();
       res.json(buildStatusPayload(binary, expectedVersion));
     } catch (err) {
       if (err instanceof ApiError) throw err;
@@ -155,9 +198,18 @@ export const registerFnBinaryRoutes: ApiRouteRegistrar = (ctx) => {
    *
    * Runs `npm install -g runfusion.ai`. Returns the install result and the
    * post-install probe so the UI can refresh its state in one round trip.
+   * Disabled when `fnBinaryCheckEnabled` is false — install is the user
+   * action that the status check informs, so it follows the same gate.
    */
   router.post("/system/fn-binary/install", async (_req, res) => {
     try {
+      if (!(await isCheckEnabled())) {
+        throw new ApiError(
+          409,
+          "fn-binary checks are disabled in global settings (fnBinaryCheckEnabled=false). Re-enable them to install via the dashboard.",
+          { code: "FN_BINARY_CHECK_DISABLED" },
+        );
+      }
       const installResult = await runNpmInstall();
       // Re-probe even on failure — the binary may already exist from a
       // previous attempt and we want the UI to reflect reality.

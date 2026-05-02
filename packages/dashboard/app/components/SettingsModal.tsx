@@ -1846,6 +1846,26 @@ export function SettingsModal({
               </small>
             </div>
             <CliBinaryPanel />
+            <div className="form-group">
+              <label htmlFor="fnBinaryCheckEnabled" className="checkbox-label">
+                <input
+                  id="fnBinaryCheckEnabled"
+                  type="checkbox"
+                  checked={form.fnBinaryCheckEnabled !== false}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, fnBinaryCheckEnabled: e.target.checked }))
+                  }
+                />
+                Check for the <code>fn</code> CLI binary on PATH
+              </label>
+              <small>
+                When enabled, the dashboard probes for a globally-installed{" "}
+                <code>fn</code> / <code>fusion</code> CLI by spawning{" "}
+                <code>&lt;bin&gt; --version</code>. Disable this if your local
+                dev process is the source of truth and you don&apos;t want any
+                outdated globally-installed binary executed during the probe.
+              </small>
+            </div>
             <h4 className="settings-section-heading settings-section-heading--spaced">Updates</h4>
             <div className="form-group">
               <label htmlFor="updateCheckEnabled" className="checkbox-label">

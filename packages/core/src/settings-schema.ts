@@ -37,6 +37,7 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   favoriteModels: undefined,
   openrouterModelSync: true,
   updateCheckEnabled: true,
+  fnBinaryCheckEnabled: true,
   updateCheckFrequency: "daily",
   showGitHubStarButton: true,
   modelOnboardingComplete: undefined,

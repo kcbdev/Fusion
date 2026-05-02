@@ -1319,6 +1319,13 @@ export interface GlobalSettings {
    *  shows update notices in the CLI and dashboard. The actual cadence is
    *  governed by `updateCheckFrequency`. Disabled = no automatic checks at all. */
   updateCheckEnabled?: boolean;
+  /** When true (default), the dashboard probes PATH for a globally-installed
+   *  `fn`/`fusion` CLI binary so it can advertise install/upgrade actions in
+   *  the UI. The probe spawns `<bin> --version`, which executes whichever
+   *  `runfusion.ai` is on PATH. Set to false to skip the probe entirely —
+   *  useful when the local dev process is the source of truth and shelling
+   *  out to an outdated globally-installed binary is unwanted. */
+  fnBinaryCheckEnabled?: boolean;
   /** When false, hides the "Star on GitHub" button in the Settings modal
    *  header. Defaults to true (visible). The button is also hidden once the
    *  user has clicked it (tracked client-side in localStorage). */
