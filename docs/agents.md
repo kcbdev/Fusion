@@ -121,6 +121,21 @@ Agent deletion is available from both the detail header lifecycle controls and t
 
 ![Agents view](./screenshots/agents-view.png)
 
+## Agent Memory Layers in Runtime Tools
+
+When engine sessions include per-agent memory context, the memory tools operate over the full agent-memory workspace under `.fusion/agent-memory/{agentId}/`, not only the inline `agent.memory` field.
+
+Runtime behavior:
+
+- `fn_memory_search` can surface snippets from:
+  - `.fusion/agent-memory/{agentId}/MEMORY.md` (long-term)
+  - `.fusion/agent-memory/{agentId}/DREAMS.md` (synthesized patterns)
+  - `.fusion/agent-memory/{agentId}/YYYY-MM-DD.md` (daily notes)
+- `fn_memory_get` is intentionally bounded to those same files only.
+- Empty inline `agent.memory` does **not** disable search/read of existing dreams/daily files once the agent-memory workspace exists.
+
+This layered behavior is shared by heartbeat agents and task-scoped sessions that inherit agent identity.
+
 ## Research Tools in Planning/Execution Sessions
 
 Triage and executor runtime sessions now include a bounded research tool surface:

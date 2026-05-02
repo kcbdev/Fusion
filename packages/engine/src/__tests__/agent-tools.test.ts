@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -380,6 +380,151 @@ describe("createMemoryTools", () => {
     expect(result.content[0]!.text).toContain(".fusion/agent-memory/ceo-agent/MEMORY.md");
     expect(loggerSpies.warn).toHaveBeenCalledWith(expect.stringContaining("Failed to read agent memory directory"));
     expect(loggerSpies.warn).toHaveBeenCalledWith(expect.stringContaining("EACCES"));
+  });
+
+  it("normalizes qmd agent-memory result paths so fn_memory_get can read dreams and daily layers", async () => {
+    process.env.FUSION_ENABLE_QMD_REFRESH_IN_TESTS = "1";
+    vi.spyOn(core, "shouldSkipBackgroundQmdRefresh").mockReturnValue(false);
+    execFileMock.mockImplementation((...args: unknown[]) => {
+      const callback = args[args.length - 1];
+      const commandArgs = args[1] as string[];
+      if (typeof callback === "function") {
+        if (Array.isArray(commandArgs) && commandArgs[0] === "search") {
+          callback(null, JSON.stringify([
+            {
+              path: "qmd://fusion-agent-memory/.fusion/agent-memory/ceo-agent/DREAMS.md",
+              snippet: "Dream insight about delegation confidence",
+              lineStart: 1,
+              lineEnd: 2,
+              score: 0.8,
+            },
+            {
+              path: "qmd://fusion-agent-memory/.fusion/agent-memory/ceo-agent/2026-05-01.md",
+              snippet: "Daily note about delegation follow-up",
+              lineStart: 1,
+              lineEnd: 2,
+              score: 0.7,
+            },
+          ]), "");
+          return undefined;
+        }
+        callback(null, "", "");
+      }
+      return undefined;
+    });
+
+    const [searchTool, getTool, appendTool] = createMemoryTools(tempDir, { memoryBackendType: "qmd" }, {
+      agentMemory: {
+        agentId: "ceo-agent",
+        agentName: "CEO",
+        memory: "",
+      },
+    });
+
+    await (appendTool as any).execute("call-append-1", {
+      scope: "agent",
+      layer: "daily",
+      content: "- Seed agent memory files",
+    }, undefined, undefined, undefined);
+    await appendFile(
+      join(tempDir, ".fusion/agent-memory/ceo-agent/DREAMS.md"),
+      "\n- Dream insight about delegation confidence\n",
+      "utf-8",
+    );
+    await (appendTool as any).execute("call-append-2", {
+      scope: "agent",
+      layer: "daily",
+      content: "- Daily note about delegation follow-up",
+    }, undefined, undefined, undefined);
+
+    const result = await (searchTool as any).execute("call-1", {
+      query: "delegation",
+      limit: 5,
+    }, undefined, undefined, undefined);
+
+    const paths = result.details.results.map((hit: any) => hit.path);
+    expect(paths.every((path: string) => !path.startsWith("qmd://"))).toBe(true);
+
+    const qmdAgentPaths = result.details.results
+      .filter((hit: any) => hit.backend === "qmd-agent-memory")
+      .map((hit: any) => hit.path);
+    if (qmdAgentPaths.length > 0) {
+      expect(qmdAgentPaths).toContain(".fusion/agent-memory/ceo-agent/DREAMS.md");
+      expect(qmdAgentPaths.some((path: string) => /\.fusion\/agent-memory\/ceo-agent\/\d{4}-\d{2}-\d{2}\.md$/.test(path))).toBe(true);
+    }
+
+    const dreamsRead = await (getTool as any).execute("call-2", {
+      path: ".fusion/agent-memory/ceo-agent/DREAMS.md",
+      startLine: 1,
+      lineCount: 20,
+    }, undefined, undefined, undefined);
+    expect(dreamsRead.content[0]!.text).toContain("Dream insight about delegation confidence");
+
+    const today = new Date().toISOString().slice(0, 10);
+    const dailyRead = await (getTool as any).execute("call-3", {
+      path: `.fusion/agent-memory/ceo-agent/${today}.md`,
+      startLine: 1,
+      lineCount: 20,
+    }, undefined, undefined, undefined);
+    expect(dailyRead.content[0]!.text).toContain("Daily note about delegation follow-up");
+  });
+
+  it("does not short-circuit qmd-backed agent search when inline long-term memory is empty", async () => {
+    process.env.FUSION_ENABLE_QMD_REFRESH_IN_TESTS = "1";
+    vi.spyOn(core, "shouldSkipBackgroundQmdRefresh").mockReturnValue(false);
+    execFileMock.mockImplementation((...args: unknown[]) => {
+      const callback = args[args.length - 1];
+      const commandArgs = args[1] as string[];
+      if (typeof callback === "function") {
+        if (Array.isArray(commandArgs) && commandArgs[0] === "search") {
+          callback(null, JSON.stringify([
+            {
+              path: "DREAMS.md",
+              snippet: "Dream-only insight with empty inline memory",
+              lineStart: 1,
+              lineEnd: 2,
+              score: 0.9,
+            },
+          ]), "");
+          return undefined;
+        }
+        callback(null, "", "");
+      }
+      return undefined;
+    });
+
+    const [searchTool, _getTool, appendTool] = createMemoryTools(tempDir, { memoryBackendType: "qmd" }, {
+      agentMemory: {
+        agentId: "ceo-agent",
+        agentName: "CEO",
+        memory: "   ",
+      },
+    });
+
+    await (appendTool as any).execute("call-append-seed", {
+      scope: "agent",
+      layer: "daily",
+      content: "- Seed files for dream search",
+    }, undefined, undefined, undefined);
+    await appendFile(
+      join(tempDir, ".fusion/agent-memory/ceo-agent/DREAMS.md"),
+      "\n- Dream-only insight with empty inline memory\n",
+      "utf-8",
+    );
+
+    const result = await (searchTool as any).execute("call-1", {
+      query: "dream-only",
+      limit: 5,
+    }, undefined, undefined, undefined);
+
+    expect(execFileMock).toHaveBeenCalledWith(
+      "qmd",
+      expect.arrayContaining(["search", "dream-only"]),
+      expect.any(Object),
+      expect.any(Function),
+    );
+    expect(result.details.results.length).toBeGreaterThan(0);
+    expect(result.details.results.some((hit: any) => String(hit.path).startsWith("qmd://"))).toBe(false);
   });
 
   it("logs a warning and falls back to file search when qmd search fails", async () => {

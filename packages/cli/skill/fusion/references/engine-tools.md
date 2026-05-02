@@ -14,8 +14,8 @@ These tools are **not** part of the pi extension's user-invokable `extension.ts`
 | `fn_task_log` | executor, heartbeat | Write significant task log entries | `message` (string), `outcome?` (string) |
 | `fn_task_document_write` | triage, executor, heartbeat | Save/update a named task document revision | `key` (string), `content` (string), `author?` (string) |
 | `fn_task_document_read` | triage, executor, heartbeat | Read one task document or list all | `key?` (string) |
-| `fn_memory_search` | triage, executor, heartbeat | Search project/agent memory snippets | `query` (string), `limit?` (number) |
-| `fn_memory_get` | triage, executor, heartbeat | Read a bounded memory file window | `path` (string), `startLine?` (number), `lineCount?` (number) |
+| `fn_memory_search` | triage, executor, heartbeat | Search project memory plus per-agent layered memory snippets | `query` (string), `limit?` (number) |
+| `fn_memory_get` | triage, executor, heartbeat | Read a bounded memory file window (including bounded per-agent layered paths) | `path` (string), `startLine?` (number), `lineCount?` (number) |
 | `fn_memory_append` | executor, heartbeat (when writable backend enabled) | Append long-term/daily memory notes | `scope?` (`project` \| `agent`), `layer` (`long-term` \| `daily`), `content` (string) |
 | `fn_research_run` | triage, executor | Start a bounded research run (optionally wait for completion) and return structured findings metadata | `query` (string), `wait_for_completion?` (boolean), `max_wait_ms?` (number) |
 | `fn_research_list` | triage, executor | List recent research runs with status/summary metadata | `status?` (`pending` \| `running` \| `completed` \| `failed` \| `cancelled`), `limit?` (number) |

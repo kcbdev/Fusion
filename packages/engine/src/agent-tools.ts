@@ -367,10 +367,43 @@ async function refreshAgentMemoryQmdIndex(rootDir: string, agentMemory: AgentMem
   }
 }
 
-async function searchAgentMemoryWithQmd(rootDir: string, agentMemory: AgentMemoryContext, query: string, limit: number): Promise<MemorySearchHit[]> {
-  if (!agentMemory.memory?.trim()) {
-    return [];
+function normalizeQmdAgentMemoryResultPath(rootDir: string, agentId: string, rawPath: unknown): string {
+  const fallbackPath = agentMemoryDisplayPath(agentId);
+  const original = String(rawPath ?? "").trim();
+  if (!original) {
+    return fallbackPath;
   }
+
+  let candidate = original.replace(/\\/g, "/");
+  const uriMatch = candidate.match(/^qmd:\/\/[^/]+\/(.+)$/i);
+  if (uriMatch?.[1]) {
+    candidate = uriMatch[1];
+  }
+
+  candidate = candidate.split("?")[0]?.split("#")[0] ?? "";
+  candidate = candidate.replace(/^\.\/+/, "");
+
+  const normalizedAgentId = sanitizeAgentMemoryId(agentId);
+  const agentPrefix = `${AGENT_MEMORY_ROOT}/${normalizedAgentId}/`;
+  if (candidate.startsWith(agentPrefix)) {
+    return resolveAgentMemoryPath(rootDir, agentId, candidate)?.displayPath ?? fallbackPath;
+  }
+
+  const filename = candidate.split("/").pop()?.toLowerCase() ?? "";
+  if (filename === AGENT_MEMORY_FILENAME.toLowerCase()) {
+    return agentMemoryDisplayPath(agentId);
+  }
+  if (filename === AGENT_DREAMS_FILENAME.toLowerCase()) {
+    return agentDreamsDisplayPath(agentId);
+  }
+  if (DAILY_AGENT_MEMORY_RE.test(filename)) {
+    return `${agentPrefix}${filename}`;
+  }
+
+  return fallbackPath;
+}
+
+async function searchAgentMemoryWithQmd(rootDir: string, agentMemory: AgentMemoryContext, query: string, limit: number): Promise<MemorySearchHit[]> {
   if (shouldSkipBackgroundQmdRefresh()) {
     return searchAgentMemoryFile(rootDir, agentMemory, query, limit);
   }
@@ -386,14 +419,17 @@ async function searchAgentMemoryWithQmd(rootDir: string, agentMemory: AgentMemor
     });
     const parsed = JSON.parse(stdout);
     const rawResults = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.results) ? parsed.results : [];
-    return rawResults.slice(0, limit).map((result: Record<string, unknown>) => ({
-      path: agentMemoryDisplayPath(agentMemory.agentId),
-      lineStart: Number(result.lineStart ?? result.startLine ?? 1),
-      lineEnd: Number(result.lineEnd ?? result.endLine ?? result.startLine ?? 1),
-      snippet: String(result.snippet ?? result.text ?? result.content ?? "").slice(0, 1200),
-      score: Number(result.score ?? 1) + 1000,
-      backend: "qmd-agent-memory",
-    })).filter((result: MemorySearchHit) => result.snippet.trim().length > 0);
+    return rawResults.slice(0, limit).map((result: Record<string, unknown>) => {
+      const rawPath = result.path ?? result.file;
+      return {
+        path: normalizeQmdAgentMemoryResultPath(rootDir, agentMemory.agentId, rawPath),
+        lineStart: Number(result.lineStart ?? result.startLine ?? 1),
+        lineEnd: Number(result.lineEnd ?? result.endLine ?? result.startLine ?? 1),
+        snippet: String(result.snippet ?? result.text ?? result.content ?? "").slice(0, 1200),
+        score: Number(result.score ?? 1) + 1000,
+        backend: "qmd-agent-memory",
+      };
+    }).filter((result: MemorySearchHit) => result.snippet.trim().length > 0);
   } catch (err) {
     log.warn(
       `QMD agent memory search failed for agent ${agentMemory.agentId}, falling back to file search: ${err instanceof Error ? err.message : String(err)}`,

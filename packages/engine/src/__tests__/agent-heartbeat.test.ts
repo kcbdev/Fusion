@@ -2,7 +2,7 @@
 // See FN-2142 for the rationale.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -2978,7 +2978,7 @@ describe("HeartbeatMonitor", () => {
         expect(toolNames).not.toContain("fn_memory_append");
       });
 
-      it("wires user-created agent memory into the fn_memory_search tool", async () => {
+      it("wires session memory tools to read agent long-term, dreams, and daily layers", async () => {
         const store = createStoreWithAgentForExec({
           name: "CEO",
           memory: "Prioritize roadmap sequencing and delegate implementation follow-ups.",
@@ -2997,15 +2997,43 @@ describe("HeartbeatMonitor", () => {
 
         const callArgs = mockedCreateFnAgent.mock.calls[0]![0];
         const memorySearch = callArgs.customTools!.find((tool: any) => tool.name === "fn_memory_search") as any;
+        const memoryGet = callArgs.customTools!.find((tool: any) => tool.name === "fn_memory_get") as any;
+        const memoryAppend = callArgs.customTools!.find((tool: any) => tool.name === "fn_memory_append") as any;
+
         expect(memorySearch).toBeDefined();
-        const result = await memorySearch.execute("call-1", {
-          query: "roadmap delegate",
+        expect(memoryGet).toBeDefined();
+        expect(memoryAppend).toBeDefined();
+
+        await memoryAppend.execute("call-append-dream", {
+          scope: "agent",
+          layer: "daily",
+          content: "- Daily delegation note from heartbeat test",
+        }, undefined, undefined, undefined);
+        appendFileSync(
+          "/tmp/test/.fusion/agent-memory/agent-001/DREAMS.md",
+          "\n- Dream delegation theme from heartbeat test\n",
+          "utf-8",
+        );
+
+        const dreamsResult = await memorySearch.execute("call-search-1", {
+          query: "dream delegation theme",
+          limit: 5,
+        }, undefined, undefined, undefined);
+        const dailyResult = await memorySearch.execute("call-search-2", {
+          query: "daily delegation note",
           limit: 5,
         }, undefined, undefined, undefined);
 
-        expect(result.content[0].text).toContain(".fusion/agent-memory/agent-001/MEMORY.md");
-        expect(result.content[0].text).toContain("roadmap sequencing");
-        expect(result.details.results[0].backend).toBe("agent-memory");
+        expect(dreamsResult.content[0].text).toContain(".fusion/agent-memory/agent-001/DREAMS.md");
+        expect(dailyResult.content[0].text).toContain(".fusion/agent-memory/agent-001/");
+
+        const dreamsRead = await memoryGet.execute("call-get-1", {
+          path: ".fusion/agent-memory/agent-001/DREAMS.md",
+          startLine: 1,
+          lineCount: 40,
+        }, undefined, undefined, undefined);
+
+        expect(dreamsRead.content[0].text).toContain("Dream delegation theme from heartbeat test");
       });
 
       it("includes document tools in heartbeat session", async () => {
