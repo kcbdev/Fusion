@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { CSSProperties } from "react";
-import { X, RefreshCw, Activity, TrendingUp, CheckCircle, AlertTriangle, Eye } from "lucide-react";
+import type { CSSProperties, DragEvent } from "react";
+import { X, RefreshCw, Activity, TrendingUp, CheckCircle, AlertTriangle, Eye, GripVertical, ChevronUp, ChevronDown } from "lucide-react";
 import type { ProviderUsage, UsageWindow } from "../api";
 import { useUsageData } from "../hooks/useUsageData";
 import { ProviderIcon } from "./ProviderIcon";
@@ -83,6 +83,7 @@ function getUsageColorClass(percentUsed: number): string {
 
 const HIDDEN_WINDOWS_STORAGE_KEY = "kb-usage-hidden-windows";
 const MODAL_SIZE_STORAGE_KEY = "kb-usage-modal-size";
+const PROVIDER_ORDER_KEY = "kb-usage-provider-order";
 
 interface ModalSize {
   width: number;
@@ -137,6 +138,28 @@ function getHiddenWindows(projectId: string | undefined): Record<string, string[
 
 function setHiddenWindows(hidden: Record<string, string[]>, projectId: string | undefined): void {
   setScopedItem(HIDDEN_WINDOWS_STORAGE_KEY, JSON.stringify(hidden), projectId);
+}
+
+function getProviderOrder(projectId: string | undefined): string[] {
+  const stored = getScopedItem(PROVIDER_ORDER_KEY, projectId);
+  if (!stored) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(stored);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.filter((name): name is string => typeof name === "string");
+  } catch {
+    return [];
+  }
+}
+
+function setProviderOrder(names: string[], projectId: string | undefined): void {
+  setScopedItem(PROVIDER_ORDER_KEY, JSON.stringify(names), projectId);
 }
 
 function isWindowHidden(
@@ -297,6 +320,19 @@ interface ProviderCardProps {
   hiddenWindows: Record<string, string[]>;
   onToggleWindow: (providerName: string, windowLabel: string) => void;
   onShowAllHidden: (providerName: string) => void;
+  isDragging: boolean;
+  isDragOver: boolean;
+  dragOverPosition: "before" | "after" | null;
+  onDragStart: (e: DragEvent<HTMLDivElement>) => void;
+  onDragOver: (e: DragEvent<HTMLDivElement>) => void;
+  onDragLeave: () => void;
+  onDrop: (e: DragEvent<HTMLDivElement>) => void;
+  onDragEnd: () => void;
+  isTouchReorderMode: boolean;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
 }
 
 /**
@@ -353,6 +389,19 @@ function ProviderCard({
   hiddenWindows,
   onToggleWindow,
   onShowAllHidden,
+  isDragging,
+  isDragOver,
+  dragOverPosition,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDragEnd,
+  isTouchReorderMode,
+  canMoveUp,
+  canMoveDown,
+  onMoveUp,
+  onMoveDown,
 }: ProviderCardProps) {
   const hiddenCount = hiddenWindows[provider.name]?.length ?? 0;
   const getStatusBadge = () => {
@@ -376,8 +425,23 @@ function ProviderCard({
   };
 
   return (
-    <div className="usage-provider" data-provider={provider.name} data-status={provider.status}>
+    <div
+      className={`usage-provider${isDragging ? " usage-provider--dragging" : ""}${
+        isDragOver && dragOverPosition === "before" ? " usage-provider--drag-over-before" : ""
+      }${isDragOver && dragOverPosition === "after" ? " usage-provider--drag-over-after" : ""}`}
+      data-provider={provider.name}
+      data-status={provider.status}
+      draggable={!isTouchReorderMode}
+      onDragStart={isTouchReorderMode ? undefined : onDragStart}
+      onDragOver={isTouchReorderMode ? undefined : onDragOver}
+      onDragLeave={isTouchReorderMode ? undefined : onDragLeave}
+      onDrop={isTouchReorderMode ? undefined : onDrop}
+      onDragEnd={isTouchReorderMode ? undefined : onDragEnd}
+    >
       <div className="usage-provider-header">
+        <div className="usage-provider-drag-handle" aria-hidden="true">
+          <GripVertical size={16} />
+        </div>
         <div className="usage-provider-info">
           <ProviderIcon provider={getProviderIconKey(provider.name)} size="md" />
           <span className="usage-provider-name">{provider.name}</span>
@@ -392,6 +456,28 @@ function ProviderCard({
           )}
         </div>
         <div className="usage-provider-actions">
+          {isTouchReorderMode && (
+            <div className="usage-provider-reorder-controls" role="group" aria-label={`Reorder ${provider.name}`}>
+              <button
+                className="btn-icon usage-provider-reorder-btn"
+                type="button"
+                onClick={onMoveUp}
+                disabled={!canMoveUp}
+                aria-label={`Move ${provider.name} up`}
+              >
+                <ChevronUp size={14} />
+              </button>
+              <button
+                className="btn-icon usage-provider-reorder-btn"
+                type="button"
+                onClick={onMoveDown}
+                disabled={!canMoveDown}
+                aria-label={`Move ${provider.name} down`}
+              >
+                <ChevronDown size={14} />
+              </button>
+            </div>
+          )}
           {getStatusBadge()}
         </div>
       </div>
@@ -468,10 +554,18 @@ export function UsageIndicator({ isOpen, onClose, projectId, anchorRect }: Usage
   const [isDesktopViewport, setIsDesktopViewport] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth >= 769 : false
   );
+  const [isTouchReorderMode, setIsTouchReorderMode] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia?.("(pointer: coarse)").matches ?? false;
+  });
   const [viewMode, setViewMode] = useState<'used' | 'remaining'>('used');
   const [hiddenWindows, setHiddenWindowsState] = useState<Record<string, string[]>>(() =>
     getHiddenWindows(projectId)
   );
+  const [providerOrder, setProviderOrderState] = useState<string[]>(() => getProviderOrder(projectId));
+  const [draggingProvider, setDraggingProvider] = useState<string | null>(null);
+  const [dragOverProvider, setDragOverProvider] = useState<string | null>(null);
+  const [dragOverPosition, setDragOverPosition] = useState<"before" | "after" | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const wasOpenRef = useRef(isOpen);
@@ -529,12 +623,19 @@ export function UsageIndicator({ isOpen, onClose, projectId, anchorRect }: Usage
       return;
     }
 
+    const touchMedia = window.matchMedia?.("(pointer: coarse)");
     const handleResize = () => {
       setIsDesktopViewport(window.innerWidth >= 769);
+      setIsTouchReorderMode(touchMedia?.matches ?? false);
     };
 
+    handleResize();
     window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+    touchMedia?.addEventListener?.("change", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      touchMedia?.removeEventListener?.("change", handleResize);
+    };
   }, []);
 
   // Trigger refresh when modal opens (isOpen transitions from false to true)
@@ -569,6 +670,7 @@ export function UsageIndicator({ isOpen, onClose, projectId, anchorRect }: Usage
 
   useEffect(() => {
     setHiddenWindowsState(getHiddenWindows(projectId));
+    setProviderOrderState(getProviderOrder(projectId));
   }, [projectId]);
 
   useEffect(() => {
@@ -607,6 +709,102 @@ export function UsageIndicator({ isOpen, onClose, projectId, anchorRect }: Usage
       return rest;
     });
   }, []);
+
+  const reorderProviders = useCallback(
+    (rawProviders: ProviderUsage[]): ProviderUsage[] => {
+      if (providerOrder.length === 0) {
+        return rawProviders;
+      }
+
+      const providerMap = new Map(rawProviders.map((provider) => [provider.name, provider]));
+      const orderedProviders: ProviderUsage[] = [];
+
+      for (const name of providerOrder) {
+        const provider = providerMap.get(name);
+        if (provider) {
+          orderedProviders.push(provider);
+          providerMap.delete(name);
+        }
+      }
+
+      return [...orderedProviders, ...providerMap.values()];
+    },
+    [providerOrder]
+  );
+
+  const handleProviderDragStart = useCallback((event: DragEvent<HTMLDivElement>, name: string) => {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", name);
+    setDraggingProvider(name);
+  }, []);
+
+  const handleProviderDragOver = useCallback((event: DragEvent<HTMLDivElement>, name: string) => {
+    if (!draggingProvider || draggingProvider === name) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+
+    const { top, height } = event.currentTarget.getBoundingClientRect();
+    const midpoint = top + height / 2;
+    const position: "before" | "after" = event.clientY < midpoint ? "before" : "after";
+
+    setDragOverProvider(name);
+    setDragOverPosition(position);
+  }, [draggingProvider]);
+
+  const handleProviderDrop = useCallback((event: DragEvent<HTMLDivElement>, name: string) => {
+    event.preventDefault();
+
+    const draggedName = draggingProvider ?? event.dataTransfer.getData("text/plain");
+    if (!draggedName || draggedName === name) {
+      setDragOverProvider(null);
+      setDragOverPosition(null);
+      return;
+    }
+
+    const currentOrder = reorderProviders(providers).map((provider) => provider.name);
+    const filteredOrder = currentOrder.filter((providerName) => providerName !== draggedName);
+    const targetIndex = filteredOrder.indexOf(name);
+
+    if (targetIndex < 0) {
+      setDragOverProvider(null);
+      setDragOverPosition(null);
+      return;
+    }
+
+    const insertIndex = dragOverPosition === "after" ? targetIndex + 1 : targetIndex;
+    filteredOrder.splice(insertIndex, 0, draggedName);
+
+    setProviderOrder(filteredOrder, projectId);
+    setProviderOrderState(filteredOrder);
+    setDragOverProvider(null);
+    setDragOverPosition(null);
+  }, [draggingProvider, dragOverPosition, projectId, providers, reorderProviders]);
+
+  const handleProviderDragEnd = useCallback(() => {
+    setDraggingProvider(null);
+    setDragOverProvider(null);
+    setDragOverPosition(null);
+  }, []);
+
+  const moveProviderByOffset = useCallback((providerName: string, direction: -1 | 1) => {
+    const currentOrder = reorderProviders(providers).map((provider) => provider.name);
+    const currentIndex = currentOrder.indexOf(providerName);
+    const targetIndex = currentIndex + direction;
+
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= currentOrder.length) {
+      return;
+    }
+
+    const nextOrder = [...currentOrder];
+    const [moved] = nextOrder.splice(currentIndex, 1);
+    nextOrder.splice(targetIndex, 0, moved);
+
+    setProviderOrder(nextOrder, projectId);
+    setProviderOrderState(nextOrder);
+  }, [projectId, providers, reorderProviders]);
 
   // Handle manual refresh
   const handleRefresh = useCallback(async () => {
@@ -658,6 +856,8 @@ export function UsageIndicator({ isOpen, onClose, projectId, anchorRect }: Usage
   const sizeStyle: CSSProperties = isDesktopViewport && savedSize
     ? { width: savedSize.width, height: savedSize.height }
     : {};
+
+  const orderedProviders = reorderProviders(providers);
 
   const usageContent = (
       <div
@@ -730,7 +930,7 @@ export function UsageIndicator({ isOpen, onClose, projectId, anchorRect }: Usage
             </div>
           ) : (
             <div className="usage-providers">
-              {providers.map((provider) => (
+              {orderedProviders.map((provider, index) => (
                 <ProviderCard
                   key={provider.name}
                   provider={provider}
@@ -738,6 +938,24 @@ export function UsageIndicator({ isOpen, onClose, projectId, anchorRect }: Usage
                   hiddenWindows={hiddenWindows}
                   onToggleWindow={handleToggleWindow}
                   onShowAllHidden={handleShowAllHidden}
+                  isDragging={draggingProvider === provider.name}
+                  isDragOver={dragOverProvider === provider.name}
+                  dragOverPosition={dragOverProvider === provider.name ? dragOverPosition : null}
+                  onDragStart={(event) => handleProviderDragStart(event, provider.name)}
+                  onDragOver={(event) => handleProviderDragOver(event, provider.name)}
+                  onDragLeave={() => {
+                    if (dragOverProvider === provider.name) {
+                      setDragOverProvider(null);
+                      setDragOverPosition(null);
+                    }
+                  }}
+                  onDrop={(event) => handleProviderDrop(event, provider.name)}
+                  onDragEnd={handleProviderDragEnd}
+                  isTouchReorderMode={isTouchReorderMode}
+                  canMoveUp={index > 0}
+                  canMoveDown={index < orderedProviders.length - 1}
+                  onMoveUp={() => moveProviderByOffset(provider.name, -1)}
+                  onMoveDown={() => moveProviderByOffset(provider.name, 1)}
                 />
               ))}
             </div>

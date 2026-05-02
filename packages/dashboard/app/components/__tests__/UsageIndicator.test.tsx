@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, createEvent } from "@testing-library/react";
 import { UsageIndicator } from "../UsageIndicator";
 import "../UsageIndicator.css";
 import * as useUsageDataModule from "../../hooks/useUsageData";
@@ -30,6 +30,7 @@ function createAnchorRect(partial: Partial<DOMRect> = {}): DOMRect {
 }
 const USAGE_VIEW_MODE_KEY = scopedKey("kb-usage-view-mode", TEST_PROJECT_ID);
 const USAGE_HIDDEN_WINDOWS_KEY = scopedKey("kb-usage-hidden-windows", TEST_PROJECT_ID);
+const USAGE_PROVIDER_ORDER_KEY = scopedKey("kb-usage-provider-order", TEST_PROJECT_ID);
 
 describe("UsageIndicator", () => {
   const mockOnClose = vi.fn();
@@ -86,6 +87,7 @@ describe("UsageIndicator", () => {
     // Clear localStorage to ensure clean view mode state
     localStorage.removeItem(USAGE_VIEW_MODE_KEY);
     localStorage.removeItem(USAGE_HIDDEN_WINDOWS_KEY);
+    localStorage.removeItem(USAGE_PROVIDER_ORDER_KEY);
   });
 
   it("renders nothing when isOpen is false", () => {
@@ -147,6 +149,178 @@ describe("UsageIndicator", () => {
     expect(screen.getByText("Session (5h)")).toBeInTheDocument();
     expect(screen.getByText("Weekly")).toBeInTheDocument();
     expect(screen.getByText("Hourly")).toBeInTheDocument();
+  });
+
+  it("renders drag handle for each provider card", () => {
+    mockUseUsageData.mockReturnValue({
+      providers: mockProviders,
+      loading: false,
+      error: null,
+      lastUpdated: new Date(),
+      refresh: mockRefresh,
+    });
+
+    render(<UsageIndicator isOpen={true} onClose={mockOnClose} projectId={TEST_PROJECT_ID} />);
+
+    const handles = document.querySelectorAll(".usage-provider-drag-handle");
+    expect(handles).toHaveLength(3);
+  });
+
+  it("reorders providers on drag and drop and persists order", () => {
+    mockUseUsageData.mockReturnValue({
+      providers: mockProviders,
+      loading: false,
+      error: null,
+      lastUpdated: new Date(),
+      refresh: mockRefresh,
+    });
+
+    render(<UsageIndicator isOpen={true} onClose={mockOnClose} projectId={TEST_PROJECT_ID} />);
+
+    const cardsBefore = Array.from(document.querySelectorAll(".usage-provider"));
+    expect(cardsBefore.map((card) => card.getAttribute("data-provider"))).toEqual([
+      "Anthropic",
+      "OpenAI",
+      "Google",
+    ]);
+
+    const draggedCard = cardsBefore[0] as HTMLElement;
+    const targetCard = cardsBefore[1] as HTMLElement;
+    const dataTransfer = {
+      setData: vi.fn(),
+      getData: vi.fn(() => "Anthropic"),
+      effectAllowed: "",
+      dropEffect: "",
+    };
+
+    Object.defineProperty(targetCard, "getBoundingClientRect", {
+      value: () => ({ top: 0, height: 100, bottom: 100, left: 0, right: 200, width: 200, x: 0, y: 0, toJSON: () => ({}) }),
+      configurable: true,
+    });
+
+    fireEvent.dragStart(draggedCard, { dataTransfer });
+    fireEvent.dragOver(targetCard, { dataTransfer, clientY: 80 });
+    fireEvent.drop(targetCard, { dataTransfer });
+    fireEvent.dragEnd(draggedCard, { dataTransfer });
+
+    const cardsAfter = Array.from(document.querySelectorAll(".usage-provider"));
+    expect(cardsAfter.map((card) => card.getAttribute("data-provider"))).toEqual([
+      "OpenAI",
+      "Anthropic",
+      "Google",
+    ]);
+    expect(localStorage.getItem(USAGE_PROVIDER_ORDER_KEY)).toBe(
+      JSON.stringify(["OpenAI", "Anthropic", "Google"])
+    );
+  });
+
+  it("loads persisted provider order on remount and appends new providers", () => {
+    localStorage.setItem(USAGE_PROVIDER_ORDER_KEY, JSON.stringify(["OpenAI", "Anthropic"]));
+
+    mockUseUsageData.mockReturnValue({
+      providers: mockProviders,
+      loading: false,
+      error: null,
+      lastUpdated: new Date(),
+      refresh: mockRefresh,
+    });
+
+    const { rerender } = render(<UsageIndicator isOpen={true} onClose={mockOnClose} projectId={TEST_PROJECT_ID} />);
+
+    rerender(<UsageIndicator isOpen={true} onClose={mockOnClose} projectId={TEST_PROJECT_ID} />);
+
+    const cards = Array.from(document.querySelectorAll(".usage-provider"));
+    expect(cards.map((card) => card.getAttribute("data-provider"))).toEqual([
+      "OpenAI",
+      "Anthropic",
+      "Google",
+    ]);
+  });
+
+  it("applies drag visual feedback classes", () => {
+    mockUseUsageData.mockReturnValue({
+      providers: mockProviders,
+      loading: false,
+      error: null,
+      lastUpdated: new Date(),
+      refresh: mockRefresh,
+    });
+
+    render(<UsageIndicator isOpen={true} onClose={mockOnClose} projectId={TEST_PROJECT_ID} />);
+
+    const cards = Array.from(document.querySelectorAll(".usage-provider"));
+    const draggedCard = cards[0] as HTMLElement;
+    const targetCard = cards[1] as HTMLElement;
+    const dataTransfer = {
+      setData: vi.fn(),
+      getData: vi.fn(() => "Anthropic"),
+      effectAllowed: "",
+      dropEffect: "",
+    };
+
+    Object.defineProperty(targetCard, "getBoundingClientRect", {
+      value: () => ({ top: 100, height: 100, bottom: 200, left: 0, right: 200, width: 200, x: 0, y: 100, toJSON: () => ({}) }),
+      configurable: true,
+    });
+
+    fireEvent.dragStart(draggedCard, { dataTransfer });
+    expect(draggedCard).toHaveClass("usage-provider--dragging");
+
+    const dragOverBefore = createEvent.dragOver(targetCard, { dataTransfer });
+    Object.defineProperty(dragOverBefore, "clientY", { value: 120 });
+    fireEvent(targetCard, dragOverBefore);
+    expect(targetCard).toHaveClass("usage-provider--drag-over-before");
+
+    const dragOverAfter = createEvent.dragOver(targetCard, { dataTransfer });
+    Object.defineProperty(dragOverAfter, "clientY", { value: 190 });
+    fireEvent(targetCard, dragOverAfter);
+    expect(targetCard).toHaveClass("usage-provider--drag-over-after");
+
+    fireEvent.dragEnd(draggedCard, { dataTransfer });
+    expect(draggedCard).not.toHaveClass("usage-provider--dragging");
+  });
+
+  it("reorders providers with move buttons in touch mode", () => {
+    const originalMatchMedia = window.matchMedia;
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      configurable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: query === "(pointer: coarse)",
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+
+    mockUseUsageData.mockReturnValue({
+      providers: mockProviders,
+      loading: false,
+      error: null,
+      lastUpdated: new Date(),
+      refresh: mockRefresh,
+    });
+
+    render(<UsageIndicator isOpen={true} onClose={mockOnClose} projectId={TEST_PROJECT_ID} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Move OpenAI up" }));
+
+    const cardsAfter = Array.from(document.querySelectorAll(".usage-provider"));
+    expect(cardsAfter.map((card) => card.getAttribute("data-provider"))).toEqual([
+      "OpenAI",
+      "Anthropic",
+      "Google",
+    ]);
+
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      configurable: true,
+      value: originalMatchMedia,
+    });
   });
 
   it("shows loading skeleton when loading", () => {

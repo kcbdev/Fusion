@@ -22,6 +22,7 @@ export const PROJECT_STORAGE_KEYS: string[] = [
   "kb-usage-view-mode",
   "kb-usage-hidden-windows",
   "kb-usage-modal-size",
+  "kb-usage-provider-order",
   "kb-chat-active-session",
 ];
 
