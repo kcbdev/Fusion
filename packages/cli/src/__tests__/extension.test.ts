@@ -118,12 +118,15 @@ async function removeDirWithRetries(path: string) {
 
 // ── Tests ──────────────────────────────────────────────────────────
 
-// Skipped: 39 tests × ~1-4s each (~62s total) exercise every fn pi tool
-// through the real ExtensionAPI + TaskStore/MissionStore stack with
-// per-test temp workspaces. Coverage overlaps with command-level tests
-// (task.test.ts, mission-related suites). Re-enable for full pre-release
-// validation or when adding new extension tools.
-describe.skip("fn pi extension", () => {
+// Audited in FN-3189: this suite is expensive (~62s) and currently stale
+// against modern extension behavior/tooling (see FN-3204). Keep an explicit,
+// discoverable gate so it never silently disappears behind unconditional skip,
+// but do not include it in the default slow lane until the failures are fixed.
+const SHOULD_RUN_EXTENSION_INTEGRATION =
+  process.env.FUSION_TEST_EXTENSION_INTEGRATION === "1" ||
+  process.env.FUSION_TEST_EXTENSION_INTEGRATION === "true";
+
+describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)("fn pi extension", () => {
   let tmpDir: string;
   let api: ReturnType<typeof createMockAPI>;
 

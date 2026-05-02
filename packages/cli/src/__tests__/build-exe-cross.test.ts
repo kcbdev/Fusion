@@ -41,7 +41,9 @@ function nativeTarget(): string | null {
 // Cross-compiling native binaries pegs CPU for ~60s per target. Skip by
 // default locally; opt in with FUSION_TEST_BUILD_EXE=1 or run on CI.
 const SHOULD_RUN_BUILD_EXE =
-  Boolean(process.env.FUSION_TEST_BUILD_EXE) || Boolean(process.env.CI);
+  process.env.FUSION_TEST_BUILD_EXE === "1" ||
+  process.env.FUSION_TEST_BUILD_EXE === "true" ||
+  Boolean(process.env.CI);
 
 describe.skipIf(!SHOULD_RUN_BUILD_EXE)("build-exe-cross: single target", () => {
   beforeAll(() => {

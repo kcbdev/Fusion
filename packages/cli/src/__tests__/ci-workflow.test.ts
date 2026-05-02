@@ -24,6 +24,10 @@ describe("CI workflow (.github/workflows/ci.yml)", () => {
   let content: string;
   let ciSteps: any[];
   let contributingContent: string;
+  let cliPackageJsonContent: string;
+  let extensionSuiteContent: string;
+  let agentExportSuiteContent: string;
+  let buildExeSuiteContent: string;
 
   beforeAll(() => {
     const result = loadWorkflow("ci.yml");
@@ -31,9 +35,25 @@ describe("CI workflow (.github/workflows/ci.yml)", () => {
     content = result.content;
     ciSteps = workflow.jobs?.ci?.steps ?? [];
     contributingContent = readFileSync(join(workspaceRoot, "docs", "contributing.md"), "utf-8");
+    cliPackageJsonContent = readFileSync(join(workspaceRoot, "packages", "cli", "package.json"), "utf-8");
+    extensionSuiteContent = readFileSync(
+      join(workspaceRoot, "packages", "cli", "src", "__tests__", "extension.test.ts"),
+      "utf-8",
+    );
+    agentExportSuiteContent = readFileSync(
+      join(workspaceRoot, "packages", "cli", "src", "commands", "__tests__", "agent-export.test.ts"),
+      "utf-8",
+    );
+    buildExeSuiteContent = readFileSync(
+      join(workspaceRoot, "packages", "cli", "src", "__tests__", "build-exe-cross.test.ts"),
+      "utf-8",
+    );
   });
 
   const findStepByRun = (runSnippet: string) => ciSteps.find((step) => typeof step.run === "string" && step.run.includes(runSnippet));
+
+  const findStepByRunExact = (runCommand: string) =>
+    ciSteps.find((step) => typeof step.run === "string" && step.run.trim() === runCommand);
 
   const findStepIndexByRun = (runSnippet: string) =>
     ciSteps.findIndex((step) => typeof step.run === "string" && step.run.includes(runSnippet));
@@ -63,31 +83,56 @@ describe("CI workflow (.github/workflows/ci.yml)", () => {
     expect(verifyStep).toBeDefined();
     expect(verifyStep.name).toContain("bootstrap contract");
 
-    const directLintStep = findStepByRun("pnpm lint");
-    const directTestStep = findStepByRun("pnpm test");
-    const directBuildStep = findStepByRun("pnpm build");
+    const directLintStep = findStepByRunExact("pnpm lint");
+    const directTestStep = findStepByRunExact("pnpm test");
+    const directBuildStep = findStepByRunExact("pnpm build");
     expect(directLintStep).toBeUndefined();
     expect(directTestStep).toBeUndefined();
     expect(directBuildStep).toBeUndefined();
   });
 
-  it("runs workspace verification before binary packaging", () => {
+  it("runs workspace verification before slow lane and binary packaging", () => {
     const verifyIdx = findStepIndexByRun("pnpm verify:workspace");
+    const slowLaneIdx = findStepIndexByRun("pnpm test:slow-cli");
     const buildExeIdx = findStepIndexByRun("build:exe");
     expect(verifyIdx).toBeGreaterThanOrEqual(0);
-    expect(buildExeIdx).toBeGreaterThan(verifyIdx);
+    expect(slowLaneIdx).toBeGreaterThan(verifyIdx);
+    expect(buildExeIdx).toBeGreaterThan(slowLaneIdx);
   });
 
-  it("keeps contributing docs aligned with the clean-worktree verification contract", () => {
+  it("keeps contributing docs aligned with verification and slow-lane contracts", () => {
     expect(contributingContent).toContain("pnpm test` must be runnable in a clean worktree without requiring a prior `pnpm build`.");
     expect(contributingContent).toContain("`pnpm verify:workspace` is the canonical pre-merge gate");
     expect(contributingContent).toContain("1. `pnpm lint`");
     expect(contributingContent).toContain("2. `pnpm test`");
     expect(contributingContent).toContain("3. `pnpm build`");
+
+    expect(contributingContent).toContain("pnpm test:slow-cli");
+    expect(contributingContent).toContain("test:pre-release");
+    expect(contributingContent).toContain("test:extension-integration");
   });
 
   it("includes binary build step", () => {
     expect(content).toContain("build:exe");
+  });
+
+  it("keeps explicit gating for audited CLI integration suites", () => {
+    expect(cliPackageJsonContent).toContain('"test:slow-cli"');
+    expect(cliPackageJsonContent).toContain("FUSION_TEST_SLOW_CLI=1");
+    expect(cliPackageJsonContent).toContain('"test:extension-integration"');
+    expect(cliPackageJsonContent).toContain("FUSION_TEST_EXTENSION_INTEGRATION=1");
+    expect(cliPackageJsonContent).toContain('"test:build-exe"');
+    expect(cliPackageJsonContent).toContain("FUSION_TEST_BUILD_EXE=1");
+
+    expect(extensionSuiteContent).toContain("describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)");
+    expect(extensionSuiteContent).toContain("FUSION_TEST_EXTENSION_INTEGRATION");
+
+    expect(agentExportSuiteContent).toContain("describe.skipIf(!SHOULD_RUN_SLOW_CLI)");
+    expect(agentExportSuiteContent).toContain("FUSION_TEST_SLOW_CLI");
+
+    expect(buildExeSuiteContent).toContain('process.env.FUSION_TEST_BUILD_EXE === "1"');
+    expect(buildExeSuiteContent).toContain('process.env.FUSION_TEST_BUILD_EXE === "true"');
+    expect(buildExeSuiteContent).not.toContain("Boolean(process.env.FUSION_TEST_BUILD_EXE)");
   });
 
   it("includes Bun setup", () => {

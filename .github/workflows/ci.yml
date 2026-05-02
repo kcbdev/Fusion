@@ -35,6 +35,9 @@ jobs:
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Run CLI slow lane (opt-in suites)
+        run: pnpm test:slow-cli
+
       - name: Build standalone binary
         run: pnpm --filter @runfusion/fusion build:exe
 

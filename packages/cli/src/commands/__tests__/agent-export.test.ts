@@ -13,10 +13,13 @@ vi.mock("../../project-context.js", () => ({
 
 import { runAgentExport } from "../agent-export.js";
 
-// Skipped: each test spins up a real workspace + AgentStore round-trip and
-// totals ~3.3s; covered indirectly by integration paths. Re-enable if
-// agent-export gains logic that isn't covered elsewhere.
-describe.skip("agent-export", () => {
+// Slow lane only: each test spins up a real workspace + AgentStore round-trip
+// and totals ~3.3s. Keep default `pnpm test` lean/reliable; run this suite in
+// the explicit slow lane (`pnpm --filter @runfusion/fusion test:slow-cli`).
+const SHOULD_RUN_SLOW_CLI =
+  process.env.FUSION_TEST_SLOW_CLI === "1" || process.env.FUSION_TEST_SLOW_CLI === "true";
+
+describe.skipIf(!SHOULD_RUN_SLOW_CLI)("agent-export", () => {
   const tmpRoot = join(tmpdir(), `fn-agent-export-test-${process.pid}`);
   let projectDir: string;
   let outputDir: string;

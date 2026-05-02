@@ -109,6 +109,30 @@ pnpm build:exe      # build host-target executable
 pnpm build:exe:all  # build multi-target executables
 ```
 
+## CLI Integration Test Lanes
+
+Default workspace verification stays lean and deterministic:
+
+- `pnpm test` runs the standard suite and does **not** require Bun cross-build integration tests.
+- `pnpm verify:workspace` remains the canonical `lint -> test -> build` gate.
+
+Slow/pre-release CLI coverage is explicit and opt-in:
+
+```bash
+pnpm test:slow-cli                                  # workspace entrypoint
+pnpm --filter @runfusion/fusion test:slow-cli       # agent-export integration (FUSION_TEST_SLOW_CLI=1)
+pnpm --filter @runfusion/fusion test:build-exe      # native binary cross-build integration (FUSION_TEST_BUILD_EXE=1)
+pnpm --filter @runfusion/fusion test:pre-release    # combined CLI slow lane (slow-cli + build-exe)
+```
+
+Additional audited suite:
+
+```bash
+pnpm --filter @runfusion/fusion test:extension-integration
+```
+
+`test:extension-integration` enables `FUSION_TEST_EXTENSION_INTEGRATION=1` and runs the full fn pi extension integration suite. It is intentionally excluded from the default slow lane until FN-3204 stabilizes that suite against current extension behavior.
+
 ## Release Process
 
 Fusion uses Changesets + version PR workflow.
