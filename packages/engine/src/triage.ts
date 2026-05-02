@@ -980,6 +980,7 @@ export class TriageProcessor {
           task,
           sessionPurpose: "triage",
           projectRootDir: this.rootDir,
+          pluginRunner: this.options.pluginRunner,
         });
 
         let { session } = await createResolvedAgentSession({

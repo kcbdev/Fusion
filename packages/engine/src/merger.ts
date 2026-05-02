@@ -911,6 +911,7 @@ async function attemptInMergeVerificationFix(
           task: taskForSkillContext,
           sessionPurpose: "merger",
           projectRootDir: rootDir,
+          pluginRunner: options.pluginRunner,
         });
       } catch {
         // Graceful fallback - no skill selection
@@ -4748,6 +4749,7 @@ async function runAiAgentForCommit(params: AiAgentParams): Promise<{ success: bo
         task: taskForSkillContext,
         sessionPurpose: "merger",
         projectRootDir: rootDir,
+        pluginRunner: options.pluginRunner,
       });
     } catch {
       // Graceful fallback - no skill selection
@@ -5332,6 +5334,7 @@ If issues are found that need attention, describe them clearly and include concr
           task: taskForSkillContext,
           sessionPurpose: "merger",
           projectRootDir: rootDir,
+          pluginRunner: mergeOptions.pluginRunner,
         });
       } catch {
         // Graceful fallback - no skill selection

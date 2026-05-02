@@ -30,6 +30,8 @@
  */
 
 import type { Agent, AgentStore } from "@fusion/core";
+import { piLog } from "./logger.js";
+import type { PluginRunner } from "./plugin-runner.js";
 import type { SkillSelectionContext } from "./skill-resolver.js";
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -52,6 +54,8 @@ export interface SessionSkillContextInput {
   sessionPurpose: SessionPurpose;
   /** Absolute path to project root */
   projectRootDir: string;
+  /** Optional plugin runner for plugin-contributed skills */
+  pluginRunner?: PluginRunner;
 }
 
 /**
@@ -105,6 +109,41 @@ export function normalizeAgentSkills(
   }
 
   return result;
+}
+
+export function collectPluginSkillNames(
+  pluginRunner: PluginRunner | undefined,
+): { names: string[]; pluginIds: string[] } {
+  if (!pluginRunner) {
+    return { names: [], pluginIds: [] };
+  }
+
+  const pluginSkills = pluginRunner.getPluginSkills();
+  const seenNames = new Set<string>();
+  const pluginIds = new Set<string>();
+  const names: string[] = [];
+
+  for (const contribution of pluginSkills) {
+    const { pluginId, skill } = contribution;
+    if (skill.enabled === false) {
+      continue;
+    }
+
+    const name = skill.name.trim();
+    if (name.length === 0 || seenNames.has(name)) {
+      continue;
+    }
+
+    seenNames.add(name);
+    pluginIds.add(pluginId);
+    names.push(name);
+    piLog.log(`[skills] Plugin ${pluginId} contributes skill: ${name}`);
+  }
+
+  return {
+    names,
+    pluginIds: Array.from(pluginIds),
+  };
 }
 
 // ── Role Fallback Mapping ───────────────────────────────────────────────────
@@ -185,18 +224,20 @@ export async function buildSessionSkillContext(
         );
 
         if (agentSkills.length > 0) {
-          // Found valid skills from assigned agent
-          const skillSelectionContext: SkillSelectionContext = {
-            projectRootDir,
-            requestedSkillNames: agentSkills,
+          return mergePluginSkills(
+            {
+              skillSelectionContext: {
+                projectRootDir,
+                requestedSkillNames: agentSkills,
+                sessionPurpose,
+              },
+              resolvedSkillNames: agentSkills,
+              skillSource: "assigned-agent",
+            },
             sessionPurpose,
-          };
-
-          return {
-            skillSelectionContext,
-            resolvedSkillNames: agentSkills,
-            skillSource: "assigned-agent",
-          };
+            projectRootDir,
+            input.pluginRunner,
+          );
         }
       }
     } catch {
@@ -204,7 +245,12 @@ export async function buildSessionSkillContext(
     }
   }
 
-  return resolveRoleFallback(sessionPurpose, projectRootDir);
+  return mergePluginSkills(
+    resolveRoleFallback(sessionPurpose, projectRootDir),
+    sessionPurpose,
+    projectRootDir,
+    input.pluginRunner,
+  );
 }
 
 function resolveRoleFallback(
@@ -232,6 +278,53 @@ function resolveRoleFallback(
   };
 }
 
+function mergePluginSkills(
+  baseResult: SessionSkillContextResult,
+  sessionPurpose: SessionPurpose,
+  projectRootDir: string,
+  pluginRunner: PluginRunner | undefined,
+): SessionSkillContextResult {
+  const { names: pluginSkillNames } = collectPluginSkillNames(pluginRunner);
+  if (pluginSkillNames.length === 0) {
+    return baseResult;
+  }
+
+  const mergedNames = [...baseResult.resolvedSkillNames];
+  const existingNames = new Set(mergedNames.map((name) => name.toLowerCase()));
+  const appendedPluginNames: string[] = [];
+
+  for (const pluginSkillName of pluginSkillNames) {
+    const key = pluginSkillName.toLowerCase();
+    if (existingNames.has(key)) {
+      continue;
+    }
+
+    existingNames.add(key);
+    mergedNames.push(pluginSkillName);
+    appendedPluginNames.push(pluginSkillName);
+  }
+
+  if (appendedPluginNames.length > 0) {
+    piLog.log(
+      `[skills] Merged ${appendedPluginNames.length} plugin skill(s) into ${sessionPurpose} session: [${appendedPluginNames.join(", ")}]`,
+    );
+  }
+
+  if (mergedNames.length === 0) {
+    return baseResult;
+  }
+
+  return {
+    skillSelectionContext: {
+      projectRootDir,
+      requestedSkillNames: mergedNames,
+      sessionPurpose,
+    },
+    resolvedSkillNames: mergedNames,
+    skillSource: baseResult.skillSource === "none" ? "role-fallback" : baseResult.skillSource,
+  };
+}
+
 // ── Sync Builder (for hot paths) ────────────────────────────────────────────
 
 /**
@@ -244,6 +337,7 @@ export function buildSessionSkillContextSync(
   agent: Agent | null | undefined,
   sessionPurpose: SessionPurpose,
   projectRootDir: string,
+  pluginRunner?: PluginRunner,
 ): SessionSkillContextResult {
   // Rule 1: Check assigned agent skills
   if (agent) {
@@ -252,19 +346,27 @@ export function buildSessionSkillContextSync(
     );
 
     if (agentSkills.length > 0) {
-      const skillSelectionContext: SkillSelectionContext = {
-        projectRootDir,
-        requestedSkillNames: agentSkills,
+      return mergePluginSkills(
+        {
+          skillSelectionContext: {
+            projectRootDir,
+            requestedSkillNames: agentSkills,
+            sessionPurpose,
+          },
+          resolvedSkillNames: agentSkills,
+          skillSource: "assigned-agent",
+        },
         sessionPurpose,
-      };
-
-      return {
-        skillSelectionContext,
-        resolvedSkillNames: agentSkills,
-        skillSource: "assigned-agent",
-      };
+        projectRootDir,
+        pluginRunner,
+      );
     }
   }
 
-  return resolveRoleFallback(sessionPurpose, projectRootDir);
+  return mergePluginSkills(
+    resolveRoleFallback(sessionPurpose, projectRootDir),
+    sessionPurpose,
+    projectRootDir,
+    pluginRunner,
+  );
 }

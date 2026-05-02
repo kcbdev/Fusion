@@ -1380,7 +1380,7 @@ export class HeartbeatMonitor {
           heartbeatLog.warn(`Failed to configure heartbeat memory tools for ${agentId}: ${message}`);
         }
         // Build skill selection context for heartbeat session (uses waking agent's skills, no role fallback)
-        const skillContext = buildSessionSkillContextSync(agent, "heartbeat", rootDir);
+        const skillContext = buildSessionSkillContextSync(agent, "heartbeat", rootDir, this.pluginRunner);
 
         const baseHeartbeatSystemPrompt = isNoTaskRun
           ? HEARTBEAT_NO_TASK_SYSTEM_PROMPT

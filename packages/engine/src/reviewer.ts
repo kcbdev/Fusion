@@ -414,6 +414,7 @@ export async function reviewStep(
         task: options.task ?? {},
         sessionPurpose: "reviewer",
         projectRootDir: options.rootDir,
+        pluginRunner: options.pluginRunner,
       });
     } catch {
       // Graceful fallback - no skill selection

@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   normalizeAgentSkills,
+  collectPluginSkillNames,
   buildSessionSkillContext,
   buildSessionSkillContextSync,
   SKILL_DIAGNOSTIC_MESSAGES,
   type SessionPurpose,
 } from "../session-skill-context.js";
 import type { Agent, AgentStore } from "@fusion/core";
+import type { PluginRunner } from "../plugin-runner.js";
 
 describe("normalizeAgentSkills", () => {
   it("returns empty array for non-array input", () => {
@@ -265,6 +267,62 @@ describe("buildSessionSkillContextSync", () => {
       expect(result.resolvedSkillNames).toEqual([]);
     });
   });
+
+  it("merges plugin skills in sync path", () => {
+    const pluginRunner = {
+      getPluginSkills: vi.fn().mockReturnValue([
+        { pluginId: "plugin-a", skill: { name: "plugin-skill" } },
+      ]),
+    } as unknown as PluginRunner;
+
+    const result = buildSessionSkillContextSync(null, "executor", projectRootDir, pluginRunner);
+    expect(result.resolvedSkillNames).toEqual(["fusion", "plugin-skill"]);
+  });
+
+  it("keeps legacy behavior in sync path when pluginRunner is omitted", () => {
+    const result = buildSessionSkillContextSync(null, "executor", projectRootDir);
+    expect(result.resolvedSkillNames).toEqual(["fusion"]);
+  });
+});
+
+describe("collectPluginSkillNames", () => {
+  it("returns empty arrays when pluginRunner is undefined", () => {
+    expect(collectPluginSkillNames(undefined)).toEqual({ names: [], pluginIds: [] });
+  });
+
+  it("returns empty arrays when no plugin skills are contributed", () => {
+    const pluginRunner = { getPluginSkills: vi.fn().mockReturnValue([]) } as unknown as PluginRunner;
+    expect(collectPluginSkillNames(pluginRunner)).toEqual({ names: [], pluginIds: [] });
+  });
+
+  it("returns enabled plugin skill names and dedupes by first occurrence", () => {
+    const pluginRunner = {
+      getPluginSkills: vi.fn().mockReturnValue([
+        { pluginId: "plugin-a", skill: { name: "alpha" } },
+        { pluginId: "plugin-b", skill: { name: "beta" } },
+        { pluginId: "plugin-c", skill: { name: "alpha" } },
+      ]),
+    } as unknown as PluginRunner;
+
+    expect(collectPluginSkillNames(pluginRunner)).toEqual({
+      names: ["alpha", "beta"],
+      pluginIds: ["plugin-a", "plugin-b"],
+    });
+  });
+
+  it("filters out disabled skills", () => {
+    const pluginRunner = {
+      getPluginSkills: vi.fn().mockReturnValue([
+        { pluginId: "plugin-a", skill: { name: "alpha", enabled: false } },
+        { pluginId: "plugin-b", skill: { name: "beta", enabled: true } },
+      ]),
+    } as unknown as PluginRunner;
+
+    expect(collectPluginSkillNames(pluginRunner)).toEqual({
+      names: ["beta"],
+      pluginIds: ["plugin-b"],
+    });
+  });
 });
 
 describe("buildSessionSkillContext", () => {
@@ -409,6 +467,73 @@ describe("buildSessionSkillContext", () => {
     expect(result.skillSource).toBe("none");
     expect(result.resolvedSkillNames).toEqual([]);
     expect(result.skillSelectionContext).toBeUndefined();
+  });
+
+  it("appends plugin skills to requestedSkillNames", async () => {
+    const mockAgentStore = { getAgent: vi.fn().mockResolvedValue(null) } as unknown as AgentStore;
+    const pluginRunner = {
+      getPluginSkills: vi.fn().mockReturnValue([
+        { pluginId: "plugin-a", skill: { name: "plugin-skill" } },
+      ]),
+    } as unknown as PluginRunner;
+
+    const result = await buildSessionSkillContext({
+      agentStore: mockAgentStore,
+      task: {},
+      sessionPurpose: "executor",
+      projectRootDir,
+      pluginRunner,
+    });
+
+    expect(result.resolvedSkillNames).toEqual(["fusion", "plugin-skill"]);
+    expect(result.skillSelectionContext?.requestedSkillNames).toEqual(["fusion", "plugin-skill"]);
+  });
+
+  it("deduplicates plugin skills against assigned-agent skills case-insensitively", async () => {
+    const mockAgent: Agent = {
+      id: "agent-001",
+      name: "Test Agent",
+      role: "executor",
+      state: "idle",
+      metadata: { skills: ["Fusion"] },
+    } as unknown as Agent;
+    const mockAgentStore = { getAgent: vi.fn().mockResolvedValue(mockAgent) } as unknown as AgentStore;
+    const pluginRunner = {
+      getPluginSkills: vi.fn().mockReturnValue([
+        { pluginId: "plugin-a", skill: { name: "fusion" } },
+        { pluginId: "plugin-b", skill: { name: "plugin-skill" } },
+      ]),
+    } as unknown as PluginRunner;
+
+    const result = await buildSessionSkillContext({
+      agentStore: mockAgentStore,
+      task: { assignedAgentId: "agent-001" },
+      sessionPurpose: "executor",
+      projectRootDir,
+      pluginRunner,
+    });
+
+    expect(result.resolvedSkillNames).toEqual(["Fusion", "plugin-skill"]);
+  });
+
+  it("creates heartbeat skill context from plugin skills when no agent skills exist", async () => {
+    const mockAgentStore = { getAgent: vi.fn() } as unknown as AgentStore;
+    const pluginRunner = {
+      getPluginSkills: vi.fn().mockReturnValue([
+        { pluginId: "plugin-a", skill: { name: "plugin-skill" } },
+      ]),
+    } as unknown as PluginRunner;
+
+    const result = await buildSessionSkillContext({
+      agentStore: mockAgentStore,
+      task: {},
+      sessionPurpose: "heartbeat",
+      projectRootDir,
+      pluginRunner,
+    });
+
+    expect(result.skillSource).toBe("role-fallback");
+    expect(result.skillSelectionContext?.requestedSkillNames).toEqual(["plugin-skill"]);
   });
 });
 

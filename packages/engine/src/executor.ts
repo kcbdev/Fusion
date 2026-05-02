@@ -2286,6 +2286,7 @@ export class TaskExecutor {
         task: detail,
         sessionPurpose: "executor",
         projectRootDir: this.rootDir,
+        pluginRunner: this.options.pluginRunner,
       });
 
       if (settings.runStepsInNewSessions) {
@@ -4805,6 +4806,7 @@ and show an appropriate message to the user.\`
         task,
         sessionPurpose: "executor",
         projectRootDir: this.rootDir,
+        pluginRunner: this.options.pluginRunner,
       });
 
       const workflowAgent = task.assignedAgentId && this.options.agentStore
@@ -6347,6 +6349,7 @@ Child agent: ${agent.id} (${name})`;
             task: childTask,
             sessionPurpose: "executor",
             projectRootDir: this.rootDir,
+            pluginRunner: this.options.pluginRunner,
           });
           const parentAgent = childTask.assignedAgentId
             ? await this.options.agentStore.getAgent(childTask.assignedAgentId).catch(() => null)
