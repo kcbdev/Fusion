@@ -4,6 +4,7 @@ import type { Task, PlanningQuestion, PlanningSummary } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
 import {
   startPlanningStreaming,
+  createPlanningDraft,
   respondToPlanning,
   retryPlanningSession,
   createTaskFromPlanning,
@@ -116,6 +117,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const modalRef = useRef<HTMLDivElement>(null);
   const streamConnectionRef = useRef<{ close: () => void; isConnected: () => boolean } | null>(null);
   const currentSessionIdRef = useRef<string | null>(null);
+  const draftSessionIdRef = useRef<string | null>(null);
+  const draftDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Tracks resumeSessionId values the user has explicitly dismissed (via "New
   // Session"). Without this, the resume effect re-fires on every callback
   // identity change (e.g. typing into the textarea recreates loadSession) and
@@ -477,6 +480,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
         ? Number.parseInt(customQuestionCount, 10)
         : undefined;
 
+      const draftSessionId = draftSessionIdRef.current;
       const { sessionId } = await startPlanningStreaming(
         plan.trim(),
         projectId,
@@ -487,7 +491,9 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
             ? parsedCustomQuestionCount
             : undefined,
         },
+        draftSessionId ?? undefined,
       );
+      draftSessionIdRef.current = null;
       currentSessionIdRef.current = sessionId;
       setLockSessionId(sessionId);
       setSelectedSessionId(sessionId);
@@ -738,6 +744,11 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const handleNewSession = useCallback(() => {
     streamConnectionRef.current?.close();
     streamConnectionRef.current = null;
+    draftSessionIdRef.current = null;
+    if (draftDebounceRef.current) {
+      clearTimeout(draftDebounceRef.current);
+      draftDebounceRef.current = null;
+    }
     if (resumeSessionId) {
       dismissedResumeRef.current = resumeSessionId;
     }
@@ -890,6 +901,10 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   // Cleanup stream connection on unmount
   useEffect(() => {
     return () => {
+      if (draftDebounceRef.current) {
+        clearTimeout(draftDebounceRef.current);
+        draftDebounceRef.current = null;
+      }
       streamConnectionRef.current?.close();
       streamConnectionRef.current = null;
 
@@ -923,6 +938,11 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       savePlanningDescription(initialPlan, projectId);
     }
 
+    draftSessionIdRef.current = null;
+    if (draftDebounceRef.current) {
+      clearTimeout(draftDebounceRef.current);
+      draftDebounceRef.current = null;
+    }
     streamConnectionRef.current?.close();
     streamConnectionRef.current = null;
     setIsReconnecting(false);
@@ -1300,7 +1320,55 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
                     className="planning-textarea"
                     placeholder="e.g., Build a user authentication system with login, signup, and password reset..."
                     value={initialPlan}
-                    onChange={(e) => setInitialPlan(e.target.value)}
+                    onChange={(e) => {
+                      const nextValue = e.target.value;
+                      setInitialPlan(nextValue);
+                      if (draftSessionIdRef.current || nextValue.trim().length === 0) {
+                        return;
+                      }
+                      if (draftDebounceRef.current) {
+                        clearTimeout(draftDebounceRef.current);
+                      }
+                      draftDebounceRef.current = setTimeout(() => {
+                        if (draftSessionIdRef.current) {
+                          return;
+                        }
+                        const content = nextValue.trim();
+                        if (!content) {
+                          return;
+                        }
+                        const modelOverride =
+                          planningModelProvider && planningModelId
+                            ? { planningModelProvider, planningModelId }
+                            : undefined;
+                        void createPlanningDraft(content, projectId, modelOverride)
+                          .then((response) => {
+                            draftSessionIdRef.current = response.sessionId;
+                            setPlanningSessions((prev) => {
+                              if (prev.some((s) => s.id === response.sessionId)) {
+                                return prev;
+                              }
+                              const draft: AiSessionSummary = {
+                                id: response.sessionId,
+                                type: "planning",
+                                status: "draft",
+                                title: response.title,
+                                projectId: projectId ?? null,
+                                lockedByTab: null,
+                                updatedAt: new Date().toISOString(),
+                                archived: false,
+                              };
+                              return [draft, ...prev].sort(
+                                (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
+                              );
+                            });
+                            setSelectedSessionId(response.sessionId);
+                          })
+                          .catch(() => {
+                            // best-effort
+                          });
+                      }, 300);
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey && initialPlan.trim()) {
                         e.preventDefault();
