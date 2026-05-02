@@ -269,6 +269,10 @@ const chatMarkdownComponents: Components = {
  * of the agentId stored on the session. This ID serves as metadata only.
  */
 const FN_AGENT_ID = "__fn_agent__";
+const CHAT_SIDEBAR_DEFAULT_WIDTH = 280;
+const CHAT_SIDEBAR_MIN_WIDTH = 180;
+const CHAT_SIDEBAR_MAX_WIDTH = 500;
+const CHAT_SIDEBAR_STORAGE_KEY = "fusion:chat-sidebar-width";
 
 interface PendingAttachment {
   file: File;
@@ -714,6 +718,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
   const [contextMenu, setContextMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(CHAT_SIDEBAR_DEFAULT_WIDTH);
   const [agentsMap, setAgentsMap] = useState<Map<string, Agent>>(new Map());
   const [discoveredSkills, setDiscoveredSkills] = useState<DiscoveredSkill[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(true);
@@ -761,6 +766,20 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
   const mentionCursorPosRef = useRef(0);
   const mode = useViewportMode();
   const isMobile = mode === "mobile";
+
+  useEffect(() => {
+    try {
+      const rawWidth = localStorage.getItem(CHAT_SIDEBAR_STORAGE_KEY);
+      if (!rawWidth) return;
+      const parsedWidth = Number.parseInt(rawWidth, 10);
+      if (Number.isNaN(parsedWidth)) return;
+      const clampedWidth = Math.max(CHAT_SIDEBAR_MIN_WIDTH, Math.min(CHAT_SIDEBAR_MAX_WIDTH, parsedWidth));
+      setSidebarWidth(clampedWidth);
+    } catch {
+      // Ignore storage errors.
+    }
+  }, []);
+
   const { keyboardOverlap, viewportHeight, viewportOffsetTop, keyboardOpen } = useMobileKeyboard({
     enabled: isMobile && !!activeSession,
   });
@@ -1358,6 +1377,74 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
     [deleteSession, addToast],
   );
 
+  const persistSidebarWidth = useCallback((width: number) => {
+    try {
+      localStorage.setItem(CHAT_SIDEBAR_STORAGE_KEY, String(width));
+    } catch {
+      // Ignore storage errors.
+    }
+  }, []);
+
+  const handleResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (isMobile) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const resizeHandle = event.currentTarget;
+    if (typeof resizeHandle.setPointerCapture === "function") {
+      resizeHandle.setPointerCapture(event.pointerId);
+    }
+
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    let latestWidth = startWidth;
+
+    document.body.style.userSelect = "none";
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const nextWidth = Math.max(CHAT_SIDEBAR_MIN_WIDTH, Math.min(CHAT_SIDEBAR_MAX_WIDTH, startWidth + deltaX));
+      latestWidth = nextWidth;
+      setSidebarWidth(nextWidth);
+      persistSidebarWidth(nextWidth);
+    };
+
+    const onPointerUp = (upEvent: PointerEvent) => {
+      if (typeof resizeHandle.releasePointerCapture === "function") {
+        resizeHandle.releasePointerCapture(upEvent.pointerId);
+      }
+
+      document.body.style.userSelect = "";
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerUp);
+      persistSidebarWidth(latestWidth);
+    };
+
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
+  }, [isMobile, persistSidebarWidth, sidebarWidth]);
+
+  const handleResizeKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (isMobile) {
+      return;
+    }
+
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+      return;
+    }
+
+    event.preventDefault();
+
+    const step = event.shiftKey ? 50 : 10;
+    const delta = event.key === "ArrowLeft" ? -step : step;
+    const nextWidth = Math.max(CHAT_SIDEBAR_MIN_WIDTH, Math.min(CHAT_SIDEBAR_MAX_WIDTH, sidebarWidth + delta));
+    setSidebarWidth(nextWidth);
+    persistSidebarWidth(nextWidth);
+  }, [isMobile, persistSidebarWidth, sidebarWidth]);
+
   // Handle session click
   const handleSessionClick = useCallback(
     (id: string) => {
@@ -1440,7 +1527,10 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
   return (
     <div className="chat-view">
       {/* Sidebar */}
-      <div className={`chat-sidebar${!sidebarVisible ? " chat-sidebar--hidden" : ""}`}>
+      <div
+        className={`chat-sidebar${!sidebarVisible ? " chat-sidebar--hidden" : ""}`}
+        style={isMobile ? undefined : { width: `${sidebarWidth}px` }}
+      >
         {/* Search section */}
         <div className="chat-sidebar-search">
           <div className="chat-sidebar-search-wrapper">
@@ -1517,6 +1607,21 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
           </button>
         </div>
       </div>
+
+      {!isMobile && sidebarVisible && (
+        <div
+          className="chat-sidebar-resize-handle"
+          role="separator"
+          aria-orientation="vertical"
+          aria-valuemin={CHAT_SIDEBAR_MIN_WIDTH}
+          aria-valuemax={CHAT_SIDEBAR_MAX_WIDTH}
+          aria-valuenow={sidebarWidth}
+          aria-label="Resize chat sidebar"
+          tabIndex={0}
+          onPointerDown={handleResizeStart}
+          onKeyDown={handleResizeKeyDown}
+        />
+      )}
 
       {/* Context Menu */}
       {contextMenu && (

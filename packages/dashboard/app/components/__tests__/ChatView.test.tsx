@@ -2249,6 +2249,105 @@ describe("ChatView sidebar structure", () => {
   });
 });
 
+describe("resizable sidebar", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("renders desktop resize handle with separator ARIA attributes", () => {
+    const viewportSpy = mockViewportMode("desktop");
+    setupMockChat({ sessions: [], filteredSessions: [] });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    const handle = screen.getByRole("separator", { name: "Resize chat sidebar" });
+    expect(handle).toHaveAttribute("aria-orientation", "vertical");
+    expect(handle).toHaveAttribute("aria-valuemin", "180");
+    expect(handle).toHaveAttribute("aria-valuemax", "500");
+    expect(handle).toHaveAttribute("aria-valuenow", "280");
+    expect(handle).toHaveAttribute("tabindex", "0");
+
+    viewportSpy.mockRestore();
+  });
+
+  it("updates sidebar width while dragging", () => {
+    const viewportSpy = mockViewportMode("desktop");
+    setupMockChat({ sessions: [], filteredSessions: [] });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    const handle = screen.getByRole("separator", { name: "Resize chat sidebar" });
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 280 });
+    fireEvent.pointerMove(document, { pointerId: 1, clientX: 360 });
+
+    const sidebar = document.querySelector(".chat-sidebar") as HTMLElement;
+    expect(sidebar.style.width).toBe("360px");
+    expect(handle).toHaveAttribute("aria-valuenow", "360");
+
+    viewportSpy.mockRestore();
+  });
+
+  it("clamps width between min and max", () => {
+    const viewportSpy = mockViewportMode("desktop");
+    setupMockChat({ sessions: [], filteredSessions: [] });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    const handle = screen.getByRole("separator", { name: "Resize chat sidebar" });
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 280 });
+    fireEvent.pointerMove(document, { pointerId: 1, clientX: -1000 });
+    expect((document.querySelector(".chat-sidebar") as HTMLElement).style.width).toBe("180px");
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 280 });
+    fireEvent.pointerMove(document, { pointerId: 1, clientX: 2000 });
+    expect((document.querySelector(".chat-sidebar") as HTMLElement).style.width).toBe("500px");
+
+    viewportSpy.mockRestore();
+  });
+
+  it("persists width to localStorage on pointer up", () => {
+    const viewportSpy = mockViewportMode("desktop");
+    setupMockChat({ sessions: [], filteredSessions: [] });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    const handle = screen.getByRole("separator", { name: "Resize chat sidebar" });
+    act(() => {
+      fireEvent.pointerDown(handle, { pointerId: 1, clientX: 280 });
+      fireEvent.pointerMove(document, { pointerId: 1, clientX: 360 });
+      fireEvent.pointerUp(document, { pointerId: 1, clientX: 360 });
+    });
+
+    expect(localStorage.getItem("fusion:chat-sidebar-width")).toBe("360");
+
+    viewportSpy.mockRestore();
+  });
+
+  it("restores persisted width on mount", () => {
+    const viewportSpy = mockViewportMode("desktop");
+    localStorage.setItem("fusion:chat-sidebar-width", "350");
+    setupMockChat({ sessions: [], filteredSessions: [] });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    expect((document.querySelector(".chat-sidebar") as HTMLElement).style.width).toBe("350px");
+
+    viewportSpy.mockRestore();
+  });
+
+  it("does not render resize handle on mobile", () => {
+    const viewportSpy = mockViewportMode("mobile");
+    setupMockChat({ sessions: [], filteredSessions: [] });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    expect(screen.queryByRole("separator", { name: "Resize chat sidebar" })).toBeNull();
+
+    viewportSpy.mockRestore();
+  });
+});
+
 describe("ChatView mobile behavior", () => {
   let savedVisualViewport: typeof window.visualViewport;
   let savedInnerHeight: number;

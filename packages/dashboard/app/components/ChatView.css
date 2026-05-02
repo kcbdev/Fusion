@@ -8,8 +8,7 @@
 
 /* Sidebar */
 .chat-sidebar {
-  width: 280px;
-  min-width: 280px;
+  min-width: 0;
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -18,6 +17,36 @@
 
 .chat-sidebar--hidden {
   display: none;
+}
+
+.chat-sidebar-resize-handle {
+  position: relative;
+  width: var(--space-sm);
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  touch-action: none;
+  transition: background var(--transition-fast);
+}
+
+.chat-sidebar-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: var(--space-xs);
+  transform: translateX(-50%);
+}
+
+.chat-sidebar-resize-handle:hover::before,
+.chat-sidebar-resize-handle:active::before {
+  background: color-mix(in srgb, var(--todo) 30%, transparent);
+}
+
+.chat-sidebar-resize-handle:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
 }
 
 .chat-sidebar-search-wrapper {
