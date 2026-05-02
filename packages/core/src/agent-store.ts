@@ -88,6 +88,8 @@ export interface AgentStoreEvents {
   "agent:assigned": (agent: Agent, taskId: string) => void;
   /** Emitted when a rating is added */
   "rating:added": (rating: AgentRating) => void;
+  /** Emitted when a log entry is appended to a run's JSONL log. */
+  "run:log": (agentId: string, runId: string, entry: AgentLogEntry) => void;
 }
 
 /** Options for AgentStore constructor */
@@ -1838,6 +1840,7 @@ export class AgentStore extends EventEmitter {
     };
     const line = JSON.stringify(safeEntry) + "\n";
     await appendFile(this.runLogPath(agentId, runId), line, "utf-8");
+    this.emit("run:log", agentId, runId, safeEntry);
   }
 
   /**

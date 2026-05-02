@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createSecureServer as createHttp2SecureServer, type Http2SecureServer } from "node:http2";
 import type { Server as HttpServer } from "node:http";
-import type { Task, TaskStore, MergeResult, AutomationStore, RoutineStore, CentralCore, MessageStore } from "@fusion/core";
+import type { Task, TaskStore, MergeResult, AutomationStore, RoutineStore, CentralCore, MessageStore, AgentLogEntry } from "@fusion/core";
 import { AgentStore, ChatStore } from "@fusion/core";
 import type { AuthStorageLike, ModelRegistryLike } from "./routes.js";
 import { createApiRoutes } from "./routes.js";
@@ -714,6 +714,54 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
     req.on("close", () => {
       clearInterval(heartbeat);
       scopedStore.off("agent:log", onAgentLog);
+    });
+  });
+
+  // Per-run SSE endpoint for live agent log streaming.
+  // Mirrors the per-task endpoint above but subscribes to AgentStore's
+  // "run:log" event (emitted from AgentStore.appendRunLog) and filters by
+  // agentId + runId.  We need the engine's AgentStore instance specifically,
+  // since that's the EventEmitter the heartbeat runtime writes to — a fresh
+  // store created here would never receive events.
+  app.get("/api/agents/:id/runs/:runId/logs/stream", async (req, res) => {
+    const agentId = req.params.id;
+    const runId = req.params.runId;
+    const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    res.write(": connected\n\n");
+
+    const engineManager = options?.engineManager;
+    const engine = engineManager && projectId ? engineManager.getEngine(projectId) : options?.engine;
+    const agentStore = engine?.getAgentStore();
+
+    if (!agentStore) {
+      // No live engine — there is no event source to subscribe to. Close
+      // gracefully so the client falls back to its initial fetch.
+      res.write(`event: error\ndata: ${JSON.stringify({ message: "No active engine for project" })}\n\n`);
+      res.end();
+      return;
+    }
+
+    const onRunLog = (eventAgentId: string, eventRunId: string, entry: AgentLogEntry) => {
+      if (eventAgentId !== agentId || eventRunId !== runId) return;
+      res.write(`event: agent:log\ndata: ${JSON.stringify(entry)}\n\n`);
+    };
+
+    agentStore.on("run:log", onRunLog);
+
+    const heartbeat = setInterval(() => {
+      res.write(": heartbeat\n\n");
+    }, 30_000);
+
+    req.on("close", () => {
+      clearInterval(heartbeat);
+      agentStore.off("run:log", onRunLog);
     });
   });
 

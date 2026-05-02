@@ -126,6 +126,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [isStreaming, setIsStreaming] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [latestRun, setLatestRun] = useState<AgentHeartbeatRun | null>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
   const agentDetailModalRef = useRef<HTMLDivElement>(null);
   const overlayMouseDownRef = useRef(false);
@@ -134,6 +135,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
   const addToastRef = useRef(addToast);
   const agentRef = useRef<AgentDetail | null>(null);
   const hasConfigChangesRef = useRef(false);
+  const loadedLatestRunLogsRef = useRef<string | null>(null);
 
   // Track the context version to detect stale events after project/agent switches.
   // Incremented whenever agentId or projectId changes, invalidating any in-flight SSE handlers.
@@ -168,29 +170,42 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
     const currentAgentId = agentId;
     const currentProjectId = projectId;
 
-    // Agent logs are tied to tasks, not agents directly.
-    // If the agent has a current task, we could show those logs.
-    // For now, we'll show heartbeat runs as the "activity" for the agent.
-    // If the agent is working on a task, we could show task logs.
-    if (agent?.taskId) {
-      try {
+    const isStale = () =>
+      contextVersionRef.current !== contextVersionAtCapture ||
+      agentId !== currentAgentId ||
+      projectId !== currentProjectId;
+
+    try {
+      if (agent?.taskId) {
+        setLatestRun(null);
+        loadedLatestRunLogsRef.current = null;
         const result = await fetchAgentLogsWithMeta(agent.taskId, currentProjectId, { limit: 100 });
-        // Reject stale response: check context version and current IDs
-        if (contextVersionRef.current !== contextVersionAtCapture ||
-            agentId !== currentAgentId ||
-            projectId !== currentProjectId) {
-          return;
-        }
+        if (isStale()) return;
         setLogs(result.entries);
-      } catch (err) {
-        // Reject stale error: check context version and current IDs
-        if (contextVersionRef.current !== contextVersionAtCapture ||
-            agentId !== currentAgentId ||
-            projectId !== currentProjectId) {
-          return;
-        }
-        console.error("Failed to load task logs:", err);
+        return;
       }
+
+      // Fallback: show the latest run's logs so the Logs tab is populated even
+      // when no task is currently assigned.
+      const runs = await fetchAgentRuns(currentAgentId, 1, currentProjectId);
+      if (isStale()) return;
+      const latest = runs[0] ?? null;
+      setLatestRun(latest);
+      if (!latest) {
+        loadedLatestRunLogsRef.current = null;
+        setLogs([]);
+        return;
+      }
+      if (loadedLatestRunLogsRef.current === latest.id) {
+        return;
+      }
+      const entries = await fetchAgentRunLogs(currentAgentId, latest.id, currentProjectId);
+      if (isStale()) return;
+      setLogs([...entries].reverse());
+      loadedLatestRunLogsRef.current = latest.id;
+    } catch (err) {
+      if (isStale()) return;
+      console.error("Failed to load agent logs:", err);
     }
   }, [agent?.taskId, agentId, projectId]);
 
@@ -215,10 +230,62 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
   }, [loadAgent]);
 
   useEffect(() => {
-    if (agent?.taskId) {
+    if (agent && activeTab === "logs") {
       void loadLogs();
     }
-  }, [agent?.taskId, loadLogs]);
+  }, [agent, activeTab, loadLogs]);
+
+  useEffect(() => {
+    if (activeTab !== "logs") {
+      loadedLatestRunLogsRef.current = null;
+    }
+  }, [activeTab]);
+
+  // When falling back to latest-run logs (no taskId) and that run is active,
+  // subscribe to the run-scoped SSE stream so the Logs tab tails updates.
+  useEffect(() => {
+    if (activeTab !== "logs" || agent?.taskId) return;
+    if (!latestRun || latestRun.status !== "active") return;
+
+    const contextVersionAtStart = contextVersionRef.current;
+    const currentAgentId = agentId;
+    const currentRunId = latestRun.id;
+    const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+
+    const unsubscribe = subscribeSse(
+      `/api/agents/${encodeURIComponent(currentAgentId)}/runs/${encodeURIComponent(currentRunId)}/logs/stream${query}`,
+      {
+        events: {
+          "agent:log": (e) => {
+            if (contextVersionRef.current !== contextVersionAtStart) return;
+            try {
+              const entry: AgentLogEntry = JSON.parse(e.data);
+              setLogs(prev => [entry, ...prev]);
+            } catch {
+              // ignore malformed events
+            }
+          },
+        },
+        onOpen: () => {
+          if (contextVersionRef.current === contextVersionAtStart) {
+            setIsStreaming(true);
+          }
+        },
+        onError: () => {
+          if (contextVersionRef.current === contextVersionAtStart) {
+            setIsStreaming(false);
+          }
+        },
+      },
+    );
+
+    return () => {
+      unsubscribe();
+      if (contextVersionRef.current === contextVersionAtStart) {
+        setIsStreaming(false);
+      }
+    };
+  }, [activeTab, agent?.taskId, agentId, projectId, latestRun]);
 
   // Detect context changes (agentId or projectId) and invalidate stale handlers
   useEffect(() => {
@@ -230,6 +297,8 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
       // Clear stale logs and streaming state immediately
       setLogs([]);
       setIsStreaming(false);
+      setLatestRun(null);
+      loadedLatestRunLogsRef.current = null;
       hasConfigChangesRef.current = false;
     }
   }, [agentId, projectId]);
@@ -530,11 +599,12 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
           )}
           
           {activeTab === "logs" && (
-            <LogsTab 
-              logs={logs} 
+            <LogsTab
+              logs={logs}
               isStreaming={isStreaming}
               containerRef={logContainerRef}
-              hasTask={!!agent.taskId}
+              hasTask={!!agent.taskId || logs.length > 0 || latestRun !== null}
+              fallbackLabel={!agent.taskId && latestRun ? `Latest run · ${latestRun.id.slice(0, 8)}` : null}
             />
           )}
           
@@ -945,25 +1015,27 @@ function DashboardTab({
 
 // ── Logs Tab ──────────────────────────────────────────────────────────────
 
-function LogsTab({ 
-  logs, 
+function LogsTab({
+  logs,
   isStreaming,
   containerRef,
-  hasTask 
-}: { 
-  logs: AgentLogEntry[]; 
+  hasTask,
+  fallbackLabel,
+}: {
+  logs: AgentLogEntry[];
   isStreaming: boolean;
   containerRef: React.RefObject<HTMLDivElement | null>;
   hasTask: boolean;
+  fallbackLabel?: string | null;
 }) {
   if (!hasTask) {
     return (
       <div className="logs-tab">
         <div className="logs-empty">
           <FileText size={48} opacity={0.3} />
-          <p>No task assigned</p>
+          <p>No activity yet</p>
           <p className="text-muted">
-            Agent logs are available when the agent is assigned to a task
+            Agent logs will appear here from the current task or most recent run
           </p>
         </div>
       </div>
@@ -974,6 +1046,9 @@ function LogsTab({
     <div className="logs-tab">
       <div className="logs-header">
         <span className="logs-count">{logs.length} entries</span>
+        {fallbackLabel && (
+          <span className="text-muted" style={{ fontSize: "12px" }}>{fallbackLabel}</span>
+        )}
         {isStreaming && (
           <span className="streaming-indicator">
             <span className="streaming-dot" />
@@ -1105,6 +1180,9 @@ function RunsTab({
 
   // Poll for active runs
   const hasActiveRun = runs.some(r => r.status === "active");
+  const selectedRunStatus = selectedRunId
+    ? runs.find((run) => run.id === selectedRunId)?.status
+    : undefined;
   useEffect(() => {
     if (!hasActiveRun) return;
     const interval = setInterval(() => {
@@ -1112,6 +1190,31 @@ function RunsTab({
     }, 5000);
     return () => clearInterval(interval);
   }, [hasActiveRun, loadRuns]);
+
+  // While a selected run is still active, subscribe to its log stream so the
+  // expanded view tails updates without a refresh.  Mirrors the per-task log
+  // SSE pattern in useAgentLogs.
+  useEffect(() => {
+    if (!selectedRunId) return;
+    if (selectedRunStatus !== "active") return;
+
+    const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+    return subscribeSse(
+      `/api/agents/${encodeURIComponent(agentId)}/runs/${encodeURIComponent(selectedRunId)}/logs/stream${query}`,
+      {
+        events: {
+          "agent:log": (e) => {
+            try {
+              const entry: AgentLogEntry = JSON.parse(e.data);
+              setRunLogs(prev => [...prev, entry]);
+            } catch {
+              // ignore malformed events
+            }
+          },
+        },
+      },
+    );
+  }, [selectedRunId, selectedRunStatus, agentId, projectId]);
 
   // Load run detail when a run is selected
   const handleRunClick = useCallback(async (runId: string) => {

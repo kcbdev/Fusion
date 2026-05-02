@@ -4,7 +4,7 @@ import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { AgentDetailView } from "../AgentDetailView";
-import type { AgentCapability, AgentDetail } from "../../api";
+import type { AgentCapability, AgentDetail, AgentHeartbeatRun } from "../../api";
 import type { AgentLogEntry } from "@fusion/core";
 import { DEFAULT_HEARTBEAT_INTERVAL_MS } from "../../utils/heartbeatIntervals";
 
@@ -93,6 +93,10 @@ vi.mock("../SkillMultiselect", () => ({
   ),
 }));
 
+vi.mock("../../sse-bus", () => ({
+  subscribeSse: vi.fn(() => () => {}),
+}));
+
 const mockConfirm = vi.fn();
 
 vi.mock("../../hooks/useConfirm", () => ({
@@ -100,6 +104,7 @@ vi.mock("../../hooks/useConfirm", () => ({
 }));
 
 import { fetchAgent, fetchAgents, updateAgent, updateAgentState, deleteAgent, fetchAgentChildren, fetchAgentRunLogs, fetchAgentRuns, fetchAgentRunDetail, fetchAgentTasks, fetchChainOfCommand, fetchAgentBudgetStatus, resetAgentBudget, updateAgentInstructions, updateAgentSoul, updateAgentMemory, fetchWorkspaceFileContent, saveWorkspaceFileContent, fetchDiscoveredSkills, fetchModels, fetchPluginRuntimes, fetchAgentLogsWithMeta, upgradeAgentHeartbeatProcedure } from "../../api";
+import { subscribeSse } from "../../sse-bus";
 
 const mockFetchAgent = vi.mocked(fetchAgent);
 const mockFetchAgents = vi.mocked(fetchAgents);
@@ -124,6 +129,7 @@ const mockFetchModels = vi.mocked(fetchModels);
 const mockFetchPluginRuntimes = vi.mocked(fetchPluginRuntimes);
 const mockFetchAgentLogsWithMeta = vi.mocked(fetchAgentLogsWithMeta);
 const mockUpgradeAgentHeartbeatProcedure = vi.mocked(upgradeAgentHeartbeatProcedure);
+const mockSubscribeSse = vi.mocked(subscribeSse);
 
 const MOCK_SKILLS = [
   { id: "skill-1", name: "Skill One", path: "/path/skill-1", relativePath: "skills/skill-1", enabled: true, metadata: { source: "*", scope: "user" as const, origin: "top-level" as const } },
@@ -166,6 +172,8 @@ describe("AgentDetailView", () => {
     vi.clearAllMocks();
     mockConfirm.mockReset();
     mockConfirm.mockResolvedValue(true);
+    mockSubscribeSse.mockReset();
+    mockSubscribeSse.mockReturnValue(vi.fn());
     const mockAgent = createMockAgent();
     mockFetchAgent.mockResolvedValue(mockAgent);
     mockFetchAgents.mockResolvedValue([
@@ -181,6 +189,7 @@ describe("AgentDetailView", () => {
       ...(mockAgent.activeRun ? [mockAgent.activeRun] : []),
       ...mockAgent.completedRuns,
     ]);
+    mockFetchAgentRunLogs.mockResolvedValue([]);
     mockFetchAgentRunDetail.mockResolvedValue(mockAgent.completedRuns[0]);
     mockFetchAgentChildren.mockResolvedValue([]);
     mockFetchAgentTasks.mockResolvedValue([]);
@@ -1052,6 +1061,55 @@ describe("AgentDetailView", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Live Run")).toBeInTheDocument();
+    });
+  });
+
+  describe("Logs tab", () => {
+    it("loads latest run logs lazily for agents without a current task", async () => {
+      const latestRun = {
+        id: "run-1001",
+        agentId: "agent-001",
+        startedAt: "2024-01-01T00:00:00.000Z",
+        endedAt: null,
+        status: "active",
+      } as AgentHeartbeatRun;
+      mockFetchAgent.mockResolvedValue(createMockAgent({
+        taskId: undefined,
+        activeRun: latestRun,
+        completedRuns: [],
+      }));
+      mockFetchAgentRuns.mockResolvedValue([latestRun]);
+      mockFetchAgentRunLogs.mockResolvedValue([
+        { timestamp: "2024-01-01T00:01:00.000Z", taskId: "agent-run", text: "First entry", type: "text" },
+        { timestamp: "2024-01-01T00:02:00.000Z", taskId: "agent-run", text: "Second entry", type: "text" },
+      ]);
+
+      render(
+        <AgentDetailView
+          agentId="agent-001"
+          onClose={vi.fn()}
+          addToast={vi.fn()}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Dashboard")).toBeInTheDocument();
+      });
+
+      expect(mockFetchAgentRuns).not.toHaveBeenCalled();
+      expect(mockFetchAgentRunLogs).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByText("Logs"));
+
+      await waitFor(() => {
+        expect(mockFetchAgentRuns).toHaveBeenCalledWith("agent-001", 1, undefined);
+        expect(mockFetchAgentRunLogs).toHaveBeenCalledWith("agent-001", "run-1001", undefined);
+      });
+
+      expect(screen.getByText("Latest run · run-1001")).toBeInTheDocument();
+      expect(
+        Array.from(document.querySelectorAll(".log-text")).map((node) => node.textContent?.trim()),
+      ).toEqual(["Second entry", "First entry"]);
     });
   });
 
@@ -2623,6 +2681,84 @@ describe("AgentDetailView", () => {
         const runButtons = buttons.filter(btn => btn.getAttribute("aria-label")?.includes("run"));
         expect(runButtons.length).toBeGreaterThan(0);
       });
+    });
+
+    it("keeps the active run log stream subscribed across run-list polling", async () => {
+      const intervalCallbacks: Array<() => void> = [];
+      const setIntervalSpy = vi.spyOn(globalThis, "setInterval").mockImplementation(((callback: TimerHandler) => {
+        if (typeof callback === "function") {
+          intervalCallbacks.push(callback as () => void);
+        }
+        return 1 as ReturnType<typeof setInterval>;
+      }) as typeof setInterval);
+      const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval").mockImplementation(((id?: ReturnType<typeof setInterval>) => {
+        void id;
+      }) as typeof clearInterval);
+
+      try {
+        const activeRun = {
+          id: "run-live-1",
+          agentId: "agent-001",
+          startedAt: "2024-01-01T00:00:00.000Z",
+          endedAt: null,
+          status: "active",
+        } as AgentHeartbeatRun;
+        mockFetchAgent.mockResolvedValue(createMockAgent({
+          activeRun,
+          completedRuns: [],
+        }));
+        mockFetchAgentRuns.mockResolvedValue([activeRun]);
+        mockFetchAgentRunLogs.mockResolvedValue([]);
+        mockFetchAgentRunDetail.mockResolvedValue(activeRun);
+
+        render(
+          <AgentDetailView
+            agentId="agent-001"
+            onClose={vi.fn()}
+            addToast={vi.fn()}
+          />
+        );
+
+        await waitFor(() => {
+          expect(screen.getByText("Runs")).toBeInTheDocument();
+        });
+        fireEvent.click(screen.getByText("Runs"));
+
+        await waitFor(() => {
+          expect(screen.getByText("Live Run")).toBeInTheDocument();
+        });
+
+        const activeRunButton = screen.getAllByRole("button").find(
+          (btn) => btn.getAttribute("aria-label")?.includes("run-live")
+            && btn.getAttribute("aria-label")?.includes("active"),
+        );
+        expect(activeRunButton).toBeTruthy();
+        fireEvent.click(activeRunButton!);
+
+        await waitFor(() => {
+          expect(mockFetchAgentRunLogs).toHaveBeenCalledWith("agent-001", "run-live-1", undefined);
+        });
+
+        const streamUrl = "/api/agents/agent-001/runs/run-live-1/logs/stream";
+        expect(
+          mockSubscribeSse.mock.calls.filter(([url]) => url === streamUrl),
+        ).toHaveLength(1);
+
+        await act(async () => {
+          intervalCallbacks.forEach((callback) => callback());
+          await Promise.resolve();
+        });
+
+        await waitFor(() => {
+          expect(mockFetchAgentRuns.mock.calls.length).toBeGreaterThanOrEqual(2);
+        });
+        expect(
+          mockSubscribeSse.mock.calls.filter(([url]) => url === streamUrl),
+        ).toHaveLength(1);
+      } finally {
+        setIntervalSpy.mockRestore();
+        clearIntervalSpy.mockRestore();
+      }
     });
 
     it("fetches and displays logs when clicking a completed run", async () => {

@@ -2040,6 +2040,27 @@ describe("AgentStore", () => {
       const completed = await store.getCompletedHeartbeatRuns(agent.id);
       expect(completed.some((r) => r.id === structuredRun.id)).toBe(true);
     });
+
+    it("appendRunLog emits run:log and persists the entry", async () => {
+      const agent = await store.createAgent({ name: "RunLogger", role: "executor" });
+      const run = await store.startHeartbeatRun(agent.id);
+      const onRunLog = vi.fn();
+      store.on("run:log", onRunLog);
+
+      const entry = {
+        timestamp: "2026-01-01T00:00:00.000Z",
+        taskId: "agent-run",
+        text: "streamed output",
+        type: "text" as const,
+      };
+
+      await store.appendRunLog(agent.id, run.id, entry);
+
+      expect(onRunLog).toHaveBeenCalledWith(agent.id, run.id, expect.objectContaining(entry));
+      await expect(store.getRunLogs(agent.id, run.id)).resolves.toEqual([
+        expect.objectContaining(entry),
+      ]);
+    });
   });
 
   // ── blocked state persistence ─────────────────────────────────────
