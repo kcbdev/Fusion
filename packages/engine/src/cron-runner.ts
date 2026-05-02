@@ -42,25 +42,90 @@ function execCommand(command: string, options: Parameters<typeof exec>[1]): Prom
  * in-process replacement only performs a create+cleanup; intercepting them
  * would silently execute the wrong operation.
  *
- * These commands shell out to whatever fusion binary is on PATH, which may
- * be older than the running process and still carry the pluginStore-rootDir
- * bug that creates a stray `.fusion/.fusion/` directory. Intercepting the
- * `--create` form keeps the auto-backup self-contained inside the running
- * engine.
+ * The matcher tokenizes the command so it can:
+ *   - accept any of the canonical invocations (`fn`, `fusion`,
+ *     `runfusion`/`runfusion.ai`, `@runfusion/fusion`), with or without an
+ *     `npx` prefix and any combination of npx flags (e.g. `-y`, `--yes`,
+ *     `-p <pkg>`), so `npx -y runfusion.ai backup --create` is covered;
+ *   - reject commands carrying shell continuations after `--create`
+ *     (`&&`, `||`, `|`, `;`, `>`, `<`, backticks, `$()`, etc.) — these
+ *     embed user-authored side effects that the in-process path cannot
+ *     replicate, so we let them shell out to keep the side effects intact.
+ *
+ * Commands that shell out instead reach whatever fusion binary is on
+ * PATH, which may be older than the running process and still carry the
+ * pluginStore-rootDir bug that creates a stray `.fusion/.fusion/`
+ * directory. Intercepting the canonical `--create` form keeps the
+ * auto-backup self-contained inside the running engine.
  */
+const FUSION_BINARY_TOKENS = new Set([
+  "fn",
+  "fusion",
+  "runfusion",
+  "runfusion.ai",
+  "@runfusion/fusion",
+]);
+
+/**
+ * Characters that introduce shell continuations, redirections, or
+ * substitutions. Their presence anywhere in the command means the
+ * scheduler author wired in additional side effects we cannot honour
+ * by simply running the in-process backup, so we decline interception.
+ */
+const SHELL_METACHARACTERS_REGEX = /[&|;<>`$()]/;
+
 export function isInProcessBackupCommand(command: string | undefined): boolean {
   if (!command) return false;
-  const normalized = command.trim().toLowerCase();
-  // Allow the binary name + the `backup --create` subcommand, optionally
-  // followed by additional whitespace-separated flags. Reject any other
-  // backup subcommand (--list, --cleanup, --restore, etc.).
-  const tail = /\s+backup\s+--create(?:\s+.*)?$/;
-  return (
-    new RegExp(`^(?:npx\\s+)?runfusion(?:\\.ai)?${tail.source}`).test(normalized) ||
-    new RegExp(`^(?:npx\\s+)?@runfusion\\/fusion${tail.source}`).test(normalized) ||
-    new RegExp(`^fn${tail.source}`).test(normalized) ||
-    new RegExp(`^fusion${tail.source}`).test(normalized)
-  );
+  const trimmed = command.trim();
+  if (!trimmed) return false;
+
+  // Refuse any command that embeds a shell continuation / redirection /
+  // substitution. These tokens carry intent we cannot mirror in-process.
+  if (SHELL_METACHARACTERS_REGEX.test(trimmed)) return false;
+
+  const tokens = trimmed.split(/\s+/).map((tok) => tok.toLowerCase());
+  let cursor = 0;
+
+  // Optional `npx` prefix, with any number of npx flags (e.g. `-y`,
+  // `--yes`, `-p <pkg>`, `--package=<pkg>`). Stop consuming once we hit
+  // the package name token.
+  if (tokens[cursor] === "npx") {
+    cursor += 1;
+    while (cursor < tokens.length) {
+      const tok = tokens[cursor];
+      if (tok === undefined || !tok.startsWith("-")) break;
+      // `-p <pkg>` consumes the next token as a value; same for the
+      // rare `--package <pkg>` form. The `--package=<pkg>` and `-y`
+      // forms don't take a separate argument.
+      const takesValue = (tok === "-p" || tok === "--package")
+        && cursor + 1 < tokens.length
+        && tokens[cursor + 1] !== undefined
+        && !tokens[cursor + 1]!.startsWith("-");
+      cursor += takesValue ? 2 : 1;
+    }
+  }
+
+  // Required: a fusion binary token.
+  const binary = tokens[cursor];
+  if (!binary || !FUSION_BINARY_TOKENS.has(binary)) return false;
+  cursor += 1;
+
+  // Required: literal `backup` then `--create`.
+  if (tokens[cursor] !== "backup") return false;
+  cursor += 1;
+  if (tokens[cursor] !== "--create") return false;
+  cursor += 1;
+
+  // Anything left over must look like additional `--flag` style options.
+  // Reject bare argument tokens — they suggest a different subcommand or
+  // user-authored payload we should not silently swallow.
+  for (; cursor < tokens.length; cursor += 1) {
+    const tok = tokens[cursor];
+    if (!tok) continue;
+    if (!tok.startsWith("-")) return false;
+  }
+
+  return true;
 }
 
 /** Default execution timeout: 5 minutes. */

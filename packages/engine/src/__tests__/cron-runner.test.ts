@@ -1781,19 +1781,28 @@ describe("CronRunner", () => {
 
   describe("isInProcessBackupCommand", () => {
     const positives = [
+      // Bare binary forms.
       "fn backup --create",
       "fusion backup --create",
       "runfusion.ai backup --create",
       "runfusion backup --create",
       "@runfusion/fusion backup --create",
+      // npx prefix without flags.
       "npx runfusion.ai backup --create",
       "npx @runfusion/fusion backup --create",
+      // npx with flags — including the canonical `npx -y runfusion.ai`
+      // form FN_NPX_INVOCATION emits.
+      "npx -y runfusion.ai backup --create",
+      "npx --yes runfusion.ai backup --create",
+      "npx -y -p runfusion.ai runfusion.ai backup --create",
+      "npx --package=runfusion.ai runfusion.ai backup --create",
+      // Whitespace / case tolerance.
       "FN BACKUP --CREATE",
       "fn backup --create --some-other-flag",
       "  fn backup --create  ",
     ];
 
-    const negatives = [
+    const negatives: Array<string | undefined> = [
       // Wrong subcommand — must not be intercepted, the in-process path
       // only does create+cleanup and would silently swallow these.
       "fn backup --list",
@@ -1807,6 +1816,18 @@ describe("CronRunner", () => {
       "fnext backup --create",
       "",
       undefined,
+      // Shell continuations after --create encode user-authored side
+      // effects we cannot mirror in-process; let them shell out.
+      "fn backup --create && notify-send done",
+      "fn backup --create || echo failed",
+      "fn backup --create | tee /tmp/log",
+      "fn backup --create ; rm -rf /tmp/garbage",
+      "fn backup --create > /tmp/out.txt",
+      "fn backup --create 2> /tmp/err.txt",
+      "fn backup --create `whoami`",
+      "fn backup --create $(date)",
+      // Trailing positional arguments aren't `--flag`s — refuse.
+      "fn backup --create extra-positional",
     ];
 
     for (const cmd of positives) {
