@@ -1209,6 +1209,31 @@ describe("SettingsModal", () => {
       expect(checkbox).toBeChecked();
     });
 
+    it("truncates long memory file option labels to keep native dropdown width bounded", async () => {
+      mockFetchMemoryFiles.mockResolvedValue({
+        files: [
+          {
+            path: ".fusion/memory/very/deep/path/that/keeps/growing/until/the/browser/native/select/dropdown/can-overflow-on-the-right-edge.md",
+            label: "Long-term memory",
+            layer: "long-term",
+            size: 42,
+            updatedAt: "2026-04-17T12:00:00.000Z",
+          },
+        ],
+      });
+
+      renderModal();
+
+      await waitFor(() => {
+        expect(mockFetchSettings).toHaveBeenCalled();
+      });
+      await userEvent.click(await screen.findByText("Memory"));
+
+      const option = await screen.findByRole("option", { name: /Long-term memory/ });
+      expect(option.textContent).toContain("…");
+      expect(option.textContent).not.toContain("dropdown/can-overflow-on-the-right-edge.md");
+    });
+
     it("shows only loading copy while backend status is unresolved", async () => {
       mockUseMemoryBackendStatus.mockReturnValue({
         // Simulate stale negative payload while a refresh is still in-flight.

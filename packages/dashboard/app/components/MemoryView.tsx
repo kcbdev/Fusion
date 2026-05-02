@@ -34,6 +34,24 @@ const MEMORY_LAYER_DESCRIPTIONS: Record<MemoryFileInfo["layer"], string> = {
   dreams: "Synthesized patterns and open loops promoted from daily memory.",
 };
 
+const MEMORY_FILE_OPTION_LABEL_MAX_CHARS = 72;
+
+function truncateMiddle(value: string, maxChars: number): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+
+  const visibleChars = Math.max(1, maxChars - 1);
+  const startChars = Math.ceil(visibleChars / 2);
+  const endChars = Math.floor(visibleChars / 2);
+  return `${value.slice(0, startChars)}…${value.slice(value.length - endChars)}`;
+}
+
+function formatMemoryFileOptionLabel(file: MemoryFileInfo): string {
+  const fullLabel = `${file.label} — ${file.path}`;
+  return truncateMiddle(fullLabel, MEMORY_FILE_OPTION_LABEL_MAX_CHARS);
+}
+
 interface ParsedInsightCategory {
   name: string;
   key: string;
@@ -437,8 +455,8 @@ export function MemoryView({ projectId, addToast }: MemoryViewProps) {
                       disabled={selectedFileDirty}
                     >
                       {memoryFiles.map((file) => (
-                        <option key={file.path} value={file.path}>
-                          {file.label} - {file.path}
+                        <option key={file.path} value={file.path} title={`${file.label} — ${file.path}`}>
+                          {formatMemoryFileOptionLabel(file)}
                         </option>
                       ))}
                     </select>

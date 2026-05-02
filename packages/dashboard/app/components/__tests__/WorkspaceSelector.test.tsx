@@ -3,6 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { WorkspaceSelector } from "../WorkspaceSelector";
 import type { WorkspaceInfo } from "../../hooks/useWorkspaces";
+import { loadAllAppCss } from "../../test/cssFixture";
 
 const workspaces: WorkspaceInfo[] = [
   {
@@ -88,5 +89,11 @@ describe("WorkspaceSelector", () => {
 
     expect(screen.getByText(/Implement a very long task title that shoul/)).toBeInTheDocument();
     expect(screen.getByText(/…$/)).toBeInTheDocument();
+  });
+
+  it("anchors the menu to the trigger's right edge on desktop to avoid right overflow", () => {
+    const css = loadAllAppCss();
+
+    expect(css).toMatch(/\.workspace-selector-menu\s*\{[^}]*left:\s*auto;[^}]*right:\s*0;/);
   });
 });

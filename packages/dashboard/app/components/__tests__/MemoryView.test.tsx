@@ -278,6 +278,30 @@ describe("MemoryView", () => {
     const button = screen.getByRole("button", { name: /Dreaming…/i });
     expect(button).toBeDisabled();
   });
+
+  it("truncates long memory file option labels to avoid wide native dropdown expansion", () => {
+    mockUseMemoryData.mockReturnValue(
+      createMemoryData({
+        memoryFiles: [
+          {
+            path: ".fusion/memory/very/deep/path/that/keeps/growing/until/the/browser/native/select/dropdown/can-overflow-on-the-right-edge.md",
+            label: "Long-term memory",
+            layer: "long-term",
+            size: 12,
+            updatedAt: "2026-04-17T12:00:00.000Z",
+          },
+        ],
+        selectedFilePath: ".fusion/memory/very/deep/path/that/keeps/growing/until/the/browser/native/select/dropdown/can-overflow-on-the-right-edge.md",
+      }),
+    );
+
+    render(<MemoryView addToast={vi.fn()} />);
+
+    const option = screen.getByRole("option", { name: /Long-term memory/ });
+    expect(option.textContent).toContain("…");
+    expect(option.textContent).not.toContain("dropdown/can-overflow-on-the-right-edge.md");
+  });
+
   it("hides Dream Now button when dreams are disabled", () => {
     render(<MemoryView addToast={vi.fn()} />);
 

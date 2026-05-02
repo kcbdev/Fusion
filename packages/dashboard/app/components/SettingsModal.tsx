@@ -172,6 +172,23 @@ type SettingsSection = {
 
 const MOBILE_SETTINGS_MEDIA_QUERY = "(max-width: 768px)";
 const DEFAULT_MEMORY_EDITOR_PATH = ".fusion/memory/DREAMS.md";
+const MEMORY_FILE_OPTION_LABEL_MAX_CHARS = 72;
+
+function truncateMiddle(value: string, maxChars: number): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+
+  const visibleChars = Math.max(1, maxChars - 1);
+  const startChars = Math.ceil(visibleChars / 2);
+  const endChars = Math.floor(visibleChars / 2);
+  return `${value.slice(0, startChars)}…${value.slice(value.length - endChars)}`;
+}
+
+function formatMemoryFileOptionLabel(file: MemoryFileInfo): string {
+  const fullLabel = `${file.label} — ${file.path}`;
+  return truncateMiddle(fullLabel, MEMORY_FILE_OPTION_LABEL_MAX_CHARS);
+}
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
   // Account group (scope-less items — independent of settings storage)
@@ -3672,8 +3689,8 @@ export function SettingsModal({
                     disabled={memoryDirty}
                   >
                     {memoryFiles.map((file) => (
-                      <option key={file.path} value={file.path}>
-                        {file.label} - {file.path}
+                      <option key={file.path} value={file.path} title={`${file.label} — ${file.path}`}>
+                        {formatMemoryFileOptionLabel(file)}
                       </option>
                     ))}
                   </select>
