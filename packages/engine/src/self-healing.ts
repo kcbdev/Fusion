@@ -1008,7 +1008,7 @@ export class SelfHealingManager {
             task.id,
             "Auto-recovered: in-review task still had incomplete steps — moved back to todo for retry",
           );
-          await this.store.moveTask(task.id, "todo");
+          await this.store.moveTask(task.id, "todo", { preserveProgress: true });
           log.log(`Recovered stale incomplete review task ${task.id}: moved back to todo`);
           recovered++;
         } catch (err: unknown) { const errorMessage = err instanceof Error ? err.message : String(err);
@@ -1082,7 +1082,7 @@ export class SelfHealingManager {
             task.id,
             "Auto-recovered: in-review task idle past stuck-task timeout — kicked back to todo",
           );
-          await this.store.moveTask(task.id, "todo");
+          await this.store.moveTask(task.id, "todo", { preserveProgress: true });
           log.log(`Kicked ghost review task ${task.id} back to todo`);
           recovered++;
         } catch (err: unknown) {
@@ -1351,7 +1351,7 @@ export class SelfHealingManager {
             task.id,
             `Auto-recovered orphaned executor task — ${reason}, moved back to todo`,
           );
-          await this.store.moveTask(task.id, "todo");
+          await this.store.moveTask(task.id, "todo", { preserveProgress: true });
           recovered++;
         } catch (err: unknown) { const errorMessage = err instanceof Error ? err.message : String(err);
           log.error(`Failed to recover orphaned executor task ${task.id}: ${errorMessage}`);
@@ -1484,7 +1484,7 @@ export class SelfHealingManager {
             task.id,
             `Auto-retry ${nextCount}/${MAX_TASK_DONE_RETRIES}: agent finished without task_done — requeuing to todo to resume partial work`,
           );
-          await this.store.moveTask(task.id, "todo");
+          await this.store.moveTask(task.id, "todo", { preserveProgress: true });
           recovered++;
         } catch (err: unknown) {
           const errorMessage = err instanceof Error ? err.message : String(err);

@@ -2667,6 +2667,12 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
        * "move back to todo" actions, which still want a clean slate.
        */
       preserveResumeState?: boolean;
+      /**
+       * Preserve step progress (step statuses + currentStep) when reopening
+       * to todo/triage, while still clearing per-run execution state
+       * (worktree and wall-clock timing fields).
+       */
+      preserveProgress?: boolean;
     },
   ): Promise<Task> {
     return this.withTaskLock(id, async () => {
@@ -2739,17 +2745,25 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         task.status = undefined;
         task.error = undefined;
         task.blockedBy = undefined;
+
+        const hasNonPendingStepProgress = task.steps.some((step) => step.status !== "pending");
+        const preserveStepProgress =
+          options?.preserveResumeState || (options?.preserveProgress === true && hasNonPendingStepProgress);
+
         if (!options?.preserveResumeState) {
           task.worktree = undefined;
           // Reset wall-clock runtime so the next run gets a fresh timer.
           task.executionStartedAt = undefined;
           task.executionCompletedAt = undefined;
-          this.resetAllStepsToPending(task);
-          await this.resetPromptCheckboxes(dir);
         } else {
           // executionCompletedAt is never set on an in-progress task; clear
           // it defensively in case we are bouncing from done/in-review.
           task.executionCompletedAt = undefined;
+        }
+
+        if (!preserveStepProgress) {
+          this.resetAllStepsToPending(task);
+          await this.resetPromptCheckboxes(dir);
         }
       }
 

@@ -748,7 +748,7 @@ describe("TaskDetailModal", () => {
         fireEvent.click(screen.getByRole("button", { name: "Move to In Review" }));
       });
 
-      expect(onMoveTask).toHaveBeenCalledWith("FN-099", "in-review");
+      expect(onMoveTask).toHaveBeenCalledWith("FN-099", "in-review", undefined);
       expect(screen.queryByRole("menu")).toBeNull();
     });
 

@@ -25,6 +25,11 @@ vi.mock("../../api", () => ({
 
 import { fetchTaskDetail, batchUpdateTaskModels, fetchNodes } from "../../api";
 
+const mockConfirm = vi.fn();
+vi.mock("../../hooks/useConfirm", () => ({
+  useConfirm: () => ({ confirm: mockConfirm }),
+}));
+
 const mockAddToast = vi.fn();
 const TEST_PROJECT_ID = "proj-123";
 const scopedStorageKey = (key: string) => scopedKey(key, TEST_PROJECT_ID);
@@ -101,6 +106,7 @@ function mockDesktopViewport() {
 describe("ListView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockConfirm.mockReset();
     localStorage.clear();
     ensureMatchMedia();
     vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
@@ -775,7 +781,46 @@ describe("ListView", () => {
     });
 
     await waitFor(() => {
-      expect(mockOnMoveTask).toHaveBeenCalledWith("FN-001", "todo");
+      expect(mockOnMoveTask).toHaveBeenCalledWith("FN-001", "todo", undefined);
+    });
+  });
+
+  it("prompts to preserve progress when dropping task with completed steps to todo", async () => {
+    const tasks = [createMockTask({
+      id: "FN-001",
+      column: "in-progress",
+      steps: [
+        { title: "Step 1", status: "done" },
+        { title: "Step 2", status: "pending" },
+      ],
+    })];
+    const mockOnMoveTask = vi.fn(() => Promise.resolve(tasks[0]));
+    mockConfirm.mockResolvedValueOnce(true);
+
+    renderListView({ tasks, onMoveTask: mockOnMoveTask });
+
+    const row = screen.getByText("FN-001").closest("tr")!;
+    fireEvent.dragStart(row, {
+      dataTransfer: {
+        setData: vi.fn(),
+        effectAllowed: "move",
+      },
+    });
+
+    const todoZone = document.querySelector('[data-column="todo"].list-drop-zone')!;
+    fireEvent.drop(todoZone, {
+      preventDefault: vi.fn(),
+      dataTransfer: {
+        getData: vi.fn(() => "FN-001"),
+      },
+    });
+
+    await waitFor(() => {
+      expect(mockConfirm).toHaveBeenCalledWith(expect.objectContaining({
+        title: "Preserve Progress?",
+        cancelLabel: "Reset Progress",
+      }));
+      expect(mockOnMoveTask).toHaveBeenCalledWith("FN-001", "todo", { preserveProgress: true });
     });
   });
 

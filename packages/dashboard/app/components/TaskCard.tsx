@@ -260,7 +260,7 @@ interface TaskCardProps {
   /** Called when user clicks the mission badge on a task card. */
   onOpenMission?: (missionId: string) => void;
   /** Called when user moves a task to a different column from the card. */
-  onMoveTask?: (id: string, column: Column) => Promise<Task>;
+  onMoveTask?: (id: string, column: Column, optionsOrPosition?: { preserveProgress?: boolean } | number) => Promise<Task>;
   /** Timestamp (ms) when task data was last confirmed fresh from the server. Used for freshness-aware stuck detection. */
   lastFetchTimeMs?: number;
   /** Lookup of workflow step IDs to display names, fetched once at board level. */
@@ -1110,17 +1110,46 @@ function TaskCardComponent({
     setShowSendBackMenu((current) => !current);
   }, []);
 
-  const handleSendBackOptionClick = useCallback((e: React.MouseEvent, column: Column) => {
+  const handleSendBackOptionClick = useCallback(async (e: React.MouseEvent, column: Column) => {
     e.stopPropagation();
     setShowSendBackMenu(false);
     if (!onMoveTask) return;
 
-    void onMoveTask(task.id, column).then(() => {
+    try {
+      const hasStepProgress = task.steps.some((step) => step.status !== "pending");
+      const shouldPrompt = (column === "todo" || column === "triage") && hasStepProgress;
+      let moveOptions: { preserveProgress?: boolean } | undefined;
+
+      if (shouldPrompt) {
+        const keepProgress = await confirm({
+          title: "Preserve Progress?",
+          message: "This task has completed steps. Keep progress before moving?",
+          confirmLabel: "Keep Progress",
+          cancelLabel: "Reset Progress",
+        });
+
+        if (keepProgress) {
+          moveOptions = { preserveProgress: true };
+        } else {
+          const resetProgress = await confirm({
+            title: "Reset Progress?",
+            message: "Reset all step progress before moving this task?",
+            confirmLabel: "Reset Progress",
+            cancelLabel: "Cancel Move",
+            danger: true,
+          });
+          if (!resetProgress) {
+            return;
+          }
+        }
+      }
+
+      await onMoveTask(task.id, column, moveOptions);
       addToast(`Moved ${task.id} to ${COLUMN_LABELS[column]}`, "success");
-    }).catch((err) => {
+    } catch (err) {
       addToast(`Failed to move ${task.id}: ${getErrorMessage(err)}`, "error");
-    });
-  }, [addToast, onMoveTask, task.id]);
+    }
+  }, [addToast, confirm, onMoveTask, task.id, task.steps]);
 
   const handleRetryTask = useCallback(async (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();

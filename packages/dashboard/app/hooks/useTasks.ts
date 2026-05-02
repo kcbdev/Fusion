@@ -333,8 +333,12 @@ export function useTasks(options?: UseTasksOptions) {
     return task;
   }, [projectId]);
 
-  const moveTask = useCallback(async (id: string, column: Column): Promise<Task> => {
-    return normalizeTask(await api.moveTask(id, column, projectId));
+  const moveTask = useCallback(async (
+    id: string,
+    column: Column,
+    optionsOrPosition?: { preserveProgress?: boolean } | number,
+  ): Promise<Task> => {
+    return normalizeTask(await api.moveTask(id, column, projectId, optionsOrPosition));
   }, [projectId]);
 
   const pauseTask = useCallback(async (id: string): Promise<Task> => {

@@ -5771,6 +5771,122 @@ Task with acceptance criteria
       expect(moved.currentStep).toBe(2);
     });
 
+    it("preserves step progress and currentStep when moving in-progress → todo with preserveProgress", async () => {
+      const task = await createTaskWithSteps();
+      const dir = join(rootDir, ".fusion", "tasks", task.id);
+      await writeFile(
+        join(dir, "PROMPT.md"),
+        `# ${task.id}: Checkbox keep
+
+## Steps
+
+### Step 0: Preflight
+
+- [x] Done thing
+
+### Step 1: Implement
+
+- [ ] Pending thing
+
+### Step 2: Verify
+
+- [ ] Pending thing
+`,
+      );
+
+      await store.moveTask(task.id, "todo");
+      await store.moveTask(task.id, "in-progress");
+      await setMixedStepStatuses(task.id);
+      await store.updateTask(task.id, {
+        currentStep: 2,
+        worktree: "/tmp/worktree",
+        executionStartedAt: new Date().toISOString(),
+        executionCompletedAt: new Date().toISOString(),
+      });
+
+      const moved = await store.moveTask(task.id, "todo", { preserveProgress: true });
+      const prompt = await readFile(join(dir, "PROMPT.md"), "utf-8");
+
+      expect(moved.steps[0].status).toBe("done");
+      expect(moved.steps[1].status).toBe("in-progress");
+      expect(moved.currentStep).toBe(2);
+      expect(moved.worktree).toBeUndefined();
+      expect(moved.executionStartedAt).toBeUndefined();
+      expect(moved.executionCompletedAt).toBeUndefined();
+      expect(prompt).toContain("- [x] Done thing");
+    });
+
+    it("still resets when preserveProgress is true but all steps are pending", async () => {
+      const task = await createTaskWithSteps();
+      await store.moveTask(task.id, "todo");
+      await store.moveTask(task.id, "in-progress");
+      await setMixedStepStatuses(task.id);
+      await store.updateStep(task.id, 0, "pending");
+      await store.updateStep(task.id, 1, "pending");
+      await store.updateTask(task.id, { currentStep: 2 });
+
+      const moved = await store.moveTask(task.id, "todo", { preserveProgress: true });
+
+      expect(moved.steps.every((step) => step.status === "pending")).toBe(true);
+      expect(moved.currentStep).toBe(0);
+    });
+
+    it("preserves steps for in-review → todo and done → todo with preserveProgress", async () => {
+      const fromReview = await createTaskWithSteps();
+      await store.moveTask(fromReview.id, "todo");
+      await store.moveTask(fromReview.id, "in-progress");
+      await setMixedStepStatuses(fromReview.id);
+      await store.moveTask(fromReview.id, "in-review");
+      await store.updateTask(fromReview.id, { currentStep: 1, executionStartedAt: new Date().toISOString() });
+
+      const reviewMoved = await store.moveTask(fromReview.id, "todo", { preserveProgress: true });
+      expect(reviewMoved.steps[0].status).toBe("done");
+      expect(reviewMoved.steps[1].status).toBe("in-progress");
+      expect(reviewMoved.currentStep).toBe(1);
+      expect(reviewMoved.executionStartedAt).toBeUndefined();
+
+      const fromDone = await createTaskWithSteps();
+      await store.moveTask(fromDone.id, "todo");
+      await store.moveTask(fromDone.id, "in-progress");
+      await setMixedStepStatuses(fromDone.id);
+      await store.updateStep(fromDone.id, 1, "done");
+      await store.updateStep(fromDone.id, 2, "done");
+      await store.moveTask(fromDone.id, "in-review");
+      await store.moveTask(fromDone.id, "done");
+      await store.updateTask(fromDone.id, { currentStep: 2, executionStartedAt: new Date().toISOString() });
+
+      const doneMoved = await store.moveTask(fromDone.id, "todo", { preserveProgress: true });
+      expect(doneMoved.steps[0].status).toBe("done");
+      expect(doneMoved.steps[1].status).toBe("done");
+      expect(doneMoved.currentStep).toBe(2);
+      expect(doneMoved.executionStartedAt).toBeUndefined();
+    });
+
+    it("preserveResumeState takes precedence when preserveProgress and preserveResumeState are both true", async () => {
+      const task = await createTaskWithSteps();
+      await store.moveTask(task.id, "todo");
+      await store.moveTask(task.id, "in-progress");
+      await setMixedStepStatuses(task.id);
+      await store.updateTask(task.id, {
+        currentStep: 2,
+        worktree: "/tmp/worktree",
+        executionStartedAt: new Date().toISOString(),
+        executionCompletedAt: new Date().toISOString(),
+      });
+
+      const moved = await store.moveTask(task.id, "todo", {
+        preserveProgress: true,
+        preserveResumeState: true,
+      });
+
+      expect(moved.steps[0].status).toBe("done");
+      expect(moved.steps[1].status).toBe("in-progress");
+      expect(moved.currentStep).toBe(2);
+      expect(moved.worktree).toBe("/tmp/worktree");
+      expect(moved.executionStartedAt).toBeDefined();
+      expect(moved.executionCompletedAt).toBeUndefined();
+    });
+
     it("resets steps when moving from in-review to todo", async () => {
       const task = await createTaskWithSteps();
       await store.moveTask(task.id, "todo");

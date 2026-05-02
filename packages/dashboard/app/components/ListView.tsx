@@ -13,6 +13,7 @@ import type { ToastType } from "../hooks/useToast";
 import { useViewportMode } from "../hooks/useViewportMode";
 import { getScopedItem, removeScopedItem, setScopedItem } from "../utils/projectStorage";
 import { getUnifiedTaskProgress } from "../utils/taskProgress";
+import { useConfirm } from "../hooks/useConfirm";
 
 const COLUMN_COLOR_MAP: Record<Column, string> = {
   triage: "var(--triage)",
@@ -155,7 +156,7 @@ function clampSidebarWidth(width: number, containerWidth: number): number {
 
 interface ListViewProps {
   tasks: Task[];
-  onMoveTask: (id: string, column: Column) => Promise<Task>;
+  onMoveTask: (id: string, column: Column, options?: { preserveProgress?: boolean }) => Promise<Task>;
   onRetryTask?: (id: string) => Promise<Task>;
   onOpenDetail: (task: Task | TaskDetail) => void;
   addToast: (message: string, type?: ToastType) => void;
@@ -238,6 +239,7 @@ export function ListView({
   const [selectedColumn, setSelectedColumn] = useState<Column | null>(null);
   const viewportMode = useViewportMode();
   const isMobile = viewportMode === "mobile";
+  const { confirm } = useConfirm();
 
   // Column visibility state - initialize from localStorage or default to all columns
   const [visibleColumns, setVisibleColumns] = useState<Set<ListColumn>>(() => readVisibleColumns(projectId));
@@ -818,12 +820,41 @@ export function ListView({
       }
 
       try {
-        await onMoveTask(taskId, column);
+        const task = tasks.find((candidate) => candidate.id === taskId);
+        const hasStepProgress = task?.steps.some((step) => step.status !== "pending") ?? false;
+        const shouldPrompt = (column === "todo" || column === "triage") && hasStepProgress;
+
+        let moveOptions: { preserveProgress?: boolean } | undefined;
+        if (shouldPrompt) {
+          const keepProgress = await confirm({
+            title: "Preserve Progress?",
+            message: "This task has completed steps. Keep progress before moving?",
+            confirmLabel: "Keep Progress",
+            cancelLabel: "Reset Progress",
+          });
+
+          if (keepProgress) {
+            moveOptions = { preserveProgress: true };
+          } else {
+            const resetProgress = await confirm({
+              title: "Reset Progress?",
+              message: "Reset all step progress before moving this task?",
+              confirmLabel: "Reset Progress",
+              cancelLabel: "Cancel Move",
+              danger: true,
+            });
+            if (!resetProgress) {
+              return;
+            }
+          }
+        }
+
+        await onMoveTask(taskId, column, moveOptions);
       } catch (err) {
         addToast(getErrorMessage(err), "error");
       }
     },
-    [onMoveTask, addToast]
+    [onMoveTask, addToast, tasks, confirm]
   );
 
   const getSortIcon = (field: SortField) => {

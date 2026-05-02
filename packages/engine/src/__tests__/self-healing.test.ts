@@ -1099,7 +1099,7 @@ describe("SelfHealingManager", () => {
         "FN-2164",
         expect.stringContaining("Auto-retry 1/3"),
       );
-      expect(store.moveTask).toHaveBeenCalledWith("FN-2164", "todo");
+      expect(store.moveTask).toHaveBeenCalledWith("FN-2164", "todo", { preserveProgress: true });
 
       managerWithRecovery.stop();
     });
@@ -1783,7 +1783,7 @@ describe("SelfHealingManager", () => {
         "FN-1572",
         expect.stringContaining("in-review task still had incomplete steps"),
       );
-      expect(store.moveTask).toHaveBeenCalledWith("FN-1572", "todo");
+      expect(store.moveTask).toHaveBeenCalledWith("FN-1572", "todo", { preserveProgress: true });
 
       managerWithRecovery.stop();
     });
@@ -2237,7 +2237,7 @@ describe("SelfHealingManager", () => {
 
       expect(result).toBe(1);
       expect(store.updateTask).not.toHaveBeenCalled();
-      expect(store.moveTask).toHaveBeenCalledWith("FN-9003", "todo");
+      expect(store.moveTask).toHaveBeenCalledWith("FN-9003", "todo", { preserveProgress: true });
 
       managerWithRecovery.stop();
     });
@@ -2276,7 +2276,7 @@ describe("SelfHealingManager", () => {
         "FN-200",
         "Auto-recovered orphaned executor task — missing worktree/session, moved back to todo",
       );
-      expect(store.moveTask).toHaveBeenCalledWith("FN-200", "todo");
+      expect(store.moveTask).toHaveBeenCalledWith("FN-200", "todo", { preserveProgress: true });
 
       managerWithRecovery.stop();
     });
@@ -2404,7 +2404,7 @@ describe("SelfHealingManager", () => {
         "FN-210",
         expect.stringContaining("worktree exists but no active session"),
       );
-      expect(store.moveTask).toHaveBeenCalledWith("FN-210", "todo");
+      expect(store.moveTask).toHaveBeenCalledWith("FN-210", "todo", { preserveProgress: true });
 
       managerWithRecovery.stop();
     });

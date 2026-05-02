@@ -21,7 +21,7 @@ interface ColumnProps {
   tasks: Task[];
   projectId?: string;
   maxConcurrent: number;
-  onMoveTask: (id: string, column: ColumnType) => Promise<Task>;
+  onMoveTask: (id: string, column: ColumnType, optionsOrPosition?: { preserveProgress?: boolean } | number) => Promise<Task>;
   onPauseTask?: (id: string) => Promise<Task>;
   onOpenDetail: (task: Task | TaskDetail) => void;
   addToast: (message: string, type?: ToastType) => void;
@@ -136,17 +136,46 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, onMoveTask, 
     if (!taskId) return;
 
     // Check if task is already in this column - if so, skip the API call
-    const task = tasks.find(t => t.id === taskId);
+    const task = tasks.find((t) => t.id === taskId);
     if (task && task.column === column) {
       return; // No-op: task is already in this column
     }
 
     try {
-      await onMoveTask(taskId, column);
+      const sourceTask = allTasks?.find((t) => t.id === taskId) ?? task;
+      const hasStepProgress = sourceTask?.steps.some((step) => step.status !== "pending") ?? false;
+      const shouldPrompt = (column === "todo" || column === "triage") && hasStepProgress;
+      let moveOptions: { preserveProgress?: boolean } | undefined;
+
+      if (shouldPrompt) {
+        const keepProgress = await confirm({
+          title: "Preserve Progress?",
+          message: "This task has completed steps. Keep progress before moving?",
+          confirmLabel: "Keep Progress",
+          cancelLabel: "Reset Progress",
+        });
+
+        if (keepProgress) {
+          moveOptions = { preserveProgress: true };
+        } else {
+          const resetProgress = await confirm({
+            title: "Reset Progress?",
+            message: "Reset all step progress before moving this task?",
+            confirmLabel: "Reset Progress",
+            cancelLabel: "Cancel Move",
+            danger: true,
+          });
+          if (!resetProgress) {
+            return;
+          }
+        }
+      }
+
+      await onMoveTask(taskId, column, moveOptions);
     } catch (err) {
       addToast(getErrorMessage(err), "error");
     }
-  }, [column, onMoveTask, addToast, tasks]);
+  }, [addToast, allTasks, column, confirm, onMoveTask, tasks]);
 
   const worktreeGroups = useMemo(() => {
     if (column !== "in-progress") return [];
@@ -237,10 +266,36 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, onMoveTask, 
     });
     if (!confirmed) return;
 
+    const hasAnyProgress = tasks.some((task) => task.steps.some((step) => step.status !== "pending"));
+    let preserveProgress = false;
+    if (hasAnyProgress) {
+      const keepProgress = await confirm({
+        title: "Preserve Progress?",
+        message: "Some tasks have completed steps. Keep progress before moving to Todo?",
+        confirmLabel: "Keep Progress",
+        cancelLabel: "Reset Progress",
+      });
+
+      if (keepProgress) {
+        preserveProgress = true;
+      } else {
+        const resetProgress = await confirm({
+          title: "Reset Progress?",
+          message: "Reset step progress for tasks before moving to Todo?",
+          confirmLabel: "Reset Progress",
+          cancelLabel: "Cancel Move",
+          danger: true,
+        });
+        if (!resetProgress) {
+          return;
+        }
+      }
+    }
+
     setIsMovingAllToTodo(true);
     try {
       const results = await Promise.allSettled(
-        tasks.map((task) => onMoveTask(task.id, "todo")),
+        tasks.map((task) => onMoveTask(task.id, "todo", preserveProgress ? { preserveProgress: true } : undefined)),
       );
       const failed = results.filter((r) => r.status === "rejected").length;
       const moved = results.length - failed;

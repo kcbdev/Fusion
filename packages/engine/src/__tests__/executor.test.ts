@@ -6085,7 +6085,7 @@ describe("TaskExecutor usage limit detection", () => {
       recoveryRetryCount: 1,
       nextRecoveryAt: expect.any(String),
     }));
-    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo", { preserveProgress: true });
     expect(store.updateTask).not.toHaveBeenCalledWith(
       "FN-001",
       expect.objectContaining({ status: "failed" }),
@@ -6227,7 +6227,7 @@ describe("TaskExecutor bounded recovery retries", () => {
       recoveryRetryCount: 1,
       nextRecoveryAt: expect.any(String),
     }));
-    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo", { preserveProgress: true });
     expect(onError).not.toHaveBeenCalled();
 
     // Second failure: count goes from 1 to 2
@@ -6250,7 +6250,7 @@ describe("TaskExecutor bounded recovery retries", () => {
     expect(store.updateTask).toHaveBeenCalledWith("FN-001", expect.objectContaining({
       recoveryRetryCount: 2,
     }));
-    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo", { preserveProgress: true });
     expect(onError).not.toHaveBeenCalled();
   });
 
@@ -6487,7 +6487,7 @@ describe("TaskExecutor bounded recovery retries", () => {
     });
 
     // Exhausted no-fn_task_done retries now requeue immediately to todo.
-    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo", { preserveProgress: true });
   });
 });
 
@@ -7542,7 +7542,7 @@ describe("Workflow Steps Execution", () => {
       error: "Agent finished without calling fn_task_done (after 3 retries)",
       taskDoneRetryCount: 1,
     });
-    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo", { preserveProgress: true });
     expect(store.logEntry).toHaveBeenCalledWith(
       "FN-001",
       "Agent finished without calling fn_task_done (after 3 retries) — requeued to todo immediately (1/3)",
@@ -13359,7 +13359,7 @@ describe("TaskExecutor messaging tools", () => {
           taskDoneRetryCount: 1,
         }),
       );
-      expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo");
+      expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo", { preserveProgress: true });
     });
 
     it("still checks completion blockers in fast mode", async () => {

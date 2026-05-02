@@ -354,10 +354,22 @@ export function batchUpdateTaskModels(
   });
 }
 
-export function moveTask(id: string, column: Column, projectId?: string): Promise<Task> {
+export function moveTask(
+  id: string,
+  column: Column,
+  projectId?: string,
+  optionsOrPosition?: { preserveProgress?: boolean } | number,
+): Promise<Task> {
   return api<Task>(withProjectId(`/tasks/${id}/move`, projectId), {
     method: "POST",
-    body: JSON.stringify({ column }),
+    body: JSON.stringify({
+      column,
+      ...(
+        typeof optionsOrPosition === "object" && optionsOrPosition?.preserveProgress
+          ? { preserveProgress: true }
+          : {}
+      ),
+    }),
   });
 }
 

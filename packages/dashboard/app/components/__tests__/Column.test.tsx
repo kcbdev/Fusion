@@ -216,7 +216,7 @@ describe("Column pagination", () => {
 
     fireEvent.drop(column, { dataTransfer });
 
-    expect(onMoveTask).toHaveBeenCalledWith("KB-999", "todo");
+    expect(onMoveTask).toHaveBeenCalledWith("KB-999", "todo", undefined);
   });
 
   it("does not paginate at the threshold boundary", () => {
@@ -417,8 +417,8 @@ describe("Column in-progress/in-review bulk actions", () => {
     await waitFor(() => {
       expect(onMoveTask).toHaveBeenCalledTimes(2);
     });
-    expect(onMoveTask).toHaveBeenCalledWith("FN-001", "todo");
-    expect(onMoveTask).toHaveBeenCalledWith("FN-002", "todo");
+    expect(onMoveTask).toHaveBeenCalledWith("FN-001", "todo", undefined);
+    expect(onMoveTask).toHaveBeenCalledWith("FN-002", "todo", undefined);
     expect(screen.queryByRole("menu")).toBeNull();
     expect(mockConfirm).toHaveBeenCalledWith({
       title: "Move All to Todo",
@@ -486,7 +486,7 @@ describe("Column same-column drop", () => {
 
     fireEvent.drop(columnEl, { dataTransfer });
 
-    expect(onMoveTask).toHaveBeenCalledWith("FN-001", "in-review");
+    expect(onMoveTask).toHaveBeenCalledWith("FN-001", "in-review", undefined);
   });
 
   describe("favorite model prop forwarding (FN-770)", () => {

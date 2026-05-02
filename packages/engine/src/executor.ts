@@ -2516,7 +2516,7 @@ export class TaskExecutor {
                 worktree: null,
                 branch: null,
               });
-              await this.store.moveTask(task.id, "todo");
+              await this.store.moveTask(task.id, "todo", { preserveProgress: true });
               stuckRequeue = null; // Prevent outer finally from re-processing
               return;
             }
@@ -3177,7 +3177,7 @@ export class TaskExecutor {
                   undefined,
                   this.currentRunContext,
                 );
-                await this.store.moveTask(task.id, "todo");
+                await this.store.moveTask(task.id, "todo", { preserveProgress: true });
                 executorLog.log(`✗ ${task.id} failed after ${MAX_TASK_DONE_SESSION_RETRIES} retries — requeued to todo (${nextRequeueCount}/${MAX_TASK_DONE_REQUEUE_RETRIES})`);
               } else {
                 await this.store.updateTask(task.id, { status: "failed", error: errorMessage });
@@ -3429,7 +3429,7 @@ export class TaskExecutor {
               worktree: null,
               branch: null,
             });
-            await this.store.moveTask(task.id, "todo");
+            await this.store.moveTask(task.id, "todo", { preserveProgress: true });
             return;
           }
 

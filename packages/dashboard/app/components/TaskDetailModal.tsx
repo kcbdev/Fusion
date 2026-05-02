@@ -156,7 +156,7 @@ interface TaskDetailModalProps {
   tasks?: Task[];
   onClose: () => void;
   onOpenDetail: (task: Task | TaskDetail) => void; // For clicking dependencies
-  onMoveTask: (id: string, column: Column) => Promise<Task>;
+  onMoveTask: (id: string, column: Column, optionsOrPosition?: { preserveProgress?: boolean } | number) => Promise<Task>;
   onDeleteTask: (id: string, options?: { removeDependencyReferences?: boolean }) => Promise<Task>;
   onMergeTask: (id: string) => Promise<MergeResult>;
   onRetryTask?: (id: string) => Promise<Task>;
@@ -942,14 +942,42 @@ export function TaskDetailModal({
   const handleMove = useCallback(
     async (column: Column) => {
       try {
-        await onMoveTask(task.id, column);
+        const hasStepProgress = task.steps.some((step) => step.status !== "pending");
+        const shouldPrompt = (column === "todo" || column === "triage") && hasStepProgress;
+
+        let moveOptions: { preserveProgress?: boolean } | undefined;
+        if (shouldPrompt) {
+          const keepProgress = await confirm({
+            title: "Preserve Progress?",
+            message: "This task has completed steps. Keep progress before moving?",
+            confirmLabel: "Keep Progress",
+            cancelLabel: "Reset Progress",
+          });
+
+          if (keepProgress) {
+            moveOptions = { preserveProgress: true };
+          } else {
+            const resetProgress = await confirm({
+              title: "Reset Progress?",
+              message: "Reset all step progress before moving this task?",
+              confirmLabel: "Reset Progress",
+              cancelLabel: "Cancel Move",
+              danger: true,
+            });
+            if (!resetProgress) {
+              return;
+            }
+          }
+        }
+
+        await onMoveTask(task.id, column, moveOptions);
         onClose();
         addToast(`Moved to ${COLUMN_LABELS[column]}`, "success");
       } catch (err) {
         addToast(getErrorMessage(err), "error");
       }
     },
-    [task.id, onMoveTask, onClose, addToast],
+    [task.id, task.steps, onMoveTask, onClose, addToast, confirm],
   );
 
   const handleDelete = useCallback(async () => {

@@ -214,11 +214,16 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
   router.post("/tasks/:id/move", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
-      const { column } = req.body;
+      const { column, preserveProgress } = req.body;
       if (!column || !COLUMNS.includes(column as Column)) {
         throw badRequest(`Invalid column. Must be one of: ${COLUMNS.join(", ")}`);
       }
-      const task = await scopedStore.moveTask(req.params.id, column as Column);
+      if (preserveProgress != null && typeof preserveProgress !== "boolean") {
+        throw badRequest("preserveProgress must be a boolean");
+      }
+      const task = await scopedStore.moveTask(req.params.id, column as Column, {
+        preserveProgress,
+      });
       res.json(task);
     } catch (err: unknown) {
       if (err instanceof ApiError) {

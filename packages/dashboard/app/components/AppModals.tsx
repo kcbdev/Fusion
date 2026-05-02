@@ -53,7 +53,7 @@ interface AppModalsProps {
   projectActions: Pick<UseProjectActionsResult, "handleAddProject" | "handleSetupComplete" | "handleModelOnboardingComplete">;
   taskHandlers: Pick<UseTaskHandlersResult, "handleModalCreate" | "handlePlanningTaskCreated" | "handlePlanningTasksCreated" | "handleSubtaskTasksCreated" | "handleGitHubImport">;
   taskOperations: {
-    moveTask: (taskId: string, column: Column, position?: number) => Promise<Task>;
+    moveTask: (taskId: string, column: Column, optionsOrPosition?: { preserveProgress?: boolean } | number) => Promise<Task>;
     deleteTask: (taskId: string) => Promise<Task>;
     mergeTask: (taskId: string) => Promise<MergeResult>;
     retryTask: (taskId: string) => Promise<Task>;
