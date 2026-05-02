@@ -4352,10 +4352,13 @@ describe("TaskDetailModal", () => {
       );
 
       expect(screen.getByText("Source issue")).toBeTruthy();
-      expect(screen.getByRole("link", { name: "(#2473)" })).toHaveAttribute(
+      expect(screen.getByLabelText("GitHub source issue")).toBeTruthy();
+      const summaryIssueLink = screen.getByRole("link", { name: "(#2473)" });
+      expect(summaryIssueLink).toHaveAttribute(
         "href",
         "https://github.com/runfusion/fusion/issues/2473",
       );
+      expect(summaryIssueLink.classList.contains("detail-source-link--summary")).toBe(true);
       expect(screen.queryByText("Provider")).toBeNull();
 
       const toggle = screen.getByRole("button", { name: "Expand source issue details" });
@@ -4373,6 +4376,42 @@ describe("TaskDetailModal", () => {
       expect(sourceLink).toHaveAttribute("href", "https://github.com/runfusion/fusion/issues/2473");
       expect(sourceLink).toHaveAttribute("target", "_blank");
       expect(screen.getByTestId("chevron-right-icon").classList.contains("detail-source-chevron--expanded")).toBe(true);
+    });
+
+    it("applies compact GitHub source summary styling contracts", () => {
+      const css = loadAllAppCss();
+
+      expectBaseRule(css, ".detail-source-provider-badge", "border-radius: var(--radius-pill);");
+      expectBaseRule(css, ".detail-source-provider-badge", "background: color-mix(in srgb, var(--text-muted) 18%, transparent);");
+      expectBaseRule(css, ".detail-source-link--summary", "text-decoration: none;");
+      expectBaseRule(css, ".detail-source-section .detail-source-grid", "margin-top: var(--space-sm);");
+      expectBaseRule(css, ".detail-source-section .detail-source-grid", "padding-top: var(--space-sm);");
+    });
+
+    it("does not render GitHub badge for non-github providers", () => {
+      render(
+        <TaskDetailModal
+          task={makeTask({
+            sourceIssue: {
+              provider: "gitlab",
+              repository: "runfusion/fusion",
+              externalIssueId: "42",
+              issueNumber: 42,
+              url: "https://gitlab.com/runfusion/fusion/-/issues/42",
+            },
+          })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      expect(screen.queryByLabelText("GitHub source issue")).toBeNull();
+      expect(document.querySelector(".detail-source-provider-badge")).toBeNull();
+      expect(screen.getByRole("link", { name: "(#42)" })).toBeTruthy();
     });
 
     it("hides source issue read section when sourceIssue metadata is missing", () => {

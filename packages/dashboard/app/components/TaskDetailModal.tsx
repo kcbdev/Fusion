@@ -1864,9 +1864,15 @@ export function TaskDetailModal({
               <div className="detail-source-header">
                 <div className="detail-source-summary">
                   <span className="detail-source-label">Source issue</span>
+                  {task.sourceIssue.provider.toLowerCase() === "github" && (
+                    <span className="detail-source-provider-badge" aria-label="GitHub source issue">
+                      <GitBranch aria-hidden="true" />
+                      <span>GitHub</span>
+                    </span>
+                  )}
                   {task.sourceIssue.url ? (
                     <a
-                      className="detail-source-link detail-source-number"
+                      className="detail-source-link detail-source-link--summary detail-source-number"
                       href={task.sourceIssue.url}
                       target="_blank"
                       rel="noopener noreferrer"
