@@ -1,5 +1,16 @@
 # @runfusion/fusion
 
+## 0.15.0
+
+### Minor Changes
+
+- 9e52028: Add host support for plugin-registered top-level dashboard views and ship the first plugin-first Graph view surface for dependency visualization.
+
+### Patch Changes
+
+- ed477f8: Fix recurring SQLite instability under heavy agent logging by tuning WAL pragmas, adding startup integrity detection with non-blocking corruption signaling, batching agent log writes in transactions, and reducing default maintenance cadence to checkpoint WAL more frequently.
+- 9fc5fd9: Limit unregistered project detection to the exact current working directory.
+
 ## 0.14.3
 
 ### Patch Changes

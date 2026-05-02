@@ -2,6 +2,52 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
+## 0.15.0
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- @fusion/core@0.15.0
+- @fusion/engine@0.15.0
+- @fusion-plugin-examples/dependency-graph@0.1.1
+- @fusion-plugin-examples/hermes-runtime@0.2.20
+- @fusion-plugin-examples/openclaw-runtime@0.2.20
+- @fusion-plugin-examples/paperclip-runtime@0.2.20
+
+### @fusion/engine
+
+#### Patch Changes
+
+- @fusion/core@0.15.0
+- @fusion/pi-claude-cli@0.15.0
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- @fusion/core@0.15.0
+
+### @runfusion/fusion
+
+#### Minor Changes
+
+- 9e52028: Add host support for plugin-registered top-level dashboard views and ship the first plugin-first Graph view surface for dependency visualization.
+
+#### Patch Changes
+
+- ed477f8: Fix recurring SQLite instability under heavy agent logging by tuning WAL pragmas, adding startup integrity detection with non-blocking corruption signaling, batching agent log writes in transactions, and reducing default maintenance cadence to checkpoint WAL more frequently.
+- 9fc5fd9: Limit unregistered project detection to the exact current working directory.
+
+### runfusion.ai
+
+#### Patch Changes
+
+- Updated dependencies [ed477f8]
+- Updated dependencies [9fc5fd9]
+- Updated dependencies [9e52028]
+  - @runfusion/fusion@0.15.0
+
 ## 0.14.3
 
 ### @fusion/dashboard
