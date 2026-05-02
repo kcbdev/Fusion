@@ -1,6 +1,6 @@
 import type { AgentLogEntry } from "@fusion/core";
 import { ProviderIcon } from "./ProviderIcon";
-import { useRef, useEffect, useState, useCallback, useLayoutEffect, useMemo, type ReactElement } from "react";
+import { useRef, useEffect, useState, useCallback, useLayoutEffect, useMemo, useId, type ReactElement } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
@@ -85,9 +85,41 @@ function isToolLikeType(type: AgentLogEntry["type"]): boolean {
   return type === "tool" || type === "tool_result" || type === "tool_error";
 }
 
-function renderToolDetail(detail?: string): ReactElement | null {
-  if (!detail) return null;
-  return <pre className="agent-log-tool-detail">{detail}</pre>;
+interface CollapsibleToolDetailProps {
+  detail: string;
+  type?: "tool" | "tool_result" | "tool_error";
+}
+
+function CollapsibleToolDetail({ detail }: CollapsibleToolDetailProps): ReactElement {
+  const [expanded, setExpanded] = useState(false);
+  const contentId = useId();
+  const lineCount = detail.split("\n").length;
+  const toggleLabel = expanded
+    ? "Hide output"
+    : `Show output${lineCount > 1 ? ` (${lineCount} lines)` : ""}`;
+
+  return (
+    <div className="agent-log-tool-detail-wrapper">
+      <button
+        type="button"
+        className="agent-log-tool-detail-toggle"
+        onClick={() => setExpanded((prev) => !prev)}
+        aria-expanded={expanded}
+        aria-controls={contentId}
+        data-testid="tool-detail-toggle"
+      >
+        {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        <span>{toggleLabel}</span>
+      </button>
+      <div
+        id={contentId}
+        className={expanded ? "agent-log-tool-detail-content" : "agent-log-tool-detail-content agent-log-tool-detail-content--collapsed"}
+        data-testid="tool-detail-content"
+      >
+        <pre className="agent-log-tool-detail">{detail}</pre>
+      </div>
+    </div>
+  );
 }
 
 function shouldShowBadge(entry: AgentLogEntry, previousEntry?: AgentLogEntry): boolean {
@@ -493,7 +525,7 @@ export function AgentLogViewer({
                 <div key={group.key} className="agent-log-tool">
                   {agentBadge}
                   <div className="agent-log-tool-title">⚡ {entry.text}</div>
-                  {renderToolDetail(entry.detail)}
+                  {entry.detail ? <CollapsibleToolDetail detail={entry.detail} type="tool" /> : null}
                 </div>
               );
             }
@@ -503,7 +535,7 @@ export function AgentLogViewer({
                 <div key={group.key} className="agent-log-tool-result">
                   {agentBadge}
                   <div className="agent-log-tool-title">✓ {entry.text}</div>
-                  {renderToolDetail(entry.detail)}
+                  {entry.detail ? <CollapsibleToolDetail detail={entry.detail} type="tool_result" /> : null}
                 </div>
               );
             }
@@ -513,7 +545,7 @@ export function AgentLogViewer({
                 <div key={group.key} className="agent-log-tool-error">
                   {agentBadge}
                   <div className="agent-log-tool-title">✗ {entry.text}</div>
-                  {renderToolDetail(entry.detail)}
+                  {entry.detail ? <CollapsibleToolDetail detail={entry.detail} type="tool_error" /> : null}
                 </div>
               );
             }

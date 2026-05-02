@@ -225,23 +225,25 @@ describe("AgentLogViewer", () => {
     });
   });
 
-  it("renders tool entry detail when present", () => {
+  it("renders tool entry detail toggle collapsed by default when detail is present", () => {
     const entries = [
       makeEntry({ text: "Bash", type: "tool", detail: "ls -la packages/" }),
     ];
-    const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
-    const detail = container.querySelector(".agent-log-tool-detail");
-    expect(detail).toBeTruthy();
-    expect(detail!.textContent).toContain("ls -la packages/");
+    render(<AgentLogViewer entries={entries} loading={false} />);
+
+    const toggle = screen.getByTestId("tool-detail-toggle");
+    expect(toggle).toBeTruthy();
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    const content = screen.getByTestId("tool-detail-content");
+    expect(content.classList.contains("agent-log-tool-detail-content--collapsed")).toBe(true);
   });
 
-  it("does not render detail span when detail is absent", () => {
+  it("does not render detail toggle when detail is absent", () => {
     const entries = [
       makeEntry({ text: "Bash", type: "tool" }),
     ];
-    const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
-    const detail = container.querySelector(".agent-log-tool-detail");
-    expect(detail).toBeNull();
+    render(<AgentLogViewer entries={entries} loading={false} />);
+    expect(screen.queryByTestId("tool-detail-toggle")).toBeNull();
   });
 
   it("renders long detail text without breaking layout", () => {
@@ -250,12 +252,48 @@ describe("AgentLogViewer", () => {
       makeEntry({ text: "Read", type: "tool", detail: longDetail }),
     ];
     const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+    fireEvent.click(screen.getByTestId("tool-detail-toggle"));
     const detail = container.querySelector(".agent-log-tool-detail");
     expect(detail).toBeTruthy();
     expect(detail!.textContent).toContain(longDetail);
     // Verify the tool div still renders correctly
     const toolDiv = container.querySelector(".agent-log-tool");
     expect(toolDiv).toBeTruthy();
+  });
+
+  it("collapses tool-like detail by default across tool, tool_result, and tool_error", () => {
+    const entries = [
+      makeEntry({ text: "Read", type: "tool", detail: "tool output" }),
+      makeEntry({ text: "Done", type: "tool_result", detail: "result output" }),
+      makeEntry({ text: "Oops", type: "tool_error", detail: "error output" }),
+    ];
+    render(<AgentLogViewer entries={entries} loading={false} />);
+
+    const toggles = screen.getAllByTestId("tool-detail-toggle");
+    expect(toggles).toHaveLength(3);
+    const contents = screen.getAllByTestId("tool-detail-content");
+    expect(contents).toHaveLength(3);
+    for (const content of contents) {
+      expect(content.classList.contains("agent-log-tool-detail-content--collapsed")).toBe(true);
+    }
+  });
+
+  it("expands and collapses tool detail on toggle click", () => {
+    const entries = [
+      makeEntry({ text: "Bash", type: "tool", detail: "line 1\nline 2" }),
+    ];
+    render(<AgentLogViewer entries={entries} loading={false} />);
+
+    const toggle = screen.getByTestId("tool-detail-toggle");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    const content = screen.getByTestId("tool-detail-content");
+    expect(content.textContent).toContain("line 1");
+    expect(content.classList.contains("agent-log-tool-detail-content--collapsed")).toBe(false);
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(content.classList.contains("agent-log-tool-detail-content--collapsed")).toBe(true);
   });
 
   it("applies the viewer styling via the agent-log-viewer class", () => {
@@ -1120,6 +1158,7 @@ describe("AgentLogViewer", () => {
       const longDetail = "B".repeat(5000);
       const entries = [makeEntry({ text: "Read", type: "tool", detail: longDetail })];
       const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      fireEvent.click(screen.getByTestId("tool-detail-toggle"));
       const detail = container.querySelector(".agent-log-tool-detail");
       expect(detail).toBeTruthy();
       expect(detail!.textContent).toContain(longDetail);
@@ -1155,6 +1194,7 @@ describe("AgentLogViewer", () => {
       const longDetail = "D".repeat(5000);
       const entries = [makeEntry({ text: "Bash", type: "tool_result", detail: longDetail })];
       const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      fireEvent.click(screen.getByTestId("tool-detail-toggle"));
       const detail = container.querySelector(".agent-log-tool-detail");
       expect(detail).toBeTruthy();
       expect(detail!.textContent).toContain(longDetail);
@@ -1164,6 +1204,7 @@ describe("AgentLogViewer", () => {
       const longDetail = "E".repeat(5000);
       const entries = [makeEntry({ text: "Write", type: "tool_error", detail: longDetail })];
       const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      fireEvent.click(screen.getByTestId("tool-detail-toggle"));
       const detail = container.querySelector(".agent-log-tool-detail");
       expect(detail).toBeTruthy();
       expect(detail!.textContent).toContain(longDetail);
@@ -1173,6 +1214,7 @@ describe("AgentLogViewer", () => {
       const detailText = "stdout:\n  line one\n    indented line two\n";
       const entries = [makeEntry({ text: "Bash", type: "tool_result", detail: detailText })];
       const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      fireEvent.click(screen.getByTestId("tool-detail-toggle"));
       const detail = container.querySelector(".agent-log-tool-detail") as HTMLElement;
       expect(detail).toBeTruthy();
       expect(detail.tagName).toBe("PRE");
