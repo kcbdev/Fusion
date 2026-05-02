@@ -9,6 +9,7 @@
 
 import { CronExpressionParser } from "cron-parser";
 import { exec } from "node:child_process";
+import { isInProcessBackupCommand } from "./cron-runner.js";
 import { promisify } from "node:util";
 import type {
   RoutineStore,
@@ -261,6 +262,35 @@ export class RoutineRunner {
     timeoutMs: number | undefined,
     startedAt: string,
   ): Promise<AutomationRunResult> {
+    // Intercept the auto-backup command so it runs in-process via the engine's
+    // existing TaskStore instead of shelling out to a globally-installed
+    // fusion binary (which may be older than the running engine and re-create
+    // the nested `.fusion/.fusion/` directory). Mirrors cron-runner.ts.
+    if (isInProcessBackupCommand(command) && this.options.taskStore) {
+      try {
+        const { runBackupCommand } = await import("@fusion/core");
+        const fusionDir = this.options.taskStore.getFusionDir();
+        const settings = await this.options.taskStore.getSettings();
+        const result = await runBackupCommand(fusionDir, settings);
+        return {
+          success: result.success,
+          output: truncateOutput(result.output ?? "", ""),
+          error: result.success ? undefined : result.output,
+          startedAt,
+          completedAt: new Date().toISOString(),
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          success: false,
+          output: "",
+          error: message,
+          startedAt,
+          completedAt: new Date().toISOString(),
+        };
+      }
+    }
+
     try {
       const { stdout, stderr } = await execAsync(command, {
         timeout: timeoutMs ?? DEFAULT_TIMEOUT_MS,

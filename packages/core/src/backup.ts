@@ -411,7 +411,13 @@ export async function syncBackupAutomation(
   // Build the backup command.
   // Uses `npx runfusion.ai` so backups work even when only the zero-install
   // path (`npx runfusion.ai`) has been used and `fn` is not on PATH.
-  const command = "npx runfusion.ai backup --create";
+  // Sentinel command intercepted in-process by the engine's cron/routine
+  // runner (see `isInProcessBackupCommand` in @fusion/engine). Stored as a
+  // command rather than a step so existing UI listings still display it as
+  // a single-line action. Falls back to the npx shell-out only when read by
+  // a runner that does not implement the in-process interception (e.g.
+  // outdated globally-installed binaries running an older fusion engine).
+  const command = "fn backup --create";
 
   if (existingSchedule) {
     // Update existing schedule
@@ -462,7 +468,13 @@ export async function syncBackupRoutine(
     throw new Error(`Invalid backup schedule: ${schedule}`);
   }
 
-  const command = "npx runfusion.ai backup --create";
+  // Sentinel command intercepted in-process by the engine's cron/routine
+  // runner (see `isInProcessBackupCommand` in @fusion/engine). Stored as a
+  // command rather than a step so existing UI listings still display it as
+  // a single-line action. Falls back to the npx shell-out only when read by
+  // a runner that does not implement the in-process interception (e.g.
+  // outdated globally-installed binaries running an older fusion engine).
+  const command = "fn backup --create";
   const input = {
     name: BACKUP_SCHEDULE_NAME,
     description: "Automatic database backup based on project settings",

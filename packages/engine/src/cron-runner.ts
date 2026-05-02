@@ -34,6 +34,23 @@ function execCommand(command: string, options: Parameters<typeof exec>[1]): Prom
   });
 }
 
+/**
+ * Recognize commands that the auto-backup feature schedules. These shell out
+ * to whatever fusion binary is on PATH — which may be older than the running
+ * process and still carry the pluginStore-rootDir bug that creates a stray
+ * `.fusion/.fusion/` directory. We intercept and run the backup in-process.
+ */
+export function isInProcessBackupCommand(command: string | undefined): boolean {
+  if (!command) return false;
+  const normalized = command.trim().toLowerCase();
+  return (
+    /^(?:npx\s+)?runfusion(?:\.ai)?\s+backup\b/.test(normalized) ||
+    /^(?:npx\s+)?@runfusion\/fusion\s+backup\b/.test(normalized) ||
+    /^fn\s+backup\b/.test(normalized) ||
+    /^fusion\s+backup\b/.test(normalized)
+  );
+}
+
 /** Default execution timeout: 5 minutes. */
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 /** Maximum output buffer: 1 MB. */
@@ -287,6 +304,16 @@ export class CronRunner {
   ): Promise<AutomationRunResult> {
     log.log(`Executing ${schedule.name} (${schedule.id}): ${schedule.command}`);
 
+    // Intercept the auto-backup command: shelling out to `npx runfusion.ai`
+    // (or `fn backup`) launches whichever globally-installed fusion binary is
+    // on PATH, which may be older than the running process and re-introduce
+    // bugs we have already patched here. Running the backup in-process via
+    // the engine's already-open TaskStore is also faster (no node startup,
+    // no engine initialization) and uses identical logic.
+    if (isInProcessBackupCommand(schedule.command)) {
+      return this.executeBackupInProcess(schedule, startedAt);
+    }
+
     try {
       const timeoutMs = schedule.timeoutMs ?? DEFAULT_TIMEOUT_MS;
       const { stdout, stderr } = await execCommand(schedule.command, {
@@ -319,6 +346,47 @@ export class CronRunner {
         success: false,
         output,
         error: errorMessage,
+        startedAt,
+        completedAt: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Run an auto-backup schedule in-process via the engine's open TaskStore,
+   * bypassing the shell-out that would otherwise invoke an outdated fusion
+   * binary on PATH. See `isInProcessBackupCommand` for the matching contract.
+   */
+  private async executeBackupInProcess(
+    schedule: ScheduledTask,
+    startedAt: string,
+  ): Promise<AutomationRunResult> {
+    try {
+      const { runBackupCommand } = await import("@fusion/core");
+      const fusionDir = this.store.getFusionDir();
+      const settings = await this.store.getSettings();
+      const result = await runBackupCommand(fusionDir, settings);
+
+      if (result.success) {
+        log.log(`✓ ${schedule.name} completed in-process`);
+      } else {
+        log.warn(`✗ ${schedule.name} in-process backup reported failure: ${result.output}`);
+      }
+
+      return {
+        success: result.success,
+        output: truncateOutput(result.output ?? "", ""),
+        error: result.success ? undefined : result.output,
+        startedAt,
+        completedAt: new Date().toISOString(),
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn(`✗ ${schedule.name} in-process backup threw: ${message}`);
+      return {
+        success: false,
+        output: "",
+        error: message,
         startedAt,
         completedAt: new Date().toISOString(),
       };
