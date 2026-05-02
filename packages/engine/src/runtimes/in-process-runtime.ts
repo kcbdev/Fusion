@@ -13,6 +13,8 @@ import type {
 } from "@fusion/core";
 import { isEphemeralAgent } from "@fusion/core";
 import { Scheduler } from "../scheduler.js";
+import type { PrMonitor, PrComment } from "../pr-monitor.js";
+import type { PrInfo } from "@fusion/core";
 import { TaskExecutor, type TaskExecutorOptions } from "../executor.js";
 import { WorktreePool, isGitRepository } from "../worktree-pool.js";
 import { AgentSemaphore } from "../concurrency.js";
@@ -1002,6 +1004,17 @@ export class InProcessRuntime
       throw new Error("Scheduler not initialized. Call start() first.");
     }
     return this.scheduler;
+  }
+
+  configurePrMonitoring(options: {
+    prMonitor: PrMonitor;
+    onClosedPrFeedback?: (taskId: string, prInfo: PrInfo, comments: PrComment[]) => void | Promise<void>;
+  }): void {
+    if (!this.scheduler) {
+      throw new Error("Scheduler not initialized. Call start() first.");
+    }
+
+    this.scheduler.configurePrMonitoring(options);
   }
 
   /**

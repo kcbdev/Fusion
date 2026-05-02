@@ -456,9 +456,9 @@ When the merge strategy is **Pull request**:
 - A blocking review state (for example, active changes requested) prevents auto-merge until cleared
 - Closed PRs do not auto-merge
 - GitHub access for PR-first workflows must be available via `gh auth login`
-- kb expects the task branch to already be pushed using the standard branch name `kb/<task-id-lower>`
-
-**Non-goal:** the dashboard does not implicitly push branches before PR creation. Use your normal git workflow or automation to publish task branches first.
+- Task PR flows use the canonical branch name `fusion/<task-id-lower>`
+- Manual PR creation (`POST /api/tasks/:id/pr/create`) first checks for an existing PR on the task branch and links it instead of creating duplicates
+- When no PR exists, the dashboard publishes `fusion/<task-id-lower>` (`git push -u origin ...`) before creating the PR so manual PR creation works even when `autoMerge` is disabled
 
 ## Theming
 

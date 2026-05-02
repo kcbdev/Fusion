@@ -2854,21 +2854,27 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
         });
       }
 
-      // Create the PR
       const client = new GitHubClient();
+      const existingPr = await client.findPrForBranch({ head: branchName, state: "all", owner, repo });
 
-      const prInfo = await client.createPr({
-        owner,
-        repo,
-        title,
-        body,
-        head: branchName,
-        base,
-      });
+      let prInfo: PrInfo;
+      if (existingPr) {
+        prInfo = existingPr;
+      } else {
+        await runGitCommand(["push", "-u", "origin", branchName], scopedStore.getRootDir(), 60_000);
+        prInfo = await client.createPr({
+          owner,
+          repo,
+          title,
+          body,
+          head: branchName,
+          base,
+        });
+      }
 
       // Store PR info
       await scopedStore.updatePrInfo(task.id, prInfo);
-      await scopedStore.logEntry(task.id, "Created PR", `PR #${prInfo.number}: ${prInfo.url}`);
+      await scopedStore.logEntry(task.id, existingPr ? "Linked existing PR" : "Created PR", `PR #${prInfo.number}: ${prInfo.url}`);
 
       res.status(201).json(prInfo);
     } catch (err: unknown) {

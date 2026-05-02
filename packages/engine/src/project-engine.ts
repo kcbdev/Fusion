@@ -273,6 +273,11 @@ export class ProjectEngine {
     this.prMonitor.onNewComments((taskId, prInfo, comments) =>
       this.prCommentHandler!.handleNewComments(taskId, prInfo, comments),
     );
+    this.runtime.configurePrMonitoring({
+      prMonitor: this.prMonitor,
+      onClosedPrFeedback: (taskId, prInfo, comments) =>
+        this.prCommentHandler!.createFollowUpTask(taskId, prInfo, comments),
+    });
 
     // 3. Initialize notification services (unless caller manages them externally)
     if (!this.options.skipNotifier) {

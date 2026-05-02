@@ -424,6 +424,32 @@ export class Scheduler {
     return this.options.missionAutopilot;
   }
 
+  configurePrMonitoring(options: {
+    prMonitor?: PrMonitor;
+    onClosedPrFeedback?: SchedulerOptions["onClosedPrFeedback"];
+  }): void {
+    this.options.prMonitor = options.prMonitor;
+    this.options.onClosedPrFeedback = options.onClosedPrFeedback;
+
+    if (!options.prMonitor) {
+      return;
+    }
+
+    void this.store.listTasks({ slim: true, includeArchived: false })
+      .then((tasks) => {
+        const repo = getCurrentRepo(this.store.getRootDir());
+        if (!repo) return;
+
+        for (const task of tasks) {
+          if (task.column !== "in-review" || !task.prInfo) continue;
+          options.prMonitor!.startMonitoring(task.id, repo.owner, repo.repo, task.prInfo);
+        }
+      })
+      .catch((err) => {
+        schedulerLog.error("Failed to hydrate PR monitoring from existing in-review tasks:", err);
+      });
+  }
+
   /**
    * Resolve the base branch for a task being started.
    *

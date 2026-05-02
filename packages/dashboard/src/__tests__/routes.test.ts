@@ -16,6 +16,7 @@ import {
   getScopedStore as resolveRouteScopedStore,
 } from "../routes/context.js";
 import { GitHubClient } from "../github.js";
+import * as resolveDiffBaseModule from "../routes/resolve-diff-base.js";
 import { githubRateLimiter } from "../github-poll.js";
 import type { TaskStore, TaskAttachment, Routine, RoutineCreateInput, RoutineUpdateInput, RoutineExecutionResult, ChatSession, ChatMessage } from "@fusion/core";
 import type { TaskDetail } from "@fusion/core";
@@ -6567,6 +6568,59 @@ describe("Pause/Unpause endpoints", () => {
       } else {
         delete process.env.GITHUB_REPOSITORY;
       }
+    });
+
+    it("reuses an existing branch PR without pushing or creating a duplicate", async () => {
+      const originalEnv = process.env.GITHUB_REPOSITORY;
+      process.env.GITHUB_REPOSITORY = "owner/repo";
+      (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(mockInReviewTask);
+      const existingPr = { ...mockPrInfo, number: 77, url: "https://github.com/owner/repo/pull/77" };
+      const findSpy = vi.spyOn(GitHubClient.prototype, "findPrForBranch").mockResolvedValue(existingPr);
+      const createSpy = vi.spyOn(GitHubClient.prototype, "createPr").mockResolvedValue(mockPrInfo);
+      const pushSpy = vi.spyOn(resolveDiffBaseModule, "runGitCommand").mockResolvedValue("ok");
+
+      const res = await REQUEST(
+        buildApp(),
+        "POST",
+        "/api/tasks/KB-001/pr/create",
+        JSON.stringify({ title: "Test PR" }),
+        { "Content-Type": "application/json" }
+      );
+
+      expect(res.status).toBe(201);
+      expect(findSpy).toHaveBeenCalledWith(expect.objectContaining({ head: "fusion/fn-001", state: "all" }));
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(pushSpy).not.toHaveBeenCalledWith(["push", "-u", "origin", "fusion/fn-001"], expect.anything(), expect.anything());
+      expect(store.logEntry).toHaveBeenCalledWith("FN-001", "Linked existing PR", "PR #77: https://github.com/owner/repo/pull/77");
+
+      if (originalEnv) process.env.GITHUB_REPOSITORY = originalEnv;
+      else delete process.env.GITHUB_REPOSITORY;
+    });
+
+    it("pushes the task branch before creating a PR when no existing PR is found", async () => {
+      const originalEnv = process.env.GITHUB_REPOSITORY;
+      process.env.GITHUB_REPOSITORY = "owner/repo";
+      (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(mockInReviewTask);
+      const findSpy = vi.spyOn(GitHubClient.prototype, "findPrForBranch").mockResolvedValue(null);
+      const createSpy = vi.spyOn(GitHubClient.prototype, "createPr").mockResolvedValue(mockPrInfo);
+      const pushSpy = vi.spyOn(resolveDiffBaseModule, "runGitCommand").mockResolvedValue("ok");
+
+      const res = await REQUEST(
+        buildApp(),
+        "POST",
+        "/api/tasks/KB-001/pr/create",
+        JSON.stringify({ title: "Test PR" }),
+        { "Content-Type": "application/json" }
+      );
+
+      expect(res.status).toBe(201);
+      expect(findSpy).toHaveBeenCalled();
+      expect(pushSpy).toHaveBeenCalledWith(["push", "-u", "origin", "fusion/fn-001"], "/fake/root", 60_000);
+      expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ head: "fusion/fn-001" }));
+      expect(store.logEntry).toHaveBeenCalledWith("FN-001", "Created PR", "PR #42: https://github.com/owner/repo/pull/42");
+
+      if (originalEnv) process.env.GITHUB_REPOSITORY = originalEnv;
+      else delete process.env.GITHUB_REPOSITORY;
     });
 
     it("returns 404 for non-existent task", async () => {

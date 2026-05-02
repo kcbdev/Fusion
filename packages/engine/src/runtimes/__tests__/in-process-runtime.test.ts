@@ -18,6 +18,7 @@ const {
   mockResumeOrphaned,
   mockTaskStoreSettings,
   mockMessageStoreSetHook,
+  mockSchedulerConfigurePrMonitoring,
 } = vi.hoisted(() => ({
   mockSelfHealingStart: vi.fn(),
   mockSelfHealingStop: vi.fn(),
@@ -28,6 +29,7 @@ const {
   mockResumeOrphaned: vi.fn().mockResolvedValue(undefined),
   mockTaskStoreSettings: {} as Record<string, unknown>,
   mockMessageStoreSetHook: vi.fn(),
+  mockSchedulerConfigurePrMonitoring: vi.fn(),
 }));
 
 // Mock the TaskStore class
@@ -108,6 +110,7 @@ vi.mock("../../scheduler.js", async () => {
       self.start = vi.fn();
       self.stop = vi.fn();
       self.reconcileAllMissionFeatures = vi.fn().mockResolvedValue(0);
+      self.configurePrMonitoring = mockSchedulerConfigurePrMonitoring;
       return self;
     }),
   };
@@ -472,6 +475,19 @@ describe("InProcessRuntime", () => {
 
     it("should return undefined TriggerScheduler before start", () => {
       expect(runtime.getTriggerScheduler()).toBeUndefined();
+    });
+
+    it("configures scheduler PR monitoring after start", async () => {
+      await runtime.start();
+      runtime.configurePrMonitoring({
+        prMonitor: {} as never,
+        onClosedPrFeedback: vi.fn(),
+      });
+
+      expect(mockSchedulerConfigurePrMonitoring).toHaveBeenCalledTimes(1);
+      expect(mockSchedulerConfigurePrMonitoring).toHaveBeenCalledWith(expect.objectContaining({
+        prMonitor: expect.any(Object),
+      }));
     });
   });
 

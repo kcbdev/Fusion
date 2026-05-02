@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => ({
   notifierNotifyGridlock: vi.fn(),
   notificationServiceStart: vi.fn(async () => undefined),
   notificationServiceStop: vi.fn(),
+  runtimeConfigurePrMonitoring: vi.fn(),
+  prHandlerCreateFollowUpTask: vi.fn(async () => undefined),
 }));
 
 vi.mock("@fusion/core", async (importOriginal) => {
@@ -71,6 +73,7 @@ vi.mock("../pr-monitor.js", () => ({
 vi.mock("../pr-comment-handler.js", () => ({
   PrCommentHandler: vi.fn().mockImplementation(() => ({
     handleNewComments: vi.fn(),
+    createFollowUpTask: mocks.prHandlerCreateFollowUpTask,
   })),
 }));
 
@@ -101,6 +104,7 @@ vi.mock("../runtimes/in-process-runtime.js", () => ({
     getRoutineRunner: vi.fn(),
     getHeartbeatMonitor: vi.fn(),
     getTriggerScheduler: vi.fn(),
+    configurePrMonitoring: mocks.runtimeConfigurePrMonitoring,
   })),
 }));
 
@@ -281,6 +285,36 @@ describe("ProjectEngine notification ownership wiring", () => {
     await engine.stop();
     expect(mocks.notificationServiceStop).toHaveBeenCalledTimes(1);
     expect(mocks.notifierStop).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ProjectEngine PR monitoring wiring", () => {
+  it("wires runtime scheduler PR monitoring with closed-PR follow-up handler", async () => {
+    const { store } = createMockStore(baseSettings);
+    mocks.currentStore = store;
+
+    const engine = createEngine();
+    await engine.start();
+
+    expect(mocks.runtimeConfigurePrMonitoring).toHaveBeenCalled();
+    const configArg = mocks.runtimeConfigurePrMonitoring.mock.calls.at(-1)?.[0] as {
+      onClosedPrFeedback?: (taskId: string, prInfo: Record<string, unknown>, comments: unknown[]) => Promise<void> | void;
+    };
+    expect(typeof configArg.onClosedPrFeedback).toBe("function");
+
+    await configArg.onClosedPrFeedback?.(
+      "FN-3202",
+      { number: 12, status: "merged", url: "https://example/pr/12" } as never,
+      [{ id: 1, body: "please fix", user: { login: "reviewer" } }] as never,
+    );
+
+    expect(mocks.prHandlerCreateFollowUpTask).toHaveBeenCalledWith(
+      "FN-3202",
+      expect.objectContaining({ number: 12 }),
+      expect.any(Array),
+    );
+
+    await engine.stop();
   });
 });
 

@@ -250,11 +250,17 @@ fn task import owner/repo --labels bug --limit 20
 fn task import owner/repo --interactive
 ```
 
-Create PR for in-review task:
+Create PR for an `in-review` task:
 
 ```bash
 fn task pr-create FN-120 --title "Fix flaky auth flow" --base main
 ```
+
+Manual/non-auto-merge behavior:
+- Task PR branches use `fusion/<task-id-lower>`.
+- Manual PR creation first checks for an existing PR on that branch and links it when found.
+- If no PR exists, Fusion pushes the task branch to `origin` before creating the PR.
+- When buffered actionable PR feedback exists on a PR that is already merged/closed and the task leaves `in-review`, Fusion creates a dependency-linked follow-up task in `triage` so feedback is not stranded.
 
 ## Completion Modes (`mergeStrategy`)
 
