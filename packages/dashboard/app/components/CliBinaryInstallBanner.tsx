@@ -99,6 +99,9 @@ export function CliBinaryInstallBanner({ onOpenSettings }: Props) {
   if (dismissed) return null;
   if (!status) return null;
   if (status.state === "installed") return null;
+  // Honour the global `fnBinaryCheckEnabled` opt-out — when checks are
+  // disabled the install banner would be misleading.
+  if (status.state === "skipped") return null;
 
   return (
     <div className="cli-binary-banner" role="status">

@@ -20,6 +20,7 @@ const STATE_LABELS: Record<FnBinaryStatus["state"], { text: string; tone: "ok" |
   installed: { text: "Installed", tone: "ok" },
   missing: { text: "Not installed", tone: "err" },
   "version-mismatch": { text: "Version mismatch", tone: "warn" },
+  skipped: { text: "Check disabled", tone: "warn" },
 };
 
 /**

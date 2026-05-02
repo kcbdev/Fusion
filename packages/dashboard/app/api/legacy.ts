@@ -1309,7 +1309,7 @@ export interface FnBinaryStatus {
     invocation: string;
   };
   expectedVersion: string;
-  state: "installed" | "missing" | "version-mismatch";
+  state: "installed" | "missing" | "version-mismatch" | "skipped";
   install: { npm: string; curl: string; package: string };
 }
 
