@@ -27,6 +27,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import type { ToastType } from "../hooks/useToast";
+import { useViewportMode } from "../hooks/useViewportMode";
 import { subscribeSse } from "../sse-bus";
 import { MissionInterviewModal } from "./MissionInterviewModal";
 import { MilestoneSliceInterviewModal } from "./MilestoneSliceInterviewModal";
@@ -436,10 +437,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   const [selectedMission, setSelectedMission] = useState<MissionWithHierarchy | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [isMobileLayout, setIsMobileLayout] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return window.innerWidth <= 768;
-  });
+  const isMobile = useViewportMode() === "mobile";
 
   // Form states
   const [isCreatingMission, setIsCreatingMission] = useState(false);
@@ -491,17 +489,6 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
     enrichedDescription: string;
   } | null>(null);
   const [triagePreviewLoading, setTriagePreviewLoading] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const update = () => setIsMobileLayout(window.innerWidth <= 768);
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, []);
 
   // Auto-open interview modal when resuming a session
   useEffect(() => {
@@ -1998,7 +1985,12 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
 
   if (!isActive) return null;
 
-  const renderMissionDetailContent = (selectedMission: MissionWithHierarchy) => (
+  const renderMissionDetailContent = () => {
+    if (!selectedMission) {
+      return null;
+    }
+
+    return (
             <div className="mission-detail">
               <div className="mission-detail__header">
                 <div className="mission-detail__title-row">
@@ -3384,9 +3376,149 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
               )}
             </div>
 
-  );
+    );
+  };
 
-  const renderMissionListContent = () => (
+  const renderMissionListItems = () => missions.map((mission) => {
+    const m = mission;
+    const isSelected = selectedMission?.id === m.id;
+    const statusColors = missionStatusColors[m.status as MissionStatus] || { bg: "", text: "" };
+    const summary = m.summary;
+    const health = missionHealthById.get(m.id);
+    const healthState = getMissionHealthState(health);
+    const hasContent = Boolean(summary && (summary.totalMilestones > 0 || summary.totalFeatures > 0));
+    const totalTasks = health?.totalTasks ?? 0;
+    const tasksCompleted = health?.tasksCompleted ?? 0;
+    const tasksFailed = health?.tasksFailed ?? 0;
+    const progressPercent = health?.estimatedCompletionPercent ?? summary?.progressPercent ?? 0;
+    const showSummaryBlock = hasContent || totalTasks > 0 || tasksFailed > 0 || Boolean(health?.lastActivityAt);
+
+    const activeSliceLabel = m.status === "active" && (health?.currentMilestoneId || health?.currentSliceId)
+      ? "Current milestone/slice in progress"
+      : null;
+
+    return (
+      <div
+        key={m.id}
+        className={`mission-list__item ${isSelected ? "mission-list__item--selected" : ""}`}
+        onClick={() => handleSelectMission(mission)}
+      >
+        <div className="mission-list__item-content">
+          <div className="mission-list__item-header">
+            <Target size={16} className="mission-list__item-icon" />
+            <span className="mission-list__item-title">{m.title}</span>
+            {mission.autopilotEnabled && (
+              <span title="Autopilot enabled"><Zap size={12} className="mission-list__item-autopilot-icon" /></span>
+            )}
+            <span
+              className={`mission-health-badge mission-health-badge--${healthState}`}
+              data-testid={`mission-health-badge-${m.id}`}
+              aria-label={`Mission health: ${healthState}`}
+            />
+            <span
+              className="mission-status-badge mission-status-badge--sm"
+              style={{
+                backgroundColor: statusColors.bg,
+                color: statusColors.text,
+              }}
+            >
+              {m.status}
+            </span>
+          </div>
+          {m.description && (
+            <p className="mission-list__item-description">{m.description}</p>
+          )}
+          {activeSliceLabel && (
+            <p className="mission-list__item-active-slice">Active: {activeSliceLabel}</p>
+          )}
+          {showSummaryBlock && (
+            <div className="mission-list__item-summary">
+              {hasContent && (
+                <>
+                  <span className="mission-list__item-stat">
+                    {summary!.completedMilestones}/{summary!.totalMilestones} milestones
+                  </span>
+                  <span className="mission-list__item-stat">
+                    {summary!.completedFeatures}/{summary!.totalFeatures} features
+                  </span>
+                </>
+              )}
+              <span className="mission-list__item-stat" data-testid={`mission-task-stats-${m.id}`}>
+                {tasksCompleted}/{totalTasks} tasks
+              </span>
+              {tasksFailed > 0 && (
+                <button
+                  className="mission-list__item-failed"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleSelectMission(mission);
+                  }}
+                  data-testid={`mission-failed-${m.id}`}
+                  title="View mission failures"
+                >
+                  {tasksFailed} failed
+                </button>
+              )}
+              <span className="mission-relative-time" data-testid={`mission-last-activity-${m.id}`}>
+                Activity {getRelativeTime(health?.lastActivityAt)}
+              </span>
+              <div className={`mission-list__item-progress mission-list__item-progress--${healthState}`}>
+                <div
+                  className="mission-list__item-progress-bar"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="mission-list__item-actions" onClick={(e) => e.stopPropagation()}>
+          {m.status === "active" && (
+            <button
+              className="mission-icon-btn mission-icon-btn--danger"
+              onClick={() => handleStopMission(m.id)}
+              title="Stop mission"
+            >
+              <Square size={14} />
+            </button>
+          )}
+          {m.status === "blocked" && (
+            <button
+              className="mission-icon-btn mission-icon-btn--success"
+              onClick={() => handleResumeMission(m.id)}
+              title="Resume mission"
+            >
+              <Play size={14} />
+            </button>
+          )}
+          {m.status === "planning" && (
+            <button
+              className="mission-icon-btn mission-icon-btn--success"
+              onClick={() => handleStartMission(m.id)}
+              title="Start mission"
+            >
+              <Play size={14} />
+            </button>
+          )}
+          <button
+            className="mission-icon-btn"
+            onClick={() => handleEditMission(mission)}
+            title="Edit mission"
+          >
+            <Pencil size={14} />
+          </button>
+          <button
+            className="mission-icon-btn mission-icon-btn--danger"
+            onClick={() => setDeleteConfirmId({ type: "mission", id: m.id })}
+            title="Delete mission"
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      </div>
+    );
+  });
+
+  const renderMissionListContent = ({ hideBottomButtons = false }: { hideBottomButtons?: boolean } = {}) => (
             <div className="mission-list">
               {/* Create mission form */}
               {isCreatingMission && (
@@ -3418,145 +3550,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
               )}
 
               {/* Mission items */}
-              {missions.map((mission) => {
-                const m = mission;
-                const selId = selectedMission as { id: string } | null;
-                const isSelected = selId && selId.id === m.id;
-                const statusColors = missionStatusColors[m.status as MissionStatus] || { bg: "", text: "" };
-                const summary = m.summary;
-                const health = missionHealthById.get(m.id);
-                const healthState = getMissionHealthState(health);
-                const hasContent = Boolean(summary && (summary.totalMilestones > 0 || summary.totalFeatures > 0));
-                const totalTasks = health?.totalTasks ?? 0;
-                const tasksCompleted = health?.tasksCompleted ?? 0;
-                const tasksFailed = health?.tasksFailed ?? 0;
-                const progressPercent = health?.estimatedCompletionPercent ?? summary?.progressPercent ?? 0;
-                const showSummaryBlock = hasContent || totalTasks > 0 || tasksFailed > 0 || Boolean(health?.lastActivityAt);
-
-                const activeSliceLabel = m.status === "active" && (health?.currentMilestoneId || health?.currentSliceId)
-                  ? "Current milestone/slice in progress"
-                  : null;
-
-                return (
-                <div
-                  key={m.id}
-                  className={`mission-list__item ${isSelected ? "mission-list__item--selected" : ""}`}
-                  onClick={() => handleSelectMission(mission)}
-                >
-                  <div className="mission-list__item-content">
-                    <div className="mission-list__item-header">
-                      <Target size={16} className="mission-list__item-icon" />
-                      <span className="mission-list__item-title">{m.title}</span>
-                      {mission.autopilotEnabled && (
-                        <span title="Autopilot enabled"><Zap size={12} className="mission-list__item-autopilot-icon" /></span>
-                      )}
-                      <span
-                        className={`mission-health-badge mission-health-badge--${healthState}`}
-                        data-testid={`mission-health-badge-${m.id}`}
-                        aria-label={`Mission health: ${healthState}`}
-                      />
-                      <span
-                        className="mission-status-badge mission-status-badge--sm"
-                        style={{
-                          backgroundColor: statusColors.bg,
-                          color: statusColors.text,
-                        }}
-                      >
-                        {m.status}
-                      </span>
-                    </div>
-                    {m.description && (
-                      <p className="mission-list__item-description">{m.description}</p>
-                    )}
-                    {activeSliceLabel && (
-                      <p className="mission-list__item-active-slice">Active: {activeSliceLabel}</p>
-                    )}
-                    {showSummaryBlock && (
-                      <div className="mission-list__item-summary">
-                        {hasContent && (
-                          <>
-                            <span className="mission-list__item-stat">
-                              {summary!.completedMilestones}/{summary!.totalMilestones} milestones
-                            </span>
-                            <span className="mission-list__item-stat">
-                              {summary!.completedFeatures}/{summary!.totalFeatures} features
-                            </span>
-                          </>
-                        )}
-                        <span className="mission-list__item-stat" data-testid={`mission-task-stats-${m.id}`}>
-                          {tasksCompleted}/{totalTasks} tasks
-                        </span>
-                        {tasksFailed > 0 && (
-                          <button
-                            className="mission-list__item-failed"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              handleSelectMission(mission);
-                            }}
-                            data-testid={`mission-failed-${m.id}`}
-                            title="View mission failures"
-                          >
-                            {tasksFailed} failed
-                          </button>
-                        )}
-                        <span className="mission-relative-time" data-testid={`mission-last-activity-${m.id}`}>
-                          Activity {getRelativeTime(health?.lastActivityAt)}
-                        </span>
-                        <div className={`mission-list__item-progress mission-list__item-progress--${healthState}`}>
-                          <div
-                            className="mission-list__item-progress-bar"
-                            style={{ width: `${progressPercent}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <div className="mission-list__item-actions" onClick={(e) => e.stopPropagation()}>
-                    {m.status === "active" && (
-                      <button
-                        className="mission-icon-btn mission-icon-btn--danger"
-                        onClick={() => handleStopMission(m.id)}
-                        title="Stop mission"
-                      >
-                        <Square size={14} />
-                      </button>
-                    )}
-                    {m.status === "blocked" && (
-                      <button
-                        className="mission-icon-btn mission-icon-btn--success"
-                        onClick={() => handleResumeMission(m.id)}
-                        title="Resume mission"
-                      >
-                        <Play size={14} />
-                      </button>
-                    )}
-                    {m.status === "planning" && (
-                      <button
-                        className="mission-icon-btn mission-icon-btn--success"
-                        onClick={() => handleStartMission(m.id)}
-                        title="Start mission"
-                      >
-                        <Play size={14} />
-                      </button>
-                    )}
-                    <button
-                      className="mission-icon-btn"
-                      onClick={() => handleEditMission(mission)}
-                      title="Edit mission"
-                    >
-                      <Pencil size={14} />
-                    </button>
-                    <button
-                      className="mission-icon-btn mission-icon-btn--danger"
-                      onClick={() => setDeleteConfirmId({ type: "mission", id: m.id })}
-                      title="Delete mission"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </div>
-                );
-              })}
+              {renderMissionListItems()}
 
               {/* Edit mission form */}
               {editingMissionId && (
@@ -3642,22 +3636,24 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                       </div>
                     </div>
                   )}
-                  <div className="mission-list__footer-actions">
-                    <button className="mission-add-btn" onClick={() => setShowInterviewModal(true)}>
-                      <Sparkles size={16} />
-                      Plan with AI
-                    </button>
-                    <button className="mission-add-btn" onClick={handleCreateMission}>
-                      <Plus size={16} />
-                      New Mission
-                    </button>
-                  </div>
+                  {!hideBottomButtons && (
+                    <div className="mission-list__footer-actions">
+                      <button className="mission-add-btn" onClick={() => setShowInterviewModal(true)}>
+                        <Sparkles size={16} />
+                        Plan with AI
+                      </button>
+                      <button className="mission-add-btn" onClick={handleCreateMission}>
+                        <Plus size={16} />
+                        New Mission
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
   );
 
-  const renderDeleteConfirmationPanel = () => (
+  const renderDeleteConfirmPanel = () => (
     <div className="mission-confirm-panel mission-confirm-panel--danger">
       <div className="mission-confirm-panel__content">
         <p>
@@ -3731,57 +3727,97 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   const manager = (
     <div
       ref={modalRef}
-      className={`mission-manager mission-manager--desktop${isInline ? " mission-manager--inline" : ""}`}
+      className={`mission-manager mission-manager--desktop-split${isInline ? " mission-manager--inline" : ""}`}
       role={isInline ? undefined : "dialog"}
       aria-modal={isInline ? undefined : true}
       aria-label={isInline ? undefined : "Mission Manager"}
       data-testid="mission-manager-dialog"
     >
-        {/* ── Header ── */}
-        <div className={`mission-manager__header${isInline ? " mission-manager__header--inline" : ""}`}>
-          <div className="mission-manager__header-title">
-            {isMobileLayout && selectedMission && (
-              <button
-                className="mission-manager__back-btn"
-                onClick={handleBackToList}
-                title="Back to missions"
-                aria-label="Back to missions list"
-                data-testid="mission-back-btn"
-              >
-                <ChevronLeft size={18} />
-              </button>
-            )}
-            <Target size={18} className="mission-manager__header-icon" />
-            <h2 className="mission-manager__title">
-              {selectedMission ? selectedMission.title : "Missions"}
-            </h2>
-          </div>
-          {!isInline && (
-            /* Modal mode: show close button */
+      <div className={`mission-manager__header${isInline ? " mission-manager__header--inline" : ""}`}>
+        <div className="mission-manager__header-title">
+          {isMobile && selectedMission && (
             <button
-              className="modal-close"
-              onClick={onClose}
-              title="Close"
-              aria-label="Close Mission Manager"
-              data-testid="mission-close-btn"
+              className="mission-manager__back-btn"
+              onClick={handleBackToList}
+              title="Back to missions"
+              aria-label="Back to missions list"
+              data-testid="mission-back-btn"
             >
-              <X size={18} />
+              <ChevronLeft size={18} />
             </button>
           )}
+          <Target size={18} className="mission-manager__header-icon" />
+          <h2 className="mission-manager__title">
+            {selectedMission ? selectedMission.title : "Missions"}
+          </h2>
         </div>
+        {!isInline && (
+          <button
+            className="modal-close"
+            onClick={onClose}
+            title="Close"
+            aria-label="Close Mission Manager"
+            data-testid="mission-close-btn"
+          >
+            <X size={18} />
+          </button>
+        )}
+      </div>
 
-        {/* ── Body ── */}
-        {/* ── Desktop split layout (visible on desktop, hidden on mobile via CSS) ── */}
+      {isMobile ? (
+        <div className="mission-manager__body mission-manager__body--stacked">
+          {loading ? (
+            <div className="mission-manager__loading">
+              <Loader2 size={24} className="spinner" />
+              <span>Loading missions...</span>
+            </div>
+          ) : detailLoading ? (
+            <div className="mission-manager__loading">
+              <Loader2 size={24} className="spinner" />
+              <span>Loading mission details...</span>
+            </div>
+          ) : selectedMission ? (
+            renderMissionDetailContent()
+          ) : (
+            renderMissionListContent()
+          )}
+          {deleteConfirmId && renderDeleteConfirmPanel()}
+          {linkTaskFeatureId && renderLinkTaskPanel()}
+        </div>
+      ) : (
         <div className="mission-manager__split">
           <div className="mission-manager__sidebar">
-            {loading ? (
-              <div className="mission-manager__loading">
-                <Loader2 size={24} className="spinner" />
-                <span>Loading missions...</span>
+            <div className="mission-manager__sidebar-header">
+              <span className="mission-manager__sidebar-title">Missions</span>
+              <div className="mission-manager__sidebar-actions">
+                <button
+                  className="mission-add-btn mission-add-btn--sm"
+                  onClick={() => setShowInterviewModal(true)}
+                  title="Plan with AI"
+                  aria-label="Plan with AI"
+                >
+                  <Sparkles size={14} />
+                </button>
+                <button
+                  className="mission-add-btn mission-add-btn--sm"
+                  onClick={handleCreateMission}
+                  title="New Mission"
+                  aria-label="New Mission"
+                >
+                  <Plus size={14} />
+                </button>
               </div>
-            ) : (
-              renderMissionListContent()
-            )}
+            </div>
+            <div className="mission-manager__sidebar-list">
+              {loading ? (
+                <div className="mission-manager__loading">
+                  <Loader2 size={24} className="spinner" />
+                  <span>Loading missions...</span>
+                </div>
+              ) : (
+                renderMissionListContent({ hideBottomButtons: true })
+              )}
+            </div>
           </div>
 
           <div className="mission-manager__detail-pane">
@@ -3791,48 +3827,19 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                 <span>Loading mission details...</span>
               </div>
             ) : selectedMission ? (
-              renderMissionDetailContent(selectedMission)
+              renderMissionDetailContent()
             ) : (
               <div className="mission-manager__detail-pane-empty">
                 <Target size={24} />
                 <span>Select a mission to view details</span>
               </div>
             )}
-
-            {deleteConfirmId && renderDeleteConfirmationPanel()}
+            {deleteConfirmId && renderDeleteConfirmPanel()}
             {linkTaskFeatureId && renderLinkTaskPanel()}
           </div>
         </div>
-
-        {/* ── Mobile stacked layout (hidden on desktop via CSS, shown on mobile) ── */}
-        <div className="mission-manager__body mission-manager__body--stacked">
-          {isMobileLayout ? (
-            loading ? (
-              <div className="mission-manager__loading">
-                <Loader2 size={24} className="spinner" />
-                <span>Loading missions...</span>
-              </div>
-            ) : detailLoading ? (
-              <div className="mission-manager__loading">
-                <Loader2 size={24} className="spinner" />
-                <span>Loading mission details...</span>
-              </div>
-            ) : selectedMission ? (
-              renderMissionDetailContent(selectedMission)
-            ) : (
-              renderMissionListContent()
-            )
-          ) : null}
-        </div>
-
-        {/* Delete/link panels for mobile stacked layout */}
-        {isMobileLayout && (
-          <div className="mission-manager__mobile-panels">
-            {deleteConfirmId && renderDeleteConfirmationPanel()}
-            {linkTaskFeatureId && renderLinkTaskPanel()}
-          </div>
-        )}
-      </div>
+      )}
+    </div>
   );
 
   const interviewModal = (

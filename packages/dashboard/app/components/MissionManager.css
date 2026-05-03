@@ -155,8 +155,39 @@
   flex-direction: column;
   border-right: var(--btn-border-width) solid var(--border);
   background: var(--surface);
+  overflow: hidden;
+}
+
+/* Desktop split-only sidebar header layout for mission quick actions. */
+.mission-manager__sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border-bottom: var(--btn-border-width) solid var(--border);
+}
+
+.mission-manager__sidebar-title {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mission-manager__sidebar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.mission-manager__sidebar-list {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  padding: var(--space-sm);
 }
 
 .mission-manager__detail-pane {
@@ -180,14 +211,6 @@
   color: var(--text-muted);
   font-size: inherit;
   padding: var(--space-2xl);
-}
-
-/* Hide back button on desktop — sidebar is always visible */
-@media (min-width: 769px) {
-  .mission-manager__split ~ .mission-manager__back-btn,
-  .mission-manager--desktop .mission-manager__back-btn {
-    display: none;
-  }
 }
 
 /* Hide mobile stacked body on desktop */
@@ -360,6 +383,16 @@
   background: var(--card);
 }
 
+/* Compact icon-only variant used by desktop split sidebar header actions. */
+.mission-add-btn--sm {
+  gap: 0;
+  width: auto;
+  min-width: calc(var(--space-md) * 2 + var(--space-xs));
+  min-height: calc(var(--space-md) * 2 + var(--space-xs));
+  padding: var(--space-xs);
+  font-size: 0;
+}
+
 .mission-resume-prompt {
   display: flex;
   align-items: center;
@@ -391,6 +424,11 @@
 .mission-list__footer-actions {
   display: flex;
   gap: var(--space-sm);
+}
+
+/* Desktop split-only: list footer actions live in sidebar header, so hide duplicated footer buttons. */
+.mission-manager__sidebar .mission-list__footer-actions {
+  display: none;
 }
 
 /* ── Inline Form Card ── */
@@ -580,6 +618,11 @@
   box-shadow: inset 0 0 0 1px var(--todo);
 }
 
+/* Desktop split-only selected-state background keeps focus contrast in sidebar cards. */
+.mission-manager__sidebar .mission-list__item--selected {
+  background: var(--card);
+}
+
 .mission-list__item-content {
   flex: 1;
   min-width: 0;
@@ -612,6 +655,15 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Desktop split-only clamp prevents description overflow in the narrow sidebar column. */
+.mission-manager__sidebar .mission-list__item-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow: hidden;
 }
 
 .mission-list__item-actions {
