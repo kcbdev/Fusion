@@ -6,7 +6,7 @@
   justify-content: space-between;
   gap: var(--space-md);
   padding: var(--space-sm) var(--space-lg);
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--btn-border-width) solid var(--border);
   background: var(--surface);
   animation: onboarding-resume-card-enter var(--transition-normal) ease-out;
 }

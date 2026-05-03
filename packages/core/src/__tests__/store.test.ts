@@ -9470,17 +9470,22 @@ Task with acceptance criteria
     it("cache is updated when polling is active even without fs.watch", async () => {
       // Start watching which enables polling
       await store.watch();
-      const task = await createTestTask();
 
-      // Verify the cache was updated (internal detail: the isWatching getter)
-      // Move the task and verify the event fires correctly (not duplicated by poll)
-      const movedEvents: any[] = [];
-      store.on("task:moved", (data: any) => movedEvents.push(data));
-      await store.moveTask(task.id, "todo");
+      try {
+        const task = await createTestTask();
 
-      expect(movedEvents).toHaveLength(1);
-      expect(movedEvents[0].from).toBe("triage");
-      expect(movedEvents[0].to).toBe("todo");
+        // Verify the cache was updated (internal detail: the isWatching getter)
+        // Move the task and verify the event fires correctly (not duplicated by poll)
+        const movedEvents: any[] = [];
+        store.on("task:moved", (data: any) => movedEvents.push(data));
+        await store.moveTask(task.id, "todo");
+
+        expect(movedEvents).toHaveLength(1);
+        expect(movedEvents[0].from).toBe("triage");
+        expect(movedEvents[0].to).toBe("todo");
+      } finally {
+        store.stopWatching();
+      }
     });
   });
 

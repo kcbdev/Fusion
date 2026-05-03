@@ -234,7 +234,7 @@
   overflow-y: auto;
   padding: 10px 8px;
   gap: 2px;
-  background: rgba(0, 0, 0, 0.1);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
   scrollbar-color: var(--border) transparent;
   scrollbar-width: thin;
 }
@@ -1222,8 +1222,8 @@
 }
 .auth-apikey-input:focus {
   outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+  border-color: var(--todo);
+  box-shadow: var(--focus-ring);
 }
 .auth-apikey-input:disabled {
   opacity: 0.6;

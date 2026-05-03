@@ -120,3 +120,24 @@
   outline: none;
   box-shadow: var(--focus-ring-strong);
 }
+
+@media (max-width: 768px) {
+  .post-onboarding-recommendations {
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .post-onboarding-recommendations__dismiss {
+    align-self: flex-end;
+  }
+
+  .post-onboarding-recommendations__item {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .post-onboarding-recommendations__item .btn {
+    min-height: calc(var(--space-lg) + var(--space-lg) + var(--space-xs));
+    width: 100%;
+  }
+}

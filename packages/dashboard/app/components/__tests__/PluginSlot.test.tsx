@@ -54,10 +54,11 @@ describe("PluginSlot", () => {
     const shell = shells[0];
     expect(shell).toHaveAttribute("data-slot-id", "task-detail-tab");
     expect(shell).toHaveAttribute("data-plugin-id", "plugin-a");
-    expect(shell).toHaveAttribute("data-component-path", "./components/task-detail-tab.js");
     expect(shell).toHaveAttribute("aria-label", "Test slot task-detail-tab");
     expect(shell.textContent).toContain("Test slot task-detail-tab");
-    expect(shell.textContent).toContain("plugin-a");
+    expect(shell.textContent).toContain("Extension content available.");
+    expect(shell.textContent).not.toContain("plugin-a");
+    expect(shell.textContent).not.toContain("./components/task-detail-tab.js");
   });
 
   it("renders multiple fallback shells for multiple plugins registered for same slotId", () => {

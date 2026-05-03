@@ -1,6 +1,6 @@
 import "./PostOnboardingRecommendations.css";
 import { useCallback, useEffect, useMemo, useState, type ComponentType } from "react";
-import { AlertCircle, GitPullRequest, Key, Lightbulb, X, Zap } from "lucide-react";
+import { GitPullRequest, Key, Lightbulb, X, Zap } from "lucide-react";
 import { fetchAuthStatus, fetchGlobalSettings } from "../api";
 import {
   dismissPostOnboardingRecommendations,
@@ -182,7 +182,6 @@ export function PostOnboardingRecommendations({
               return (
                 <li key={item.id} className="post-onboarding-recommendations__item">
                   <span className="post-onboarding-recommendations__item-icon" aria-hidden="true">
-                    <AlertCircle size={14} aria-hidden={true} />
                     <ItemIcon size={14} aria-hidden={true} />
                   </span>
                   <span className="post-onboarding-recommendations__item-text">

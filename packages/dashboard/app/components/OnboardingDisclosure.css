@@ -24,7 +24,8 @@
 }
 
 .onboarding-disclosure-trigger:focus-visible {
-  outline: var(--focus-ring-strong);
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
   border-radius: var(--radius-sm);
 }
 

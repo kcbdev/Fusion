@@ -1,6 +1,6 @@
 import "./ModelOnboardingModal.css";
 import { useState, useEffect, useCallback, useRef } from "react";
-import { X, Loader2, CheckCircle, Key, Zap, GitPullRequest, Rocket, Plus, ChevronRight } from "lucide-react";
+import { X, Loader2, CheckCircle, Key, Zap, GitPullRequest, Rocket, Plus } from "lucide-react";
 import { getErrorMessage, type Task } from "@fusion/core";
 import type { AuthProvider, ModelInfo, CustomProvider, CustomProviderConfig } from "../api";
 import {
@@ -24,6 +24,7 @@ import { ProviderIcon } from "./ProviderIcon";
 import { ClaudeCliProviderCard } from "./ClaudeCliProviderCard";
 import { DroidCliProviderCard } from "./DroidCliProviderCard";
 import { LoginInstructions } from "./LoginInstructions";
+import { OnboardingDisclosure } from "./OnboardingDisclosure";
 import { CustomProviderForm } from "./CustomProviderForm";
 import { appendTokenQuery } from "../auth";
 import { filterVisibleOnboardingAndSettingsProviders } from "./providerVisibility";
@@ -304,44 +305,6 @@ function getProviderInfo(providerId: string): ProviderInfo {
 function getApiKeyInfo(provider: AuthProvider): ApiKeyInfo {
   const info = getProviderInfo(provider.id);
   return info.apiKeyInfo ?? API_KEY_INFO_FALLBACK;
-}
-
-/** Props for OnboardingDisclosure component */
-interface OnboardingDisclosureProps {
-  summary: string;
-  children: React.ReactNode;
-  className?: string;
-}
-
-/**
- * Progressive disclosure component that reveals additional content on click.
- * Used to hide technical details behind expandable "Learn more" sections.
- */
-function OnboardingDisclosure({ summary, children, className = "" }: OnboardingDisclosureProps) {
-  const [isOpen, setIsOpen] = useState(false);
-
-  return (
-    <div className={`onboarding-disclosure ${className}`}>
-      <button
-        className="onboarding-disclosure-trigger"
-        onClick={() => setIsOpen(!isOpen)}
-        aria-expanded={isOpen}
-        type="button"
-      >
-        <ChevronRight
-          size={14}
-          className="onboarding-disclosure-chevron"
-          aria-hidden="true"
-        />
-        <span>{summary}</span>
-      </button>
-      {isOpen && (
-        <div className="onboarding-disclosure-content">
-          {children}
-        </div>
-      )}
-    </div>
-  );
 }
 
 interface ReadinessItem {

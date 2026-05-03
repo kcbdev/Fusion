@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { usePluginUiSlots } from "../hooks/usePluginUiSlots";
+import "./PluginSlot.css";
 
 interface PluginSlotProps {
   /** The slot identifier to render (e.g., "task-detail-tab", "header-action") */
@@ -15,7 +16,7 @@ interface PluginSlotProps {
  * Renders plugin slot registrations for a host surface.
  *
  * Dynamic plugin component loading is not yet available, so this renders a
- * meaningful fallback shell with plugin metadata instead of empty placeholders.
+ * lightweight non-technical placeholder while preserving plugin slot boundaries.
  * Each rendered slot is wrapped in an ErrorBoundary to isolate failures from
  * the parent dashboard UI.
  */
@@ -41,25 +42,14 @@ export function PluginSlot({ slotId, projectId, pluginIds }: PluginSlotProps): R
         {matchingEntries.map((entry, index) => (
           <section
             key={`${entry.pluginId}-${entry.slot.slotId}-${index}`}
-            className="card"
+            className="plugin-slot-shell"
             data-plugin-slot
             data-slot-id={entry.slot.slotId}
             data-plugin-id={entry.pluginId}
-            data-component-path={entry.slot.componentPath}
             aria-label={entry.slot.label}
           >
-            <div className="card-header">
-              <span className="card-title">{entry.slot.label}</span>
-              <span className="card-id">{entry.pluginId}</span>
-            </div>
-            <div className="card-meta">
-              <span className="detail-metadata-label">Surface</span>
-              <code className="detail-source-number">{entry.slot.slotId}</code>
-            </div>
-            <div className="detail-source-summary">
-              <span className="detail-source-label">Component</span>
-              <code className="detail-source-number">{entry.slot.componentPath}</code>
-            </div>
+            <p className="plugin-slot-shell__title">{entry.slot.label}</p>
+            <p className="plugin-slot-shell__message">Extension content available.</p>
           </section>
         ))}
       </>
