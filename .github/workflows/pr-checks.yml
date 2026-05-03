@@ -38,5 +38,5 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Test
-        run: pnpm test
+      - name: Test (full suite)
+        run: pnpm test:full

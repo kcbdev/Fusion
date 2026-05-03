@@ -103,11 +103,12 @@ describe("CI workflow (.github/workflows/ci.yml)", () => {
   });
 
   it("keeps contributing docs aligned with verification and slow-lane contracts", () => {
-    expect(contributingContent).toContain("pnpm test` must be runnable in a clean worktree without requiring a prior `pnpm build`.");
+    expect(contributingContent).toContain("pnpm test:full` must be runnable in a clean worktree without requiring a prior `pnpm build`.");
     expect(contributingContent).toContain("`pnpm verify:workspace` is the canonical pre-merge gate");
     expect(contributingContent).toContain("1. `pnpm lint`");
-    expect(contributingContent).toContain("2. `pnpm test`");
+    expect(contributingContent).toContain("2. `pnpm test:full`");
     expect(contributingContent).toContain("3. `pnpm build`");
+    expect(contributingContent).toContain("`pnpm test` now uses a changed-only entrypoint");
 
     expect(contributingContent).toContain("pnpm test:slow-cli");
     expect(contributingContent).toContain("test:pre-release");
@@ -151,6 +152,35 @@ describe("CI workflow (.github/workflows/ci.yml)", () => {
 
   it("verifies binary exists after build", () => {
     expect(content).toContain("test -f packages/cli/dist/fn");
+  });
+});
+
+describe("PR checks workflow (.github/workflows/pr-checks.yml)", () => {
+  let workflow: any;
+  let content: string;
+  let steps: any[];
+
+  beforeAll(() => {
+    const result = loadWorkflow("pr-checks.yml");
+    workflow = result.parsed;
+    content = result.content;
+    steps = workflow.jobs?.checks?.steps ?? [];
+  });
+
+  it("is valid YAML", () => {
+    expect(workflow).toBeDefined();
+    expect(typeof workflow).toBe("object");
+  });
+
+  it("runs on pull requests targeting main", () => {
+    expect(workflow.on?.pull_request?.branches).toContain("main");
+  });
+
+  it("runs explicit full-suite tests (not changed-only root test)", () => {
+    const testStep = steps.find((step: any) => step.name?.includes("Test"));
+    expect(testStep).toBeDefined();
+    expect(testStep.run).toBe("pnpm test:full");
+    expect(content).not.toContain("run: pnpm test\n");
   });
 });
 
