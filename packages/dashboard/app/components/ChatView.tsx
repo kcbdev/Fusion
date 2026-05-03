@@ -445,8 +445,8 @@ function NewChatDialog({ projectId, onClose, onCreate }: NewChatDialogProps) {
     chatMode === "agent" ? !selectedAgentId : !selectedModel;
 
   return (
-    <div className="chat-new-dialog-backdrop" onClick={onClose} role="dialog" aria-modal="true">
-      <div className="chat-new-dialog" onClick={(e) => e.stopPropagation()}>
+    <div className="chat-new-dialog-backdrop chat-view-dialog-backdrop" onClick={onClose} role="dialog" aria-modal="true">
+      <div className="chat-new-dialog chat-view-dialog" onClick={(e) => e.stopPropagation()}>
         <h3>New Chat</h3>
         <div className="chat-new-dialog-mode-toggle" data-testid="chat-new-dialog-mode-toggle">
           <button
@@ -1652,10 +1652,10 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
 
       {/* Confirm Delete Dialog */}
       {confirmDelete && (
-        <div className="chat-new-dialog-backdrop" onClick={() => setConfirmDelete(null)}>
-          <div className="chat-new-dialog" onClick={(e) => e.stopPropagation()}>
+        <div className="chat-new-dialog-backdrop chat-view-dialog-backdrop" onClick={() => setConfirmDelete(null)}>
+          <div className="chat-new-dialog chat-view-dialog" onClick={(e) => e.stopPropagation()}>
             <h3>Delete Conversation?</h3>
-            <p style={{ fontSize: "14px", color: "var(--text-secondary)", marginBottom: "16px" }}>
+            <p className="chat-view-delete-dialog-copy">
               This action cannot be undone. All messages in this conversation will be permanently deleted.
             </p>
             <div className="chat-new-dialog-actions">

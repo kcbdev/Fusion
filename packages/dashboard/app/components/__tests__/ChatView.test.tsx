@@ -2878,6 +2878,22 @@ describe("ChatView mobile CSS contract", () => {
     expect(mobileRuleNotContains(".chat-message-render-toggle", "display: inline-flex")).toBe(true);
   });
 
+  it("mobile keeps ChatView dialog backdrop centered with safe-area padding", () => {
+    expect(mobileRuleContains(".chat-view-dialog-backdrop", "align-items: center")).toBe(true);
+    expect(mobileRuleContains(".chat-view-dialog-backdrop", "padding-top: max(var(--space-md), env(safe-area-inset-top, 0px))")).toBe(true);
+    expect(mobileRuleContains(".chat-view-dialog-backdrop", "padding-bottom: max(var(--space-md), env(safe-area-inset-bottom, 0px))")).toBe(true);
+  });
+
+  it("mobile constrains ChatView dialog height and allows internal scrolling", () => {
+    expect(mobileRuleContains(".chat-view-dialog", "max-height: calc(100dvh - (var(--space-md) * 2) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))")).toBe(true);
+    expect(mobileRuleContains(".chat-view-dialog", "overflow-y: auto")).toBe(true);
+  });
+
+  it("mobile ChatView dialog rules do not set full-screen heights", () => {
+    expect(mobileRuleNotContains(".chat-view-dialog", "height: 100vh")).toBe(true);
+    expect(mobileRuleNotContains(".chat-view-dialog", "height: 100dvh")).toBe(true);
+  });
+
   it("mobile includes keyboard-aware chat-thread height rule", () => {
     expect(css).toMatch(/\.chat-thread\[style\*=\"--keyboard-overlap\"\]\s*\{[^}]*--vv-height/);
   });

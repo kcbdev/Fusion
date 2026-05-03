@@ -225,7 +225,13 @@
 .chat-new-dialog-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-sm);
+}
+
+.chat-view-delete-dialog-copy {
+  margin: 0 0 var(--space-lg);
+  color: var(--text-muted);
+  font-size: calc(var(--space-sm) + var(--space-xs) * 1.5);
 }
 
 /* New Chat dialog model selector */
@@ -309,17 +315,17 @@
     height: min(520px, calc(100dvh - 120px));
   }
 
-  /* Keep regular chat New Chat + Delete confirmation dialogs compact on mobile.
-     styles.css sets .chat-new-dialog-backdrop align-items: stretch globally on
-     mobile; override here so this modal does not become full-height. */
-  .chat-new-dialog-backdrop {
+  /* ChatView New Chat + Delete dialogs should stay inset/compact on mobile.
+     styles.css intentionally stretches .chat-new-dialog-backdrop for full-screen
+     overlays, so scope the compact override to ChatView's modifier class only. */
+  .chat-view-dialog-backdrop {
     align-items: center;
     padding: var(--space-md);
     padding-top: max(var(--space-md), env(safe-area-inset-top, 0px));
     padding-bottom: max(var(--space-md), env(safe-area-inset-bottom, 0px));
   }
 
-  .chat-new-dialog {
+  .chat-view-dialog {
     width: 100%;
     max-width: min(100%, calc(var(--space-xl) * 16));
     max-height: calc(100dvh - (var(--space-md) * 2) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
