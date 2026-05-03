@@ -140,6 +140,10 @@
   flex-shrink: 0;
 }
 
+.usage-provider-actions .usage-provider-drag-handle {
+  margin-left: var(--space-xs);
+}
+
 .usage-provider-drag-handle:hover {
   color: var(--text-muted);
 }
@@ -161,6 +165,7 @@
   align-items: center;
   justify-content: flex-end;
   gap: var(--space-sm);
+  margin-left: auto;
   flex-shrink: 0;
 }
 

@@ -151,7 +151,7 @@ describe("UsageIndicator", () => {
     expect(screen.getByText("Hourly")).toBeInTheDocument();
   });
 
-  it("renders drag handle for each provider card", () => {
+  it("renders drag handle in the right-side actions cluster for each provider card", () => {
     mockUseUsageData.mockReturnValue({
       providers: mockProviders,
       loading: false,
@@ -162,8 +162,22 @@ describe("UsageIndicator", () => {
 
     render(<UsageIndicator isOpen={true} onClose={mockOnClose} projectId={TEST_PROJECT_ID} />);
 
-    const handles = document.querySelectorAll(".usage-provider-drag-handle");
-    expect(handles).toHaveLength(3);
+    const cards = Array.from(document.querySelectorAll(".usage-provider"));
+    expect(cards).toHaveLength(3);
+
+    cards.forEach((card) => {
+      const info = card.querySelector(".usage-provider-info");
+      const actions = card.querySelector(".usage-provider-actions");
+      const handle = card.querySelector(".usage-provider-drag-handle");
+      const headerChildren = Array.from(card.querySelectorAll(":scope > .usage-provider-header > *"));
+
+      expect(info).toBeInTheDocument();
+      expect(actions).toBeInTheDocument();
+      expect(handle).toBeInTheDocument();
+      expect(actions).toContainElement(handle);
+      expect(info?.contains(handle)).toBe(false);
+      expect(headerChildren[0]).toBe(info);
+    });
   });
 
   it("reorders providers on drag and drop and persists order", () => {

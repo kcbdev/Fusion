@@ -439,9 +439,6 @@ function ProviderCard({
       onDragEnd={isTouchReorderMode ? undefined : onDragEnd}
     >
       <div className="usage-provider-header">
-        <div className="usage-provider-drag-handle" aria-hidden="true">
-          <GripVertical size={16} />
-        </div>
         <div className="usage-provider-info">
           <ProviderIcon provider={getProviderIconKey(provider.name)} size="md" />
           <span className="usage-provider-name">{provider.name}</span>
@@ -479,6 +476,9 @@ function ProviderCard({
             </div>
           )}
           {getStatusBadge()}
+          <div className="usage-provider-drag-handle" aria-hidden="true">
+            <GripVertical size={16} />
+          </div>
         </div>
       </div>
 
