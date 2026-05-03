@@ -945,11 +945,12 @@ Do not refactor, rename broadly, or make opportunistic improvements.
 
 ## Rules
 1. Read the error output carefully to understand what is failing before editing anything
-2. Make targeted fixes to the failing code path
-3. After fixing, run the verification command to confirm the fix works
-4. Do NOT make any git commits — just fix the code
-5. Do NOT modify files unrelated to the failure
-6. If you cannot fix the issue within scope, explain why and what evidence indicates a deeper/root problem`,
+2. Before assuming a code fix is needed, check whether the failure is caused by stale/missing build artifacts in a sibling workspace package — typical signatures: \`Failed to resolve import "./X.js"\` pointing into another package's \`dist/\`, \`Cannot find module\`, or \`ERR_MODULE_NOT_FOUND\` referencing a workspace-internal path. In that case, rebuild the affected package(s) (e.g. \`pnpm --filter <pkg> build\`, or \`pnpm --filter "<scope>/*" build\` for a group) and re-run verification before editing source files.
+3. Make targeted fixes to the failing code path
+4. After fixing, run the verification command to confirm the fix works
+5. Do NOT make any git commits — just fix the code
+6. You MAY modify any files needed to make the verification pass, including files unrelated to this task's original change. Pre-existing build/test breakage on the base branch is in scope: fix it. Prefer the smallest change that makes verification green.
+7. If you cannot fix the issue within scope, explain why and what evidence indicates a deeper/root problem`,
       tools: "coding", // Agent needs read/write file access
       onText: logger.onText,
       onThinking: logger.onThinking,
