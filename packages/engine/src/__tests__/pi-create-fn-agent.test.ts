@@ -22,6 +22,7 @@ const execSyncMock = vi.fn((_cmd?: any, _opts?: any) => "");
 const existsSyncMock = vi.fn((_path: PathLike) => false);
 const readFileSyncMock = vi.fn((_path?: any) => "{}");
 const readCustomProvidersMock = vi.fn(() => []);
+const packageManagerCwdCapture = vi.fn();
 
 // Route async `exec` through the `execSync` mock so the promisify bridge works.
 // Use Symbol.for("nodejs.util.promisify.custom") directly to avoid async imports
@@ -96,6 +97,9 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
     }
   },
   DefaultPackageManager: class {
+    constructor(options: any) {
+      packageManagerCwdCapture(options?.cwd);
+    }
     async resolve() {
       return packageManagerResolveMock();
     }
@@ -483,6 +487,46 @@ describe("createFnAgent", () => {
     });
 
     // Verify the session was created (no crash)
+    expect(createAgentSessionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("FN-3338: registerExtensionProviders receives resolved project root when cwd is a subdirectory", async () => {
+    // Simulate cwd being a subdirectory of the project. resolvePiExtensionProjectRoot
+    // walks up from /project/src/components checking each dir for .fusion.
+    existsSyncMock.mockImplementation((path) => {
+      const value = String(path);
+      return value === "/project/.fusion";
+    });
+
+    const { createFnAgent } = await import("../pi.js");
+
+    await createFnAgent({
+      cwd: "/project/src/components",
+      systemPrompt: "test",
+      tools: "readonly",
+    });
+
+    // registerExtensionProviders should receive the resolved project root,
+    // not the raw subdirectory cwd. This is verified by checking the
+    // DefaultPackageManager constructor received "/project" as cwd.
+    expect(packageManagerCwdCapture).toHaveBeenCalledWith("/project");
+    expect(createAgentSessionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("FN-3338: registerExtensionProviders falls back to cwd when no .fusion is found", async () => {
+    // No .fusion directory exists anywhere above cwd.
+    existsSyncMock.mockImplementation(() => false);
+
+    const { createFnAgent } = await import("../pi.js");
+
+    await createFnAgent({
+      cwd: "/unrelated/directory",
+      systemPrompt: "test",
+      tools: "readonly",
+    });
+
+    // Falls back to the raw cwd when no .fusion is found
+    expect(packageManagerCwdCapture).toHaveBeenCalledWith("/unrelated/directory");
     expect(createAgentSessionMock).toHaveBeenCalledTimes(1);
   });
 
@@ -983,11 +1027,13 @@ describe("createFnAgent", () => {
           }
         },
         DefaultPackageManager: class {
+          constructor(options: any) {
+            packageManagerCwdCapture(options?.cwd);
+          }
           async resolve() {
             return packageManagerResolveMock();
           }
         },
-        discoverAndLoadExtensions: discoverAndLoadExtensionsMock,
         getAgentDir: () => "/mock-agent-dir",
         ModelRegistry: class {
           static create(...args: unknown[]) {
@@ -1068,11 +1114,13 @@ describe("createFnAgent", () => {
           }
         },
         DefaultPackageManager: class {
+          constructor(options: any) {
+            packageManagerCwdCapture(options?.cwd);
+          }
           async resolve() {
             return packageManagerResolveMock();
           }
         },
-        discoverAndLoadExtensions: discoverAndLoadExtensionsMock,
         getAgentDir: () => "/mock-agent-dir",
         ModelRegistry: class {
           static create(...args: unknown[]) {
@@ -1150,11 +1198,13 @@ describe("createFnAgent", () => {
           }
         },
         DefaultPackageManager: class {
+          constructor(options: any) {
+            packageManagerCwdCapture(options?.cwd);
+          }
           async resolve() {
             return packageManagerResolveMock();
           }
         },
-        discoverAndLoadExtensions: discoverAndLoadExtensionsMock,
         getAgentDir: () => "/mock-agent-dir",
         ModelRegistry: class {
           static create(...args: unknown[]) {

@@ -1043,7 +1043,12 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
   piLog.log(`createFnAgent called (tools=${options.tools}, provider=${options.defaultProvider}, model=${options.defaultModelId})`);
   const authStorage = createFusionAuthStorage();
   const modelRegistry = ModelRegistry.create(authStorage, getModelRegistryModelsPath());
-  await registerExtensionProviders(options.cwd, modelRegistry);
+
+  // Resolve the project root early so extension providers, skill discovery,
+  // and resource loading all use the correct root when cwd is a worktree,
+  // subdirectory, or any path other than the project root itself.
+  const resolvedProjectRoot = getProjectRootFromWorktree(options.cwd) ?? resolvePiExtensionProjectRoot(options.cwd);
+  await registerExtensionProviders(resolvedProjectRoot, modelRegistry);
 
   for (const provider of readCustomProviders()) {
     try {
@@ -1109,11 +1114,8 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
   }
   const wrappedTools = wrapToolsWithBoundary(tools, worktreePath, worktreeProjectRoot);
 
-  // Resolve the project root for resource discovery (skills, settings, extensions).
-  // When cwd is a worktree (e.g., /project/.worktrees/task-branch) or any other
-  // subdirectory, we walk up to find the project root containing .fusion/.
-  // This ensures skill/settings discovery works regardless of session cwd.
-  const resolvedProjectRoot = worktreeProjectRoot ?? resolvePiExtensionProjectRoot(options.cwd);
+  // resolvedProjectRoot was computed above (before registerExtensionProviders)
+  // and is reused here for resource loader and skill discovery.
 
   // Compaction is explicitly enabled to prevent context-window overflow during
   // long-running agent conversations (triage, execution, review, merge).
