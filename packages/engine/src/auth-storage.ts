@@ -98,16 +98,64 @@ function resolveStoredCredentialApiKey(providerId: string, credential: StoredCre
   return undefined;
 }
 
+/**
+ * Reads API keys from the resolved models.json file.
+ *
+ * Some providers (e.g., kimi-coding, lmstudio, ollama) store their API keys
+ * in `models.json` under `providers.<providerId>.apiKey` rather than in
+ * `auth.json`. This function extracts those keys so the auth storage proxy
+ * can return them as a fallback when neither Fusion auth nor legacy auth.json
+ * contains a key for the provider.
+ */
+function readModelsJsonApiKeys(home = getHomeDir()): Map<string, string> {
+  const apiKeys = new Map<string, string>();
+  const modelsPath = getModelRegistryModelsPath(home);
+
+  if (!existsSync(modelsPath)) {
+    return apiKeys;
+  }
+
+  try {
+    const parsed = JSON.parse(readFileSync(modelsPath, "utf-8")) as {
+      providers?: Record<string, { apiKey?: string }>;
+    };
+    const providers = parsed?.providers;
+    if (providers) {
+      for (const [providerId, config] of Object.entries(providers)) {
+        if (config.apiKey) {
+          apiKeys.set(providerId, config.apiKey);
+        }
+      }
+    }
+  } catch {
+    // Ignore invalid models.json files.
+  }
+
+  return apiKeys;
+}
+
 export function createFusionAuthStorage(): AuthStorage {
   const primary = AuthStorage.create(getFusionAuthPath());
   let legacyCredentials = readLegacyCredentials();
+  // models.json provider API keys — third fallback after primary auth and legacy auth.json
+  let modelsJsonApiKeys = readModelsJsonApiKeys();
 
   return new Proxy(primary, {
+    // Forward property writes to the target so that methods like
+    // `setFallbackResolver` (called by ModelRegistry) correctly update the
+    // underlying AuthStorage. Without this trap, writes land on the Proxy
+    // object itself and the target's fallbackResolver stays undefined.
+    set(target: AuthStorage, prop: string | symbol, value: unknown) {
+      (target as Record<string | symbol, unknown>)[prop] = value;
+      return true;
+    },
+
     get(target, prop, receiver) {
       if (prop === "reload") {
         return () => {
           target.reload();
           legacyCredentials = readLegacyCredentials();
+          modelsJsonApiKeys = readModelsJsonApiKeys();
         };
       }
 
@@ -116,11 +164,11 @@ export function createFusionAuthStorage(): AuthStorage {
       }
 
       if (prop === "has") {
-        return (provider: string) => target.has(provider) || provider in legacyCredentials;
+        return (provider: string) => target.has(provider) || provider in legacyCredentials || modelsJsonApiKeys.has(provider);
       }
 
       if (prop === "hasAuth") {
-        return (provider: string) => target.hasAuth(provider) || Boolean(legacyCredentials[provider]);
+        return (provider: string) => target.hasAuth(provider) || Boolean(legacyCredentials[provider]) || modelsJsonApiKeys.has(provider);
       }
 
       if (prop === "getAll") {
@@ -128,15 +176,21 @@ export function createFusionAuthStorage(): AuthStorage {
       }
 
       if (prop === "list") {
-        return () => Array.from(new Set([...Object.keys(legacyCredentials), ...target.list()]));
+        return () => Array.from(new Set([...Object.keys(legacyCredentials), ...target.list(), ...modelsJsonApiKeys.keys()]));
       }
 
       if (prop === "getApiKey") {
         return async (provider: string) => {
+          // 1. Primary Fusion auth
           const primaryKey = await target.getApiKey(provider);
           if (primaryKey) return primaryKey;
 
-          return resolveStoredCredentialApiKey(provider, legacyCredentials[provider]);
+          // 2. Legacy auth.json credentials
+          const legacyKey = resolveStoredCredentialApiKey(provider, legacyCredentials[provider]);
+          if (legacyKey) return legacyKey;
+
+          // 3. models.json provider API keys (e.g., kimi-coding, lmstudio)
+          return modelsJsonApiKeys.get(provider);
         };
       }
 

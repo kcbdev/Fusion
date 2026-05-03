@@ -94,4 +94,186 @@ describe("createFusionAuthStorage", () => {
     expect(existsSync(join(homeDir, ".pi", "agent", "auth.json"))).toBe(false);
     expect(existsSync(join(homeDir, ".pi", "auth.json"))).toBe(false);
   });
+
+  describe("models.json API key fallback", () => {
+    it("returns API key from models.json when not in auth.json", async () => {
+      const legacyAgentDir = join(homeDir, ".pi", "agent");
+      mkdirSync(legacyAgentDir, { recursive: true });
+      writeFileSync(
+        join(legacyAgentDir, "models.json"),
+        JSON.stringify({
+          providers: {
+            "kimi-coding": {
+              api: "openai-completions",
+              apiKey: "kimi-api-key-123",
+              baseUrl: "https://api.kimi.com/coding/v1",
+              models: [],
+            },
+          },
+        }),
+      );
+
+      const authStorage = createFusionAuthStorage();
+
+      expect(await authStorage.getApiKey("kimi-coding")).toBe("kimi-api-key-123");
+    });
+
+    it("returns hasAuth=true for provider with key only in models.json", async () => {
+      const legacyAgentDir = join(homeDir, ".pi", "agent");
+      mkdirSync(legacyAgentDir, { recursive: true });
+      writeFileSync(
+        join(legacyAgentDir, "models.json"),
+        JSON.stringify({
+          providers: {
+            "kimi-coding": {
+              api: "openai-completions",
+              apiKey: "kimi-api-key-123",
+              baseUrl: "https://api.kimi.com/coding/v1",
+              models: [],
+            },
+          },
+        }),
+      );
+
+      const authStorage = createFusionAuthStorage();
+
+      expect(authStorage.hasAuth("kimi-coding")).toBe(true);
+    });
+
+    it("includes models.json providers in list()", async () => {
+      const legacyAgentDir = join(homeDir, ".pi", "agent");
+      mkdirSync(legacyAgentDir, { recursive: true });
+      writeFileSync(
+        join(legacyAgentDir, "auth.json"),
+        JSON.stringify({
+          openrouter: { type: "api_key", key: "openrouter-key" },
+        }),
+      );
+      writeFileSync(
+        join(legacyAgentDir, "models.json"),
+        JSON.stringify({
+          providers: {
+            "kimi-coding": { apiKey: "kimi-key" },
+            lmstudio: { apiKey: "lm-key" },
+          },
+        }),
+      );
+
+      const authStorage = createFusionAuthStorage();
+      const providers = authStorage.list();
+
+      expect(providers).toContain("openrouter");
+      expect(providers).toContain("kimi-coding");
+      expect(providers).toContain("lmstudio");
+    });
+
+    it("auth.json keys take precedence over models.json keys", async () => {
+      const legacyAgentDir = join(homeDir, ".pi", "agent");
+      mkdirSync(legacyAgentDir, { recursive: true });
+      writeFileSync(
+        join(legacyAgentDir, "auth.json"),
+        JSON.stringify({
+          "kimi-coding": { type: "api_key", key: "auth-json-key" },
+        }),
+      );
+      writeFileSync(
+        join(legacyAgentDir, "models.json"),
+        JSON.stringify({
+          providers: {
+            "kimi-coding": { apiKey: "models-json-key" },
+          },
+        }),
+      );
+
+      const authStorage = createFusionAuthStorage();
+
+      // auth.json key should take precedence
+      expect(await authStorage.getApiKey("kimi-coding")).toBe("auth-json-key");
+    });
+
+    it("reload() picks up changes to models.json", async () => {
+      const legacyAgentDir = join(homeDir, ".pi", "agent");
+      mkdirSync(legacyAgentDir, { recursive: true });
+
+      // Initially no models.json
+      const authStorage = createFusionAuthStorage();
+      expect(await authStorage.getApiKey("kimi-coding")).toBeUndefined();
+
+      // Write models.json and reload
+      writeFileSync(
+        join(legacyAgentDir, "models.json"),
+        JSON.stringify({
+          providers: {
+            "kimi-coding": { apiKey: "new-kimi-key" },
+          },
+        }),
+      );
+
+      authStorage.reload();
+
+      expect(await authStorage.getApiKey("kimi-coding")).toBe("new-kimi-key");
+    });
+
+    it("reads from Fusion models.json before legacy paths", async () => {
+      // Create both Fusion and legacy models.json
+      const fusionAgentDir = join(homeDir, ".fusion", "agent");
+      const legacyAgentDir = join(homeDir, ".pi", "agent");
+      mkdirSync(fusionAgentDir, { recursive: true });
+      mkdirSync(legacyAgentDir, { recursive: true });
+
+      writeFileSync(
+        join(fusionAgentDir, "models.json"),
+        JSON.stringify({
+          providers: {
+            "kimi-coding": { apiKey: "fusion-models-key" },
+          },
+        }),
+      );
+      writeFileSync(
+        join(legacyAgentDir, "models.json"),
+        JSON.stringify({
+          providers: {
+            "kimi-coding": { apiKey: "legacy-models-key" },
+          },
+        }),
+      );
+
+      const authStorage = createFusionAuthStorage();
+
+      expect(await authStorage.getApiKey("kimi-coding")).toBe("fusion-models-key");
+    });
+
+    it("has() returns true for provider with key only in models.json", async () => {
+      const legacyAgentDir = join(homeDir, ".pi", "agent");
+      mkdirSync(legacyAgentDir, { recursive: true });
+      writeFileSync(
+        join(legacyAgentDir, "models.json"),
+        JSON.stringify({
+          providers: {
+            ollama: { apiKey: "ollama-key" },
+          },
+        }),
+      );
+
+      const authStorage = createFusionAuthStorage();
+
+      expect(authStorage.has("ollama")).toBe(true);
+    });
+
+    it("forwards setFallbackResolver to the underlying AuthStorage", async () => {
+      const authStorage = createFusionAuthStorage();
+
+      // Set a fallback resolver (this is what ModelRegistry does in its constructor)
+      // Without the Proxy `set` trap, this would write to the Proxy object instead
+      // of the underlying AuthStorage, making the resolver invisible to getApiKey().
+      (authStorage as any).setFallbackResolver((provider: string) => {
+        if (provider === "dynamic-provider") return "dynamic-api-key";
+        return undefined;
+      });
+
+      expect(await authStorage.getApiKey("dynamic-provider")).toBe("dynamic-api-key");
+      expect(await authStorage.getApiKey("unknown-provider")).toBeUndefined();
+      expect(authStorage.hasAuth("dynamic-provider")).toBe(true);
+    });
+  });
 });
