@@ -125,6 +125,16 @@
   margin-top: calc(var(--space-xs) * 0.5);
 }
 
+/* Unified right-side header action cluster */
+.agent-detail-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* Lifecycle controls: compact action buttons */
 .agent-detail-controls {
   display: flex;
@@ -1367,11 +1377,18 @@
     flex-wrap: wrap;
   }
 
-  .agent-detail-controls {
+  .agent-detail-header-actions {
     flex: 1 1 100%;
     flex-wrap: wrap;
-    gap: calc(var(--space-xs) + var(--space-sm) * 0.25);
+    justify-content: space-between;
+    gap: var(--space-sm);
     order: 3;
+  }
+
+  .agent-detail-controls {
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    gap: calc(var(--space-xs) + var(--space-sm) * 0.25);
   }
 
   .agent-detail-controls .btn--compact {
@@ -1387,6 +1404,7 @@
 
   .agent-detail-utility-actions {
     flex-shrink: 0;
+    margin-left: auto;
   }
 
   .agent-detail-utility-actions .btn-icon {

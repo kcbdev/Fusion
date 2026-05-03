@@ -808,7 +808,7 @@ describe("AgentDetailView", () => {
     });
   });
 
-  it("renders lifecycle controls in compact layout with agent-detail-controls container", async () => {
+  it("groups lifecycle and utility controls under a shared header action cluster", async () => {
     render(
       <AgentDetailView
         agentId="agent-001"
@@ -818,30 +818,28 @@ describe("AgentDetailView", () => {
     );
 
     await waitFor(() => {
-      // Verify lifecycle controls are in the compact controls container
-      const controlsContainer = document.querySelector(".agent-detail-controls");
+      const headerActions = document.querySelector(".agent-detail-header-actions");
+      expect(headerActions).toBeTruthy();
+
+      const controlsContainer = headerActions?.querySelector(".agent-detail-controls");
       expect(controlsContainer).toBeTruthy();
       expect(controlsContainer?.querySelector(".btn--compact")).toBeTruthy();
-    });
-  });
 
-  it("renders utility actions in separate container", async () => {
-    render(
-      <AgentDetailView
-        agentId="agent-001"
-        onClose={vi.fn()}
-        addToast={vi.fn()}
-      />
-    );
-
-    await waitFor(() => {
-      // Verify utility actions are in the separate utility container
-      const utilityContainer = document.querySelector(".agent-detail-utility-actions");
+      const utilityContainer = headerActions?.querySelector(".agent-detail-utility-actions");
       expect(utilityContainer).toBeTruthy();
-      // Refresh and Close buttons should be in utility container
       expect(utilityContainer?.querySelector('[title="Refresh"]')).toBeTruthy();
       expect(utilityContainer?.querySelector('[title="Close"]')).toBeTruthy();
     });
+  });
+
+  it("keeps desktop header actions on one row and mobile wraps them safely", () => {
+    const stylesContent = loadAllAppCss();
+
+    expect(stylesContent).toContain(".agent-detail-header-actions {");
+    expect(stylesContent).toContain("justify-content: flex-end;");
+
+    const mobileHeaderActionsBlock = /@media \(max-width: 768px\)\s*\{[\s\S]*?\.agent-detail-header-actions\s*\{[\s\S]*?flex-wrap: wrap;[\s\S]*?\}/;
+    expect(stylesContent).toMatch(mobileHeaderActionsBlock);
   });
 
   it("shows statistics section on dashboard", async () => {

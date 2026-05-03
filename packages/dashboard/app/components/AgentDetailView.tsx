@@ -519,81 +519,83 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
             </div>
           </div>
 
-          {/* Lifecycle controls: compact action buttons */}
-          <div className="agent-detail-controls">
-            {/* State-dependent action buttons */}
-            {agent.state === "idle" && (
-              <>
-                <button className="btn btn-task-create btn--compact" onClick={() => void handleStateChange("active")} disabled={isTransitioning}>
-                  <Play size={14} />
-                  Start
-                </button>
-                <button className="btn btn--danger btn--compact" onClick={handleDelete}>
-                  <Trash2 size={14} />
-                  Delete
-                </button>
-              </>
-            )}
-            {agent.state === "active" && (
-              <button className="btn btn--compact" onClick={() => void handleStateChange("paused")} disabled={isTransitioning}>
-                <Pause size={14} />
-                Pause
-              </button>
-            )}
-            {agent.state === "paused" && (
-              <button className="btn btn-task-create btn--compact" onClick={() => void handleStateChange("active")} disabled={isTransitioning}>
-                <Play size={14} />
-                Resume
-              </button>
-            )}
-            {agent.state === "running" && (
-              <>
+          <div className="agent-detail-header-actions">
+            {/* Lifecycle controls: compact action buttons */}
+            <div className="agent-detail-controls">
+              {/* State-dependent action buttons */}
+              {agent.state === "idle" && (
+                <>
+                  <button className="btn btn-task-create btn--compact" onClick={() => void handleStateChange("active")} disabled={isTransitioning}>
+                    <Play size={14} />
+                    Start
+                  </button>
+                  <button className="btn btn--danger btn--compact" onClick={handleDelete}>
+                    <Trash2 size={14} />
+                    Delete
+                  </button>
+                </>
+              )}
+              {agent.state === "active" && (
                 <button className="btn btn--compact" onClick={() => void handleStateChange("paused")} disabled={isTransitioning}>
                   <Pause size={14} />
                   Pause
                 </button>
-                <button className="btn btn--danger btn--compact" onClick={() => void handleStateChange("terminated")} disabled={isTransitioning}>
-                  <Square size={14} />
-                  Stop
-                </button>
-              </>
-            )}
-            {agent.state === "error" && (
-              <>
+              )}
+              {agent.state === "paused" && (
                 <button className="btn btn-task-create btn--compact" onClick={() => void handleStateChange("active")} disabled={isTransitioning}>
                   <Play size={14} />
-                  Retry
+                  Resume
                 </button>
-                <button className="btn btn--danger btn--compact" onClick={() => void handleStateChange("terminated")} disabled={isTransitioning}>
-                  <Square size={14} />
-                  Stop
-                </button>
-              </>
-            )}
-            {agent.state === "terminated" && (
-              <>
-                <button className="btn btn-task-create btn--compact" onClick={() => void handleStateChange("active")} disabled={isTransitioning}>
-                  <Play size={14} />
-                  Start
-                </button>
-                <button className="btn btn--danger btn--compact" onClick={handleDelete}>
-                  <Trash2 size={14} />
-                  Delete
-                </button>
-              </>
-            )}
-          </div>
+              )}
+              {agent.state === "running" && (
+                <>
+                  <button className="btn btn--compact" onClick={() => void handleStateChange("paused")} disabled={isTransitioning}>
+                    <Pause size={14} />
+                    Pause
+                  </button>
+                  <button className="btn btn--danger btn--compact" onClick={() => void handleStateChange("terminated")} disabled={isTransitioning}>
+                    <Square size={14} />
+                    Stop
+                  </button>
+                </>
+              )}
+              {agent.state === "error" && (
+                <>
+                  <button className="btn btn-task-create btn--compact" onClick={() => void handleStateChange("active")} disabled={isTransitioning}>
+                    <Play size={14} />
+                    Retry
+                  </button>
+                  <button className="btn btn--danger btn--compact" onClick={() => void handleStateChange("terminated")} disabled={isTransitioning}>
+                    <Square size={14} />
+                    Stop
+                  </button>
+                </>
+              )}
+              {agent.state === "terminated" && (
+                <>
+                  <button className="btn btn-task-create btn--compact" onClick={() => void handleStateChange("active")} disabled={isTransitioning}>
+                    <Play size={14} />
+                    Start
+                  </button>
+                  <button className="btn btn--danger btn--compact" onClick={handleDelete}>
+                    <Trash2 size={14} />
+                    Delete
+                  </button>
+                </>
+              )}
+            </div>
 
-          {/* Utility actions: refresh + close */}
-          <div className="agent-detail-utility-actions">
-            <button className="btn-icon" onClick={() => void loadAgent()} title="Refresh">
-              <RefreshCw size={16} />
-            </button>
-            {!inline && (
-              <button className="btn-icon" onClick={onClose} aria-label="Close" title="Close">
-                <X size={20} />
+            {/* Utility actions: refresh + close */}
+            <div className="agent-detail-utility-actions">
+              <button className="btn-icon" onClick={() => void loadAgent()} title="Refresh">
+                <RefreshCw size={16} />
               </button>
-            )}
+              {!inline && (
+                <button className="btn-icon" onClick={onClose} aria-label="Close" title="Close">
+                  <X size={20} />
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
