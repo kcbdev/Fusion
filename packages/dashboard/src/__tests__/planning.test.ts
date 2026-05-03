@@ -3013,14 +3013,18 @@ describe("FN-3300: thinking-block response extraction", () => {
         thinkingOutputPerPrompt: [questionJson, questionJson],
       });
 
-      const { sessionId } = await createSessionWithAgent(
+      const sessionId = await createSessionWithAgent(
         getUniqueIp(),
         "Test plan",
         TEST_ROOT_DIR,
       );
 
+      await vi.waitFor(() => {
+        expect(getSession(sessionId)?.currentQuestion?.id).toBe("q-scope");
+      });
+
       // Submit response to trigger continueAgentConversation
-      const result = await submitResponse(sessionId, { scope: "medium" });
+      const result = await submitResponse(sessionId, { "q-scope": "medium" }, TEST_ROOT_DIR);
       expect(result.type).toBe("question");
       if (result.type === "question") {
         expect(result.data.id).toBe("q-scope");
@@ -3050,13 +3054,17 @@ describe("FN-3300: thinking-block response extraction", () => {
         thinkingOutputPerPrompt: ["old-thinking-output"],
       });
 
-      const { sessionId } = await createSessionWithAgent(
+      const sessionId = await createSessionWithAgent(
         getUniqueIp(),
         "Test plan",
         TEST_ROOT_DIR,
       );
 
-      const result = await submitResponse(sessionId, { scope: "medium" });
+      await vi.waitFor(() => {
+        expect(getSession(sessionId)?.currentQuestion?.id).toBe("q-from-text-block");
+      });
+
+      const result = await submitResponse(sessionId, { "q-from-text-block": "value" }, TEST_ROOT_DIR);
       expect(result.type).toBe("question");
       if (result.type === "question") {
         expect(result.data.id).toBe("q-from-text-block");
