@@ -48,6 +48,7 @@ function createMockStore(options?: {
     updateRun: vi.fn(),
     appendEvent: vi.fn(),
     addSource: vi.fn(),
+    searchRuns: vi.fn(() => []),
   };
 
   return {
@@ -86,6 +87,39 @@ describe("research-routes", () => {
     expect(Array.isArray(response.body.runs)).toBe(true);
   });
 
+  it("supports run status actions, detail fetch, and export formats", async () => {
+    const store = createMockStore();
+    const app = express();
+    app.use(express.json());
+    app.use(createResearchRouter(store as any));
+
+    const getRun = await performGet(app, "/runs/RR-1");
+    expect(getRun.status).toBe(200);
+    expect(getRun.body.run.id).toBe("RR-1");
+
+    const cancel = await performRequest(app, "POST", "/runs/RR-1/cancel");
+    expect(cancel.status).toBe(200);
+    expect(cancel.body.run.status).toBe("pending");
+
+    const retry = await performRequest(app, "POST", "/runs/RR-1/retry");
+    expect(retry.status).toBe(200);
+    expect(retry.body.run.status).toBe("pending");
+
+    const markdownExport = await performGet(app, "/runs/RR-1/export?format=markdown");
+    expect(markdownExport.status).toBe(200);
+    expect(markdownExport.body.format).toBe("markdown");
+
+    const jsonExport = await performGet(app, "/runs/RR-1/export?format=json");
+    expect(jsonExport.status).toBe(200);
+    expect(jsonExport.body.format).toBe("json");
+
+    const htmlExport = await performGet(app, "/runs/RR-1/export?format=html");
+    expect(htmlExport.status).toBe(200);
+    expect(htmlExport.body.format).toBe("html");
+
+    expect(store.getResearchStore().updateStatus).toHaveBeenCalledWith("RR-1", "cancelled");
+    expect(store.getResearchStore().updateStatus).toHaveBeenCalledWith("RR-1", "pending");
+  });
   it("creates task from finding with research provenance", async () => {
     const store = createMockStore();
     const app = express();
@@ -350,4 +384,13 @@ describe("research-routes", () => {
     expect(response.body.error).toContain("Invalid mime type");
   });
 
+  it("supports search endpoint", async () => {
+    const app = express();
+    app.use(express.json());
+    app.use(createResearchRouter(createMockStore() as any));
+
+    const search = await performGet(app, "/search?q=test");
+    expect(search.status).toBe(200);
+    expect(Array.isArray(search.body.runs)).toBe(true);
+  });
 });

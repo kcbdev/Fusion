@@ -120,11 +120,18 @@ describe("ResearchView", () => {
     expect(await screen.findByTestId("research-state-empty")).toBeInTheDocument();
   });
 
-  it("renders selected run details", async () => {
+  it("renders selected run details, citations, and history", async () => {
     mockUseResearch.mockReturnValue({
       ...baseHookValue,
       runs: [{ id: "RR-1", title: "t", query: "q", status: "running" }],
-      selectedRun: { id: "RR-1", title: "t", query: "q", status: "running", events: [], results: { summary: "Summary", findings: [], citations: [] } },
+      selectedRun: {
+        id: "RR-1",
+        title: "t",
+        query: "q",
+        status: "running",
+        events: [{ id: "evt-1", message: "Started" }],
+        results: { summary: "Summary", findings: [], citations: ["https://example.com"] },
+      },
       selectedRunId: "RR-1",
       statusCounts: { pending: 0, running: 1, completed: 0, failed: 0, cancelled: 0 },
     });
@@ -132,6 +139,9 @@ describe("ResearchView", () => {
 
     render(<ResearchView projectId="p1" />);
     expect(await screen.findByTestId("research-state-results")).toHaveTextContent("Summary");
+    expect(screen.getByRole("link", { name: "https://example.com" })).toHaveAttribute("href", "https://example.com");
+    fireEvent.click(screen.getByText("Run history"));
+    expect(screen.getByText("Started")).toBeInTheDocument();
   });
 
   it("triggers lifecycle/task/export actions", async () => {
@@ -178,6 +188,82 @@ describe("ResearchView", () => {
       expect(createTaskFromRun).toHaveBeenCalled();
       expect(exportRun).toHaveBeenCalled();
     });
+  });
+
+  it("triggers enrich-task action from finding modal", async () => {
+    const attachRunToTask = vi.fn().mockResolvedValue({});
+    mockUseResearch.mockReturnValue({
+      ...baseHookValue,
+      runs: [{ id: "RR-1", title: "t", query: "q", status: "pending" }],
+      selectedRun: {
+        id: "RR-1",
+        title: "t",
+        query: "q",
+        status: "pending",
+        events: [],
+        results: { summary: "Summary", findings: [{ id: "finding-1", heading: "Finding", content: "Impact." }], citations: [] },
+      },
+      selectedRunId: "RR-1",
+      attachRunToTask,
+    });
+    mockFetchAuthStatus.mockResolvedValue({ providers: [{ id: "openrouter", type: "api_key", authenticated: true }] });
+
+    render(<ResearchView projectId="p1" />);
+    fireEvent.click((await screen.findAllByText("Enrich Task"))[0]);
+
+    const enrichDialog = await screen.findByRole("dialog");
+    const targetInput = within(enrichDialog).getByRole("combobox", { name: "Target task" });
+    fireEvent.change(targetInput, { target: { value: "FN-1" } });
+    fireEvent.click(within(enrichDialog).getByRole("button", { name: "Enrich Task" }));
+
+    await waitFor(() => {
+      expect(attachRunToTask).toHaveBeenCalledWith("RR-1", "FN-1", "finding-1", false);
+    });
+  });
+
+  it("disables create-run button while submitting", async () => {
+    let resolveCreate: ((value: unknown) => void) | undefined;
+    const createRun = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
+    mockFetchAuthStatus.mockResolvedValue({ providers: [{ id: "openrouter", type: "api_key", authenticated: true }] });
+    mockUseResearch.mockReturnValue({ ...baseHookValue, createRun });
+
+    render(<ResearchView projectId="p1" />);
+    fireEvent.change(await screen.findByLabelText("Query"), { target: { value: "async query" } });
+    const createButton = screen.getByRole("button", { name: /Create Run/i });
+
+    fireEvent.click(createButton);
+    await waitFor(() => expect(createButton).toBeDisabled());
+
+    resolveCreate?.({ run: { id: "RR-2" } });
+    await waitFor(() => expect(createRun).toHaveBeenCalledWith({ query: "async query", providers: ["web-search"] }));
+  });
+
+  it("wires search field and run selection interactions", async () => {
+    const setSearchQuery = vi.fn();
+    const setSelectedRunId = vi.fn();
+    mockFetchAuthStatus.mockResolvedValue({ providers: [{ id: "openrouter", type: "api_key", authenticated: true }] });
+    mockUseResearch.mockReturnValue({
+      ...baseHookValue,
+      searchQuery: "",
+      setSearchQuery,
+      setSelectedRunId,
+      runs: [
+        { id: "RR-1", title: "Alpha", query: "alpha", status: "pending" },
+        { id: "RR-2", title: "Beta", query: "beta", status: "completed" },
+      ],
+    });
+
+    render(<ResearchView projectId="p1" />);
+    fireEvent.change(await screen.findByPlaceholderText("Search runs"), { target: { value: "beta" } });
+    expect(setSearchQuery).toHaveBeenCalledWith("beta");
+
+    fireEvent.click(screen.getByRole("button", { name: /RR-2/i }));
+    expect(setSelectedRunId).toHaveBeenCalledWith("RR-2");
   });
 
   it("renders unavailable state without interactive workflow controls", async () => {

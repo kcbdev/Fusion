@@ -223,7 +223,30 @@ This matrix is bounded to safeguards only (timeouts, cancel, rate limits, error 
 
 ---
 
-## 6) Blockers status
+## 6) FN-3016 coverage hardening landed
+
+FN-3016 added standalone Research interaction coverage across component/hook/route/app layers using this shape-freeze map.
+
+Primary coverage files:
+- `packages/dashboard/app/components/__tests__/ResearchView.test.tsx`
+- `packages/dashboard/app/hooks/__tests__/useResearch.test.ts`
+- `packages/dashboard/src/__tests__/research-routes.test.ts`
+- `packages/dashboard/app/components/__tests__/App.test.tsx`
+
+Covered user-visible flows:
+- create-run UX and in-flight/disabled behavior
+- loading/empty/error/setup-needed rendering
+- run history/search, cited results reading, and detail selection
+- export/cancel/retry controls
+- finding actions for creating new tasks and enriching existing tasks
+- dashboard navigation to standalone Research + feature-disabled fallback/persistence
+
+Bounded fix included by test guidance:
+- `ResearchView.handleCreateRun` now clears submitting state before early-return on zero enabled providers (prevents stuck disabled create button).
+
+---
+
+## 7) Blockers status
 
 - **No dependency blocker detected for FN-2998 in current repo state.**
 - Existing research subsystem is landed and test-covered (`research-routes.test.ts`, CLI research tests).

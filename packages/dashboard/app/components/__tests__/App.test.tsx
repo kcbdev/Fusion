@@ -252,6 +252,16 @@ vi.mock("../../components/AgentsView", () => ({
   AgentsView: () => <div className="agents-view">Agents view</div>,
 }));
 
+vi.mock("../../components/ResearchView", () => ({
+  ResearchView: ({ addToast }: { addToast?: (message: string, type?: "success" | "error" | "info") => void }) => (
+    <div data-testid="research-view">
+      <h2>Research</h2>
+      <p data-testid="research-status">completed</p>
+      <button type="button" onClick={() => addToast?.("Task created from research", "success")}>Create Task</button>
+    </div>
+  ),
+}));
+
 vi.mock("../../components/TodoView", () => ({
   TodoView: ({ onPlanningMode }: { onPlanningMode?: (initialPlan: string) => void }) => (
     <div className="todo-view" data-testid="todo-view">
@@ -1344,6 +1354,55 @@ describe("App engine pause (soft pause)", () => {
 });
 
 describe("App view switching", () => {
+  it("opens research view from overflow and persists view selection", async () => {
+    localStorage.setItem("kb-dashboard-view-mode", "project");
+    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ...defaultSettings,
+      experimentalFeatures: {
+        ...defaultSettings.experimentalFeatures,
+        researchView: true,
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+    fireEvent.click(await screen.findByTestId("view-overflow-research"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("research-view")).toBeInTheDocument();
+      expect(localStorage.getItem(taskViewStorageKey())).toBe("research");
+    });
+
+    localStorage.removeItem("kb-dashboard-view-mode");
+    localStorage.removeItem(taskViewStorageKey());
+  });
+
+  it("falls back to board when research view is feature-disabled", async () => {
+    localStorage.setItem("kb-dashboard-view-mode", "project");
+    localStorage.setItem(taskViewStorageKey(), "research");
+    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ...defaultSettings,
+      experimentalFeatures: {
+        ...defaultSettings.experimentalFeatures,
+        researchView: false,
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(document.querySelector(".board")).toBeTruthy();
+    });
+    expect(screen.queryByTestId("research-view")).not.toBeInTheDocument();
+
+    localStorage.removeItem("kb-dashboard-view-mode");
+    localStorage.removeItem(taskViewStorageKey());
+  });
   it("renders Board view by default", async () => {
     // Set project mode so board view is available
     localStorage.setItem("kb-dashboard-view-mode", "project");

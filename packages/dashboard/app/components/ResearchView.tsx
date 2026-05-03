@@ -208,6 +208,7 @@ export function ResearchView({ projectId, addToast, onOpenSettings, readinessVer
     try {
       const providers = selectedProviders.filter((provider) => isProviderEnabled(provider));
       if (providers.length === 0) {
+        setSubmitting(false);
         addToast?.("No enabled research sources are available for this project.", "error");
         return;
       }
