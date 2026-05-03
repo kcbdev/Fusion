@@ -469,6 +469,38 @@ describe("AiSessionStore", () => {
     expect(store.updateStatus("S-missing", "error", "Nope")).toBe(false);
   });
 
+  it("updateDraft updates planning title + input payload and emits updated", () => {
+    seedSession({ id: "S-draft", status: "awaiting_input" });
+
+    const onUpdated = vi.fn();
+    store.on("ai_session:updated", onUpdated);
+
+    const updated = store.updateDraft("S-draft", {
+      title: "  Refined plan title  ",
+      initialPlan: "  Refined draft body  ",
+    });
+
+    expect(updated).toBe(true);
+    const session = store.get("S-draft");
+    expect(session?.title).toBe("Refined plan title");
+    expect(session?.inputPayload).toBe(JSON.stringify({ initialPlan: "Refined draft body" }));
+    expect(onUpdated).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "S-draft", title: "Refined plan title" }),
+    );
+  });
+
+  it("updateDraft returns false for missing or non-planning sessions", () => {
+    seedSession({ id: "S-subtask", status: "awaiting_input" });
+    db.prepare("UPDATE ai_sessions SET type = 'subtask' WHERE id = ?").run("S-subtask");
+
+    expect(
+      store.updateDraft("S-subtask", { title: "Nope", initialPlan: "Nope" }),
+    ).toBe(false);
+    expect(
+      store.updateDraft("S-missing", { title: "Missing", initialPlan: "Missing" }),
+    ).toBe(false);
+  });
+
   it("listRecoverable returns awaiting_input and generating sessions", () => {
     seedSession({ id: "S-generating", status: "generating", ageMs: 3_000 });
     seedSession({ id: "S-awaiting", status: "awaiting_input", ageMs: 1_000 });

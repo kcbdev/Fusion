@@ -20,6 +20,7 @@ import {
   fetchModels,
   cancelPlanning,
   stopPlanningGeneration,
+  updatePlanningSessionDraft,
   updateGlobalSettings,
   type PlanningSession,
   type SubtaskItem,
@@ -165,6 +166,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   // target is the overlay and would dismiss the modal mid-resize.
   const overlayMouseDownOnSelfRef = useRef(false);
   const thinkingOutputRef = useRef<HTMLDivElement>(null);
+  const draftSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSyncedDraftRef = useRef<{ sessionId: string; initialPlan: string } | null>(null);
 
   useModalResizePersist(modalRef, isOpen, "fusion:planning-modal-size");
 
@@ -760,6 +763,85 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const handleBackToList = useCallback(() => {
     setMobileShowDetail(false);
   }, []);
+
+  const syncPlanningDraft = useCallback(
+    async (sessionId: string, planText: string) => {
+      const trimmedPlan = planText.trim();
+      if (!trimmedPlan) {
+        return;
+      }
+
+      const alreadySynced =
+        lastSyncedDraftRef.current?.sessionId === sessionId &&
+        lastSyncedDraftRef.current.initialPlan === trimmedPlan;
+      if (alreadySynced) {
+        return;
+      }
+
+      try {
+        await updatePlanningSessionDraft(
+          sessionId,
+          {
+            title: trimmedPlan,
+            initialPlan: trimmedPlan,
+          },
+          projectId,
+        );
+        lastSyncedDraftRef.current = { sessionId, initialPlan: trimmedPlan };
+      } catch {
+        // best-effort draft sync; avoid blocking typing UX on transient failures
+      }
+    },
+    [projectId],
+  );
+
+  useEffect(() => {
+    if (draftSyncTimerRef.current) {
+      clearTimeout(draftSyncTimerRef.current);
+      draftSyncTimerRef.current = null;
+    }
+
+    if (!isOpen || view.type !== "initial" || !selectedSessionId) {
+      return;
+    }
+
+    draftSyncTimerRef.current = setTimeout(() => {
+      void syncPlanningDraft(selectedSessionId, initialPlan);
+    }, 500);
+
+    return () => {
+      if (draftSyncTimerRef.current) {
+        clearTimeout(draftSyncTimerRef.current);
+        draftSyncTimerRef.current = null;
+      }
+    };
+  }, [initialPlan, isOpen, selectedSessionId, syncPlanningDraft, view.type]);
+
+  useEffect(() => {
+    lastSyncedDraftRef.current = null;
+  }, [selectedSessionId]);
+
+  useEffect(() => {
+    return () => {
+      if (draftSyncTimerRef.current) {
+        clearTimeout(draftSyncTimerRef.current);
+        draftSyncTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const handleInitialPlanBlur = useCallback(() => {
+    if (draftSyncTimerRef.current) {
+      clearTimeout(draftSyncTimerRef.current);
+      draftSyncTimerRef.current = null;
+    }
+
+    if (!selectedSessionId || view.type !== "initial") {
+      return;
+    }
+
+    void syncPlanningDraft(selectedSessionId, initialPlan);
+  }, [initialPlan, selectedSessionId, syncPlanningDraft, view.type]);
 
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {

@@ -220,6 +220,36 @@ export class AiSessionStore extends EventEmitter<AiSessionStoreEvents> {
   }
 
   /**
+   * Update persisted draft metadata for a planning session.
+   * Keeps sidebar title/input payload current while the user edits.
+   */
+  updateDraft(id: string, draft: { title: string; initialPlan: string }): boolean {
+    const now = new Date().toISOString();
+    const trimmedTitle = draft.title.trim();
+    const trimmedPlan = draft.initialPlan.trim();
+    const inputPayload = JSON.stringify({ initialPlan: trimmedPlan });
+    const result = this.db
+      .prepare(
+        `UPDATE ai_sessions
+         SET title = ?, inputPayload = ?, updatedAt = ?
+         WHERE id = ? AND type = 'planning'`,
+      )
+      .run(trimmedTitle, inputPayload, now, id) as { changes?: number };
+
+    const changed = Number(result.changes ?? 0) > 0;
+    if (!changed) {
+      return false;
+    }
+
+    const row = this.get(id);
+    if (row) {
+      this.emit("ai_session:updated", toSummary(row, row.updatedAt));
+    }
+
+    return true;
+  }
+
+  /**
    * Lightweight heartbeat for active sessions.
    * Updates only `updatedAt` and intentionally does NOT emit
    * `ai_session:updated` to avoid high-frequency SSE broadcasts.

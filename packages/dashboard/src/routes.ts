@@ -3618,6 +3618,47 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   });
 
   /**
+   * PATCH /api/ai-sessions/:id/draft
+   * Keep planning draft title/text synchronized while editing.
+   * Body: { title: string, initialPlan: string }
+   */
+  router.patch("/ai-sessions/:id/draft", (req, res) => {
+    if (!aiSessionStore) {
+      throw notFound("AI sessions not available");
+    }
+
+    const { id } = req.params;
+    const session = aiSessionStore.get(id);
+    if (!session) {
+      throw notFound("Session not found");
+    }
+
+    if (session.type !== "planning") {
+      throw badRequest("Only planning sessions support draft updates");
+    }
+
+    const rawTitle = typeof req.body?.title === "string" ? req.body.title : "";
+    const rawInitialPlan = typeof req.body?.initialPlan === "string" ? req.body.initialPlan : "";
+    const title = rawTitle.trim();
+    const initialPlan = rawInitialPlan.trim();
+
+    if (!title) {
+      throw badRequest("title is required");
+    }
+
+    if (!initialPlan) {
+      throw badRequest("initialPlan is required");
+    }
+
+    const updated = aiSessionStore.updateDraft(id, { title, initialPlan });
+    if (!updated) {
+      throw notFound("Session not found");
+    }
+
+    res.json({ ok: true });
+  });
+
+  /**
    * DELETE /api/ai-sessions/:id
    * Dismiss/cancel a background AI session.
    * Also cleans up the in-memory agent if still alive.

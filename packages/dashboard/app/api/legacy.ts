@@ -7235,6 +7235,17 @@ export function pingSession(sessionId: string, projectId?: string): Promise<{ ok
   });
 }
 
+export function updatePlanningSessionDraft(
+  sessionId: string,
+  draft: { title: string; initialPlan: string },
+  projectId?: string,
+): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>(withProjectId(`/ai-sessions/${encodeURIComponent(sessionId)}/draft`, projectId), {
+    method: "PATCH",
+    body: JSON.stringify(draft),
+  });
+}
+
 // ── Messages API ──────────────────────────────────────────────────────────
 
 /** Response shape for GET /messages/inbox */
