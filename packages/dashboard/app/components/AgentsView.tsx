@@ -634,6 +634,13 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
     openAgentDetail(childId);
   }, [openAgentDetail]);
 
+  const handleOverviewAgentSelect = useCallback((agentId: string) => {
+    openAgentDetail(agentId);
+    if (isMobileViewport) {
+      setIsOverviewOpen(false);
+    }
+  }, [isMobileViewport, openAgentDetail]);
+
   const handleRunHeartbeat = async (agentId: string, agentName: string) => {
     try {
       await startAgentRun(agentId, projectId, { source: "on_demand", triggerDetail: "Triggered from dashboard" });
@@ -855,7 +862,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
         projectId={projectId}
         isOpen={isOverviewOpen}
         onToggle={() => setIsOverviewOpen((open) => !open)}
-        onSelectAgent={setSelectedAgentId}
+        onSelectAgent={handleOverviewAgentSelect}
         onOpenTaskLogs={onOpenTaskLogs}
       />
 

@@ -334,6 +334,32 @@ describe("AgentsView", () => {
       expect(container.querySelector(".agents-split-detail--hidden-mobile")).toBeTruthy();
     });
 
+    it("collapses mobile overview after selecting an active agent card", async () => {
+      mockViewportMode.mockReturnValue("mobile");
+      render(<AgentsView addToast={mockAddToast} />);
+
+      const overviewToggle = await openOverviewPanel();
+      fireEvent.click(await screen.findByRole("button", { name: /select agent test agent 2/i }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("agent-detail-view")).toHaveTextContent("agent-002");
+        expect(overviewToggle.getAttribute("aria-expanded")).toBe("false");
+      });
+    });
+
+    it("keeps desktop overview open after selecting an active agent card", async () => {
+      mockViewportMode.mockReturnValue("desktop");
+      render(<AgentsView addToast={mockAddToast} />);
+
+      const overviewToggle = await openOverviewPanel();
+      fireEvent.click(await screen.findByRole("button", { name: /select agent test agent 2/i }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("agent-detail-view")).toHaveTextContent("agent-002");
+        expect(overviewToggle.getAttribute("aria-expanded")).toBe("true");
+      });
+    });
+
     it("shows a loading indicator while the initial agents fetch is pending", async () => {
       let resolveAgents: ((value: Agent[]) => void) | undefined;
       mockFetchAgents.mockImplementationOnce(
