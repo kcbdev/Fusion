@@ -287,7 +287,11 @@ function AppInner() {
   const { keyboardOpen } = useMobileKeyboard({ enabled: isMobile });
   // Keyboard visibility controls both MobileNavBar rendering and whether
   // the project content reserves bottom padding for the mobile nav bar.
-  const mobileKeyboardOpen = isMobile && keyboardOpen;
+  // When a modal is open, modal-local inputs can trigger the keyboard without
+  // affecting the underlying dashboard layout — the modal handles its own
+  // viewport. Without this guard, modal keyboard state leaks into the app-level
+  // layout, causing stale bottom-padding offsets after the keyboard closes.
+  const mobileKeyboardOpen = isMobile && keyboardOpen && !modalManager.anyModalOpen;
 
   // App-level mailbox unread count state (used for header/mobile nav badges)
   const [mailboxUnreadCount, setMailboxUnreadCount] = useState(0);

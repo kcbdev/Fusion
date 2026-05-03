@@ -471,6 +471,26 @@ vi.mock("../../hooks/useNodes", () => ({
   })),
 }));
 
+// Mock useMobileKeyboard for modal keyboard isolation tests (FN-3290).
+// Default: keyboard closed, matching real test-environment behavior.
+const mockUseMobileKeyboard = vi.fn(() => ({
+  keyboardOverlap: 0,
+  viewportHeight: null,
+  viewportOffsetTop: 0,
+  keyboardOpen: false,
+}));
+vi.mock("../../hooks/useMobileKeyboard", () => ({
+  useMobileKeyboard: (...args: unknown[]) => mockUseMobileKeyboard(...args),
+}));
+
+// Mock useViewportMode so tests can simulate mobile viewport without
+// depending on window.matchMedia in jsdom.
+const mockUseViewportMode = vi.fn(() => "desktop");
+vi.mock("../../hooks/useViewportMode", () => ({
+  useViewportMode: (...args: unknown[]) => mockUseViewportMode(...args),
+  getViewportMode: () => "desktop",
+}));
+
 import { App } from "../../App";
 import { AUTH_TOKEN_RECOVERY_REQUIRED_EVENT } from "../../auth";
 import { fetchAuthStatus, fetchSettings, fetchGlobalSettings, fetchTaskDetail, fetchUnreadCount, updateSettings, runScript, fetchScripts, fetchModels, fetchPluginDashboardViews } from "../../api";
@@ -557,6 +577,16 @@ beforeEach(() => {
     totalCount: 0,
     dismissedCount: 0,
   }));
+  // Reset mobile keyboard and viewport mocks to defaults (desktop, no keyboard)
+  mockUseMobileKeyboard.mockReset();
+  mockUseMobileKeyboard.mockReturnValue({
+    keyboardOverlap: 0,
+    viewportHeight: null,
+    viewportOffsetTop: 0,
+    keyboardOpen: false,
+  });
+  mockUseViewportMode.mockReset();
+  mockUseViewportMode.mockReturnValue("desktop");
 });
 
 describe("App backend-unreachable first-run flow", () => {
@@ -2949,5 +2979,130 @@ describe("App auth token recovery dialog", () => {
     fireEvent.click(overlay);
 
     expect(screen.getByRole("dialog", { name: "Authentication token required" })).toBeInTheDocument();
+  });
+});
+
+describe("FN-3290: modal keyboard isolation for mobile dashboard layout", () => {
+  const originalLocation = window.location;
+
+  beforeEach(() => {
+    window.history.replaceState = vi.fn();
+    // Prevent onboarding modal from auto-opening
+    (fetchAuthStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      providers: [
+        { id: "anthropic", name: "Anthropic", authenticated: true },
+      ],
+    });
+    (fetchGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+      modelOnboardingComplete: true,
+      defaultProvider: "anthropic",
+      defaultModelId: "claude-sonnet-4-5",
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: originalLocation,
+    });
+    localStorage.removeItem("kb-dashboard-view-mode");
+    localStorage.removeItem(taskViewStorageKey());
+  });
+
+  it("removes project-content--with-mobile-nav when keyboard is open with no modal (mobile)", async () => {
+    mockUseViewportMode.mockReturnValue("mobile");
+    localStorage.setItem("kb-dashboard-view-mode", "project");
+
+    // Keyboard is open, no modal
+    mockUseMobileKeyboard.mockReturnValue({
+      keyboardOverlap: 250,
+      viewportHeight: 550,
+      viewportOffsetTop: 0,
+      keyboardOpen: true,
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(document.querySelector(".project-content")).toBeTruthy();
+    });
+
+    const wrapper = document.querySelector(".project-content");
+    // Without a modal, the keyboard-open state should remove the mobile nav padding
+    expect(wrapper?.classList.contains("project-content--with-mobile-nav")).toBe(false);
+  });
+
+  it("keeps project-content--with-mobile-nav when keyboard is open inside a modal (mobile)", async () => {
+    // Use deep link to open a task detail modal — avoids complex mobile overflow navigation
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: new URL("http://localhost:3000/?task=FN-123"),
+    });
+    mockUseViewportMode.mockReturnValue("mobile");
+    localStorage.setItem("kb-dashboard-view-mode", "project");
+
+    // Keyboard is reported as open (as if a modal input has focus)
+    mockUseMobileKeyboard.mockReturnValue({
+      keyboardOverlap: 250,
+      viewportHeight: 550,
+      viewportOffsetTop: 0,
+      keyboardOpen: true,
+    });
+
+    render(<App />);
+
+    // Wait for task detail modal to open
+    await waitFor(() => {
+      expect(fetchTaskDetail).toHaveBeenCalledWith("FN-123", "proj_123");
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Task FN-123")).toBeTruthy();
+    });
+
+    // The dashboard wrapper should STILL have project-content--with-mobile-nav
+    // because the keyboard-open state is gated by anyModalOpen.
+    const wrapper = document.querySelector(".project-content");
+    expect(wrapper).toBeTruthy();
+    expect(wrapper?.classList.contains("project-content--with-mobile-nav")).toBe(true);
+  });
+
+  it("removes mobile nav class when modal closes while keyboard stays open", async () => {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: new URL("http://localhost:3000/?task=FN-456"),
+    });
+    mockUseViewportMode.mockReturnValue("mobile");
+    localStorage.setItem("kb-dashboard-view-mode", "project");
+
+    mockUseMobileKeyboard.mockReturnValue({
+      keyboardOverlap: 250,
+      viewportHeight: 550,
+      viewportOffsetTop: 0,
+      keyboardOpen: true,
+    });
+
+    const { rerender } = render(<App />);
+
+    // Wait for task detail modal to open
+    await waitFor(() => {
+      expect(screen.getByText("Task FN-456")).toBeTruthy();
+    });
+
+    // With modal open, mobile nav class is preserved despite keyboard being open
+    let wrapper = document.querySelector(".project-content");
+    expect(wrapper?.classList.contains("project-content--with-mobile-nav")).toBe(true);
+
+    // Close the modal via close button
+    const closeBtn = document.querySelector(".modal-overlay.open .modal-close") as HTMLElement;
+    expect(closeBtn).toBeTruthy();
+    fireEvent.click(closeBtn);
+    rerender(<App />);
+
+    // Keyboard is still open, but modal is now closed — mobileKeyboardOpen becomes true,
+    // so the mobile nav class should be removed
+    await waitFor(() => {
+      wrapper = document.querySelector(".project-content");
+      expect(wrapper?.classList.contains("project-content--with-mobile-nav")).toBe(false);
+    });
   });
 });

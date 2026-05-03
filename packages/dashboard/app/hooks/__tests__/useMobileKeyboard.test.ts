@@ -335,4 +335,140 @@ describe("useMobileKeyboard", () => {
 
     input.remove();
   });
+
+  // FN-3290 regression: focusout must reset keyboard state when input blurs
+  describe("FN-3290: focusout resets keyboard state", () => {
+    it("resets keyboardOpen to false on focusout when viewport returns to baseline", async () => {
+      const { listeners, mockVV } = setupMobileVisualViewport({
+        innerHeight: 844,
+        vvHeight: 844,
+      });
+
+      const input = document.createElement("textarea");
+      document.body.appendChild(input);
+
+      const { result } = renderHook(() => useMobileKeyboard());
+
+      await waitFor(() => {
+        expect(result.current.keyboardOpen).toBe(false);
+      });
+
+      // Focus the input and simulate keyboard opening
+      input.focus();
+      Object.defineProperty(window, "innerHeight", {
+        value: 520,
+        writable: true,
+        configurable: true,
+      });
+      Object.defineProperty(mockVV, "height", {
+        value: 520,
+        writable: true,
+        configurable: true,
+      });
+
+      act(() => {
+        for (const cb of listeners.resize) cb();
+      });
+
+      await waitFor(() => {
+        expect(result.current.keyboardOpen).toBe(true);
+        expect(result.current.keyboardOverlap).toBe(324);
+      });
+
+      // Blur the input and restore viewport to baseline
+      input.blur();
+      Object.defineProperty(window, "innerHeight", {
+        value: 844,
+        writable: true,
+        configurable: true,
+      });
+      Object.defineProperty(mockVV, "height", {
+        value: 844,
+        writable: true,
+        configurable: true,
+      });
+
+      act(() => {
+        for (const cb of listeners.resize) cb();
+      });
+
+      await waitFor(() => {
+        expect(result.current.keyboardOpen).toBe(false);
+        expect(result.current.keyboardOverlap).toBe(0);
+      });
+
+      input.remove();
+    });
+
+    it("clears keyboardOpen when active input is removed from DOM (simulating modal close)", async () => {
+      const { listeners, mockVV } = setupMobileVisualViewport({
+        innerHeight: 844,
+        vvHeight: 844,
+      });
+
+      const input = document.createElement("input");
+      input.type = "text";
+      document.body.appendChild(input);
+
+      const { result } = renderHook(() => useMobileKeyboard());
+
+      await waitFor(() => {
+        expect(result.current.keyboardOpen).toBe(false);
+      });
+
+      // Focus input and shrink viewport (keyboard appears)
+      input.focus();
+      Object.defineProperty(mockVV, "height", {
+        value: 824,
+        writable: true,
+        configurable: true,
+      });
+      Object.defineProperty(mockVV, "offsetTop", {
+        value: 5,
+        writable: true,
+        configurable: true,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        value: 829,
+        writable: true,
+        configurable: true,
+      });
+
+      act(() => {
+        for (const cb of listeners.resize) cb();
+      });
+
+      await waitFor(() => {
+        expect(result.current.keyboardOpen).toBe(true);
+      });
+
+      // Simulate modal close: remove the focused input from DOM and restore viewport
+      // The focusout event fires when the element is removed
+      input.remove();
+      Object.defineProperty(mockVV, "height", {
+        value: 844,
+        writable: true,
+        configurable: true,
+      });
+      Object.defineProperty(mockVV, "offsetTop", {
+        value: 0,
+        writable: true,
+        configurable: true,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        value: 844,
+        writable: true,
+        configurable: true,
+      });
+
+      act(() => {
+        for (const cb of listeners.resize) cb();
+      });
+
+      await waitFor(() => {
+        expect(result.current.keyboardOpen).toBe(false);
+        expect(result.current.keyboardOverlap).toBe(0);
+      });
+    });
+  });
 });
