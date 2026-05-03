@@ -2348,6 +2348,49 @@ describe("resizable sidebar", () => {
   });
 });
 
+describe("thread header New Chat button", () => {
+  const activeSession = { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" };
+
+  it("renders New Chat button in thread header on desktop when session is active", () => {
+    const viewportSpy = mockViewportMode("desktop");
+    setupMockChat({ activeSession });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    const btn = screen.getByTestId("chat-thread-new-chat-btn");
+    expect(btn).toBeInTheDocument();
+    expect(btn).toHaveTextContent("New Chat");
+    expect(btn).toHaveClass("btn", "btn-sm", "btn-primary");
+
+    viewportSpy.mockRestore();
+  });
+
+  it("clicking thread header New Chat button opens the NewChatDialog", () => {
+    const viewportSpy = mockViewportMode("desktop");
+    setupMockChat({ activeSession });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    const btn = screen.getByTestId("chat-thread-new-chat-btn");
+    fireEvent.click(btn);
+
+    expect(screen.getByTestId("chat-new-dialog-mode-toggle")).toBeInTheDocument();
+
+    viewportSpy.mockRestore();
+  });
+
+  it("does not render New Chat button in thread header on mobile", () => {
+    const viewportSpy = mockViewportMode("mobile");
+    setupMockChat({ activeSession });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    expect(screen.queryByTestId("chat-thread-new-chat-btn")).toBeNull();
+
+    viewportSpy.mockRestore();
+  });
+});
+
 describe("ChatView mobile behavior", () => {
   let savedVisualViewport: typeof window.visualViewport;
   let savedInnerHeight: number;

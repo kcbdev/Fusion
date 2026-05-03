@@ -1686,6 +1686,16 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
             <Bot size={16} />
             <span className="chat-thread-header-title">{threadHeaderTitle}</span>
             {showThreadHeaderModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
+            {!isMobile && (
+              <button
+                className="btn btn-sm btn-primary chat-thread-header-new-chat"
+                onClick={() => setShowNewDialog(true)}
+                data-testid="chat-thread-new-chat-btn"
+              >
+                <Plus size={14} />
+                New Chat
+              </button>
+            )}
 
           </div>
         )}

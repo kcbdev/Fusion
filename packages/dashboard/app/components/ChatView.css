@@ -214,6 +214,11 @@
   font-size: 15px;
 }
 
+.chat-thread-header-new-chat {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 /* Messages */
 .chat-messages {
   flex: 1;
@@ -1024,6 +1029,10 @@
 
   .chat-thread-header {
     flex-wrap: wrap;
+  }
+
+  .chat-thread-header-new-chat {
+    display: none;
   }
 
   .chat-session-delete-btn {
