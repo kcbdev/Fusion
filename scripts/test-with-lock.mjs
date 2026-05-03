@@ -2,7 +2,7 @@
 /**
  * test-with-lock.mjs
  *
- * Serializes `pnpm test` across concurrent git-worktree agent sessions so
+ * Serializes `pnpm test:full` across concurrent git-worktree agent sessions so
  * multiple Claude Code instances don't saturate the machine with vitest forks.
  *
  * Acquires an exclusive lock at ~/.fusion/test.lock (Darwin/Linux, O_EXLOCK)
@@ -10,7 +10,7 @@
  * While waiting it prints the PID and worktree path of the lock holder so
  * the developer knows who is blocking.
  *
- * Usage:  pnpm test:locked [extra args passed to pnpm test]
+ * Usage:  pnpm test:locked [extra args passed to pnpm test:full]
  * e.g.:   pnpm test:locked --filter @fusion/core
  */
 
@@ -154,11 +154,11 @@ for (const sig of ["exit", "SIGINT", "SIGTERM", "SIGHUP"]) {
 
 await acquireWithWait();
 
-// Forward all argv after the script name to `pnpm test`.
+// Forward all argv after the script name to `pnpm test:full`.
 const extraArgs = process.argv.slice(2);
 const child = spawn(
   "pnpm",
-  ["test", ...extraArgs],
+  ["test:full", ...extraArgs],
   { stdio: "inherit", shell: false },
 );
 

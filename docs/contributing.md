@@ -44,7 +44,8 @@ pnpm build:all  # full recursive build including desktop/mobile
 pnpm dev               # build + run CLI entrypoint in dev mode
 pnpm dev:ui            # dashboard dev server only
 pnpm lint              # lint all packages
-pnpm test              # workspace test suite (clean-worktree compatible)
+pnpm test              # changed-only workspace tests (falls back to full suite in safety contexts)
+pnpm test:full         # full workspace test suite (clean-worktree compatible)
 pnpm build             # workspace builds (excludes desktop/mobile)
 pnpm build:all         # full workspace build (includes desktop/mobile)
 pnpm verify:workspace  # canonical lint -> test -> build verification gate
@@ -56,14 +57,16 @@ pnpm typecheck         # workspace typechecks
 Fusion codifies workspace verification as a deterministic contract:
 
 - Use `pnpm install --frozen-lockfile` for clean bootstrap and dependency repair paths.
-- `pnpm test` must be runnable in a clean worktree without requiring a prior `pnpm build`.
+- `pnpm test:full` must be runnable in a clean worktree without requiring a prior `pnpm build`.
 - This includes clean states where `packages/core/dist`, `packages/engine/dist`, and `packages/dashboard/dist` are absent.
 - `pnpm verify:workspace` is the canonical pre-merge gate and runs in strict order:
   1. `pnpm lint`
-  2. `pnpm test`
+  2. `pnpm test:full`
   3. `pnpm build`
 
 CI uses `pnpm verify:workspace` directly, so changes that reintroduce hidden test pre-build dependencies fail fast.
+
+`pnpm test` now uses a changed-only entrypoint (`scripts/test-changed.mjs`) for faster local iteration. It resolves the comparison base from `.changeset/config.json` (`baseBranch`) and runs only affected package test scripts using safe package-first filtering (`pnpm --filter <pkg> test`). It automatically falls back to the full suite when the run is forced (CI / `--full`), the git comparison base or diff cannot be resolved, no changes are detected, or shared/root test infrastructure changes.
 
 ## Quality Gate Checklist
 
