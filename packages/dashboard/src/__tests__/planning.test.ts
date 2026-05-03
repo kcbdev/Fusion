@@ -2777,6 +2777,69 @@ describe("planning routes lock enforcement", () => {
     expect(finalTitle).not.toBe("Initial plan body before the late edits");
   });
 
+  it("re-summarizes on start when the model changed since the last summarize, even if text is identical", async () => {
+    // Defeats a subtle dedup loophole: blur produces a title under model A;
+    // the user switches to model B without editing text; clicking Start
+    // would otherwise reuse A's summary. updateDraft must invalidate
+    // summarizedFor on a model change so the start path summarizes again
+    // under model B.
+    const draft = await request(
+      app,
+      "POST",
+      "/api/planning/create-draft",
+      JSON.stringify({
+        initialPlan: "Plan body that does not change between blur and start",
+        planningModelProvider: "anthropic",
+        planningModelId: "claude-opus-4-7",
+      }),
+      { "content-type": "application/json" },
+    );
+    const draftSessionId = draft.body.sessionId as string;
+
+    const blur = await request(
+      app,
+      "POST",
+      `/api/planning/${draftSessionId}/summarize-draft-title`,
+      JSON.stringify({}),
+      { "content-type": "application/json" },
+    );
+    expect(blur.status).toBe(200);
+    const titleAfterBlur = blur.body.title as string;
+    const blurredPayload = JSON.parse(aiSessionStore.get(draftSessionId)?.inputPayload ?? "{}");
+    expect(blurredPayload.summarizedFor).toBe("Plan body that does not change between blur and start");
+    expect(blurredPayload.modelProvider).toBe("anthropic");
+
+    // User switches model without editing text — the modal calls
+    // updatePlanningSessionDraft with the new override.
+    await request(
+      app,
+      "PATCH",
+      `/api/ai-sessions/${draftSessionId}/draft`,
+      JSON.stringify({
+        initialPlan: "Plan body that does not change between blur and start",
+        modelProvider: "openai",
+        modelId: "gpt-5",
+      }),
+      { "content-type": "application/json" },
+    );
+
+    // summarizedFor must be cleared even though the text is identical —
+    // the prior summary was produced by a different model.
+    const switchedPayload = JSON.parse(aiSessionStore.get(draftSessionId)?.inputPayload ?? "{}");
+    expect(switchedPayload.modelProvider).toBe("openai");
+    expect(switchedPayload.modelId).toBe("gpt-5");
+    expect(switchedPayload.summarizedFor).toBeUndefined();
+
+    // The dropped summarizedFor above is the load-bearing assertion: it
+    // means startExistingSession's skip condition
+    // (persistedSummarizedFor === trimmed) evaluates to false, so the
+    // re-summarize path runs under the new model on Start. Title equality
+    // can't distinguish "skipped" from "re-summarized to the same fallback"
+    // for short text, so we verify the upstream signal that drives the
+    // decision rather than asserting on the resulting title string.
+    void titleAfterBlur;
+  });
+
   it("starts a draft that survived a backend restart by lazily rebuilding from SQLite", async () => {
     // Recreate the post-restart state: draft persisted in SQLite but the
     // in-memory sessions map is empty (rehydrateFromStore skips drafts since

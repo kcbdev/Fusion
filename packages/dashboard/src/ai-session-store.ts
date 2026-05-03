@@ -292,15 +292,30 @@ export class AiSessionStore extends EventEmitter<AiSessionStoreEvents> {
     const hasModelOverride = Boolean(draft.modelProvider && draft.modelId);
 
     // Preserve the prior `summarizedFor` field so summarize results aren't
-    // wiped on every draft sync. It only stays valid if it still matches the
-    // new initialPlan; otherwise the previous summary is stale and the start
-    // path will re-summarize against the current text.
+    // wiped on every draft sync, but only when both the plan text AND the
+    // model identity are unchanged. A model switch invalidates the prior
+    // summary even with identical text — otherwise startExistingSession
+    // would skip re-summarize and run the session with a title produced
+    // under a model the user just abandoned.
     const existing = this.get(id);
     let preservedSummarizedFor: string | undefined;
     if (existing?.inputPayload) {
       try {
-        const prev = JSON.parse(existing.inputPayload) as { summarizedFor?: unknown };
-        if (typeof prev.summarizedFor === "string" && prev.summarizedFor === trimmedPlan) {
+        const prev = JSON.parse(existing.inputPayload) as {
+          summarizedFor?: unknown;
+          modelProvider?: unknown;
+          modelId?: unknown;
+        };
+        const prevProvider = typeof prev.modelProvider === "string" ? prev.modelProvider : undefined;
+        const prevModelId = typeof prev.modelId === "string" ? prev.modelId : undefined;
+        const newProvider = hasModelOverride ? draft.modelProvider : undefined;
+        const newModelId = hasModelOverride ? draft.modelId : undefined;
+        const modelUnchanged = prevProvider === newProvider && prevModelId === newModelId;
+        if (
+          typeof prev.summarizedFor === "string"
+          && prev.summarizedFor === trimmedPlan
+          && modelUnchanged
+        ) {
           preservedSummarizedFor = prev.summarizedFor;
         }
       } catch {
