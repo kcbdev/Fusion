@@ -21,6 +21,7 @@ import {
   Play,
   Settings,
   Monitor,
+  Network,
   Search,
   Sparkles,
   Target,
@@ -72,7 +73,17 @@ export interface MobileNavBarProps {
   /** Whether to show the skills tab */
   showSkillsTab?: boolean;
   /** Experimental feature flags controlling visibility of nav items. */
-  experimentalFeatures?: { insights?: boolean; roadmap?: boolean; memoryView?: boolean; devServer?: boolean; devServerView?: boolean; todoView?: boolean; researchView?: boolean };
+  experimentalFeatures?: {
+    insights?: boolean;
+    roadmap?: boolean;
+    memoryView?: boolean;
+    devServer?: boolean;
+    devServerView?: boolean;
+    todoView?: boolean;
+    researchView?: boolean;
+    nodesView?: boolean;
+  };
+  onOpenNodes?: () => void;
   pluginDashboardViews?: PluginDashboardViewEntry[];
 }
 
@@ -123,6 +134,7 @@ export function MobileNavBar({
   onViewAllProjects,
   showSkillsTab,
   experimentalFeatures,
+  onOpenNodes,
   pluginDashboardViews = [],
 }: MobileNavBarProps) {
   const mode = useViewportMode();
@@ -654,6 +666,18 @@ export function MobileNavBar({
               >
                 <Monitor />
                 <span>Dev Server</span>
+              </button>
+            )}
+
+            {experimentalFeatures?.nodesView && onOpenNodes && (
+              <button
+                type="button"
+                className="mobile-more-item"
+                data-testid="mobile-more-item-nodes"
+                onClick={() => handleMoreAction(onOpenNodes)}
+              >
+                <Network />
+                <span>Nodes</span>
               </button>
             )}
 

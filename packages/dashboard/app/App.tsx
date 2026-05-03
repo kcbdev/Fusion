@@ -1046,6 +1046,7 @@ function AppInner() {
         onOpenActivityLog={modalManager.openActivityLog}
         onOpenSystemStats={modalManager.openSystemStats}
         onOpenMailbox={() => handleTaskViewChange("mailbox")}
+        onOpenNodes={handleOpenNodes}
         mailboxUnreadCount={mailboxUnreadCount}
         onOpenGitManager={modalManager.openGitManager}
         onOpenWorkflowSteps={modalManager.openWorkflowSteps}
@@ -1072,6 +1073,7 @@ function AppInner() {
           devServerView: devServerEnabled,
           todoView: todosEnabled,
           researchView: researchEnabled,
+          nodesView: nodesEnabled,
         }}
         pluginDashboardViews={pluginDashboardViews}
       />

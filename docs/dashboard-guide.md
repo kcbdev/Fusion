@@ -171,6 +171,10 @@ Project-wide routing defaults are configured in **Settings → Node Routing**.
 
 The Node Dashboard provides a mesh view of connected Fusion nodes. Each node can be a local instance or a remote headless node (`fn serve`).
 
+Navigation:
+- Desktop: Header node controls / overflow entry
+- Mobile: `MobileNavBar` → **More** sheet → **Nodes** (shown only when `experimentalFeatures.nodesView` is enabled)
+
 ![Nodes view](./screenshots/nodes-view.png)
 
 ### Local/Remote Node Switching

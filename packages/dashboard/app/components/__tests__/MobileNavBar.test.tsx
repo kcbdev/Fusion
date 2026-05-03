@@ -34,6 +34,7 @@ const createDefaultProps = () => ({
   onOpenActivityLog: vi.fn(),
   onOpenSystemStats: vi.fn(),
   onOpenMailbox: vi.fn(),
+  onOpenNodes: vi.fn(),
   mailboxUnreadCount: 0,
   onOpenGitManager: vi.fn(),
   onOpenWorkflowSteps: vi.fn(),
@@ -332,6 +333,29 @@ describe("MobileNavBar", () => {
     render(<MobileNavBar {...createDefaultProps()} experimentalFeatures={{ insights: true }} />);
     fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
     expect(screen.getByTestId("mobile-more-item-insights")).toBeDefined();
+  });
+
+  it("shows nodes in more sheet only when nodesView is enabled", () => {
+    const disabledProps = createDefaultProps();
+    const { unmount } = render(<MobileNavBar {...disabledProps} experimentalFeatures={{}} />);
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+    expect(screen.queryByTestId("mobile-more-item-nodes")).toBeNull();
+    unmount();
+
+    const enabledProps = createDefaultProps();
+    render(<MobileNavBar {...enabledProps} experimentalFeatures={{ nodesView: true }} />);
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+    expect(screen.getByTestId("mobile-more-item-nodes")).toBeDefined();
+  });
+
+  it("invokes onOpenNodes when nodes item is tapped", () => {
+    const props = createDefaultProps();
+    render(<MobileNavBar {...props} experimentalFeatures={{ nodesView: true }} />);
+
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+    fireEvent.click(screen.getByTestId("mobile-more-item-nodes"));
+
+    expect(props.onOpenNodes).toHaveBeenCalledOnce();
   });
 
   it("does not show memory in more sheet when memoryView is not enabled", () => {

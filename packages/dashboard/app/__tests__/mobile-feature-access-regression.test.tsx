@@ -46,6 +46,7 @@ const createDefaultMobileNavProps = () => ({
   onOpenSettings: vi.fn(),
   onOpenActivityLog: vi.fn(),
   onOpenMailbox: vi.fn(),
+  onOpenNodes: vi.fn(),
   mailboxUnreadCount: 0,
   onOpenGitManager: vi.fn(),
   onOpenWorkflowSteps: vi.fn(),
@@ -159,7 +160,20 @@ describe("Mobile Feature Access Regression Guard", () => {
     expect(screen.getByTestId("mobile-more-item-github")).toBeDefined();
     expect(screen.getByTestId("mobile-more-item-usage")).toBeDefined();
     expect(screen.queryByTestId("mobile-more-item-chat")).toBeNull();
+    expect(screen.queryByTestId("mobile-more-item-nodes")).toBeNull();
     expect(screen.getByTestId("mobile-more-item-settings")).toBeDefined();
+  });
+
+  it("nodes view is reachable from mobile More sheet when enabled", () => {
+    const props = createDefaultMobileNavProps();
+    render(<MobileNavBar {...props} experimentalFeatures={{ nodesView: true }} />);
+
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+
+    const nodesItem = screen.getByTestId("mobile-more-item-nodes");
+    expect(nodesItem).toBeDefined();
+    fireEvent.click(nodesItem);
+    expect(props.onOpenNodes).toHaveBeenCalledOnce();
   });
 
   it("chat is accessible via the bottom nav while remaining absent from the More sheet", () => {
