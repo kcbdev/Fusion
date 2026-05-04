@@ -2,6 +2,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import { MissionManager } from "../MissionManager";
 
+/**
+ * MissionManager layout reference (post FN-3136):
+ * - split container: .mission-manager__split
+ * - sidebar: .mission-manager__sidebar
+ * - detail pane: .mission-manager__detail-pane
+ * - empty detail placeholder: [data-testid="mission-empty-detail"]
+ * - back button handling: rendered when mission selected, CSS-hidden on desktop (.mission-manager--desktop .mission-manager__back-btn)
+ * - viewport strategy: js_detection via useViewportMode() + matchMedia
+ * - sidebar mission items: .mission-list__item
+ */
+
 const mockFetchAiSession = vi.fn();
 const mockFetchAiSessions = vi.fn();
 const mockCancelMissionInterview = vi.fn();
@@ -656,6 +667,12 @@ function mockViewport(mode: "mobile" | "desktop" | "tablet") {
   });
 }
 
+async function waitForDetailLoaded(detailContent = "Database Schema") {
+  await waitFor(() => {
+    expect(screen.getByText(detailContent)).toBeInTheDocument();
+  });
+}
+
 describe("MissionManager", () => {
   let originalFetch: typeof globalThis.fetch;
   let originalEventSource: typeof globalThis.EventSource | undefined;
@@ -1018,7 +1035,9 @@ describe("MissionManager", () => {
     fireEvent.click(screen.getByTestId("mission-activity-load-more"));
 
     await waitFor(() => {
-      expect(screen.getByText("65 of 65")).toBeDefined();
+      expect(
+        screen.getByText((_, element) => element?.textContent?.includes("65 of 65") ?? false),
+      ).toBeDefined();
       expect(screen.queryByTestId("mission-activity-load-more")).toBeNull();
     });
   }, 15000);
@@ -1146,10 +1165,7 @@ describe("MissionManager", () => {
     // Click on the mission to open detail view
     fireEvent.click(screen.getByText("Build Auth System"));
 
-    await waitFor(() => {
-      // Back button should appear in detail view
-      expect(screen.queryByTestId("mission-back-btn")).toBeNull();
-    });
+    await waitForDetailLoaded();
 
     // Record initial fetch calls for mission detail
     const initialFetchCount = fetchMock.mock.calls.filter(
@@ -1212,9 +1228,7 @@ describe("MissionManager", () => {
 
     fireEvent.click(screen.getByText("Build Auth System"));
 
-    await waitFor(() => {
-      expect(screen.queryByTestId("mission-back-btn")).toBeNull();
-    });
+    await waitForDetailLoaded();
 
     const initialTelemetryCalls = fetchMock.mock.calls.filter(
       (call) => typeof call[0] === "string" && call[0].includes("/milestones/MS-001/validation-telemetry")
@@ -1253,9 +1267,7 @@ describe("MissionManager", () => {
     // Click on the mission to open detail view
     fireEvent.click(screen.getByText("Build Auth System"));
 
-    await waitFor(() => {
-      expect(screen.queryByTestId("mission-back-btn")).toBeNull();
-    });
+    await waitForDetailLoaded();
 
     // Record initial fetch calls for mission detail
     const initialFetchCount = fetchMock.mock.calls.filter(
@@ -1336,9 +1348,7 @@ describe("MissionManager", () => {
     // Click on the mission to open detail view
     fireEvent.click(screen.getByText("Build Auth System"));
 
-    await waitFor(() => {
-      expect(screen.queryByTestId("mission-back-btn")).toBeNull();
-    });
+    await waitForDetailLoaded();
 
     // Record initial fetch calls for mission detail
     const initialFetchCount = fetchMock.mock.calls.filter(
@@ -1564,11 +1574,11 @@ describe("MissionManager", () => {
       });
       fireEvent.click(screen.getByText("Build Auth System"));
 
-      await waitFor(() => {
-        expect(screen.queryByTestId("mission-back-btn")).toBeNull();
-        // Close button should still be absent in inline mode even in detail view
-        expect(screen.queryByTestId("mission-close-btn")).toBeNull();
-      });
+      await waitForDetailLoaded();
+      expect(screen.getByTestId("mission-back-btn")).toBeInTheDocument();
+      expect(getComputedStyle(screen.getByTestId("mission-back-btn")).display).toBe("none");
+      // Close button should still be absent in inline mode even in detail view
+      expect(screen.queryByTestId("mission-close-btn")).toBeNull();
     });
   });
 
@@ -1928,9 +1938,7 @@ describe("MissionManager", () => {
       });
       fireEvent.click(screen.getByText("Build Auth System"));
 
-      await waitFor(() => {
-        expect(screen.queryByTestId("mission-back-btn")).toBeNull();
-      });
+      await waitForDetailLoaded();
 
       // Detail header should have edit/delete buttons
       const editBtns = screen.getAllByLabelText("Edit mission");
@@ -1960,9 +1968,7 @@ describe("MissionManager", () => {
       });
       fireEvent.click(screen.getByText("Build Auth System"));
 
-      await waitFor(() => {
-        expect(screen.queryByTestId("mission-back-btn")).toBeNull();
-      });
+      await waitForDetailLoaded();
 
       // Click edit mission in detail header
       const editBtns = screen.getAllByLabelText("Edit mission");
@@ -1987,9 +1993,7 @@ describe("MissionManager", () => {
       });
       fireEvent.click(screen.getByText("Build Auth System"));
 
-      await waitFor(() => {
-        expect(screen.queryByTestId("mission-back-btn")).toBeNull();
-      });
+      await waitForDetailLoaded();
 
       // Click delete mission in detail header
       const deleteBtns = screen.getAllByLabelText("Delete mission");
@@ -2712,9 +2716,7 @@ describe("MissionManager", () => {
       });
       fireEvent.click(screen.getByText("Build Auth System"));
 
-      await waitFor(() => {
-        expect(screen.queryByTestId("mission-back-btn")).toBeNull();
-      });
+      await waitForDetailLoaded();
 
       // After async telemetry loads, validation telemetry section should appear
       await waitFor(() => {
@@ -2846,9 +2848,7 @@ describe("MissionManager", () => {
       });
       fireEvent.click(screen.getByText("Build Auth System"));
 
-      await waitFor(() => {
-        expect(screen.queryByTestId("mission-back-btn")).toBeNull();
-      });
+      await waitForDetailLoaded();
 
       // Resume button with aria-label="Resume mission" should appear for blocked mission
       await waitFor(() => {
@@ -2929,14 +2929,16 @@ describe("MissionManager", () => {
       expect(document.querySelectorAll(".mission-manager__sidebar .mission-list__item").length).toBeGreaterThan(1);
     });
 
-    it("does not render desktop back button", async () => {
+    it("keeps desktop back button mounted but CSS-hidden", async () => {
       mockViewport("desktop");
       globalThis.fetch = createFetchMock();
       render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
       await waitFor(() => expect(screen.getByText("Build Auth System")).toBeDefined());
       const sidebar = document.querySelector(".mission-manager__sidebar") as HTMLElement;
       fireEvent.click(within(sidebar).getByText("Build Auth System"));
-      expect(screen.queryByTestId("mission-back-btn")).toBeNull();
+      await waitForDetailLoaded();
+      expect(screen.getByTestId("mission-back-btn")).toBeInTheDocument();
+      expect(getComputedStyle(screen.getByTestId("mission-back-btn")).display).toBe("none");
     });
 
     it("delete confirmation renders inside detail pane", async () => {
@@ -3298,11 +3300,10 @@ describe("MissionManager", () => {
       const sidebar = screen.getByTestId("mission-sidebar");
       fireEvent.click(within(sidebar).getByText("Build Auth System"));
 
-      await waitFor(() => {
-        expect(screen.getByTestId("mission-sidebar")).toBeInTheDocument();
-        expect(within(sidebar).getByText("API Redesign")).toBeInTheDocument();
-        expect(screen.getByTestId("mission-tab-structure")).toBeInTheDocument();
-      });
+      await waitForDetailLoaded();
+      expect(screen.getByTestId("mission-sidebar")).toBeInTheDocument();
+      expect(within(sidebar).getByText("API Redesign")).toBeInTheDocument();
+      expect(screen.getByTestId("mission-tab-structure")).toBeInTheDocument();
     });
 
     it("applies desktop class to shell on desktop viewport", async () => {
