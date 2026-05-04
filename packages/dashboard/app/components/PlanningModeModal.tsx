@@ -1178,6 +1178,22 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   // Close the modal without abandoning the active server session. Sessions
   // remain in the list and can be resumed later. Only an explicit Delete
   // (from the sidebar) cancels and removes a session.
+  const resetMobileViewportAfterClose = useCallback(() => {
+    if (viewportMode !== "mobile") {
+      return;
+    }
+
+    const activeElement = document.activeElement;
+    if (activeElement instanceof HTMLElement) {
+      activeElement.blur();
+    }
+
+    window.scrollTo(0, 0);
+    requestAnimationFrame(() => {
+      window.scrollTo(0, 0);
+    });
+  }, [viewportMode]);
+
   const handleClose = useCallback(() => {
     // Save the in-progress draft so the next open restores it.
     if (initialPlan && view.type === "initial") {
@@ -1200,8 +1216,9 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     streamConnectionRef.current = null;
     setIsReconnecting(false);
     setIsRetrying(false);
+    resetMobileViewportAfterClose();
     onClose();
-  }, [flushDraftAndSummarize, initialPlan, onClose, projectId, view.type]);
+  }, [flushDraftAndSummarize, initialPlan, onClose, projectId, resetMobileViewportAfterClose, view.type]);
 
   // Handle escape key to close
   useEffect(() => {
@@ -1475,12 +1492,12 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       currentSessionIdRef.current = null;
       setLockSessionId(null);
       setSelectedSessionId(null);
-      onClose();
+      handleClose();
     } catch (err) {
       setError(getErrorMessage(err) || "Failed to create tasks");
       setView({ type: "breakdown", sessionId: view.sessionId, subtasks: view.subtasks, dirty: view.dirty });
     }
-  }, [broadcastCompleted, view, onTasksCreated, onClose, projectId]);
+  }, [broadcastCompleted, handleClose, view, onTasksCreated, projectId]);
 
   const handleBack = useCallback(() => {
     if (view.type === "question" && responseHistory.length > 0) {

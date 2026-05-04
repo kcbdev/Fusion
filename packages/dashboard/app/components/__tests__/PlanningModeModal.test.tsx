@@ -349,6 +349,42 @@ describe("PlanningModeModal", () => {
       expect(screen.queryByText("Planning Mode")).toBeNull();
     });
 
+    it("mobile close path blurs focused input and resets viewport scroll", () => {
+      mockViewport("mobile");
+      const scrollToSpy = vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
+      const rafSpy = vi
+        .spyOn(window, "requestAnimationFrame")
+        .mockImplementation((callback: FrameRequestCallback) => {
+          callback(0);
+          return 1;
+        });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />
+      );
+
+      const textarea = screen.getByPlaceholderText(/e.g., Build a user authentication/) as HTMLTextAreaElement;
+      act(() => {
+        textarea.focus();
+      });
+      const blurSpy = vi.spyOn(textarea, "blur");
+
+      act(() => {
+        fireEvent.click(screen.getByRole("button", { name: "Close" }));
+      });
+
+      expect(blurSpy).toHaveBeenCalledTimes(1);
+      expect(scrollToSpy).toHaveBeenCalledWith(0, 0);
+      expect(rafSpy).toHaveBeenCalled();
+      expect(mockOnClose).toHaveBeenCalledTimes(1);
+    });
+
     it("hides send to background button in initial state", () => {
       render(
         <PlanningModeModal
