@@ -298,7 +298,7 @@ export function registerSettingsMemoryRoutes(ctx: ApiRoutesContext, deps: Settin
     }
 
     const token = generateRemoteToken();
-    await scopedStore.updateSettings({
+    await scopedStore.updateGlobalSettings({
       remoteAccess: {
         ...remoteAccess,
         tokenStrategy: {
@@ -646,7 +646,7 @@ export function registerSettingsMemoryRoutes(ctx: ApiRoutesContext, deps: Settin
       const settings = await scopedStore.getSettings();
       const remoteAccess = settings.remoteAccess ?? DEFAULT_GLOBAL_SETTINGS.remoteAccess;
 
-      await scopedStore.updateSettings({
+      await scopedStore.updateGlobalSettings({
         remoteAccess: {
           ...remoteAccess,
           activeProvider: provider,
@@ -676,7 +676,7 @@ export function registerSettingsMemoryRoutes(ctx: ApiRoutesContext, deps: Settin
       if (provider === "tailscale" && settings.remoteAccess) {
         const livePort = req.socket?.localPort;
         if (Number.isFinite(livePort) && (livePort ?? 0) > 0 && livePort !== settings.remoteAccess.providers.tailscale.targetPort) {
-          await scopedStore.updateSettings({
+          await scopedStore.updateGlobalSettings({
             remoteAccess: {
               ...settings.remoteAccess,
               providers: {
@@ -764,7 +764,7 @@ export function registerSettingsMemoryRoutes(ctx: ApiRoutesContext, deps: Settin
       }
 
       const token = generateRemoteToken();
-      await scopedStore.updateSettings({
+      await scopedStore.updateGlobalSettings({
         remoteAccess: {
           ...remoteAccess,
           tokenStrategy: {

@@ -79,6 +79,16 @@ describe("settings key parity", () => {
     expect((DEFAULT_PROJECT_SETTINGS as Record<string, unknown>).remoteAccess).toBeUndefined();
   });
 
+  it("keeps experimentalFeatures scoped to global settings only", () => {
+    const globalKeys = GLOBAL_SETTINGS_KEYS as readonly string[];
+    const projectKeys = PROJECT_SETTINGS_KEYS as readonly string[];
+
+    expect(projectKeys).not.toContain("experimentalFeatures");
+    expect(globalKeys).toContain("experimentalFeatures");
+    expect(DEFAULT_GLOBAL_SETTINGS.experimentalFeatures).toBeDefined();
+    expect((DEFAULT_PROJECT_SETTINGS as Record<string, unknown>).experimentalFeatures).toBeUndefined();
+  });
+
   it("No key appears in both GLOBAL_SETTINGS_KEYS and PROJECT_SETTINGS_KEYS", () => {
     const projectKeySet = new Set(PROJECT_SETTINGS_KEYS as readonly string[]);
     const overlap = (GLOBAL_SETTINGS_KEYS as readonly string[]).filter((key) => projectKeySet.has(key));

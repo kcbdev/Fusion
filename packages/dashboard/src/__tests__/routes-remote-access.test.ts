@@ -199,8 +199,8 @@ describe("remote access API route contracts", () => {
         lastError: null,
       }),
     };
-    const updateSettings = vi.fn().mockResolvedValue(undefined);
-    const store = createMockStore({ updateSettings });
+    const updateGlobalSettings = vi.fn().mockResolvedValue(undefined);
+    const store = createMockStore({ updateGlobalSettings });
     const { app } = createApp({ store, engine });
 
     const activateRes = await REQUEST(app, "POST", "/api/remote/provider/activate", { provider: "tailscale" });
@@ -219,7 +219,7 @@ describe("remote access API route contracts", () => {
 
     expect(engine.startRemoteTunnel.mock.calls.length).toBeLessThanOrEqual(1);
     expect(engine.stopRemoteTunnel.mock.calls.length).toBeLessThanOrEqual(1);
-    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+    expect(updateGlobalSettings).toHaveBeenCalledWith(expect.objectContaining({
       remoteAccess: expect.objectContaining({ activeProvider: "tailscale" }),
     }));
   });

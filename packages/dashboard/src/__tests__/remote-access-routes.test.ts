@@ -60,6 +60,7 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
   return {
     getSettings: vi.fn().mockResolvedValue({ remoteAccess: buildRemoteAccessSettings() }),
     updateSettings: vi.fn(async (patch: Record<string, unknown>) => patch),
+    updateGlobalSettings: vi.fn().mockResolvedValue(undefined),
     getRootDir: vi.fn().mockReturnValue("/fake/root"),
     getFusionDir: vi.fn().mockReturnValue("/fake/root/.fusion"),
     getDatabase: vi.fn().mockReturnValue({
@@ -125,13 +126,13 @@ beforeEach(() => {
 
 describe("remote access provider/lifecycle contracts", () => {
   it("switches active provider and rejects invalid provider values", async () => {
-    const updateSettings = vi.fn().mockResolvedValue(undefined);
-    const { app } = createApp({ store: createMockStore({ updateSettings }) });
+    const updateGlobalSettings = vi.fn().mockResolvedValue(undefined);
+    const { app } = createApp({ store: createMockStore({ updateGlobalSettings }) });
 
     const activate = await REQUEST(app, "POST", "/api/remote/provider/activate", { provider: "tailscale" });
     expect(activate.status).toBe(200);
     expect(activate.body).toEqual({ activeProvider: "tailscale" });
-    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+    expect(updateGlobalSettings).toHaveBeenCalledWith(expect.objectContaining({
       remoteAccess: expect.objectContaining({ activeProvider: "tailscale" }),
     }));
 
@@ -144,17 +145,17 @@ describe("remote access provider/lifecycle contracts", () => {
   });
 
   it("seeds defaults when activating a provider on a fresh project", async () => {
-    const updateSettings = vi.fn().mockResolvedValue(undefined);
+    const updateGlobalSettings = vi.fn().mockResolvedValue(undefined);
     const store = createMockStore({
       getSettings: vi.fn().mockResolvedValue({}),
-      updateSettings,
+      updateGlobalSettings,
     });
     const { app } = createApp({ store });
 
     const activate = await REQUEST(app, "POST", "/api/remote/provider/activate", { provider: "cloudflare" });
 
     expect(activate.status).toBe(200);
-    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+    expect(updateGlobalSettings).toHaveBeenCalledWith(expect.objectContaining({
       remoteAccess: expect.objectContaining({
         activeProvider: "cloudflare",
       }),
