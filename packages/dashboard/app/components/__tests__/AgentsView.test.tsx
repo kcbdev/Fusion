@@ -772,6 +772,33 @@ describe("AgentsView", () => {
       expect(options).not.toContain("1m");
     });
 
+    it("renders Last/Next heartbeat timestamps without seconds", async () => {
+      const lastHeartbeatAt = "2026-05-04T14:23:45.000Z";
+      mockFetchAgents.mockResolvedValueOnce([
+        {
+          ...mockAgents[1],
+          lastHeartbeatAt,
+          runtimeConfig: { heartbeatIntervalMs: 300000 },
+        },
+      ]);
+      mockFetchAgentStats.mockResolvedValueOnce({ total: 1, byState: { active: 1 }, byRole: { triage: 1 } });
+
+      render(<AgentsView addToast={mockAddToast} />);
+
+      const lastAt = new Date(lastHeartbeatAt);
+      const nextAt = new Date(lastAt.getTime() + 300000);
+      const expectedLast = `Last: ${lastAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+      const expectedNext = `Next: ${nextAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+
+      await waitFor(() => {
+        expect(screen.getByText(expectedLast)).toBeTruthy();
+        expect(screen.getByText(expectedNext)).toBeTruthy();
+      });
+
+      expect(screen.queryByText(/Last: .*:\d{2}:\d{2}/)).toBeNull();
+      expect(screen.queryByText(/Next: .*:\d{2}:\d{2}/)).toBeNull();
+    });
+
     it("uses the system default heartbeat interval when runtime config is unset", async () => {
       mockFetchAgents.mockResolvedValue([
         {

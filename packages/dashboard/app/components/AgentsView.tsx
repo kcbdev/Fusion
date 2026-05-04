@@ -1233,11 +1233,11 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
                         return (
                           <>
                             <span className="agent-heartbeat-last text-secondary" title={lastAt.toLocaleString()}>
-                              Last: {lastAt.toLocaleTimeString()}
+                              Last: {lastAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
                             </span>
                             {isTicking && (
                               <span className="agent-heartbeat-next text-secondary" title={nextAt.toLocaleString()}>
-                                Next: {nextAt.toLocaleTimeString()}
+                                Next: {nextAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
                               </span>
                             )}
                           </>
