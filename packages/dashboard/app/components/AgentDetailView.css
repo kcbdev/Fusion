@@ -309,6 +309,11 @@
   gap: var(--space-xs);
 }
 
+.dashboard-summary-health-reason {
+  margin-left: var(--space-xs);
+  font-size: var(--space-md);
+}
+
 .runs-list {
   display: flex;
   flex-direction: column;

@@ -886,7 +886,7 @@ function DashboardTab({
           </div>
           <div>
             <p className="dashboard-summary-label">Status</p>
-            <p className="dashboard-summary-health-row"><span className={cn("status-dot", agent.state === "running" && "status-dot--running")} />{health.label}{health.reason && <span className="text-secondary" style={{ marginLeft: 'var(--space-xs)', fontSize: '12px' }} title={health.reason}>({health.reason})</span>}</p>
+            <p className="dashboard-summary-health-row"><span className={cn("status-dot", agent.state === "running" && "status-dot--running")} />{health.label}{health.reason && <span className="text-secondary dashboard-summary-health-reason" title={health.reason}>({health.reason})</span>}</p>
           </div>
         </div>
       </section>
