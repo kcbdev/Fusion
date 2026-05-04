@@ -78,6 +78,14 @@ describe("CLI package.json publishing config", () => {
     const deps = Object.keys(pkg.dependencies || {});
     expect(deps).toContain("ioredis");
   });
+
+  it("declares dockerode as a runtime dependency when kept external in CLI bundling", () => {
+    const deps = Object.keys(pkg.dependencies || {});
+    const devDeps = Object.keys(pkg.devDependencies || {});
+
+    expect(deps).toContain("dockerode");
+    expect(devDeps).not.toContain("dockerode");
+  });
 });
 
 describe("Scoped @fusion/* packages publishing config", () => {

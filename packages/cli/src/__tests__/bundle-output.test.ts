@@ -80,6 +80,14 @@ describe("CLI bundle output", () => {
     expect(tsupConfig).toContain("cpSync(dashboardClientSrc, dashboardClientDest, { recursive: true });");
   });
 
+  it("keeps native module loaders externalized in tsup config", () => {
+    const tsupConfig = readFileSync(tsupConfigPath, "utf-8");
+
+    expect(tsupConfig).toContain('"dockerode"');
+    expect(tsupConfig).toContain('"ssh2"');
+    expect(tsupConfig).toContain('"cpu-features"');
+  });
+
   it("loads sqlite from Node built-ins and never from bare sqlite npm package", () => {
     const content = readFileSync(bundlePath, "utf-8");
     // The bundle must resolve sqlite through Node's built-in module.
@@ -87,6 +95,12 @@ describe("CLI bundle output", () => {
     // Bun-native sqlite support is optional in this artifact depending on runtime-targeted code paths.
     // No bare "sqlite" import (we never want to pull in an npm package named sqlite).
     expect(content).not.toMatch(/from\s+["']sqlite["'][^s]/);
+  });
+
+  it("does not inline native artifact filenames into the bundled CLI", () => {
+    const content = readFileSync(bundlePath, "utf-8");
+    expect(content).not.toContain("sshcrypto.node");
+    expect(content).not.toContain("cpufeatures.node");
   });
 
   it("provides require via createRequire banner", () => {
