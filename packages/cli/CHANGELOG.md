@@ -1,5 +1,12 @@
 # @runfusion/fusion
 
+## 0.18.1
+
+### Patch Changes
+
+- 89401cd: Fix `npx runfusion.ai` failing with `ERR_MODULE_NOT_FOUND: Cannot find package 'dockerode'` by declaring `dockerode` as a runtime dependency of the published CLI package (#33).
+- 89401cd: Allow the dashboard task-detail footer action to manually drive PR-first completion when `mergeStrategy` is `pull-request` and `autoMerge` is disabled.
+
 ## 0.18.0
 
 ### Minor Changes
