@@ -10801,7 +10801,7 @@ describe("TaskExecutor agent execution flow (FN-978)", () => {
         log: [],
         mergeDetails: { strategy: "manual" } as any,
         mergeRetries: 2,
-        verificationFailureCount: 1,
+        verificationFailureCount: 0,
         workflowStepResults: [{ id: "wf-1", status: "passed" }],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -10847,7 +10847,7 @@ describe("TaskExecutor agent execution flow (FN-978)", () => {
         log: [],
         mergeDetails: { strategy: "ours" } as any,
         mergeRetries: 1,
-        verificationFailureCount: 2,
+        verificationFailureCount: 0,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -10869,6 +10869,40 @@ describe("TaskExecutor agent execution flow (FN-978)", () => {
         undefined,
         undefined,
       );
+    });
+
+    it("preserves verificationFailureCount for merge remediation cycles even if status was cleared", async () => {
+      const store = createMockStore();
+      const executor = new TaskExecutor(store, "/tmp/test");
+      vi.spyOn(executor, "execute").mockResolvedValue(undefined);
+
+      const movedTask = {
+        id: "FN-2883-D",
+        title: "Verification remediation",
+        description: "desc",
+        column: "in-progress" as const,
+        dependencies: [],
+        steps: [{ name: "Step 2: Testing & Verification", status: "done" }],
+        currentStep: 0,
+        log: [],
+        mergeDetails: { strategy: "manual" } as any,
+        mergeRetries: 0,
+        status: null,
+        verificationFailureCount: 2,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      store.getTask.mockResolvedValue(movedTask);
+      store._trigger("task:moved", { task: movedTask, from: "in-review", to: "in-progress" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(store.updateTask).toHaveBeenCalledWith("FN-2883-D", expect.objectContaining({
+        mergeDetails: null,
+        mergeRetries: 0,
+        verificationFailureCount: 2,
+        workflowStepResults: [],
+      }));
     });
 
     it("does not reset merge state on todo → in-progress move", async () => {
@@ -13711,11 +13745,15 @@ describe("Executor verification gate (FN-3345)", () => {
     expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
     // Task should NOT move to in-review
     expect(store.moveTask).not.toHaveBeenCalledWith("FN-3345", "in-review");
-    // Task should have been sent back for fix
+    // Task should have been sent back for merge remediation with active merge status
     expect(store.addTaskComment).toHaveBeenCalledWith(
       "FN-3345",
       expect.stringContaining("Deterministic verification failed"),
       "agent",
+    );
+    expect(store.updateTask).toHaveBeenCalledWith(
+      "FN-3345",
+      expect.objectContaining({ status: "merging-fix" }),
     );
   });
 
@@ -13850,11 +13888,15 @@ describe("Executor verification gate (FN-3345)", () => {
     expect(mockedCreateFnAgent).not.toHaveBeenCalled();
     // Task should NOT move to in-review
     expect(store.moveTask).not.toHaveBeenCalledWith("FN-3345", "in-review");
-    // Task should have been sent back for fix
+    // Task should have been sent back for merge remediation with active merge status
     expect(store.addTaskComment).toHaveBeenCalledWith(
       "FN-3345",
       expect.stringContaining("Deterministic verification failed"),
       "agent",
+    );
+    expect(store.updateTask).toHaveBeenCalledWith(
+      "FN-3345",
+      expect.objectContaining({ status: "merging-fix" }),
     );
   });
 });

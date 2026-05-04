@@ -25,7 +25,7 @@ function getRoutingPolicyLabel(policy: RoutingSettings["unavailableNodePolicy"] 
   return "Not configured";
 }
 
-const ACTIVE_STATUSES = new Set(["planning", "researching", "executing", "finalizing", "merging"]);
+const ACTIVE_STATUSES = new Set(["planning", "researching", "executing", "finalizing", "merging", "merging-fix"]);
 
 function isUnhealthy(status: NodeInfo["status"] | undefined): boolean {
   return status !== undefined && status !== "online";

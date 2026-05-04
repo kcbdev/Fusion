@@ -293,7 +293,7 @@ describe("ProjectEngine merge error recovery", () => {
     expect(hasErrorLog(errorSpy, "persist failed")).toBe(true);
   });
 
-  it("moves task back to in-progress on verification errors", async () => {
+  it("moves task back to in-progress with merge-remediation status on verification errors", async () => {
     const verificationError = new Error("Deterministic test verification failed");
     verificationError.name = "VerificationError";
     vi.mocked(aiMergeTask).mockRejectedValueOnce(verificationError);
@@ -309,7 +309,7 @@ describe("ProjectEngine merge error recovery", () => {
       "agent",
     );
     expect(store.updateTask).toHaveBeenCalledWith(TASK_ID, {
-      status: null,
+      status: "merging-fix",
       mergeRetries: 0,
       error: null,
       verificationFailureCount: 1,
@@ -317,11 +317,32 @@ describe("ProjectEngine merge error recovery", () => {
     expect(store.moveTask).toHaveBeenCalledWith(TASK_ID, "in-progress");
     expect(store.logEntry).toHaveBeenCalledWith(
       TASK_ID,
-      "Deterministic test verification failed (1/3) — moved back to in-progress for remediation",
+      "Deterministic test verification failed (1/3) — moved back to in-progress with status=merging-fix for remediation",
     );
     expect(logSpy).toHaveBeenCalledWith(
-      `Auto-merge: ${TASK_ID} deterministic test verification failed (1/3) — moved to in-progress`,
+      `Auto-merge: ${TASK_ID} deterministic test verification failed (1/3) — moved to in-progress with status=merging-fix`,
     );
+  });
+
+  it("increments verificationFailureCount across consecutive verification bounces", async () => {
+    const verificationError = new Error("Deterministic test verification failed");
+    verificationError.name = "VerificationError";
+    vi.mocked(aiMergeTask).mockRejectedValueOnce(verificationError);
+
+    const store = makeStore({
+      tasks: [makeTask({ verificationFailureCount: 1, status: "merging-fix" })],
+    });
+    const engine = createEngine(store);
+
+    await runMergeCycle(engine);
+
+    expect(store.updateTask).toHaveBeenCalledWith(TASK_ID, {
+      status: "merging-fix",
+      mergeRetries: 0,
+      error: null,
+      verificationFailureCount: 2,
+    });
+    expect(store.moveTask).toHaveBeenCalledWith(TASK_ID, "in-progress");
   });
 
   it("caps verification-failure bounces and creates a follow-up task", async () => {

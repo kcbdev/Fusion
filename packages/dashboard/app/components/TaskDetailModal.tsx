@@ -44,7 +44,7 @@ interface ModelSelection {
   modelId?: string;
 }
 
-const ACTIVE_STATUSES = new Set(["planning", "researching", "executing", "finalizing", "merging"]);
+const ACTIVE_STATUSES = new Set(["planning", "researching", "executing", "finalizing", "merging", "merging-fix"]);
 
 
 
@@ -1555,6 +1555,7 @@ export function TaskDetailContent({
     "creating-pr": "Creating PR…",
     "awaiting-pr-checks": "Awaiting PR checks",
     "merging-pr": "Merging PR…",
+    "merging-fix": "Merging fixes…",
   };
   const prAutomationLabel = task.status ? prAutomationStatusLabels[task.status] : undefined;
 

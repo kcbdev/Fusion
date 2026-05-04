@@ -1404,7 +1404,7 @@ export class ProjectEngine {
                 "agent",
               );
               await store.updateTask(taskId, {
-                status: null,
+                status: "merging-fix",
                 mergeRetries: 0,
                 error: null,
                 verificationFailureCount: nextBounces,
@@ -1412,10 +1412,10 @@ export class ProjectEngine {
               await store.moveTask(taskId, "in-progress");
               await store.logEntry(
                 taskId,
-                `Deterministic ${failedKind} verification failed (${nextBounces}/${cap}) — moved back to in-progress for remediation`,
+                `Deterministic ${failedKind} verification failed (${nextBounces}/${cap}) — moved back to in-progress with status=merging-fix for remediation`,
               );
               runtimeLog.log(
-                `Auto-merge: ${taskId} deterministic ${failedKind} verification failed (${nextBounces}/${cap}) — moved to in-progress`,
+                `Auto-merge: ${taskId} deterministic ${failedKind} verification failed (${nextBounces}/${cap}) — moved to in-progress with status=merging-fix`,
               );
             } catch {
               runtimeLog.error(

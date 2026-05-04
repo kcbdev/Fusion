@@ -620,12 +620,15 @@ describe("ListView", () => {
     expect(row?.className).toContain("paused");
   });
 
-  it("renders agent-active tasks with glow styling", () => {
+  it.each([
+    { status: "executing", column: "in-progress" as const, label: "executing" },
+    { status: "merging-fix", column: "in-review" as const, label: "Merging fixes…" },
+  ])("renders agent-active tasks with glow styling for $status", ({ status, column, label }) => {
     const tasks = [
       createMockTask({
         id: "FN-001",
-        status: "executing",
-        column: "in-progress",
+        status,
+        column,
       }),
     ];
 
@@ -633,6 +636,7 @@ describe("ListView", () => {
 
     const row = screen.getByText("FN-001").closest("tr");
     expect(row?.className).toContain("agent-active");
+    expect(screen.getByText(label)).toBeInTheDocument();
   });
 
   it("does not render agent-active when globalPaused is true", () => {
@@ -2845,15 +2849,18 @@ describe("ListView - Bulk Selection", () => {
       expect((screen.getByLabelText("Select FN-002") as HTMLInputElement).checked).toBe(true);
     });
 
-    it("applies agent-active class to mobile cards when task is in-progress and not paused/failed", () => {
+    it.each([
+      { status: "executing", column: "in-progress" as const },
+      { status: "merging-fix", column: "in-review" as const },
+    ])("applies agent-active class to mobile cards for active states (%s)", ({ status, column }) => {
       mockMobileViewport();
 
       const { container } = renderListView({
         tasks: [
           createMockTask({
             id: "FN-001",
-            status: "executing",
-            column: "in-progress",
+            status,
+            column,
           }),
         ],
         globalPaused: false,

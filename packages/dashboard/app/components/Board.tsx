@@ -86,8 +86,8 @@ function sortTasksForColumn(tasks: Task[], column: ColumnType): Task[] {
   return [...tasks].sort((a, b) => {
     // In the in-review column, merging tasks stay pinned above non-merging tasks.
     if (column === "in-review") {
-      const aIsMerging = a.status === "merging" || a.status === "merging-pr";
-      const bIsMerging = b.status === "merging" || b.status === "merging-pr";
+      const aIsMerging = a.status === "merging" || a.status === "merging-pr" || a.status === "merging-fix";
+      const bIsMerging = b.status === "merging" || b.status === "merging-pr" || b.status === "merging-fix";
       if (aIsMerging !== bIsMerging) {
         return aIsMerging ? -1 : 1;
       }

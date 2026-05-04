@@ -79,7 +79,7 @@ export interface SelfHealingOptions {
 
 const APPROVED_TRIAGE_RECOVERY_GRACE_MS = 60_000;
 const ORPHANED_EXECUTION_RECOVERY_GRACE_MS = 60_000;
-const ACTIVE_MERGE_STATUSES = new Set(["merging", "merging-pr"]);
+const ACTIVE_MERGE_STATUSES = new Set(["merging", "merging-pr", "merging-fix"]);
 const NON_TERMINAL_STEP_STATUSES = new Set(["pending", "in-progress"]);
 /** Statuses that represent an explicit human-handoff or active merge —
  *  the ghost-review fallback must not disturb tasks parked in these states. */
@@ -89,6 +89,7 @@ const GHOST_REVIEW_PRESERVED_STATUSES = new Set([
   "awaiting-approval",
   "merging",
   "merging-pr",
+  "merging-fix",
 ]);
 /**
  * Longer grace period for tasks that still have a worktree on disk.
@@ -1040,7 +1041,7 @@ export class SelfHealingManager {
    *
    * Preserved statuses (skipped):
    * - `awaiting-user-review`, `awaiting-approval`: explicit human handoff
-   * - `merging`, `merging-pr`: handled by `recoverInterruptedMergingTasks`
+   * - `merging`, `merging-pr`, `merging-fix`: handled by `recoverInterruptedMergingTasks`
    *
    * Rate-limiting comes from the `updatedAt >= taskStuckTimeoutMs` gate —
    * each kick refreshes `updatedAt`, so a task that re-enters review and gets

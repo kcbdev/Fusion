@@ -224,8 +224,8 @@ describe("RoutingTab", () => {
     expect(screen.getByText("Node override cannot be changed while the task is active.")).toBeInTheDocument();
   });
 
-  it("disables node selector for active task statuses", async () => {
-    render(<RoutingTab task={makeTask({ column: "todo", status: "executing" })} settings={makeSettings()} addToast={addToast} />);
+  it.each(["executing", "merging-fix"] as const)("disables node selector for active task status %s", async (status) => {
+    render(<RoutingTab task={makeTask({ column: "todo", status })} settings={makeSettings()} addToast={addToast} />);
 
     const selector = await screen.findByLabelText("Select execution node");
     expect(selector).toBeDisabled();

@@ -1174,7 +1174,8 @@ export class TaskExecutor {
       || (task.mergeRetries ?? 0) > 0
       || (task.verificationFailureCount ?? 0) > 0
       || task.status === "merging"
-      || task.status === "merging-pr";
+      || task.status === "merging-pr"
+      || task.status === "merging-fix";
 
     if (!hasMergeEvidence) {
       return task;
@@ -1183,14 +1184,24 @@ export class TaskExecutor {
     return this.cleanupMergeStateForReverification(
       task,
       `Task returned to in-progress from ${from} column — resetting verification steps and merge state for re-verification`,
+      {
+        // Keep deterministic merge-verification bounce budget across remediation
+        // cycles. Status may be cleared by intermediate paths, so the counter is
+        // the canonical signal once a bounce has started.
+        preserveVerificationFailureCount: (task.verificationFailureCount ?? 0) > 0,
+      },
     );
   }
 
-  private async cleanupMergeStateForReverification(task: Task, logMessage: string): Promise<Task> {
+  private async cleanupMergeStateForReverification(
+    task: Task,
+    logMessage: string,
+    options?: { preserveVerificationFailureCount?: boolean },
+  ): Promise<Task> {
     await this.store.updateTask(task.id, {
       mergeDetails: null,
       mergeRetries: 0,
-      verificationFailureCount: 0,
+      verificationFailureCount: options?.preserveVerificationFailureCount ? task.verificationFailureCount ?? 0 : 0,
       workflowStepResults: [],
     });
 
@@ -1990,7 +2001,7 @@ export class TaskExecutor {
     // Skip for tasks that are already in-progress, in-review, merging, or done —
     // these should not be interrupted and sent back to triage for re-planning.
     const activeColumns = new Set(["in-progress", "in-review", "done"]);
-    const activeMergeStatuses = new Set(["merging", "merging-pr"]);
+    const activeMergeStatuses = new Set(["merging", "merging-pr", "merging-fix"]);
     const isActiveTask = activeColumns.has(task.column) || activeMergeStatuses.has(task.status ?? "");
     if (!isActiveTask) {
       const tasksDir = join(this.store.getFusionDir(), "tasks");
@@ -2440,6 +2451,8 @@ export class TaskExecutor {
                       `${failedType} command \`${failedCommand}\` failed (exit ${failedResult.exitCode}):\n${summary}`,
                       `Verification (${failedType})`,
                       `Deterministic verification failed (${failedType})`,
+                      true,
+                      true,
                     );
                     return;
                   }
@@ -2485,6 +2498,8 @@ export class TaskExecutor {
                       `${failedType} command \`${failedCommand}\` failed (exit ${failedResult.exitCode}) after ${maxFixRetries} fix attempts:\n${summary}`,
                       `Verification (${failedType})`,
                       `Deterministic verification failed after ${maxFixRetries} fix attempts`,
+                      true,
+                      true,
                     );
                     return;
                   }
@@ -4604,6 +4619,7 @@ ${failureContext.output.slice(0, VERIFICATION_LOG_MAX_CHARS)}
     stepName: string,
     reason: string,
     preserveResumeState: boolean = true,
+    mergeVerificationFailure: boolean = false,
   ): Promise<void> {
     const taskId = task.id;
     this.clearCompletedTaskWatchdog(taskId);
@@ -4634,7 +4650,7 @@ ${failureContext.output.slice(0, VERIFICATION_LOG_MAX_CHARS)}
 
     // 5. Clear error/status/session fields and reset workflow step retries
     await this.store.updateTask(taskId, {
-      status: null,
+      status: mergeVerificationFailure ? "merging-fix" : null,
       error: null,
       sessionFile: null,
       workflowStepRetries: 0,

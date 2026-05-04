@@ -403,6 +403,28 @@ describe("Board", () => {
         expect(inReviewTasks.map((task) => task.id)).toEqual(["FN-020", "FN-021"]);
       });
 
+      it("pins merging-fix tasks to top of in-review even when newer non-merging tasks exist", () => {
+        const tasks: Task[] = [
+          createTask({
+            id: "FN-060",
+            column: "in-review",
+            status: "merging-fix",
+            columnMovedAt: "2024-01-01T10:00:00.000Z",
+          }),
+          createTask({
+            id: "FN-061",
+            column: "in-review",
+            status: "review-ready",
+            columnMovedAt: "2024-01-01T13:00:00.000Z",
+          }),
+        ];
+
+        renderBoard({ tasks });
+
+        const inReviewTasks = JSON.parse(screen.getByTestId("column-in-review").getAttribute("data-tasks") || "[]") as Task[];
+        expect(inReviewTasks.map((task) => task.id)).toEqual(["FN-060", "FN-061"]);
+      });
+
       it("sorts multiple merging tasks by priority then task ID within the pinned group", () => {
         const tasks: Task[] = [
           createTask({

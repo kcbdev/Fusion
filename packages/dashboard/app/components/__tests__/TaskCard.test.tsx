@@ -70,6 +70,20 @@ describe("TaskCard", () => {
     expect(screen.getByText("executing")).toBeDefined();
   });
 
+  it("renders merge-remediation status as merge-active for in-review tasks", () => {
+    const { container } = render(
+      <TaskCard
+        task={makeTask({ column: "in-review", status: "merging-fix" })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.getByText("Merging fixes…")).toBeDefined();
+    const badge = container.querySelector(".card-status-badge");
+    expect(badge?.className).toContain("pulsing");
+  });
+
   it("renders the status badge after the card ID in DOM order", () => {
     const { container } = render(
       <TaskCard
@@ -856,7 +870,7 @@ describe("TaskCard", () => {
     expect(container.querySelector(".card-time-indicator")?.getAttribute("title")).toBe("Execution time 35m");
   });
 
-  it("shows live merge elapsed in timer chip while task.status is merging", () => {
+  it.each(["merging", "merging-fix"] as const)("shows live merge elapsed in timer chip while task.status is %s", (status) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-25T13:45:00.000Z"));
 
@@ -865,7 +879,7 @@ describe("TaskCard", () => {
         <TaskCard
           task={makeTask({
             column: "in-review",
-            status: "merging",
+            status,
             executionStartedAt: "2026-04-25T13:00:00.000Z",
             updatedAt: "2026-04-25T13:44:30.000Z",
             workflowStepResults: [

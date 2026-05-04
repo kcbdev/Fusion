@@ -25,9 +25,14 @@ const COLUMN_COLOR_MAP: Record<Column, string> = {
   archived: "var(--text-secondary)",
 };
 
-const ACTIVE_STATUSES = new Set(["planning", "researching", "executing", "finalizing", "merging"]);
+const ACTIVE_STATUSES = new Set(["planning", "researching", "executing", "finalizing", "merging", "merging-fix"]);
 
 type SortField = "id" | "title" | "status" | "column";
+
+function getTaskStatusLabel(status: string): string {
+  if (status === "merging-fix") return "Merging fixes…";
+  return status;
+}
 type SortDirection = "asc" | "desc";
 
 // Column visibility types
@@ -1263,7 +1268,7 @@ export function ListView({
                                   <span className="list-status-badge stuck">Stuck</span>
                                 ) : hasStatus ? (
                                   <span className={`list-status-badge list-status-badge--${task.column}${isFailed ? " failed" : ""}${isAgentActive ? " pulsing" : ""}`}>
-                                    {task.status}
+                                    {getTaskStatusLabel(task.status ?? "")}
                                   </span>
                                 ) : null}
                               </div>
@@ -1465,7 +1470,7 @@ export function ListView({
                                           isAgentActive ? " pulsing" : ""
                                         }`}
                                       >
-                                        {task.status}
+                                        {getTaskStatusLabel(task.status ?? "")}
                                       </span>
                                     ) : (
                                       <span className="list-status-badge">-</span>
