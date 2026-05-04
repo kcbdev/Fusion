@@ -2,6 +2,8 @@ import "./TodoModal.css";
 import { useEffect } from "react";
 import { ListChecks, X } from "lucide-react";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
+import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
+import { useViewportMode } from "./Header";
 import { TodoView } from "./TodoView";
 
 interface TodoModalProps {
@@ -14,6 +16,20 @@ interface TodoModalProps {
 
 export function TodoModal({ onClose, projectId, addToast, onPlanningMode }: TodoModalProps) {
   const overlayDismissProps = useOverlayDismiss(onClose);
+  const mode = useViewportMode();
+  const isMobile = mode === "mobile";
+  const { keyboardOverlap, viewportHeight, viewportOffsetTop, keyboardOpen } = useMobileKeyboard({
+    enabled: isMobile,
+  });
+
+  const modalKeyboardStyle: React.CSSProperties =
+    keyboardOpen
+      ? ({
+          "--keyboard-overlap": `${keyboardOverlap}px`,
+          "--vv-offset-top": `${viewportOffsetTop}px`,
+          ...(viewportHeight !== null ? { "--vv-height": `${viewportHeight}px` } : {}),
+        } as React.CSSProperties)
+      : {};
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -28,7 +44,7 @@ export function TodoModal({ onClose, projectId, addToast, onPlanningMode }: Todo
 
   return (
     <div className="modal-overlay open" {...overlayDismissProps} role="dialog" aria-modal="true">
-      <div className="modal todo-modal">
+      <div className="modal todo-modal" style={modalKeyboardStyle}>
         <div className="modal-header todo-modal-header">
           <div className="todo-modal-header-title">
             <ListChecks size={18} />

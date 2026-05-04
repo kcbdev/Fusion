@@ -3,6 +3,8 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { TodoModal } from "../TodoModal";
 
 const mockTodoView = vi.fn();
+const mockUseMobileKeyboard = vi.fn();
+const mockUseViewportMode = vi.fn();
 
 vi.mock("../TodoView", () => ({
   TodoView: (props: unknown) => {
@@ -11,12 +13,27 @@ vi.mock("../TodoView", () => ({
   },
 }));
 
+vi.mock("../../hooks/useMobileKeyboard", () => ({
+  useMobileKeyboard: (...args: unknown[]) => mockUseMobileKeyboard(...args),
+}));
+
+vi.mock("../../hooks/useViewportMode", () => ({
+  useViewportMode: (...args: unknown[]) => mockUseViewportMode(...args),
+}));
+
 describe("TodoModal", () => {
   const onClose = vi.fn();
   const addToast = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseViewportMode.mockReturnValue("desktop");
+    mockUseMobileKeyboard.mockReturnValue({
+      keyboardOverlap: 0,
+      viewportHeight: null,
+      viewportOffsetTop: 0,
+      keyboardOpen: false,
+    });
   });
 
   it("renders modal dialog semantics and header content", () => {
@@ -54,5 +71,45 @@ describe("TodoModal", () => {
     expect(mockTodoView).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: "proj-1", addToast }),
     );
+  });
+
+  describe("mobile keyboard behavior", () => {
+    it("applies CSS variables when keyboard is open on mobile", () => {
+      mockUseViewportMode.mockReturnValue("mobile");
+      mockUseMobileKeyboard.mockReturnValue({
+        keyboardOverlap: 250,
+        viewportHeight: 450,
+        viewportOffsetTop: 40,
+        keyboardOpen: true,
+      });
+
+      render(<TodoModal onClose={onClose} addToast={addToast} />);
+      const modal = screen.getByRole("dialog").querySelector(".modal.todo-modal");
+      expect(modal).toBeTruthy();
+
+      const style = (modal as HTMLElement).style;
+      expect(style.getPropertyValue("--keyboard-overlap")).toBe("250px");
+      expect(style.getPropertyValue("--vv-offset-top")).toBe("40px");
+      expect(style.getPropertyValue("--vv-height")).toBe("450px");
+    });
+
+    it("does not apply keyboard CSS variables when keyboard is closed", () => {
+      mockUseViewportMode.mockReturnValue("mobile");
+      mockUseMobileKeyboard.mockReturnValue({
+        keyboardOverlap: 0,
+        viewportHeight: null,
+        viewportOffsetTop: 0,
+        keyboardOpen: false,
+      });
+
+      render(<TodoModal onClose={onClose} addToast={addToast} />);
+      const modal = screen.getByRole("dialog").querySelector(".modal.todo-modal");
+      expect(modal).toBeTruthy();
+
+      const style = (modal as HTMLElement).style;
+      expect(style.getPropertyValue("--keyboard-overlap")).toBe("");
+      expect(style.getPropertyValue("--vv-offset-top")).toBe("");
+      expect(style.getPropertyValue("--vv-height")).toBe("");
+    });
   });
 });
