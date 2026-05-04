@@ -6,6 +6,7 @@ export function createMockStore(overrides: Partial<AgentStore> = {}): AgentStore
   return {
     recordHeartbeat: vi.fn().mockResolvedValue(undefined),
     updateAgentState: vi.fn().mockResolvedValue(undefined),
+    getAgentsByReportsTo: vi.fn().mockResolvedValue([]),
     ...overrides,
   } as unknown as AgentStore;
 }

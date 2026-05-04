@@ -17,7 +17,7 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { getTaskMergeBlocker, type TaskStore, type Settings, type Task, type MergeDetails } from "@fusion/core";
+import { getTaskMergeBlocker, isEphemeralAgent, type AgentStore, type TaskStore, type Settings, type Task, type MergeDetails } from "@fusion/core";
 import { createLogger } from "./logger.js";
 import { getRegisteredWorktreePaths, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
 
@@ -27,6 +27,8 @@ const execAsync = promisify(exec);
 export interface SelfHealingOptions {
   /** Project root directory (parent of .worktrees/) */
   rootDir: string;
+  /** Optional AgentStore for agent-level self-healing checks. */
+  agentStore?: AgentStore;
   /**
    * Callback to recover a completed task that is stuck in in-progress.
    * Called by the periodic maintenance cycle when it detects a task whose
@@ -196,6 +198,7 @@ export class SelfHealingManager {
       { name: "orphaned-executions", fn: () => this.recoverOrphanedExecutions().then(() => undefined) },
       { name: "approved-triage", fn: () => this.recoverApprovedTriageTasks().then(() => undefined) },
       { name: "orphaned-planning", fn: () => this.recoverOrphanedPlanningTasks().then(() => undefined) },
+      { name: "recover-orphaned-agents", fn: () => this.recoverOrphanedAgents().then(() => undefined) },
     ];
 
     for (const step of steps) {
@@ -650,6 +653,7 @@ export class SelfHealingManager {
           { name: "recover-approved-triage", fn: () => this.recoverApprovedTriageTasks() },
           { name: "recover-orphaned-planning", fn: () => this.recoverOrphanedPlanningTasks() },
           { name: "recover-ghost-review", fn: () => this.recoverGhostReviewTasks() },
+          { name: "recover-orphaned-agents", fn: () => this.recoverOrphanedAgents() },
         ];
         for (const fn of batch2Fns) {
           try {
@@ -1365,6 +1369,76 @@ export class SelfHealingManager {
       return recovered;
     } catch (err: unknown) { const errorMessage = err instanceof Error ? err.message : String(err);
       log.error(`Orphaned executor recovery failed: ${errorMessage}`);
+      return 0;
+    }
+  }
+
+  async recoverOrphanedAgents(): Promise<number> {
+    const agentStore = this.options.agentStore;
+    if (!agentStore) {
+      return 0;
+    }
+
+    try {
+      const settings = await this.store.getSettings();
+      const timeoutMs = settings.taskStuckTimeoutMs;
+      if (!Number.isFinite(timeoutMs) || timeoutMs === undefined || timeoutMs <= 0) {
+        return 0;
+      }
+      const recoveryTimeoutMs = timeoutMs;
+
+      const allAgents = await agentStore.listAgents();
+      const allAgentIds = new Set(allAgents.map((agent) => agent.id));
+      const now = Date.now();
+
+      const orphaned = allAgents.filter((agent) => {
+        if (isEphemeralAgent(agent)) {
+          return false;
+        }
+        if (agent.state !== "running" && agent.state !== "error") {
+          return false;
+        }
+        const managerMissing = !agent.reportsTo || !allAgentIds.has(agent.reportsTo);
+        if (!managerMissing) {
+          return false;
+        }
+        const updatedAt = Date.parse(agent.updatedAt ?? "");
+        if (!Number.isFinite(updatedAt)) {
+          return false;
+        }
+        return now - updatedAt >= recoveryTimeoutMs;
+      });
+
+      if (orphaned.length === 0) {
+        return 0;
+      }
+
+      let recovered = 0;
+      for (const agent of orphaned) {
+        const updatedAt = Date.parse(agent.updatedAt ?? "");
+        const stuckForMs = Math.max(0, now - updatedAt);
+        try {
+          await agentStore.updateAgentState(agent.id, "active");
+          await agentStore.updateAgent(agent.id, {
+            lastError: undefined,
+          });
+          log.log(
+            `Auto-recovered: orphaned agent ${agent.id} stuck in ${agent.state} for ${Math.round(stuckForMs / 1000)}s — reset to active`,
+          );
+          recovered++;
+        } catch (err: unknown) {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          log.error(`Failed to recover orphaned agent ${agent.id}: ${errorMessage}`);
+        }
+      }
+
+      if (recovered > 0) {
+        log.log(`Recovered ${recovered} orphaned agent(s) → active`);
+      }
+      return recovered;
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      log.error(`Orphaned agent recovery failed: ${errorMessage}`);
       return 0;
     }
   }

@@ -65,7 +65,7 @@ vi.mock("../logger.js", () => ({
 }));
 
 import { SelfHealingManager } from "../self-healing.js";
-import type { TaskStore, Settings, Task } from "@fusion/core";
+import type { TaskStore, Settings, Task, AgentStore, Agent } from "@fusion/core";
 import { EventEmitter } from "node:events";
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -438,6 +438,7 @@ describe("SelfHealingManager", () => {
       const recoverPartialProgressNoTaskDoneFailures = vi.spyOn(manager, "recoverPartialProgressNoTaskDoneFailures").mockResolvedValue(1);
       const recoverOrphanedExecutions = vi.spyOn(manager, "recoverOrphanedExecutions").mockResolvedValue(1);
       const recoverApprovedTriageTasks = vi.spyOn(manager, "recoverApprovedTriageTasks").mockResolvedValue(1);
+      const recoverOrphanedAgents = vi.spyOn(manager, "recoverOrphanedAgents").mockResolvedValue(1);
 
       await manager.runStartupRecovery();
 
@@ -447,6 +448,7 @@ describe("SelfHealingManager", () => {
       expect(recoverPartialProgressNoTaskDoneFailures).toHaveBeenCalledTimes(1);
       expect(recoverOrphanedExecutions).toHaveBeenCalledTimes(1);
       expect(recoverApprovedTriageTasks).toHaveBeenCalledTimes(1);
+      expect(recoverOrphanedAgents).toHaveBeenCalledTimes(1);
     });
 
     it("runStartupRecovery skips while enginePaused is active", async () => {
@@ -459,6 +461,136 @@ describe("SelfHealingManager", () => {
       await manager.runStartupRecovery();
 
       expect(recoverCompletedTasks).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("recoverOrphanedAgents", () => {
+    function createMockAgentStore(agents: Agent[]): AgentStore {
+      return {
+        listAgents: vi.fn().mockResolvedValue(agents),
+        updateAgentState: vi.fn().mockResolvedValue(undefined),
+        updateAgent: vi.fn().mockResolvedValue(undefined),
+      } as unknown as AgentStore;
+    }
+
+    it("returns 0 when no agentStore", async () => {
+      const result = await manager.recoverOrphanedAgents();
+      expect(result).toBe(0);
+    });
+
+    it("skips agents with valid manager", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const agentStore = createMockAgentStore([
+        { id: "manager-1", state: "active", updatedAt: new Date(now).toISOString() } as Agent,
+        { id: "report-1", state: "error", reportsTo: "manager-1", updatedAt: new Date(now - 120_000).toISOString() } as Agent,
+      ]);
+      const managerWithAgents = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(0);
+      expect(agentStore.updateAgent).not.toHaveBeenCalled();
+      managerWithAgents.stop();
+    });
+
+    it("recovers orphaned agent in error state", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const agentStore = createMockAgentStore([
+        { id: "orphan-1", state: "error", updatedAt: new Date(now - 120_000).toISOString() } as Agent,
+      ]);
+      const managerWithAgents = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(1);
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("orphan-1", "active");
+      expect(agentStore.updateAgent).toHaveBeenCalledWith("orphan-1", { lastError: undefined });
+      managerWithAgents.stop();
+    });
+
+    it("skips agents within grace period", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const agentStore = createMockAgentStore([
+        { id: "orphan-1", state: "error", updatedAt: new Date(now - 10_000).toISOString() } as Agent,
+      ]);
+      const managerWithAgents = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(0);
+      expect(agentStore.updateAgent).not.toHaveBeenCalled();
+      managerWithAgents.stop();
+    });
+
+    it("skips ephemeral agents", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const agentStore = createMockAgentStore([
+        {
+          id: "ephemeral-1",
+          name: "ephemeral-1",
+          role: "executor",
+          state: "error",
+          createdAt: new Date(now - 240_000).toISOString(),
+          updatedAt: new Date(now - 120_000).toISOString(),
+          metadata: { agentKind: "task-worker" },
+        } as Agent,
+      ]);
+      const managerWithAgents = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(0);
+      expect(agentStore.updateAgent).not.toHaveBeenCalled();
+      managerWithAgents.stop();
+    });
+
+    it("recovers agent whose manager was deleted", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const agentStore = createMockAgentStore([
+        { id: "orphan-2", state: "running", reportsTo: "missing-manager", updatedAt: new Date(now - 120_000).toISOString() } as Agent,
+      ]);
+      const managerWithAgents = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(1);
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("orphan-2", "active");
+      expect(agentStore.updateAgent).toHaveBeenCalledWith("orphan-2", { lastError: undefined });
+      managerWithAgents.stop();
+    });
+
+    it("ignores agents in healthy states", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const agentStore = createMockAgentStore([
+        { id: "agent-a", state: "active", updatedAt: new Date(now - 120_000).toISOString() } as Agent,
+        { id: "agent-b", state: "idle", updatedAt: new Date(now - 120_000).toISOString() } as Agent,
+        { id: "agent-c", state: "paused", updatedAt: new Date(now - 120_000).toISOString() } as Agent,
+      ]);
+      const managerWithAgents = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(0);
+      expect(agentStore.updateAgent).not.toHaveBeenCalled();
+      managerWithAgents.stop();
+    });
+
+    it("runStartupRecovery includes orphaned agents step", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({
+        globalPause: false,
+        enginePaused: false,
+      } as unknown as Settings);
+      const recoverOrphanedAgents = vi.spyOn(manager, "recoverOrphanedAgents").mockResolvedValue(1);
+
+      await manager.runStartupRecovery();
+
+      expect(recoverOrphanedAgents).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -2996,13 +3128,15 @@ describe("maintenance cycle concurrency", () => {
     makeSlow("recoverOrphanedExecutions");
     makeSlow("recoverApprovedTriageTasks");
     makeSlow("recoverOrphanedPlanningTasks");
+    makeSlow("recoverGhostReviewTasks");
+    makeSlow("recoverOrphanedAgents");
 
     await (manager as any).runMaintenance();
 
     // Operations run sequentially (one at a time), not in parallel.
     expect(maxConcurrent).toBe(1);
     // All operations should have run (including last one)
-    expect(executionOrder[executionOrder.length - 1]).toBe("recoverOrphanedPlanningTasks");
+    expect(executionOrder[executionOrder.length - 1]).toBe("recoverOrphanedAgents");
   });
 
   it("one failing batch 2 operation does not abort the batch", async () => {
@@ -3018,6 +3152,8 @@ describe("maintenance cycle concurrency", () => {
       "recoverOrphanedExecutions",
       "recoverApprovedTriageTasks",
       "recoverOrphanedPlanningTasks",
+      "recoverGhostReviewTasks",
+      "recoverOrphanedAgents",
     ] as const;
 
     // Make one operation fail

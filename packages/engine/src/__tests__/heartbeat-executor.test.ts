@@ -159,6 +159,7 @@ describe("executeHeartbeat", () => {
       setLastBlockedState: vi.fn().mockResolvedValue(undefined),
       clearLastBlockedState: vi.fn().mockResolvedValue(undefined),
       appendRunLog: vi.fn().mockResolvedValue(undefined),
+      getAgentsByReportsTo: vi.fn().mockResolvedValue([]),
     } as unknown as AgentStore;
   }
 
@@ -169,6 +170,86 @@ describe("executeHeartbeat", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  describe("reports health check", () => {
+    it("buildReportsHealthSection returns null when agent has no reports", async () => {
+      const store = createStoreWithAgentForExec();
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      const result = await (monitor as any).buildReportsHealthSection("agent-001", store);
+      expect(result).toBeNull();
+    });
+
+    it("buildReportsHealthSection returns formatted table for healthy reports", async () => {
+      const now = new Date().toISOString();
+      const store = createStoreWithAgentForExec();
+      vi.mocked(store.getAgentsByReportsTo).mockResolvedValue([
+        { id: "agent-002", name: "agent-2", state: "active", taskId: "FN-100", lastHeartbeatAt: now, updatedAt: now } as Agent,
+        { id: "agent-003", name: "agent-3", state: "running", taskId: "FN-101", lastHeartbeatAt: now, updatedAt: now } as Agent,
+      ]);
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      const section = await (monitor as any).buildReportsHealthSection("agent-001", store);
+      expect(section).toContain("## Reports Health Check");
+      expect(section).toContain("agent-2");
+      expect(section).toContain("agent-3");
+      expect(section).toContain("| Name | State | Task | Last Heartbeat | Health |");
+      expect(section).toContain("healthy");
+    });
+
+    it("buildReportsHealthSection classifies stuck agents", async () => {
+      const now = Date.now();
+      const store = createStoreWithAgentForExec();
+      vi.mocked(store.getAgentsByReportsTo).mockResolvedValue([
+        { id: "agent-002", name: "agent-2", state: "error", taskId: "FN-100", lastHeartbeatAt: new Date(now - 1000).toISOString(), updatedAt: new Date(now - 1000).toISOString(), lastError: "boom" } as Agent,
+      ]);
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp", heartbeatTimeoutMs: 60_000 });
+
+      const section = await (monitor as any).buildReportsHealthSection("agent-001", store);
+      expect(section).toContain("**stuck**");
+      expect(section).toContain("Actions for Unresponsive Reports");
+    });
+
+    it("buildReportsHealthSection classifies stale agents", async () => {
+      const now = Date.now();
+      const store = createStoreWithAgentForExec();
+      vi.mocked(store.getAgentsByReportsTo).mockResolvedValue([
+        { id: "agent-003", name: "agent-3", state: "active", taskId: "FN-101", lastHeartbeatAt: new Date(now - 3 * 60 * 60 * 1000).toISOString(), updatedAt: new Date(now - 3 * 60 * 60 * 1000).toISOString() } as Agent,
+      ]);
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp", heartbeatTimeoutMs: 60_000 });
+
+      const section = await (monitor as any).buildReportsHealthSection("agent-001", store);
+      expect(section).toContain("**stale**");
+    });
+
+    it("executeHeartbeat includes reports health section when agent has reports", async () => {
+      const store = createStoreWithAgentForExec({ taskId: "FN-001" });
+      const now = new Date().toISOString();
+      vi.mocked(store.getAgentsByReportsTo).mockResolvedValue([
+        { id: "agent-010", name: "reporter", state: "running", taskId: "FN-200", lastHeartbeatAt: now, updatedAt: now } as Agent,
+      ]);
+      const mockSession = createMockAgentSession();
+      mockedCreateFnAgent.mockResolvedValue({ session: mockSession as any });
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+      const executionPrompt = mockSession.prompt.mock.calls.at(-1)?.[0] as string;
+      expect(executionPrompt).toContain("## Reports Health Check");
+      expect(executionPrompt).toContain("reporter");
+    });
+
+    it("executeHeartbeat omits reports health section when agent has no reports", async () => {
+      const store = createStoreWithAgentForExec({ taskId: "FN-001" });
+      vi.mocked(store.getAgentsByReportsTo).mockResolvedValue([]);
+      const mockSession = createMockAgentSession();
+      mockedCreateFnAgent.mockResolvedValue({ session: mockSession as any });
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+      const executionPrompt = mockSession.prompt.mock.calls.at(-1)?.[0] as string;
+      expect(executionPrompt).not.toContain("## Reports Health Check");
+    });
   });
 
   describe("dependency validation", () => {

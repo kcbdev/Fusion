@@ -127,6 +127,15 @@ export function formatDuration(ms: number): string {
   return `${minutes}m`;
 }
 
+function formatRelativeTime(iso?: string | null): string {
+  if (!iso) return "never";
+  const parsed = Date.parse(iso);
+  if (!Number.isFinite(parsed)) return "unknown";
+  const elapsed = Date.now() - parsed;
+  if (elapsed < 0) return "just now";
+  return `${formatDuration(elapsed)} ago`;
+}
+
 /** Compare blocked-state snapshots to decide whether blocked messaging is duplicate noise. */
 export function isBlockedStateDuplicate(current: BlockedStateSnapshot, previous: BlockedStateSnapshot): boolean {
   return current.blockedBy === previous.blockedBy && current.contextHash === previous.contextHash;
@@ -1510,6 +1519,7 @@ export class HeartbeatMonitor {
           const customProcedure = await resolveAgentHeartbeatProcedure(agent, rootDir);
           const heartbeatProcedureText = customProcedure
             ?? (isNoTaskRun ? HEARTBEAT_NO_TASK_PROCEDURE : HEARTBEAT_PROCEDURE);
+          const reportsHealthSection = await this.buildReportsHealthSection(agent.id, this.store);
 
           if (isNoTaskRun) {
             // No-task heartbeat: agent has identity but no assigned task
@@ -1578,6 +1588,7 @@ export class HeartbeatMonitor {
               "",
               "Your soul, instructions, and memory are already loaded in the system prompt.",
               "Focus on work that benefits the project without requiring a specific task context.",
+              ...(reportsHealthSection ? ["", reportsHealthSection] : []),
               "",
               "Call fn_heartbeat_done when finished.",
             ].join("\n");
@@ -1665,6 +1676,7 @@ export class HeartbeatMonitor {
               taskDetail!.prompt ? `PROMPT.md:\n${taskDetail!.prompt}` : "No PROMPT.md available.",
               ...triggeringCommentLines,
               ...pendingMessagesLines,
+              ...(reportsHealthSection ? ["", reportsHealthSection] : []),
               "",
               "Run the Heartbeat Procedure above. Call fn_heartbeat_done when finished.",
             ].join("\n");
@@ -1822,6 +1834,76 @@ export class HeartbeatMonitor {
         return (await this.store.getRunDetail(agentId, run.id))!;
       }
     });
+  }
+
+  private async buildReportsHealthSection(agentId: string, agentStore: AgentStore): Promise<string | null> {
+    const getReports = (agentStore as AgentStore & { getAgentsByReportsTo?: (id: string) => Promise<Agent[]> }).getAgentsByReportsTo;
+    if (typeof getReports !== "function") {
+      return null;
+    }
+
+    let reports: Agent[];
+    try {
+      reports = await getReports(agentId);
+    } catch (err) {
+      heartbeatLog.warn(`Failed to load reports for ${agentId}: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
+    if (reports.length === 0) {
+      return null;
+    }
+
+    const now = Date.now();
+    const rows = reports.map((report) => {
+      const timeoutMs = this.resolveAgentConfig(report.id).heartbeatTimeoutMs;
+      const lastHeartbeatTs = report.lastHeartbeatAt ? Date.parse(report.lastHeartbeatAt) : NaN;
+      const heartbeatAgeMs = Number.isFinite(lastHeartbeatTs) ? Math.max(0, now - lastHeartbeatTs) : Infinity;
+
+      let health = "healthy";
+      if (report.state === "paused") {
+        health = report.pauseReason ? `paused (${report.pauseReason})` : "paused";
+      } else if (report.state === "terminated") {
+        health = "terminated";
+      } else if (report.state === "error") {
+        health = "**stuck**";
+      } else if (report.state === "running") {
+        health = heartbeatAgeMs <= timeoutMs * 2 ? "healthy" : "**stuck**";
+      } else if ((report.state === "active" || report.state === "idle") && heartbeatAgeMs > timeoutMs * 3) {
+        health = "**stale**";
+      }
+
+      const task = report.taskId ?? "—";
+      const state = report.state;
+      const heartbeat = formatRelativeTime(report.lastHeartbeatAt);
+      return `| ${report.name} | ${state} | ${task} | ${heartbeat} | ${health} |`;
+    });
+
+    const hasStuck = rows.some((row) => row.includes("**stuck**"));
+    const hasStale = rows.some((row) => row.includes("**stale**"));
+    const hasTerminated = rows.some((row) => row.includes("terminated"));
+
+    const actionLines = ["### Actions for Unresponsive Reports"];
+    if (hasStuck) {
+      actionLines.push("- For **stuck** reports: consider sending a message via fn_send_message asking for status, or reassigning their task via fn_delegate_task to a healthy agent.");
+    }
+    if (hasStale) {
+      actionLines.push("- For **stale** reports: the agent may have lost its heartbeat trigger — create a follow-up task to investigate.");
+    }
+    if (hasTerminated) {
+      actionLines.push("- For **terminated** reports: if they had active work, reassign their tasks or spawn replacement agents.");
+    }
+
+    return [
+      "## Reports Health Check",
+      "",
+      `You have ${reports.length} agent(s) reporting to you. Review their status and intervene if any are unresponsive.`, 
+      "",
+      "| Name | State | Task | Last Heartbeat | Health |",
+      "|------|-------|------|----------------|--------|",
+      ...rows,
+      "",
+      ...actionLines,
+    ].join("\n");
   }
 
   // ─────────────────────────────────────────────────────────────────────────
