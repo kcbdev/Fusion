@@ -55,7 +55,7 @@
  * - **Working memory** (`MEMORY.md`): Manual/agent-maintained. No automatic
  *   pruning — agents are expected to keep it relevant.
  *
- * - **Insights memory** (`memory-insights.md`): Only grows through
+ * - **Insights memory** (`.fusion/memory/memory-insights.md`): Only grows through
  *   extraction. New insights are merged with existing ones. Simple duplicate
  *   detection prevents re-adding the same insight.
  *
@@ -64,7 +64,7 @@
  *   near-exact content match), it is skipped.
  */
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ProjectSettings } from "./types.js";
@@ -76,13 +76,17 @@ import type { ScheduledTaskCreateInput } from "./automation.js";
 export const MEMORY_WORKING_PATH = ".fusion/memory/MEMORY.md";
 
 /** Path to insights memory relative to project root. */
-export const MEMORY_INSIGHTS_PATH = ".fusion/memory-insights.md";
+export const MEMORY_INSIGHTS_PATH = ".fusion/memory/memory-insights.md";
 
 /** Path to memory audit report relative to project root. */
-export const MEMORY_AUDIT_PATH = ".fusion/memory-audit.md";
+export const MEMORY_AUDIT_PATH = ".fusion/memory/memory-audit.md";
 
 /** Path to persisted memory audit state (latest extraction/pruning metadata). */
-export const MEMORY_AUDIT_STATE_PATH = ".fusion/memory-audit-state.json";
+export const MEMORY_AUDIT_STATE_PATH = ".fusion/memory/memory-audit-state.json";
+
+const LEGACY_MEMORY_INSIGHTS_PATH = ".fusion/memory-insights.md";
+const LEGACY_MEMORY_AUDIT_PATH = ".fusion/memory-audit.md";
+const LEGACY_MEMORY_AUDIT_STATE_PATH = ".fusion/memory-audit-state.json";
 
 /** Default cron schedule for insight extraction: daily at 2 AM. */
 export const DEFAULT_INSIGHT_SCHEDULE = "0 2 * * *";
@@ -254,17 +258,60 @@ export async function readWorkingMemory(rootDir: string): Promise<string> {
   return readFile(filePath, "utf-8");
 }
 
+async function migrateLegacyArtifactIfNeeded(
+  rootDir: string,
+  canonicalPath: string,
+  legacyPath: string,
+): Promise<void> {
+  const canonicalFilePath = join(rootDir, canonicalPath);
+  const legacyFilePath = join(rootDir, legacyPath);
+  if (existsSync(canonicalFilePath) || !existsSync(legacyFilePath)) {
+    return;
+  }
+
+  const content = await readFile(legacyFilePath, "utf-8");
+  const canonicalDir = dirname(canonicalFilePath);
+  if (!existsSync(canonicalDir)) {
+    await mkdir(canonicalDir, { recursive: true });
+  }
+  await writeFile(canonicalFilePath, content, "utf-8");
+
+  try {
+    await unlink(legacyFilePath);
+  } catch {
+    // Best effort cleanup; canonical write already preserves data.
+  }
+}
+
+async function removeLegacyArtifactIfPresent(rootDir: string, legacyPath: string): Promise<void> {
+  const legacyFilePath = join(rootDir, legacyPath);
+  if (!existsSync(legacyFilePath)) {
+    return;
+  }
+
+  try {
+    await unlink(legacyFilePath);
+  } catch {
+    // Best effort cleanup; inability to delete should not block writes.
+  }
+}
+
 /**
- * Read the insights memory file (`memory-insights.md`).
+ * Read the insights memory file (`.fusion/memory/memory-insights.md`).
  *
  * Returns `null` if the file does not exist, indicating that no insights
  * have been extracted yet. The caller should treat this as "no prior
  * extraction" and pass `null` to `buildInsightExtractionPrompt()`.
  *
+ * Legacy compatibility: transparently migrates `.fusion/memory-insights.md`
+ * to the canonical memory workspace path on first read.
+ *
  * @param rootDir - Absolute path to the project root directory.
  * @returns The insights memory content, or null if not found.
  */
 export async function readInsightsMemory(rootDir: string): Promise<string | null> {
+  await migrateLegacyArtifactIfNeeded(rootDir, MEMORY_INSIGHTS_PATH, LEGACY_MEMORY_INSIGHTS_PATH);
+
   const filePath = join(rootDir, MEMORY_INSIGHTS_PATH);
   if (!existsSync(filePath)) {
     return null;
@@ -273,20 +320,21 @@ export async function readInsightsMemory(rootDir: string): Promise<string | null
 }
 
 /**
- * Write the insights memory file (`memory-insights.md`).
+ * Write the insights memory file (`.fusion/memory/memory-insights.md`).
  *
- * Creates the `.fusion` directory if it does not exist.
+ * Creates the `.fusion/memory/` directory if it does not exist.
  *
  * @param rootDir - Absolute path to the project root directory.
  * @param content - The markdown content to write.
  */
 export async function writeInsightsMemory(rootDir: string, content: string): Promise<void> {
   const filePath = join(rootDir, MEMORY_INSIGHTS_PATH);
-  const dir = join(rootDir, ".fusion");
+  const dir = dirname(filePath);
   if (!existsSync(dir)) {
     await mkdir(dir, { recursive: true });
   }
   await writeFile(filePath, content, "utf-8");
+  await removeLegacyArtifactIfPresent(rootDir, LEGACY_MEMORY_INSIGHTS_PATH);
 }
 
 /**
@@ -307,7 +355,7 @@ export async function writeWorkingMemory(rootDir: string, content: string): Prom
 }
 
 /**
- * Read the memory audit file (`memory-audit.md`).
+ * Read the memory audit file (`.fusion/memory/memory-audit.md`).
  *
  * Returns `null` if the file does not exist.
  *
@@ -315,6 +363,8 @@ export async function writeWorkingMemory(rootDir: string, content: string): Prom
  * @returns The audit file content, or null if not found.
  */
 export async function readMemoryAudit(rootDir: string): Promise<string | null> {
+  await migrateLegacyArtifactIfNeeded(rootDir, MEMORY_AUDIT_PATH, LEGACY_MEMORY_AUDIT_PATH);
+
   const filePath = join(rootDir, MEMORY_AUDIT_PATH);
   if (!existsSync(filePath)) {
     return null;
@@ -323,28 +373,31 @@ export async function readMemoryAudit(rootDir: string): Promise<string | null> {
 }
 
 /**
- * Write the memory audit file (`memory-audit.md`).
+ * Write the memory audit file (`.fusion/memory/memory-audit.md`).
  *
- * Creates the `.fusion` directory if it does not exist.
+ * Creates the `.fusion/memory/` directory if it does not exist.
  *
  * @param rootDir - Absolute path to the project root directory.
  * @param content - The markdown content to write.
  */
 export async function writeMemoryAudit(rootDir: string, content: string): Promise<void> {
   const filePath = join(rootDir, MEMORY_AUDIT_PATH);
-  const dir = join(rootDir, ".fusion");
+  const dir = dirname(filePath);
   if (!existsSync(dir)) {
     await mkdir(dir, { recursive: true });
   }
   await writeFile(filePath, content, "utf-8");
+  await removeLegacyArtifactIfPresent(rootDir, LEGACY_MEMORY_AUDIT_PATH);
 }
 
 /**
- * Read persisted memory audit state (`memory-audit-state.json`).
+ * Read persisted memory audit state (`.fusion/memory/memory-audit-state.json`).
  *
  * Returns `null` when no prior state exists.
  */
 async function readMemoryAuditState(rootDir: string): Promise<MemoryAuditState | null> {
+  await migrateLegacyArtifactIfNeeded(rootDir, MEMORY_AUDIT_STATE_PATH, LEGACY_MEMORY_AUDIT_STATE_PATH);
+
   const filePath = join(rootDir, MEMORY_AUDIT_STATE_PATH);
   if (!existsSync(filePath)) {
     return null;
@@ -370,16 +423,17 @@ async function readMemoryAuditState(rootDir: string): Promise<MemoryAuditState |
 }
 
 /**
- * Persist memory audit state (`memory-audit-state.json`).
+ * Persist memory audit state (`.fusion/memory/memory-audit-state.json`).
  */
 async function writeMemoryAuditState(rootDir: string, state: MemoryAuditState): Promise<void> {
   const filePath = join(rootDir, MEMORY_AUDIT_STATE_PATH);
-  const dir = join(rootDir, ".fusion");
+  const dir = dirname(filePath);
   if (!existsSync(dir)) {
     await mkdir(dir, { recursive: true });
   }
 
   await writeFile(filePath, JSON.stringify(state, null, 2), "utf-8");
+  await removeLegacyArtifactIfPresent(rootDir, LEGACY_MEMORY_AUDIT_STATE_PATH);
 }
 
 function isValidExtractionMetadata(value: unknown): value is MemoryExtractionMetadata {
@@ -885,7 +939,7 @@ export function createInsightExtractionAutomation(
 ## Instructions
 
 1. Read the working memory file at \`.fusion/memory/MEMORY.md\` using your file reading tools
-2. Read the existing insights file at \`.fusion/memory-insights.md\` (it may not exist yet)
+2. Read the existing insights file at \`.fusion/memory/memory-insights.md\` (it may not exist yet)
 3. Analyze the working memory content and identify:
    a) **New insights** that should be preserved in long-term memory
    b) **Durable content** that should remain in working memory
@@ -1330,7 +1384,7 @@ export async function generateMemoryAudit(
       id: "insights-memory-exists",
       name: "Insights memory file exists",
       passed: false,
-      details: "File .fusion/memory-insights.md does not exist yet",
+      details: "File .fusion/memory/memory-insights.md does not exist yet",
     });
   }
 

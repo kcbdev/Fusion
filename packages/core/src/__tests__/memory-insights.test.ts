@@ -70,6 +70,18 @@ describe("memory-insights", () => {
       const result = await readInsightsMemory(tempDir);
       expect(result).toBeNull();
     });
+
+    it("should migrate legacy top-level insights file on read", async () => {
+      const legacyPath = join(tempDir, ".fusion", "memory-insights.md");
+      const content = "# Legacy Insights\n\n- Keep this";
+      writeFileSync(legacyPath, content);
+
+      const result = await readInsightsMemory(tempDir);
+
+      expect(result).toBe(content);
+      expect(existsSync(join(tempDir, MEMORY_INSIGHTS_PATH))).toBe(true);
+      expect(existsSync(legacyPath)).toBe(false);
+    });
   });
 
   // ── writeInsightsMemory ──────────────────────────────────────────────
@@ -97,6 +109,16 @@ describe("memory-insights", () => {
       // .fusion dir does not exist yet
       await writeInsightsMemory(newDir, "test content");
       expect(existsSync(join(newDir, MEMORY_INSIGHTS_PATH))).toBe(true);
+    });
+
+    it("should remove legacy top-level insights file after canonical write", async () => {
+      const legacyPath = join(tempDir, ".fusion", "memory-insights.md");
+      writeFileSync(legacyPath, "legacy");
+
+      await writeInsightsMemory(tempDir, "canonical");
+
+      expect(readFileSync(join(tempDir, MEMORY_INSIGHTS_PATH), "utf-8")).toBe("canonical");
+      expect(existsSync(legacyPath)).toBe(false);
     });
   });
 
@@ -613,7 +635,7 @@ describe("memory-insights", () => {
   describe("constants", () => {
     it("should have correct file paths", () => {
       expect(MEMORY_WORKING_PATH).toBe(".fusion/memory/MEMORY.md");
-      expect(MEMORY_INSIGHTS_PATH).toBe(".fusion/memory-insights.md");
+      expect(MEMORY_INSIGHTS_PATH).toBe(".fusion/memory/memory-insights.md");
     });
 
     it("should have sensible defaults", () => {
@@ -657,6 +679,18 @@ describe("memory-insights audit file operations", () => {
       const result = await readMemoryAudit(tempDir);
       expect(result).toBe(content);
     });
+
+    it("should migrate legacy top-level audit file on read", async () => {
+      const legacyPath = join(tempDir, ".fusion", "memory-audit.md");
+      const content = "# Legacy Audit";
+      writeFileSync(legacyPath, content);
+
+      const result = await readMemoryAudit(tempDir);
+
+      expect(result).toBe(content);
+      expect(existsSync(join(tempDir, MEMORY_AUDIT_PATH))).toBe(true);
+      expect(existsSync(legacyPath)).toBe(false);
+    });
   });
 
   describe("writeMemoryAudit", () => {
@@ -681,6 +715,16 @@ describe("memory-insights audit file operations", () => {
       await mkdir(newDir, { recursive: true });
       await writeMemoryAudit(newDir, "test content");
       expect(existsSync(join(newDir, MEMORY_AUDIT_PATH))).toBe(true);
+    });
+
+    it("should remove legacy top-level audit file after canonical write", async () => {
+      const legacyPath = join(tempDir, ".fusion", "memory-audit.md");
+      writeFileSync(legacyPath, "legacy");
+
+      await writeMemoryAudit(tempDir, "canonical");
+
+      expect(readFileSync(join(tempDir, MEMORY_AUDIT_PATH), "utf-8")).toBe("canonical");
+      expect(existsSync(legacyPath)).toBe(false);
     });
   });
 });
@@ -1123,6 +1167,33 @@ describe("memory-insights audit generation", () => {
       expect(report.extraction.success).toBe(true);
       expect(report.extraction.summary).toBe("Persisted extraction summary");
       expect(report.checks.find((c) => c.id === "recent-extraction")?.passed).toBe(true);
+      expect(existsSync(join(tempDir, ".fusion", "memory", "memory-audit-state.json"))).toBe(true);
+    });
+
+    it("migrates legacy top-level audit state to canonical memory directory", async () => {
+      const runAt = new Date().toISOString();
+      const legacyStatePath = join(tempDir, ".fusion", "memory-audit-state.json");
+      writeFileSync(
+        legacyStatePath,
+        JSON.stringify({
+          extraction: {
+            runAt,
+            success: true,
+            insightCount: 2,
+            duplicateCount: 0,
+            skippedCount: 0,
+            summary: "Legacy summary",
+          },
+          updatedAt: runAt,
+        }),
+      );
+
+      const report = await generateMemoryAudit(tempDir);
+
+      expect(report.extraction.runAt).toBe(runAt);
+      expect(report.extraction.summary).toBe("Legacy summary");
+      expect(existsSync(join(tempDir, ".fusion", "memory", "memory-audit-state.json"))).toBe(true);
+      expect(existsSync(legacyStatePath)).toBe(false);
     });
 
     it("should include pruning outcome in report", async () => {

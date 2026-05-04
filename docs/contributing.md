@@ -182,8 +182,8 @@ Use project memory for reusable patterns, constraints, and pitfalls that should 
 Fusion can automatically extract insights from memory and prune transient content. Enable via `insightExtractionEnabled` setting:
 
 - `.fusion/memory/MEMORY.md` — Canonical long-term memory source (inside the layered `.fusion/memory/` workspace) compacted/pruned by extraction jobs
-- `.fusion/memory-insights.md` — Distilled insights output
-- `.fusion/memory-audit.md` — Audit report after each extraction (includes pruning outcome)
+- `.fusion/memory/memory-insights.md` — Distilled insights output
+- `.fusion/memory/memory-audit.md` — Audit report after each extraction (includes pruning outcome)
 
 See [Settings Reference](./settings-reference.md#background-memory-summarization--audit) for configuration details.
 

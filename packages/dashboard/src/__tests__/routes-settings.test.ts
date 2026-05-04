@@ -2230,7 +2230,7 @@ describe("GET /api/memory/insights", () => {
 
   beforeEach(() => {
     rootDir = mkdtempSync(join(tmpdir(), "fusion-memory-insights-"));
-    mkdirSync(join(rootDir, ".fusion"), { recursive: true });
+    mkdirSync(join(rootDir, ".fusion", "memory"), { recursive: true });
     store = createMockStore({
       getRootDir: vi.fn().mockReturnValue(rootDir),
     });
@@ -2248,8 +2248,8 @@ describe("GET /api/memory/insights", () => {
   }
 
   it("returns 200 with content and exists:true when insights file exists", async () => {
-    // Insights file is at .fusion/memory-insights.md
-    writeFileSync(join(rootDir, ".fusion", "memory-insights.md"), "## Patterns\n- Pattern 1\n- Pattern 2");
+    // Insights file is at .fusion/memory/memory-insights.md
+    writeFileSync(join(rootDir, ".fusion", "memory", "memory-insights.md"), "## Patterns\n- Pattern 1\n- Pattern 2");
 
     const res = await GET(buildApp(), "/api/memory/insights");
 
@@ -2303,8 +2303,8 @@ describe("PUT /api/memory/insights", () => {
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty("success", true);
 
-    // Verify file was written (insights file is .fusion/memory-insights.md)
-    const insightsPath = join(rootDir, ".fusion", "memory-insights.md");
+    // Verify file was written (insights file is .fusion/memory/memory-insights.md)
+    const insightsPath = join(rootDir, ".fusion", "memory", "memory-insights.md");
     expect(existsSync(insightsPath)).toBe(true);
   });
 
@@ -2376,6 +2376,24 @@ describe("POST /api/memory/extract", () => {
     mkdirSync(join(rootDir, ".fusion", "memory"), { recursive: true });
     writeFileSync(join(rootDir, ".fusion", "memory", "MEMORY.md"), "Working memory content for extraction that is long enough.");
 
+    const session = {
+      state: {
+        messages: [] as Array<{ role: string; content: string }>,
+      },
+      prompt: vi.fn(async function (this: { state: { messages: Array<{ role: string; content: string }> } }) {
+        const response = JSON.stringify({
+          summary: "Extracted insights",
+          insights: [{ category: "pattern", content: "Persist reusable conventions" }],
+          prunedMemory: "## Architecture\n\nDurable architecture notes.",
+        });
+        this.state.messages.push({ role: "assistant", content: response });
+        return response;
+      }),
+      dispose: vi.fn(),
+    };
+
+    vi.mocked(createFnAgent).mockResolvedValue({ session } as never);
+
     const res = await REQUEST(
       buildApp(),
       "POST",
@@ -2389,6 +2407,9 @@ describe("POST /api/memory/extract", () => {
     expect(res.body).toHaveProperty("summary");
     expect(res.body).toHaveProperty("insightCount");
     expect(res.body).toHaveProperty("pruned");
+    expect(existsSync(join(rootDir, ".fusion", "memory", "memory-insights.md"))).toBe(true);
+    expect(existsSync(join(rootDir, ".fusion", "memory", "memory-audit.md"))).toBe(true);
+    expect(existsSync(join(rootDir, ".fusion", "memory", "memory-audit-state.json"))).toBe(true);
   });
 });
 

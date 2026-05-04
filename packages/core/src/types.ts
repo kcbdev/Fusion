@@ -1957,7 +1957,7 @@ export interface ProjectSettings {
   /** When true, enables periodic AI-powered extraction of insights from working memory
    *  into a distilled long-term memory file. Creates an automation schedule that reads
    *  `.fusion/memory/MEMORY.md`, identifies patterns/principles/pitfalls, and writes to
-   *  `.fusion/memory-insights.md`. Default: false. */
+   *  `.fusion/memory/memory-insights.md`. Default: false. */
   insightExtractionEnabled?: boolean;
   /** Cron expression for insight extraction schedule. Only used when
    *  insightExtractionEnabled is true. Default: "0 2 * * *" (daily at 2 AM). */

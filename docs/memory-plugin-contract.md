@@ -40,8 +40,8 @@ Fusion currently has two related but distinct memory systems:
 | `MEMORY_DREAMS_FILENAME` | `DREAMS.md` | `memory-backend.ts` |
 | `DEFAULT_MEMORY_BACKEND` | `qmd` | `memory-backend.ts` |
 | `MEMORY_WORKING_PATH` | `.fusion/memory/MEMORY.md` | `memory-insights.ts` |
-| `MEMORY_INSIGHTS_PATH` | `.fusion/memory-insights.md` | `memory-insights.ts` |
-| `MEMORY_AUDIT_PATH` | `.fusion/memory-audit.md` | `memory-insights.ts` |
+| `MEMORY_INSIGHTS_PATH` | `.fusion/memory/memory-insights.md` | `memory-insights.ts` |
+| `MEMORY_AUDIT_PATH` | `.fusion/memory/memory-audit.md` | `memory-insights.ts` |
 
 ### 1.3 Exported Surface (Post-Migration)
 
@@ -264,8 +264,8 @@ Dashboard memory routes must remain rooted in project-scoped memory APIs:
 Insight extraction is a separate subsystem that currently uses:
 
 - Working source: `.fusion/memory/MEMORY.md`
-- Insight output: `.fusion/memory-insights.md`
-- Audit output: `.fusion/memory-audit.md`
+- Insight output: `.fusion/memory/memory-insights.md`
+- Audit output: `.fusion/memory/memory-audit.md`
 
 It is related to, but not equivalent to, backend selection and prompt instruction logic.
 

@@ -848,15 +848,15 @@ Fusion can automatically extract insights from project memory and prune transien
 
 1. **Scheduled Extraction**: When `insightExtractionEnabled` is `true`, a background automation runs on the configured `insightExtractionSchedule` (default: daily at 2 AM).
 
-2. **AI-Powered Analysis**: The automation uses an AI agent to read canonical long-term memory (`.fusion/memory/MEMORY.md`) from the layered `.fusion/memory/` workspace plus `.fusion/memory-insights.md`, extract new insights, and produce a pruned working memory candidate.
+2. **AI-Powered Analysis**: The automation uses an AI agent to read canonical long-term memory (`.fusion/memory/MEMORY.md`) from the layered `.fusion/memory/` workspace plus `.fusion/memory/memory-insights.md`, extract new insights, and produce a pruned working memory candidate.
 
-3. **Insight Merging**: New insights are automatically merged into `.fusion/memory-insights.md` under the appropriate category (Patterns, Principles, Conventions, Pitfalls, Context). Duplicates are skipped.
+3. **Insight Merging**: New insights are automatically merged into `.fusion/memory/memory-insights.md` under the appropriate category (Patterns, Principles, Conventions, Pitfalls, Context). Duplicates are skipped.
 
 4. **Memory Pruning**: The AI agent also produces a pruned version of working memory containing only durable items:
    - **Preserved**: Architecture, Conventions, Pitfalls, Context sections with durable content
    - **Pruned**: Task-specific notes, one-time observations, outdated entries
 
-5. **Audit Report**: After each extraction run, a `.fusion/memory-audit.md` file is generated with:
+5. **Audit Report**: After each extraction run, a `.fusion/memory/memory-audit.md` file is generated with:
    - Working memory status (presence, size, sections)
    - Insights memory status (insight counts by category)
    - Last extraction results (success/failure, insight count, duplicates skipped)
@@ -870,8 +870,8 @@ Fusion can automatically extract insights from project memory and prune transien
 |------|-------------|
 | `.fusion/memory/MEMORY.md` | Long-term memory (updated when pruning is applied and validated) |
 | Legacy top-level memory file | Deprecated migration fallback (compatibility only; not canonical storage) |
-| `.fusion/memory-insights.md` | Long-term insights distilled from working memory |
-| `.fusion/memory-audit.md` | Human-readable audit report after each extraction |
+| `.fusion/memory/memory-insights.md` | Long-term insights distilled from working memory |
+| `.fusion/memory/memory-audit.md` | Human-readable audit report after each extraction |
 
 ### Settings Interaction
 
