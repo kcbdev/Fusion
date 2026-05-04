@@ -923,6 +923,16 @@ it("should return status from GET /status", async () => {
 pnpm test
 ```
 
+### Fusion Host Regression Coverage (Plugin Discovery / Load / Registration)
+
+When a plugin changes host integration contracts, add or update host-side regression tests in this repository:
+
+- **Core loader pipeline** (`packages/core/src/__tests__/plugin-loader.test.ts`): verify `PluginStore.registerPlugin()` → `PluginLoader.loadAllPlugins()` / `loadPlugin()` and assert `started` state transitions, manifest validation failures, disabled-plugin skip behavior, missing entrypoint failures, and `onLoad` error handling.
+- **Dashboard API aggregation** (`packages/dashboard/src/__tests__/plugin-routes.test.ts`, `packages/dashboard/src/__tests__/plugin-routes.routes.test.ts`): verify plugin visibility via `GET /api/plugins`, `GET /api/plugins/ui-slots`, and `GET /api/plugins/runtimes` using standard loader/store aggregation (no plugin-specific route branches).
+- **Dashboard slot consumers** (`packages/dashboard/app/components/__tests__/PluginSlot.test.tsx`, `packages/dashboard/app/hooks/__tests__/usePluginUiSlots.test.ts`): cover slot filtering, ordering, and rendering behavior for host slot IDs used by your plugin.
+
+Keep this layer focused on **discovery/load/registration plumbing**. Deeper feature-flow regressions (Settings UX, onboarding UX, runtime execution/provider behavior) belong in dedicated follow-up suites, not in these plumbing tests.
+
 ---
 
 ## 12. Publishing Plugins

@@ -1,9 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { mkdtempSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { PluginLoader } from "../plugin-loader.js";
+
+vi.mock("@mariozechner/pi-ai", () => ({
+  AssistantMessageEventStream: class AssistantMessageEventStream {
+    push() {}
+    end() {}
+  },
+  calculateCost: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }),
+}));
 import { PluginStore } from "../plugin-store.js";
 import { setCreateAiSessionFactory } from "../ai-engine-loader.js";
 import type { CreateAiSessionOptions, FusionPlugin, PluginManifest } from "../plugin-types.js";
@@ -103,6 +112,12 @@ export { plugin };
 
 function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), "kb-plugin-loader-test-"));
+}
+
+function droidPluginModulePath(): string {
+  return fileURLToPath(
+    new URL("../../../../plugins/fusion-plugin-droid-runtime/src/index.ts", import.meta.url),
+  );
 }
 
 // Mock TaskStore for testing
@@ -310,6 +325,64 @@ describe("PluginLoader", () => {
       expect(loader.isPluginLoaded("load-test")).toBe(true);
     });
 
+    it("loads the migrated Droid plugin through register→loadAllPlugins→loadPlugin pipeline", async () => {
+      await pluginStore.init();
+
+      const droidManifest = {
+        id: "fusion-plugin-droid-runtime",
+        name: "Droid Runtime Plugin",
+        version: "0.1.0",
+        description: "Droid runtime plugin for Fusion",
+        runtime: {
+          runtimeId: "droid",
+          name: "Droid Runtime",
+          description: "Drives the Droid CLI for Fusion agents",
+          version: "0.1.0",
+        },
+      } as const;
+
+      await pluginStore.registerPlugin({
+        manifest: droidManifest,
+        path: droidPluginModulePath(),
+      });
+
+      const loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      const loadAllResult = await loader.loadAllPlugins();
+
+      expect(loadAllResult).toEqual({ loaded: 1, errors: 0 });
+      expect(loader.isPluginLoaded("fusion-plugin-droid-runtime")).toBe(true);
+
+      const loaded = await loader.loadPlugin("fusion-plugin-droid-runtime");
+      expect(loaded.manifest.id).toBe("fusion-plugin-droid-runtime");
+      expect(loaded.state).toBe("started");
+
+      const installed = await pluginStore.getPlugin("fusion-plugin-droid-runtime");
+      expect(installed.state).toBe("started");
+
+      const slots = loader
+        .getPluginUiSlots()
+        .filter((entry) => entry.pluginId === "fusion-plugin-droid-runtime");
+      expect(slots.map((entry) => entry.slot.slotId)).toEqual([
+        "onboarding-provider-card",
+        "onboarding-setup-help",
+        "post-onboarding-recommendation",
+        "settings-provider-card",
+      ]);
+      expect(slots[0]?.slot).toHaveProperty("label");
+      expect(slots[0]?.slot).toHaveProperty("componentPath");
+
+      const runtimes = loader
+        .getPluginRuntimes()
+        .filter((entry) => entry.pluginId === "fusion-plugin-droid-runtime");
+      expect(runtimes).toHaveLength(1);
+      expect(runtimes[0].runtime.metadata).toMatchObject({
+        runtimeId: "droid",
+        name: "Droid Runtime",
+        version: "0.1.0",
+      });
+      expect(typeof runtimes[0].runtime.factory).toBe("function");
+    });
+
     it("updates plugin state to started", async () => {
       await pluginStore.init();
 
@@ -415,6 +488,56 @@ describe("PluginLoader", () => {
       );
     });
 
+    it("fails when plugin module manifest is invalid", async () => {
+      await pluginStore.init();
+
+      const pluginDir = join(rootDir, "plugins");
+      const pluginPath = join(pluginDir, "invalid-manifest.js");
+      await mkdir(pluginDir, { recursive: true });
+      await writeFile(
+        pluginPath,
+        `
+const plugin = {
+  manifest: { id: "invalid-manifest", version: "1.0.0" },
+  state: "installed",
+  hooks: {},
+};
+export default plugin;
+`,
+      );
+
+      await pluginStore.registerPlugin({
+        manifest: makeManifest({ id: "invalid-manifest" }),
+        path: pluginPath,
+      });
+
+      const loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+
+      await expect(loader.loadPlugin("invalid-manifest")).rejects.toThrow(
+        "Invalid plugin manifest",
+      );
+
+      const stored = await pluginStore.getPlugin("invalid-manifest");
+      expect(stored.state).toBe("error");
+    });
+
+    it("fails when plugin entrypoint is missing", async () => {
+      await pluginStore.init();
+
+      const missingPath = join(rootDir, "plugins", "missing-entrypoint.js");
+      await pluginStore.registerPlugin({
+        manifest: makeManifest({ id: "missing-entrypoint" }),
+        path: missingPath,
+      });
+
+      const loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+
+      await expect(loader.loadPlugin("missing-entrypoint")).rejects.toThrow();
+      const stored = await pluginStore.getPlugin("missing-entrypoint");
+      expect(stored.state).toBe("error");
+      expect(stored.error).toBeTruthy();
+    });
+
     it("error isolation - plugin crash during load doesn't crash loader", async () => {
       await pluginStore.init();
 
@@ -485,6 +608,28 @@ describe("PluginLoader", () => {
       expect(result.errors).toBe(0);
       expect(loader.isPluginLoaded("all-a")).toBe(true);
       expect(loader.isPluginLoaded("all-b")).toBe(true);
+    });
+
+    it("skips disabled plugins during loadAllPlugins", async () => {
+      await pluginStore.init();
+
+      const pluginDir = join(rootDir, "plugins");
+      const enabledPlugin = makePlugin(makeManifest({ id: "enabled-plugin" }));
+      const disabledPlugin = makePlugin(makeManifest({ id: "disabled-plugin" }));
+
+      const enabledPath = await writePluginModule(pluginDir, "enabled.js", enabledPlugin);
+      const disabledPath = await writePluginModule(pluginDir, "disabled.js", disabledPlugin);
+
+      await pluginStore.registerPlugin({ manifest: enabledPlugin.manifest, path: enabledPath });
+      await pluginStore.registerPlugin({ manifest: disabledPlugin.manifest, path: disabledPath });
+      await pluginStore.disablePlugin("disabled-plugin");
+
+      const loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      const result = await loader.loadAllPlugins();
+
+      expect(result).toEqual({ loaded: 1, errors: 0 });
+      expect(loader.isPluginLoaded("enabled-plugin")).toBe(true);
+      expect(loader.isPluginLoaded("disabled-plugin")).toBe(false);
     });
 
     it("returns error count for failed plugins", async () => {

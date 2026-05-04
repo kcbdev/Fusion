@@ -10,20 +10,16 @@ interface PluginSlotProps {
   projectId?: string;
   /** Optional plugin IDs to restrict rendering to a subset of matching entries */
   pluginIds?: string[];
+  /** Render fallback shell placeholders while dynamic slot component mounting is unavailable */
+  renderPlaceholder?: boolean;
 }
 
 /**
  * Renders plugin slot registrations for a host surface.
- *
- * Dynamic plugin component loading is not yet available, so this renders a
- * lightweight non-technical placeholder while preserving plugin slot boundaries.
- * Each rendered slot is wrapped in an ErrorBoundary to isolate failures from
- * the parent dashboard UI.
  */
-export function PluginSlot({ slotId, projectId, pluginIds }: PluginSlotProps): ReactNode {
+export function PluginSlot({ slotId, projectId, pluginIds, renderPlaceholder = true }: PluginSlotProps): ReactNode {
   const { getSlotsForId, loading, error } = usePluginUiSlots(projectId);
 
-  // Non-critical failure — no visible UI when loading, errored, or no matching slots
   if (loading || error || !slotId) {
     return null;
   }
@@ -32,7 +28,7 @@ export function PluginSlot({ slotId, projectId, pluginIds }: PluginSlotProps): R
     pluginIds && pluginIds.length > 0 ? pluginIds.includes(entry.pluginId) : true,
   );
 
-  if (matchingEntries.length === 0) {
+  if (matchingEntries.length === 0 || !renderPlaceholder) {
     return null;
   }
 

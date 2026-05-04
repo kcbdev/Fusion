@@ -21,6 +21,7 @@ const PROVIDER_ID = "droid-cli";
 let cliValidationPromise: Promise<void> | undefined;
 type DiscoveredModel = { id: string; name: string; reasoning: boolean; input: Array<"text" | "image">; cost: { input: number; output: number; cacheRead: number; cacheWrite: number }; contextWindow: number; maxTokens: number };
 let discoveredModelsPromise: Promise<DiscoveredModel[]> | undefined;
+type StreamSimpleHandler = NonNullable<Parameters<ExtensionAPI["registerProvider"]>[1]["streamSimple"]>;
 
 function runCliValidationOnce(): Promise<void> {
   if (cliValidationPromise) return cliValidationPromise;
@@ -112,7 +113,7 @@ export default function (pi: ExtensionAPI) {
         apiKey: "unused",
         api: "droid-cli",
         models,
-        streamSimple: (model, context, options) => {
+        streamSimple: ((model, context, options) => {
           const configPath = ensureMcpConfig(
             pi,
             (context as { tools?: ReadonlyArray<{ name: string; description: string; parameters: Record<string, unknown> }> }).tools,
@@ -121,8 +122,8 @@ export default function (pi: ExtensionAPI) {
             model,
             context as never,
             { ...(options ?? {}), mcpConfigPath: configPath } as never,
-          );
-        },
+          ) as unknown as ReturnType<StreamSimpleHandler>;
+        }) as StreamSimpleHandler,
       });
     } catch (err) {
       console.error("[droid-cli] Failed to register provider:", err);

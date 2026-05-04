@@ -197,6 +197,29 @@ describe("GET /plugins", () => {
     });
   });
 
+  it("includes the Droid plugin in installed plugin listings", async () => {
+    (pluginStore.listPlugins as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      {
+        ...FAKE_PLUGIN,
+        id: "fusion-plugin-droid-runtime",
+        name: "Droid Runtime Plugin",
+        version: "0.1.0",
+      },
+    ]);
+
+    const res = await GET(buildApp(), "/api/plugins");
+
+    expect(res.status).toBe(200);
+    expect(pluginStore.listPlugins).toHaveBeenCalledWith({});
+    expect(res.body).toEqual([
+      expect.objectContaining({
+        id: "fusion-plugin-droid-runtime",
+        name: "Droid Runtime Plugin",
+        version: "0.1.0",
+      }),
+    ]);
+  });
+
   it("filters plugins by enabled status", async () => {
     const res = await GET(buildApp(), "/api/plugins?enabled=true");
 

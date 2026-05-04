@@ -196,7 +196,7 @@ export function PostOnboardingRecommendations({
               );
             })}
           </ul>
-          <PluginSlot slotId="post-onboarding-recommendation" />
+          <PluginSlot slotId="post-onboarding-recommendation" renderPlaceholder={false} />
         </div>
       </div>
       <button

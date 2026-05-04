@@ -13,6 +13,14 @@ export default defineConfig({
       "@fusion/engine": resolve(__dirname, "../engine/src/index.ts"),
       "@fusion/plugin-sdk": resolve(__dirname, "../plugin-sdk/src/index.ts"),
       "@fusion/test-utils": resolve(__dirname, "../core/src/__test-utils__/workspace.ts"),
+      "@fusion-plugin-examples/droid-runtime/probe": resolve(
+        __dirname,
+        "../../plugins/fusion-plugin-droid-runtime/src/probe.ts",
+      ),
+      "@fusion-plugin-examples/droid-runtime": resolve(
+        __dirname,
+        "../../plugins/fusion-plugin-droid-runtime/src/index.ts",
+      ),
     },
   },
   test: {

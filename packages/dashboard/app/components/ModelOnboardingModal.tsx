@@ -2112,7 +2112,7 @@ export function ModelOnboardingModal({
                 </div>
               ) : (
                 <>
-                  <PluginSlot slotId="onboarding-provider-card" projectId={projectId} />
+                  <PluginSlot slotId="onboarding-provider-card" projectId={projectId} renderPlaceholder={false} />
 
                   <section className="onboarding-provider-section" data-testid="onboarding-quick-start-providers">
                     <h3 className="onboarding-section-title">Quick start providers</h3>

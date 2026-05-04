@@ -105,6 +105,14 @@ describe("CLI Vitest workspace resolution", () => {
           replacement: join(workspaceRoot, "packages", "dashboard", "src", "index.ts"),
         },
         {
+          find: String(/^@fusion-plugin-examples\/droid-runtime\/probe$/),
+          replacement: join(workspaceRoot, "plugins", "fusion-plugin-droid-runtime", "src", "probe.ts"),
+        },
+        {
+          find: String(/^@fusion-plugin-examples\/droid-runtime$/),
+          replacement: join(workspaceRoot, "plugins", "fusion-plugin-droid-runtime", "src", "index.ts"),
+        },
+        {
           find: String(/^@fusion\/test-utils$/),
           replacement: join(workspaceRoot, "packages", "core", "src", "__test-utils__", "workspace.ts"),
         },
@@ -112,7 +120,10 @@ describe("CLI Vitest workspace resolution", () => {
     );
 
     for (const entry of normalized) {
-      expect(entry.replacement).toContain(`${join("packages", "")}`);
+      expect(
+        entry.replacement.includes(`${join("packages", "")}`) ||
+          entry.replacement.includes(`${join("plugins", "")}`),
+      ).toBe(true);
       expect(entry.replacement).toContain(`${join("src", "")}`);
       expect(entry.replacement).not.toContain(`${join("dist", "")}`);
     }

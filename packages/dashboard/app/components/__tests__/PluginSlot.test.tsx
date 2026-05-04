@@ -76,7 +76,6 @@ describe("PluginSlot", () => {
     const shells = container.querySelectorAll("[data-plugin-slot]");
     expect(shells).toHaveLength(2);
 
-    // Verify both shells have correct attributes
     expect(shells[0]).toHaveAttribute("data-plugin-id", "plugin-x");
     expect(shells[0]).toHaveAttribute("data-slot-id", "board-column-footer");
     expect(shells[1]).toHaveAttribute("data-plugin-id", "plugin-y");
@@ -118,6 +117,22 @@ describe("PluginSlot", () => {
     render(<PluginSlot slotId="settings-section" projectId="proj-1" />);
 
     expect(vi.mocked(usePluginUiSlots)).toHaveBeenCalledWith("proj-1");
+  });
+
+  it("suppresses placeholder rendering when renderPlaceholder is false", () => {
+    const entry = createSlotEntry("settings-provider-card", "plugin-droid");
+    vi.mocked(usePluginUiSlots).mockReturnValue({
+      slots: [entry],
+      getSlotsForId: vi.fn(() => [entry]),
+      loading: false,
+      error: null,
+    });
+
+    const { container } = render(
+      <PluginSlot slotId="settings-provider-card" renderPlaceholder={false} />,
+    );
+
+    expect(container.firstChild).toBeNull();
   });
 
   it("returns null for empty string slotId", () => {

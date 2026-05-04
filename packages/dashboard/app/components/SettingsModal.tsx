@@ -5063,8 +5063,8 @@ export function SettingsModal({
               </div>
             ) : (
               <div className="auth-panel-body">
-              <PluginSlot slotId="settings-provider-card" projectId={projectId} />
-              <PluginSlot slotId="settings-integration-card" projectId={projectId} />
+              <PluginSlot slotId="settings-provider-card" projectId={projectId} renderPlaceholder={false} />
+              <PluginSlot slotId="settings-integration-card" projectId={projectId} renderPlaceholder={false} />
               {!showAuthenticatedGroup && (
                 <div className="auth-section-hint">
                   Sign in to at least one provider to get started with AI models.

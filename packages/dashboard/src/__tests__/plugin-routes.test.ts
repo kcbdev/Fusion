@@ -92,6 +92,7 @@ function createMockPluginLoader(overrides: Partial<PluginLoader> = {}): PluginLo
     getPluginTools: vi.fn().mockReturnValue([]),
     getPluginRoutes: vi.fn().mockReturnValue([]),
     getPluginUiSlots: vi.fn().mockReturnValue([]),
+    getPluginRuntimes: vi.fn().mockReturnValue([]),
     getPluginDashboardViews: vi.fn().mockReturnValue([]),
     loadAllPlugins: vi.fn().mockResolvedValue({ loaded: 0, errors: 0 }),
     stopAllPlugins: vi.fn().mockResolvedValue(undefined),
@@ -845,5 +846,112 @@ describe("GET /api/plugins/ui-slots", () => {
     // Should return 200, not 404 (which would happen if :id = "ui-slots" matched)
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
+  });
+
+  it("surfaces Droid plugin slot registrations through standard loader aggregation", async () => {
+    const droidSlots = [
+      {
+        pluginId: "fusion-plugin-droid-runtime",
+        slot: {
+          slotId: "settings-provider-card",
+          label: "Droid CLI Provider",
+          componentPath: "./components/settings-provider-card.js",
+          order: 5,
+        },
+      },
+      {
+        pluginId: "fusion-plugin-droid-runtime",
+        slot: {
+          slotId: "onboarding-provider-card",
+          label: "Droid CLI Provider",
+          componentPath: "./components/onboarding-provider-card.js",
+          placement: "after-default",
+        },
+      },
+    ];
+    (pluginLoader.getPluginUiSlots as ReturnType<typeof vi.fn>).mockReturnValue(droidSlots);
+
+    const res = await performGet(buildApp(), "/api/plugins/ui-slots");
+
+    expect(res.status).toBe(200);
+    expect(pluginLoader.getPluginUiSlots).toHaveBeenCalledTimes(1);
+    expect(res.body).toEqual([
+      {
+        pluginId: "fusion-plugin-droid-runtime",
+        slot: {
+          slotId: "settings-provider-card",
+          surface: "settings-provider-card",
+          label: "Droid CLI Provider",
+          componentPath: "./components/settings-provider-card.js",
+          order: 5,
+        },
+      },
+      {
+        pluginId: "fusion-plugin-droid-runtime",
+        slot: {
+          slotId: "onboarding-provider-card",
+          surface: "onboarding-provider-card",
+          label: "Droid CLI Provider",
+          componentPath: "./components/onboarding-provider-card.js",
+          placement: "after-default",
+          order: null,
+        },
+      },
+    ]);
+  });
+});
+
+describe("GET /api/plugins/runtimes", () => {
+  let pluginStore: PluginStore;
+  let pluginLoader: PluginLoader;
+  let store: TaskStore;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    pluginStore = createMockPluginStore();
+    pluginLoader = createMockPluginLoader();
+    store = createMockTaskStore({
+      getPluginStore: vi.fn().mockReturnValue(pluginStore),
+    });
+  });
+
+  function buildApp() {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store, { pluginStore, pluginLoader }));
+    return app;
+  }
+
+  it("includes Droid runtime metadata from plugin loader aggregation", async () => {
+    (pluginLoader.getPluginRuntimes as ReturnType<typeof vi.fn>).mockReturnValue([
+      {
+        pluginId: "fusion-plugin-droid-runtime",
+        runtime: {
+          metadata: {
+            runtimeId: "droid",
+            name: "Droid Runtime",
+            description: "Drives the Droid CLI for Fusion agents",
+            version: "0.1.0",
+          },
+          factory: vi.fn(),
+        },
+      },
+    ]);
+
+    const res = await performGet(buildApp(), "/api/plugins/runtimes");
+
+    expect(res.status).toBe(200);
+    expect(pluginLoader.getPluginRuntimes).toHaveBeenCalledTimes(1);
+    expect(res.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          pluginId: "fusion-plugin-droid-runtime",
+          runtimeId: "droid",
+          name: "Droid Runtime",
+          description: "Drives the Droid CLI for Fusion agents",
+          version: "0.1.0",
+        }),
+      ]),
+    );
   });
 });
