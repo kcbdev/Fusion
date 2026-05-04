@@ -1028,7 +1028,11 @@ describe("MissionManager", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Mission event 50")).toBeDefined();
-      expect(screen.getByText("50 of 65")).toBeDefined();
+      expect(
+        screen.getByText("50 of 65", {
+          selector: ".mission-detail__activity-count",
+        }),
+      ).toBeDefined();
       expect(screen.getByTestId("mission-activity-load-more")).toBeDefined();
     });
 
@@ -1036,7 +1040,9 @@ describe("MissionManager", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText((_, element) => element?.textContent?.includes("65 of 65") ?? false),
+        screen.getByText("65 of 65", {
+          selector: ".mission-detail__activity-count",
+        }),
       ).toBeDefined();
       expect(screen.queryByTestId("mission-activity-load-more")).toBeNull();
     });

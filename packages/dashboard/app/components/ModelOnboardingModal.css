@@ -1121,7 +1121,7 @@
 }
 
 .model-onboarding-complete .success-icon {
-  color: var(--success, #22c55e);
+  color: var(--color-success);
 }
 
 .model-onboarding-complete p {
@@ -1191,11 +1191,11 @@
   }
 
   .model-onboarding-header {
-    padding: 14px 14px 10px;
+    padding: var(--space-md) var(--space-md) calc(var(--space-sm) + var(--space-xs) / 2);
   }
 
   .model-onboarding-steps {
-    padding: 12px 14px;
+    padding: var(--space-md);
   }
 
   .model-onboarding-step-connector {
@@ -1204,7 +1204,7 @@
   }
 
   .model-onboarding-content {
-    padding: 14px;
+    padding: var(--space-md);
   }
 
   .onboarding-provider-row {
@@ -1270,7 +1270,7 @@
      name + description + status fit in ~3 short lines. */
   .onboarding-provider-card__body {
     flex: 1 1 0;
-    gap: 2px;
+    gap: calc(var(--space-xs) / 2);
   }
 
   .onboarding-provider-card__name {
@@ -1339,12 +1339,12 @@
     flex: 1 1 auto;
     width: auto;
     min-width: 0;
-    min-height: 32px;
+    min-height: calc(var(--space-md) * 3);
   }
 
   .onboarding-apikey-input-row .btn {
     flex: 0 0 auto;
-    min-height: 32px;
+    min-height: calc(var(--space-md) * 3);
     /* Compact label so "Save" doesn't bloat the row. */
     padding-inline: var(--space-md);
   }
@@ -1374,7 +1374,7 @@
   }
 
   .model-onboarding-footer {
-    padding: 12px 14px;
+    padding: var(--space-md);
     flex-wrap: wrap;
     gap: var(--space-sm);
   }
@@ -1414,12 +1414,12 @@
   }
 
   .onboarding-cta-card .cta-icon {
-    width: 40px;
-    height: 40px;
+    width: calc(var(--space-lg) * 2 + var(--space-sm));
+    height: calc(var(--space-lg) * 2 + var(--space-sm));
   }
 
   .onboarding-cta-card .cta-content strong {
-    font-size: 14px;
+    font-size: calc(var(--space-sm) + var(--space-xs) + var(--space-xs) / 2);
   }
 
   .onboarding-cta-card .cta-content span {

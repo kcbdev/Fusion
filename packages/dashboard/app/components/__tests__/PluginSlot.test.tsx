@@ -5,6 +5,9 @@ import type { PluginUiSlotEntry } from "../../api";
 import { usePluginUiSlots } from "../../hooks/usePluginUiSlots";
 
 vi.mock("../../hooks/usePluginUiSlots");
+vi.mock("../DroidCliProviderCard", () => ({
+  DroidCliProviderCard: () => <div data-testid="droid-cli-provider-card" />,
+}));
 
 function createSlotEntry(slotId: string, pluginId = "test-plugin"): PluginUiSlotEntry {
   return {
@@ -119,7 +122,7 @@ describe("PluginSlot", () => {
     expect(vi.mocked(usePluginUiSlots)).toHaveBeenCalledWith("proj-1");
   });
 
-  it("suppresses placeholder rendering when renderPlaceholder is false", () => {
+  it("suppresses placeholder rendering when renderPlaceholder is false for unknown slots", () => {
     const entry = createSlotEntry("settings-provider-card", "plugin-droid");
     vi.mocked(usePluginUiSlots).mockReturnValue({
       slots: [entry],
@@ -133,6 +136,22 @@ describe("PluginSlot", () => {
     );
 
     expect(container.firstChild).toBeNull();
+  });
+
+  it("renders known droid settings slot even when placeholders are disabled", () => {
+    const entry = createSlotEntry("settings-provider-card", "fusion-plugin-droid-runtime");
+    vi.mocked(usePluginUiSlots).mockReturnValue({
+      slots: [entry],
+      getSlotsForId: vi.fn(() => [entry]),
+      loading: false,
+      error: null,
+    });
+
+    const { container } = render(
+      <PluginSlot slotId="settings-provider-card" renderPlaceholder={false} />,
+    );
+
+    expect(container.querySelector('[data-testid="droid-cli-provider-card"]')).not.toBeNull();
   });
 
   it("returns null for empty string slotId", () => {

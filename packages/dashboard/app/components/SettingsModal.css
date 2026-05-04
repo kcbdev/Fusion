@@ -15,16 +15,15 @@
    their differing icon sizes (provider icon 16px vs. HelpCircle 13px). */
 .settings-header-actions > .settings-github-star-btn,
 .settings-header-actions > .btn {
-  height: 26px;
+  height: calc(var(--space-md) * 2 + var(--space-xs) / 2);
   box-sizing: border-box;
 }
 
 @media (max-width: 768px) {
-  /* Keep settings header actions compact; override global mobile
-     `.btn-icon { min-height/min-width: 36px; }` inflation. */
+  /* Preserve mobile touch targets while keeping visuals compact via icon sizing/padding. */
   .settings-header-actions > .btn-icon {
-    min-height: 26px;
-    min-width: 26px;
+    min-height: calc(var(--space-md) * 3);
+    min-width: calc(var(--space-md) * 3);
   }
 }
 
@@ -59,14 +58,14 @@
 .settings-github-star-btn__action {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
+  gap: var(--space-xs);
+  padding: var(--space-xs) calc(var(--space-sm) + var(--space-xs) / 2);
 }
 
 .settings-github-star-btn__count {
   display: inline-flex;
   align-items: center;
-  padding: 4px 9px;
+  padding: var(--space-xs) calc(var(--space-sm) + var(--space-xs) / 4);
   border-left: var(--btn-border-width) solid var(--border);
   background: color-mix(in srgb, var(--surface) 60%, var(--card));
   color: var(--text-muted);
@@ -91,6 +90,7 @@
    overlay's default top padding so the modal actually fills the viewport,
    and disable resize (touchscreen users can't drag the grip anyway). */
 @media (max-width: 768px) {
+  .modal-overlay.settings-modal-overlay,
   .modal-overlay:has(.settings-modal) {
     padding-top: 0;
     align-items: stretch;

@@ -19,6 +19,15 @@ describe("droid runtime plugin index", () => {
     ]));
   });
 
+  it("locks droid settings slot registration shape", () => {
+    const settingsSlot = plugin.uiSlots?.find((slot) => slot.slotId === "settings-provider-card");
+    expect(settingsSlot).toMatchObject({
+      slotId: "settings-provider-card",
+      label: "Droid CLI Provider",
+      componentPath: "./components/settings-provider-card.js",
+    });
+  });
+
   it("has a valid manifest", () => {
     expect(() => validatePluginManifest(plugin.manifest)).not.toThrow();
   });

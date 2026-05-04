@@ -49,6 +49,9 @@ const mockGenerateShortLivedRemoteToken = vi.fn();
 const mockFetchRemoteQr = vi.fn();
 const mockFetchRemoteUrl = vi.fn();
 const mockTriggerMemoryDreams = vi.fn();
+const mockFetchPluginUiSlots = vi.fn();
+const mockFetchDroidCliStatus = vi.fn();
+const mockSetDroidCliEnabled = vi.fn();
 const mockUseWorkspaceFileBrowser = vi.fn();
 
 vi.mock("../../api", async (importOriginal) => {
@@ -98,6 +101,9 @@ vi.mock("../../api", async (importOriginal) => {
     fetchRemoteQr: (...args: unknown[]) => mockFetchRemoteQr(...args),
     fetchRemoteUrl: (...args: unknown[]) => mockFetchRemoteUrl(...args),
     triggerMemoryDreams: (...args: unknown[]) => mockTriggerMemoryDreams(...args),
+    fetchPluginUiSlots: (...args: unknown[]) => mockFetchPluginUiSlots(...args),
+    fetchDroidCliStatus: (...args: unknown[]) => mockFetchDroidCliStatus(...args),
+    setDroidCliEnabled: (...args: unknown[]) => mockSetDroidCliEnabled(...args),
   });
 });
 
@@ -136,9 +142,6 @@ vi.mock("../PiExtensionsManager", () => ({
   PiExtensionsManager: () => <div data-testid="pi-extensions-manager">Pi extensions content</div>,
 }));
 
-vi.mock("../PluginSlot", () => ({
-  PluginSlot: () => <div data-testid="plugin-slot">Plugin slot content</div>,
-}));
 
 vi.mock("../../hooks/useWorkspaceFileBrowser", () => ({
   useWorkspaceFileBrowser: (...args: unknown[]) => mockUseWorkspaceFileBrowser(...args),
@@ -361,6 +364,14 @@ describe("SettingsModal", () => {
     mockFetchRemoteQr.mockResolvedValue({ url: "https://remote.example.com", tokenType: "persistent", expiresAt: null, format: "image/svg", data: "<svg></svg>" });
     mockFetchRemoteUrl.mockResolvedValue({ url: "https://remote.example.com", tokenType: "persistent", expiresAt: null });
     mockTriggerMemoryDreams.mockResolvedValue({ success: true, summary: "done" });
+    mockFetchPluginUiSlots.mockResolvedValue([]);
+    mockFetchDroidCliStatus.mockResolvedValue({
+      binary: { available: true, version: "1.2.3", binaryPath: "/usr/local/bin/droid", probeDurationMs: 9 },
+      enabled: false,
+      extension: { status: "ok" },
+      ready: false,
+    });
+    mockSetDroidCliEnabled.mockResolvedValue({ enabled: true, restartRequired: true });
     mockUseWorkspaceFileBrowser.mockReturnValue({
       entries: [],
       currentPath: ".",
@@ -1056,6 +1067,78 @@ describe("SettingsModal", () => {
     });
   });
 
+  describe("Droid plugin Settings integration", () => {
+    it.each([
+      {
+        name: "unavailable/not enabled",
+        status: {
+          binary: { available: false, reason: "`droid` not found on PATH", probeDurationMs: 9 },
+          enabled: false,
+          extension: { status: "ok" },
+          ready: false,
+        },
+        expectedText: "not found on PATH",
+      },
+      {
+        name: "enabled but not ready",
+        status: {
+          binary: { available: true, version: "1.2.3", binaryPath: "/usr/local/bin/droid", probeDurationMs: 9 },
+          enabled: true,
+          extension: { status: "ok" },
+          ready: false,
+        },
+        expectedText: "Enabled. Validating…",
+      },
+      {
+        name: "connected and ready",
+        status: {
+          binary: { available: true, version: "1.2.3", binaryPath: "/usr/local/bin/droid", probeDurationMs: 9 },
+          enabled: true,
+          extension: { status: "ok" },
+          ready: true,
+        },
+        expectedText: "✓ Connected — 1.2.3",
+      },
+    ])("renders plugin-driven droid card state: $name", async ({ status, expectedText }) => {
+      mockFetchAuthStatus.mockResolvedValueOnce({
+        providers: [{ id: "droid-cli", name: "Factory AI (via Droid CLI)", authenticated: false, type: "cli" }],
+      });
+      mockFetchPluginUiSlots.mockResolvedValueOnce([
+        {
+          pluginId: "fusion-plugin-droid-runtime",
+          slot: {
+            slotId: "settings-provider-card",
+            label: "Droid CLI Provider",
+            componentPath: "./components/settings-provider-card.js",
+          },
+        },
+      ]);
+      mockFetchDroidCliStatus.mockResolvedValueOnce(status);
+
+      renderModal();
+      await waitForSettingsModalReady();
+
+      expect(screen.getByRole("heading", { name: "Authentication" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+      expect(await screen.findByTestId("droid-cli-provider-card")).toBeInTheDocument();
+      expect(screen.getAllByTestId("droid-cli-provider-card")).toHaveLength(1);
+      expect(screen.getByText(new RegExp(expectedText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))).toBeInTheDocument();
+    });
+
+    it("renders legacy droid auth card only when plugin slot is not present", async () => {
+      mockFetchAuthStatus.mockResolvedValueOnce({
+        providers: [{ id: "droid-cli", name: "Factory AI (via Droid CLI)", authenticated: false, type: "cli" }],
+      });
+      mockFetchPluginUiSlots.mockResolvedValueOnce([]);
+
+      renderModal();
+      await waitForSettingsModalReady();
+
+      expect(await screen.findByTestId("droid-cli-provider-card")).toBeInTheDocument();
+      expect(screen.getAllByTestId("droid-cli-provider-card")).toHaveLength(1);
+    });
+  });
+
   describe("Plugins section navigation", () => {
     it("does not render a standalone Pi Extensions sidebar item", async () => {
       renderModal();
@@ -1090,7 +1173,6 @@ describe("SettingsModal", () => {
       await userEvent.click(await screen.findByRole("button", { name: /Plugins$/ }));
 
       expect(await screen.findByTestId("plugin-manager")).toBeInTheDocument();
-      expect(screen.getByTestId("plugin-slot")).toBeInTheDocument();
       expect(screen.queryByTestId("pi-extensions-manager")).not.toBeInTheDocument();
 
       await userEvent.click(screen.getByRole("tab", { name: "Pi Extensions" }));
@@ -1099,7 +1181,6 @@ describe("SettingsModal", () => {
         expect(screen.getByTestId("pi-extensions-manager")).toBeInTheDocument();
       });
       expect(screen.queryByTestId("plugin-manager")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("plugin-slot")).not.toBeInTheDocument();
       expect(screen.getByRole("tabpanel", { name: "Pi Extensions" })).toBeVisible();
       expect(document.getElementById("plugins-panel-fusion-plugins")).toHaveAttribute("hidden");
     });

@@ -43,6 +43,7 @@ import { useConfirm } from "../hooks/useConfirm";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { useNodes } from "../hooks/useNodes";
+import { usePluginUiSlots } from "../hooks/usePluginUiSlots";
 import { useViewportMode } from "../hooks/useViewportMode";
 import { NodeHealthDot } from "./NodeHealthDot";
 import { filterVisibleOnboardingAndSettingsProviders } from "./providerVisibility";
@@ -437,6 +438,7 @@ export function SettingsModal({
   } = useWorkspaceFileBrowser("project", overlapPathPickerIndex !== null, projectId);
 
   const { nodes } = useNodes();
+  const { getSlotsForId } = usePluginUiSlots(projectId);
   const experimentalFeatures = form.experimentalFeatures ?? {};
   const remoteAccessEnabled = isExperimentalFeatureEnabled(experimentalFeatures, "remoteAccess");
   const researchViewEnabled = isExperimentalFeatureEnabled(experimentalFeatures, "researchView");
@@ -5025,6 +5027,9 @@ export function SettingsModal({
         // auth state (Authenticated when signed in, Available otherwise).
         const claudeCliProvider = cliAuthProviders.find((p) => p.id === "claude-cli");
         const droidCliProvider = cliAuthProviders.find((p) => p.id === "droid-cli");
+        const hasDroidPluginSlot = getSlotsForId("settings-provider-card").some(
+          (entry) => entry.pluginId === "fusion-plugin-droid-runtime",
+        );
         const claudeCliCard = claudeCliProvider ? (
           <ClaudeCliProviderCard
             compact
@@ -5034,7 +5039,7 @@ export function SettingsModal({
             }}
           />
         ) : null;
-        const droidCliCard = droidCliProvider ? (
+        const droidCliCard = droidCliProvider && !hasDroidPluginSlot ? (
           <DroidCliProviderCard
             compact
             authenticated={droidCliProvider.authenticated}
@@ -5046,12 +5051,11 @@ export function SettingsModal({
         const showAuthenticatedGroup =
           authenticatedProviders.length > 0
           || (claudeCliProvider?.authenticated ?? false)
-          || (droidCliProvider?.authenticated ?? false);
+          || ((droidCliProvider?.authenticated ?? false) && !hasDroidPluginSlot);
         const showAvailableGroup =
           unauthenticatedProviders.length > 0
           || (claudeCliProvider && !claudeCliProvider.authenticated)
-          || (droidCliProvider && !droidCliProvider.authenticated);
-
+          || (droidCliProvider && !droidCliProvider.authenticated && !hasDroidPluginSlot);
         return (
           <>
             <h4 className="settings-section-heading">Authentication</h4>
@@ -5314,7 +5318,7 @@ export function SettingsModal({
   };
 
   return (
-    <div className="modal-overlay open" {...overlayDismissProps} role="dialog" aria-modal="true">
+    <div className="modal-overlay open settings-modal-overlay" {...overlayDismissProps} role="dialog" aria-modal="true">
       <div className="modal modal-lg settings-modal" ref={modalRef} style={keyboardStyle}>
         <div className="modal-header">
           <div className="settings-modal-heading">

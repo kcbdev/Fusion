@@ -448,6 +448,8 @@ Plugins declare `uiSlots` in their `FusionPlugin` definition. The dashboard disc
 | `task-detail-tab` | Task detail modal | Tab added to the task detail view | Available |
 | `header-action` | Dashboard header | Action button in the header toolbar | Available |
 | `settings-section` | Settings modal | Section added to the settings panel | Available |
+| `settings-provider-card` | Settings → Authentication | Provider card contribution in Authentication section | Available |
+| `settings-integration-card` | Settings → Authentication | Integration/help card contribution in Authentication section | Available |
 | `task-card-badge` | Task card on the board | Small badge displayed on task cards (e.g., CI status indicator) | Planned |
 | `board-column-footer` | Board column | Footer area below the last card in a column | Planned |
 

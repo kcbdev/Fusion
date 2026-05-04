@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { DroidCliProviderCard } from "./DroidCliProviderCard";
 import { usePluginUiSlots } from "../hooks/usePluginUiSlots";
 import "./PluginSlot.css";
 
@@ -12,6 +13,14 @@ interface PluginSlotProps {
   pluginIds?: string[];
   /** Render fallback shell placeholders while dynamic slot component mounting is unavailable */
   renderPlaceholder?: boolean;
+}
+
+function renderKnownPluginSlot(slotId: string, pluginId: string): ReactNode | null {
+  if (pluginId === "fusion-plugin-droid-runtime" && slotId === "settings-provider-card") {
+    return <DroidCliProviderCard compact authenticated={false} />;
+  }
+
+  return null;
 }
 
 /**
@@ -28,26 +37,37 @@ export function PluginSlot({ slotId, projectId, pluginIds, renderPlaceholder = t
     pluginIds && pluginIds.length > 0 ? pluginIds.includes(entry.pluginId) : true,
   );
 
-  if (matchingEntries.length === 0 || !renderPlaceholder) {
+  if (matchingEntries.length === 0) {
     return null;
   }
 
   return (
     <ErrorBoundary level="page">
       <>
-        {matchingEntries.map((entry, index) => (
-          <section
-            key={`${entry.pluginId}-${entry.slot.slotId}-${index}`}
-            className="plugin-slot-shell"
-            data-plugin-slot
-            data-slot-id={entry.slot.slotId}
-            data-plugin-id={entry.pluginId}
-            aria-label={entry.slot.label}
-          >
-            <p className="plugin-slot-shell__title">{entry.slot.label}</p>
-            <p className="plugin-slot-shell__message">Extension content available.</p>
-          </section>
-        ))}
+        {matchingEntries.map((entry, index) => {
+          const knownSlot = renderKnownPluginSlot(entry.slot.slotId, entry.pluginId);
+          if (knownSlot) {
+            return <div key={`${entry.pluginId}-${entry.slot.slotId}-${index}`}>{knownSlot}</div>;
+          }
+
+          if (!renderPlaceholder) {
+            return null;
+          }
+
+          return (
+            <section
+              key={`${entry.pluginId}-${entry.slot.slotId}-${index}`}
+              className="plugin-slot-shell"
+              data-plugin-slot
+              data-slot-id={entry.slot.slotId}
+              data-plugin-id={entry.pluginId}
+              aria-label={entry.slot.label}
+            >
+              <p className="plugin-slot-shell__title">{entry.slot.label}</p>
+              <p className="plugin-slot-shell__message">Extension content available.</p>
+            </section>
+          );
+        })}
       </>
     </ErrorBoundary>
   );
