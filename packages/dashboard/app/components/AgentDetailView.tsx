@@ -2037,7 +2037,7 @@ function MemoryTab({
           <div className="config-field">
             <label htmlFor="agent-memory-file-select">Memory Files</label>
             <span className="config-hint config-hint--block">
-              Full OpenClaw memory files at <code>.fusion/agent-memory/{agent.id}/</code> (MEMORY.md, DREAMS.md, and daily notes).
+              Full OpenClaw memory files at <code>agent/{agent.name || agent.id}/memory/</code> (MEMORY.md, DREAMS.md, and daily notes).
             </span>
 
             <select
