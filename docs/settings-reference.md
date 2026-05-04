@@ -548,7 +548,7 @@ fn plugin install ./plugins/fusion-plugin-hermes-runtime
 fn plugin install ./plugins/fusion-plugin-openclaw-runtime
 ```
 
-> 💡 In the dashboard, go to **Settings → Plugins → Fusion Plugins**. The **Bundled Runtime Plugins** section surfaces Hermes, Paperclip, and OpenClaw directly from shipped manifests, shows install status, and provides one-click install actions for runtimes that are not yet installed.
+> 💡 In the dashboard, go to **Settings → Plugins → Fusion Plugins**. The **Bundled Plugins** section surfaces Agent Browser, Hermes, Paperclip, OpenClaw, and Droid directly from shipped manifests, shows install status, and provides one-click install actions for plugins that are not yet installed.
 
 2. Create agents with the appropriate `runtimeConfig`:
 
