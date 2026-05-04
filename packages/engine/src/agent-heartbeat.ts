@@ -1344,7 +1344,7 @@ export class HeartbeatMonitor {
           },
         };
 
-        const { createResolvedAgentSession, extractRuntimeHint } = await import("./agent-session-helpers.js");
+        const { createResolvedAgentSession, extractRuntimeHint, extractRuntimeModel } = await import("./agent-session-helpers.js");
         const { buildSessionSkillContextSync } = await import("./session-skill-context.js");
 
         // Build tools with task creation tracking and run context for mutation correlation
@@ -1449,8 +1449,10 @@ export class HeartbeatMonitor {
           systemPrompt,
           tools: "readonly",
           customTools: heartbeatTools,
-          defaultProvider: agent.runtimeConfig?.modelProvider as string | undefined,
-          defaultModelId: agent.runtimeConfig?.modelId as string | undefined,
+          ...(() => {
+            const { provider, modelId } = extractRuntimeModel(agent.runtimeConfig);
+            return { defaultProvider: provider, defaultModelId: modelId };
+          })(),
           onText: (delta) => {
             outputLength += delta.length;
             appendStdoutExcerpt(delta);

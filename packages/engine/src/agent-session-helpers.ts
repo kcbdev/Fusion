@@ -71,6 +71,37 @@ export function extractRuntimeHint(
 }
 
 /**
+ * Extract the model provider and id from an agent's runtimeConfig.
+ *
+ * The dashboard's NewAgentDialog stores the agent's selected model as a
+ * single combined string `runtimeConfig.model = "provider/modelId"` (see
+ * register-chat-routes.ts which parses the same shape). Older code paths
+ * also looked at separate `modelProvider` / `modelId` fields. This helper
+ * accepts either shape, preferring the combined `model` string.
+ */
+export function extractRuntimeModel(
+  runtimeConfig: Record<string, unknown> | undefined,
+): { provider: string | undefined; modelId: string | undefined } {
+  const combined = typeof runtimeConfig?.model === "string" ? runtimeConfig.model.trim() : "";
+  if (combined) {
+    const slashIdx = combined.indexOf("/");
+    if (slashIdx > 0 && slashIdx < combined.length - 1) {
+      return {
+        provider: combined.slice(0, slashIdx).trim() || undefined,
+        modelId: combined.slice(slashIdx + 1).trim() || undefined,
+      };
+    }
+  }
+
+  const provider = typeof runtimeConfig?.modelProvider === "string" ? runtimeConfig.modelProvider.trim() : "";
+  const modelId = typeof runtimeConfig?.modelId === "string" ? runtimeConfig.modelId.trim() : "";
+  return {
+    provider: provider || undefined,
+    modelId: modelId || undefined,
+  };
+}
+
+/**
  * Create an agent session using runtime resolution.
  *
  * This function:
