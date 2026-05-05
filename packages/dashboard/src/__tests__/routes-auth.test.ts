@@ -574,15 +574,15 @@ describe("GET /auth/status", () => {
 
   it("includes oauth and model-registry-derived API key providers in one response", async () => {
     (authStorage.getOAuthProviders as ReturnType<typeof vi.fn>).mockReturnValue([
-      { id: "openai-codex", name: "OpenAI Codex" },
       { id: "github-copilot", name: "GitHub Copilot" },
+      { id: "openai-codex", name: "OpenAI Codex" },
     ]);
     (authStorage.getApiKeyProviders as ReturnType<typeof vi.fn>).mockReturnValue([
       { id: "openrouter", name: "OpenRouter" },
       { id: "kimi-coding", name: "Kimi" },
       { id: "acme-extension", name: "Acme Extension" },
     ]);
-    (authStorage.hasAuth as ReturnType<typeof vi.fn>).mockImplementation((provider: string) => provider === "openai-codex");
+    (authStorage.hasAuth as ReturnType<typeof vi.fn>).mockImplementation((provider: string) => provider === "github-copilot");
     (authStorage.hasApiKey as ReturnType<typeof vi.fn>).mockImplementation((provider: string) => provider === "acme-extension");
 
     const res = await GET(buildApp(), "/api/auth/status");
@@ -590,8 +590,8 @@ describe("GET /auth/status", () => {
     expect(res.status).toBe(200);
     const providers = res.body.providers.filter((p: any) => p.id !== "claude-cli" && p.id !== "droid-cli" && p.id !== "llama-cpp");
     expect(providers).toEqual([
-      { id: "openai-codex", name: "OpenAI Codex", authenticated: true, type: "oauth", loginInProgress: false },
-      { id: "github-copilot", name: "GitHub Copilot", authenticated: false, type: "oauth", loginInProgress: false },
+      { id: "github-copilot", name: "GitHub Copilot", authenticated: true, type: "oauth", loginInProgress: false },
+      { id: "openai-codex", name: "OpenAI Codex", authenticated: false, type: "oauth", loginInProgress: false },
       { id: "openrouter", name: "OpenRouter", authenticated: false, type: "api_key" },
       { id: "kimi-coding", name: "Kimi", authenticated: false, type: "api_key" },
       { id: "acme-extension", name: "Acme Extension", authenticated: true, type: "api_key" },
