@@ -6043,7 +6043,7 @@ ${stepsSection}`;
       phase: "pre-merge",
       prompt: entry.template.prompt,
       toolMode: entry.template.toolMode,
-      enabled: true,
+      enabled: entry.template.enabled ?? true,
       createdAt: now,
       updatedAt: now,
     };
