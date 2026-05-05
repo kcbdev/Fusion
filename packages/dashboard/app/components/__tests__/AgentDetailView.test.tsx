@@ -302,8 +302,12 @@ describe("AgentDetailView", () => {
     await userEvent.click(screen.getByLabelText("Back to agents"));
     expect(onClose).toHaveBeenCalledTimes(1);
 
-    const identityContainer = document.querySelector(".agent-detail-identity");
+    const header = document.querySelector(".agent-detail-header");
+    const identityContainer = header?.querySelector(".agent-detail-identity");
+    const actionsContainer = header?.querySelector(".agent-detail-header-actions");
     expect(identityContainer?.querySelector(".agent-detail-inline-back")).toBeTruthy();
+    expect(actionsContainer?.querySelector('[aria-label="Refresh"]')).toBeTruthy();
+    expect(actionsContainer?.querySelector(".agent-detail-mobile-icon-control")).toBeTruthy();
   });
 
   it("keeps modal mode as dialog with close button", async () => {
@@ -902,7 +906,7 @@ describe("AgentDetailView", () => {
     });
   });
 
-  it("keeps desktop header actions on one row and mobile uses explicit two-row header contracts", () => {
+  it("keeps mobile inline header controls on the same row as identity", () => {
     const stylesContent = loadAllAppCss();
 
     expect(stylesContent).toContain(".agent-detail-header-actions {");
@@ -911,11 +915,12 @@ describe("AgentDetailView", () => {
 
     expect(stylesContent).toContain("@media (max-width: 768px)");
     expect(stylesContent).toContain(".agent-detail-header {");
-    expect(stylesContent).toContain("grid-template-rows: auto auto;");
+    expect(stylesContent).toContain("grid-template-columns: minmax(0, 1fr) auto;");
     expect(stylesContent).toContain(".agent-detail-identity {");
-    expect(stylesContent).toContain("grid-row: 1;");
+    expect(stylesContent).toContain("grid-column: 1;");
     expect(stylesContent).toContain(".agent-detail-header-actions {");
-    expect(stylesContent).toContain("grid-row: 2;");
+    expect(stylesContent).toContain("grid-column: 2;");
+    expect(stylesContent).toContain(".agent-detail-mobile-icon-control .agent-detail-control-label {");
   });
 
   it("shows statistics section on dashboard", async () => {

@@ -203,6 +203,19 @@ describe("Agent CSS classes", () => {
   });
 
   // Verify AgentDetailView classes
+  it("encodes compact mobile agent detail header layout contracts", () => {
+    const css = fs.readFileSync(path.join(__dirname, "../components/AgentDetailView.css"), "utf-8");
+    const mobileStart = css.indexOf("@media (max-width: 768px)");
+    const mobileCss = mobileStart >= 0 ? css.slice(mobileStart) : "";
+
+    expect(mobileCss).toContain(".agent-detail-header {");
+    expect(mobileCss).toContain("grid-template-columns: minmax(0, 1fr) auto;");
+    expect(mobileCss).not.toContain("grid-template-rows: auto auto;");
+    expect(mobileCss).toContain(".agent-detail-header-actions {");
+    expect(mobileCss).toContain("grid-column: 2;");
+    expect(mobileCss).toContain(".agent-detail-mobile-icon-control .agent-detail-control-label {");
+  });
+
   it("should define AgentDetailView CSS classes", () => {
     expect(hasClass(".agent-detail-overlay")).toBe(true);
     expect(hasClass(".agent-detail-modal")).toBe(true);

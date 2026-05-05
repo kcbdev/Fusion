@@ -545,22 +545,22 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
                 </>
               )}
               {agent.state === "active" && (
-                <button className="btn btn--compact" onClick={() => void handleStateChange("paused")} disabled={isTransitioning}>
+                <button className="btn btn--compact agent-detail-mobile-icon-control" onClick={() => void handleStateChange("paused")} disabled={isTransitioning} aria-label="Pause">
                   <Pause size={14} />
-                  Pause
+                  <span className="agent-detail-control-label">Pause</span>
                 </button>
               )}
               {agent.state === "paused" && (
-                <button className="btn btn-task-create btn--compact" onClick={() => void handleStateChange("active")} disabled={isTransitioning}>
+                <button className="btn btn-task-create btn--compact agent-detail-mobile-icon-control" onClick={() => void handleStateChange("active")} disabled={isTransitioning} aria-label="Resume">
                   <Play size={14} />
-                  Resume
+                  <span className="agent-detail-control-label">Resume</span>
                 </button>
               )}
               {agent.state === "running" && (
                 <>
-                  <button className="btn btn--compact" onClick={() => void handleStateChange("paused")} disabled={isTransitioning}>
+                  <button className="btn btn--compact agent-detail-mobile-icon-control" onClick={() => void handleStateChange("paused")} disabled={isTransitioning} aria-label="Pause">
                     <Pause size={14} />
-                    Pause
+                    <span className="agent-detail-control-label">Pause</span>
                   </button>
                   <button className="btn btn--danger btn--compact" onClick={() => void handleStateChange("terminated")} disabled={isTransitioning}>
                     <Square size={14} />
@@ -596,7 +596,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
 
             {/* Utility actions: refresh + close */}
             <div className="agent-detail-utility-actions">
-              <button className="btn-icon" onClick={() => void loadAgent()} title="Refresh">
+              <button className="btn-icon" onClick={() => void loadAgent()} title="Refresh" aria-label="Refresh">
                 <RefreshCw size={16} />
               </button>
               {!inline && (
