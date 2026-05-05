@@ -572,6 +572,25 @@ describe("GET /auth/status", () => {
     expect(authStorage.reload).toHaveBeenCalled();
   });
 
+  it("includes Anthropic as oauth when auth storage reports it", async () => {
+    (authStorage.getOAuthProviders as ReturnType<typeof vi.fn>).mockReturnValue([
+      { id: "anthropic", name: "Anthropic" },
+    ]);
+    (authStorage.hasAuth as ReturnType<typeof vi.fn>).mockImplementation((provider: string) => provider === "anthropic");
+
+    const res = await GET(buildApp(), "/api/auth/status");
+
+    expect(res.status).toBe(200);
+    const anthropic = res.body.providers.find((p: any) => p.id === "anthropic");
+    expect(anthropic).toEqual({
+      id: "anthropic",
+      name: "Anthropic",
+      authenticated: true,
+      type: "oauth",
+      loginInProgress: false,
+    });
+  });
+
   it("includes oauth and model-registry-derived API key providers in one response", async () => {
     (authStorage.getOAuthProviders as ReturnType<typeof vi.fn>).mockReturnValue([
       { id: "github-copilot", name: "GitHub Copilot" },

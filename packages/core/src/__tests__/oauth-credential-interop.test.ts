@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   choosePreferredStoredCredential,
+  extractClaudeCliStoredCredential,
   extractCodexCliStoredCredential,
+  getClaudeCodeCredentialPaths,
   readStoredCredentialsFromAuthFile,
   shouldHydrateStoredCredential,
 } from "../oauth-credential-interop.js";
@@ -84,6 +86,59 @@ describe("oauth credential interop", () => {
     expect(choosePreferredStoredCredential(expired, valid)).toEqual(valid);
     expect(shouldHydrateStoredCredential(expired, valid)).toBe(true);
     expect(shouldHydrateStoredCredential({ type: "api_key", key: "sk-live" }, valid)).toBe(false);
+  });
+
+  it("extracts Claude OAuth credentials from .credentials.json payload", () => {
+    const credential = extractClaudeCliStoredCredential({
+      claudeAiOauth: {
+        accessToken: "claude-access",
+        refreshToken: "claude-refresh",
+        expiresAt: Date.now() + 3600_000,
+      },
+    });
+
+    expect(credential).toEqual({
+      type: "oauth",
+      access: "claude-access",
+      refresh: "claude-refresh",
+      expires: expect.any(Number),
+    });
+  });
+
+  it("reads Claude credentials from auth file as anthropic OAuth", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "fusion-oauth-interop-"));
+
+    try {
+      const authPath = join(tempDir, ".credentials.json");
+      writeFileSync(
+        authPath,
+        JSON.stringify({
+          claudeAiOauth: {
+            accessToken: "claude-access",
+            refreshToken: "claude-refresh",
+            expiresAt: Date.now() + 3_600_000,
+          },
+        }),
+      );
+
+      expect(readStoredCredentialsFromAuthFile(authPath)).toEqual({
+        anthropic: {
+          type: "oauth",
+          access: "claude-access",
+          refresh: "claude-refresh",
+          expires: expect.any(Number),
+        },
+      });
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns both supported Claude credential paths", () => {
+    expect(getClaudeCodeCredentialPaths("/tmp/home")).toEqual([
+      "/tmp/home/.claude/.credentials.json",
+      "/tmp/home/.config/claude/.credentials.json",
+    ]);
   });
 
   it("gracefully ignores malformed auth files", () => {

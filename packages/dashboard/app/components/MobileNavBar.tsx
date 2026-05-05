@@ -137,8 +137,10 @@ export function MobileNavBar({
   experimentalFeatures,
   onOpenNodes,
   pluginDashboardViews = [],
+  shellConnectionControl,
 }: MobileNavBarProps) {
   const mode = useViewportMode();
+  void shellConnectionControl;
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isScriptsSubmenuOpen, setIsScriptsSubmenuOpen] = useState(false);
   const [scripts, setScripts] = useState<Record<string, string>>({});

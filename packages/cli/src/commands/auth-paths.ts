@@ -18,6 +18,13 @@ export function getCodexCliAuthPath(home = process.env.HOME || process.env.USERP
   return join(home, ".codex", "auth.json");
 }
 
+export function getClaudeCodeCredentialPaths(home = process.env.HOME || process.env.USERPROFILE || homedir()): string[] {
+  return [
+    join(home, ".claude", ".credentials.json"),
+    join(home, ".config", "claude", ".credentials.json"),
+  ];
+}
+
 export function getLegacyAuthPaths(home = process.env.HOME || process.env.USERPROFILE || homedir()): string[] {
   return [
     join(home, ".pi", "agent", "auth.json"),

@@ -41,18 +41,7 @@ interface ReadFallbackAuthStorage {
 
 type StoredCredential = StoredAuthCredential;
 
-/**
- * Provider IDs that should be treated as OAuth-backed by the upstream
- * pi-coding-agent AuthStorage but which Fusion reclassifies as API-key
- * providers.  These IDs are stripped from getOAuthProviders() results so
- * the dashboard never offers a browser-based OAuth login for them.
- */
-const OAUTH_TO_API_KEY_RECLASSIFICATIONS: ReadonlySet<string> = new Set([
-  "anthropic",
-]);
-
 const BUILT_IN_API_KEY_PROVIDERS: Array<{ id: string; name: string }> = [
-  { id: "anthropic", name: "Anthropic" },
   { id: "brave", name: "Brave Search" },
   { id: "kimi-coding", name: "Kimi" },
   { id: "minimax", name: "Minimax" },
@@ -90,7 +79,6 @@ export function wrapAuthStorageWithApiKeyProviders(
     getOAuthProviders: () =>
       mergedAuthStorage
         .getOAuthProviders()
-        .filter((provider) => !OAUTH_TO_API_KEY_RECLASSIFICATIONS.has(provider.id))
         .map((provider) => ({ id: provider.id, name: provider.name })),
     hasAuth: (provider) => mergedAuthStorage.hasAuth(provider),
     login: (providerId, callbacks) =>
@@ -100,12 +88,9 @@ export function wrapAuthStorageWithApiKeyProviders(
       ),
     logout: (provider) => mergedAuthStorage.logout(provider),
     getApiKeyProviders: () => {
-      // Use the reclassified (filtered) OAuth provider list so that providers
-      // moved to API-key (e.g. anthropic) are not skipped by the OAuth dedup.
       const oauthProviderIds = new Set(
         mergedAuthStorage
           .getOAuthProviders()
-          .filter((provider) => !OAUTH_TO_API_KEY_RECLASSIFICATIONS.has(provider.id))
           .map((provider) => provider.id),
       );
       const providers = new Map<string, string>();

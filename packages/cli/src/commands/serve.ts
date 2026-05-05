@@ -41,7 +41,7 @@ import {
 import { promptForPort } from "./port-prompt.js";
 import { createReadOnlyProviderSettingsView } from "./provider-settings.js";
 import { createReadOnlyAuthFileStorage, mergeAuthStorageReads, wrapAuthStorageWithApiKeyProviders } from "./provider-auth.js";
-import { getCodexCliAuthPath, getFusionAuthPath, getLegacyAuthPaths, getModelRegistryModelsPath, getPackageManagerAgentDir } from "./auth-paths.js";
+import { getClaudeCodeCredentialPaths, getCodexCliAuthPath, getFusionAuthPath, getLegacyAuthPaths, getModelRegistryModelsPath, getPackageManagerAgentDir } from "./auth-paths.js";
 import { resolveProject } from "../project-context.js";
 import {
   ensureClaudeSkillsForAllProjectsOnStartup,
@@ -487,6 +487,7 @@ export async function runServe(
   const supplementalAuthStorage = createReadOnlyAuthFileStorage([
     ...getLegacyAuthPaths(),
     getCodexCliAuthPath(),
+    ...getClaudeCodeCredentialPaths(),
   ]);
   const mergedAuthStorage = mergeAuthStorageReads(authStorage, [supplementalAuthStorage]);
   const modelRegistry = ModelRegistry.create(mergedAuthStorage, getModelRegistryModelsPath());

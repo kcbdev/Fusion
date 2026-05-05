@@ -23,6 +23,13 @@ export function getCodexCliAuthPath(home = getHomeDir()): string {
   return join(home, ".codex", "auth.json");
 }
 
+export function getClaudeCodeCredentialPaths(home = getHomeDir()): string[] {
+  return [
+    join(home, ".claude", ".credentials.json"),
+    join(home, ".config", "claude", ".credentials.json"),
+  ];
+}
+
 function parseJwtPayload(token: string): Record<string, unknown> | null {
   try {
     const [, payload = ""] = token.split(".", 3);
@@ -213,6 +220,34 @@ export function extractCodexCliStoredCredential(raw: unknown): StoredAuthCredent
   };
 }
 
+export function extractClaudeCliStoredCredential(raw: unknown): StoredAuthCredential | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return undefined;
+  }
+
+  const record = raw as Record<string, unknown>;
+  const oauthRecord =
+    record.claudeAiOauth && typeof record.claudeAiOauth === "object" && !Array.isArray(record.claudeAiOauth)
+      ? (record.claudeAiOauth as Record<string, unknown>)
+      : record;
+
+  const access = typeof oauthRecord.accessToken === "string" ? oauthRecord.accessToken : undefined;
+  const refresh = typeof oauthRecord.refreshToken === "string" ? oauthRecord.refreshToken : undefined;
+  const expiresRaw = oauthRecord.expiresAt;
+  const expires = typeof expiresRaw === "number" && Number.isFinite(expiresRaw) ? expiresRaw : undefined;
+
+  if (!access || !refresh || expires === undefined) {
+    return undefined;
+  }
+
+  return {
+    type: "oauth",
+    access,
+    refresh,
+    expires,
+  };
+}
+
 export function readStoredCredentialsFromAuthFile(authPath: string): Record<string, StoredAuthCredential> {
   if (!existsSync(authPath)) {
     return {};
@@ -223,6 +258,11 @@ export function readStoredCredentialsFromAuthFile(authPath: string): Record<stri
     const codexCliCredential = extractCodexCliStoredCredential(parsed);
     if (codexCliCredential) {
       return { "openai-codex": codexCliCredential };
+    }
+
+    const claudeCliCredential = extractClaudeCliStoredCredential(parsed);
+    if (claudeCliCredential) {
+      return { anthropic: claudeCliCredential };
     }
 
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {

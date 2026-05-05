@@ -320,6 +320,12 @@ importers:
 
   packages/desktop:
     dependencies:
+      '@fusion/core':
+        specifier: workspace:*
+        version: link:../core
+      '@fusion/dashboard':
+        specifier: workspace:*
+        version: link:../dashboard
       electron-updater:
         specifier: ^6.6.0
         version: 6.8.3

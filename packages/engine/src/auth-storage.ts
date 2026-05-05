@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   choosePreferredStoredCredential,
+  getClaudeCodeCredentialPaths,
   getCodexCliAuthPath,
   readStoredCredentialsFromAuthFile,
   shouldHydrateStoredCredential,
@@ -38,6 +39,7 @@ function getSupplementalAuthPaths(home = getHomeDir()): string[] {
   return [
     ...getLegacyAuthPaths(home),
     getCodexCliAuthPath(home),
+    ...getClaudeCodeCredentialPaths(home),
   ];
 }
 

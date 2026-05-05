@@ -139,6 +139,32 @@ describe("createFusionAuthStorage", () => {
     });
   });
 
+  it("reads valid Claude OAuth credentials from Claude credential files", async () => {
+    const claudeDir = join(homeDir, ".claude");
+    mkdirSync(claudeDir, { recursive: true });
+
+    writeFileSync(
+      join(claudeDir, ".credentials.json"),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: "claude-access-token",
+          refreshToken: "claude-refresh-token",
+          expiresAt: Date.now() + 3_600_000,
+        },
+      }),
+    );
+
+    const authStorage = createFusionAuthStorage();
+
+    expect(await authStorage.getApiKey("anthropic")).toBe("claude-access-token");
+    expect(authStorage.get("anthropic")).toEqual({
+      type: "oauth",
+      access: "claude-access-token",
+      refresh: "claude-refresh-token",
+      expires: expect.any(Number),
+    });
+  });
+
   it("hydrates newer Codex CLI OAuth credentials into Fusion auth on reload", async () => {
     const fusionAgentDir = join(homeDir, ".fusion", "agent");
     const codexDir = join(homeDir, ".codex");

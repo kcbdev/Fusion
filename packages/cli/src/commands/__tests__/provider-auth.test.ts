@@ -148,8 +148,8 @@ describe("wrapAuthStorageWithApiKeyProviders", () => {
     expect(await storage.getApiKey("openai-codex")).toBe("legacy-access-token");
   });
 
-  describe("Anthropic reclassification from OAuth to API key", () => {
-    it("filters anthropic out of getOAuthProviders even when upstream reports it as OAuth", () => {
+  describe("Anthropic provider classification", () => {
+    it("keeps anthropic in getOAuthProviders when upstream reports it as OAuth", () => {
       const fusionAuth = makeAuthStorage();
       fusionAuth.getOAuthProviders = vi.fn(() => [
         { id: "anthropic", name: "Anthropic" },
@@ -161,11 +161,11 @@ describe("wrapAuthStorageWithApiKeyProviders", () => {
       const oauthProviders = wrapped.getOAuthProviders();
 
       const oauthIds = oauthProviders.map((p) => p.id);
-      expect(oauthIds).not.toContain("anthropic");
+      expect(oauthIds).toContain("anthropic");
       expect(oauthIds).toContain("github-copilot");
     });
 
-    it("includes anthropic in getApiKeyProviders with correct display name", () => {
+    it("does not duplicate anthropic in getApiKeyProviders when OAuth-backed", () => {
       const fusionAuth = makeAuthStorage();
       fusionAuth.getOAuthProviders = vi.fn(() => [
         { id: "anthropic", name: "Anthropic" },
@@ -176,8 +176,7 @@ describe("wrapAuthStorageWithApiKeyProviders", () => {
       const apiKeyProviders = wrapped.getApiKeyProviders();
 
       const anthropic = apiKeyProviders.find((p) => p.id === "anthropic");
-      expect(anthropic).toBeDefined();
-      expect(anthropic!.name).toBe("Anthropic");
+      expect(anthropic).toBeUndefined();
     });
 
     it("stores anthropic credentials as api_key type", () => {

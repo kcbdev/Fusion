@@ -770,7 +770,9 @@ export { ChatStore } from "./chat-store.js";
 export type { ChatStoreEvents } from "./chat-store.js";
 export {
   choosePreferredStoredCredential,
+  extractClaudeCliStoredCredential,
   extractCodexCliStoredCredential,
+  getClaudeCodeCredentialPaths,
   getCodexCliAuthPath,
   readStoredCredentialsFromAuthFile,
   shouldHydrateStoredCredential,
