@@ -2715,6 +2715,7 @@ describe("ChatView mobile behavior", () => {
   });
 
   it("mobile mode: scrolls messages container to bottom when keyboard opens", async () => {
+    _resetInitialViewportHeight();
     const restoreMatchMedia = mockMobileViewport();
     const { listeners, mockVV } = mockMobileVisualViewport({
       innerHeight: 800,
