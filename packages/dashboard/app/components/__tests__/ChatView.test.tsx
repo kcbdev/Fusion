@@ -2397,6 +2397,7 @@ describe("ChatView mobile behavior", () => {
   let savedOntouchstart: typeof window.ontouchstart;
 
   beforeEach(() => {
+    _resetInitialViewportHeight();
     savedVisualViewport = window.visualViewport;
     savedInnerHeight = window.innerHeight;
     savedOntouchstart = window.ontouchstart;
@@ -2589,7 +2590,6 @@ describe("ChatView mobile behavior", () => {
 
   it("mobile mode: sets and clears keyboard overlap CSS vars on chat thread", async () => {
     const restoreMatchMedia = mockMobileViewport();
-    _resetInitialViewportHeight();
     const { listeners, mockVV } = mockMobileVisualViewport({
       innerHeight: 844,
       vvHeight: 844,
@@ -2610,7 +2610,12 @@ describe("ChatView mobile behavior", () => {
       // Focus the chat textarea so the hook treats the active element as a
       // keyboard-focusable target.
       const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
-      textarea.focus();
+      await act(async () => {
+        textarea.focus();
+      });
+      act(() => {
+        document.dispatchEvent(new Event("focusin"));
+      });
 
       Object.defineProperty(window, "innerHeight", {
         value: 560,
@@ -2656,7 +2661,6 @@ describe("ChatView mobile behavior", () => {
 
   it("mobile mode: applies --vv-height when keyboard opens with zero overlap (iOS last-resort signal)", async () => {
     const restoreMatchMedia = mockMobileViewport();
-    _resetInitialViewportHeight();
     const { listeners, mockVV } = mockMobileVisualViewport({
       innerHeight: 800,
       vvHeight: 800,
@@ -2678,7 +2682,12 @@ describe("ChatView mobile behavior", () => {
       // keyboard-focusable target — this is what unlocks the iOS last-resort
       // signal where viewport shrinks but offsetTop+height closes the gap.
       const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
-      textarea.focus();
+      await act(async () => {
+        textarea.focus();
+      });
+      act(() => {
+        document.dispatchEvent(new Event("focusin"));
+      });
 
       // iOS scenario: vv.height shrinks by 16px, vv.offsetTop also = 16.
       // Both chromeOverlap (innerHeight - offsetTop - height) and the gap
@@ -2735,14 +2744,15 @@ describe("ChatView mobile behavior", () => {
         configurable: true,
       });
 
-      // Focus the chat input so the hook treats the viewport shrink as a keyboard-open event.
-      const chatInput = screen.getByTestId("chat-input");
-      chatInput.focus();
-
       // Focus the chat textarea so the hook treats the active element as a
       // keyboard-focusable target.
       const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
-      textarea.focus();
+      await act(async () => {
+        textarea.focus();
+      });
+      act(() => {
+        document.dispatchEvent(new Event("focusin"));
+      });
 
       Object.defineProperty(window, "innerHeight", {
         value: 560,
