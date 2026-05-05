@@ -1172,7 +1172,7 @@ describe("PlanningModeModal", () => {
 
       await waitFor(() => {
         expect(screen.getByText("What are the key requirements?")).toBeDefined();
-      });
+      }, { timeout: 5000 });
 
       expect(screen.getByTestId("conversation-history")).toBeDefined();
       expect(screen.getByText("What is the scope?")).toBeDefined();

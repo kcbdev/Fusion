@@ -20,13 +20,14 @@ export interface ResolvedTaskEvaluationSettings {
 export function resolveTaskEvaluationSettings(
   settings: Partial<ProjectSettings>,
 ): ResolvedTaskEvaluationSettings {
+  const evalSettings = settings as Partial<ResolvedTaskEvaluationSettings>;
   return {
-    taskEvaluationEnabled: settings.taskEvaluationEnabled ?? false,
-    taskEvaluationSchedule: settings.taskEvaluationSchedule ?? DEFAULT_TASK_EVALUATION_SCHEDULE,
-    taskEvaluationProvider: settings.taskEvaluationProvider,
-    taskEvaluationModelId: settings.taskEvaluationModelId,
-    taskEvaluationFollowUpPolicy: settings.taskEvaluationFollowUpPolicy ?? "off",
-    taskEvaluationRetention: settings.taskEvaluationRetention,
+    taskEvaluationEnabled: evalSettings.taskEvaluationEnabled ?? false,
+    taskEvaluationSchedule: evalSettings.taskEvaluationSchedule ?? DEFAULT_TASK_EVALUATION_SCHEDULE,
+    taskEvaluationProvider: evalSettings.taskEvaluationProvider,
+    taskEvaluationModelId: evalSettings.taskEvaluationModelId,
+    taskEvaluationFollowUpPolicy: evalSettings.taskEvaluationFollowUpPolicy ?? "off",
+    taskEvaluationRetention: evalSettings.taskEvaluationRetention,
   };
 }
 

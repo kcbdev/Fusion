@@ -36,7 +36,7 @@ import { useCurrentProject } from "./hooks/useCurrentProject";
 import { ToastProvider, useToast } from "./hooks/useToast";
 import { ConfirmDialogProvider } from "./hooks/useConfirm";
 import { useTheme } from "./hooks/useTheme";
-import { useModalManager, type DetailTaskOrigin } from "./hooks/useModalManager";
+import { useModalManager, type DetailTaskOrigin, type DetailTaskTab } from "./hooks/useModalManager";
 import { useAppSettings } from "./hooks/useAppSettings";
 import { useDeepLink } from "./hooks/useDeepLink";
 import { useFavorites } from "./hooks/useFavorites";
@@ -879,10 +879,8 @@ function AppInner() {
               tasks: isRemote && remoteData.tasks.length > 0 ? remoteData.tasks : tasks,
               workflowSteps,
               openTaskDetail: isMobile
-                ? (task: Task | TaskDetail, initialTab?: Parameters<typeof modalManager.openDetailTask>[1]) =>
-                  openDetailTaskWithHistory(task, initialTab)
-                : (task: Task | TaskDetail, initialTab?: Parameters<typeof modalManager.openDetailTask>[1]) =>
-                  modalManager.openDetailTask(task, initialTab),
+                ? (task: Task | TaskDetail, initialTab?: DetailTaskTab) => openDetailTaskWithHistory(task, initialTab)
+                : (task: Task | TaskDetail, initialTab?: DetailTaskTab) => modalManager.openDetailTask(task, initialTab),
               renderTaskCard: (task: Task | TaskDetail) => (
                 <TaskCard
                   task={task}

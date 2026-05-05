@@ -292,12 +292,6 @@ export const DEFAULT_PROJECT_SETTINGS = {
   researchDefaultTimeout: 300000,
   researchMaxSourcesPerRun: 20,
   researchMaxSynthesisRounds: 2,
-  taskEvaluationEnabled: false,
-  taskEvaluationSchedule: "0 5 * * *",
-  taskEvaluationProvider: undefined,
-  taskEvaluationModelId: undefined,
-  taskEvaluationFollowUpPolicy: "off",
-  taskEvaluationRetention: undefined,
 } satisfies CompleteSettings<ProjectSettings>;
 
 /**

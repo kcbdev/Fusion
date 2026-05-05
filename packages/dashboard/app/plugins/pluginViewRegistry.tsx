@@ -5,7 +5,7 @@ import "./pluginViewRegistry.css";
 
 export type PluginTaskView = `plugin:${string}:${string}`;
 
-type PluginViewComponent = LazyExoticComponent<() => ReactNode>;
+type PluginViewComponent = LazyExoticComponent<() => ReactElement>;
 
 const registry = new Map<string, PluginViewComponent>();
 
