@@ -564,16 +564,18 @@ export class ChatManager {
    * first so subscription and broadcast generationIds are tied together.
    */
   beginGeneration(sessionId: string): { generationId: number; abortController: AbortController } {
+    // If a previous generation is still tracked (e.g. its browser disconnected
+    // mid-stream and its agent loop hasn't reached `finally` yet), abort its
+    // controller so it stops issuing further prompts/tool calls that would
+    // race against the new generation for the same CLI session file.
+    //
+    // We deliberately do NOT dispose its agent here — the previous generation
+    // owns its own dispose in its `finally`. Calling dispose pre-emptively can
+    // yank the underlying CLI process out from under the new generation's
+    // freshly-opened SessionManager pointing at the same session file.
     const existing = this.activeGenerations.get(sessionId);
     if (existing) {
       existing.abortController.abort();
-      if (existing.agentResult) {
-        try {
-          existing.agentResult.session.dispose?.();
-        } catch (err) {
-          diagnostics.error(`Error disposing previous agent session during pre-emption:`, err);
-        }
-      }
     }
     this.generationCounter += 1;
     const generationId = this.generationCounter;

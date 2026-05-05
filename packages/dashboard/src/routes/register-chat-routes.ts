@@ -560,6 +560,15 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
       // Handle client disconnect
       req.on("close", () => {
         unsubscribe();
+        // If the response hasn't been ended (i.e. the generation was still
+        // streaming when the browser disconnected — tab close, navigation,
+        // network drop), cancel the agent so it doesn't keep running with
+        // nobody listening. Otherwise the next request for this session sees a
+        // stale `activeGenerations` entry and races against the lingering
+        // agent for the same CLI session file.
+        if (!res.writableEnded) {
+          chatManager.cancelGeneration(sessionId);
+        }
       });
 
       // Send heartbeat every 30s to keep connection alive
