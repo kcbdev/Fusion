@@ -169,12 +169,13 @@ Navigation:
 - Mobile: bottom nav tab (**Agents**)
 
 Features:
-- Browse agents with role/state filters and health/status indicators
-- Start/pause agents and trigger runs
-- Open agent detail for config, logs, token stats, and org relationships
-- Optional planning-style onboarding/import flows when enabled in settings
+- Switch between **List**, **Board**, and **Org chart** layouts
+- Filter by role/state, include/exclude system agents, and inspect health/status
+- Start, pause, stop, and trigger agent runs from the view and from detail panels
+- Open agent detail tabs for runs, logs, settings/config, tasks, memory, and chain-of-command relationships
+- Jump from agent activity to related task logs, and use onboarding/import flows when `experimentalFeatures.agentOnboarding` is enabled
 
-For full agent lifecycle behavior and heartbeat/runtime config, see [Agents guide](./agents.md).
+For full lifecycle behavior, runtime/heartbeat settings, and budgets, see [Agents guide](./agents.md).
 
 ## Roadmaps View
 
@@ -188,9 +189,10 @@ Navigation:
 - Mobile: **More** sheet (or promoted to a top tab when eligible based on mobile nav slot rules)
 
 Features:
-- Create/edit/reorder roadmap milestones and features
-- Inline editing and drag/drop organization
-- Export planning handoff payloads for mission/task planning workflows
+- Create, edit, archive/delete, and reorder roadmaps, milestones, and features
+- Use inline editing plus drag/drop for milestone and feature organization
+- Open roadmap export modal and copy mission/feature planning handoff payloads
+- Feed roadmap output into mission/task planning workflows
 
 For mission planning context and handoff structure, see [Missions guide](./missions.md).
 
@@ -205,24 +207,26 @@ Navigation:
 - Mobile: **More** sheet → **Insights**
 
 Features:
-- Category-based insight browser with run metadata
-- Manual insight generation and refresh actions
-- Dismiss stale insights and create triage tasks from selected findings
+- Category-based insight browser with run metadata and status indicators
+- Manual insight generation plus refresh actions for latest insight runs
+- Dismiss/archive/unarchive insight records as they age
+- Create triage tasks from selected insights directly from the view
 
 ## Dev Server View
 
 Dev Server view manages detected dev server commands, preview URLs, and live logs for local development.
 
-> Available when `experimentalFeatures.devServerView` is enabled.
+> Available when `experimentalFeatures.devServerView` is enabled (`devServer` is treated as a legacy alias).
 
 Navigation:
 - Desktop: **Header → More views → Dev Server**
 - Mobile: **More** sheet → **Dev Server**
 
 Features:
-- Detect/start/stop/restart dev server commands per project
-- Embedded preview with fallback to external open
-- Live log stream with load-more history
+- Detect candidate dev server commands and choose which command/session to run
+- Start, stop, and restart the current server session
+- Manage preview URLs with embedded preview and **Open in new tab** fallback
+- Tail live logs, load older history, and refresh session status
 
 For module-level behavior and API surfaces, see [Dev Server modules](./dev-server-modules.md).
 
@@ -231,9 +235,10 @@ For module-level behavior and API surfaces, see [Dev Server modules](./dev-serve
 Plugin management lives in **Settings → Plugins → Fusion Plugins**.
 
 Features:
-- Install bundled or path-based Fusion plugins
-- Enable/disable, reload, uninstall, and inspect plugin state
-- Edit plugin settings with live lifecycle updates
+- Install bundled plugins or custom path-based plugins
+- Enable/disable plugins, reload active plugins, and uninstall plugins
+- Inspect plugin runtime state and transition feedback
+- Edit and save plugin-defined settings schemas from the same panel
 
 For plugin-related settings and experimental toggles, see [Settings reference](./settings-reference.md).
 
@@ -242,9 +247,10 @@ For plugin-related settings and experimental toggles, see [Settings reference](.
 Pi extension management lives in **Settings → Plugins → Pi Extensions**.
 
 Features:
-- Install/remove Pi package sources
-- Reinstall the Fusion Pi package
-- Enable/disable discovered Pi extensions and manage extension/skill/prompt/theme paths
+- Add/remove Pi package sources (npm, git, or local)
+- Reinstall the Fusion Pi package/skill bundle
+- Enable/disable discovered extensions
+- Manage extension, skill, prompt, and theme path lists in one place
 
 For related global/project configuration behavior, see [Settings reference](./settings-reference.md).
 
