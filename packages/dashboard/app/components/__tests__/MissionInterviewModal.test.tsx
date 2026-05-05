@@ -30,9 +30,11 @@ vi.mock("../../api", () => ({
   fetchModels: (...args: any[]) => mockFetchModels(...args),
 }));
 
+const mockGetMissionGoal = vi.fn(() => "");
+
 vi.mock("../../hooks/modalPersistence", () => ({
   saveMissionGoal: vi.fn(),
-  getMissionGoal: vi.fn(() => ""),
+  getMissionGoal: (...args: any[]) => mockGetMissionGoal(...args),
   clearMissionGoal: vi.fn(),
 }));
 
@@ -323,5 +325,38 @@ describe("MissionInterviewModal", () => {
         expect.any(String),
       );
     });
+  });
+
+  it("restores persisted goal from localStorage on open", () => {
+    mockGetMissionGoal.mockReturnValue("Previous mission goal");
+
+    renderModal();
+
+    const textarea = screen.getByLabelText("What do you want to build?");
+    expect(textarea).toHaveValue("Previous mission goal");
+  });
+
+  it("allows typing in textarea without resetting to stale persisted goal", async () => {
+    // Simulate a stale persisted goal from a previous session
+    mockGetMissionGoal.mockReturnValue("Old stale goal");
+
+    renderModal();
+
+    const textarea = screen.getByLabelText("What do you want to build?");
+    expect(textarea).toHaveValue("Old stale goal");
+
+    // User starts typing a new goal
+    fireEvent.change(textarea, { target: { value: "New mission" } });
+    expect(textarea).toHaveValue("New mission");
+
+    // Type more characters — the stale value should NOT overwrite
+    fireEvent.change(textarea, { target: { value: "New mission idea" } });
+    expect(textarea).toHaveValue("New mission idea");
+
+    // Even after a re-render cycle, user input should persist
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(textarea).toHaveValue("New mission idea");
   });
 });

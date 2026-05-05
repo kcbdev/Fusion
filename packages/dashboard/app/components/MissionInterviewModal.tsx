@@ -345,6 +345,19 @@ export function MissionInterviewModal({
     }
   }, [isOpen, view.type]);
 
+  // Restore persisted goal from localStorage ONCE when the modal opens.
+  // Must NOT depend on handleStartInterview or missionGoal — otherwise every
+  // keystroke recreates handleStartInterview, re-triggers this effect, and
+  // overwrites what the user just typed (cursor jumps to end, can't edit).
+  useEffect(() => {
+    if (isOpen && !initialGoalProp && !resumeSessionId && !hasAutoStartedRef.current && view.type === "initial") {
+      const persisted = getMissionGoal(projectId);
+      if (persisted) {
+        setMissionGoal(persisted);
+      }
+    }
+  }, [isOpen]);
+
   // Auto-start when initialGoal prop is provided
   useEffect(() => {
     if (isOpen && initialGoalProp && !hasAutoStartedRef.current && view.type === "initial") {
@@ -354,12 +367,6 @@ export function MissionInterviewModal({
         handleStartInterview(initialGoalProp);
       }, 0);
       return () => clearTimeout(timer);
-    } else if (isOpen && !initialGoalProp && !hasAutoStartedRef.current && view.type === "initial") {
-      // Check localStorage for persisted goal when no prop provided
-      const persisted = getMissionGoal(projectId);
-      if (persisted) {
-        setMissionGoal(persisted);
-      }
     }
   }, [isOpen, initialGoalProp, view.type, handleStartInterview]);
 
