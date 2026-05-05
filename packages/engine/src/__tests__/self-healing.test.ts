@@ -694,6 +694,51 @@ describe("SelfHealingManager", () => {
 
       expect(spy).toHaveBeenCalledTimes(1);
     });
+
+    // Documents the race between recovery and a concurrent live startRun().
+    // Sequence: recovery loads the stale row, then a fresh startRun() saves a
+    // brand-new run for the same agent, then recovery calls endHeartbeatRun()
+    // on the stale row. The new run must remain untouched — recovery must
+    // only terminate the run id it sampled, never the agent's "any active
+    // run." Otherwise we'd kill the very run we just spawned.
+    it("only terminates the sampled run id even if a fresh run is started concurrently", async () => {
+      const oldStarted = new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString();
+      const ended: Array<{ runId: string; status: string }> = [];
+      const saved: Array<{ id: string; status: string }> = [];
+
+      const agentStore = {
+        listActiveHeartbeatRuns: vi.fn().mockResolvedValue([
+          { id: "run-stale", agentId: "agent-x", startedAt: oldStarted, endedAt: null, status: "active", processPid: 999_999 },
+        ]),
+        // Simulate the live process spawning a NEW run after recovery sampled the stale one
+        // but before it called endHeartbeatRun. getRunDetail still returns the stale row
+        // because the new run has a different id.
+        getRunDetail: vi.fn().mockImplementation((_agentId: string, runId: string) => {
+          if (runId === "run-stale") {
+            return Promise.resolve({ id: "run-stale", agentId: "agent-x", startedAt: oldStarted, endedAt: null, status: "active", processPid: 999_999 });
+          }
+          return Promise.resolve(null);
+        }),
+        saveRun: vi.fn().mockImplementation((run: any) => {
+          saved.push({ id: run.id, status: run.status });
+          return Promise.resolve();
+        }),
+        endHeartbeatRun: vi.fn().mockImplementation((runId: string, status: string) => {
+          ended.push({ runId, status });
+          return Promise.resolve();
+        }),
+      } as unknown as AgentStore;
+
+      const m = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+      const result = await m.recoverStaleHeartbeatRuns();
+
+      expect(result).toBe(1);
+      expect(ended).toEqual([{ runId: "run-stale", status: "terminated" }]);
+      // The hypothetical concurrent run-fresh must not have been touched.
+      expect(ended.some((e) => e.runId === "run-fresh")).toBe(false);
+      expect(saved.every((s) => s.id === "run-stale")).toBe(true);
+      m.stop();
+    });
   });
 
   describe("recoverNoProgressNoTaskDoneFailures", () => {
