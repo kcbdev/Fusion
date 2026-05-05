@@ -97,6 +97,16 @@ Fallback behavior remains unchanged:
 
 Execution-ownership sync intentionally avoids assignment-trigger side effects (`agent:assigned` wakeups) that are intended for control-plane delegation.
 
+### Ephemeral agent terminal cleanup
+
+Runtime-created ephemeral agents are removed immediately after terminal cleanup paths run:
+
+- Task-worker agents created by `InProcessRuntime` are deleted as soon as they reach `terminated` through completion, error, or `agent:stateChanged` fallback cleanup.
+- Spawned child agents created by `TaskExecutor` are deleted immediately inside `terminateChildAgent()` after terminal state update.
+- User-managed non-ephemeral agents are never auto-deleted by these pathways.
+
+Because deletion is immediate, terminated runtime helper agents should not remain visible in the dashboard or `AgentStore` after cleanup completes.
+
 ## Agents View (Dashboard)
 
 The agents surface provides:
