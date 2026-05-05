@@ -78,7 +78,7 @@
 .list-section-controls {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-sm);
 }
 
 .list-section-controls .btn {
@@ -99,11 +99,11 @@
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  font-size: 13px;
+  font-size: calc(var(--space-sm) + var(--space-xs) * 1.25);
   color: var(--text);
-  background: var(--todo-bg, rgba(59, 130, 246, 0.1));
-  border: 1px solid var(--todo-border, rgba(59, 130, 246, 0.3));
-  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--todo) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--todo) 30%, transparent);
+  border-radius: var(--radius-md);
   padding: var(--space-xs) var(--space-md);
 }
 
@@ -118,9 +118,9 @@
   align-items: center;
   gap: var(--space-md);
   padding: var(--space-sm) var(--space-md);
-  background: var(--surface-hover);
+  background: var(--surface-hover, color-mix(in srgb, var(--surface) 90%, var(--text) 10%));
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   margin-left: auto;
 }
 
@@ -143,7 +143,7 @@
 
 .bulk-edit-dropdown .model-combobox-trigger {
   font-size: 12px;
-  padding: 6px 10px;
+  padding: var(--space-xs) var(--space-md);
 }
 
 .bulk-node-select {
@@ -157,6 +157,13 @@
 }
 
 .bulk-edit-apply-btn {
+  white-space: nowrap;
+}
+
+.bulk-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
   white-space: nowrap;
 }
 
@@ -192,7 +199,7 @@
 .list-column-toggle .btn {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-sm);
 }
 
 .list-create-area {
@@ -227,9 +234,9 @@
   margin-top: var(--space-xs);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   min-width: 160px;
-  padding: 6px 0;
+  padding: var(--space-xs) 0;
   z-index: 100;
   box-shadow: var(--shadow);
   animation: dropdown-in 0.15s ease-out;
@@ -249,9 +256,9 @@
 .list-column-dropdown-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-md);
   padding: var(--space-sm) var(--space-md);
-  font-size: 13px;
+  font-size: calc(var(--space-sm) + var(--space-xs) * 1.25);
   color: var(--text);
   cursor: pointer;
   transition: background var(--transition-fast);
@@ -285,7 +292,7 @@
 .list-hide-done-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-sm);
 }
 
 /* Drop zones for drag and drop */
@@ -926,7 +933,7 @@
   .list-card {
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-md);
     padding: var(--space-md);
     margin: var(--space-xs) 0;
     cursor: pointer;
@@ -1067,6 +1074,38 @@
 
   .bulk-node-select {
     min-height: 36px;
+  }
+
+  .bulk-delete-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .list-mobile-bulk-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+    margin: 0 var(--space-md) var(--space-sm);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+  }
+
+  .list-mobile-bulk-actions__count {
+    color: var(--text-muted);
+    font-size: calc(var(--space-sm) + var(--space-xs) * 0.75);
+    font-weight: 600;
+  }
+
+  .list-mobile-bulk-actions .btn {
+    min-height: calc(var(--space-lg) * 2 + var(--space-xs));
+  }
+
+  .list-mobile-bulk-actions .bulk-delete-btn {
+    margin-left: auto;
+    width: auto;
   }
 
   /* List column dropdown items: touch target on mobile */
