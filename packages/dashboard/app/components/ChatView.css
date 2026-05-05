@@ -215,8 +215,38 @@
 }
 
 .chat-thread-header-new-chat {
-  margin-left: auto;
   flex-shrink: 0;
+}
+
+/* Single thread-wide markdown / plain-text toggle, anchored to the right of
+ * the header next to "New Chat". Replaces the per-message eye toggle that
+ * used to live inside every assistant bubble. */
+.chat-thread-header-render-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(var(--space-md) * 3);
+  height: calc(var(--space-md) * 3);
+  min-width: calc(var(--space-md) * 3);
+  min-height: calc(var(--space-md) * 3);
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.chat-thread-header-render-toggle:hover {
+  background: var(--bg-hover, var(--bg-secondary));
+  color: var(--text);
+}
+
+.chat-thread-header-render-toggle--plain {
+  color: var(--text);
 }
 
 /* Messages */
@@ -260,6 +290,15 @@
   margin-bottom: 4px;
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+/* Model-only chats hide the per-message agent identity. The toggle still
+ * needs a place to live, so collapse the avatar row to just the toggle on
+ * the right edge instead of a full identity strip. */
+.chat-message-avatar.chat-message-avatar--toolbar-only {
+  margin-bottom: 0;
+  min-height: 0;
+  justify-content: flex-end;
 }
 
 .chat-message-render-toggle {

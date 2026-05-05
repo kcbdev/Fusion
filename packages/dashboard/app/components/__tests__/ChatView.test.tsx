@@ -445,7 +445,7 @@ describe("ChatView", () => {
     expect(screen.queryByTestId("chat-render-mode-plain")).not.toBeInTheDocument();
   });
 
-  it("renders per-message eye toggles for assistant bubbles on desktop and isolates toggles by message", async () => {
+  it("thread-header toggle flips every assistant bubble between rendered Markdown and plain text", async () => {
     setupMockChat({
       activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [
@@ -458,24 +458,27 @@ describe("ChatView", () => {
 
     const firstBubble = screen.getByTestId("chat-message-msg-001");
     const secondBubble = screen.getByTestId("chat-message-msg-002");
-    const [firstToggle, secondToggle] = screen.getAllByTestId("chat-message-render-toggle");
+    const headerToggle = screen.getByTestId("chat-thread-render-toggle");
 
-    expect(firstToggle).toBeInTheDocument();
-    expect(secondToggle).toBeInTheDocument();
+    // Per-message toggles were intentionally removed; only the single
+    // thread-level toggle should exist.
+    expect(screen.queryAllByTestId("chat-message-render-toggle")).toHaveLength(0);
     expect(within(firstBubble).getByText("First", { selector: "strong" })).toBeInTheDocument();
     expect(within(secondBubble).getByText("Second", { selector: "strong" })).toBeInTheDocument();
 
-    await userEvent.click(firstToggle);
+    await userEvent.click(headerToggle);
 
     expect(within(firstBubble).getByText(/\*\*First\*\* item/)).toBeInTheDocument();
     expect(within(firstBubble).queryByText("First", { selector: "strong" })).toBeNull();
-    expect(within(secondBubble).getByText("Second", { selector: "strong" })).toBeInTheDocument();
+    expect(within(secondBubble).getByText(/\*\*Second\*\* item/)).toBeInTheDocument();
+    expect(within(secondBubble).queryByText("Second", { selector: "strong" })).toBeNull();
 
-    await userEvent.click(firstToggle);
+    await userEvent.click(headerToggle);
     expect(within(firstBubble).getByText("First", { selector: "strong" })).toBeInTheDocument();
+    expect(within(secondBubble).getByText("Second", { selector: "strong" })).toBeInTheDocument();
   });
 
-  it("uses a dedicated streaming toggle sentinel without affecting persisted assistant messages", async () => {
+  it("thread-header toggle also drives the streaming bubble", async () => {
     setupMockChat({
       activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "**Persisted**", createdAt: "2026-04-08T00:00:00.000Z" }],
@@ -487,19 +490,19 @@ describe("ChatView", () => {
 
     const persistedBubble = screen.getByTestId("chat-message-msg-001");
     const streamingBubble = document.querySelector(".chat-message--streaming") as HTMLElement;
-    const [persistedToggle, streamingToggle] = screen.getAllByTestId("chat-message-render-toggle");
+    const headerToggle = screen.getByTestId("chat-thread-render-toggle");
 
     expect(within(streamingBubble).getByText("Live", { selector: "strong" })).toBeInTheDocument();
     expect(within(persistedBubble).getByText("Persisted", { selector: "strong" })).toBeInTheDocument();
 
-    await userEvent.click(streamingToggle);
+    await userEvent.click(headerToggle);
 
     expect(within(streamingBubble).getByText(/\*\*Live\*\* stream/)).toBeInTheDocument();
-    expect(within(persistedBubble).getByText("Persisted", { selector: "strong" })).toBeInTheDocument();
-
-    await userEvent.click(persistedToggle);
     expect(within(persistedBubble).getByText(/\*\*Persisted\*\*/)).toBeInTheDocument();
-    expect(within(streamingBubble).getByText(/\*\*Live\*\* stream/)).toBeInTheDocument();
+
+    await userEvent.click(headerToggle);
+    expect(within(streamingBubble).getByText("Live", { selector: "strong" })).toBeInTheDocument();
+    expect(within(persistedBubble).getByText("Persisted", { selector: "strong" })).toBeInTheDocument();
   });
 
   it("renders tool calls from persisted messages", () => {
@@ -869,7 +872,10 @@ describe("ChatView", () => {
     expect(within(avatar!).queryByText("Fusion")).not.toBeInTheDocument();
   });
 
-  it("shows Fusion in assistant message avatar for fn agent sessions", () => {
+  it("hides per-message assistant identity for fn agent (model-only) sessions", () => {
+    // Model-only chats use the active model as their identity, which is
+    // already shown in the thread header. We deliberately suppress the
+    // per-message avatar to avoid repeating it on every reply.
     setupMockChat({
       activeSession: { id: "session-001", agentId: "__fn_agent__", status: "active", title: "Fusion Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
       messages: [
@@ -879,12 +885,11 @@ describe("ChatView", () => {
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const avatar = document.querySelector(".chat-message-avatar") as HTMLElement | null;
-    expect(avatar).toBeInTheDocument();
-    expect(within(avatar!).getByText("Fusion")).toBeInTheDocument();
+    const messageBubble = screen.getByTestId("chat-message-msg-001");
+    expect(messageBubble.querySelector(".chat-message-avatar")).toBeNull();
   });
 
-  it("shows formatted model name in assistant message avatar for fn agent sessions", async () => {
+  it("hides per-message assistant identity for fn agent (model-only) sessions even when a model is configured", async () => {
     setupMockChat({
       activeSession: {
         id: "session-001",
@@ -902,14 +907,12 @@ describe("ChatView", () => {
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const avatar = document.querySelector(".chat-message-avatar") as HTMLElement | null;
-    expect(avatar).toBeInTheDocument();
-
+    const messageBubble = screen.getByTestId("chat-message-msg-001");
+    expect(messageBubble.querySelector(".chat-message-avatar")).toBeNull();
+    // The model name still appears once in the thread header.
     await waitFor(() => {
-      expect(within(avatar!).getByText("Claude Sonnet 4.5")).toBeInTheDocument();
+      expect(screen.getByText("Claude Sonnet 4.5")).toBeInTheDocument();
     });
-    expect(within(avatar!).queryByText("Fusion")).not.toBeInTheDocument();
-    expect(avatar?.querySelector(".chat-model-tag")).toBeNull();
   });
 
   it("shows resolved agent name in streaming assistant avatar", async () => {
@@ -1858,7 +1861,11 @@ describe("ChatView", () => {
     expect(modelTag).not.toBeInTheDocument();
   });
 
-  it("shows model tag in message avatar when non-fn session has model", () => {
+  it("does not repeat the model tag in per-message avatars for non-fn sessions", () => {
+    // Per-message model tags were intentionally removed — the model is shown
+    // once in the thread header. The avatar should still render with the
+    // agent name (no agent identity collapse for real agents) but no model
+    // tag inside it.
     setupMockChat({
       activeSession: {
         id: "session-001",
@@ -1876,12 +1883,13 @@ describe("ChatView", () => {
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const avatar = document.querySelector(".chat-message-avatar") as HTMLElement | null;
+    const messageBubble = screen.getByTestId("chat-message-msg-001");
+    const avatar = messageBubble.querySelector(".chat-message-avatar") as HTMLElement | null;
     expect(avatar).toBeInTheDocument();
-    expect(avatar?.querySelector(".chat-model-tag")?.textContent).toContain("GPT");
+    expect(avatar?.querySelector(".chat-model-tag")).toBeNull();
   });
 
-  it("does not show duplicate model tag in message avatar for fn agent sessions", () => {
+  it("hides per-message identity entirely for fn agent (model-only) sessions even when model is set", () => {
     setupMockChat({
       activeSession: {
         id: "session-001",
@@ -1899,10 +1907,8 @@ describe("ChatView", () => {
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    const avatar = document.querySelector(".chat-message-avatar") as HTMLElement | null;
-    expect(avatar).toBeInTheDocument();
-    expect(within(avatar!).getByText("GPT-4o")).toBeInTheDocument();
-    expect(avatar?.querySelector(".chat-model-tag")).toBeNull();
+    const messageBubble = screen.getByTestId("chat-message-msg-001");
+    expect(messageBubble.querySelector(".chat-message-avatar")).toBeNull();
   });
 });
 

@@ -1013,17 +1013,21 @@ export class ChatManager {
         },
       };
 
+      // Single agent-creation path for both regular chat and QuickChat. When
+      // the chat is bound to an agent that declares a runtime hint we pass it
+      // through; when there's no agent (e.g. QuickChat's model-only mode) or
+      // no hint, `createResolvedAgentSession` falls back to the default
+      // runtime via `resolveRuntime`. This avoids the previous divergence
+      // where QuickChat went through `createFnAgent` and hit pi-ai's shared
+      // `cleanupSessionResources(sessionId)` tear-down across overlapping
+      // sessions opened from the same CLI session file.
       const agentRuntimeHint = agent ? extractRuntimeHint(agent.runtimeConfig) : undefined;
-      if (agentRuntimeHint) {
-        agentResult = await createResolvedAgentSession({
-          sessionPurpose: "executor",
-          runtimeHint: agentRuntimeHint,
-          pluginRunner: this.pluginRunner,
-          ...sessionOptions,
-        });
-      } else {
-        agentResult = await createFnAgent(sessionOptions);
-      }
+      agentResult = await createResolvedAgentSession({
+        sessionPurpose: "executor",
+        ...(agentRuntimeHint ? { runtimeHint: agentRuntimeHint } : {}),
+        pluginRunner: this.pluginRunner,
+        ...sessionOptions,
+      });
       this.activeGenerations.set(sessionId, { abortController, agentResult, generationId });
 
       if (abortController.signal.aborted) {
@@ -1143,16 +1147,29 @@ export class ChatManager {
         data: errorMessage,
       }, broadcastOptions);
     } finally {
-      // Only clear the active-generation slot if it still belongs to us. If a newer
-      // sendMessage pre-empted us via beginGeneration, the slot now holds that newer
-      // generation's controller and must not be deleted by our cleanup.
+      // Only clear the active-generation slot if it still belongs to us. If a
+      // newer sendMessage pre-empted us via beginGeneration, the slot now holds
+      // that newer generation's controller and must not be deleted by us.
       const current = this.activeGenerations.get(sessionId);
-      if (current?.generationId === generationId) {
+      const stillOwnsSlot = current?.generationId === generationId;
+      if (stillOwnsSlot) {
         this.activeGenerations.delete(sessionId);
       }
 
-      // Always dispose agent session
-      if (agentResult) {
+      // Dispose the agent session — but ONLY when we still own the slot.
+      //
+      // pi-ai's `cleanupSessionResources(sessionId)` fires globally-registered
+      // cleanup callbacks keyed by sessionId, and two agents opened from the
+      // same CLI session file share that sessionId. If a newer generation has
+      // taken over for the same chat session, disposing this (older) agent
+      // tears down resources the newer agent is actively using — the model
+      // produces no output and the next turn looks like a silent failure.
+      //
+      // The newer generation will dispose its own agent in its own finally.
+      // The older agent's resources are largely garbage-collectible without
+      // an explicit dispose; the small leak per pre-empted generation is
+      // worth avoiding the cross-generation tear-down.
+      if (stillOwnsSlot && agentResult) {
         try {
           agentResult.session.dispose?.();
         } catch (err) {
@@ -1209,6 +1226,12 @@ export class ChatManager {
  */
 export function __setCreateFnAgent(mock: typeof createFnAgent): void {
   createFnAgent = mock;
+  // chat.ts now routes both regular chat and QuickChat through
+  // `createResolvedAgentSession`, which would normally bypass this mock and
+  // hit the real engine. Mirror the same fake into the resolved-session slot
+  // so existing test setups that only call `__setCreateFnAgent` continue to
+  // work.
+  createResolvedAgentSession = (async (options: any) => mock(options)) as typeof createResolvedAgentSession;
 }
 
 /**

@@ -541,13 +541,24 @@ function NewChatDialog({ projectId, onClose, onCreate }: NewChatDialogProps) {
 
 interface ChatMessageItemProps {
   message: ChatMessageInfo;
+  /**
+   * When true, render assistant message content as plain text instead of
+   * Markdown. The per-message eye toggle has been removed in favor of a
+   * single thread-level toggle in the chat header, so this is a global
+   * mirror of that header state.
+   */
   forcePlain: boolean;
   agentName: string;
+  /**
+   * Hide the per-message agent identity (icon + name + model tag) on
+   * assistant bubbles. In model-only chats the agent identity *is* the
+   * active model and it's already shown in the thread header.
+   */
+  hideAssistantIdentity: boolean;
   showAssistantModelTag: boolean;
   activeModelTag: string | null;
   activeSessionId: string | null;
   mentionAgentsByName: Map<string, Agent>;
-  onToggleRender: (id: string) => void;
 }
 
 // Renders a single chat message bubble. Memoized so the streaming bubble's
@@ -557,11 +568,11 @@ const ChatMessageItem = memo(function ChatMessageItem({
   message,
   forcePlain,
   agentName,
+  hideAssistantIdentity,
   showAssistantModelTag,
   activeModelTag,
   activeSessionId,
   mentionAgentsByName,
-  onToggleRender,
 }: ChatMessageItemProps) {
   const isAssistantMessage = message.role === "assistant";
 
@@ -659,20 +670,11 @@ const ChatMessageItem = memo(function ChatMessageItem({
       className={`chat-message chat-message--${message.role}`}
       data-testid={`chat-message-${message.id}`}
     >
-      {isAssistantMessage && (
+      {isAssistantMessage && !hideAssistantIdentity && (
         <div className="chat-message-avatar">
           <Bot size={14} />
           <span>{agentName}</span>
           {showAssistantModelTag && activeModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
-          <button
-            type="button"
-            className={`chat-message-render-toggle${forcePlain ? " chat-message-render-toggle--plain" : ""}`}
-            data-testid="chat-message-render-toggle"
-            aria-label={forcePlain ? "Show rendered markdown" : "Show plain text"}
-            onClick={() => onToggleRender(message.id)}
-          >
-            {forcePlain ? <EyeOff size={14} /> : <Eye size={14} />}
-          </button>
         </div>
       )}
       {isAssistantMessage
@@ -730,7 +732,11 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
   const [mentionPopupVisible, setMentionPopupVisible] = useState(false);
   const [mentionHighlightIndex, setMentionHighlightIndex] = useState(0);
   const [mentionStartPos, setMentionStartPos] = useState(-1);
-  const [plainTextMessageIds, setPlainTextMessageIds] = useState<Set<string>>(() => new Set());
+  // Single thread-wide toggle: when true, all assistant content (including the
+  // streaming bubble) renders as plain text instead of Markdown. Replaces the
+  // earlier per-message toggle so the chat header owns this control instead
+  // of every reply having its own button.
+  const [showAllAsPlain, setShowAllAsPlain] = useState(false);
   // Attachment state mirrors QuickEntryBox: pending files selected before send.
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -1479,22 +1485,25 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
       ? (activeModelTag ?? "Fusion")
       : (activeSession?.agentId?.slice(0, 30) ?? "Fusion"));
 
-  const showAssistantModelTag = Boolean(activeModelTag && activeModelTag !== agentName);
+  // The model tag is already visible in the thread header — repeating it on
+  // every assistant message is noise. Keep it suppressed for regular chat
+  // (real agent name is the identity); QuickChat already collapses the tag
+  // because its `agentName` IS the model tag, so the per-message slot was
+  // always empty there too.
+  const showAssistantModelTag = false;
+
+  // In model-only chats (no real agent picked) the agent identity *is* the
+  // model name, which is already in the thread header. Repeating it on every
+  // assistant bubble is noise. Hide the per-message identity row entirely;
+  // the render-mode toggle still appears in a slim toolbar.
+  const hideAssistantIdentity = activeSession?.agentId === FN_AGENT_ID;
 
   const pendingPreview = pendingMessage.length > 50
     ? `${pendingMessage.slice(0, 50)}…`
     : pendingMessage;
 
-  const toggleMessageRenderMode = useCallback((messageId: string) => {
-    setPlainTextMessageIds((current) => {
-      const next = new Set(current);
-      if (next.has(messageId)) {
-        next.delete(messageId);
-      } else {
-        next.add(messageId);
-      }
-      return next;
-    });
+  const toggleAllAsPlain = useCallback(() => {
+    setShowAllAsPlain((value) => !value);
   }, []);
 
   const renderAssistantContent = useCallback(
@@ -1677,6 +1686,17 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
             <Bot size={16} />
             <span className="chat-thread-header-title">{threadHeaderTitle}</span>
             {showThreadHeaderModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
+            {hasThreadInView && (
+              <button
+                type="button"
+                className={`chat-thread-header-render-toggle${showAllAsPlain ? " chat-thread-header-render-toggle--plain" : ""}`}
+                data-testid="chat-thread-render-toggle"
+                aria-label={showAllAsPlain ? "Show all messages as rendered Markdown" : "Show all messages as plain text"}
+                onClick={toggleAllAsPlain}
+              >
+                {showAllAsPlain ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            )}
             {!isMobile && (
               <button
                 className="btn btn-sm btn-primary chat-thread-header-new-chat"
@@ -1699,32 +1719,25 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
                 <ChatMessageItem
                   key={message.id}
                   message={message}
-                  forcePlain={plainTextMessageIds.has(message.id)}
+                  forcePlain={showAllAsPlain}
                   agentName={agentName}
+                  hideAssistantIdentity={hideAssistantIdentity}
                   showAssistantModelTag={showAssistantModelTag}
                   activeModelTag={activeModelTag}
                   activeSessionId={activeSession?.id ?? null}
                   mentionAgentsByName={mentionAgentsByName}
-                  onToggleRender={toggleMessageRenderMode}
                 />
               ))}
               <div className="chat-message chat-message--assistant chat-message--streaming">
-                <div className="chat-message-avatar">
-                  <Bot size={14} />
-                  <span>{agentName}</span>
-                  {showAssistantModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
-                  <button
-                    type="button"
-                    className={`chat-message-render-toggle${plainTextMessageIds.has("__streaming__") ? " chat-message-render-toggle--plain" : ""}`}
-                    data-testid="chat-message-render-toggle"
-                    aria-label={plainTextMessageIds.has("__streaming__") ? "Show rendered markdown" : "Show plain text"}
-                    onClick={() => toggleMessageRenderMode("__streaming__")}
-                  >
-                    {plainTextMessageIds.has("__streaming__") ? <EyeOff size={14} /> : <Eye size={14} />}
-                  </button>
-                </div>
+                {!hideAssistantIdentity && (
+                  <div className="chat-message-avatar">
+                    <Bot size={14} />
+                    <span>{agentName}</span>
+                    {showAssistantModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
+                  </div>
+                )}
                 {streamingText ? (
-                  renderAssistantContent(streamingText, plainTextMessageIds.has("__streaming__"))
+                  renderAssistantContent(streamingText, showAllAsPlain)
                 ) : (
                   <div className="chat-message-content chat-message-content--waiting">
                     {streamingThinking ? "Thinking…" : "Connecting…"}
@@ -1758,13 +1771,13 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
                 <ChatMessageItem
                   key={message.id}
                   message={message}
-                  forcePlain={plainTextMessageIds.has(message.id)}
+                  forcePlain={showAllAsPlain}
                   agentName={agentName}
+                  hideAssistantIdentity={hideAssistantIdentity}
                   showAssistantModelTag={showAssistantModelTag}
                   activeModelTag={activeModelTag}
                   activeSessionId={activeSession?.id ?? null}
                   mentionAgentsByName={mentionAgentsByName}
-                  onToggleRender={toggleMessageRenderMode}
                 />
               ))}
             </>

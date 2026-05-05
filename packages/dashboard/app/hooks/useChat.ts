@@ -30,38 +30,11 @@ export interface ChatSessionInfo {
   isGenerating?: boolean;
 }
 
-export interface ToolCallInfo {
-  toolName: string;
-  args?: Record<string, unknown>;
-  isError: boolean;
-  result?: unknown;
-  status: "running" | "completed";
-}
-
-export interface FallbackInfo {
-  primaryModel: string;
-  fallbackModel: string;
-  triggerPoint: "session-creation" | "prompt-time";
-}
-
-export interface ChatMessageInfo {
-  id: string;
-  sessionId: string;
-  role: "user" | "assistant" | "system";
-  content: string;
-  thinkingOutput?: string | null;
-  toolCalls?: ToolCallInfo[];
-  fallbackInfo?: FallbackInfo;
-  attachments?: Array<{
-    id: string;
-    filename: string;
-    originalName: string;
-    mimeType: string;
-    size: number;
-    createdAt: string;
-  }>;
-  createdAt: string;
-}
+// Re-export shared chat types so existing consumers (`import { ChatMessageInfo } from "../hooks/useChat"`)
+// keep working — single source of truth lives in chatTypes.ts.
+export type { ChatMessageInfo, FallbackInfo, ToolCallInfo } from "./chatTypes";
+import type { ChatMessageInfo, FallbackInfo, ToolCallInfo } from "./chatTypes";
+import { createChatStreamHandlers } from "./createChatStreamHandlers";
 
 export interface UseChatReturn {
   // Session state
@@ -547,127 +520,37 @@ export function useChat(
       setStreamingToolCalls([]);
       setIsStreaming(true);
 
-      // Accumulate streaming text and tool calls in local variables
-      let capturedText = "";
-      let capturedThinking = "";
-      let capturedToolCalls: ToolCallInfo[] = [];
-      let capturedFallbackInfo: FallbackInfo | undefined;
-
-      // Coalesce per-token state updates to one render per animation frame.
-      // ReactMarkdown re-parses the entire growing string on every render and
-      // every prior message also re-renders, so unthrottled updates pin the
-      // main thread for long replies.
-      let textRaf: number | null = null;
-      let thinkingRaf: number | null = null;
-      const flushText = () => {
-        textRaf = null;
-        setStreamingText(capturedText);
-      };
-      const flushThinking = () => {
-        thinkingRaf = null;
-        setStreamingThinking(capturedThinking);
-      };
-      const cancelStreamingFlushes = () => {
-        if (textRaf !== null) {
-          cancelAnimationFrame(textRaf);
-          textRaf = null;
-        }
-        if (thinkingRaf !== null) {
-          cancelAnimationFrame(thinkingRaf);
-          thinkingRaf = null;
-        }
-      };
-      cancelStreamingFlushesRef.current = cancelStreamingFlushes;
-
-      const textHandlers = {
-        onThinking: (data: string) => {
-          capturedThinking += data;
-          if (thinkingRaf === null) {
-            thinkingRaf = requestAnimationFrame(flushThinking);
-          }
-        },
-        onText: (data: string) => {
-          capturedText += data;
-          if (textRaf === null) {
-            textRaf = requestAnimationFrame(flushText);
-          }
-        },
-        onToolStart: (data: { toolName: string; args?: Record<string, unknown> }) => {
-          capturedToolCalls = [
-            ...capturedToolCalls,
-            {
-              toolName: data.toolName,
-              args: data.args,
-              isError: false,
-              status: "running",
-            },
-          ];
-          setStreamingToolCalls(capturedToolCalls);
-        },
-        onToolEnd: (data: { toolName: string; isError: boolean; result?: unknown }) => {
-          const nextToolCalls = [...capturedToolCalls];
-          for (let i = nextToolCalls.length - 1; i >= 0; i--) {
-            const candidate = nextToolCalls[i];
-            if (candidate?.toolName === data.toolName && candidate.status === "running") {
-              nextToolCalls[i] = {
-                ...candidate,
-                status: "completed",
-                isError: data.isError,
-                result: data.result,
-              };
-              capturedToolCalls = nextToolCalls;
-              setStreamingToolCalls(nextToolCalls);
-              return;
-            }
-          }
-
-          capturedToolCalls = [
-            ...nextToolCalls,
-            {
-              toolName: data.toolName,
-              isError: data.isError,
-              result: data.result,
-              status: "completed",
-            },
-          ];
-          setStreamingToolCalls(capturedToolCalls);
-        },
-        onFallback: (data: FallbackInfo) => {
-          capturedFallbackInfo = data;
+      const { handlers } = createChatStreamHandlers({
+        sessionId: activeSession.id,
+        tempUserMessageId: tempId,
+        setStreamingText,
+        setStreamingThinking,
+        setStreamingToolCalls,
+        cancelStreamingFlushesRef,
+        addToast,
+        onFallbackSession: (data, sessionId) => {
           const nextModel = parseModelDescriptor(data.fallbackModel);
           setSessions((prev) => prev.map((session) =>
-            session.id === activeSession.id
-              ? {
-                  ...session,
-                  ...nextModel,
-                }
-              : session,
+            session.id === sessionId ? { ...session, ...nextModel } : session,
           ));
-          setActiveSession((prev) => prev && prev.id === activeSession.id
-            ? {
-                ...prev,
-                ...nextModel,
-              }
-            : prev);
-          addToast?.(`Primary model unavailable. Switched to fallback ${data.fallbackModel}.`, "warning");
+          setActiveSession((prev) => prev && prev.id === sessionId ? { ...prev, ...nextModel } : prev);
         },
-        onDone: (data: { messageId: string; message?: ChatMessage }) => {
-          cancelStreamingFlushes();
-          const finalMessage = data.message;
+        onDone: ({ messageId, message: finalMessage, accumulated }) => {
           const assistantMessage: ChatMessageInfo = finalMessage
             ? mapChatMessageToInfo(finalMessage)
             : {
-                id: data.messageId || `msg-${Date.now()}`,
+                id: messageId || `msg-${Date.now()}`,
                 sessionId: activeSession.id,
                 role: "assistant",
-                content: capturedText,
-                thinkingOutput: capturedThinking,
-                toolCalls: capturedToolCalls.length > 0 ? capturedToolCalls : undefined,
-                fallbackInfo: capturedFallbackInfo,
+                content: accumulated.text,
+                thinkingOutput: accumulated.thinking,
+                toolCalls: accumulated.toolCalls.length > 0 ? accumulated.toolCalls : undefined,
+                fallbackInfo: accumulated.fallbackInfo,
                 createdAt: new Date().toISOString(),
               };
 
-          // Track this message ID so SSE handler skips it if event arrives first
+          // Track this message ID so the SSE chatMessageAdded handler skips it
+          // if the broadcast event arrives before our optimistic add settles.
           streamingMessageIdsRef.current.add(assistantMessage.id);
 
           // Preserve user message and add assistant message
@@ -693,9 +576,8 @@ export function useChat(
             sendMessage(queuedMessage);
           }
         },
-        onError: (data: string) => {
-          cancelStreamingFlushes();
-          setMessages((prev) => prev.filter((m) => m.id !== tempId));
+        onError: (data, tempUserMessageId) => {
+          setMessages((prev) => prev.filter((m) => m.id !== tempUserMessageId));
           setStreamingText("");
           setStreamingThinking("");
           setStreamingToolCalls([]);
@@ -713,9 +595,9 @@ export function useChat(
             }
           }
         },
-      };
+      });
 
-      streamRef.current = streamChatResponse(activeSession.id, content, textHandlers, attachments, projectId);
+      streamRef.current = streamChatResponse(activeSession.id, content, handlers, attachments, projectId);
     },
     [activeSession, isStreaming, projectId, refreshSessions, addToast],
   );
