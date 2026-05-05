@@ -128,6 +128,10 @@ function parseArgs(argv) {
     }
   }
 
+  if (!opts.help && opts.auth && opts.noAuth) {
+    fail("--auth and --no-auth cannot be used together");
+  }
+
   return opts;
 }
 
@@ -251,7 +255,12 @@ function ensureProjectRegistered(opts) {
           isolationMode: "in-process",
         });
         await central.updateProject(project.id, { status: "active" });
-        await ensureMemoryFileWithBackend(root).catch(() => false);
+        await ensureMemoryFileWithBackend(root).catch((error) => {
+          console.warn(
+            "ensureMemoryFileWithBackend failed; continuing without project memory file: " +
+              (error instanceof Error ? error.message : String(error))
+          );
+        });
         console.log("Registered project " + name);
       } finally {
         await central.close();
@@ -295,7 +304,16 @@ async function pickPort(preferredPort, host, allow4040) {
 function shouldDisableAuth(opts) {
   if (opts.noAuth) return true;
   if (opts.auth) return false;
-  return opts.host === "127.0.0.1" || opts.host === "localhost" || opts.host === "::1";
+  return isLocalHost(opts.host);
+}
+
+function isLocalHost(host) {
+  const normalized = host.toLowerCase();
+  return normalized === "localhost" || normalized === "::1" || normalized.startsWith("127.");
+}
+
+function isExternalBind(host) {
+  return !isLocalHost(host);
 }
 
 function printSummary(opts, port, dashboardArgs) {
@@ -333,8 +351,8 @@ async function main() {
   if (opts.paused) dashboardArgs.push("--paused");
   if (shouldDisableAuth(opts)) dashboardArgs.push("--no-auth");
 
-  if (opts.host === "0.0.0.0" && dashboardArgs.includes("--no-auth")) {
-    warn("Auth is disabled while binding to 0.0.0.0. Only do this on a trusted network.");
+  if (isExternalBind(opts.host) && dashboardArgs.includes("--no-auth")) {
+    warn(`Auth is disabled while binding to ${opts.host}. Only do this on a trusted network.`);
   }
 
   printSummary(opts, port, dashboardArgs);
