@@ -880,10 +880,10 @@ function AppInner() {
               workflowSteps,
               openTaskDetail: isMobile
                 ? (task: Task | TaskDetail, initialTab?: Parameters<typeof modalManager.openDetailTask>[1]) =>
-                    openDetailTaskWithHistory(task, initialTab)
+                  openDetailTaskWithHistory(task, initialTab)
                 : (task: Task | TaskDetail, initialTab?: Parameters<typeof modalManager.openDetailTask>[1]) =>
-                    modalManager.openDetailTask(task, initialTab),
-              renderTaskCard: (task: Task) => (
+                  modalManager.openDetailTask(task, initialTab),
+              renderTaskCard: (task: Task | TaskDetail) => (
                 <TaskCard
                   task={task}
                   projectId={currentProject?.id}
