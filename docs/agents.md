@@ -282,6 +282,14 @@ The custom tab exposes separate fields for:
 - **Instructions Path** (`instructionsPath`) — optional file-backed instructions path
 - **Inline Instructions** (`instructionsText`) — optional inline behavior instructions
 
+For long-form prompt authoring, **Soul**, **Agent Memory**, and **Inline Instructions** now use the same rich editing affordances as other prompt editors in the dashboard:
+
+- Larger default editing surfaces for easier drafting
+- Plain/edit mode and Markdown preview mode
+- Fullscreen expand/collapse editing for long content (safe-area-aware on mobile)
+
+These controls are also available on the editable review step, so prompt content can be reviewed and refined with the same markdown and fullscreen behavior before submit.
+
 ### Final review edits (step 2)
 
 Before clicking **Create**, the final review step remains editable for identity/instruction fields so operators can make last-minute corrections without navigating backward. The review step includes edit-in-place controls for:

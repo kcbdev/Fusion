@@ -1,6 +1,5 @@
 import type { Task, TaskDetail, Column as ColumnType, TaskCreateInput } from "@fusion/core";
 import { COLUMNS } from "@fusion/core";
-import { compareTaskPriority, sortTasksByPriorityThenAgeAndId } from "../../../core/src/task-priority";
 import { Column } from "./Column";
 import type { ToastType } from "../hooks/useToast";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
@@ -54,6 +53,32 @@ interface BoardProps {
   lastFetchTimeMs?: number;
 }
 
+function normalizeTaskPriority(priority: Task["priority"]): "low" | "normal" | "high" | "urgent" {
+  if (priority === "low" || priority === "normal" || priority === "high" || priority === "urgent") {
+    return priority;
+  }
+  return "normal";
+}
+
+function getTaskPriorityRank(priority: Task["priority"]): number {
+  switch (normalizeTaskPriority(priority)) {
+    case "urgent":
+      return 3;
+    case "high":
+      return 2;
+    case "normal":
+      return 1;
+    case "low":
+      return 0;
+    default:
+      return 1;
+  }
+}
+
+function compareTaskPriority(a: Task["priority"], b: Task["priority"]): number {
+  return getTaskPriorityRank(b) - getTaskPriorityRank(a);
+}
+
 function compareTaskIdNumeric(a: string, b: string): number {
   const aNum = Number.parseInt(a.slice(a.lastIndexOf("-") + 1), 10);
   const bNum = Number.parseInt(b.slice(b.lastIndexOf("-") + 1), 10);
@@ -63,6 +88,21 @@ function compareTaskIdNumeric(a: string, b: string): number {
   }
 
   return a.localeCompare(b);
+}
+
+function sortTasksByPriorityThenAgeAndId(tasks: Task[]): Task[] {
+  return [...tasks].sort((a, b) => {
+    const priorityCmp = compareTaskPriority(a.priority, b.priority);
+    if (priorityCmp !== 0) {
+      return priorityCmp;
+    }
+
+    if (a.createdAt !== b.createdAt) {
+      return a.createdAt.localeCompare(b.createdAt);
+    }
+
+    return compareTaskIdNumeric(a.id, b.id);
+  });
 }
 
 function getDoneSortTimestamp(task: Task): number {
