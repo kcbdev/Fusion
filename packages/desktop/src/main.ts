@@ -13,6 +13,8 @@ import {
 } from "./native.js";
 import { setupTray } from "./tray.js";
 import { getRendererUrl, getRendererFilePath, isUrlRenderer } from "./renderer.js";
+import { DesktopLocalServerManager } from "./local-server.js";
+import { readShellSettings } from "./shell-settings.js";
 
 // Re-export for backward compatibility
 export { IS_DEVELOPMENT } from "./renderer.js";
@@ -33,6 +35,7 @@ enableSourceMaps();
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+let localServerManager: DesktopLocalServerManager | null = null;
 
 function getAppWithQuitFlag(): Electron.App & AppWithQuitFlag {
   return app as Electron.App & AppWithQuitFlag;
@@ -88,13 +91,33 @@ export async function initializeApp(): Promise<void> {
     appName: "Fusion",
   });
 
+  localServerManager = new DesktopLocalServerManager(process.cwd());
+
   tray = new Tray(nativeImage.createEmpty());
   setupTray(createdWindow, tray);
 
-  registerIpcHandlers(createdWindow, tray);
+  registerIpcHandlers(createdWindow, tray, {
+    onDesktopModeChange: async (mode) => {
+      if (!localServerManager) {
+        return;
+      }
+      if (mode === "local") {
+        await localServerManager.start();
+      } else {
+        await localServerManager.stop();
+      }
+    },
+    getLocalServerState: () => localServerManager?.getState() ?? { status: "idle", error: null },
+    getServerPort: () => localServerManager?.getPort(),
+  });
   registerDeepLinkProtocol();
   setupDeepLinkHandler(createdWindow);
   setupAutoUpdater(createdWindow);
+
+  const shellSettings = await readShellSettings();
+  if (shellSettings.desktopMode === "local") {
+    await localServerManager.start();
+  }
 
   if (state?.isMaximized === true) {
     createdWindow.maximize();
@@ -118,6 +141,10 @@ export function run(): void {
     if (tray) {
       tray.destroy();
       tray = null;
+    }
+
+    if (localServerManager) {
+      void localServerManager.stop();
     }
   });
 

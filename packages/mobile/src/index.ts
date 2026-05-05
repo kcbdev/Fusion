@@ -7,6 +7,7 @@ import {
   type PushNotificationManagerOptions,
 } from "./plugins/push-notifications.js";
 import { ShareManager, type ShareManagerOptions } from "./plugins/share.js";
+import { MobileNativeShellBridge } from "./plugins/native-shell.js";
 
 export { DeepLinkManager } from "./plugins/deep-links.js";
 export type {
@@ -20,12 +21,28 @@ export type {
   PushNotificationManagerOptions,
 } from "./plugins/push-notifications.js";
 export { ShareManager } from "./plugins/share.js";
+export { MobileNativeShellBridge } from "./plugins/native-shell.js";
+export { QrScanner, parseQrConnectionPayload } from "./plugins/qr-scanner.js";
+export {
+  loadShellProfiles,
+  listShellProfiles,
+  saveShellProfile,
+  deleteShellProfile,
+  setActiveShellProfile,
+} from "./plugins/connection-profiles.js";
 export type {
   ShareEventMap,
   ShareManagerOptions,
   ShareTaskPayload,
 } from "./plugins/share.js";
-export type { MobilePluginManager, PluginEventMap } from "./types.js";
+export type {
+  FusionShellApi,
+  MobilePluginManager,
+  PluginEventMap,
+  ShellConnectionProfile,
+  ShellConnectionProfileInput,
+  ShellConnectionState,
+} from "./types.js";
 
 interface LifecycleManager {
   initialize?: () => Promise<void>;
@@ -56,6 +73,14 @@ async function initializeManager(manager: LifecycleManager): Promise<void> {
   if (typeof manager.start === "function") {
     await manager.start();
   }
+}
+
+export function installMobileShellBridge(
+  target: Window & typeof globalThis = window,
+): MobileNativeShellBridge {
+  const bridge = new MobileNativeShellBridge();
+  (target as Window & { fusionShell?: MobileNativeShellBridge }).fusionShell = bridge;
+  return bridge;
 }
 
 export async function initializePlugins(

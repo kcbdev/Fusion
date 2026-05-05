@@ -54,6 +54,11 @@ import { useTaskHandlers } from "./hooks/useTaskHandlers";
 import { useRemoteNodeData } from "./hooks/useRemoteNodeData";
 import { useRemoteNodeEvents } from "./hooks/useRemoteNodeEvents";
 import { NodeProvider, useNodeContext } from "./context/NodeContext";
+import { ShellProvider } from "./context/ShellContext";
+import { useShellConnection } from "./hooks/useShellConnection";
+import { NativeShellOnboardingModal } from "./components/NativeShellOnboardingModal";
+import { NativeShellConnectionManager } from "./components/NativeShellConnectionManager";
+import { NativeShellConnectionStatus } from "./components/NativeShellConnectionStatus";
 import type { AiSessionSummary } from "./api";
 import { fetchUnreadCount, reportDashboardPerf, fetchTaskDetail, fetchWorkflowSteps } from "./api";
 import { getScopedItem, setScopedItem } from "./utils/projectStorage";
@@ -110,8 +115,29 @@ function prefetchLazyViews() {
 
 const SETUP_WARNING_DISMISSED_KEY = "kb-setup-warning-dismissed";
 
+export function requiresNativeShellOnboarding(
+  shellState: { host: "web" | "mobile-shell" | "desktop-shell"; desktopMode?: "local" | "remote"; activeProfileId: string | null },
+  shellReady: boolean,
+  shellOnboardingComplete: boolean,
+): boolean {
+  if (!shellReady || shellOnboardingComplete || shellState.host === "web") {
+    return false;
+  }
+
+  if (shellState.host === "mobile-shell") {
+    return !shellState.activeProfileId;
+  }
+
+  if (shellState.desktopMode === "local") {
+    return false;
+  }
+
+  return !shellState.activeProfileId;
+}
+
 function AppInner() {
   const { toasts, addToast, removeToast } = useToast();
+  const { shellApi, state: shellState, ready: shellReady } = useShellConnection();
   const isElectron = typeof window !== "undefined" && Boolean((window as Window & { electronAPI?: unknown }).electronAPI);
 
   // Warm lazy view chunks during browser idle so first navigation is instant.
@@ -764,6 +790,31 @@ function AppInner() {
     // intentional no-op
   }, []);
 
+  const [shellOnboardingComplete, setShellOnboardingComplete] = useState(false);
+  const [shellConnectionManagerOpen, setShellConnectionManagerOpen] = useState(false);
+
+  const requiresShellOnboarding = requiresNativeShellOnboarding(shellState, shellReady, shellOnboardingComplete);
+
+  useEffect(() => {
+    if (shellState.host !== "desktop-shell") {
+      return;
+    }
+
+    if (shellState.desktopMode !== "local") {
+      return;
+    }
+
+    if (shellState.localServer?.status !== "ready" || !shellState.localServer.port) {
+      return;
+    }
+
+    if (window.location.port === String(shellState.localServer.port)) {
+      return;
+    }
+
+    window.location.href = `http://localhost:${shellState.localServer.port}`;
+  }, [shellState]);
+
   const showBackendConnectionErrorPage =
     !projectsLoading &&
     !currentProjectLoading &&
@@ -779,6 +830,9 @@ function AppInner() {
           errorMessage={projectsError ?? "Failed to fetch projects"}
           isRetrying={retryingProjects}
           onRetry={handleRetryProjects}
+          onManageConnection={shellApi ? () => {
+            void shellApi.openConnectionManager();
+          } : undefined}
         />
       );
     }
@@ -1161,6 +1215,9 @@ function AppInner() {
           researchView: researchEnabled,
         }}
         pluginDashboardViews={pluginDashboardViews}
+        shellConnectionControl={shellApi && shellState.host !== "web" ? (
+          <NativeShellConnectionStatus state={shellState} onManage={() => setShellConnectionManagerOpen(true)} />
+        ) : undefined}
       />
       {viewMode === "project" && currentProject && !nodesOpen && taskView !== "missions" && !modalManager.isPlanningOpen && !sessionBannersHidden && (
         <SessionNotificationBanner
@@ -1258,6 +1315,9 @@ function AppInner() {
           nodesView: nodesEnabled,
         }}
         pluginDashboardViews={pluginDashboardViews}
+        shellConnectionControl={shellApi && shellState.host !== "web" ? (
+          <NativeShellConnectionStatus state={shellState} onManage={() => setShellConnectionManagerOpen(true)} />
+        ) : undefined}
       />
       {viewMode === "project" && currentProject && taskView !== "chat" && taskView !== "mailbox" && taskView !== "insights" && taskView !== "devserver" && taskView !== "dev-server" && !taskView.startsWith("plugin:") && (
         <QuickChatFAB
@@ -1299,6 +1359,22 @@ function AppInner() {
         }}
       />
       <AuthTokenRecoveryDialog open={authTokenRecoveryOpen} />
+      {shellApi && (
+        <>
+          <NativeShellOnboardingModal
+            open={requiresShellOnboarding}
+            shellApi={shellApi}
+            shellState={shellState}
+            onComplete={() => setShellOnboardingComplete(true)}
+          />
+          <NativeShellConnectionManager
+            open={shellConnectionManagerOpen}
+            shellApi={shellApi}
+            shellState={shellState}
+            onClose={() => setShellConnectionManagerOpen(false)}
+          />
+        </>
+      )}
     </>
   );
 }
@@ -1306,11 +1382,13 @@ function AppInner() {
 export function App() {
   return (
     <ToastProvider>
-      <NodeProvider>
-        <ConfirmDialogProvider>
-          <AppInner />
-        </ConfirmDialogProvider>
-      </NodeProvider>
+      <ShellProvider>
+        <NodeProvider>
+          <ConfirmDialogProvider>
+            <AppInner />
+          </ConfirmDialogProvider>
+        </NodeProvider>
+      </ShellProvider>
     </ToastProvider>
   );
 }

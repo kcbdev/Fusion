@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { Settings, Pause, Play, Square, LayoutGrid, List, Terminal, Lightbulb, Search, X, Activity, MoreHorizontal, Clock, Folder, History, GitBranch, Monitor, Server, Workflow, Bot, Target, ChevronRight, FileCode, Loader2, Grid3X3, Mail, MessageSquare, ChevronDown, Check, Zap, Sparkles, FileText, Brain, CheckSquare } from "lucide-react";
 import "./Header.css";
 // Header renders an inline ProjectSelector dropdown using project-selector-* classes.
@@ -228,6 +228,7 @@ export interface HeaderProps {
   /** Experimental feature flags controlling visibility of nav items. */
   experimentalFeatures?: { insights?: boolean; roadmap?: boolean; memoryView?: boolean; devServer?: boolean; devServerView?: boolean; researchView?: boolean };
   pluginDashboardViews?: PluginDashboardViewEntry[];
+  shellConnectionControl?: ReactNode;
 }
 
 export function Header({
@@ -277,6 +278,7 @@ export function Header({
   isRemote = false,
   experimentalFeatures,
   pluginDashboardViews = [],
+  shellConnectionControl,
 }: HeaderProps) {
   const mode: ViewportMode = useViewportMode();
   const isMobile = mode === "mobile";
@@ -992,6 +994,7 @@ export function Header({
       </div>
 
       <div className="header-actions">
+        {shellConnectionControl}
         {/* Mobile View Toggle - compact board/list switcher in header when mobile nav is active */}
         {hideFullNav && onChangeView && (view === "board" || view === "list") && (
           <div className="view-toggle" data-testid="mobile-view-toggle">

@@ -1,5 +1,17 @@
 # @fusion/mobile
 
+## Native Shell Onboarding & Remote Connections
+
+Mobile uses a shell-level onboarding flow for first-run connection setup before dashboard onboarding.
+
+- **Remote-first flow:** mobile onboarding goes directly to remote server connection.
+- **Connection setup options:** QR scan (`startQrScan`) or manual server URL entry, with optional auth token.
+- **Saved profiles:** multiple remote profiles are persisted in shell-local storage and can be edited/switched later from dashboard connection management.
+- **Storage boundary:** profile/mode state is stored only in mobile shell-local storage (via native plugin wrappers), not in Fusion project settings/local dashboard project storage.
+- **Bridge contract:** mobile exposes `window.fusionShell` (`getState`, `listProfiles`, `saveProfile`, `deleteProfile`, `setActiveProfile`, `startQrScan`, `openConnectionManager`, `subscribe`) so shared dashboard code can run host-neutrally.
+
+Native wrappers are isolated under `src/plugins/native-shell.ts`, `src/plugins/connection-profiles.ts`, and `src/plugins/qr-scanner.ts` so dashboard code never calls vendor-specific APIs directly.
+
 ## Push Notifications
 
 `PushNotificationManager` supports two complementary notification channels:

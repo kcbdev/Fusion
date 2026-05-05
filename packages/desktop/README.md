@@ -59,9 +59,18 @@ getRendererUrl()     // Returns URL or file:// path
 getRendererFilePath() // Returns absolute file path for loadFile()
 ```
 
+## First-run Shell Onboarding (Desktop)
+
+Desktop now boots through a shell-level onboarding gate before dashboard onboarding when no usable shell connection state exists.
+
+- **First run choice:** users choose **Local Fusion (bundled runtime)** or **Remote Server**.
+- **Desktop mode restore:** last-used mode is persisted and restored on relaunch.
+- **Remote profiles:** multiple saved profiles are supported (`name`, `serverUrl`, optional `authToken`) and can be managed/switched later from the dashboard header connection UI.
+- **Storage boundary:** shell connection state is stored only in desktop-local app data at `app.getPath("userData")/shell-connections.json` and is not written to `.fusion/config.json` or dashboard project storage keys.
+
 ## IPC Channel Reference
 
-`src/ipc.ts` registers the renderer ↔ main process bridge used by `window.fusionAPI`.
+`src/ipc.ts` registers renderer ↔ main process bridges used by `window.electronAPI` (desktop renderer transport/window controls) and `window.fusionShell` (shared shell connection contract for dashboard code).
 
 ### Renderer → Main (`ipcRenderer.invoke`)
 
@@ -85,6 +94,16 @@ getRendererFilePath() // Returns absolute file path for loadFile()
 | `deep-link` | main → renderer | `DeepLinkResult` (`{ type, id, raw }`) |
 | `update-available` | main → renderer | update info object (includes `version`) |
 | `update-downloaded` | main → renderer | no payload is currently forwarded by preload |
+
+## Local Bundled Runtime Lifecycle
+
+Desktop local mode uses an in-process runtime manager (`src/local-server.ts`) that mirrors the CLI desktop server pattern:
+
+- creates `TaskStore`, calls `init()` and `watch()`
+- creates the dashboard server with `createServer(store)`
+- listens on an ephemeral port (`0`, never `4040`)
+- reports `idle | starting | ready | error` local runtime state via `window.fusionShell`
+- starts automatically when desktop mode is `local`, stops on remote switch and app shutdown
 
 ## Main Process Lifecycle
 
@@ -115,20 +134,26 @@ getRendererFilePath() // Returns absolute file path for loadFile()
 - Tray instance is destroyed (`tray.destroy()`)
 - `mainWindow` is nulled on `closed` for clean re-creation on macOS `activate`
 
-## Preload API (`window.fusionAPI`)
+## Preload APIs (`window.electronAPI` and `window.fusionShell`)
 
-`src/preload.ts` exposes a safe, context-isolated bridge:
+`src/preload.ts` exposes safe, context-isolated bridges:
 
-- Window control: `minimize()`, `maximize()`, `close()`, `isMaximized()`
-- App/system: `getSystemInfo()`, `checkForUpdates()`, `getServerPort()`
-- Tray: `updateTrayStatus(status)`
-- Native dialogs: `showExportDialog()`, `showImportDialog()`
-- Event subscriptions (return unsubscribe functions):
-  - `onDeepLink(callback)`
-  - `onUpdateAvailable(callback)`
-  - `onUpdateDownloaded(callback)`
+- `window.electronAPI`
+  - Window control: `minimize()`, `maximize()`, `close()`, `isMaximized()`
+  - App/system: `getSystemInfo()`, `checkForUpdates()`, `getServerPort()`
+  - Tray: `updateTrayStatus(status)`
+  - Native dialogs: `showExportDialog()`, `showImportDialog()`
+  - Event subscriptions (return unsubscribe functions):
+    - `onDeepLink(callback)`
+    - `onUpdateAvailable(callback)`
+    - `onUpdateDownloaded(callback)`
+- `window.fusionShell`
+  - `getState()`, `listProfiles()`, `saveProfile()`, `deleteProfile()`
+  - `setActiveProfile()`, `setDesktopMode()`
+  - `startQrScan()`, `openConnectionManager()`, `subscribe(listener)`
+- `window.fusionAPI` remains as a backward-compatible alias of `window.electronAPI`.
 
-All preload typings are declared in `src/types.d.ts` (`FusionAPI`, `SystemInfo`, `UpdateCheckResult`, `DeepLinkResult`).
+All preload typings are declared in `src/types.d.ts`.
 
 ## Module Integration Overview
 

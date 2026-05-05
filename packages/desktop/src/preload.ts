@@ -1,9 +1,40 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { DeepLinkResult, FusionAPI, SystemInfo, UpdateCheckResult } from "./types";
 
+interface ShellConnectionProfile {
+  id: string;
+  name: string;
+  serverUrl: string;
+  authToken?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt?: string | null;
+}
+
+interface ShellConnectionProfileInput {
+  id?: string;
+  name: string;
+  serverUrl: string;
+  authToken?: string | null;
+}
+
+interface ShellConnectionState {
+  host: "web" | "mobile-shell" | "desktop-shell";
+  desktopMode?: "local" | "remote";
+  activeProfileId: string | null;
+  profiles: ShellConnectionProfile[];
+  localServer?: {
+    status: "idle" | "starting" | "ready" | "error";
+    port?: number;
+    error?: string | null;
+  };
+}
+
 export type FusionDesktopAPI = FusionAPI;
 
-contextBridge.exposeInMainWorld("fusionAPI", {
+type WindowControlAction = "minimize" | "maximize" | "close" | "isMaximized";
+
+const electronApi = {
   // Window control
   minimize: (): Promise<void> => ipcRenderer.invoke("window:minimize"),
   maximize: (): Promise<boolean> => ipcRenderer.invoke("window:maximize"),
@@ -29,6 +60,22 @@ contextBridge.exposeInMainWorld("fusionAPI", {
     return () => ipcRenderer.removeListener("deep-link", handler);
   },
 
+  windowControl: async (action: WindowControlAction): Promise<boolean | void> => {
+    switch (action) {
+      case "minimize":
+        return ipcRenderer.invoke("window:minimize");
+      case "maximize":
+        return ipcRenderer.invoke("window:maximize");
+      case "close":
+        return ipcRenderer.invoke("window:close");
+      case "isMaximized":
+        return ipcRenderer.invoke("window:isMaximized");
+    }
+  },
+  getPlatform: (): Promise<"darwin" | "win32" | "linux"> => ipcRenderer.invoke("platform:get"),
+  apiRequest: (method: string, path: string, body?: unknown): Promise<unknown> =>
+    ipcRenderer.invoke("api-request", { method, path, body }),
+
   // Auto-updater events (main → renderer)
   onUpdateAvailable: (callback: (info: { version: string }) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, info: { version: string }) => callback(info);
@@ -40,4 +87,25 @@ contextBridge.exposeInMainWorld("fusionAPI", {
     ipcRenderer.on("update-downloaded", handler);
     return () => ipcRenderer.removeListener("update-downloaded", handler);
   },
-});
+  invoke: (channel: string, payload?: unknown): Promise<unknown> => ipcRenderer.invoke(channel, payload),
+};
+
+const fusionShell = {
+  getState: (): Promise<ShellConnectionState> => ipcRenderer.invoke("shell:getState"),
+  listProfiles: (): Promise<ShellConnectionProfile[]> => ipcRenderer.invoke("shell:listProfiles"),
+  saveProfile: (profile: ShellConnectionProfileInput): Promise<ShellConnectionProfile> => ipcRenderer.invoke("shell:saveProfile", profile),
+  deleteProfile: (profileId: string): Promise<void> => ipcRenderer.invoke("shell:deleteProfile", profileId),
+  setActiveProfile: (profileId: string | null): Promise<ShellConnectionState> => ipcRenderer.invoke("shell:setActiveProfile", profileId),
+  setDesktopMode: (mode: "local" | "remote"): Promise<ShellConnectionState> => ipcRenderer.invoke("shell:setDesktopMode", mode),
+  startQrScan: (): Promise<{ serverUrl: string; authToken?: string | null }> => ipcRenderer.invoke("shell:startQrScan"),
+  openConnectionManager: (): Promise<void> => ipcRenderer.invoke("shell:openConnectionManager"),
+  subscribe: (listener: (state: ShellConnectionState) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: ShellConnectionState) => listener(state);
+    ipcRenderer.on("shell:state", handler);
+    return () => ipcRenderer.removeListener("shell:state", handler);
+  },
+};
+
+contextBridge.exposeInMainWorld("electronAPI", electronApi);
+contextBridge.exposeInMainWorld("fusionAPI", electronApi);
+contextBridge.exposeInMainWorld("fusionShell", fusionShell);

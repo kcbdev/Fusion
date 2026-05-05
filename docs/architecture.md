@@ -16,7 +16,10 @@ At a high level, Fusion is split into:
 - **Dashboard API + SPA** (`@fusion/dashboard`)
 - **CLI + Pi extension** (`@runfusion/fusion`)
 - **Desktop shell** (`@fusion/desktop`)
+- **Mobile shell** (`@fusion/mobile`)
 - **Terminal dashboard** (part of `@runfusion/fusion` — see `packages/cli/src/commands/dashboard-tui/`)
+
+Native shells expose a shared host-neutral bridge at `window.fusionShell` for first-run shell onboarding, connection profile persistence, and active shell mode/profile state. The dashboard consumes `window.fusionShell` when present and degrades cleanly in plain web/PWA mode.
 
 ### High-level runtime diagram
 

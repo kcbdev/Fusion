@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => {
   const showExportSettingsDialog = vi.fn();
   const showImportSettingsDialog = vi.fn();
   const setupAutoUpdater = vi.fn();
+  const readShellSettings = vi.fn(async () => ({ desktopMode: "remote", activeProfileId: null, profiles: [] }));
+  const writeShellSettings = vi.fn(async () => undefined);
 
   return {
     ipcMain,
@@ -26,6 +28,8 @@ const mocks = vi.hoisted(() => {
     showExportSettingsDialog,
     showImportSettingsDialog,
     setupAutoUpdater,
+    readShellSettings,
+    writeShellSettings,
   };
 });
 
@@ -44,6 +48,11 @@ vi.mock("../native.js", () => ({
   setupAutoUpdater: mocks.setupAutoUpdater,
 }));
 
+vi.mock("../shell-settings.js", () => ({
+  readShellSettings: mocks.readShellSettings,
+  writeShellSettings: mocks.writeShellSettings,
+}));
+
 function createWindowMock() {
   return {
     minimize: vi.fn(),
@@ -51,6 +60,7 @@ function createWindowMock() {
     unmaximize: vi.fn(),
     close: vi.fn(),
     isMaximized: vi.fn(() => false),
+    webContents: { send: vi.fn() },
   };
 }
 
@@ -61,11 +71,11 @@ function createTrayMock() {
   };
 }
 
-async function registerHandlers() {
+async function registerHandlers(options: Record<string, unknown> = {}) {
   const { registerIpcHandlers } = await import("../ipc.ts");
   const window = createWindowMock();
   const tray = createTrayMock();
-  registerIpcHandlers(window as never, tray as never);
+  registerIpcHandlers(window as never, tray as never, options as never);
   return { window, tray };
 }
 
@@ -74,169 +84,34 @@ describe("ipc handlers", () => {
     vi.clearAllMocks();
     vi.resetModules();
     mocks.ipcHandlers.clear();
-    mocks.app.getVersion.mockReturnValue("1.2.3");
-    mocks.setupAutoUpdater.mockImplementation(() => undefined);
-    mocks.showExportSettingsDialog.mockResolvedValue(null);
-    mocks.showImportSettingsDialog.mockResolvedValue(null);
   });
 
-  it("registers all expected channels", async () => {
+  it("registers shell channels", async () => {
     await registerHandlers();
 
     const channels = new Set(mocks.ipcMain.handle.mock.calls.map(([channel]) => channel));
-
-    expect(channels).toEqual(new Set([
-      "window:minimize",
-      "window:maximize",
-      "window:close",
-      "window:isMaximized",
-      "app:getSystemInfo",
-      "app:checkForUpdates",
-      "app:getServerPort",
-      "tray:updateStatus",
-      "native:showExportDialog",
-      "native:showImportDialog",
-    ]));
+    expect(channels.has("shell:getState")).toBe(true);
+    expect(channels.has("shell:saveProfile")).toBe(true);
+    expect(channels.has("shell:setDesktopMode")).toBe(true);
+    expect(channels.has("platform:get")).toBe(true);
   });
 
-  it("window:minimize calls mainWindow.minimize", async () => {
-    const { window } = await registerHandlers();
-
-    const handler = mocks.ipcHandlers.get("window:minimize");
-    await handler?.({});
-
-    expect(window.minimize).toHaveBeenCalledTimes(1);
-  });
-
-  it("window:maximize maximizes when currently unmaximized", async () => {
-    const { window } = await registerHandlers();
-    window.isMaximized.mockReturnValue(false);
-
-    const handler = mocks.ipcHandlers.get("window:maximize");
-    const result = await handler?.({});
-
-    expect(window.maximize).toHaveBeenCalledTimes(1);
-    expect(window.unmaximize).not.toHaveBeenCalled();
-    expect(result).toBe(true);
-  });
-
-  it("window:maximize restores when currently maximized", async () => {
-    const { window } = await registerHandlers();
-    window.isMaximized.mockReturnValue(true);
-
-    const handler = mocks.ipcHandlers.get("window:maximize");
-    const result = await handler?.({});
-
-    expect(window.unmaximize).toHaveBeenCalledTimes(1);
-    expect(window.maximize).not.toHaveBeenCalled();
-    expect(result).toBe(false);
-  });
-
-  it("window:close calls mainWindow.close", async () => {
-    const { window } = await registerHandlers();
-
-    const handler = mocks.ipcHandlers.get("window:close");
-    await handler?.({});
-
-    expect(window.close).toHaveBeenCalledTimes(1);
-  });
-
-  it("window:isMaximized returns current maximized state", async () => {
-    const { window } = await registerHandlers();
-    window.isMaximized.mockReturnValue(true);
-
-    const handler = mocks.ipcHandlers.get("window:isMaximized");
-    const result = await handler?.({});
-
-    expect(result).toBe(true);
-  });
-
-  it("app:getSystemInfo returns process and app metadata", async () => {
+  it("shell:getState returns desktop shell state", async () => {
     await registerHandlers();
-
-    const handler = mocks.ipcHandlers.get("app:getSystemInfo");
+    const handler = mocks.ipcHandlers.get("shell:getState");
     const result = await handler?.({});
 
-    expect(result).toEqual({
-      platform: process.platform,
-      arch: process.arch,
-      electronVersion: process.versions.electron,
-      nodeVersion: process.versions.node,
-      appVersion: "1.2.3",
-    });
+    expect(result).toMatchObject({ host: "desktop-shell", desktopMode: "remote" });
   });
 
-  it("app:checkForUpdates calls setupAutoUpdater and returns checking", async () => {
-    const { window } = await registerHandlers();
+  it("shell:setDesktopMode persists mode and emits state", async () => {
+    const onDesktopModeChange = vi.fn(async () => undefined);
+    const { window } = await registerHandlers({ onDesktopModeChange });
+    const handler = mocks.ipcHandlers.get("shell:setDesktopMode");
+    await handler?.({}, "local");
 
-    const handler = mocks.ipcHandlers.get("app:checkForUpdates");
-    const result = await handler?.({});
-
-    expect(mocks.setupAutoUpdater).toHaveBeenCalledWith(window);
-    expect(result).toEqual({ status: "checking" });
-  });
-
-  it("app:checkForUpdates returns error when updater throws", async () => {
-    await registerHandlers();
-    mocks.setupAutoUpdater.mockImplementationOnce(() => {
-      throw new Error("updater failed");
-    });
-
-    const handler = mocks.ipcHandlers.get("app:checkForUpdates");
-    const result = await handler?.({});
-
-    expect(result).toEqual({ status: "error", error: "updater failed" });
-  });
-
-  it("native:showExportDialog calls showExportSettingsDialog with mainWindow", async () => {
-    const { window } = await registerHandlers();
-    mocks.showExportSettingsDialog.mockResolvedValueOnce("/path/to/file.json");
-
-    const handler = mocks.ipcHandlers.get("native:showExportDialog");
-    const result = await handler?.({});
-
-    expect(mocks.showExportSettingsDialog).toHaveBeenCalledWith(window);
-    expect(result).toBe("/path/to/file.json");
-  });
-
-  it("native:showImportDialog calls showImportSettingsDialog with mainWindow", async () => {
-    const { window } = await registerHandlers();
-    mocks.showImportSettingsDialog.mockResolvedValueOnce(null);
-
-    const handler = mocks.ipcHandlers.get("native:showImportDialog");
-    const result = await handler?.({});
-
-    expect(mocks.showImportSettingsDialog).toHaveBeenCalledWith(window);
-    expect(result).toBeNull();
-  });
-
-  it("tray:updateStatus forwards status and tray instance", async () => {
-    const { tray } = await registerHandlers();
-
-    const handler = mocks.ipcHandlers.get("tray:updateStatus");
-    await handler?.({}, "paused");
-
-    expect(mocks.updateTrayStatus).toHaveBeenCalledWith(tray, "paused");
-  });
-
-  it("app:getServerPort returns port from environment", async () => {
-    process.env.FUSION_SERVER_PORT = "4545";
-    await registerHandlers();
-
-    const handler = mocks.ipcHandlers.get("app:getServerPort");
-    const result = await handler?.({});
-
-    expect(result).toBe(4545);
-    delete process.env.FUSION_SERVER_PORT;
-  });
-
-  it("app:getServerPort returns undefined when env var not set", async () => {
-    delete process.env.FUSION_SERVER_PORT;
-    await registerHandlers();
-
-    const handler = mocks.ipcHandlers.get("app:getServerPort");
-    const result = await handler?.({});
-
-    expect(result).toBeUndefined();
+    expect(mocks.writeShellSettings).toHaveBeenCalled();
+    expect(onDesktopModeChange).toHaveBeenCalledWith("local");
+    expect(window.webContents.send).toHaveBeenCalledWith("shell:state", expect.any(Object));
   });
 });

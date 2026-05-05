@@ -1,12 +1,3 @@
-export interface PluginEventMap {
-  [event: string]: unknown;
-}
-
-export interface MobilePluginManager {
-  start(): Promise<void>;
-  destroy(): void | Promise<void>;
-}
-
 export interface ShellConnectionProfile {
   id: string;
   name: string;
@@ -24,10 +15,8 @@ export interface ShellConnectionProfileInput {
   authToken?: string | null;
 }
 
-export type ShellHost = "web" | "mobile-shell" | "desktop-shell";
-
 export interface ShellConnectionState {
-  host: ShellHost;
+  host: "web" | "mobile-shell" | "desktop-shell";
   desktopMode?: "local" | "remote";
   activeProfileId: string | null;
   profiles: ShellConnectionProfile[];
@@ -48,4 +37,10 @@ export interface FusionShellApi {
   startQrScan(): Promise<{ serverUrl: string; authToken?: string | null }>;
   openConnectionManager(): Promise<void>;
   subscribe(listener: (state: ShellConnectionState) => void): () => void;
+}
+
+declare global {
+  interface Window {
+    fusionShell?: FusionShellApi;
+  }
 }

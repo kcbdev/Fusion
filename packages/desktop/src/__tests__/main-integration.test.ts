@@ -280,7 +280,7 @@ describe("main integration", () => {
 
     const [{ instance }] = mocks.windowInstances;
     const [trayInstance] = mocks.trayInstances;
-    expect(mocks.registerIpcHandlers).toHaveBeenCalledWith(instance, trayInstance);
+    expect(mocks.registerIpcHandlers).toHaveBeenCalledWith(instance, trayInstance, expect.any(Object));
   });
 
   it("window close hides to tray when app is not quitting", async () => {

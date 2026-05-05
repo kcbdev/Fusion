@@ -77,6 +77,13 @@ Install from browser:
 
 ## Mobile UX Behavior
 
+### Native shell onboarding and connection profiles
+
+- First launch in the mobile shell enters a shell-level remote connection onboarding flow before dashboard model onboarding.
+- Connection setup supports QR scan and manual URL entry, with optional auth token.
+- Saved remote profiles are persisted in shell-local mobile storage and managed through `window.fusionShell` connection APIs.
+- Shell connection persistence is intentionally separate from Fusion project/global settings.
+
 ### Planning Mode
 
 Planning Mode opens directly into the composer pane on mobile when no planning sessions exist, avoiding an empty-sidebar dead end. On desktop/tablet the split view is unaffected. Once sessions are saved, mobile shows the session list as usual and the user can navigate between list and detail panes.

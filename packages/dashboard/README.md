@@ -2,6 +2,18 @@
 
 Web-based dashboard for managing Fusion tasks. Provides a visual kanban board, list view, and git repository management tools.
 
+## Native Shell Embedding (`window.fusionShell`)
+
+When running inside Fusion mobile or desktop shells, the dashboard uses a host-neutral bridge (`window.fusionShell`) for shell connection state and profile management.
+
+- Shell host detection: `web | mobile-shell | desktop-shell`
+- Shell-first onboarding gate: native-shell connection onboarding runs before dashboard model onboarding when needed
+- Connection management: header status + manage/switch modal for saved profiles; desktop also supports local/remote mode switching
+- Desktop local mode handoff uses dynamic local server port resolution (`getServerPort`) while remote mode points to the active remote profile
+- Browser/PWA mode degrades cleanly when `window.fusionShell` is absent
+
+The shared dashboard must use `window.fusionShell` for shell connectivity concerns (not direct Electron or Capacitor globals).
+
 ## Features
 
 ### Planning Mode
