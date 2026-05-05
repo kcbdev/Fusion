@@ -265,6 +265,8 @@ describe("agents-view mobile CSS", () => {
     expect(extractRuleBlock(mobileMediaBlock, ".agent-org-chart-viewport")).toContain("min-height: calc(var(--space-2xl) * 4)");
     expect(extractRuleBlock(mobileMediaBlock, ".agent-org-chart")).toContain("gap: var(--space-sm)");
     expect(extractRuleBlock(mobileMediaBlock, ".agent-org-chart")).toContain("--org-chart-node-width: calc(var(--space-2xl) * 5)");
+    expect(extractRuleBlock(mobileMediaBlock, ".agent-org-chart")).toContain("--org-chart-sibling-gap: var(--space-sm)");
+    expect(extractRuleBlock(mobileMediaBlock, ".agent-org-chart")).toContain("--org-chart-children-offset: var(--space-lg)");
     expect(extractRuleBlock(mobileMediaBlock, ".org-chart-node-card")).toContain("padding: var(--space-sm)");
     expect(extractRuleBlock(mobileMediaBlock, ".org-chart-node__badge")).toContain("font-size: calc(var(--space-sm) + var(--space-xs) * 0.625)");
   });

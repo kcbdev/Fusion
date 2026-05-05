@@ -1,5 +1,5 @@
 import "./AgentsView.css";
-import { useState, useEffect, useCallback, useRef, useMemo, useId, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, useId, lazy, Suspense, type CSSProperties } from "react";
 import { Plus, Play, Pause, Activity, Trash2, RefreshCw, Bot, List, ChevronRight, ChevronDown, ChevronUp, Filter, Upload, Network, SlidersHorizontal, Copy, Check, ZoomIn, ZoomOut, Minimize2 } from "lucide-react";
 import type { Agent, AgentCapability, AgentOnboardingSummary, AgentState, OrgTreeNode } from "../api";
 import { updateAgent, updateAgentState, deleteAgent, startAgentRun, fetchOrgTree, fetchSettings, updateSettings } from "../api";
@@ -155,6 +155,14 @@ export function CollapsibleErrorDisplay({
   );
 }
 
+function getOrgChartLeafCount(node: OrgTreeNode): number {
+  if (node.children.length === 0) {
+    return 1;
+  }
+
+  return node.children.reduce((sum, child) => sum + getOrgChartLeafCount(child), 0);
+}
+
 function OrgChartNode({
   node,
   onSelect,
@@ -174,9 +182,14 @@ function OrgChartNode({
   const health = getHealthStatus(agent);
   const stateBadgeClass = getStateBadgeClass(agent.state);
   const stateNodeClass = getStateCardClass("org-chart-node-card", agent.state);
+  const subtreeLeafCount = getOrgChartLeafCount(node);
+  const nodeStyle = { "--org-chart-subtree-leaves": String(subtreeLeafCount) } as CSSProperties;
 
   return (
-    <div className={`org-chart-node${children.length > 0 ? " org-chart-node--has-children" : ""}`}>
+    <div
+      className={`org-chart-node${children.length > 0 ? " org-chart-node--has-children" : ""}`}
+      style={nodeStyle}
+    >
       <div
         className={`${stateNodeClass}${selectedAgentId === agent.id ? " agent-card--selected" : ""}`}
         onClick={() => onSelect(agent.id)}

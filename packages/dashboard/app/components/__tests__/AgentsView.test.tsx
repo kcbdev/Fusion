@@ -1291,6 +1291,29 @@ describe("AgentsView", () => {
       });
     });
 
+    it("sizes org chart subtree containers based on descendant leaf counts", async () => {
+      mockFetchOrgTree.mockResolvedValue(orgTree);
+      const { container } = render(<AgentsView addToast={mockAddToast} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Org Chart view" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Chief Agent")).toBeTruthy();
+      });
+
+      const rootNode = screen.getByText("Chief Agent").closest(".org-chart-node") as HTMLElement;
+      const nestedParentNode = screen.getByText("Director One").closest(".org-chart-node") as HTMLElement;
+      const leafNode = screen.getByText("Manager Alpha").closest(".org-chart-node") as HTMLElement;
+      const rootChildren = rootNode.querySelector(":scope > .org-chart-children") as HTMLElement;
+
+      expect(rootNode.style.getPropertyValue("--org-chart-subtree-leaves")).toBe("2");
+      expect(nestedParentNode.style.getPropertyValue("--org-chart-subtree-leaves")).toBe("1");
+      expect(leafNode.style.getPropertyValue("--org-chart-subtree-leaves")).toBe("1");
+      expect(rootChildren).toBeTruthy();
+      expect(rootChildren.className).toContain("org-chart-children");
+      expect(container.querySelectorAll(".org-chart-node--has-children").length).toBeGreaterThan(0);
+    });
+
     it("shows mobile zoom controls for org chart and keeps node selection working", async () => {
       mockViewportMode.mockReturnValue("mobile");
       mockFetchOrgTree.mockResolvedValue(orgTree);
