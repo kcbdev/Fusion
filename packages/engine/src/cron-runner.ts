@@ -488,7 +488,7 @@ export class CronRunner {
   ): Promise<AutomationRunResult> {
     const settings = await this.store.getSettings();
     const evalSettings = resolveTaskEvaluationSettings(settings);
-    const evaluator = new HybridEvaluatorService({ cwd: this.options.workingDirectory ?? process.cwd() });
+    const evaluator = new HybridEvaluatorService({ cwd: this.options.workingDirectory ?? process.cwd(), store: this.store });
 
     const result = await runScheduledEvalBatch({
       store: this.store,

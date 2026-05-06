@@ -2,6 +2,12 @@ import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import { fromJson, toJson, toJsonNullable } from "./db.js";
+import {
+  EVIDENCE_EXCERPT_TRUNCATION_MARKER,
+  EVIDENCE_LIMITS,
+  MAX_EVIDENCE_EXCERPT_LENGTH,
+  TASK_EVALUATION_EVIDENCE_SOURCE_ORDER,
+} from "./eval-types.js";
 import type {
   EvalRun,
   EvalRunCreateInput,
@@ -14,10 +20,13 @@ import type {
   EvalTaskResultCreateInput,
   EvalTaskResultListOptions,
   EvalTaskResultUpdateInput,
+  TaskEvaluationEvidenceBundle,
+  TaskEvidenceEntryBase,
 } from "./eval-types.js";
 
 const TERMINAL_STATUSES = new Set<EvalRunStatus>(["completed", "failed", "cancelled"]);
 const ACTIVE_STATUSES = new Set<EvalRunStatus>(["pending", "running"]);
+const EVIDENCE_BUNDLE_METADATA_KEY = "__taskEvaluationEvidenceBundle";
 const VALID_TRANSITIONS: Record<EvalRunStatus, EvalRunStatus[]> = {
   pending: ["running", "completed", "failed", "cancelled"],
   running: ["completed", "failed", "cancelled"],
@@ -43,6 +52,77 @@ function generateResultId(): string {
 
 function generateEventId(): string {
   return `ERE-${randomUUID()}`;
+}
+
+function withEvidenceBundleMetadata(
+  metadata: Record<string, unknown> | undefined,
+  evidenceBundle: EvalTaskResult["evidenceBundle"],
+): Record<string, unknown> | undefined {
+  if (!evidenceBundle) return metadata;
+  return {
+    ...(metadata ?? {}),
+    [EVIDENCE_BUNDLE_METADATA_KEY]: evidenceBundle,
+  };
+}
+
+function readEvidenceBundleFromMetadata(metadata: Record<string, unknown> | undefined): EvalTaskResult["evidenceBundle"] {
+  if (!metadata) return undefined;
+  return metadata[EVIDENCE_BUNDLE_METADATA_KEY] as EvalTaskResult["evidenceBundle"] | undefined;
+}
+
+function sortEvidenceEntries<T extends TaskEvidenceEntryBase>(entries: T[]): T[] {
+  return [...entries].sort((a, b) => {
+    const timeOrder = (a.timestamp ?? "").localeCompare(b.timestamp ?? "");
+    if (timeOrder !== 0) return timeOrder;
+    return a.id.localeCompare(b.id);
+  });
+}
+
+function truncateEvidenceExcerpt<T extends TaskEvidenceEntryBase>(entry: T): T {
+  if (!entry.excerpt || entry.excerpt.length <= MAX_EVIDENCE_EXCERPT_LENGTH) {
+    return entry;
+  }
+  const maxPrefix = Math.max(0, MAX_EVIDENCE_EXCERPT_LENGTH - EVIDENCE_EXCERPT_TRUNCATION_MARKER.length);
+  return {
+    ...entry,
+    excerpt: `${entry.excerpt.slice(0, maxPrefix)}${EVIDENCE_EXCERPT_TRUNCATION_MARKER}`,
+    truncated: true,
+  };
+}
+
+function validateEvidenceBundle(bundle: TaskEvaluationEvidenceBundle | undefined): TaskEvaluationEvidenceBundle | undefined {
+  if (!bundle) return undefined;
+  if (bundle.sourceOrder.join("|") !== TASK_EVALUATION_EVIDENCE_SOURCE_ORDER.join("|")) {
+    throw new Error("evidenceBundle.sourceOrder must match TASK_EVALUATION_EVIDENCE_SOURCE_ORDER");
+  }
+  const groupLimits: Array<[keyof TaskEvaluationEvidenceBundle, number]> = [
+    ["taskMetadata", EVIDENCE_LIMITS.taskMetadata],
+    ["commits", EVIDENCE_LIMITS.commits],
+    ["workflow", EVIDENCE_LIMITS.workflow],
+    ["reviews", EVIDENCE_LIMITS.reviews],
+    ["documents", EVIDENCE_LIMITS.documents],
+    ["taskActivity", EVIDENCE_LIMITS.taskActivity],
+    ["agentLogs", EVIDENCE_LIMITS.agentLogs],
+    ["runAudit", EVIDENCE_LIMITS.runAudit],
+  ];
+  for (const [group, limit] of groupLimits) {
+    const entries = bundle[group];
+    if (Array.isArray(entries) && entries.length > limit) {
+      throw new Error(`evidenceBundle.${group} exceeds limit ${limit}`);
+    }
+  }
+
+  return {
+    ...bundle,
+    taskMetadata: sortEvidenceEntries(bundle.taskMetadata).map(truncateEvidenceExcerpt),
+    commits: sortEvidenceEntries(bundle.commits).map(truncateEvidenceExcerpt),
+    workflow: sortEvidenceEntries(bundle.workflow).map(truncateEvidenceExcerpt),
+    reviews: sortEvidenceEntries(bundle.reviews).map(truncateEvidenceExcerpt),
+    documents: sortEvidenceEntries(bundle.documents).map(truncateEvidenceExcerpt),
+    taskActivity: sortEvidenceEntries(bundle.taskActivity).map(truncateEvidenceExcerpt),
+    agentLogs: sortEvidenceEntries(bundle.agentLogs).map(truncateEvidenceExcerpt),
+    runAudit: sortEvidenceEntries(bundle.runAudit).map(truncateEvidenceExcerpt),
+  };
 }
 
 export class EvalStore extends EventEmitter<EvalStoreEvents> {
@@ -188,6 +268,8 @@ export class EvalStore extends EventEmitter<EvalStoreEvents> {
     if (!run) throw new Error(`Eval run not found: ${runId}`);
 
     const now = new Date().toISOString();
+    const evidenceBundle = validateEvidenceBundle(input.evidenceBundle);
+    const metadata = withEvidenceBundleMetadata(input.metadata, evidenceBundle);
     const result: EvalTaskResult = {
       id: generateResultId(),
       runId,
@@ -200,11 +282,12 @@ export class EvalStore extends EventEmitter<EvalStoreEvents> {
       rationale: input.rationale,
       summary: input.summary,
       evidence: input.evidence ?? [],
+      evidenceBundle,
       deterministicSignals: input.deterministicSignals ?? [],
       aiSignals: input.aiSignals,
       followUps: input.followUps ?? [],
       provenance: input.provenance,
-      metadata: input.metadata,
+      metadata,
       createdAt: now,
       updatedAt: now,
     };
@@ -301,10 +384,13 @@ export class EvalStore extends EventEmitter<EvalStoreEvents> {
     if (!existing) return undefined;
 
     const now = new Date().toISOString();
+    const mergedMetadata = input.metadata ? { ...(existing.metadata ?? {}), ...input.metadata } : existing.metadata;
+    const evidenceBundle = validateEvidenceBundle(input.evidenceBundle ?? existing.evidenceBundle);
     const updated: EvalTaskResult = {
       ...existing,
       ...input,
-      metadata: input.metadata ? { ...(existing.metadata ?? {}), ...input.metadata } : existing.metadata,
+      evidenceBundle,
+      metadata: withEvidenceBundleMetadata(mergedMetadata, evidenceBundle),
       provenance: input.provenance ? { ...(existing.provenance ?? {}), ...input.provenance } : existing.provenance,
       updatedAt: now,
     };
@@ -437,6 +523,8 @@ export class EvalStore extends EventEmitter<EvalStoreEvents> {
   }
 
   private rowToResult(row: Record<string, unknown>): EvalTaskResult {
+    const metadata = fromJson<Record<string, unknown>>(row.metadata as string);
+    const evidenceBundle = readEvidenceBundleFromMetadata(metadata);
     return {
       id: String(row.id),
       runId: String(row.runId),
@@ -449,11 +537,12 @@ export class EvalStore extends EventEmitter<EvalStoreEvents> {
       rationale: (row.rationale as string | null) ?? undefined,
       summary: (row.summary as string | null) ?? undefined,
       evidence: fromJson(row.evidence as string) ?? [],
+      evidenceBundle,
       deterministicSignals: fromJson(row.deterministicSignals as string) ?? [],
       aiSignals: fromJson(row.aiSignals as string),
       followUps: fromJson(row.followUps as string) ?? [],
       provenance: fromJson(row.provenance as string),
-      metadata: fromJson(row.metadata as string),
+      metadata,
       createdAt: String(row.createdAt),
       updatedAt: String(row.updatedAt),
     };

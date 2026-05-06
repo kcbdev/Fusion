@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeOverallScore, createDatabase, EvalStore, runScheduledEvalBatch, type TaskDetail } from "@fusion/core";
+import { TASK_EVALUATION_EVIDENCE_SOURCE_ORDER, computeOverallScore, createDatabase, EvalStore, runScheduledEvalBatch, type TaskDetail, type TaskEvaluationEvidenceBundle } from "@fusion/core";
 import { HybridEvaluatorService, buildEvaluationPrompt, parseAiResponse, resolveEvaluatorModel } from "../evaluator.js";
 
 function makeTask(overrides: Partial<TaskDetail> = {}): TaskDetail {
@@ -110,13 +110,56 @@ describe("evaluator", () => {
       evidence: [],
     });
     expect(prompt).toContain("Deterministic signals");
+    expect(prompt).toContain("## Evidence");
     expect(prompt).toContain("ER-1");
+  });
+
+  it("injects evidence bundle payload into prompt", () => {
+    const task = makeTask();
+    const bundle: TaskEvaluationEvidenceBundle = {
+      taskId: task.id,
+      runId: "ER-1",
+      sourceOrder: TASK_EVALUATION_EVIDENCE_SOURCE_ORDER,
+      taskMetadata: [{ id: "tm-1", source: "taskMetadata", label: "snapshot", taskId: task.id, runId: "ER-1" }],
+      commits: [{ id: "commit-abc123", source: "commits", label: "subject", sha: "abc123", taskId: task.id, runId: "ER-1" }],
+      workflow: [],
+      reviews: [],
+      documents: [],
+      taskActivity: [],
+      agentLogs: [],
+      runAudit: [],
+    };
+    const prompt = buildEvaluationPrompt(task, { runId: "ER-1", startedAt: "2026-05-02T00:00:00.000Z" }, {
+      taskId: task.id,
+      column: "done",
+      workflowSummary: { total: 0, passed: 0, failed: 0, pending: 0 },
+      commitSummary: { commitCount: 0 },
+      logSummary: { errorCount: 0, warningCount: 0, timingEntries: 1 },
+      evidence: [],
+    }, bundle);
+    expect(prompt).toContain("## Evidence");
+    expect(prompt).toContain("tm-1");
+    expect(prompt).toContain("commit-abc123");
   });
 
   it("returns merged evaluation payload shape for persistence", async () => {
     const service = new HybridEvaluatorService({
       cwd: process.cwd(),
       runPrompt: async () => makeAiResponse(),
+      store: {} as any,
+      collectEvidence: async ({ task, runId }) => ({
+        taskId: task.id,
+        runId,
+        sourceOrder: TASK_EVALUATION_EVIDENCE_SOURCE_ORDER,
+        taskMetadata: [],
+        commits: [],
+        workflow: [],
+        reviews: [],
+        documents: [],
+        taskActivity: [],
+        agentLogs: [{ id: "agent-log-1", source: "agentLogs", label: "tool_result", taskId: task.id, runId, excerpt: "summary only" }],
+        runAudit: [],
+      }),
     });
     const result = await service.evaluateTask(makeTask(), { runId: "ER-1", startedAt: "2026-05-01T00:00:00.000Z" }, {});
     expect(result.status).toBe("scored");
@@ -130,6 +173,9 @@ describe("evaluator", () => {
       "processCompliance",
     ]);
     expect((result.metadata as any).hybridEvaluation).toBeDefined();
+    expect(result.evidenceBundle?.sourceOrder).toEqual(TASK_EVALUATION_EVIDENCE_SOURCE_ORDER);
+    expect(result.evidenceBundle?.agentLogs[0]?.excerpt).toBe("summary only");
+    expect((result.evidenceBundle?.agentLogs[0] as any)?.detail).toBeUndefined();
   });
 
   it("integrates scheduled batch with evaluator and persists one result per run/task", async () => {

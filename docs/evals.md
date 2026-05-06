@@ -64,6 +64,41 @@ Each `eval_task_results.categoryScores[]` item stores:
 
 `overallScore` is authoritative only when derived from these category finals using `computeOverallScore`.
 
+## Evidence Bundle Contract
+
+Hybrid evaluation now consumes a deterministic `TaskEvaluationEvidenceBundle` before AI scoring.
+
+Source groups are fixed and ordered:
+
+1. `taskMetadata`
+2. `commits`
+3. `workflow`
+4. `reviews`
+5. `documents`
+6. `taskActivity`
+7. `agentLogs`
+8. `runAudit`
+
+Per-source caps are enforced before persistence:
+
+- `commits`: 20
+- `agentLogs`: 25
+- `runAudit`: 25
+- `taskActivity`: 25
+- other groups: 25 max entries
+
+Persisted excerpts are bounded to 500 characters with an explicit truncation marker (`… [truncated]`). Commit subjects are additionally capped at 160 chars.
+
+### Persisted vs Linked Evidence
+
+Eval rows store normalized evidence references and bounded excerpts only. Full raw blobs (full agent logs/tool output, full git output, full run-audit payloads) are not copied into eval rows.
+
+Stored references include task/run identifiers and source-specific drill-down fields (e.g. commit SHA, workflow step ID/name/status, document key/revision, run-audit event ID/domain/mutation, PR/merge metadata, execution timing, retry/recovery counters).
+
+### Prompt Integration
+
+`packages/engine/src/evaluator.ts` injects the normalized bundle under a dedicated `## Evidence` prompt section. The evaluator is instructed to cite evidence IDs/labels from this section instead of inventing unsupported claims.
+
 ## Non-Goals
 
 This contract does not define:
@@ -71,4 +106,3 @@ This contract does not define:
 - follow-up task creation policy
 - eval settings UX
 - eval dashboard/list rendering
-- exhaustive cross-source evidence harvesting

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createDatabase, type Database } from "../db.js";
 import { EvalLifecycleError, EvalStore } from "../eval-store.js";
+import { EVIDENCE_EXCERPT_TRUNCATION_MARKER, EVIDENCE_LIMITS, TASK_EVALUATION_EVIDENCE_SOURCE_ORDER } from "../eval-types.js";
 
 let db: Database;
 let store: EvalStore;
@@ -125,6 +126,145 @@ describe("EvalStore", () => {
     expect(rows[0]?.overallScore).toBe(90);
     expect(rows[0]?.taskSnapshot.title).toBe("B");
     expect(second.id).toBe(first.id);
+  });
+
+  it("persists evidence bundles via metadata and preserves stable source ordering", () => {
+    const run = store.createRun({ projectId: "p1", scope: "window" });
+    const created = store.createTaskResult(run.id, {
+      taskId: "FN-evidence",
+      taskSnapshot: { taskId: "FN-evidence", title: "Evidence task" },
+      status: "scored",
+      evidenceBundle: {
+        taskId: "FN-evidence",
+        runId: run.id,
+        sourceOrder: [...TASK_EVALUATION_EVIDENCE_SOURCE_ORDER],
+        taskMetadata: [{ id: "tm-1", source: "taskMetadata", label: "task snapshot", taskId: "FN-evidence", runId: run.id }],
+        commits: [{ id: "c-1", source: "commits", label: "commit", sha: "abc123", taskId: "FN-evidence", runId: run.id }],
+        workflow: [],
+        reviews: [],
+        documents: [],
+        taskActivity: [],
+        agentLogs: [],
+        runAudit: [],
+      },
+    });
+
+    const fetched = store.getTaskResult(created.id);
+    expect(fetched?.evidenceBundle?.sourceOrder).toEqual(TASK_EVALUATION_EVIDENCE_SOURCE_ORDER);
+    expect(fetched?.evidenceBundle?.taskMetadata[0]?.id).toBe("tm-1");
+    expect(fetched?.metadata?.__taskEvaluationEvidenceBundle).toBeDefined();
+  });
+
+  it("rejects evidence bundles that exceed per-source limits", () => {
+    const run = store.createRun({ projectId: "p1", scope: "window" });
+    expect(() => store.createTaskResult(run.id, {
+      taskId: "FN-over-limit",
+      taskSnapshot: { taskId: "FN-over-limit" },
+      status: "scored",
+      evidenceBundle: {
+        taskId: "FN-over-limit",
+        runId: run.id,
+        sourceOrder: [...TASK_EVALUATION_EVIDENCE_SOURCE_ORDER],
+        taskMetadata: [],
+        commits: Array.from({ length: EVIDENCE_LIMITS.commits + 1 }, (_, i) => ({
+          id: `c-${i}`,
+          source: "commits" as const,
+          label: `commit ${i}`,
+          sha: `${i}`,
+          taskId: "FN-over-limit",
+          runId: run.id,
+        })),
+        workflow: [],
+        reviews: [],
+        documents: [],
+        taskActivity: [],
+        agentLogs: [],
+        runAudit: [],
+      },
+    })).toThrow(/commits exceeds limit/);
+  });
+
+  it("truncates overlong evidence excerpts to bounded persisted size", () => {
+    const run = store.createRun({ projectId: "p1", scope: "window" });
+    const result = store.createTaskResult(run.id, {
+      taskId: "FN-truncate",
+      taskSnapshot: { taskId: "FN-truncate" },
+      status: "scored",
+      evidenceBundle: {
+        taskId: "FN-truncate",
+        runId: run.id,
+        sourceOrder: [...TASK_EVALUATION_EVIDENCE_SOURCE_ORDER],
+        taskMetadata: [{
+          id: "tm-1",
+          source: "taskMetadata",
+          label: "summary",
+          taskId: "FN-truncate",
+          runId: run.id,
+          excerpt: "x".repeat(800),
+        }],
+        commits: [],
+        workflow: [],
+        reviews: [],
+        documents: [],
+        taskActivity: [],
+        agentLogs: [],
+        runAudit: [],
+      },
+    });
+
+    const fetched = store.getTaskResult(result.id);
+    const excerpt = fetched?.evidenceBundle?.taskMetadata[0]?.excerpt ?? "";
+    expect(excerpt.length).toBeLessThanOrEqual(500);
+    expect(excerpt.endsWith(EVIDENCE_EXCERPT_TRUNCATION_MARKER)).toBe(true);
+    expect(fetched?.evidenceBundle?.taskMetadata[0]?.truncated).toBe(true);
+  });
+
+  it("rejects evidence bundles with incorrect sourceOrder", () => {
+    const run = store.createRun({ projectId: "p1", scope: "window" });
+    expect(() => store.createTaskResult(run.id, {
+      taskId: "FN-wrong-order",
+      taskSnapshot: { taskId: "FN-wrong-order" },
+      status: "scored",
+      evidenceBundle: {
+        taskId: "FN-wrong-order",
+        runId: run.id,
+        sourceOrder: ["commits", "taskMetadata", "workflow", "reviews", "documents", "taskActivity", "agentLogs", "runAudit"],
+        taskMetadata: [],
+        commits: [],
+        workflow: [],
+        reviews: [],
+        documents: [],
+        taskActivity: [],
+        agentLogs: [],
+        runAudit: [],
+      },
+    })).toThrow(/sourceOrder must match/);
+  });
+
+  it("round-trips optional empty evidence source groups", () => {
+    const run = store.createRun({ projectId: "p1", scope: "window" });
+    const result = store.createTaskResult(run.id, {
+      taskId: "FN-empty-sources",
+      taskSnapshot: { taskId: "FN-empty-sources" },
+      status: "scored",
+      evidenceBundle: {
+        taskId: "FN-empty-sources",
+        runId: run.id,
+        sourceOrder: [...TASK_EVALUATION_EVIDENCE_SOURCE_ORDER],
+        taskMetadata: [],
+        commits: [],
+        workflow: [],
+        reviews: [],
+        documents: [],
+        taskActivity: [],
+        agentLogs: [],
+        runAudit: [],
+      },
+    });
+
+    const fetched = store.getTaskResult(result.id);
+    expect(fetched?.evidenceBundle?.commits).toEqual([]);
+    expect(fetched?.evidenceBundle?.runAudit).toEqual([]);
   });
 
   it("appends run events with sequential ordering", () => {
