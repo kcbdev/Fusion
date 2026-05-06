@@ -619,7 +619,7 @@ describe("AgentsView", () => {
         expect(screen.getByRole("button", { name: "View details for Test Agent 2" })).toBeTruthy();
       });
 
-      expect(screen.getAllByText("View Details").length).toBeGreaterThanOrEqual(4);
+      expect(screen.getAllByText("Details").length).toBeGreaterThanOrEqual(4);
     });
 
     it("opens matching detail view when clicking View Details button", async () => {
@@ -659,19 +659,19 @@ describe("AgentsView", () => {
       });
     });
 
-    it("keeps clickable identity area behavior for opening detail view", async () => {
+    it("opens detail view when clicking anywhere on the agent card body", async () => {
       render(<AgentsView addToast={mockAddToast} />);
 
       await waitFor(() => {
         expect(screen.getAllByText("Test Agent 1").length).toBeGreaterThan(0);
       });
 
-      const clickableIdentity = Array.from(document.querySelectorAll(".agent-info--clickable")).find((element) =>
+      const clickableCard = Array.from(document.querySelectorAll(".agent-card--clickable")).find((element) =>
         element.textContent?.includes("Test Agent 1"),
       ) as HTMLElement | undefined;
-      expect(clickableIdentity).toBeTruthy();
+      expect(clickableCard).toBeTruthy();
 
-      fireEvent.click(clickableIdentity!);
+      fireEvent.click(clickableCard!);
 
       await waitFor(() => {
         const detail = screen.getByTestId("agent-detail-view");

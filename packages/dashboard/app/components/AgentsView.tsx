@@ -675,11 +675,31 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
   }, [isMobileViewport, openAgentDetail]);
 
   const handleRunHeartbeat = async (agentId: string, agentName: string) => {
+    // Optimistic state flip: the API call can take several seconds before the
+    // backend transitions the agent to running, and the user clicking "Run
+    // Now" reasonably expects the card to react immediately. We mirror the
+    // pattern handleStateChange uses: stamp the override, await the API,
+    // refetch on success, roll back on failure.
+    setOptimisticStateOverrides((prev) => {
+      const next = new Map(prev);
+      next.set(agentId, "running");
+      return next;
+    });
     try {
       await startAgentRun(agentId, projectId, { source: "on_demand", triggerDetail: "Triggered from dashboard" });
       addToast(`Heartbeat run started for ${agentName}`, "success");
-      void loadAgents();
+      await loadAgents();
+      setOptimisticStateOverrides((prev) => {
+        const next = new Map(prev);
+        next.delete(agentId);
+        return next;
+      });
     } catch (err) {
+      setOptimisticStateOverrides((prev) => {
+        const next = new Map(prev);
+        next.delete(agentId);
+        return next;
+      });
       addToast(`Failed to start heartbeat run: ${getErrorMessage(err)}`, "error");
     }
   };
@@ -1120,22 +1140,39 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
               const heartbeatOptions = getHeartbeatIntervalOptions(configuredIntervalMs);
               const isUpdatingHeartbeat = updatingHeartbeatAgentId === agent.id;
               return (
-                <div key={agent.id} className={`agent-card ${stateCardClass}${selectedAgentId === agent.id ? " agent-card--selected" : ""}`}>
+                <div
+                  key={agent.id}
+                  className={`agent-card agent-card--clickable ${stateCardClass}${selectedAgentId === agent.id ? " agent-card--selected" : ""}`}
+                  onClick={(e) => {
+                    // Open detail when the user clicks the card body, but
+                    // bail when the click landed on an interactive
+                    // descendant (action buttons, the role-edit select,
+                    // the role-icon button) so those keep their dedicated
+                    // behaviors instead of double-firing. Use currentTarget
+                    // as the boundary so the card's own role="button" is
+                    // not treated as an interactive descendant.
+                    const target = e.target as HTMLElement;
+                    if (target === e.currentTarget) {
+                      openAgentDetail(agent.id);
+                      return;
+                    }
+                    const interactive = target.closest('button, select, input, [role="button"]');
+                    if (interactive && interactive !== e.currentTarget) return;
+                    openAgentDetail(agent.id);
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === "Enter" || e.key === " ") {
+                      if (e.key === " ") e.preventDefault();
+                      openAgentDetail(agent.id);
+                    }
+                  }}
+                  aria-label={`Open details for ${agent.name}`}
+                >
                   <div className="agent-card-header">
-                    <div
-                      className="agent-info agent-info--clickable"
-                      onClick={() => openAgentDetail(agent.id)}
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          if (e.key === " ") {
-                            e.preventDefault();
-                          }
-                          openAgentDetail(agent.id);
-                        }
-                      }}
-                    >
+                    <div className="agent-info">
                       {editingRoleForAgent === agent.id ? (
                         <select
                           ref={roleSelectRef}
@@ -1420,7 +1457,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
                       title={`View details for ${agent.name}`}
                       aria-label={`View details for ${agent.name}`}
                     >
-                      View Details
+                      Details
                     </button>
                     {(agent.state === "idle" || agent.state === "terminated" || agent.state === "paused") && (
                       <button

@@ -694,11 +694,25 @@
   display: flex;
   gap: var(--space-sm);
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+
+.agent-card-actions .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .agent-card-details-btn {
   margin-left: auto;
+}
+
+.agent-card--clickable {
+  cursor: pointer;
+}
+
+.agent-card--clickable:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--state-active-border));
+  outline-offset: 2px;
 }
 
 .agent-empty {
