@@ -184,7 +184,7 @@ function renderToolCalls(toolCalls?: ToolCallInfo[]): ReactNode {
       >
         <summary>
           <span className="chat-tool-call-status-dot" aria-hidden="true" />
-          <span className="chat-tool-call-name">{toolCall.toolName}</span>
+          <span className="chat-tool-call-name" title={toolCall.toolName}>{toolCall.toolName}</span>
           {summaryPreview && (
             <span className="chat-tool-call-preview" title={summaryPreview}>
               {summaryPreview}
@@ -243,7 +243,7 @@ function renderToolCalls(toolCalls?: ToolCallInfo[]): ReactNode {
       <details className="chat-tool-calls-group" data-testid="chat-tool-calls-group" open={hasRunning}>
         <summary className="chat-tool-calls-group-summary">
           <Wrench size={12} aria-hidden="true" />
-          <span>{toolCalls.length} tool calls</span>
+          <span className="chat-tool-calls-count">{toolCalls.length} tool calls</span>
           <span className="chat-tool-calls-names" title={namesSummary}>{namesSummary}</span>
           {statusSummary && <span className="chat-tool-calls-group-status">{statusSummary}</span>}
         </summary>

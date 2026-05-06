@@ -593,8 +593,11 @@ describe("ChatView", () => {
     const group = screen.getByTestId("chat-tool-calls-group") as HTMLDetailsElement;
     expect(group).toBeInTheDocument();
     expect(group.open).toBe(false);
-    expect(screen.getByText("2 tool calls")).toBeInTheDocument();
-    expect(screen.getByText("read, grep")).toBeInTheDocument();
+
+    const summary = group.querySelector(".chat-tool-calls-group-summary") as HTMLElement;
+    expect(summary).toBeInTheDocument();
+    expect(summary.querySelector(".chat-tool-calls-count")).toHaveTextContent("2 tool calls");
+    expect(summary.querySelector(".chat-tool-calls-names")).toHaveTextContent("read, grep");
   });
 
   it("auto-opens grouped tool calls when any tool call is running", () => {
@@ -771,6 +774,8 @@ describe("ChatView", () => {
     const details = document.querySelector(".chat-tool-call") as HTMLDetailsElement | null;
     expect(details).toBeInTheDocument();
     expect(details?.open).toBe(false);
+    expect(details?.querySelector(".chat-tool-call-name")).toHaveTextContent("read");
+    expect(details?.querySelector(".chat-tool-call-status-text")).toHaveTextContent("completed");
   });
 
   it("truncates tool names when more than 5 unique", () => {
