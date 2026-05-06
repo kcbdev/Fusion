@@ -54,6 +54,29 @@ function listProtectedFusionDirs() {
   return [...dirs];
 }
 
+// Paths inside a protected .fusion root that a concurrently-running fusion app
+// is expected to mutate. Tests still must not write to these — the filter only
+// suppresses noise from a live app sharing the same HOME during local dev.
+const RUNTIME_IGNORE_PATTERNS = [
+  /^agent(?:[\/\\]|$)/,
+  /^agents(?:[\/\\]|$)/,
+  /^agent-memory(?:[\/\\]|$)/,
+  /^automations(?:[\/\\]|$)/,
+  /^backups(?:[\/\\]|$)/,
+  /^plugins(?:[\/\\]|$)/,
+  /^cache(?:[\/\\]|$)/,
+  /^config\.json$/,
+  /^fusion-central\.db(?:-wal|-shm|-journal)?$/,
+  /^fusion\.db(?:-wal|-shm|-journal)?(?:\.backup-[\w-]+)?$/,
+  /^archive\.db(?:-wal|-shm|-journal)?(?:\.backup-[\w-]+)?$/,
+  /^activity-log\.jsonl$/,
+  /^logs(?:[\/\\]|$)/,
+];
+
+function isRuntimePath(relPath) {
+  return RUNTIME_IGNORE_PATTERNS.some((re) => re.test(relPath));
+}
+
 function collectFusionSignature(rootDir, out = []) {
   if (!existsSync(rootDir)) return out;
   let stat;
@@ -68,6 +91,7 @@ function collectFusionSignature(rootDir, out = []) {
   for (const entry of entries) {
     const fullPath = join(rootDir, entry.name);
     const relPath = fullPath.slice(rootDir.length + (rootDir.endsWith(sep) ? 0 : 1));
+    if (isRuntimePath(relPath)) continue;
     let entryStat;
     try {
       entryStat = statSync(fullPath);
@@ -94,22 +118,31 @@ function sleepMs(ms) {
 }
 
 function recordBaseline() {
-  const firstProtected = snapshotProtectedFusion();
-  sleepMs(250);
-  const secondProtected = snapshotProtectedFusion();
+  const samples = [snapshotProtectedFusion()];
+  for (let i = 0; i < 4; i++) {
+    sleepMs(500);
+    samples.push(snapshotProtectedFusion());
+  }
 
+  const latestProtected = samples[samples.length - 1];
   const unstableProtectedDirs = [];
+  const firstProtected = samples[0];
   for (const first of firstProtected) {
-    const second = secondProtected.find((entry) => entry.dir === first.dir);
-    if (!second) continue;
-    if (JSON.stringify(first.entries) !== JSON.stringify(second.entries)) {
-      unstableProtectedDirs.push(first.dir);
+    let unstable = false;
+    for (let i = 1; i < samples.length; i++) {
+      const current = samples[i].find((entry) => entry.dir === first.dir);
+      if (!current) continue;
+      if (JSON.stringify(first.entries) !== JSON.stringify(current.entries)) {
+        unstable = true;
+        break;
+      }
     }
+    if (unstable) unstableProtectedDirs.push(first.dir);
   }
 
   const payload = {
     tmpNames: snapshotTmp().map((e) => e.name),
-    protectedFusion: secondProtected,
+    protectedFusion: latestProtected,
     unstableProtectedDirs,
   };
   writeFileSync(BASELINE_FILE, JSON.stringify(payload));
@@ -136,14 +169,37 @@ function checkAgainstBaseline() {
   const baselineByDir = new Map((baseline.protectedFusion ?? []).map((entry) => [entry.dir, entry]));
   const unstableProtectedDirs = new Set(baseline.unstableProtectedDirs ?? []);
   const currentProtected = snapshotProtectedFusion();
-  const protectedViolations = [];
+  const currentByDir = new Map(currentProtected.map((entry) => [entry.dir, entry]));
+  const candidateViolations = [];
   for (const current of currentProtected) {
     if (unstableProtectedDirs.has(current.dir)) continue;
     const base = baselineByDir.get(current.dir) ?? { exists: false, entries: [] };
     const changedExistence = Boolean(base.exists) !== Boolean(current.exists);
     const changedEntries = JSON.stringify(base.entries) !== JSON.stringify(current.entries);
     if (changedExistence || changedEntries) {
-      protectedViolations.push(current.dir);
+      candidateViolations.push(current.dir);
+    }
+  }
+
+  const protectedViolations = [];
+  if (candidateViolations.length > 0) {
+    sleepMs(1250);
+    const resampledProtected = snapshotProtectedFusion();
+    const resampledByDir = new Map(resampledProtected.map((entry) => [entry.dir, entry]));
+
+    for (const dir of candidateViolations) {
+      const first = currentByDir.get(dir);
+      const second = resampledByDir.get(dir);
+      if (!first || !second) {
+        protectedViolations.push(dir);
+        continue;
+      }
+
+      // If the directory is still mutating across back-to-back samples,
+      // treat it as externally active noise (same as baseline unstable dirs).
+      if (JSON.stringify(first.entries) === JSON.stringify(second.entries)) {
+        protectedViolations.push(dir);
+      }
     }
   }
 

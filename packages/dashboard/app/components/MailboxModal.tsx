@@ -82,6 +82,36 @@ function messagePreview(content: string, max = 80): string {
   return `${content.slice(0, max)}…`;
 }
 
+function buildReplyThread(messages: Message[], selectedMessage: Message): Message[] {
+  const allMessages = [...messages];
+  if (!allMessages.some((message) => message.id === selectedMessage.id)) {
+    allMessages.push(selectedMessage);
+  }
+
+  const threadIds = new Set<string>([selectedMessage.id]);
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+
+    for (const message of allMessages) {
+      const replyToId = message.metadata?.replyTo?.messageId;
+      if (threadIds.has(message.id) && replyToId && !threadIds.has(replyToId)) {
+        threadIds.add(replyToId);
+        changed = true;
+      }
+      if (replyToId && threadIds.has(replyToId) && !threadIds.has(message.id)) {
+        threadIds.add(message.id);
+        changed = true;
+      }
+    }
+  }
+
+  return allMessages
+    .filter((message) => threadIds.has(message.id))
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+}
+
 // ── Component ─────────────────────────────────────────────────────────────
 
 export function MailboxModal({
@@ -314,6 +344,8 @@ export function MailboxModal({
 
   if (!isOpen) return null;
 
+  const threadMessages = selectedMessage ? buildReplyThread(conversationMessages, selectedMessage) : [];
+
   // ── Render ────────────────────────────────────────────────────────────
 
   return (
@@ -468,13 +500,13 @@ export function MailboxModal({
                 </div>
               </div>
               {/* Conversation thread */}
-              {conversationMessages.length > 1 && (
+              {threadMessages.length > 1 && (
                 <div className="mailbox-conversation" data-testid="mailbox-conversation">
                   <div className="mailbox-conversation-label">Conversation</div>
-                  {conversationMessages.map((msg) => {
+                  {threadMessages.map((msg) => {
                     const replyToId = msg.metadata?.replyTo?.messageId;
                     const replyToMessage = replyToId
-                      ? conversationMessages.find((candidate) => candidate.id === replyToId)
+                      ? threadMessages.find((candidate) => candidate.id === replyToId)
                       : undefined;
 
                     return (
@@ -498,7 +530,7 @@ export function MailboxModal({
                 </div>
               )}
               {/* Full message content */}
-              {(conversationMessages.length <= 1) && (
+              {(threadMessages.length <= 1) && (
                 <>
                   {selectedMessage.metadata?.replyTo?.messageId && (
                     <div className="mailbox-reply-context" data-testid="mailbox-selected-reply-context">

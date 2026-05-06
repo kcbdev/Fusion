@@ -231,7 +231,7 @@ describe("MailboxView", () => {
     render(<MailboxView {...defaultProps} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("mailbox-conversations")).toBeDefined();
+      expect(screen.getByTestId("mailbox-inbox-list")).toBeDefined();
     });
   });
 
@@ -263,10 +263,15 @@ describe("MailboxView", () => {
     });
   });
 
-  it("groups messages by sender and shows unread count per group", async () => {
-    const secondMessage = { ...mockMessage, id: "msg-003", read: false };
+  it("renders separate inbox rows for independent messages from the same sender", async () => {
+    const secondMessage = {
+      ...mockMessage,
+      id: "msg-003",
+      content: "Second top-level message",
+      metadata: undefined,
+    };
     mockFetchInbox.mockResolvedValue({
-      messages: [mockMessage, secondMessage], // Same sender, both unread
+      messages: [mockMessage, secondMessage],
       unreadCount: 2,
       total: 2,
     });
@@ -274,10 +279,42 @@ describe("MailboxView", () => {
     render(<MailboxView {...defaultProps} />);
 
     await waitFor(() => {
-      // Should show one conversation group with 2 unread
-      const group = screen.getByTestId("mailbox-conversation-agent:agent-001");
-      expect(group).toBeDefined();
-      expect(screen.getByTestId("mailbox-unread-badge-agent:agent-001")).toBeDefined();
+      expect(screen.getByTestId("mailbox-item-msg-001")).toBeDefined();
+      expect(screen.getByTestId("mailbox-item-msg-003")).toBeDefined();
+      expect(screen.getByTestId("mailbox-unread-dot-msg-001")).toBeDefined();
+      expect(screen.getByTestId("mailbox-unread-dot-msg-003")).toBeDefined();
+    });
+  });
+
+  it("opens the specific selected inbox row when same-sender messages are separate", async () => {
+    const secondMessage: Message = {
+      ...mockMessage,
+      id: "msg-003",
+      content: "Second top-level message",
+      createdAt: new Date(Date.now() + 1000).toISOString(),
+    };
+
+    mockFetchInbox.mockResolvedValue({
+      messages: [mockMessage, secondMessage],
+      unreadCount: 2,
+      total: 2,
+    });
+    mockFetchConversation.mockResolvedValue([secondMessage]);
+    mockMarkMessageRead.mockResolvedValue({ ...secondMessage, read: true });
+
+    render(<MailboxView {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-item-msg-003")).toBeDefined();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mailbox-item-msg-003"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-message-body")).toHaveTextContent("Second top-level message");
+      expect(mockMarkMessageRead).toHaveBeenCalledWith("msg-003", undefined);
     });
   });
 
@@ -291,7 +328,7 @@ describe("MailboxView", () => {
     render(<MailboxView {...defaultProps} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("mailbox-unread-badge-agent:agent-001")).toBeDefined();
+      expect(screen.getByTestId("mailbox-unread-dot-msg-001")).toBeDefined();
     });
   });
 
@@ -362,11 +399,11 @@ describe("MailboxView", () => {
     render(<MailboxView {...defaultProps} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("mailbox-conversation-agent:agent-001")).toBeDefined();
+      expect(screen.getByTestId("mailbox-item-msg-001")).toBeDefined();
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByTestId("mailbox-conversation-agent:agent-001"));
+      fireEvent.click(screen.getByTestId("mailbox-item-msg-001"));
     });
 
     await waitFor(() => {
@@ -391,7 +428,7 @@ describe("MailboxView", () => {
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByTestId("mailbox-conversation-agent:agent-001"));
+      fireEvent.click(screen.getByTestId("mailbox-item-msg-001"));
     });
 
     await waitFor(() => {
@@ -434,7 +471,7 @@ describe("MailboxView", () => {
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByTestId("mailbox-conversation-agent:agent-001"));
+      fireEvent.click(screen.getByTestId("mailbox-item-msg-001"));
     });
 
     await waitFor(() => {
@@ -465,11 +502,11 @@ describe("MailboxView", () => {
     render(<MailboxView {...defaultProps} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("mailbox-conversation-agent:agent-001")).toBeDefined();
+      expect(screen.getByTestId("mailbox-item-msg-004")).toBeDefined();
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByTestId("mailbox-conversation-agent:agent-001"));
+      fireEvent.click(screen.getByTestId("mailbox-item-msg-004"));
     });
 
     await waitFor(() => {
@@ -491,11 +528,11 @@ describe("MailboxView", () => {
     render(<MailboxView {...defaultProps} onUnreadCountChange={onUnreadCountChange} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("mailbox-conversation-agent:agent-001")).toBeDefined();
+      expect(screen.getByTestId("mailbox-item-msg-001")).toBeDefined();
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByTestId("mailbox-conversation-agent:agent-001"));
+      fireEvent.click(screen.getByTestId("mailbox-item-msg-001"));
     });
 
     await waitFor(() => {
@@ -543,11 +580,11 @@ describe("MailboxView", () => {
     render(<MailboxView {...defaultProps} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("mailbox-conversation-agent:agent-001")).toBeDefined();
+      expect(screen.getByTestId("mailbox-item-msg-001")).toBeDefined();
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByTestId("mailbox-conversation-agent:agent-001"));
+      fireEvent.click(screen.getByTestId("mailbox-item-msg-001"));
     });
 
     await waitFor(() => {
@@ -579,11 +616,11 @@ describe("MailboxView", () => {
     render(<MailboxView {...defaultProps} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("mailbox-conversation-agent:agent-001")).toBeDefined();
+      expect(screen.getByTestId("mailbox-item-msg-001")).toBeDefined();
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByTestId("mailbox-conversation-agent:agent-001"));
+      fireEvent.click(screen.getByTestId("mailbox-item-msg-001"));
     });
 
     await waitFor(() => {
@@ -653,11 +690,11 @@ describe("MailboxView", () => {
     render(<MailboxView {...defaultProps} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("mailbox-conversation-agent:agent-001")).toBeDefined();
+      expect(screen.getByTestId("mailbox-item-msg-thread-root")).toBeDefined();
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByTestId("mailbox-conversation-agent:agent-001"));
+      fireEvent.click(screen.getByTestId("mailbox-item-msg-thread-root"));
     });
 
     await waitFor(() => {
@@ -666,6 +703,44 @@ describe("MailboxView", () => {
       expect(replyContext).toBeDefined();
       expect(replyContext).toHaveClass("mailbox-reply-context");
       expect(screen.getByText(/Replying to Can you share your current status\?/)).toBeDefined();
+    });
+  });
+
+  it("does not pull unrelated same-sender messages into selected detail thread", async () => {
+    const root: Message = {
+      ...mockMessage,
+      id: "msg-thread-root-only",
+      content: "Root request",
+    };
+    const unrelated: Message = {
+      ...mockMessage,
+      id: "msg-unrelated",
+      content: "Independent update",
+      createdAt: new Date(Date.now() + 10_000).toISOString(),
+    };
+
+    mockFetchInbox.mockResolvedValue({
+      messages: [root],
+      unreadCount: 1,
+      total: 1,
+    });
+    mockFetchConversation.mockResolvedValue([root, unrelated]);
+    mockMarkMessageRead.mockResolvedValue({ ...root, read: true });
+
+    render(<MailboxView {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-item-msg-thread-root-only")).toBeDefined();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mailbox-item-msg-thread-root-only"));
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("mailbox-conversation")).toBeNull();
+      expect(screen.getByTestId("mailbox-message-body")).toHaveTextContent("Root request");
+      expect(screen.queryByText("Independent update")).toBeNull();
     });
   });
 
@@ -688,11 +763,11 @@ describe("MailboxView", () => {
     render(<MailboxView {...defaultProps} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("mailbox-conversation-agent:agent-001")).toBeDefined();
+      expect(screen.getByTestId("mailbox-item-msg-reply-single")).toBeDefined();
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByTestId("mailbox-conversation-agent:agent-001"));
+      fireEvent.click(screen.getByTestId("mailbox-item-msg-reply-single"));
     });
 
     await waitFor(() => {

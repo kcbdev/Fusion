@@ -483,6 +483,37 @@ describe("MailboxModal", () => {
     });
   });
 
+  it("does not show unrelated same-sender messages as a thread in detail", async () => {
+    const root: Message = {
+      ...mockMessage,
+      id: "msg-modal-root-only",
+      content: "Primary inbox request",
+    };
+    const unrelated: Message = {
+      ...mockMessage,
+      id: "msg-modal-unrelated",
+      content: "Unrelated top-level note",
+      createdAt: new Date(Date.now() + 10_000).toISOString(),
+    };
+
+    mockFetchInbox.mockResolvedValue({ messages: [root], total: 1, unreadCount: 1 });
+    mockFetchConversation.mockResolvedValue([root, unrelated]);
+
+    render(<MailboxModal {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-item-msg-modal-root-only")).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByTestId("mailbox-item-msg-modal-root-only"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("mailbox-conversation")).toBeNull();
+      expect(screen.getByTestId("mailbox-message-body")).toHaveTextContent("Primary inbox request");
+      expect(screen.queryByText("Unrelated top-level note")).toBeNull();
+    });
+  });
+
   it("shows compose button in header on inbox tab", async () => {
     render(<MailboxModal {...defaultProps} />);
     await waitFor(() => {

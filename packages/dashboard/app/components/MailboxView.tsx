@@ -43,19 +43,6 @@ interface MailboxViewProps {
   onUnreadCountChange?: (count: number) => void;
 }
 
-/** Represents a grouped conversation in the inbox */
-interface ConversationGroup {
-  /** Unique key combining fromId and fromType */
-  key: string;
-  fromId: string;
-  fromType: ParticipantType;
-  /** Latest message in the conversation */
-  latestMessage: Message;
-  /** All messages in this conversation */
-  messages: Message[];
-  /** Count of unread messages in this conversation */
-  unreadCount: number;
-}
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -104,41 +91,36 @@ function messagePreview(content: string, max = 80): string {
   return `${content.slice(0, max)}…`;
 }
 
-/** Groups messages by conversation (sender) key */
-function groupMessagesByConversation(messages: Message[]): ConversationGroup[] {
-  const groups = new Map<string, ConversationGroup>();
+function buildReplyThread(messages: Message[], selectedMessage: Message): Message[] {
+  const allMessages = [...messages];
+  if (!allMessages.some((message) => message.id === selectedMessage.id)) {
+    allMessages.push(selectedMessage);
+  }
 
-  for (const msg of messages) {
-    const key = `${msg.fromType}:${msg.fromId}`;
-    const existing = groups.get(key);
+  const threadIds = new Set<string>([selectedMessage.id]);
+  let changed = true;
 
-    if (existing) {
-      existing.messages.push(msg);
-      // Track latest by timestamp
-      if (new Date(msg.createdAt) > new Date(existing.latestMessage.createdAt)) {
-        existing.latestMessage = msg;
+  while (changed) {
+    changed = false;
+
+    for (const message of allMessages) {
+      const replyToId = message.metadata?.replyTo?.messageId;
+      if (threadIds.has(message.id) && replyToId && !threadIds.has(replyToId)) {
+        threadIds.add(replyToId);
+        changed = true;
       }
-      // Update unread count
-      if (!msg.read) {
-        existing.unreadCount++;
+      if (replyToId && threadIds.has(replyToId) && !threadIds.has(message.id)) {
+        threadIds.add(message.id);
+        changed = true;
       }
-    } else {
-      groups.set(key, {
-        key,
-        fromId: msg.fromId,
-        fromType: msg.fromType,
-        latestMessage: msg,
-        messages: [msg],
-        unreadCount: msg.read ? 0 : 1,
-      });
     }
   }
 
-  // Sort by latest message timestamp, newest first
-  return Array.from(groups.values()).sort(
-    (a, b) => new Date(b.latestMessage.createdAt).getTime() - new Date(a.latestMessage.createdAt).getTime()
-  );
+  return allMessages
+    .filter((message) => threadIds.has(message.id))
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 }
+
 
 // ── Component ─────────────────────────────────────────────────────────────
 
@@ -407,6 +389,8 @@ export function MailboxView({
   const renderMessageDetail = () => {
     if (!selectedMessage || showComposer) return null;
 
+    const threadMessages = buildReplyThread(conversationMessages, selectedMessage);
+
     return (
       <div className="mailbox-message-detail" data-testid="mailbox-message-detail">
         <div className="mailbox-message-detail-header">
@@ -460,13 +444,13 @@ export function MailboxView({
             </span>
           </div>
         </div>
-        {conversationMessages.length > 1 && (
+        {threadMessages.length > 1 && (
           <div className="mailbox-conversation" data-testid="mailbox-conversation">
             <div className="mailbox-conversation-label">Conversation</div>
-            {conversationMessages.map((msg) => {
+            {threadMessages.map((msg) => {
               const replyToId = msg.metadata?.replyTo?.messageId;
               const replyToMessage = replyToId
-                ? conversationMessages.find((candidate) => candidate.id === replyToId)
+                ? threadMessages.find((candidate) => candidate.id === replyToId)
                 : undefined;
 
               return (
@@ -489,7 +473,7 @@ export function MailboxView({
             })}
           </div>
         )}
-        {(conversationMessages.length <= 1) && (
+        {(threadMessages.length <= 1) && (
           <>
             {selectedMessage.metadata?.replyTo?.messageId && (
               <div className="mailbox-reply-context" data-testid="mailbox-selected-reply-context">
@@ -516,41 +500,28 @@ export function MailboxView({
               <p>No messages in your inbox</p>
             </div>
           )}
-          {inbox && inbox.messages.length > 0 && (
-            <div className="mailbox-conversations" data-testid="mailbox-conversations">
-              {groupMessagesByConversation(inbox.messages).map((group) => (
-                <div
-                  key={group.key}
-                  className={`mailbox-conversation-group ${group.unreadCount > 0 ? "unread" : ""}`}
-                  onClick={() => handleOpenMessage(group.latestMessage)}
-                  data-testid={`mailbox-conversation-${group.key}`}
-                >
-                  <div className="mailbox-item-avatar">
-                    {group.fromType === "agent" ? <Bot size={16} /> : <User size={16} />}
-                  </div>
-                  <div className="mailbox-item-content">
-                    <div className="mailbox-item-header">
-                      <span className="mailbox-item-from">
-                        {getParticipantLabel(group.fromId, group.fromType)}
-                      </span>
-                      <span className="mailbox-item-time">
-                        {formatTimestamp(group.latestMessage.createdAt)}
-                      </span>
-                    </div>
-                    <div className="mailbox-item-preview">
-                      {group.latestMessage.content.slice(0, 80)}
-                      {group.latestMessage.content.length > 80 ? "…" : ""}
-                    </div>
-                  </div>
-                  {group.unreadCount > 0 && (
-                    <div className="mailbox-group-unread-badge" data-testid={`mailbox-unread-badge-${group.key}`}>
-                      {group.unreadCount > 9 ? "9+" : group.unreadCount}
-                    </div>
-                  )}
+          {inbox?.messages.map((msg) => (
+            <div
+              key={msg.id}
+              className={`mailbox-item ${!msg.read ? "unread" : ""}`}
+              onClick={() => handleOpenMessage(msg)}
+              data-testid={`mailbox-item-${msg.id}`}
+            >
+              <div className="mailbox-item-avatar">
+                {msg.fromType === "agent" ? <Bot size={16} /> : <User size={16} />}
+              </div>
+              <div className="mailbox-item-content">
+                <div className="mailbox-item-header">
+                  <span className="mailbox-item-from">
+                    {getParticipantLabel(msg.fromId, msg.fromType)}
+                  </span>
+                  <span className="mailbox-item-time">{formatTimestamp(msg.createdAt)}</span>
                 </div>
-              ))}
+                <div className="mailbox-item-preview">{msg.content.slice(0, 80)}{msg.content.length > 80 ? "…" : ""}</div>
+              </div>
+              {!msg.read && <div className="mailbox-item-unread-dot" data-testid={`mailbox-unread-dot-${msg.id}`} />}
             </div>
-          )}
+          ))}
         </div>
       )}
 
@@ -737,7 +708,7 @@ export function MailboxView({
     return (
       <div className="mailbox-split-empty" data-testid="mailbox-split-empty">
         <Mail size={24} />
-        <p>Select a conversation to read messages</p>
+        <p>Select a message to read</p>
       </div>
     );
   };
