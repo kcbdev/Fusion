@@ -73,7 +73,9 @@ GitHub Actions now runs deterministic test sharding via `pnpm test:ci:shard --sh
 
 `test:ci:shard` is a CI-focused entrypoint (`scripts/ci-test-shard.mjs`) that partitions a fixed package list by shard index modulo total shard count so coverage is deterministic and reproducible.
 
-`pnpm test` now uses a changed-only entrypoint (`scripts/test-changed.mjs`) for faster local iteration. It resolves the comparison base from `.changeset/config.json` (`baseBranch`) and runs only affected package test scripts using safe package-first filtering (`pnpm --filter <pkg> test`). It automatically falls back to the full suite when the run is forced (CI / `--full`), the git comparison base or diff cannot be resolved, no changes are detected, or shared/root test infrastructure changes.
+`pnpm test` now uses a changed-only entrypoint (`scripts/test-changed.mjs`) for faster local iteration. It resolves the comparison base from `.changeset/config.json` (`baseBranch`) and runs only affected workspaces from `pnpm-workspace.yaml` (both `packages/*` and `plugins/**`) using safe package-first filtering (`pnpm --filter <pkg> test`). It automatically falls back to the full suite when the run is forced (CI / `--full`), the git comparison base or diff cannot be resolved, no changes are detected, shared/root test infrastructure changes, or changed workspace paths cannot be resolved to a workspace package (fail-safe coverage behavior).
+
+Root test entrypoints (`pnpm test`, `pnpm test:full`, and `pnpm test:ci:shard`) now use a shared CPU-aware default worker budget instead of fixed low values. By default, Fusion sets `FUSION_TEST_TOTAL_WORKERS` to `max(4, min(12, cpuCount - 1))` and `FUSION_TEST_CONCURRENCY` to `2` (clamped to the total budget), while still honoring explicit overrides from `VITEST_MAX_WORKERS`, `FUSION_TEST_TOTAL_WORKERS`, and `FUSION_TEST_CONCURRENCY`.
 
 ### Test isolation contract (required)
 

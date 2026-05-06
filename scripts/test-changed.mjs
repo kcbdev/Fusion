@@ -5,6 +5,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { cpus } from "node:os";
 import { ensureTestArtifacts } from "./ensure-test-artifacts.mjs";
 
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -76,16 +77,50 @@ function getBaseBranch() {
   return changesetConfig.baseBranch || "main";
 }
 
-function listWorkspacePackages() {
-  const packagesDir = path.join(rootDir, "packages");
-  const packageDirs = readdirSync(packagesDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name);
+function workspacePatterns() {
+  try {
+    const workspacePath = path.join(rootDir, "pnpm-workspace.yaml");
+    const content = readFileSync(workspacePath, "utf8");
+    return content
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("-"))
+      .map((line) => line.replace(/^-\s*/, "").replace(/^['"]|['"]$/g, ""))
+      .filter(Boolean);
+  } catch {
+    return ["packages/*"];
+  }
+}
 
+function expandWorkspacePattern(pattern) {
+  if (!pattern.includes("*")) {
+    return [pattern.replace(/\/$/, "")];
+  }
+
+  const normalized = pattern.replace(/\/$/, "");
+  if (!normalized.endsWith("/*")) {
+    return [];
+  }
+
+  const base = normalized.slice(0, -2);
+  const basePath = path.join(rootDir, base);
+
+  try {
+    return readdirSync(basePath, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => `${base}/${entry.name}`);
+  } catch {
+    return [];
+  }
+}
+
+function listWorkspacePackages() {
   const packageNameByDir = new Map();
-  for (const dir of packageDirs) {
+  const dirs = new Set(workspacePatterns().flatMap(expandWorkspacePattern));
+
+  for (const dir of dirs) {
     try {
-      const packageJsonPath = path.join(packagesDir, dir, "package.json");
+      const packageJsonPath = path.join(rootDir, dir, "package.json");
       const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8"));
       if (typeof pkg.name === "string") {
         packageNameByDir.set(dir, pkg.name);
@@ -124,7 +159,7 @@ export function shouldForceFullSuite(changedFiles) {
       return false;
     }
 
-    if (!file.startsWith("packages/") && !file.startsWith("docs/")) {
+    if (!file.startsWith("packages/") && !file.startsWith("plugins/") && !file.startsWith("docs/")) {
       return true;
     }
 
@@ -164,12 +199,18 @@ export function resolveAffectedPackages(changedFiles, packageNameByDir) {
   const affected = new Set();
 
   for (const file of changedFiles) {
-    if (!file.startsWith("packages/")) {
+    if (!file.startsWith("packages/") && !file.startsWith("plugins/")) {
       continue;
     }
 
-    const [, dir] = file.split("/");
-    const packageName = packageNameByDir.get(dir);
+    const workspaceDir = [...packageNameByDir.keys()]
+      .find((dir) => file === dir || file.startsWith(`${dir}/`));
+
+    if (!workspaceDir) {
+      return null;
+    }
+
+    const packageName = packageNameByDir.get(workspaceDir);
     if (!packageName) {
       return null;
     }
@@ -428,13 +469,34 @@ export function recordCachePass(packages, packageDirByName, options = {}) {
 // Execution plan
 // ---------------------------------------------------------------------------
 
-const workspaceConcurrency =
-  process.env.FUSION_TEST_WORKSPACE_CONCURRENCY || "2";
+const workspaceConcurrency = process.env.FUSION_TEST_WORKSPACE_CONCURRENCY || "2";
+
+function parsePositiveInteger(value) {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+export function defaultTestWorkerBudget(env = process.env) {
+  const cpuCap = Math.max(1, cpus().length - 1);
+  const defaultTotal = Math.min(12, Math.max(4, cpuCap));
+  const totalWorkers = parsePositiveInteger(env.FUSION_TEST_TOTAL_WORKERS) ?? defaultTotal;
+  const concurrency = Math.max(
+    1,
+    Math.min(parsePositiveInteger(env.FUSION_TEST_CONCURRENCY) ?? 2, totalWorkers),
+  );
+
+  return {
+    totalWorkers,
+    concurrency,
+  };
+}
+
+const { totalWorkers, concurrency } = defaultTestWorkerBudget(process.env);
 
 const fullSuiteEnv = {
   ...process.env,
-  FUSION_TEST_TOTAL_WORKERS: process.env.FUSION_TEST_TOTAL_WORKERS || "4",
-  FUSION_TEST_CONCURRENCY: process.env.FUSION_TEST_CONCURRENCY || "2",
+  FUSION_TEST_TOTAL_WORKERS: process.env.FUSION_TEST_TOTAL_WORKERS || String(totalWorkers),
+  FUSION_TEST_CONCURRENCY: process.env.FUSION_TEST_CONCURRENCY || String(concurrency),
 };
 
 function runFullSuite(forwardedArgs) {
@@ -482,7 +544,7 @@ export function main(argv = process.argv.slice(2)) {
   // Build reverse map: pkg-name → relative dir (e.g. "packages/engine")
   const packageDirByName = new Map();
   for (const [dir, name] of packageNameByDir) {
-    packageDirByName.set(name, `packages/${dir}`);
+    packageDirByName.set(name, dir);
   }
 
   const plan = decideExecutionPlan({
