@@ -92,6 +92,144 @@ export interface EvalEvidenceReference {
   metadata?: Record<string, unknown>;
 }
 
+export const TASK_EVALUATION_EVIDENCE_SOURCE_ORDER = [
+  "taskMetadata",
+  "commits",
+  "workflow",
+  "reviews",
+  "documents",
+  "taskActivity",
+  "agentLogs",
+  "runAudit",
+] as const;
+
+export const EVIDENCE_LIMITS = {
+  taskMetadata: 25,
+  commits: 20,
+  workflow: 25,
+  reviews: 25,
+  documents: 25,
+  taskActivity: 25,
+  agentLogs: 25,
+  runAudit: 25,
+} as const;
+
+export const MAX_EVIDENCE_EXCERPT_LENGTH = 500;
+export const EVIDENCE_EXCERPT_TRUNCATION_MARKER = "… [truncated]";
+
+export type TaskEvaluationEvidenceSource = typeof TASK_EVALUATION_EVIDENCE_SOURCE_ORDER[number];
+
+export interface TaskEvidenceEntryBase {
+  id: string;
+  source: TaskEvaluationEvidenceSource;
+  label: string;
+  timestamp?: string;
+  excerpt?: string;
+  truncated?: boolean;
+}
+
+export interface TaskMetadataEvidence extends TaskEvidenceEntryBase {
+  source: "taskMetadata";
+  taskId: string;
+  runId: string;
+  summary?: string;
+  references?: {
+    prNumber?: number;
+    prUrl?: string;
+    mergeCommitSha?: string;
+    mergeCompletedAt?: string;
+    executionStartedAt?: string;
+    executionCompletedAt?: string;
+  };
+  retryMetrics?: {
+    mergeRetries: number;
+    workflowStepRetries: number;
+    stuckKillCount: number;
+    postReviewFixCount: number;
+    recoveryRetryCount: number;
+    taskDoneRetryCount: number;
+    verificationFailureCount: number;
+    mergeConflictBounceCount: number;
+  };
+}
+
+export interface CommitEvidence extends TaskEvidenceEntryBase {
+  source: "commits";
+  sha: string;
+  taskId: string;
+  runId: string;
+  authoredAt?: string;
+  authorName?: string;
+  subject?: string;
+}
+
+export interface WorkflowEvidence extends TaskEvidenceEntryBase {
+  source: "workflow";
+  taskId: string;
+  runId: string;
+  workflowStepId?: string;
+  stepName?: string;
+  status?: string;
+  command?: string;
+}
+
+export interface ReviewEvidence extends TaskEvidenceEntryBase {
+  source: "reviews";
+  taskId: string;
+  runId: string;
+  reviewStep?: number;
+  reviewType?: string;
+  verdict?: string;
+}
+
+export interface DocumentEvidence extends TaskEvidenceEntryBase {
+  source: "documents";
+  taskId: string;
+  runId: string;
+  documentKey: string;
+  revision?: number;
+  author?: string;
+}
+
+export interface TaskActivityEvidence extends TaskEvidenceEntryBase {
+  source: "taskActivity";
+  taskId: string;
+  runId: string;
+  activityType?: string;
+}
+
+export interface AgentLogEvidence extends TaskEvidenceEntryBase {
+  source: "agentLogs";
+  taskId: string;
+  runId: string;
+  logType?: string;
+  agentId?: string;
+}
+
+export interface RunAuditEvidence extends TaskEvidenceEntryBase {
+  source: "runAudit";
+  taskId: string;
+  runId: string;
+  eventId: string;
+  domain?: string;
+  mutationType?: string;
+  target?: string;
+}
+
+export interface TaskEvaluationEvidenceBundle {
+  taskId: string;
+  runId: string;
+  sourceOrder: readonly TaskEvaluationEvidenceSource[];
+  taskMetadata: TaskMetadataEvidence[];
+  commits: CommitEvidence[];
+  workflow: WorkflowEvidence[];
+  reviews: ReviewEvidence[];
+  documents: DocumentEvidence[];
+  taskActivity: TaskActivityEvidence[];
+  agentLogs: AgentLogEvidence[];
+  runAudit: RunAuditEvidence[];
+}
+
 export interface EvalCategoryScore {
   category: EvalScoreCategory;
   deterministicScore: number;
@@ -123,6 +261,7 @@ export interface EvalTaskResult {
   rationale?: string;
   summary?: string;
   evidence: EvalEvidenceReference[];
+  evidenceBundle?: TaskEvaluationEvidenceBundle;
   deterministicSignals: EvalSignal[];
   aiSignals?: EvalSignal[];
   followUps: EvalFollowUpSuggestion[];
@@ -215,6 +354,7 @@ export interface EvalTaskResultCreateInput {
   rationale?: string;
   summary?: string;
   evidence?: EvalEvidenceReference[];
+  evidenceBundle?: TaskEvaluationEvidenceBundle;
   deterministicSignals?: EvalSignal[];
   aiSignals?: EvalSignal[];
   followUps?: EvalFollowUpSuggestion[];
@@ -230,6 +370,7 @@ export interface EvalTaskResultUpdateInput {
   rationale?: string;
   summary?: string;
   evidence?: EvalEvidenceReference[];
+  evidenceBundle?: TaskEvaluationEvidenceBundle;
   deterministicSignals?: EvalSignal[];
   aiSignals?: EvalSignal[];
   followUps?: EvalFollowUpSuggestion[];

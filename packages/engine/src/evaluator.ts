@@ -11,7 +11,10 @@ import {
   type FollowUpDraft,
   type Settings,
   type TaskDetail,
+  type TaskEvaluationEvidenceBundle,
+  type TaskStore,
 } from "@fusion/core";
+import { collectTaskEvaluationEvidence } from "./evaluator-evidence.js";
 import { createFnAgent, promptWithFallback } from "./pi.js";
 import { createLogger } from "./logger.js";
 
@@ -29,7 +32,9 @@ export interface EvaluatorModelOverride {
 
 export interface EvaluatorDeps {
   cwd: string;
+  store?: TaskStore;
   runPrompt?: (prompt: string, provider?: string, modelId?: string) => Promise<string>;
+  collectEvidence?: (params: { task: TaskDetail; runId: string; cwd: string; store: TaskStore }) => Promise<TaskEvaluationEvidenceBundle>;
 }
 
 interface EvaluatorAiCategoryResponse {
@@ -66,7 +71,15 @@ export class HybridEvaluatorService {
   ): Promise<Omit<EvalTaskResultCreateInput, "taskId" | "taskSnapshot">> {
     const deterministicSignals = collectDeterministicSignals(task, run);
     const model = resolveEvaluatorModel(settings, modelOverride);
-    const prompt = buildEvaluationPrompt(task, run, deterministicSignals);
+    const evidenceBundle = this.deps.store
+      ? await (this.deps.collectEvidence ?? collectTaskEvaluationEvidence)({
+        store: this.deps.store,
+        task,
+        runId: run.runId,
+        cwd: this.deps.cwd,
+      })
+      : undefined;
+    const prompt = buildEvaluationPrompt(task, run, deterministicSignals, evidenceBundle);
     const responseText = await this.runPrompt(prompt, model.provider, model.modelId);
     const ai = parseAiResponse(responseText);
 
@@ -95,6 +108,7 @@ export class HybridEvaluatorService {
       rationale: ai.overallRationale,
       summary: ai.overallRationale,
       evidence: categoryScores.flatMap((categoryScore) => categoryScore.evidence),
+      evidenceBundle,
       deterministicSignals: deterministicSignalsToEvalSignals(deterministicSignals),
       followUps: ai.followUpDrafts.map((draft) => ({
         title: draft.title,
@@ -188,10 +202,30 @@ function deterministicSignalsToEvalSignals(signals: DeterministicSignals): Array
   ];
 }
 
-export function buildEvaluationPrompt(task: TaskDetail, run: EvalRunContext, deterministicSignals: DeterministicSignals): string {
+function formatEvidenceForPrompt(evidenceBundle: TaskEvaluationEvidenceBundle): string {
+  return JSON.stringify({
+    sourceOrder: evidenceBundle.sourceOrder,
+    taskMetadata: evidenceBundle.taskMetadata,
+    commits: evidenceBundle.commits,
+    workflow: evidenceBundle.workflow,
+    reviews: evidenceBundle.reviews,
+    documents: evidenceBundle.documents,
+    taskActivity: evidenceBundle.taskActivity,
+    agentLogs: evidenceBundle.agentLogs,
+    runAudit: evidenceBundle.runAudit,
+  }, null, 2);
+}
+
+export function buildEvaluationPrompt(
+  task: TaskDetail,
+  run: EvalRunContext,
+  deterministicSignals: DeterministicSignals,
+  evidenceBundle?: TaskEvaluationEvidenceBundle,
+): string {
   return [
     "Evaluate the completed task and respond with strict JSON.",
     "Scores must be integers between 0 and 100.",
+    "When citing evidence, use labels that include evidence IDs from the ## Evidence section.",
     `Run: ${run.runId}`,
     "Schema:",
     JSON.stringify({
@@ -213,6 +247,8 @@ export function buildEvaluationPrompt(task: TaskDetail, run: EvalRunContext, det
     }, null, 2),
     "Deterministic signals:",
     JSON.stringify(deterministicSignals, null, 2),
+    "## Evidence",
+    evidenceBundle ? formatEvidenceForPrompt(evidenceBundle) : JSON.stringify({ sourceOrder: [], note: "No evidence bundle available" }, null, 2),
   ].join("\n\n");
 }
 

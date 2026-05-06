@@ -202,10 +202,12 @@ Scoring authority boundary:
 - Advisory/model-authored fields: category `aiScore`, category `rationale`, category `evidence`, and `overallRationale` text.
 - Evaluator code (`packages/engine/src/evaluator.ts`) may provide AI category inputs, but must route final score computation through core helpers (`normalizeCategoryScore`, `computeOverallScore`) and must not persist AI-provided overall numbers as source of truth.
 
-Hybrid evaluator pipeline (FN-3389):
+Hybrid evaluator pipeline (FN-3389/FN-3391):
 - **Batch selection:** `runScheduledEvalBatch` in core computes a deterministic completed-task window (`windowStartExclusive` → `windowEndInclusive`) from the last completed scheduled run.
-- **Deterministic evidence:** `collectDeterministicSignals` (`eval-signal-collector.ts`) normalizes timing/workflow/review/log/commit summaries with stable fallbacks for missing metadata.
-- **AI review:** `HybridEvaluatorService` (`packages/engine/src/evaluator.ts`) builds a strict JSON prompt from task snapshot + deterministic signals, runs a read-only AI session, validates the JSON payload, and merges AI verdict fields into persisted eval output.
+- **Signal summary:** `collectDeterministicSignals` (`eval-signal-collector.ts`) normalizes timing/workflow/review/log/commit summaries with stable fallbacks for missing metadata.
+- **Evidence harvesting:** `collectTaskEvaluationEvidence` (`packages/engine/src/evaluator-evidence.ts`) reads existing task-store/git surfaces (`workflowStepResults`, documents, task activity log, agent logs, run-audit events, merge/PR metadata) and emits a bounded `TaskEvaluationEvidenceBundle` with fixed source-group ordering.
+- **AI review:** `HybridEvaluatorService` (`packages/engine/src/evaluator.ts`) injects deterministic signals plus a dedicated `## Evidence` bundle section into a strict JSON prompt, runs a read-only AI session, validates the JSON payload, and merges AI advisory fields into persisted eval output while preserving core score authority.
+- **Persistence boundary:** eval rows persist normalized evidence refs plus bounded excerpts/IDs (not full raw logs or unbounded command output). Source drill-down stays in original task/agent/run-audit stores and git history.
 - **Model resolution (temporary):** evaluator model selection first uses an explicit run override pair (`provider` + `modelId` together only), then falls back to the existing validator lane (`resolveValidatorSettingsModel`) until FN-3393 introduces dedicated evaluator settings.
 - **Scheduled execution wiring:** CronRunner intercepts the sentinel command `fn eval --scheduled-batch` and executes in-process, invoking `runScheduledEvalBatch` with `HybridEvaluatorService`; `ProjectEngine` syncs scheduled eval automation on startup and on relevant settings changes.
 

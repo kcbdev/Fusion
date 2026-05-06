@@ -12,6 +12,7 @@ export {
 export { AgentSemaphore, PRIORITY_MERGE, PRIORITY_EXECUTE, PRIORITY_SPECIFY } from "./concurrency.js";
 export { TriageProcessor, type TriageProcessorOptions } from "./triage.js";
 export { TaskExecutor, type TaskExecutorOptions } from "./executor.js";
+export { collectTaskEvaluationEvidence } from "./evaluator-evidence.js";
 export { Scheduler, type SchedulerOptions } from "./scheduler.js";
 export { MissionAutopilot, type MissionAutopilotOptions } from "./mission-autopilot.js";
 export { MissionExecutionLoop, type MissionExecutionLoopOptions, type ValidationResult, loopLog } from "./mission-execution-loop.js";
