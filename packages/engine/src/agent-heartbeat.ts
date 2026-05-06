@@ -580,20 +580,57 @@ export class HeartbeatMonitor {
   }
 
   /**
-   * Find agents in `state="running"` that have no active heartbeat run and
-   * flip them to `"active"`. Called on monitor start to clean up orphans
-   * left behind by older governance-skip code paths. Best-effort — failures
-   * are logged but do not block startup.
+   * Find agents in `state="running"` that are not actually running and flip
+   * them to `"active"`. An agent is considered orphaned when either:
+   *   (a) it has no active heartbeat run record, or
+   *   (b) it is not in this monitor's in-memory tracked set AND its
+   *       lastHeartbeatAt is older than 3× the configured timeout.
+   *
+   * Case (a) covers historical bypass paths (governance-skip, supersede-on-
+   * startRun, safety-net run termination) that ended the run record but
+   * never propagated the agent-state transition. Case (b) covers a process
+   * that crashed mid-run, leaving both the run row and the agent row stuck.
+   *
+   * Called on monitor start AND periodically from the polling loop to keep
+   * the system self-healing across versions. Best-effort — failures are
+   * logged but do not block the caller.
    */
   private async reconcileOrphanedRunningAgents(): Promise<void> {
     try {
       const runningAgents = await this.store.listAgents({ state: "running", includeEphemeral: true });
+      const now = Date.now();
       for (const agent of runningAgents) {
+        let reason: string | null = null;
         const activeRun = await this.store.getActiveHeartbeatRun(agent.id);
-        if (activeRun) continue;
+        if (!activeRun) {
+          reason = "no active run";
+        } else if (!this.trackedAgents.has(agent.id)) {
+          const timeoutMs = this.resolveAgentConfig(agent.id).heartbeatTimeoutMs;
+          const lastTs = agent.lastHeartbeatAt ? Date.parse(agent.lastHeartbeatAt) : NaN;
+          const heartbeatAgeMs = Number.isFinite(lastTs) ? Math.max(0, now - lastTs) : Infinity;
+          if (heartbeatAgeMs > timeoutMs * 3) {
+            try {
+              const detail = await this.store.getRunDetail(agent.id, activeRun.id);
+              if (detail && detail.status !== "completed" && detail.status !== "failed" && detail.status !== "terminated") {
+                await this.store.saveRun({
+                  ...detail,
+                  endedAt: new Date().toISOString(),
+                  status: "terminated",
+                  stderrExcerpt: `Reconciled stale run (no heartbeat for ${formatDuration(heartbeatAgeMs)}; threshold ${formatDuration(timeoutMs * 3)})`,
+                });
+              }
+              await this.store.endHeartbeatRun(activeRun.id, "terminated");
+            } catch (runEndErr) {
+              heartbeatLog.warn(`Failed to terminate stale run ${activeRun.id} for ${agent.id}: ${runEndErr instanceof Error ? runEndErr.message : String(runEndErr)}`);
+            }
+            reason = `stale heartbeat (${formatDuration(heartbeatAgeMs)} since lastHeartbeatAt)`;
+          }
+        }
+        if (!reason) continue;
         try {
           await this.store.updateAgentState(agent.id, "active");
-          heartbeatLog.log(`Reconciled orphaned running agent ${agent.id} → active (no active run)`);
+          this.clearRunState(agent.id);
+          heartbeatLog.log(`Reconciled orphaned running agent ${agent.id} → active (${reason})`);
         } catch (err) {
           heartbeatLog.warn(`Failed to reconcile orphaned running agent ${agent.id}: ${err instanceof Error ? err.message : String(err)}`);
         }
@@ -2332,6 +2369,11 @@ export class HeartbeatMonitor {
         }
       }
     }
+
+    // Periodically scan for orphaned `state="running"` rows so that a single
+    // missed termination can't leave an agent permanently stuck. Cheap query
+    // (indexed by state) so running it every poll is fine.
+    await this.reconcileOrphanedRunningAgents();
   }
 
   private async handleMissedHeartbeat(tracked: TrackedAgent, reason: string): Promise<void> {
@@ -2349,6 +2391,8 @@ export class HeartbeatMonitor {
 
     heartbeatLog.warn(`Recovering unresponsive agent ${tracked.agentId}: ${reason}`);
 
+    const runIdToTerminate = tracked.runId;
+
     try {
       tracked.session.dispose();
     } catch (err) {
@@ -2356,6 +2400,20 @@ export class HeartbeatMonitor {
     }
 
     this.untrackAgent(tracked.agentId);
+
+    // Canonically end the run record. Without this, dispose() relies on the
+    // in-flight execution self-completing — which never happens when the run
+    // is actually hung. completeRun also updates agent state, but we still
+    // call pauseAgent below to set `pauseReason="heartbeat-unresponsive"`
+    // and pause assigned tasks. The double state transition is harmless.
+    try {
+      await this.completeRun(tracked.agentId, runIdToTerminate, {
+        status: "terminated",
+        stderrExcerpt: reason,
+      });
+    } catch (err) {
+      heartbeatLog.warn(`completeRun(terminated) failed for ${tracked.agentId}/${runIdToTerminate}: ${err instanceof Error ? err.message : String(err)}`);
+    }
 
     try {
       await this.pauseAgent(tracked.agentId, { pauseReason: "heartbeat-unresponsive", stopActiveRun: false });
