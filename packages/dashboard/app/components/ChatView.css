@@ -124,8 +124,23 @@
 .chat-session-meta {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   font-size: 11px;
   color: var(--text-tertiary);
+}
+
+.chat-session-meta-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-session-meta-model .provider-icon {
+  flex-shrink: 0;
 }
 
 /* === Chat Session Delete Button === */

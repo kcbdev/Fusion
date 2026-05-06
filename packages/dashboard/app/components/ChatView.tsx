@@ -27,6 +27,7 @@ import type { Agent } from "@fusion/core";
 import type { DiscoveredSkill } from "@fusion/dashboard";
 import type { ModelInfo } from "../api";
 import { CustomModelDropdown } from "./CustomModelDropdown";
+import { ProviderIcon } from "./ProviderIcon";
 import { AgentMentionPopup } from "./AgentMentionPopup";
 import { FileMentionPopup } from "./FileMentionPopup";
 import { useFileMention } from "../hooks/useFileMention";
@@ -557,6 +558,7 @@ interface ChatMessageItemProps {
   hideAssistantIdentity: boolean;
   showAssistantModelTag: boolean;
   activeModelTag: string | null;
+  activeModelProvider: string | null;
   activeSessionId: string | null;
   mentionAgentsByName: Map<string, Agent>;
 }
@@ -571,6 +573,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
   hideAssistantIdentity,
   showAssistantModelTag,
   activeModelTag,
+  activeModelProvider,
   activeSessionId,
   mentionAgentsByName,
 }: ChatMessageItemProps) {
@@ -672,7 +675,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
     >
       {isAssistantMessage && !hideAssistantIdentity && (
         <div className="chat-message-avatar">
-          <Bot size={14} />
+          {activeModelProvider ? <ProviderIcon provider={activeModelProvider} size="sm" /> : <Bot size={14} />}
           <span>{agentName}</span>
           {showAssistantModelTag && activeModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
         </div>
@@ -1471,6 +1474,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
   };
 
   const activeModelTag = formatModelTag(activeSession?.modelProvider, activeSession?.modelId);
+  const activeModelProvider = activeSession?.modelProvider ?? null;
   const hasThreadInView = Boolean(activeSession || isStreaming || messages.length > 0);
 
   const threadHeaderTitle = activeSession?.agentId === FN_AGENT_ID
@@ -1583,11 +1587,16 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
                   {session.lastMessagePreview || "No messages"}
                 </div>
                 <div className="chat-session-meta">
-                  <span>
-                    {agentsMap.get(session.agentId)?.name ||
-                      (session.agentId === FN_AGENT_ID
-                        ? (formatModelTag(session.modelProvider, session.modelId) ?? "Fusion")
-                        : session.agentId.slice(0, 30))}
+                  <span className="chat-session-meta-model">
+                    {session.modelProvider && (
+                      <ProviderIcon provider={session.modelProvider} size="sm" />
+                    )}
+                    <span>
+                      {agentsMap.get(session.agentId)?.name ||
+                        (session.agentId === FN_AGENT_ID
+                          ? (formatModelTag(session.modelProvider, session.modelId) ?? "Fusion")
+                          : session.agentId.slice(0, 30))}
+                    </span>
                   </span>
                   <span>{session.updatedAt ? formatRelativeTime(session.updatedAt) : ""}</span>
                 </div>
@@ -1683,7 +1692,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
                 <ChevronLeft size={16} />
               </button>
             )}
-            <Bot size={16} />
+            {activeModelProvider ? <ProviderIcon provider={activeModelProvider} size="md" /> : <Bot size={16} />}
             <span className="chat-thread-header-title">{threadHeaderTitle}</span>
             {showThreadHeaderModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
             {hasThreadInView && (
@@ -1724,6 +1733,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
                   hideAssistantIdentity={hideAssistantIdentity}
                   showAssistantModelTag={showAssistantModelTag}
                   activeModelTag={activeModelTag}
+                  activeModelProvider={activeModelProvider}
                   activeSessionId={activeSession?.id ?? null}
                   mentionAgentsByName={mentionAgentsByName}
                 />
@@ -1731,7 +1741,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
               <div className="chat-message chat-message--assistant chat-message--streaming">
                 {!hideAssistantIdentity && (
                   <div className="chat-message-avatar">
-                    <Bot size={14} />
+                    {activeModelProvider ? <ProviderIcon provider={activeModelProvider} size="sm" /> : <Bot size={14} />}
                     <span>{agentName}</span>
                     {showAssistantModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
                   </div>
@@ -1776,6 +1786,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
                   hideAssistantIdentity={hideAssistantIdentity}
                   showAssistantModelTag={showAssistantModelTag}
                   activeModelTag={activeModelTag}
+                  activeModelProvider={activeModelProvider}
                   activeSessionId={activeSession?.id ?? null}
                   mentionAgentsByName={mentionAgentsByName}
                 />
