@@ -1043,8 +1043,11 @@ export function registerAgentRuntimeRoutes(ctx: ApiRoutesContext, deps: AgentRun
           throw new ApiError(409, "Agent already has an active run", { runId: activeRun.id });
         }
 
-        // Execute heartbeat end-to-end (single run record, no duplicate startRun call)
-        const run = await resolvedMonitor.executeHeartbeat({
+        // Kick off heartbeat in the background; respond as soon as the run
+        // record exists so slow runs don't time out the client socket.
+        // executeHeartbeat creates the run record synchronously near the top,
+        // then performs provider work that can take many seconds-to-minutes.
+        const heartbeatPromise = resolvedMonitor.executeHeartbeat({
           agentId: req.params.id,
           source: invocationSource,
           triggerDetail: trigger,
@@ -1053,8 +1056,50 @@ export function registerAgentRuntimeRoutes(ctx: ApiRoutesContext, deps: AgentRun
           triggeringCommentType: normalizedTriggeringCommentType,
           contextSnapshot,
         });
+        heartbeatPromise.catch((err) => {
+          runtimeLogger.child("heartbeat").warn(
+            `background executeHeartbeat for ${req.params.id} failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
 
-        res.status(201).json(run);
+        // Track heartbeatPromise settlement so we can: (a) surface synchronous
+        // failures to the caller, and (b) exit the poll loop early if the
+        // entire run completes faster than the polling deadline (e.g. tests
+        // that mock executeHeartbeat).
+        type Settled =
+          | { state: "pending" }
+          | { state: "resolved"; value: Awaited<typeof heartbeatPromise> }
+          | { state: "rejected"; error: unknown };
+        const settledRef: { current: Settled } = { current: { state: "pending" } };
+        heartbeatPromise.then(
+          (value) => { settledRef.current = { state: "resolved", value }; },
+          (error) => { settledRef.current = { state: "rejected", error }; },
+        );
+
+        // Poll briefly for the run record (created synchronously inside
+        // executeHeartbeat → startRun). Bounded so a stuck monitor still
+        // returns rather than hanging the request.
+        const pollDeadline = Date.now() + 5000;
+        let createdRun = await agentStore.getActiveHeartbeatRun(req.params.id);
+        while (!createdRun && Date.now() < pollDeadline && settledRef.current.state === "pending") {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          createdRun = await agentStore.getActiveHeartbeatRun(req.params.id);
+        }
+
+        if (settledRef.current.state === "rejected") {
+          throw settledRef.current.error;
+        }
+        if (!createdRun && settledRef.current.state === "resolved") {
+          createdRun = settledRef.current.value;
+        }
+        if (!createdRun) {
+          // Last resort: await the promise so the caller gets the completed
+          // run rather than a timeout. This only triggers if the active-run
+          // record never materialized within the poll window.
+          createdRun = await heartbeatPromise;
+        }
+
+        res.status(201).json(createdRun);
       } else {
         // Fallback: record-only behavior without HeartbeatMonitor
         const { store: scopedStore } = await getProjectContext(req);
