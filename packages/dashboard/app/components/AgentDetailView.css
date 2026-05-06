@@ -106,8 +106,6 @@
 .agent-detail-icon {
   width: calc(var(--space-lg) * 2 + var(--space-xs));
   height: calc(var(--space-lg) * 2 + var(--space-xs));
-  border-radius: var(--radius-md);
-  background: var(--todo);
   display: flex;
   align-items: center;
   justify-content: center;
