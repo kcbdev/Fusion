@@ -10,9 +10,9 @@ import {
 } from "@fusion/core";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import type { AgentSemaphore } from "./concurrency.js";
-import { generateReservedWorktreeName, slugify } from "./worktree-names.js";
+import { planTaskWorktreePath } from "./worktree-names.js";
 import { schedulerLog } from "./logger.js";
 import { type PrMonitor, type PrComment } from "./pr-monitor.js";
 import { reconcileMissionFeatureState } from "./mission-feature-sync.js";
@@ -495,28 +495,7 @@ export class Scheduler {
     naming: string | undefined,
     reservedNames: Set<string>,
   ): string {
-    if (task.worktree) {
-      const existingName = basename(task.worktree);
-      if (existingName) reservedNames.add(existingName);
-      return task.worktree;
-    }
-
-    let worktreeName: string;
-    switch (naming || "random") {
-      case "task-id":
-        worktreeName = task.id.toLowerCase();
-        break;
-      case "task-title":
-        worktreeName = slugify(task.title || task.description.slice(0, 60));
-        break;
-      case "random":
-      default:
-        worktreeName = generateReservedWorktreeName(this.store.getRootDir(), reservedNames);
-        break;
-    }
-
-    reservedNames.add(worktreeName);
-    return join(this.store.getRootDir(), ".worktrees", worktreeName);
+    return planTaskWorktreePath(task, this.store.getRootDir(), naming, reservedNames);
   }
 
   /**
@@ -687,11 +666,6 @@ export class Scheduler {
       // Resolve dependency order among todo tasks
       const ordered = resolveDependencyOrder(todo);
       let started = 0;
-      const reservedWorktreeNames = new Set(
-        tasks
-          .map((task) => (task.worktree ? basename(task.worktree) : undefined))
-          .filter((name): name is string => Boolean(name)),
-      );
 
       for (const taskId of ordered) {
         const task = tasks.find((t) => t.id === taskId)!;
@@ -760,13 +734,11 @@ export class Scheduler {
           continue;
         }
 
-        // Dependencies met — resolve base branch from in-review deps
+        // Dependencies met — resolve base branch from in-review deps.
+        // Worktree allocation is deferred to moveTask below, where it
+        // runs under TaskStore's cross-task allocation lock so it can't
+        // race against a concurrent manual-move.
         const baseBranch = this.resolveBaseBranch(task, tasks);
-        const plannedWorktree = this.planWorktreePath(
-          task,
-          settings.worktreeNaming,
-          reservedWorktreeNames,
-        );
 
         // Compare-and-swap: re-read the task to verify it's still in "todo" before dispatching.
         // This prevents dispatching a task twice if another schedule() call or user action
@@ -836,12 +808,14 @@ export class Scheduler {
           status: null,
           blockedBy: null,
           executionStartBranch: baseBranch ?? undefined,
-          worktree: plannedWorktree,
           effectiveNodeId: effectiveNode.nodeId ?? null,
           effectiveNodeSource: effectiveNode.source,
           mergeRetries: 0,
         });
-        await this.store.moveTask(task.id, "in-progress");
+        await this.store.moveTask(task.id, "in-progress", {
+          allocateWorktree: (reservedNames) =>
+            this.planWorktreePath(task, settings.worktreeNaming, reservedNames),
+        });
         this.wasNodeBlocked.delete(task.id);
         await this.store.logEntry(task.id, `Node routing resolved: ${effectiveNode.nodeId ?? "local"} (source: ${effectiveNode.source})`);
         this.options.onSchedule?.(task);

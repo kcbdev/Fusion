@@ -1427,11 +1427,25 @@ export class TaskExecutor {
         // moveTask's default reopen-to-todo path resets every step to
         // pending and rewrites PROMPT.md checkboxes, which would discard
         // the partial progress this bounce is supposed to retry on top of.
+        // `preserveWorktree` keeps the same checkout assigned across the
+        // hop so listeners never observe an interim `worktree=null` state
+        // — this bounce immediately re-promotes the task on the same
+        // directory, so releasing it would publish a misleading snapshot
+        // and could let self-healing reclaim the worktree as idle.
         if (preserveResumeState) {
-          await this.store.moveTask(taskId, "todo", { preserveResumeState: true });
+          await this.store.moveTask(taskId, "todo", {
+            preserveResumeState: true,
+            preserveWorktree: true,
+          });
         } else {
-          await this.store.moveTask(taskId, "todo");
+          await this.store.moveTask(taskId, "todo", { preserveWorktree: true });
         }
+        // Restore worktree + executionStartedAt unconditionally to match
+        // the original bounce contract: even with preserveWorktree the
+        // worktree pointer could have been cleared by an in-flight
+        // updateTask, and executionStartedAt is reset by moveTask when
+        // preserveResumeState is false. Keep the writes so callers and
+        // tests can observe the restoration deterministically.
         await this.store.updateTask(taskId, {
           worktree: worktreePath,
           executionStartedAt: originalExecutionStartedAt ?? null,

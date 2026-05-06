@@ -244,7 +244,7 @@ describe("Scheduler", () => {
       await flushAsyncWork();
 
       // Verify schedule() was called (moveTask should be called since task can start)
-      expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-progress");
+      expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
     });
 
     it("resets mergeRetries when dispatching a task to in-progress", async () => {
@@ -282,7 +282,7 @@ describe("Scheduler", () => {
         "FN-001",
         expect.objectContaining({ mergeRetries: 0 }),
       );
-      expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-progress");
+      expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
     });
 
     it("registers task:moved event listener", () => {
@@ -335,7 +335,7 @@ describe("Scheduler", () => {
       await flushAsyncWork();
 
       // Verify schedule() was called - FN-002 should now be able to start
-      expect(store.moveTask).toHaveBeenCalledWith("FN-002", "in-progress");
+      expect(store.moveTask).toHaveBeenCalledWith("FN-002", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
     });
 
     it("does not trigger scheduling for non-done task:moved events", async () => {
@@ -406,7 +406,7 @@ describe("Scheduler", () => {
       await flushAsyncWork();
 
       // Verify schedule() was called — task in todo should be scheduled
-      expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-progress");
+      expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
     });
   });
 
@@ -450,7 +450,7 @@ describe("Scheduler", () => {
       await flushAsyncWork();
 
       // Should have triggered scheduling and moved the task to in-progress
-      expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-progress");
+      expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
     });
 
     it("does not trigger scheduling on unpause if scheduler is not running", async () => {
@@ -710,7 +710,7 @@ describe("Scheduler", () => {
       expect(moveTask).not.toHaveBeenCalledWith("FN-102", "in-progress");
 
       // Lower-priority ready task still runs.
-      expect(moveTask).toHaveBeenCalledWith("FN-104", "in-progress");
+      expect(moveTask).toHaveBeenCalledWith("FN-104", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
       // Overlap-blocked urgent task must not run.
       expect(moveTask).not.toHaveBeenCalledWith("FN-103", "in-progress");
     });
@@ -751,7 +751,7 @@ describe("Scheduler", () => {
       (scheduler as any).running = true;
       await scheduler.schedule();
 
-      expect(moveTask).toHaveBeenCalledWith("FN-002", "in-progress");
+      expect(moveTask).toHaveBeenCalledWith("FN-002", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
       expect(updateTask).not.toHaveBeenCalledWith("FN-002", { status: "queued", blockedBy: "FN-001" });
     });
 
@@ -789,7 +789,7 @@ describe("Scheduler", () => {
       (scheduler as any).running = true;
       await scheduler.schedule();
 
-      expect(moveTask).toHaveBeenCalledWith("FN-002", "in-progress");
+      expect(moveTask).toHaveBeenCalledWith("FN-002", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
       expect(updateTask).not.toHaveBeenCalledWith("FN-002", { status: "queued", blockedBy: "FN-001" });
     });
 
@@ -855,12 +855,11 @@ describe("Scheduler", () => {
         status: null,
         blockedBy: null,
         executionStartBranch: undefined,
-        worktree: "/test/project/.worktrees/fn-010",
         effectiveNodeId: null,
         effectiveNodeSource: "local",
         mergeRetries: 0,
       });
-      expect(moveTask).toHaveBeenCalledWith("FN-010", "in-progress");
+      expect(moveTask).toHaveBeenCalledWith("FN-010", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
       expect(updateTask.mock.invocationCallOrder[0]).toBeLessThan(moveTask.mock.invocationCallOrder[0]);
     });
 
@@ -894,7 +893,6 @@ describe("Scheduler", () => {
         status: null,
         blockedBy: null,
         executionStartBranch: undefined,
-        worktree: "/test/project/.worktrees/amber-aspen",
         effectiveNodeId: null,
         effectiveNodeSource: "local",
         mergeRetries: 0,
@@ -903,7 +901,6 @@ describe("Scheduler", () => {
         status: null,
         blockedBy: null,
         executionStartBranch: undefined,
-        worktree: "/test/project/.worktrees/amber-aspen-2",
         effectiveNodeId: null,
         effectiveNodeSource: "local",
         mergeRetries: 0,
@@ -1035,7 +1032,7 @@ describe("Scheduler", () => {
       // Flush any remaining microtasks
       await new Promise(resolve => setTimeout(resolve, 0));
 
-      expect(moveTask).toHaveBeenCalledWith("FN-010", "in-progress");
+      expect(moveTask).toHaveBeenCalledWith("FN-010", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
       expect(moveTask).not.toHaveBeenCalledWith("FN-010", "triage");
     });
 
@@ -1217,7 +1214,7 @@ describe("Scheduler", () => {
         expect.any(String)
       );
       // Should move to in-progress (since deps are satisfied and concurrency allows)
-      expect(moveTask).toHaveBeenCalledWith("FN-004", "in-progress");
+      expect(moveTask).toHaveBeenCalledWith("FN-004", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
     });
 
     it("does not validate filesystem for tasks with unmet dependencies", async () => {
@@ -1956,7 +1953,7 @@ describe("Scheduler", () => {
       (scheduler as any).running = true;
       await scheduler.schedule();
 
-      expect(store.moveTask).toHaveBeenCalledWith("FN-100", "in-progress");
+      expect(store.moveTask).toHaveBeenCalledWith("FN-100", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
     });
 
     it("schedules tasks without sliceId regardless of mission state", async () => {
@@ -1981,7 +1978,7 @@ describe("Scheduler", () => {
       (scheduler as any).running = true;
       await scheduler.schedule();
 
-      expect(store.moveTask).toHaveBeenCalledWith("FN-100", "in-progress");
+      expect(store.moveTask).toHaveBeenCalledWith("FN-100", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
     });
   });
 
@@ -2037,7 +2034,7 @@ describe("Scheduler", () => {
       (scheduler as any).running = true;
       await scheduler.schedule();
 
-      expect(store.moveTask).toHaveBeenCalledWith("FN-011", "in-progress");
+      expect(store.moveTask).toHaveBeenCalledWith("FN-011", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
     });
 
     it("picks up todo tasks without nextRecoveryAt normally", async () => {
@@ -2063,7 +2060,7 @@ describe("Scheduler", () => {
       (scheduler as any).running = true;
       await scheduler.schedule();
 
-      expect(store.moveTask).toHaveBeenCalledWith("FN-012", "in-progress");
+      expect(store.moveTask).toHaveBeenCalledWith("FN-012", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
     });
   });
 

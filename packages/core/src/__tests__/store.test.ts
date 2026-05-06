@@ -6350,15 +6350,17 @@ Task with acceptance criteria
       expect(doneMoved.executionStartedAt).toBeUndefined();
     });
 
-    it("preserveResumeState takes precedence when preserveProgress and preserveResumeState are both true", async () => {
+    it("preserveResumeState keeps step progress and timing but always releases the worktree", async () => {
       const task = await createTaskWithSteps();
       await store.moveTask(task.id, "todo");
       await store.moveTask(task.id, "in-progress");
       await setMixedStepStatuses(task.id);
+      const startedAt = new Date().toISOString();
       await store.updateTask(task.id, {
         currentStep: 2,
         worktree: "/tmp/worktree",
-        executionStartedAt: new Date().toISOString(),
+        branch: "fusion/fn-test",
+        executionStartedAt: startedAt,
         executionCompletedAt: new Date().toISOString(),
       });
 
@@ -6370,9 +6372,68 @@ Task with acceptance criteria
       expect(moved.steps[0].status).toBe("done");
       expect(moved.steps[1].status).toBe("in-progress");
       expect(moved.currentStep).toBe(2);
-      expect(moved.worktree).toBe("/tmp/worktree");
-      expect(moved.executionStartedAt).toBeDefined();
+      // Worktree is always released on requeue so the directory can be
+      // reused by another task; the branch stays so progress is kept.
+      expect(moved.worktree).toBeUndefined();
+      expect(moved.branch).toBe("fusion/fn-test");
+      expect(moved.executionStartedAt).toBe(startedAt);
       expect(moved.executionCompletedAt).toBeUndefined();
+
+      // Round-trip: when the task is re-promoted to in-progress with a
+      // fresh allocator, the branch reference must survive the requeue
+      // so the executor can reattach to it via createFromExistingBranch
+      // and resume the in-flight changes. Guards against regressions in
+      // the in-review → todo full-reset path leaking into other paths.
+      const repromoted = await store.moveTask(task.id, "in-progress", {
+        allocateWorktree: () => "/tmp/worktree-fresh",
+      });
+      expect(repromoted.branch).toBe("fusion/fn-test");
+      expect(repromoted.worktree).toBe("/tmp/worktree-fresh");
+    });
+
+    it("preserveWorktree keeps the directory across an internal bounce", async () => {
+      const task = await createTaskWithSteps();
+      await store.moveTask(task.id, "todo");
+      await store.moveTask(task.id, "in-progress");
+      await store.updateTask(task.id, { worktree: "/tmp/wt-bounce" });
+
+      const moved = await store.moveTask(task.id, "todo", {
+        preserveResumeState: true,
+        preserveWorktree: true,
+      });
+
+      // The bounce path keeps the same checkout assigned so listeners
+      // never observe an interim worktree=null state and self-healing
+      // can't reclaim the directory as idle.
+      expect(moved.worktree).toBe("/tmp/wt-bounce");
+    });
+
+    it("allocateWorktree assigns a path under the cross-task lock and avoids names already in use", async () => {
+      const a = await createTaskWithSteps();
+      const b = await createTaskWithSteps();
+      await store.moveTask(a.id, "todo");
+      await store.moveTask(a.id, "in-progress");
+      await store.updateTask(a.id, { worktree: "/tmp/.worktrees/eager-daisy" });
+      await store.moveTask(b.id, "todo");
+
+      const seenReserved: Set<string>[] = [];
+      const moved = await store.moveTask(b.id, "in-progress", {
+        allocateWorktree: (reservedNames) => {
+          seenReserved.push(new Set(reservedNames));
+          // Caller picks a name; if it collides with reservedNames the
+          // caller is responsible for choosing a different one. Here we
+          // assert the reservedNames snapshot reflects task A's
+          // assignment, then return a non-colliding path.
+          return "/tmp/.worktrees/swift-falcon";
+        },
+      });
+
+      expect(seenReserved).toHaveLength(1);
+      expect(seenReserved[0].has("eager-daisy")).toBe(true);
+      // The allocator's task itself must not appear in reservedNames —
+      // a task should never be told to avoid its own current name.
+      expect(seenReserved[0].has("swift-falcon")).toBe(false);
+      expect(moved.worktree).toBe("/tmp/.worktrees/swift-falcon");
     });
 
     it("resets steps when moving from in-review to todo", async () => {

@@ -725,8 +725,14 @@ describe("In-progress task resume after restart", () => {
     // Run any pending microtasks (the async code in setTimeout)
     await vi.runAllTimersAsync();
 
-    // Task should move to todo then in-progress (not in-review)
-    expect(store.moveTask).toHaveBeenCalledWith("FN-963", "todo");
+    // Task should move to todo then in-progress (not in-review). The
+    // workflow-rerun bounce passes `preserveWorktree: true` so the
+    // checkout doesn't briefly disappear during the hop.
+    expect(store.moveTask).toHaveBeenCalledWith(
+      "FN-963",
+      "todo",
+      expect.objectContaining({ preserveWorktree: true }),
+    );
     expect(store.moveTask).toHaveBeenCalledWith("FN-963", "in-progress");
 
     vi.useRealTimers();
@@ -963,7 +969,7 @@ describe("Scheduler after restart", () => {
     await new Promise((r) => setTimeout(r, 50));
     scheduler.stop();
 
-    expect(store.moveTask).toHaveBeenCalledWith("FN-070", "in-progress");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-070", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
     expect(store.updateTask).toHaveBeenCalledWith("FN-070", expect.objectContaining({ status: null, blockedBy: null }));
     expect(onSchedule).toHaveBeenCalledWith(todoTask);
   });
@@ -1033,7 +1039,7 @@ describe("Scheduler after restart", () => {
     await new Promise((r) => setTimeout(r, 50));
     scheduler.stop();
 
-    expect(store.moveTask).toHaveBeenCalledWith("FN-081", "in-progress");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-081", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
 
     // 3. Executor resumes in-progress tasks
     vi.clearAllMocks();
@@ -1549,7 +1555,7 @@ describe("Engine pause/unpause cycle", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     // Scheduler should have moved todo task to in-progress
-    expect(store.moveTask).toHaveBeenCalledWith("FN-EP3", "in-progress");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-EP3", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
 
     // Now simulate engine pause then unpause
     store.moveTask.mockClear();
@@ -1573,7 +1579,7 @@ describe("Engine pause/unpause cycle", () => {
     scheduler.stop();
 
     // The new task should have been scheduled after unpause
-    expect(store.moveTask).toHaveBeenCalledWith("FN-EP4", "in-progress");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-EP4", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
   });
 
   it("concurrency slots freed after agent completes during enginePaused (soft pause)", async () => {

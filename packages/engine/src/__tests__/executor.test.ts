@@ -8649,7 +8649,7 @@ describe("Workflow Steps Execution", () => {
     // todo must flag preserveResumeState so the workflow-rerun bounce keeps
     // the worktree and accumulated step progress through the transient
     // todo state on its way back to in-progress.
-    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo", { preserveResumeState: true });
+    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo", { preserveResumeState: true, preserveWorktree: true });
     expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-progress");
 
     // onComplete should NOT be called (task is being retried, not completed)
@@ -8784,7 +8784,7 @@ describe("Workflow Steps Execution", () => {
     // todo must flag preserveResumeState so the workflow-rerun bounce keeps
     // the worktree and accumulated step progress through the transient
     // todo state on its way back to in-progress.
-    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo", { preserveResumeState: true });
+    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo", { preserveResumeState: true, preserveWorktree: true });
     expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-progress");
 
     // onComplete should NOT be called (task is being retried, not completed)
@@ -8925,7 +8925,7 @@ describe("Workflow Steps Execution", () => {
     await new Promise<void>((resolve) => queueMicrotask(resolve));
 
     // (2) bounce uses preserveResumeState so step progress + worktree survive
-    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo", { preserveResumeState: true });
+    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo", { preserveResumeState: true, preserveWorktree: true });
     expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-progress");
     expect(store.moveTask).not.toHaveBeenCalledWith("FN-001", "in-review");
     expect(onError).not.toHaveBeenCalled();
@@ -11880,7 +11880,7 @@ describe("TaskExecutor watchdogs", () => {
       executionStartedAt: originalExecutionStartedAt,
     });
     expect(store.moveTask.mock.calls).toEqual([
-      ["FN-WD-4", "todo", { preserveResumeState: true }],
+      ["FN-WD-4", "todo", { preserveResumeState: true, preserveWorktree: true }],
       ["FN-WD-4", "in-progress"],
     ]);
   });
@@ -12716,7 +12716,7 @@ describe("StepSessionExecutor integration", () => {
     // Task should move to todo then in-progress (not in-review). The
     // workflow-rerun bounce flags preserveResumeState so the worktree and
     // accumulated step progress survive the transient todo state.
-    expect(store.moveTask).toHaveBeenCalledWith("FN-200", "todo", { preserveResumeState: true });
+    expect(store.moveTask).toHaveBeenCalledWith("FN-200", "todo", { preserveResumeState: true, preserveWorktree: true });
     expect(store.moveTask).toHaveBeenCalledWith("FN-200", "in-progress");
 
     vi.useRealTimers();

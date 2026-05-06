@@ -8,6 +8,7 @@ import {
   resolveTitleSummarizerSettingsModel,
   validateNodeOverrideChange,
 } from "@fusion/core";
+import { planTaskWorktreePath } from "@fusion/engine";
 import { ApiError, badRequest, conflict, notFound } from "../api-error.js";
 import type { ApiRoutesContext } from "./types.js";
 
@@ -228,8 +229,29 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       if (preserveProgress != null && typeof preserveProgress !== "boolean") {
         throw badRequest("preserveProgress must be a boolean");
       }
+
+      // When manually promoting to in-progress, supply an allocator so
+      // moveTask assigns a worktree path under its cross-task allocation
+      // lock. This mirrors scheduler dispatch semantics — without it, a
+      // user-initiated move would land the task in-progress with a stale
+      // (or null) worktree and could collide with another active task.
+      // The executor's createWorktree path will reuse `task.branch` if it
+      // already exists, so any prior committed progress survives even
+      // though the on-disk worktree directory is freshly allocated.
+      let allocateWorktree: ((reservedNames: Set<string>) => string | null) | undefined;
+      if ((column as Column) === "in-progress") {
+        const existing = await scopedStore.getTask(req.params.id);
+        if (existing) {
+          const settings = await scopedStore.getSettings();
+          const rootDir = scopedStore.getRootDir();
+          allocateWorktree = (reservedNames) =>
+            planTaskWorktreePath(existing, rootDir, settings.worktreeNaming, reservedNames);
+        }
+      }
+
       const task = await scopedStore.moveTask(req.params.id, column as Column, {
         preserveProgress,
+        allocateWorktree,
       });
       res.json(task);
     } catch (err: unknown) {

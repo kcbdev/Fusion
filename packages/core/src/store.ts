@@ -482,6 +482,13 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private debounceMs = 150;
   /** Per-task promise chain for serializing writes */
   private taskLocks: Map<string, Promise<void>> = new Map();
+  /**
+   * Cross-task lock for worktree path allocation. Serializes the
+   * read-tasks → pick-name → write-task sequence so two concurrent
+   * `moveTask` calls (or a moveTask vs. a scheduler dispatch) cannot
+   * pick the same name from a stale snapshot.
+   */
+  private worktreeAllocationLock: Promise<void> = Promise.resolve();
   /** Promise chain for serializing config.json read-modify-write cycles */
   private configLock: Promise<void> = Promise.resolve();
   /** Cached workflow steps — invalidated on create/update/delete */
@@ -1503,6 +1510,21 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    * Serialize all mutations to a given task's task.json by chaining promises
    * per task ID. Concurrent callers for the same ID will queue behind each other.
    */
+  private withWorktreeAllocationLock<T>(fn: () => Promise<T>): Promise<T> {
+    let resolve: () => void;
+    const next = new Promise<void>((r) => { resolve = r; });
+    const prev = this.worktreeAllocationLock;
+    this.worktreeAllocationLock = next;
+
+    return prev.then(async () => {
+      try {
+        return await fn();
+      } finally {
+        resolve!();
+      }
+    });
+  }
+
   private withTaskLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
     const prev = this.taskLocks.get(id) ?? Promise.resolve();
     let resolve: () => void;
@@ -2841,6 +2863,26 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
        * (worktree and wall-clock timing fields).
        */
       preserveProgress?: boolean;
+      /**
+       * Skip the default "release worktree on requeue" behavior. Used by
+       * internal bounce paths (e.g. workflow-rerun) that immediately
+       * promote the task back to in-progress on the same checkout, where
+       * publishing an interim `worktree=null` state to listeners would be
+       * misleading. Has no effect on transitions that don't otherwise
+       * clear the worktree.
+       */
+      preserveWorktree?: boolean;
+      /**
+       * When transitioning to in-progress on a task that has no worktree
+       * assigned, invoke this allocator to pick a path. The store calls
+       * the allocator with a fresh `reservedNames` set (built from every
+       * other task's current `worktree`) inside a cross-task allocation
+       * lock, so two concurrent moves cannot pick the same name. The
+       * allocator should return an absolute path or `null` to skip
+       * allocation. Provided by callers (the manual-move route, the
+       * scheduler) so the store stays free of worktree-naming policy.
+       */
+      allocateWorktree?: (reservedNames: Set<string>) => string | null;
     },
   ): Promise<Task> {
     return this.withTaskLock(id, async () => {
@@ -2918,8 +2960,24 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         const preserveStepProgress =
           options?.preserveResumeState || (options?.preserveProgress === true && hasNonPendingStepProgress);
 
-        if (!options?.preserveResumeState) {
+        // Default: release the on-disk worktree directory on requeue. The
+        // checkout may have been removed, may now collide with another
+        // task's allocation, or may simply be abandoned by the bounce.
+        // `task.branch` is intentionally left intact so the next run can
+        // reattach to the same line of work — the executor's worktree
+        // creation path falls back to `git worktree add <path> <branch>`
+        // when the branch already exists, so any committed progress is
+        // preserved even though a fresh directory is allocated.
+        //
+        // Opt-out: internal bounces that immediately re-promote the task
+        // to in-progress on the same checkout (e.g. workflow-rerun) pass
+        // `preserveWorktree: true` so listeners never observe an interim
+        // `worktree=null` state.
+        if (!options?.preserveWorktree) {
           task.worktree = undefined;
+        }
+
+        if (!options?.preserveResumeState) {
           // Reset wall-clock runtime so the next run gets a fresh timer.
           task.executionStartedAt = undefined;
           task.executionCompletedAt = undefined;
@@ -2960,6 +3018,29 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         task.summary = undefined;
         task.recoveryRetryCount = undefined;
         task.nextRecoveryAt = undefined;
+      }
+
+      // Atomic worktree allocation on transition to in-progress.
+      // Wrapped in withWorktreeAllocationLock so the read-tasks → pick-name
+      // sequence cannot interleave with another concurrent moveTask. The
+      // caller supplies the naming policy via the `allocateWorktree`
+      // callback; the store builds `reservedNames` here so the snapshot
+      // is fresh under the global lock.
+      if (toColumn === "in-progress" && !task.worktree && options?.allocateWorktree) {
+        const allocator = options.allocateWorktree;
+        const allocated = await this.withWorktreeAllocationLock(async () => {
+          const others = await this.listTasks({ slim: true, includeArchived: false });
+          const reservedNames = new Set<string>();
+          for (const other of others) {
+            if (other.id === id || !other.worktree) continue;
+            const name = other.worktree.split("/").filter(Boolean).pop();
+            if (name) reservedNames.add(name);
+          }
+          return allocator(reservedNames);
+        });
+        if (allocated) {
+          task.worktree = allocated;
+        }
       }
 
       await this.atomicWriteTaskJson(dir, task);

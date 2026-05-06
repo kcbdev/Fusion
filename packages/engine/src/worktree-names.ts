@@ -94,6 +94,48 @@ export function generateReservedWorktreeName(
   return `${baseName}-${suffix}`;
 }
 
+/**
+ * Plan a worktree directory path for a task that is about to enter
+ * `in-progress`. Returns the absolute path under `<rootDir>/.worktrees/`.
+ *
+ * If the task already carries a `worktree` value, it is reused — the
+ * caller is responsible for ensuring it does not collide with another
+ * active task. Otherwise a name is generated according to `naming`,
+ * avoiding any names already in `reservedNames`.
+ *
+ * Shared by the scheduler dispatch path and the manual-move HTTP route
+ * so both allocate via the same collision rules.
+ */
+export function planTaskWorktreePath(
+  task: { id: string; title?: string | null; description: string; worktree?: string | null },
+  rootDir: string,
+  naming: string | undefined,
+  reservedNames: Set<string>,
+): string {
+  if (task.worktree) {
+    const existingName = task.worktree.split("/").filter(Boolean).pop();
+    if (existingName) reservedNames.add(existingName);
+    return task.worktree;
+  }
+
+  let worktreeName: string;
+  switch (naming || "random") {
+    case "task-id":
+      worktreeName = task.id.toLowerCase();
+      break;
+    case "task-title":
+      worktreeName = slugify(task.title || task.description.slice(0, 60));
+      break;
+    case "random":
+    default:
+      worktreeName = generateReservedWorktreeName(rootDir, reservedNames);
+      break;
+  }
+
+  reservedNames.add(worktreeName);
+  return join(rootDir, ".worktrees", worktreeName);
+}
+
 function getExistingWorktreeNames(worktreesDir: string): Set<string> {
   if (!existsSync(worktreesDir)) {
     return new Set();
