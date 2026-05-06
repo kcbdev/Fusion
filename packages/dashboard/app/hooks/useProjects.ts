@@ -3,7 +3,6 @@ import type { ProjectInfo } from "../api";
 import {
   fetchProjectsAcrossNodes,
   registerProject,
-  reportDashboardPerf,
   unregisterProject,
   updateProject,
   type ProjectCreateInput,
@@ -64,18 +63,14 @@ export function useProjects(): UseProjectsResult {
       try {
         const data = await fetchProjectsAcrossNodes();
         const elapsed = Math.round(performance.now() - t0);
-        const msg = `initial fetchProjectsAcrossNodes took ${elapsed}ms (${data.length} projects)`;
-        console.log(`[useProjects] ${msg}`);
-        reportDashboardPerf("[useProjects]", msg);
+        console.log(`[useProjects] initial fetchProjectsAcrossNodes took ${elapsed}ms (${data.length} projects)`);
         if (!cancelled) {
           setProjects(data);
           setError(null);
         }
       } catch (err) {
         const elapsed = Math.round(performance.now() - t0);
-        const msg = `initial fetch failed after ${elapsed}ms: ${err instanceof Error ? err.message : String(err)}`;
-        console.warn(`[useProjects] ${msg}`);
-        reportDashboardPerf("[useProjects]", msg);
+        console.warn(`[useProjects] initial fetch failed after ${elapsed}ms: ${err instanceof Error ? err.message : String(err)}`);
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "Failed to fetch projects");
         }

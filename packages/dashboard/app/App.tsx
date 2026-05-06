@@ -61,7 +61,7 @@ import { NativeShellOnboardingModal } from "./components/NativeShellOnboardingMo
 import { NativeShellConnectionManager } from "./components/NativeShellConnectionManager";
 import { NativeShellConnectionStatus } from "./components/NativeShellConnectionStatus";
 import type { AiSessionSummary } from "./api";
-import { fetchUnreadCount, reportDashboardPerf, fetchTaskDetail, fetchWorkflowSteps } from "./api";
+import { fetchUnreadCount, fetchTaskDetail, fetchWorkflowSteps } from "./api";
 import { getScopedItem, setScopedItem } from "./utils/projectStorage";
 import { subscribeSse } from "./sse-bus";
 import { AUTH_TOKEN_RECOVERY_REQUIRED_EVENT } from "./auth";
@@ -296,7 +296,6 @@ function AppInner() {
       const msg = `projects loaded at ${Math.round(performance.now() - mountTimeRef.current)}ms from mount`;
       if (!IS_TEST_ENV) {
         console.log(`[App] ${msg}`);
-        reportDashboardPerf("[App]", msg);
       }
     }
     if (!currentProjectLoading && !projectReadyLoggedRef.current) {
@@ -304,7 +303,6 @@ function AppInner() {
       const msg = `current-project resolved at ${Math.round(performance.now() - mountTimeRef.current)}ms from mount`;
       if (!IS_TEST_ENV) {
         console.log(`[App] ${msg}`);
-        reportDashboardPerf("[App]", msg);
       }
     }
   }, [projectsLoading, currentProjectLoading]);
@@ -323,7 +321,6 @@ function AppInner() {
       const msg = `dashboard ready at ${Math.round(performance.now() - mountTimeRef.current)}ms from mount (settle delay=${Math.round(performance.now() - settleStart)}ms)`;
       if (!IS_TEST_ENV) {
         console.log(`[App] ${msg}`);
-        reportDashboardPerf("[App]", msg);
       }
       setInitialLoadComplete(true);
     }, DASHBOARD_READY_SETTLE_DELAY_MS);
