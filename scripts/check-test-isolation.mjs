@@ -70,6 +70,7 @@ const RUNTIME_IGNORE_PATTERNS = [
   /^fusion\.db(?:-wal|-shm|-journal)?(?:\.backup-[\w-]+)?$/,
   /^archive\.db(?:-wal|-shm|-journal)?(?:\.backup-[\w-]+)?$/,
   /^activity-log\.jsonl$/,
+  /^settings\.json$/,
   /^logs(?:[\/\\]|$)/,
 ];
 
