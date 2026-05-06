@@ -9,8 +9,8 @@ import { parseShardArgs, selectShardPackages } from "../../../../scripts/ci-test
 describe("root test command changed-only planning", () => {
   it("uses changed mode when package-only changes are detected", () => {
     const packageMap = new Map([
-      ["core", "@fusion/core"],
-      ["engine", "@fusion/engine"],
+      ["packages/core", "@fusion/core"],
+      ["packages/engine", "@fusion/engine"],
     ]);
 
     const plan = decideExecutionPlan({
@@ -28,7 +28,7 @@ describe("root test command changed-only planning", () => {
       forceFullSuite: false,
       comparisonBase: "abc123",
       changedFiles: ["scripts/test-with-lock.mjs"],
-      packageNameByDir: new Map([["core", "@fusion/core"]]),
+      packageNameByDir: new Map([["packages/core", "@fusion/core"]]),
     });
 
     expect(plan).toEqual({ mode: "full", reason: "shared-infra-changed" });

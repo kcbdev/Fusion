@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import { cpus } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureTestArtifacts } from "./ensure-test-artifacts.mjs";
@@ -37,6 +38,18 @@ function parsePositiveInteger(value) {
   return parsed;
 }
 
+export function defaultTestWorkerBudget(env = process.env) {
+  const cpuCap = Math.max(1, cpus().length - 1);
+  const defaultTotal = Math.min(12, Math.max(4, cpuCap));
+  const totalWorkers = parsePositiveInteger(env.FUSION_TEST_TOTAL_WORKERS) ?? defaultTotal;
+  const concurrency = Math.max(
+    1,
+    Math.min(parsePositiveInteger(env.FUSION_TEST_CONCURRENCY) ?? 2, totalWorkers),
+  );
+
+  return { totalWorkers, concurrency };
+}
+
 export function parseShardArgs(argv = process.argv.slice(2), env = process.env) {
   const byFlag = (name) => {
     const idx = argv.indexOf(name);
@@ -68,10 +81,11 @@ export function main(argv = process.argv.slice(2), env = process.env) {
 
   console.log(`[ci-test-shard] shard ${shard}/${total}: ${shardPackages.join(", ")}`);
 
+  const { totalWorkers, concurrency } = defaultTestWorkerBudget(env);
   const shardEnv = {
     ...env,
-    FUSION_TEST_TOTAL_WORKERS: env.FUSION_TEST_TOTAL_WORKERS || "4",
-    FUSION_TEST_CONCURRENCY: env.FUSION_TEST_CONCURRENCY || "1",
+    FUSION_TEST_TOTAL_WORKERS: env.FUSION_TEST_TOTAL_WORKERS || String(totalWorkers),
+    FUSION_TEST_CONCURRENCY: env.FUSION_TEST_CONCURRENCY || String(concurrency),
   };
 
   run("pnpm", ["sync:fusion-skill:check"], { env: shardEnv });

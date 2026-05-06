@@ -43,7 +43,7 @@ describe("computeMaxWorkers", () => {
     expect(process.env.VITEST_MAX_WORKERS).toBe("3");
   });
 
-  it("ignores invalid env values and falls back to default cap", () => {
+  it("ignores invalid env values and falls back to provided default cap", () => {
     process.env.VITEST_MAX_WORKERS = "abc";
     process.env.FUSION_TEST_TOTAL_WORKERS = "0";
     process.env.FUSION_TEST_CONCURRENCY = "-1";
@@ -52,5 +52,18 @@ describe("computeMaxWorkers", () => {
 
     expect(workers).toBe(2);
     expect(process.env.VITEST_MAX_WORKERS).toBe("2");
+  });
+
+  it("uses a CPU-aware default cap when no overrides are provided", () => {
+    delete process.env.VITEST_MAX_WORKERS;
+    delete process.env.FUSION_TEST_TOTAL_WORKERS;
+    delete process.env.FUSION_TEST_CONCURRENCY;
+
+    const cpuCap = Math.max(1, cpus().length - 1);
+    const expected = Math.max(2, Math.min(6, Math.ceil(cpuCap / 2)));
+    const workers = computeMaxWorkers();
+
+    expect(workers).toBe(expected);
+    expect(process.env.VITEST_MAX_WORKERS).toBe(String(expected));
   });
 });

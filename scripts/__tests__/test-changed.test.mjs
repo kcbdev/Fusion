@@ -18,6 +18,7 @@ import {
   recordCachePass,
   cacheFilePath,
   shouldRunIsolationGuard,
+  defaultTestWorkerBudget,
 } from "../test-changed.mjs";
 
 import { mkdirSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
@@ -105,7 +106,7 @@ test("shouldForceFullSuite: returns true when a GitHub workflow changed", () => 
 // ---------------------------------------------------------------------------
 
 test("resolveAffectedPackages: maps changed files to package names", () => {
-  const map = pkgMap([["engine", "@fusion/engine"], ["core", "@fusion/core"]]);
+  const map = pkgMap([["packages/engine", "@fusion/engine"], ["packages/core", "@fusion/core"]]);
   const result = resolveAffectedPackages(
     ["packages/engine/src/index.ts", "packages/core/src/utils.ts"],
     map,
@@ -113,23 +114,37 @@ test("resolveAffectedPackages: maps changed files to package names", () => {
   assert.deepEqual(result?.sort(), ["@fusion/core", "@fusion/engine"]);
 });
 
-test("resolveAffectedPackages: ignores non-package files", () => {
-  const map = pkgMap([["engine", "@fusion/engine"]]);
+test("resolveAffectedPackages: ignores non-workspace files", () => {
+  const map = pkgMap([["packages/engine", "@fusion/engine"]]);
   const result = resolveAffectedPackages(["docs/readme.md"], map);
   assert.deepEqual(result, []);
 });
 
 test("resolveAffectedPackages: returns null for unknown package dir", () => {
-  const map = pkgMap([["engine", "@fusion/engine"]]);
+  const map = pkgMap([["packages/engine", "@fusion/engine"]]);
   const result = resolveAffectedPackages(["packages/unknown-pkg/src/foo.ts"], map);
   assert.equal(result, null);
+});
+
+
+test("resolveAffectedPackages: maps plugin workspace changes", () => {
+  const map = pkgMap([
+    ["packages/engine", "@fusion/engine"],
+    ["plugins/fusion-plugin-hermes-runtime", "@fusion-plugin-examples/hermes-runtime"],
+  ]);
+
+  const result = resolveAffectedPackages([
+    "plugins/fusion-plugin-hermes-runtime/src/runtime-adapter.ts",
+  ], map);
+
+  assert.deepEqual(result, ["@fusion-plugin-examples/hermes-runtime"]);
 });
 
 // ---------------------------------------------------------------------------
 // decideExecutionPlan
 // ---------------------------------------------------------------------------
 
-const basePackageMap = pkgMap([["engine", "@fusion/engine"], ["core", "@fusion/core"]]);
+const basePackageMap = pkgMap([["packages/engine", "@fusion/engine"], ["packages/core", "@fusion/core"]]);
 
 test("decideExecutionPlan: forced full suite", () => {
   const plan = decideExecutionPlan({
@@ -204,6 +219,33 @@ test("decideExecutionPlan: no affected package resolved → full", () => {
     changedFiles: ["packages/nonexistent/src/foo.ts"],
     packageNameByDir: basePackageMap,
   });
+  assert.equal(plan.mode, "full");
+  assert.equal(plan.reason, "no-affected-package");
+});
+
+test("decideExecutionPlan: plugin-only workspace changes stay in changed mode", () => {
+  const plan = decideExecutionPlan({
+    forceFullSuite: false,
+    comparisonBase: "abc123",
+    changedFiles: ["plugins/fusion-plugin-openclaw-runtime/src/runtime-adapter.ts"],
+    packageNameByDir: pkgMap([
+      ["packages/engine", "@fusion/engine"],
+      ["plugins/fusion-plugin-openclaw-runtime", "@fusion-plugin-examples/openclaw-runtime"],
+    ]),
+  });
+
+  assert.equal(plan.mode, "changed");
+  assert.deepEqual(plan.packages, ["@fusion-plugin-examples/openclaw-runtime"]);
+});
+
+test("decideExecutionPlan: plugin changes without mapping fail safe to full", () => {
+  const plan = decideExecutionPlan({
+    forceFullSuite: false,
+    comparisonBase: "abc123",
+    changedFiles: ["plugins/fusion-plugin-openclaw-runtime/src/runtime-adapter.ts"],
+    packageNameByDir: basePackageMap,
+  });
+
   assert.equal(plan.mode, "full");
   assert.equal(plan.reason, "no-affected-package");
 });
@@ -551,9 +593,9 @@ test("recordCachePass: empty package list skips write", () => {
 // cacheFilePath
 // ---------------------------------------------------------------------------
 
-test("cacheFilePath: ends with .fusion/test-cache.json", () => {
+test("cacheFilePath: ends with node_modules/.cache/fusion/test-cache.json", () => {
   const p = cacheFilePath();
-  assert.ok(p.endsWith(path.join(".fusion", "test-cache.json")), `got: ${p}`);
+  assert.ok(p.endsWith(path.join("node_modules", ".cache", "fusion", "test-cache.json")), `got: ${p}`);
 });
 
 test("shouldRunIsolationGuard: enabled by default", () => {
@@ -562,4 +604,24 @@ test("shouldRunIsolationGuard: enabled by default", () => {
 
 test("shouldRunIsolationGuard: disabled when env flag is set", () => {
   assert.equal(shouldRunIsolationGuard({ FUSION_TEST_DISABLE_ISOLATION_GUARD: "1" }), false);
+});
+
+test("defaultTestWorkerBudget: uses env overrides when provided", () => {
+  const budget = defaultTestWorkerBudget({
+    FUSION_TEST_TOTAL_WORKERS: "9",
+    FUSION_TEST_CONCURRENCY: "3",
+  });
+
+  assert.deepEqual(budget, { totalWorkers: 9, concurrency: 3 });
+});
+
+test("defaultTestWorkerBudget: uses CPU-aware defaults and clamps concurrency", () => {
+  const budget = defaultTestWorkerBudget({
+    FUSION_TEST_TOTAL_WORKERS: "",
+    FUSION_TEST_CONCURRENCY: "999",
+  });
+
+  assert.ok(budget.totalWorkers >= 4);
+  assert.ok(budget.totalWorkers <= 12);
+  assert.equal(budget.concurrency, budget.totalWorkers);
 });
