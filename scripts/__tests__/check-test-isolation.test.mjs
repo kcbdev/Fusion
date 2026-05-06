@@ -1,0 +1,84 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+
+const scriptPath = path.resolve("scripts/check-test-isolation.mjs");
+
+function withFixture(fn) {
+  const cwd = mkdtempSync(path.join(tmpdir(), "check-isolation-cwd-"));
+  const home = mkdtempSync(path.join(tmpdir(), "check-isolation-home-"));
+  mkdirSync(path.join(cwd, ".fusion"), { recursive: true });
+  mkdirSync(path.join(home, ".fusion"), { recursive: true });
+  try {
+    fn({ cwd, home });
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+function runScript(args, options) {
+  return spawnSync(process.execPath, [scriptPath, ...args], {
+    cwd: options.cwd,
+    env: { ...process.env, HOME: options.home, USERPROFILE: options.home },
+    encoding: "utf8",
+  });
+}
+
+test("passes when baseline and current state match", () => {
+  withFixture(({ cwd, home }) => {
+    const before = runScript(["--before"], { cwd, home });
+    assert.equal(before.status, 0);
+    const after = runScript([], { cwd, home });
+    assert.equal(after.status, 0);
+  });
+});
+
+test("fails when a tracked temp leak appears after baseline", () => {
+  withFixture(({ cwd, home }) => {
+    const before = runScript(["--before"], { cwd, home });
+    assert.equal(before.status, 0);
+    mkdirSync(path.join(tmpdir(), "fusion-test-leak-check-script"), { recursive: true });
+    const after = runScript([], { cwd, home });
+    assert.equal(after.status, 1);
+    assert.match(after.stderr, /leaked temp director/i);
+    rmSync(path.join(tmpdir(), "fusion-test-leak-check-script"), { recursive: true, force: true });
+  });
+});
+
+test("fails when protected repo .fusion data changes after baseline", () => {
+  withFixture(({ cwd, home }) => {
+    const before = runScript(["--before"], { cwd, home });
+    assert.equal(before.status, 0);
+    writeFileSync(path.join(cwd, ".fusion", "mutated.txt"), "x");
+    const after = runScript([], { cwd, home });
+    assert.equal(after.status, 1);
+    assert.match(after.stderr, /protected live \.fusion data changed/i);
+  });
+});
+
+test("fails when protected HOME .fusion data changes after baseline", () => {
+  withFixture(({ cwd, home }) => {
+    const before = runScript(["--before"], { cwd, home });
+    assert.equal(before.status, 0);
+    writeFileSync(path.join(home, ".fusion", "home-mutated.txt"), "x");
+    const after = runScript([], { cwd, home });
+    assert.equal(after.status, 1);
+    assert.match(after.stderr, /protected live \.fusion data changed/i);
+  });
+});
+
+test("fails when protected .fusion existence changes after baseline", () => {
+  withFixture(({ cwd, home }) => {
+    rmSync(path.join(cwd, ".fusion"), { recursive: true, force: true });
+    const before = runScript(["--before"], { cwd, home });
+    assert.equal(before.status, 0);
+    mkdirSync(path.join(cwd, ".fusion"), { recursive: true });
+    const after = runScript([], { cwd, home });
+    assert.equal(after.status, 1);
+    assert.match(after.stderr, /protected live \.fusion data changed/i);
+  });
+});

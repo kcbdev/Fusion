@@ -106,6 +106,36 @@ describe("MessageStore", () => {
       expect(store.getMessage(reply.id)?.metadata).toEqual({ replyTo: { messageId: original.id } });
     });
 
+    it("persists wakeRecipient metadata through storage roundtrip", () => {
+      const message = store.sendMessage({
+        fromId: "user:dashboard",
+        fromType: "user",
+        toId: "agent-1",
+        toType: "agent",
+        content: "urgent",
+        type: "user-to-agent",
+        metadata: { wakeRecipient: true },
+      });
+
+      expect(message.metadata).toEqual({ wakeRecipient: true });
+      expect(store.getMessage(message.id)?.metadata).toEqual({ wakeRecipient: true });
+    });
+
+    it("rejects non-boolean wakeRecipient metadata", () => {
+      expect(() => {
+        store.sendMessage({
+          fromId: "user:dashboard",
+          fromType: "user",
+          toId: "agent-1",
+          toType: "agent",
+          content: "Bad metadata",
+          type: "user-to-agent",
+          // @ts-expect-error intentional bad type for runtime validation
+          metadata: { wakeRecipient: "yes" },
+        });
+      }).toThrow("metadata.wakeRecipient must be a boolean");
+    });
+
     it("rejects malformed reply metadata", () => {
       expect(() => {
         store.sendMessage({

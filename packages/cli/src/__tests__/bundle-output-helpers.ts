@@ -44,6 +44,7 @@ export function buildCliWithRealDashboardAssets() {
     return;
   }
 
+  runBuildCommand(`node ${join(workspaceRoot, "scripts", "ensure-test-artifacts.mjs")}`, workspaceRoot);
   runBuildCommand("pnpm --filter @fusion/dashboard build:client", workspaceRoot);
   runBuildCommand("pnpm build", cliRoot);
 

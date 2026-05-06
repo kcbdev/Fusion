@@ -1149,7 +1149,12 @@ export class HeartbeatMonitor {
     }
 
     const runtimeConfig = agent.runtimeConfig as AgentHeartbeatConfig | undefined;
-    const senderForcedWake = message.metadata?.wakeRecipient === true;
+    // Only human-originated (user) messages may override an agent's
+    // messageResponseMode setting. Agent-to-agent traffic must respect the
+    // recipient's configured behavior to prevent agents from forcing wakes
+    // on each other.
+    const senderForcedWake =
+      message.metadata?.wakeRecipient === true && message.fromType === "user";
     if (!senderForcedWake && runtimeConfig?.messageResponseMode !== "immediate") {
       return;
     }

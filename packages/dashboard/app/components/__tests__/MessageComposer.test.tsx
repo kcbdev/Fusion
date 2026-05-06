@@ -197,6 +197,71 @@ describe("MessageComposer", () => {
     });
   });
 
+  it("forwards wakeRecipient metadata when the wake checkbox is ticked for an agent recipient", async () => {
+    render(<MessageComposer {...defaultProps} agents={mockAgents} />);
+    fireEvent.change(screen.getByTestId("message-composer-recipient"), {
+      target: { value: "agent-001" },
+    });
+    fireEvent.change(screen.getByTestId("message-composer-content"), {
+      target: { value: "wake up" },
+    });
+    fireEvent.click(screen.getByTestId("message-composer-wake"));
+    fireEvent.click(screen.getByTestId("message-composer-send"));
+
+    await waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: { wakeRecipient: true },
+        }),
+        undefined,
+      );
+    });
+  });
+
+  it("merges wakeRecipient with replyTo metadata when replying", async () => {
+    render(
+      <MessageComposer
+        {...defaultProps}
+        agents={mockAgents}
+        recipient={{ id: "agent-001", type: "agent" }}
+        replyContext={{ messageId: "msg-orig", preview: "earlier message" }}
+      />,
+    );
+    fireEvent.change(screen.getByTestId("message-composer-content"), {
+      target: { value: "follow up" },
+    });
+    fireEvent.click(screen.getByTestId("message-composer-wake"));
+    fireEvent.click(screen.getByTestId("message-composer-send"));
+
+    await waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: {
+            replyTo: { messageId: "msg-orig" },
+            wakeRecipient: true,
+          },
+        }),
+        undefined,
+      );
+    });
+  });
+
+  it("omits wakeRecipient metadata when the checkbox is left unchecked", async () => {
+    render(<MessageComposer {...defaultProps} agents={mockAgents} />);
+    fireEvent.change(screen.getByTestId("message-composer-recipient"), {
+      target: { value: "agent-001" },
+    });
+    fireEvent.change(screen.getByTestId("message-composer-content"), {
+      target: { value: "regular" },
+    });
+    fireEvent.click(screen.getByTestId("message-composer-send"));
+
+    await waitFor(() => {
+      const callArgs = mockSendMessage.mock.calls[0][0];
+      expect(callArgs.metadata).toBeUndefined();
+    });
+  });
+
   it("passes projectId to sendMessage", async () => {
     render(<MessageComposer {...defaultProps} agents={mockAgents} projectId="proj-1" />);
     fireEvent.change(screen.getByTestId("message-composer-recipient"), {

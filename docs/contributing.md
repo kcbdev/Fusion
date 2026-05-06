@@ -75,6 +75,17 @@ GitHub Actions now runs deterministic test sharding via `pnpm test:ci:shard --sh
 
 `pnpm test` now uses a changed-only entrypoint (`scripts/test-changed.mjs`) for faster local iteration. It resolves the comparison base from `.changeset/config.json` (`baseBranch`) and runs only affected package test scripts using safe package-first filtering (`pnpm --filter <pkg> test`). It automatically falls back to the full suite when the run is forced (CI / `--full`), the git comparison base or diff cannot be resolved, no changes are detected, or shared/root test infrastructure changes.
 
+### Test isolation contract (required)
+
+Fusion tests must run against disposable test data, never live local state:
+
+- The canonical Vitest bootstrap is `packages/core/src/__test-utils__/vitest-setup.ts`.
+- Workspace/package Vitest configs should use package-local `src/__tests__/setup-test-isolation.ts` shims that call into the shared core bootstrap rather than re-implementing HOME/cwd isolation.
+- Test runs must use temp HOME and temp workspace/project roots so global settings resolve under temporary directories instead of real `~/.fusion`.
+- The repository `.fusion` directory is treated as protected live data; root test entrypoints run `scripts/check-test-isolation.mjs` to fail if tests mutate protected Fusion data paths.
+
+If you add or change test entrypoints, keep this isolation guard path intact so cached/changed-package routes remain protected.
+
 ## Quality Gate Checklist
 
 Before submitting changes, verify:

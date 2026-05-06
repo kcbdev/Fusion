@@ -17,6 +17,7 @@ import {
   applyCacheToPlan,
   recordCachePass,
   cacheFilePath,
+  shouldRunIsolationGuard,
 } from "../test-changed.mjs";
 
 import { mkdirSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
@@ -89,6 +90,10 @@ test("shouldForceFullSuite: returns true when pnpm-lock.yaml changed", () => {
 
 test("shouldForceFullSuite: returns true when scripts/test-changed.mjs changed", () => {
   assert.equal(shouldForceFullSuite(["scripts/test-changed.mjs"]), true);
+});
+
+test("shouldForceFullSuite: returns true when scripts/check-test-isolation.mjs changed", () => {
+  assert.equal(shouldForceFullSuite(["scripts/check-test-isolation.mjs"]), true);
 });
 
 test("shouldForceFullSuite: returns true when a GitHub workflow changed", () => {
@@ -549,4 +554,12 @@ test("recordCachePass: empty package list skips write", () => {
 test("cacheFilePath: ends with .fusion/test-cache.json", () => {
   const p = cacheFilePath();
   assert.ok(p.endsWith(path.join(".fusion", "test-cache.json")), `got: ${p}`);
+});
+
+test("shouldRunIsolationGuard: enabled by default", () => {
+  assert.equal(shouldRunIsolationGuard({}), true);
+});
+
+test("shouldRunIsolationGuard: disabled when env flag is set", () => {
+  assert.equal(shouldRunIsolationGuard({ FUSION_TEST_DISABLE_ISOLATION_GUARD: "1" }), false);
 });

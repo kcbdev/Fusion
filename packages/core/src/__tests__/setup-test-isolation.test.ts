@@ -9,8 +9,8 @@ import { Database } from "../db.js";
 
 const TEMP_HOME_PREFIX = "fn-test-home-";
 
-describe("test isolation setup", () => {
-  it("process.env.HOME is overridden to a temp directory", () => {
+describe("shared test isolation setup", () => {
+  it("overrides HOME to a temp fn-test-home directory", () => {
     const home = process.env.HOME;
     const userProfile = process.env.USERPROFILE;
 
@@ -43,11 +43,12 @@ describe("test isolation setup", () => {
     );
   });
 
-  it("cwd is not inside the repository .fusion directory", () => {
+  it("records protected repository root and avoids repo .fusion cwd", () => {
     const thisFile = fileURLToPath(import.meta.url);
     const repoRoot = resolve(dirname(thisFile), "../../../../");
     const repoFusionDir = join(repoRoot, ".fusion");
 
+    expect(process.env.FUSION_TEST_REAL_ROOT).toBeDefined();
     expect(process.cwd().startsWith(repoFusionDir)).toBe(false);
   });
 

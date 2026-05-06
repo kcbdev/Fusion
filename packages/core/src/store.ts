@@ -3163,10 +3163,35 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       } else if (updates.blockedBy !== undefined) {
         task.blockedBy = updates.blockedBy;
       }
+      const previousAssignedAgentId = task.assignedAgentId;
       if (updates.assignedAgentId === null) {
         task.assignedAgentId = undefined;
       } else if (updates.assignedAgentId !== undefined) {
         task.assignedAgentId = updates.assignedAgentId;
+      }
+      // If the agent that paused this task is being unassigned (or replaced),
+      // auto-unpause: the pause was tied to that agent's lifecycle, and now
+      // there's no longer a relationship that justifies keeping the task paused.
+      const assignmentChanged =
+        updates.assignedAgentId !== undefined && task.assignedAgentId !== previousAssignedAgentId;
+      if (
+        assignmentChanged &&
+        task.paused &&
+        task.pausedByAgentId &&
+        task.pausedByAgentId === previousAssignedAgentId
+      ) {
+        task.paused = undefined;
+        task.pausedByAgentId = undefined;
+        if (task.column === "in-progress" || task.column === "in-review") {
+          if (task.status === "paused") {
+            task.status = undefined;
+          }
+        }
+        task.log.push({
+          timestamp: new Date().toISOString(),
+          action: `Task unpaused (agent ${previousAssignedAgentId} unassigned)`,
+          ...(runContext ? { runContext } : {}),
+        });
       }
       if (updates.pausedByAgentId === null) {
         task.pausedByAgentId = undefined;

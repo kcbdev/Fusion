@@ -7,6 +7,10 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { ensureTestArtifacts } from "./ensure-test-artifacts.mjs";
 
+const currentFilePath = fileURLToPath(import.meta.url);
+const scriptDir = path.dirname(currentFilePath);
+const checkIsolationScript = path.join(scriptDir, "check-test-isolation.mjs");
+
 const rootDir = process.env.FUSION_PROJECT_DIR
   ? path.resolve(process.env.FUSION_PROJECT_DIR)
   : process.cwd();
@@ -29,6 +33,26 @@ function run(command, commandArgs, options = {}) {
 
   if (result.status !== 0) {
     process.exit(result.status ?? 1);
+  }
+}
+
+function runIsolationCheck(before = false) {
+  const args = [checkIsolationScript];
+  if (before) args.push("--before");
+  run(process.execPath, args);
+}
+
+export function shouldRunIsolationGuard(env = process.env) {
+  return env.FUSION_TEST_DISABLE_ISOLATION_GUARD !== "1";
+}
+
+function runMaybeIsolated(command, commandArgs, options = {}) {
+  const enabled = shouldRunIsolationGuard();
+  if (enabled) runIsolationCheck(true);
+  try {
+    run(command, commandArgs, options);
+  } finally {
+    if (enabled) runIsolationCheck(false);
   }
 }
 
@@ -414,7 +438,7 @@ const fullSuiteEnv = {
 };
 
 function runFullSuite(forwardedArgs) {
-  run("pnpm", [`-r`, `--workspace-concurrency=${workspaceConcurrency}`, "test", ...forwardedArgs], { env: fullSuiteEnv });
+  runMaybeIsolated("pnpm", [`-r`, `--workspace-concurrency=${workspaceConcurrency}`, "test", ...forwardedArgs], { env: fullSuiteEnv });
 }
 
 export function decideExecutionPlan({
@@ -495,6 +519,10 @@ export function main(argv = process.argv.slice(2)) {
     console.log(
       `[test-changed] all changed packages are cache-fresh (${cachedPackages.join(", ")}); nothing to run.`,
     );
+    if (shouldRunIsolationGuard()) {
+      runIsolationCheck(true);
+      runIsolationCheck(false);
+    }
     return;
   }
 
@@ -504,13 +532,12 @@ export function main(argv = process.argv.slice(2)) {
     console.log(`[test-changed] skipping cached packages: ${cachedPackages.join(", ")}`);
   }
 
-  run("pnpm", [...filterArgs, `--workspace-concurrency=${workspaceConcurrency}`, "test", ...forwardedArgs], { env: fullSuiteEnv });
+  runMaybeIsolated("pnpm", [...filterArgs, `--workspace-concurrency=${workspaceConcurrency}`, "test", ...forwardedArgs], { env: fullSuiteEnv });
 
   // Tests passed — record in cache (never cache failures; process.exit on failure above).
   recordCachePass(activePackages, packageDirByName, { noCache });
 }
 
-const currentFilePath = fileURLToPath(import.meta.url);
 if (process.argv[1] && path.resolve(process.argv[1]) === currentFilePath) {
   main();
 }

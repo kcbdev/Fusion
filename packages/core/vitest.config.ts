@@ -14,7 +14,6 @@ export default defineConfig({
   test: {
     include: ["src/**/*.test.ts"],
     setupFiles: [
-      "./src/__tests__/setup-test-isolation.ts",
       "./src/__test-utils__/vitest-setup.ts",
     ],
     globalSetup: ["./src/__test-utils__/vitest-teardown.ts"],
@@ -25,10 +24,8 @@ export default defineConfig({
     //      worker never gets its isolated cwd. Tests that rely on cwd being a
     //      disposable temp dir would silently operate in the repo root.
     //
-    //   2. setup-test-isolation.ts:15-16 — `process.env.HOME` is written
-    //      unconditionally in every setupFile invocation. Threads share
-    //      `process.env`, so concurrent workers race on HOME and the last writer
-    //      wins, breaking isolation for all other workers in the same run.
+    //   2. Some suites rely on fork-level process/env isolation for setup side effects,
+    //      and cannot safely share mutable process state under worker_threads.
     pool: "forks",
     maxWorkers,
     poolOptions: { forks: { minForks: 1, maxForks: maxWorkers } },
