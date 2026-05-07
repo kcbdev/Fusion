@@ -2474,6 +2474,9 @@ export function QuickChatFAB({
                         if (handledMobileActionRef.current) return;
                         handledMobileActionRef.current = true;
                         stopStreaming();
+                        window.setTimeout(() => {
+                          handledMobileActionRef.current = false;
+                        }, 500);
                       }
                     }}
                     onTouchStart={(event) => {
@@ -2482,6 +2485,9 @@ export function QuickChatFAB({
                       if (handledMobileActionRef.current) return;
                       handledMobileActionRef.current = true;
                       stopStreaming();
+                      window.setTimeout(() => {
+                        handledMobileActionRef.current = false;
+                      }, 500);
                     }}
                     onMouseDown={(event) => {
                       if (typeof window === "undefined" || window.innerWidth > QUICK_CHAT_DESKTOP_BREAKPOINT) return;
@@ -2507,17 +2513,18 @@ export function QuickChatFAB({
                       if (typeof window === "undefined" || window.innerWidth > QUICK_CHAT_DESKTOP_BREAKPOINT) return;
                       event.preventDefault();
                       if (event.pointerType && event.pointerType !== "mouse") {
-                        // Guard against the same touch firing both
-                        // onPointerDown and onTouchStart, which would call
-                        // handleSendMessage twice — the second call closes
-                        // the first's stream and the server-side
-                        // beginGeneration aborts the in-flight generation,
-                        // producing no output. (See ChatView send button.)
+                        // Dedupe across pointerdown/touchstart/click for one
+                        // tap; self-clear via setTimeout because preventDefault
+                        // can suppress the synthesized click that previously
+                        // cleared this ref. (See ChatView send button.)
                         if (handledMobileActionRef.current) return;
                         handledMobileActionRef.current = true;
                         markPreserveComposerFocus();
                         focusComposerInput();
                         void handleSendMessage();
+                        window.setTimeout(() => {
+                          handledMobileActionRef.current = false;
+                        }, 500);
                       }
                     }}
                     onTouchStart={(event) => {
@@ -2528,6 +2535,9 @@ export function QuickChatFAB({
                       markPreserveComposerFocus();
                       focusComposerInput();
                       void handleSendMessage();
+                      window.setTimeout(() => {
+                        handledMobileActionRef.current = false;
+                      }, 500);
                     }}
                     onMouseDown={(event) => {
                       if (typeof window === "undefined" || window.innerWidth > QUICK_CHAT_DESKTOP_BREAKPOINT) return;
