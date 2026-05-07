@@ -84,6 +84,28 @@ describe("distributed-task-id allocator", () => {
     expect(state.nextSequence).toBe(3702);
   });
 
+  it("skips stale overlapping nextSequence values and reserves the next free id", async () => {
+    const db = new Database("/tmp/fusion-test", { inMemory: true });
+    db.init();
+    const now = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO tasks (id, description, \"column\", createdAt, updatedAt) VALUES (?, '', 'todo', ?, ?)",
+    ).run("FN-002", now, now);
+    db.prepare(
+      "INSERT INTO distributed_task_id_state (prefix, nextSequence, committedClusterTaskCount, lastCommittedTaskId, updatedAt) VALUES (?, ?, ?, ?, ?)",
+    ).run("FN", 2, 1, "FN-001", now);
+
+    const allocator = createDistributedTaskIdAllocator(db);
+    const reservation = await allocator.reserveDistributedTaskId({ prefix: "FN", nodeId: "node-a" });
+
+    expect(reservation.taskId).toBe("FN-003");
+    expect(reservation.sequence).toBe(3);
+
+    const state = await allocator.getDistributedTaskIdState({ prefix: "FN" });
+    expect(state.nextSequence).toBe(4);
+    expect(state.committedClusterTaskCount).toBe(1);
+  });
+
   it("state reports committed count independently from nextSequence", async () => {
     const { allocator } = createAllocator();
     const first = await allocator.reserveDistributedTaskId({ prefix: "FN", nodeId: "node-a" });

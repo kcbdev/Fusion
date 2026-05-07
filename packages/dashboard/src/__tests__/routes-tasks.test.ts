@@ -727,6 +727,66 @@ describe("POST /tasks", () => {
     expect(res.body.error).toContain("nodeId must be a string");
   });
 
+  it("retries reserved-id create when first reservation overlaps an existing task id", async () => {
+    const reserveDistributedTaskId = vi
+      .fn()
+      .mockResolvedValueOnce({ reservationId: "res-1", taskId: "FN-7001" })
+      .mockResolvedValueOnce({ reservationId: "res-2", taskId: "FN-7002" });
+    const commitDistributedTaskIdReservation = vi.fn().mockResolvedValue({});
+    const abortDistributedTaskIdReservation = vi.fn().mockResolvedValue({});
+    const createTaskWithReservedId = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Task ID already exists: FN-7001"))
+      .mockResolvedValueOnce({
+        ...FAKE_TASK_DETAIL,
+        id: "FN-7002",
+        column: "triage",
+        createdAt: "2026-05-05T00:00:00.000Z",
+        updatedAt: "2026-05-05T00:00:00.000Z",
+      });
+    const deleteTask = vi.fn().mockResolvedValue(undefined);
+    const getTask = vi.fn().mockResolvedValue({ ...FAKE_TASK_DETAIL, prompt: "# FN-7002\n\nBig initiative\n" });
+    const storeWithReservedCreate = createMockStore({
+      createTaskWithReservedId,
+      deleteTask,
+      getTask,
+      getDistributedTaskIdAllocator: vi.fn().mockReturnValue({
+        reserveDistributedTaskId,
+        commitDistributedTaskIdReservation,
+        abortDistributedTaskIdReservation,
+      }),
+    });
+
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(storeWithReservedCreate));
+
+    const res = await REQUEST(
+      app,
+      "POST",
+      "/api/tasks",
+      JSON.stringify({ description: "Big initiative" }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(createTaskWithReservedId).toHaveBeenCalledTimes(2);
+    expect(createTaskWithReservedId).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ description: "Big initiative" }),
+      expect.objectContaining({ taskId: "FN-7001" }),
+    );
+    expect(createTaskWithReservedId).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ description: "Big initiative" }),
+      expect.objectContaining({ taskId: "FN-7002" }),
+    );
+    expect(abortDistributedTaskIdReservation).toHaveBeenCalledTimes(1);
+    expect(abortDistributedTaskIdReservation).toHaveBeenCalledWith(expect.objectContaining({ reservationId: "res-1", reason: "failed-create" }));
+    expect(commitDistributedTaskIdReservation).toHaveBeenCalledWith(expect.objectContaining({ reservationId: "res-2" }));
+    expect(deleteTask).not.toHaveBeenCalled();
+  });
+
   it("aborts reservation and deletes local task on replication failure", async () => {
     const reserveDistributedTaskId = vi.fn().mockResolvedValue({ reservationId: "res-1", taskId: "FN-7002" });
     const commitDistributedTaskIdReservation = vi.fn().mockResolvedValue({});
@@ -768,6 +828,7 @@ describe("POST /tasks", () => {
     expect(abortDistributedTaskIdReservation).toHaveBeenCalledWith(expect.objectContaining({ reservationId: "res-1", reason: "failed-create" }));
     expect(deleteTask).toHaveBeenCalledWith("FN-7002");
     expect(commitDistributedTaskIdReservation).not.toHaveBeenCalled();
+    expect(reserveDistributedTaskId).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
     mockCentralListNodes.mockResolvedValue([]);
   });

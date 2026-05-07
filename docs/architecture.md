@@ -531,6 +531,7 @@ Implemented in `agent-heartbeat.ts`:
   - Mesh allocator write routes (`/api/mesh/task-ids/reserve|commit|abort`) return `503` when the coordinator node is unreachable; they never fall back to local-only cluster ID issuance.
 - Cluster task creation now uses a strong-write reserve → create → replicate → commit/abort sequence.
   - `POST /api/tasks` reserves a distributed ID, creates the authoritative local task with that reserved ID, then POSTs authenticated replication payloads to peer nodes.
+  - Creation self-heals stale ID overlap state: if a reserved `FN-*` collides with an existing task (`Task ID already exists...` or replicated-create collision), the route aborts that reservation, cleans up partial local state, reserves the next ID, and retries up to a bounded limit.
   - Replica apply uses `TaskStore.applyReplicatedTaskCreate(...)`, which is idempotent by task ID: replaying the same payload returns the existing task without creating duplicates.
   - If an incoming replicated payload conflicts with a different existing task record for the same ID, the apply path returns a deterministic collision error instead of overwriting data.
   - Any replication/coordinator failure aborts the reservation and returns write failure (`503`), so this path does not report success for local-only partial writes.

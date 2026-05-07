@@ -19,7 +19,7 @@
 }
 
 .plugin-manager-header-title {
-  font-size: 13px;
+  font-size: var(--font-size-sm, 0.85rem);
   font-weight: 600;
   color: var(--text);
   flex: 1;
@@ -43,7 +43,7 @@
 
 .plugin-install-hint {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--font-size-sm, 0.85rem);
   color: var(--text-secondary, var(--text-muted));
   line-height: 1.45;
 }
@@ -97,7 +97,7 @@
 }
 
 .plugin-version {
-  font-size: 0.85rem;
+  font-size: var(--font-size-sm, 0.85rem);
 }
 
 .plugin-state-badge {
@@ -105,7 +105,7 @@
   align-items: center;
   padding: var(--space-xs) var(--space-sm);
   border-radius: var(--radius-pill);
-  font-size: 0.7rem;
+  font-size: var(--font-size-3xs, 0.7rem);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -157,7 +157,7 @@
 }
 
 .plugin-description {
-  font-size: 0.95rem;
+  font-size: var(--font-size-md, 0.95rem);
   color: var(--text-secondary, var(--text-muted));
   line-height: 1.5;
 }
@@ -166,7 +166,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-xs);
-  font-size: 0.9rem;
+  font-size: var(--font-size-base, 0.9rem);
   color: var(--text-muted);
 }
 
@@ -180,7 +180,7 @@
   align-items: center;
   gap: var(--space-xs);
   color: var(--color-info);
-  font-size: 0.85rem;
+  font-size: var(--font-size-sm, 0.85rem);
   flex-wrap: wrap;
   overflow-wrap: anywhere;
 }
@@ -189,7 +189,7 @@
   margin: 0;
   padding: 0;
   border: 0;
-  font-size: 0.95rem;
+  font-size: var(--font-size-md, 0.95rem);
 }
 
 .plugin-settings-form {
@@ -212,7 +212,7 @@
 
 .plugin-settings-group-heading {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--font-size-xs, 0.8rem);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -317,12 +317,12 @@
 
 .plugin-builtins-heading {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: var(--font-size-md, 0.95rem);
 }
 
 .plugin-builtins-description {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--font-size-sm, 0.85rem);
   color: var(--text-muted);
 }
 
@@ -356,7 +356,7 @@
 
 .plugin-builtins-name {
   color: var(--text);
-  font-size: 0.9rem;
+  font-size: var(--font-size-base, 0.9rem);
   font-weight: 500;
 }
 
@@ -367,7 +367,7 @@
   border-radius: var(--radius-pill);
   background: var(--status-in-review-bg);
   color: var(--in-review);
-  font-size: 0.75rem;
+  font-size: var(--font-size-2xs, 0.75rem);
   font-weight: 600;
   text-transform: uppercase;
 }
@@ -377,7 +377,7 @@
   align-items: center;
   padding: var(--btn-border-width) var(--space-xs);
   border-radius: var(--radius-pill);
-  font-size: 0.75rem;
+  font-size: var(--font-size-2xs, 0.75rem);
   font-weight: 600;
   text-transform: uppercase;
 }
@@ -397,7 +397,7 @@
   align-items: center;
   padding: var(--btn-border-width) var(--space-xs);
   border-radius: var(--radius-pill);
-  font-size: 0.75rem;
+  font-size: var(--font-size-2xs, 0.75rem);
   font-weight: 600;
   text-transform: uppercase;
 }
@@ -425,12 +425,12 @@
 .plugin-builtins-description-text {
   flex: 1 1 100%;
   color: var(--text-muted);
-  font-size: 0.85rem;
+  font-size: var(--font-size-sm, 0.85rem);
 }
 
 .plugin-builtins-metadata-only {
   color: var(--text-muted);
-  font-size: 0.8rem;
+  font-size: var(--font-size-xs, 0.8rem);
   font-weight: 600;
   text-transform: uppercase;
 }
@@ -465,7 +465,7 @@
 
 .plugin-bundled-runtime-name {
   color: var(--text);
-  font-size: 0.9rem;
+  font-size: var(--font-size-base, 0.9rem);
   font-weight: 500;
 }
 
@@ -476,7 +476,7 @@
   border-radius: var(--radius-pill);
   background: var(--status-in-review-bg);
   color: var(--in-review);
-  font-size: 0.75rem;
+  font-size: var(--font-size-2xs, 0.75rem);
   font-weight: 600;
   text-transform: uppercase;
 }
@@ -495,12 +495,12 @@
 
 .plugin-bundled-runtime-heading {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: var(--font-size-md, 0.95rem);
 }
 
 .plugin-bundled-runtime-description {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--font-size-sm, 0.85rem);
   color: var(--text-muted);
 }
 
@@ -509,7 +509,7 @@
   align-items: center;
   padding: var(--btn-border-width) var(--space-xs);
   border-radius: var(--radius-pill);
-  font-size: 0.75rem;
+  font-size: var(--font-size-2xs, 0.75rem);
   font-weight: 600;
   text-transform: uppercase;
 }

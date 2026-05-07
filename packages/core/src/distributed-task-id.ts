@@ -81,6 +81,22 @@ export function createDistributedTaskIdAllocator(db: Database): DistributedTaskI
     return result.changes ?? 0;
   };
 
+  const taskIdExists = (prefix: string, sequence: number): boolean => {
+    const taskId = formatDistributedTaskId(prefix, sequence);
+    const existsInTable = (table: string): boolean => {
+      try {
+        const row = db
+          .prepare(`SELECT 1 as found FROM ${table} WHERE id = ? LIMIT 1`)
+          .get(taskId) as { found?: number } | undefined;
+        return row?.found === 1;
+      } catch {
+        return false;
+      }
+    };
+
+    return existsInTable("tasks") || existsInTable("archivedTasks");
+  };
+
   const ensureStateRow = (prefix: string): void => {
     // Seed nextSequence past any pre-existing task ID for this prefix. Without
     // this, projects whose tasks were originally allocated through
@@ -161,7 +177,11 @@ export function createDistributedTaskIdAllocator(db: Database): DistributedTaskI
             )
             .get(prefix) as { nextSequence: number; committedClusterTaskCount: number };
 
-          const sequence = state.nextSequence;
+          let sequence = state.nextSequence;
+          while (taskIdExists(prefix, sequence)) {
+            sequence += 1;
+          }
+
           const taskId = formatDistributedTaskId(prefix, sequence);
           const reservationId = randomUUID();
 

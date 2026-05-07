@@ -249,53 +249,70 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       const remoteNodes = nodes.filter((node) => node.type === "remote" && node.url && node.apiKey);
       await central.close();
 
-      const reservation = await allocator.reserveDistributedTaskId({
-        prefix: "FN",
-        nodeId: localNode?.id ?? "local",
-      });
-
-      let createdTask: Task | null = null;
-      try {
-        createdTask = await scopedStore.createTaskWithReservedId(createInput, {
-          taskId: reservation.taskId,
-        });
-
-        const replicatedPayload = buildMeshReplicatedTaskCreatePayload({
-          taskId: createdTask.id,
-          reservationId: reservation.reservationId,
-          sourceNodeId: localNode?.id ?? "local",
-          createdAt: createdTask.createdAt,
-          updatedAt: createdTask.updatedAt,
-          prompt: (await scopedStore.getTask(createdTask.id)).prompt,
-          createInput: toReplicatedCreateInput(createdTask),
-        });
-
-        for (const peer of remoteNodes) {
-          await fetchFromRemoteNode(peer, "/api/mesh/tasks/create", {
-            method: "POST",
-            body: replicatedPayload,
-          });
-        }
-
-        await allocator.commitDistributedTaskIdReservation({
-          reservationId: reservation.reservationId,
-          nodeId: localNode?.id ?? "local",
-        });
-
-        res.status(201).json(createdTask);
-      } catch (err: unknown) {
-        await allocator.abortDistributedTaskIdReservation({
-          reservationId: reservation.reservationId,
-          nodeId: localNode?.id ?? "local",
-          reason: "failed-create",
-        }).catch(() => undefined);
-
-        if (createdTask) {
-          await scopedStore.deleteTask(createdTask.id).catch(() => undefined);
-        }
-
+      const nodeIdForReservation = localNode?.id ?? "local";
+      const isOverlapClassFailure = (err: unknown): boolean => {
         const message = err instanceof Error ? err.message : String(err);
-        throw new ApiError(503, `Cluster task create failed: ${message}`);
+        return (
+          message.includes("Task ID already exists:") ||
+          message.includes("Replicated task payload collision for existing task")
+        );
+      };
+
+      const maxCreateAttempts = 3;
+      for (let attempt = 1; attempt <= maxCreateAttempts; attempt += 1) {
+        const reservation = await allocator.reserveDistributedTaskId({
+          prefix: "FN",
+          nodeId: nodeIdForReservation,
+        });
+
+        let createdTask: Task | null = null;
+        try {
+          createdTask = await scopedStore.createTaskWithReservedId(createInput, {
+            taskId: reservation.taskId,
+          });
+
+          const replicatedPayload = buildMeshReplicatedTaskCreatePayload({
+            taskId: createdTask.id,
+            reservationId: reservation.reservationId,
+            sourceNodeId: nodeIdForReservation,
+            createdAt: createdTask.createdAt,
+            updatedAt: createdTask.updatedAt,
+            prompt: (await scopedStore.getTask(createdTask.id)).prompt,
+            createInput: toReplicatedCreateInput(createdTask),
+          });
+
+          for (const peer of remoteNodes) {
+            await fetchFromRemoteNode(peer, "/api/mesh/tasks/create", {
+              method: "POST",
+              body: replicatedPayload,
+            });
+          }
+
+          await allocator.commitDistributedTaskIdReservation({
+            reservationId: reservation.reservationId,
+            nodeId: nodeIdForReservation,
+          });
+
+          res.status(201).json(createdTask);
+          return;
+        } catch (err: unknown) {
+          await allocator.abortDistributedTaskIdReservation({
+            reservationId: reservation.reservationId,
+            nodeId: nodeIdForReservation,
+            reason: "failed-create",
+          }).catch(() => undefined);
+
+          if (createdTask) {
+            await scopedStore.deleteTask(createdTask.id).catch(() => undefined);
+          }
+
+          if (attempt < maxCreateAttempts && isOverlapClassFailure(err)) {
+            continue;
+          }
+
+          const message = err instanceof Error ? err.message : String(err);
+          throw new ApiError(503, `Cluster task create failed: ${message}`);
+        }
       }
     } catch (err: unknown) {
       if (err instanceof ApiError) {
