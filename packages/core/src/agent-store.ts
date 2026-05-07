@@ -30,6 +30,7 @@ import type {
   AgentConfigRevision,
   AgentConfigSnapshot,
   AgentAccessState,
+  AgentPermissionPolicy,
   OrgTreeNode,
   InstructionsBundleConfig,
   AgentRating,
@@ -54,6 +55,7 @@ import {
 import type { RunMutationContext } from "./types.js";
 import type { TaskStore } from "./store.js";
 import { computeAccessState } from "./agent-permissions.js";
+import { resolveEffectiveAgentPermissionPolicy } from "./agent-permission-policy.js";
 import { Database } from "./db.js";
 import { createAgentRunSnapshot, createAgentSnapshot, validateSnapshotEnvelope, type AgentRunSnapshot, type AgentSnapshot } from "./shared-mesh-state.js";
 
@@ -125,6 +127,7 @@ interface AgentData {
   runtimeConfig?: Record<string, unknown>;
   pauseReason?: string;
   permissions?: Record<string, boolean>;
+  permissionPolicy?: AgentPermissionPolicy;
   totalInputTokens?: number;
   totalOutputTokens?: number;
   lastError?: string;
@@ -606,6 +609,10 @@ export class AgentStore extends EventEmitter {
     const resolvedHeartbeatProcedurePath = input.heartbeatProcedurePath
       ?? (ephemeral ? undefined : getDefaultHeartbeatProcedurePath(agentId, input.name));
 
+    const normalizedPermissionPolicy = ephemeral
+      ? input.permissionPolicy
+      : resolveEffectiveAgentPermissionPolicy(input.permissionPolicy);
+
     const agent: Agent = {
       id: agentId,
       name: normalizedName,
@@ -620,6 +627,7 @@ export class AgentStore extends EventEmitter {
       ...(input.reportsTo && { reportsTo: input.reportsTo }),
       ...(runtimeConfig && { runtimeConfig }),
       ...(input.permissions && { permissions: input.permissions }),
+      ...(normalizedPermissionPolicy && { permissionPolicy: normalizedPermissionPolicy }),
       ...(input.instructionsPath && { instructionsPath: input.instructionsPath }),
       ...(input.instructionsText && { instructionsText: input.instructionsText }),
       ...(input.soul && { soul: input.soul }),
@@ -1072,6 +1080,7 @@ export class AgentStore extends EventEmitter {
         ...("runtimeConfig" in updates && { runtimeConfig: updates.runtimeConfig }),
         ...("pauseReason" in updates && { pauseReason: updates.pauseReason }),
         ...("permissions" in updates && { permissions: updates.permissions }),
+        ...("permissionPolicy" in updates && { permissionPolicy: updates.permissionPolicy }),
         ...("lastError" in updates && { lastError: updates.lastError }),
         ...("totalInputTokens" in updates && { totalInputTokens: updates.totalInputTokens }),
         ...("totalOutputTokens" in updates && { totalOutputTokens: updates.totalOutputTokens }),
@@ -2274,6 +2283,7 @@ export class AgentStore extends EventEmitter {
     | "reportsTo"
     | "runtimeConfig"
     | "permissions"
+    | "permissionPolicy"
     | "instructionsPath"
     | "instructionsText"
     | "soul"
@@ -2291,6 +2301,12 @@ export class AgentStore extends EventEmitter {
       reportsTo: snapshot.reportsTo,
       runtimeConfig: snapshot.runtimeConfig ? { ...snapshot.runtimeConfig } : undefined,
       permissions: snapshot.permissions ? { ...snapshot.permissions } : undefined,
+      permissionPolicy: snapshot.permissionPolicy
+        ? {
+            presetId: snapshot.permissionPolicy.presetId,
+            rules: { ...snapshot.permissionPolicy.rules },
+          }
+        : undefined,
       instructionsPath: snapshot.instructionsPath,
       instructionsText: snapshot.instructionsText,
       soul: snapshot.soul,
@@ -2575,6 +2591,9 @@ export class AgentStore extends EventEmitter {
       runtimeConfig: data.runtimeConfig,
       pauseReason: data.pauseReason,
       permissions: data.permissions,
+      permissionPolicy: isEphemeralAgent(data)
+        ? data.permissionPolicy
+        : resolveEffectiveAgentPermissionPolicy(data.permissionPolicy),
       totalInputTokens: data.totalInputTokens,
       totalOutputTokens: data.totalOutputTokens,
       lastError: data.lastError,
@@ -2605,6 +2624,7 @@ export class AgentStore extends EventEmitter {
       runtimeConfig: agent.runtimeConfig,
       pauseReason: agent.pauseReason,
       permissions: agent.permissions,
+      permissionPolicy: agent.permissionPolicy,
       totalInputTokens: agent.totalInputTokens,
       totalOutputTokens: agent.totalOutputTokens,
       lastError: agent.lastError,

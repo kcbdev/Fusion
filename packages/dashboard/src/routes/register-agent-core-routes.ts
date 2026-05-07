@@ -2,7 +2,11 @@ import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Request, Response } from "express";
 import type { Agent, AgentCapability, AgentUpdateInput, TaskStore } from "@fusion/core";
-import { getDefaultHeartbeatProcedurePath } from "@fusion/core";
+import {
+  getDefaultHeartbeatProcedurePath,
+  isAgentPermissionPolicyPresetId,
+  normalizeAgentPermissionPolicyFromPreset,
+} from "@fusion/core";
 import { ApiError, badRequest, notFound } from "../api-error.js";
 import type { ApiRoutesContext } from "./types.js";
 import { ensureDefaultHeartbeatProcedureFile, HEARTBEAT_PROCEDURE } from "@fusion/engine";
@@ -89,6 +93,7 @@ export function registerAgentCoreListCreateRoutes(ctx: ApiRoutesContext, deps: A
         reportsTo,
         runtimeConfig,
         permissions,
+        permissionPolicy,
         instructionsPath,
         instructionsText,
         soul,
@@ -120,6 +125,16 @@ export function registerAgentCoreListCreateRoutes(ctx: ApiRoutesContext, deps: A
       }
       if (permissions !== undefined && (typeof permissions !== "object" || permissions === null || Array.isArray(permissions))) {
         throw badRequest("permissions must be an object");
+      }
+      let normalizedPermissionPolicy;
+      if (permissionPolicy !== undefined && permissionPolicy !== null) {
+        if (typeof permissionPolicy !== "object" || Array.isArray(permissionPolicy)) {
+          throw badRequest("permissionPolicy must be an object");
+        }
+        if (typeof permissionPolicy.presetId !== "string" || !isAgentPermissionPolicyPresetId(permissionPolicy.presetId)) {
+          throw badRequest("permissionPolicy.presetId must be one of: unrestricted, approval-required, locked-down");
+        }
+        normalizedPermissionPolicy = normalizeAgentPermissionPolicyFromPreset(permissionPolicy.presetId);
       }
       if (!validateAgentInstructionsPayload(instructionsPath, instructionsText)) {
         return;
@@ -176,6 +191,7 @@ export function registerAgentCoreListCreateRoutes(ctx: ApiRoutesContext, deps: A
           reportsTo: reportsTo ?? undefined,
           runtimeConfig,
           permissions,
+          permissionPolicy: normalizedPermissionPolicy,
           instructionsPath: instructionsPath ?? undefined,
           instructionsText: instructionsText ?? undefined,
           soul: soul ?? undefined,
@@ -551,6 +567,20 @@ export function registerAgentCoreRoutes(ctx: ApiRoutesContext, deps: AgentCoreRo
           throw badRequest("permissions must be an object");
         }
         updates.permissions = body.permissions ?? undefined;
+      }
+
+      if ("permissionPolicy" in body) {
+        if (body.permissionPolicy !== null) {
+          if (typeof body.permissionPolicy !== "object" || Array.isArray(body.permissionPolicy)) {
+            throw badRequest("permissionPolicy must be an object");
+          }
+          if (typeof body.permissionPolicy.presetId !== "string" || !isAgentPermissionPolicyPresetId(body.permissionPolicy.presetId)) {
+            throw badRequest("permissionPolicy.presetId must be one of: unrestricted, approval-required, locked-down");
+          }
+          updates.permissionPolicy = normalizeAgentPermissionPolicyFromPreset(body.permissionPolicy.presetId);
+        } else {
+          updates.permissionPolicy = undefined;
+        }
       }
 
       if ("totalInputTokens" in body) {

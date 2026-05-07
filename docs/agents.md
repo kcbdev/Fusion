@@ -21,6 +21,7 @@ Every first-class editable agent field has a defined create/edit/import/template
 | `reportsTo` | ✓ | ✓ | ✓ (from manifest) | Parent agent ID |
 | `runtimeConfig` | ✓ | ✓ | ✗ | Heartbeat/budget config |
 | `permissions` | ✓ | ✓ | ✗ | Capability flags |
+| `permissionPolicy` | ✓ | ✓ | ✗ | Runtime action-gating policy for permanent agents (default/fallback: `unrestricted`) |
 | `instructionsPath` | ✓ | ✓ | ✗ | File-backed instructions path |
 | `instructionsText` | ✓ | ✓ | ✓ (from manifest `instructionBody`) | Inline instructions |
 | `soul` | ✓ | ✓ | ✗ | Personality/identity description |
@@ -39,6 +40,36 @@ Every first-class editable agent field has a defined create/edit/import/template
 | `instructionBody` | `instructionsText` | — |
 | `memory` | `memory` | — |
 | `skills` | `metadata.skills` | — |
+
+## Permission Policy Presets (Permanent Agents)
+
+`permissionPolicy` is a first-class persisted policy contract for **runtime action gating**, separate from role/capability authorization and separate from dashboard persona presets.
+
+Built-in preset catalog:
+
+- `unrestricted` (default) — all v1 runtime action categories are `allow`
+- `approval-required` — all v1 runtime action categories are `require-approval`
+- `locked-down` — all v1 runtime action categories are `block`
+
+V1 runtime action categories:
+
+- `git-write`
+- `file-write-delete`
+- `shell-command`
+- `network-api`
+- `task-agent-management`
+
+Default and legacy fallback behavior:
+
+- New **non-ephemeral/permanent** agents persist a normalized `permissionPolicy` using preset `unrestricted` when not explicitly provided.
+- Legacy permanent-agent rows missing `permissionPolicy` resolve to the same effective `unrestricted` policy at read time (no eager migration required).
+- Ephemeral/runtime task-worker agents are intentionally left unchanged and are not backfilled with a default `permissionPolicy`.
+
+Separation of concerns:
+
+- `permissions` capability flags (plus role defaults) determine what an agent is conceptually authorized to do (for example, `tasks:assign`, `agents:create`).
+- `permissionPolicy` determines how sensitive runtime actions are gated (`allow`, `block`, `require-approval`) once the capability path is in play.
+- Dashboard persona presets (`packages/dashboard/app/components/agent-presets/`) are UI templates for identity/behavior and are **not** the source of truth for permission-policy enforcement.
 
 ### System-Managed Fields (Not User-Editable)
 

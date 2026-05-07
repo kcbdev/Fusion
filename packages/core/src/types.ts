@@ -3661,6 +3661,39 @@ export const AGENT_PERMISSIONS = [
 /** A single canonical permission string. */
 export type AgentPermission = (typeof AGENT_PERMISSIONS)[number];
 
+/** Runtime action categories governed by agent permission policy presets. */
+export const AGENT_PERMISSION_POLICY_ACTION_CATEGORIES = [
+  "git-write",
+  "file-write-delete",
+  "shell-command",
+  "network-api",
+  "task-agent-management",
+] as const;
+
+/** A single runtime action category governed by permission policy. */
+export type AgentPermissionPolicyActionCategory = (typeof AGENT_PERMISSION_POLICY_ACTION_CATEGORIES)[number];
+
+/** How a runtime action category is handled by permission policy. */
+export type AgentPermissionPolicyDisposition = "allow" | "block" | "require-approval";
+
+/** Built-in permission policy preset identifiers for permanent agents. */
+export const AGENT_PERMISSION_POLICY_PRESET_IDS = ["unrestricted", "approval-required", "locked-down"] as const;
+
+/** A single built-in permission policy preset identifier. */
+export type AgentPermissionPolicyPresetId = (typeof AGENT_PERMISSION_POLICY_PRESET_IDS)[number];
+
+/** Canonical category->disposition map for a permission policy. */
+export type AgentPermissionPolicyRules = Record<
+  AgentPermissionPolicyActionCategory,
+  AgentPermissionPolicyDisposition
+>;
+
+/** First-class persisted permission policy contract for permanent agents. */
+export interface AgentPermissionPolicy {
+  presetId: AgentPermissionPolicyPresetId;
+  rules: AgentPermissionPolicyRules;
+}
+
 /** Describes how an agent's task assignment capability was determined. */
 export type TaskAssignSource =
   | "role_default" // Granted automatically by role (e.g., scheduler gets tasks:assign)
@@ -3731,6 +3764,8 @@ export interface Agent {
   pauseReason?: string;
   /** Capability permission flags */
   permissions?: Record<string, boolean>;
+  /** Runtime action gating policy (preset + normalized category rules). */
+  permissionPolicy?: AgentPermissionPolicy;
   /** Cumulative input tokens across all runs */
   totalInputTokens?: number;
   /** Cumulative output tokens across all runs */
@@ -3873,6 +3908,7 @@ export interface AgentCreateInput {
   reportsTo?: string;
   runtimeConfig?: Record<string, unknown>;
   permissions?: Record<string, boolean>;
+  permissionPolicy?: AgentPermissionPolicy;
   instructionsPath?: string;
   instructionsText?: string;
   soul?: string;
@@ -3893,6 +3929,7 @@ export interface AgentUpdateInput {
   runtimeConfig?: Record<string, unknown>;
   pauseReason?: string;
   permissions?: Record<string, boolean>;
+  permissionPolicy?: AgentPermissionPolicy;
   lastError?: string;
   totalInputTokens?: number;
   totalOutputTokens?: number;
@@ -3990,6 +4027,7 @@ export interface AgentConfigSnapshot {
   reportsTo?: string;
   runtimeConfig?: Record<string, unknown>;
   permissions?: Record<string, boolean>;
+  permissionPolicy?: AgentPermissionPolicy;
   instructionsPath?: string;
   instructionsText?: string;
   soul?: string;
@@ -4119,6 +4157,12 @@ export function agentToConfigSnapshot(agent: Agent): AgentConfigSnapshot {
     reportsTo: agent.reportsTo,
     runtimeConfig: agent.runtimeConfig ? { ...agent.runtimeConfig } : undefined,
     permissions: agent.permissions ? { ...agent.permissions } : undefined,
+    permissionPolicy: agent.permissionPolicy
+      ? {
+          presetId: agent.permissionPolicy.presetId,
+          rules: { ...agent.permissionPolicy.rules },
+        }
+      : undefined,
     instructionsPath: agent.instructionsPath,
     instructionsText: agent.instructionsText,
     soul: agent.soul,
@@ -4148,6 +4192,7 @@ export function diffConfigSnapshots(
     "reportsTo",
     "runtimeConfig",
     "permissions",
+    "permissionPolicy",
     "instructionsPath",
     "instructionsText",
     "soul",

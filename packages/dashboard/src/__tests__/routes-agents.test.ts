@@ -1862,6 +1862,7 @@ describe("Agent create/update routes", () => {
         reportsTo: agentId,
         runtimeConfig: { heartbeatIntervalMs: 60000 },
         permissions: { read: true },
+        permissionPolicy: { presetId: "approval-required" },
         instructionsPath: "docs/reviewer.md",
         instructionsText: "Check test quality.",
         soul: "Analytical and thorough.",
@@ -1879,6 +1880,16 @@ describe("Agent create/update routes", () => {
       reportsTo: agentId,
       runtimeConfig: { heartbeatIntervalMs: 60000 },
       permissions: { read: true },
+      permissionPolicy: {
+        presetId: "approval-required",
+        rules: {
+          "git-write": "require-approval",
+          "file-write-delete": "require-approval",
+          "shell-command": "require-approval",
+          "network-api": "require-approval",
+          "task-agent-management": "require-approval",
+        },
+      },
       instructionsPath: "docs/reviewer.md",
       instructionsText: "Check test quality.",
       soul: "Analytical and thorough.",
@@ -1900,6 +1911,7 @@ describe("Agent create/update routes", () => {
         runtimeConfig: { heartbeatTimeoutMs: 120000 },
         pauseReason: "manual",
         permissions: { deploy: true },
+        permissionPolicy: { presetId: "locked-down" },
         totalInputTokens: 42,
         totalOutputTokens: 21,
         instructionsPath: "agents/infra.md",
@@ -1921,11 +1933,82 @@ describe("Agent create/update routes", () => {
       runtimeConfig: { heartbeatTimeoutMs: 120000 },
       pauseReason: "manual",
       permissions: { deploy: true },
+      permissionPolicy: {
+        presetId: "locked-down",
+        rules: {
+          "git-write": "block",
+          "file-write-delete": "block",
+          "shell-command": "block",
+          "network-api": "block",
+          "task-agent-management": "block",
+        },
+      },
       totalInputTokens: 42,
       totalOutputTokens: 21,
       instructionsPath: "agents/infra.md",
       instructionsText: "Focus on reliability.",
       soul: "Pragmatic and efficient.",
+    });
+  });
+
+  it("POST /api/agents rejects invalid permissionPolicy preset", async () => {
+    const res = await REQUEST(
+      buildAgentApp(),
+      "POST",
+      "/api/agents",
+      JSON.stringify({
+        name: "Invalid Policy Agent",
+        role: "executor",
+        permissionPolicy: { presetId: "custom" },
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("permissionPolicy.presetId");
+  });
+
+  it("PATCH /api/agents/:id rejects invalid permissionPolicy payload shape", async () => {
+    const res = await REQUEST(
+      buildAgentApp(),
+      "PATCH",
+      `/api/agents/${agentId}`,
+      JSON.stringify({
+        permissionPolicy: "bad",
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("permissionPolicy must be an object");
+  });
+
+  it("POST /api/agents normalizes policy rules from preset and ignores caller-supplied rules", async () => {
+    const res = await REQUEST(
+      buildAgentApp(),
+      "POST",
+      "/api/agents",
+      JSON.stringify({
+        name: "Normalized Policy Agent",
+        role: "executor",
+        permissionPolicy: {
+          presetId: "locked-down",
+          rules: {
+            "git-write": "allow",
+          },
+        },
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(res.body.permissionPolicy.presetId).toBe("locked-down");
+    expect(res.body.permissionPolicy.rules).toEqual({
+      "git-write": "block",
+      "file-write-delete": "block",
+      "shell-command": "block",
+      "network-api": "block",
+      "task-agent-management": "block",
     });
   });
 

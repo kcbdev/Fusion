@@ -19,6 +19,7 @@ import { mkdtempSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import {
+  AGENT_PERMISSION_POLICY_ACTION_CATEGORIES,
   CheckoutConflictError,
   getCanonicalAgentAssetDirectoryName,
   type AgentCapability,
@@ -315,6 +316,28 @@ describe("AgentStore", () => {
       expect(runtimeConfig.runMissedHeartbeatOnStartup).toBe(true);
     });
 
+    it("stores default unrestricted permission policy for durable agents", async () => {
+      const agent = await store.createAgent({
+        name: "Policy Default",
+        role: "executor",
+      });
+
+      expect(agent.permissionPolicy?.presetId).toBe("unrestricted");
+      for (const category of AGENT_PERMISSION_POLICY_ACTION_CATEGORIES) {
+        expect(agent.permissionPolicy?.rules[category]).toBe("allow");
+      }
+    });
+
+    it("does not backfill permission policy for ephemeral task workers", async () => {
+      const agent = await store.createAgent({
+        name: "executor-FN-100",
+        role: "executor",
+        metadata: { agentKind: "task-worker", taskWorker: true },
+      });
+
+      expect(agent.permissionPolicy).toBeUndefined();
+    });
+
     it("preserves custom metadata", async () => {
       const agent = await store.createAgent({
         name: "With Meta",
@@ -393,6 +416,18 @@ describe("AgentStore", () => {
     it("returns null for a non-existent ID", async () => {
       const result = await store.getAgent("agent-nonexistent");
       expect(result).toBeNull();
+    });
+
+    it("resolves legacy durable agents without permissionPolicy to unrestricted", async () => {
+      const created = await store.createAgent({ name: "Legacy Policy", role: "executor" });
+      const testDb = (store as unknown as { db: { prepare: (sql: string) => { run: (...args: unknown[]) => unknown } } }).db;
+      testDb.prepare("UPDATE agents SET data = json_remove(data, '$.permissionPolicy') WHERE id = ?").run(created.id);
+
+      const hydrated = await store.getAgent(created.id);
+      expect(hydrated?.permissionPolicy?.presetId).toBe("unrestricted");
+      for (const category of AGENT_PERMISSION_POLICY_ACTION_CATEGORIES) {
+        expect(hydrated?.permissionPolicy?.rules[category]).toBe("allow");
+      }
     });
   });
 
@@ -935,7 +970,7 @@ describe("AgentStore", () => {
       expect(revisions[0].after.name).toBe("Renamed");
     });
 
-    it("records revisions for runtimeConfig, permissions, instructions, soul, and memory changes", async () => {
+    it("records revisions for runtimeConfig, permissions, permissionPolicy, instructions, soul, and memory changes", async () => {
       const created = await store.createAgent({
         name: "Configurable",
         role: "executor",
@@ -945,6 +980,13 @@ describe("AgentStore", () => {
 
       await store.updateAgent(created.id, { runtimeConfig: { heartbeatIntervalMs: 10000 } });
       await store.updateAgent(created.id, { permissions: { canReview: true, canExecute: true } });
+      await store.updateAgent(created.id, { permissionPolicy: { presetId: "locked-down", rules: {
+        "git-write": "block",
+        "file-write-delete": "block",
+        "shell-command": "block",
+        "network-api": "block",
+        "task-agent-management": "block",
+      } } });
       await store.updateAgent(created.id, { instructionsPath: "docs/agent.md" });
       await store.updateAgent(created.id, { instructionsText: "Follow safety checks." });
       await store.updateAgent(created.id, { soul: "Thoughtful collaborator" });
@@ -955,6 +997,7 @@ describe("AgentStore", () => {
 
       expect(changedFields).toContain("runtimeConfig");
       expect(changedFields).toContain("permissions");
+      expect(changedFields).toContain("permissionPolicy");
       expect(changedFields).toContain("instructionsPath");
       expect(changedFields).toContain("instructionsText");
       expect(changedFields).toContain("soul");
