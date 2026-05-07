@@ -1,5 +1,5 @@
 import "./ScriptsModal.css";
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, type CSSProperties } from "react";
 import type { Task } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
@@ -7,6 +7,9 @@ import { useConfirm } from "../hooks/useConfirm";
 import { getPathBasename } from "../utils/pathDisplay";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
+import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
+import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
+import { useViewportMode } from "../hooks/useViewportMode";
 import type {
   GitStatus,
   GitCommit,
@@ -176,12 +179,37 @@ interface GitManagerModalProps {
 
 export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, projectId }: GitManagerModalProps) {
   const confirmContext = useConfirm();
+  const viewportMode = useViewportMode();
+  useMobileScrollLock(isOpen);
+  const { keyboardOverlap, viewportHeight, viewportOffsetTop, keyboardOpen } = useMobileKeyboard({
+    enabled: viewportMode === "mobile",
+  });
+  const keyboardStyle: CSSProperties = keyboardOpen
+    ? ({
+        "--keyboard-overlap": `${keyboardOverlap}px`,
+        "--vv-offset-top": `${viewportOffsetTop}px`,
+        ...(viewportHeight !== null ? { "--vv-height": `${viewportHeight}px` } : {}),
+      } as CSSProperties)
+    : {};
+  const handleClose = useCallback(() => {
+    if (viewportMode === "mobile") {
+      const activeElement = document.activeElement;
+      if (activeElement instanceof HTMLElement) {
+        activeElement.blur();
+      }
+      window.scrollTo(0, 0);
+      requestAnimationFrame(() => {
+        window.scrollTo(0, 0);
+      });
+    }
+    onClose();
+  }, [onClose, viewportMode]);
   const [activeSection, setActiveSection] = useState<SectionId>("status");
   const [loading, setLoading] = useState(false);
   const [sectionError, setSectionError] = useState<string | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   useModalResizePersist(modalRef, isOpen, "fusion:git-modal-size");
-  const overlayDismissProps = useOverlayDismiss(onClose);
+  const overlayDismissProps = useOverlayDismiss(handleClose);
   const copyToClipboard = useCopyToClipboard(addToast);
 
   // ── Status state
@@ -300,7 +328,7 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
     if (!isOpen) return;
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        onClose();
+        handleClose();
         return;
       }
       // Arrow key navigation between sections
@@ -316,7 +344,7 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
     };
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [isOpen, onClose, activeSection]);
+  }, [isOpen, handleClose, activeSection]);
 
   // ── Changes Handlers ────────────────────────────────────────────
 
@@ -741,8 +769,8 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
   if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay open" {...overlayDismissProps} role="dialog" aria-modal="true">
-      <div className="modal gm-modal" ref={modalRef}>
+    <div className="modal-overlay open git-manager-modal-overlay" {...overlayDismissProps} role="dialog" aria-modal="true">
+      <div className="modal gm-modal" ref={modalRef} style={keyboardStyle}>
         <div className="modal-header">
           <h3>
             <FolderGit2 size={18} style={{ marginRight: 8, verticalAlign: "middle" }} />
@@ -757,7 +785,7 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
             >
               <RefreshCw size={14} className={loading ? "spin" : ""} />
             </button>
-            <button className="modal-close" onClick={onClose} aria-label="Close">
+            <button className="modal-close" onClick={handleClose} aria-label="Close">
               <X size={18} />
             </button>
           </div>

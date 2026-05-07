@@ -5,6 +5,26 @@ import { GitManagerModal } from "../GitManagerModal";
 import type { Task } from "@fusion/core";
 import { loadAllAppCss } from "../../test/cssFixture";
 
+const mockUseViewportMode = vi.fn(() => "desktop");
+const mockUseMobileKeyboard = vi.fn(() => ({
+  keyboardOverlap: 0,
+  viewportHeight: null,
+  viewportOffsetTop: 0,
+  keyboardOpen: false,
+}));
+
+vi.mock("../../hooks/useViewportMode", () => ({
+  useViewportMode: () => mockUseViewportMode(),
+}));
+
+vi.mock("../../hooks/useMobileKeyboard", () => ({
+  useMobileKeyboard: () => mockUseMobileKeyboard(),
+}));
+
+vi.mock("../../hooks/useMobileScrollLock", () => ({
+  useMobileScrollLock: vi.fn(),
+}));
+
 // Mock the API module with all functions
 vi.mock("../../api", async () => {
   return {
@@ -114,6 +134,13 @@ const mockTasks: Task[] = [
 describe("GitManagerModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseViewportMode.mockReturnValue("desktop");
+    mockUseMobileKeyboard.mockReturnValue({
+      keyboardOverlap: 0,
+      viewportHeight: null,
+      viewportOffsetTop: 0,
+      keyboardOpen: false,
+    });
     mockConfirm.mockReset();
     mockConfirm.mockResolvedValue(true);
 
@@ -210,6 +237,39 @@ describe("GitManagerModal", () => {
     await waitFor(() => {
       expect(screen.getByText("Git Manager")).toBeInTheDocument();
     });
+  });
+
+  it("renders git-manager overlay class hook for mobile fullscreen CSS", async () => {
+    const { container } = render(
+      <GitManagerModal isOpen={true} onClose={vi.fn()} tasks={mockTasks} addToast={mockAddToast} />
+    );
+    await waitFor(() => {
+      expect(screen.getByText("Git Manager")).toBeInTheDocument();
+    });
+
+    expect(container.querySelector(".modal-overlay.git-manager-modal-overlay")).toBeTruthy();
+  });
+
+  it("applies mobile keyboard CSS variables to gm-modal when keyboard is open", async () => {
+    mockUseViewportMode.mockReturnValue("mobile");
+    mockUseMobileKeyboard.mockReturnValue({
+      keyboardOverlap: 240,
+      viewportHeight: 620,
+      viewportOffsetTop: 18,
+      keyboardOpen: true,
+    });
+
+    const { container } = render(
+      <GitManagerModal isOpen={true} onClose={vi.fn()} tasks={mockTasks} addToast={mockAddToast} />
+    );
+    await waitFor(() => {
+      expect(screen.getByText("Git Manager")).toBeInTheDocument();
+    });
+
+    const modal = container.querySelector(".modal.gm-modal") as HTMLElement;
+    expect(modal.style.getPropertyValue("--keyboard-overlap")).toBe("240px");
+    expect(modal.style.getPropertyValue("--vv-height")).toBe("620px");
+    expect(modal.style.getPropertyValue("--vv-offset-top")).toBe("18px");
   });
 
   it("renders all navigation sections", async () => {

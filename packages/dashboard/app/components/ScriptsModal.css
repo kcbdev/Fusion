@@ -3438,9 +3438,10 @@
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 768px) {
   /* Full-screen sheet on mobile — drop overlay padding so the modal
      actually fills the viewport instead of being pushed below it. */
+  .modal-overlay.git-manager-modal-overlay,
   .modal-overlay:has(.gm-modal) {
     padding-top: 0;
     align-items: stretch;
@@ -3452,12 +3453,21 @@
     min-width: 0;
     max-width: 100vw;
     height: 100dvh;
-    min-height: 0;
+    min-height: 100dvh;
     max-height: 100dvh;
     margin: 0;
     border: none;
     border-radius: 0;
     resize: none;
+    flex: 1 1 auto;
+  }
+
+  .modal.gm-modal[style*="--keyboard-overlap"] {
+    height: var(--vv-height, 100dvh);
+    min-height: var(--vv-height, 100dvh);
+    max-height: var(--vv-height, 100dvh);
+    transform: translateY(var(--vv-offset-top, 0px));
+    will-change: transform;
   }
 
   /* Same treatment for the Automations modal — same min-width: 480px would

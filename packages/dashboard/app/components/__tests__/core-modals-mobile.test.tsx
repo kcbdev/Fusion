@@ -159,6 +159,21 @@ describe("core modals mobile css coverage", () => {
     expect(mobileBlock).toContain("overflow-y: auto;");
   });
 
+  it("GitManagerModal: mobile fullscreen block includes explicit overlay class and keyboard viewport rule", () => {
+    const css = loadAllAppCss();
+    const mobileBlock = getMainMobileBlock(css);
+
+    expect(mobileBlock).toContain(".modal-overlay.git-manager-modal-overlay,");
+    expect(mobileBlock).toContain(".modal.gm-modal[style*=\"--keyboard-overlap\"]");
+
+    const keyboardRule = mobileBlock.match(/\.modal\.gm-modal\[style\*=\"--keyboard-overlap\"\]\s*\{[^}]+\}/s);
+    expect(keyboardRule).not.toBeNull();
+    expect(keyboardRule![0]).toContain("height: var(--vv-height, 100dvh)");
+    expect(keyboardRule![0]).toContain("min-height: var(--vv-height, 100dvh)");
+    expect(keyboardRule![0]).toContain("max-height: var(--vv-height, 100dvh)");
+    expect(keyboardRule![0]).toContain("translateY(var(--vv-offset-top, 0px))");
+  });
+
   it("GitManagerModal: changes rows/actions wrap without widening viewport on mobile", () => {
     const css = loadAllAppCss();
     const mobileBlock = getMainMobileBlock(css);
