@@ -24,6 +24,10 @@ const mockUpdateNode = vi.fn();
 const mockGetLocalNode = vi.fn();
 const mockGetSettingsForSync = vi.fn();
 const mockApplyRemoteSettings = vi.fn();
+const mockReserveDistributedTaskId = vi.fn();
+const mockCommitDistributedTaskIdReservation = vi.fn();
+const mockAbortDistributedTaskIdReservation = vi.fn();
+const mockGetDistributedTaskIdState = vi.fn();
 
 // Mock GlobalSettingsStore
 const mockGetSettings = vi.fn().mockResolvedValue({});
@@ -84,6 +88,15 @@ class MockStore extends EventEmitter {
 
   getGlobalSettingsStore() {
     return mockGlobalSettingsStore;
+  }
+
+  getDistributedTaskIdAllocator() {
+    return {
+      reserveDistributedTaskId: mockReserveDistributedTaskId,
+      commitDistributedTaskIdReservation: mockCommitDistributedTaskIdReservation,
+      abortDistributedTaskIdReservation: mockAbortDistributedTaskIdReservation,
+      getDistributedTaskIdState: mockGetDistributedTaskIdState,
+    };
   }
 
   async listTasks(): Promise<Task[]> {
@@ -173,6 +186,10 @@ describe("POST /api/mesh/sync", () => {
     });
     mockGetNode.mockResolvedValue(undefined);
     mockUpdateNode.mockResolvedValue({ id: "node_remote", status: "online" });
+    mockReserveDistributedTaskId.mockResolvedValue({ reservationId: "res-1", taskId: "FN-001", sequence: 1, expiresAt: "2030-01-01T00:00:00.000Z", committedClusterTaskCount: 0 });
+    mockCommitDistributedTaskIdReservation.mockResolvedValue({ reservationId: "res-1", taskId: "FN-001", sequence: 1, committedClusterTaskCount: 1, committedAt: "2030-01-01T00:00:00.000Z" });
+    mockAbortDistributedTaskIdReservation.mockResolvedValue({ reservationId: "res-1", taskId: "FN-001", sequence: 1, committedClusterTaskCount: 0, abortedAt: "2030-01-01T00:00:00.000Z" });
+    mockGetDistributedTaskIdState.mockResolvedValue({ nextSequence: 2, committedClusterTaskCount: 1, activeReservationCount: 0, burnedReservationCount: 0, lastCommittedTaskId: "FN-001" });
     mockGetLocalNode.mockResolvedValue({
       id: "node_local",
       name: "local",
@@ -652,5 +669,60 @@ describe("POST /api/mesh/sync", () => {
         }),
       );
     });
+  });
+});
+
+describe("/api/mesh/task-ids routes", () => {
+  let app: ReturnType<typeof createServer>;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockInit.mockResolvedValue(undefined);
+    mockClose.mockResolvedValue(undefined);
+    mockGetLocalNode.mockResolvedValue({ id: "node_local", type: "local", name: "local", status: "online", maxConcurrent: 4, createdAt: "2026-04-01T10:00:00.000Z", updatedAt: "2026-04-01T12:00:00.000Z" });
+    mockGetNode.mockResolvedValue(undefined);
+    mockReserveDistributedTaskId.mockResolvedValue({ reservationId: "res-1", taskId: "FN-001", sequence: 1, expiresAt: "2030-01-01T00:00:00.000Z", committedClusterTaskCount: 0 });
+    mockCommitDistributedTaskIdReservation.mockResolvedValue({ reservationId: "res-1", taskId: "FN-001", sequence: 1, committedClusterTaskCount: 1, committedAt: "2030-01-01T00:00:00.000Z" });
+    mockAbortDistributedTaskIdReservation.mockResolvedValue({ reservationId: "res-1", taskId: "FN-001", sequence: 1, committedClusterTaskCount: 0, abortedAt: "2030-01-01T00:00:00.000Z" });
+    mockGetDistributedTaskIdState.mockResolvedValue({ nextSequence: 2, committedClusterTaskCount: 1, activeReservationCount: 0, burnedReservationCount: 0, lastCommittedTaskId: "FN-001" });
+    app = createServer(new MockStore() as unknown as TaskStore);
+  });
+
+  it("reserves distributed task ids locally", async () => {
+    const response = await request(app, "POST", "/api/mesh/task-ids/reserve", JSON.stringify({ prefix: "FN", nodeId: "node-a" }), { "Content-Type": "application/json" });
+    expect(response.status).toBe(200);
+    expect(mockReserveDistributedTaskId).toHaveBeenCalledWith({ prefix: "FN", nodeId: "node-a", ttlMs: undefined });
+    expect((response.body as any).committedClusterTaskCount).toBe(0);
+  });
+
+  it("returns allocator state with authoritative committedClusterTaskCount", async () => {
+    const response = await request(app, "GET", "/api/mesh/task-ids/state?prefix=FN");
+    expect(response.status).toBe(200);
+    expect((response.body as any).committedClusterTaskCount).toBe(1);
+  });
+
+  it("rejects bad requests", async () => {
+    const response = await request(app, "POST", "/api/mesh/task-ids/abort", JSON.stringify({ reservationId: "r", nodeId: "n", reason: "bad" }), { "Content-Type": "application/json" });
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects unauthorized mesh caller", async () => {
+    mockGetNode.mockResolvedValue(makeNodeConfig({ id: "node_remote_1", apiKey: "secret" }));
+    const response = await request(
+      app,
+      "POST",
+      "/api/mesh/task-ids/reserve",
+      JSON.stringify({ prefix: "FN", nodeId: "node-a", senderNodeId: "node_remote_1" }),
+      { "Content-Type": "application/json", Authorization: "Bearer wrong" },
+    );
+    expect(response.status).toBe(401);
+  });
+
+  it("returns 503 when coordinator is unreachable for writes", async () => {
+    mockGetNode.mockResolvedValue(makeNodeConfig({ id: "node_remote_1", url: "https://remote.example.com", apiKey: "secret" }));
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+    const response = await request(app, "POST", "/api/mesh/task-ids/commit", JSON.stringify({ reservationId: "res-1", nodeId: "node-a", coordinatorNodeId: "node_remote_1" }), { "Content-Type": "application/json" });
+    expect(response.status).toBe(503);
+    vi.unstubAllGlobals();
   });
 });

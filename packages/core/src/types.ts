@@ -2208,6 +2208,59 @@ export interface BoardConfig {
   settings?: Settings;
 }
 
+export interface DistributedTaskIdReserveInput {
+  prefix: string;
+  nodeId: string;
+  ttlMs?: number;
+}
+
+export interface DistributedTaskIdReserveResult {
+  reservationId: string;
+  taskId: string;
+  sequence: number;
+  expiresAt: string;
+  committedClusterTaskCount: number;
+}
+
+export interface DistributedTaskIdCommitInput {
+  reservationId: string;
+  nodeId: string;
+}
+
+export interface DistributedTaskIdCommitResult {
+  reservationId: string;
+  taskId: string;
+  sequence: number;
+  committedClusterTaskCount: number;
+  committedAt: string;
+}
+
+export interface DistributedTaskIdAbortInput {
+  reservationId: string;
+  nodeId: string;
+  reason: "abort" | "expired" | "failed-create";
+}
+
+export interface DistributedTaskIdAbortResult {
+  reservationId: string;
+  taskId: string;
+  sequence: number;
+  committedClusterTaskCount: number;
+  abortedAt: string;
+}
+
+export interface DistributedTaskIdStateInput {
+  prefix: string;
+}
+
+export interface DistributedTaskIdStateResult {
+  nextSequence: number;
+  committedClusterTaskCount: number;
+  activeReservationCount: number;
+  burnedReservationCount: number;
+  lastCommittedTaskId?: string;
+}
+
 /**
  * Outcome of restoring the developer's pre-merge autostash after the merge
  * completes. Surfaced on MergeResult so the UI / dashboard can show whether

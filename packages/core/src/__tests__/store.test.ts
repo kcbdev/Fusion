@@ -11350,6 +11350,14 @@ describe("RunMutationContext", () => {
   });
   });
 
+  describe("distributed task-id allocator seam", () => {
+    it("returns a stable allocator instance", () => {
+      const first = store.getDistributedTaskIdAllocator();
+      const second = store.getDistributedTaskIdAllocator();
+      expect(first).toBe(second);
+    });
+  });
+
   describe("FTS5 corruption recovery during upsert", () => {
     it("rebuilds FTS5 and retries once when upsert fails with an FTS corruption error", async () => {
       const db = store.getDatabase();

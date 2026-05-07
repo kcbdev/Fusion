@@ -35,6 +35,7 @@ Peer/mesh coordination spans core + engine, with startup ownership in CLI proces
 - `NodeDiscovery` and `NodeConnection` in `@fusion/core` handle discovery and remote node connectivity/auth primitives.
 - `PeerExchangeService` in `@fusion/engine` coordinates node-to-node sync/exchange workflows.
 - Canonical replication semantics live in [`docs/shared-mesh-protocol.md`](./shared-mesh-protocol.md). That protocol separates strongly coordinated shared state from append-only streams, queued replay classes, and node-local runtime state.
+- Distributed task-ID allocation is one strongly coordinated shared-state path: reserve/commit/abort are coordinator-mediated writes, and cluster-wide committed task totals come from allocator `committedClusterTaskCount` state (not per-node local task counts).
 - `runServe()` and `runDashboard()` (CLI) own process-level mesh service lifecycle:
   - start one process-wide `PeerExchangeService` instance
   - call `CentralCore.startDiscovery()` only after the HTTP server is listening and the real bound port is known

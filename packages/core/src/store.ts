@@ -27,6 +27,7 @@ import { createLogger } from "./logger.js";
 import { validateNodeOverrideChange } from "./node-override-guard.js";
 import { sanitizeTitle } from "./ai-summarize.js";
 import { assertProjectRootDir } from "./project-root-guard.js";
+import { createDistributedTaskIdAllocator, type DistributedTaskIdAllocator } from "./distributed-task-id.js";
 
 /** Database row shape for the tasks table (all columns). */
 interface TaskRow {
@@ -526,6 +527,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private evalStore: EvalStore | null = null;
   /** Cached ProjectAuthStore instance */
   private projectAuthStore: ProjectAuthStore | null = null;
+  /** Cached distributed task-id allocator instance. */
+  private distributedTaskIdAllocator: DistributedTaskIdAllocator | null = null;
 
   /** Buffer for batching agent log writes to reduce WAL pressure. */
   private agentLogBuffer: Array<{
@@ -6495,6 +6498,13 @@ ${stepsSection}`;
   /** Expose the shared Database instance for co-located stores (e.g. AiSessionStore). */
   getDatabase(): Database {
     return this.db;
+  }
+
+  getDistributedTaskIdAllocator(): DistributedTaskIdAllocator {
+    if (!this.distributedTaskIdAllocator) {
+      this.distributedTaskIdAllocator = createDistributedTaskIdAllocator(this.db);
+    }
+    return this.distributedTaskIdAllocator;
   }
 
   /**

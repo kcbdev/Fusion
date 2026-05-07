@@ -88,7 +88,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 64;
+const SCHEMA_VERSION = 65;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -236,6 +236,35 @@ CREATE TABLE IF NOT EXISTS config (
   workflowSteps TEXT DEFAULT '[]',
   updatedAt TEXT
 );
+
+CREATE TABLE IF NOT EXISTS distributed_task_id_state (
+  prefix TEXT PRIMARY KEY,
+  nextSequence INTEGER NOT NULL,
+  committedClusterTaskCount INTEGER NOT NULL,
+  lastCommittedTaskId TEXT,
+  updatedAt TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS distributed_task_id_reservations (
+  reservationId TEXT PRIMARY KEY,
+  prefix TEXT NOT NULL,
+  nodeId TEXT NOT NULL,
+  sequence INTEGER NOT NULL,
+  taskId TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('reserved', 'committed', 'aborted', 'expired')),
+  reason TEXT CHECK (reason IS NULL OR reason IN ('abort', 'expired', 'failed-create')),
+  expiresAt TEXT NOT NULL,
+  committedAt TEXT,
+  abortedAt TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY (prefix) REFERENCES distributed_task_id_state(prefix) ON DELETE CASCADE,
+  UNIQUE(prefix, sequence),
+  UNIQUE(prefix, taskId)
+);
+
+CREATE INDEX IF NOT EXISTS idxDistributedTaskIdReservationsPrefixStatus ON distributed_task_id_reservations(prefix, status);
+CREATE INDEX IF NOT EXISTS idxDistributedTaskIdReservationsExpiry ON distributed_task_id_reservations(status, expiresAt);
 
 -- Workflow step definitions
 CREATE TABLE IF NOT EXISTS workflow_steps (
@@ -2703,6 +2732,41 @@ export class Database {
     if (version < 64) {
       this.applyMigration(64, () => {
         this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idxEvalTaskResultsRunTaskUnique ON eval_task_results(runId, taskId)`);
+      });
+    }
+
+    if (version < 65) {
+      this.applyMigration(65, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS distributed_task_id_state (
+            prefix TEXT PRIMARY KEY,
+            nextSequence INTEGER NOT NULL,
+            committedClusterTaskCount INTEGER NOT NULL,
+            lastCommittedTaskId TEXT,
+            updatedAt TEXT NOT NULL
+          )
+        `);
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS distributed_task_id_reservations (
+            reservationId TEXT PRIMARY KEY,
+            prefix TEXT NOT NULL,
+            nodeId TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            taskId TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('reserved', 'committed', 'aborted', 'expired')),
+            reason TEXT CHECK (reason IS NULL OR reason IN ('abort', 'expired', 'failed-create')),
+            expiresAt TEXT NOT NULL,
+            committedAt TEXT,
+            abortedAt TEXT,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL,
+            FOREIGN KEY (prefix) REFERENCES distributed_task_id_state(prefix) ON DELETE CASCADE,
+            UNIQUE(prefix, sequence),
+            UNIQUE(prefix, taskId)
+          )
+        `);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxDistributedTaskIdReservationsPrefixStatus ON distributed_task_id_reservations(prefix, status)`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxDistributedTaskIdReservationsExpiry ON distributed_task_id_reservations(status, expiresAt)`);
       });
     }
 

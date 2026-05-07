@@ -1,8 +1,57 @@
 import { ApiError, badRequest } from "../api-error.js";
 import type { ApiRouteRegistrar } from "./types.js";
+import { fetchFromRemoteNode } from "./register-settings-sync-helpers.js";
 
 export const registerMeshRoutes: ApiRouteRegistrar = (ctx) => {
   const { router, store, emitRemoteRouteDiagnostic, rethrowAsApiError } = ctx;
+
+  const resolveAllocator = async (coordinatorNodeId?: string) => {
+    const { CentralCore } = await import("@fusion/core");
+    const central = new CentralCore();
+    await central.init();
+    if (!coordinatorNodeId) {
+      await central.close();
+      return { mode: "local" as const };
+    }
+    const coordinator = await central.getNode(coordinatorNodeId);
+    if (coordinator?.type === "local") {
+      await central.close();
+      return { mode: "local" as const };
+    }
+    await central.close();
+    if (!coordinator) {
+      throw new ApiError(503, "Allocator coordinator is unavailable");
+    }
+    return { mode: "remote" as const, coordinator };
+  };
+
+  const mapCoordinatorWriteError = (err: unknown): never => {
+    if (err instanceof ApiError && [502, 504].includes(err.statusCode)) {
+      throw new ApiError(503, "Allocator coordinator is unavailable");
+    }
+    throw err;
+  };
+
+  const requireMeshAuth = async (
+    req: { headers: { authorization?: string } },
+    res: { status: (code: number) => { json: (payload: unknown) => void } },
+    senderNodeId?: string,
+  ): Promise<boolean> => {
+    if (!senderNodeId) return true;
+    const { CentralCore } = await import("@fusion/core");
+    const central = new CentralCore();
+    await central.init();
+    const senderNode = await central.getNode(senderNodeId);
+    await central.close();
+    if (!senderNode?.apiKey) return true;
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
+    if (!token || token !== senderNode.apiKey) {
+      res.status(401).json({ error: "Unauthorized" });
+      return false;
+    }
+    return true;
+  };
 
   // ── Mesh Topology Routes ────────────────────────────────────────────────
 
@@ -67,6 +116,124 @@ export const registerMeshRoutes: ApiRouteRegistrar = (ctx) => {
    * Request body: PeerSyncRequest (may include optional settings field)
    * Response body: PeerSyncResponse (may include optional settings field)
    */
+  router.post("/mesh/task-ids/reserve", async (req, res) => {
+    try {
+      const prefix = String(req.body?.prefix ?? "").trim();
+      const nodeId = String(req.body?.nodeId ?? "").trim();
+      const ttlMs = req.body?.ttlMs;
+      const coordinatorNodeId = typeof req.body?.coordinatorNodeId === "string" ? req.body.coordinatorNodeId : undefined;
+      const senderNodeId = typeof req.body?.senderNodeId === "string" ? req.body.senderNodeId : undefined;
+      if (!prefix) throw badRequest("prefix is required");
+      if (!nodeId) throw badRequest("nodeId is required");
+      if (!(await requireMeshAuth(req, res, senderNodeId))) return;
+
+      const target = await resolveAllocator(coordinatorNodeId);
+      if (target.mode === "remote") {
+        try {
+          const remote = await fetchFromRemoteNode(target.coordinator, "/api/mesh/task-ids/reserve", {
+            method: "POST",
+            body: { prefix, nodeId, ttlMs },
+          });
+          res.json(remote);
+          return;
+        } catch (err) {
+          mapCoordinatorWriteError(err);
+        }
+      }
+
+      const result = await store.getDistributedTaskIdAllocator().reserveDistributedTaskId({ prefix, nodeId, ttlMs });
+      res.json(result);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err);
+    }
+  });
+
+  router.post("/mesh/task-ids/commit", async (req, res) => {
+    try {
+      const reservationId = String(req.body?.reservationId ?? "").trim();
+      const nodeId = String(req.body?.nodeId ?? "").trim();
+      const coordinatorNodeId = typeof req.body?.coordinatorNodeId === "string" ? req.body.coordinatorNodeId : undefined;
+      const senderNodeId = typeof req.body?.senderNodeId === "string" ? req.body.senderNodeId : undefined;
+      if (!reservationId) throw badRequest("reservationId is required");
+      if (!nodeId) throw badRequest("nodeId is required");
+      if (!(await requireMeshAuth(req, res, senderNodeId))) return;
+
+      const target = await resolveAllocator(coordinatorNodeId);
+      if (target.mode === "remote") {
+        try {
+          const remote = await fetchFromRemoteNode(target.coordinator, "/api/mesh/task-ids/commit", {
+            method: "POST",
+            body: { reservationId, nodeId },
+          });
+          res.json(remote);
+          return;
+        } catch (err) {
+          mapCoordinatorWriteError(err);
+        }
+      }
+
+      const result = await store.getDistributedTaskIdAllocator().commitDistributedTaskIdReservation({ reservationId, nodeId });
+      res.json(result);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      if (err instanceof Error && err.message.toLowerCase().includes("expired")) {
+        throw new ApiError(409, err.message);
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  router.post("/mesh/task-ids/abort", async (req, res) => {
+    try {
+      const reservationId = String(req.body?.reservationId ?? "").trim();
+      const nodeId = String(req.body?.nodeId ?? "").trim();
+      const reason = req.body?.reason;
+      const coordinatorNodeId = typeof req.body?.coordinatorNodeId === "string" ? req.body.coordinatorNodeId : undefined;
+      const senderNodeId = typeof req.body?.senderNodeId === "string" ? req.body.senderNodeId : undefined;
+      if (!reservationId) throw badRequest("reservationId is required");
+      if (!nodeId) throw badRequest("nodeId is required");
+      if (reason !== "abort" && reason !== "expired" && reason !== "failed-create") {
+        throw badRequest("reason must be one of: abort, expired, failed-create");
+      }
+      if (!(await requireMeshAuth(req, res, senderNodeId))) return;
+
+      const target = await resolveAllocator(coordinatorNodeId);
+      if (target.mode === "remote") {
+        try {
+          const remote = await fetchFromRemoteNode(target.coordinator, "/api/mesh/task-ids/abort", {
+            method: "POST",
+            body: { reservationId, nodeId, reason },
+          });
+          res.json(remote);
+          return;
+        } catch (err) {
+          mapCoordinatorWriteError(err);
+        }
+      }
+
+      const result = await store.getDistributedTaskIdAllocator().abortDistributedTaskIdReservation({ reservationId, nodeId, reason });
+      res.json(result);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err);
+    }
+  });
+
+  router.get("/mesh/task-ids/state", async (req, res) => {
+    try {
+      const prefix = String(req.query?.prefix ?? "").trim();
+      const senderNodeId = typeof req.query?.senderNodeId === "string" ? req.query.senderNodeId : undefined;
+      if (!prefix) throw badRequest("prefix is required");
+      if (!(await requireMeshAuth(req, res, senderNodeId))) return;
+      const result = await store.getDistributedTaskIdAllocator().getDistributedTaskIdState({ prefix });
+      res.json(result);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err);
+    }
+  });
+
   router.post("/mesh/sync", async (req, res) => {
     try {
       const { CentralCore } = await import("@fusion/core");

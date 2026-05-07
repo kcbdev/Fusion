@@ -133,6 +133,8 @@ export function useMobileKeyboard(
       return;
     }
 
+    // Full update for resize + focus transitions (real keyboard
+    // open/close events).
     const update = () => {
       const metrics = getKeyboardMetrics();
       setKeyboardOverlap(metrics.overlap);
@@ -141,15 +143,29 @@ export function useMobileKeyboard(
       setKeyboardOpen(metrics.open);
     };
 
+    // Scroll-only update: visualViewport.scroll fires at 60fps during
+    // an iOS pan with the keyboard up. Routing offsetTop through React
+    // state on every event amplifies the pan into a visible judder via
+    // the .chat-thread translateY(--vv-offset-top) transform. We skip
+    // offsetTop here; it stays pinned to whatever resize/focus last
+    // captured. Other metrics still update so a true viewport shrink
+    // is reflected.
+    const updateScrollOnly = () => {
+      const metrics = getKeyboardMetrics();
+      setKeyboardOverlap(metrics.overlap);
+      setViewportHeight(metrics.vvHeight);
+      setKeyboardOpen(metrics.open);
+    };
+
     update();
     vv.addEventListener("resize", update);
-    vv.addEventListener("scroll", update);
+    vv.addEventListener("scroll", updateScrollOnly);
     document.addEventListener("focusin", update);
     document.addEventListener("focusout", update);
 
     return () => {
       vv.removeEventListener("resize", update);
-      vv.removeEventListener("scroll", update);
+      vv.removeEventListener("scroll", updateScrollOnly);
       document.removeEventListener("focusin", update);
       document.removeEventListener("focusout", update);
       setKeyboardOverlap(0);

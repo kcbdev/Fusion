@@ -1105,14 +1105,11 @@
   .chat-thread[style*="--keyboard-overlap"] {
     height: calc(var(--vv-height, calc(100dvh - var(--keyboard-overlap, 0px))) - var(--header-height));
     max-height: calc(var(--vv-height, calc(100dvh - var(--keyboard-overlap, 0px))) - var(--header-height));
-    /* The previous translateY(--vv-offset-top) compensated for iOS
-       shifting the visual viewport on focus, but it also amplified
-       jitter during a swipe — visualViewport scroll events update
-       --vv-offset-top rapidly, the transform follows, and the thread
-       jutters / shifts ~300px / exposes the body background. Dropping
-       the transform lets the browser place the thread where iOS
-       expects; height-shrink to vv-height still keeps it inside the
-       visible area. */
+    /* useMobileKeyboard pins --vv-offset-top across pan-time scroll
+       events (only resize/focus update it), so this transform anchors
+       the thread on initial focus without juddering during swipes. */
+    transform: translateY(var(--vv-offset-top, 0px));
+    will-change: transform;
   }
 
   /* On mobile, the "New Chat" affordance uses a full-width pinned footer. */

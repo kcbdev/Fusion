@@ -773,7 +773,6 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const preserveComposerFocusRef = useRef(false);
-  const handledMobileSendRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingAttachmentsRef = useRef<PendingAttachment[]>([]);
   const mentionCursorPosRef = useRef(0);
@@ -1086,12 +1085,6 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
         window.scrollTo(previousScrollX, previousScrollY);
       }
     });
-  }, []);
-
-  const markPreserveComposerFocus = useCallback(() => {
-    if (typeof window === "undefined") return;
-    if (window.innerWidth > 768) return;
-    preserveComposerFocusRef.current = true;
   }, []);
 
   const handleSkillSelect = useCallback(
