@@ -2,6 +2,7 @@ import {
   collectDeterministicSignals,
   computeOverallScore,
   normalizeCategoryScore,
+  resolveScoreBand,
   resolveValidatorSettingsModel,
   EVAL_SCORE_CATEGORIES,
   type DeterministicSignals,
@@ -15,6 +16,7 @@ import {
   type TaskStore,
 } from "@fusion/core";
 import { collectTaskEvaluationEvidence } from "./evaluator-evidence.js";
+import { materializeEvalFollowUps, normalizeEvalFollowUps, resolveEvalFollowUpPolicyMode } from "./eval-followups.js";
 import { createFnAgent, promptWithFallback } from "./pi.js";
 import { createLogger } from "./logger.js";
 
@@ -100,6 +102,24 @@ export class HybridEvaluatorService {
     });
 
     const overallScore = computeOverallScore(categoryScores);
+    const followUpPolicyMode = resolveEvalFollowUpPolicyMode(settings.taskEvaluationFollowUpPolicy);
+    const followUps = this.deps.store
+      ? await materializeEvalFollowUps({
+        parentTaskId: task.id,
+        runId: run.runId,
+        policyMode: followUpPolicyMode,
+        overallScore,
+        store: this.deps.store,
+        followUps: await normalizeEvalFollowUps({
+          parentTaskId: task.id,
+          runId: run.runId,
+          overallBand: resolveScoreBand(overallScore),
+          drafts: ai.followUpDrafts,
+          store: this.deps.store,
+          policyMode: followUpPolicyMode,
+        }),
+      })
+      : [];
 
     return {
       status: "scored",
@@ -110,11 +130,7 @@ export class HybridEvaluatorService {
       evidence: categoryScores.flatMap((categoryScore) => categoryScore.evidence),
       evidenceBundle,
       deterministicSignals: deterministicSignalsToEvalSignals(deterministicSignals),
-      followUps: ai.followUpDrafts.map((draft) => ({
-        title: draft.title,
-        description: draft.description,
-        metadata: { reason: draft.reason, evidenceRefs: draft.evidenceRefs },
-      })),
+      followUps,
       metadata: {
         runId: run.runId,
         evaluatorModel: model,

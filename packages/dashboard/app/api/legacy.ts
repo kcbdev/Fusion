@@ -8220,11 +8220,17 @@ export function streamChatResponse(
         processLines(decoder.decode(value, { stream: true }));
       }
 
+      const hasUndispatchedTrailingFragment =
+        buffer.length > 0 || currentEvent.length > 0 || currentDataLines.length > 0;
+
       // Server closed the stream without emitting a terminal `done` or `error`
       // SSE event (common on flaky mobile networks, proxy idle-kill, or
       // backgrounded tabs). Surface as an error so the client unwinds
       // streaming state instead of getting stuck with isStreaming=true.
-      if (!terminated && !closedByUser) {
+      // Ignore dangling partial fragments at EOF: those indicate a truncated
+      // trailing event that should be dropped rather than surfaced as transport
+      // failure.
+      if (!terminated && !closedByUser && !hasUndispatchedTrailingFragment) {
         handlers.onError?.("Connection closed unexpectedly");
       }
     } catch (err: unknown) {

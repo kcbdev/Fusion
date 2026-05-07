@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TASK_EVALUATION_EVIDENCE_SOURCE_ORDER, computeOverallScore, createDatabase, EvalStore, runScheduledEvalBatch, type TaskDetail, type TaskEvaluationEvidenceBundle } from "@fusion/core";
 import { HybridEvaluatorService, buildEvaluationPrompt, parseAiResponse, resolveEvaluatorModel } from "../evaluator.js";
 
@@ -38,7 +38,12 @@ function makeAiResponse(overrides: Partial<Record<string, unknown>> = {}): strin
       },
     },
     overallRationale: "Solid result with complete verification.",
-    followUpDrafts: [],
+    followUpDrafts: [{
+      title: "Investigate flaky verification command",
+      description: "Investigate flaky verification command failures seen in workflow output.",
+      reason: "Verification command failed repeatedly",
+      evidenceRefs: ["workflow-1"],
+    }],
     ...overrides,
   });
 }
@@ -143,10 +148,15 @@ describe("evaluator", () => {
   });
 
   it("returns merged evaluation payload shape for persistence", async () => {
+    const createTask = vi.fn(async () => ({ id: "FN-900" }));
     const service = new HybridEvaluatorService({
       cwd: process.cwd(),
       runPrompt: async () => makeAiResponse(),
-      store: {} as any,
+      store: {
+        listTasks: async () => [],
+        createTask,
+        getEvalStore: () => ({ listTaskResults: () => [] }),
+      } as any,
       collectEvidence: async ({ task, runId }) => ({
         taskId: task.id,
         runId,
@@ -161,7 +171,7 @@ describe("evaluator", () => {
         runAudit: [],
       }),
     });
-    const result = await service.evaluateTask(makeTask(), { runId: "ER-1", startedAt: "2026-05-01T00:00:00.000Z" }, {});
+    const result = await service.evaluateTask(makeTask(), { runId: "ER-1", startedAt: "2026-05-01T00:00:00.000Z" }, { taskEvaluationFollowUpPolicy: "create" });
     expect(result.status).toBe("scored");
     expect(result.overallScore).toBeGreaterThanOrEqual(0);
     expect(result.overallScore).toBeLessThanOrEqual(100);
@@ -176,6 +186,42 @@ describe("evaluator", () => {
     expect(result.evidenceBundle?.sourceOrder).toEqual(TASK_EVALUATION_EVIDENCE_SOURCE_ORDER);
     expect(result.evidenceBundle?.agentLogs[0]?.excerpt).toBe("summary only");
     expect((result.evidenceBundle?.agentLogs[0] as any)?.detail).toBeUndefined();
+    expect(result.followUps?.[0]?.suggestionId).toMatch(/^efs-/);
+    expect(result.followUps?.[0]?.policyMode).toBe("auto_create_qualified");
+    expect(result.followUps?.[0]?.state).toBe("created");
+    expect(result.followUps?.[0]?.createdTaskId).toBe("FN-900");
+    expect(createTask).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists-only in suggest mode without creating tasks", async () => {
+    const createTask = vi.fn(async () => ({ id: "FN-created" }));
+    const service = new HybridEvaluatorService({
+      cwd: process.cwd(),
+      runPrompt: async () => makeAiResponse(),
+      store: {
+        listTasks: async () => [],
+        createTask,
+        getEvalStore: () => ({ listTaskResults: () => [] }),
+      } as any,
+      collectEvidence: async ({ task, runId }) => ({
+        taskId: task.id,
+        runId,
+        sourceOrder: TASK_EVALUATION_EVIDENCE_SOURCE_ORDER,
+        taskMetadata: [],
+        commits: [],
+        workflow: [],
+        reviews: [],
+        documents: [],
+        taskActivity: [],
+        agentLogs: [],
+        runAudit: [],
+      }),
+    });
+
+    const result = await service.evaluateTask(makeTask(), { runId: "ER-suggest", startedAt: "2026-05-01T00:00:00.000Z" }, { taskEvaluationFollowUpPolicy: "suggest" });
+    expect(result.followUps?.[0]?.policyMode).toBe("persist_only");
+    expect(result.followUps?.[0]?.state).toBe("suggested");
+    expect(createTask).not.toHaveBeenCalled();
   });
 
   it("integrates scheduled batch with evaluator and persists one result per run/task", async () => {

@@ -99,10 +99,51 @@ Stored references include task/run identifiers and source-specific drill-down fi
 
 `packages/engine/src/evaluator.ts` injects the normalized bundle under a dedicated `## Evidence` prompt section. The evaluator is instructed to cite evidence IDs/labels from this section instead of inventing unsupported claims.
 
+## Follow-up Suggestion Policy
+
+Evaluator follow-ups are normalized into structured `followUps[]` records on each eval result (no freeform-only suggestions).
+
+Each suggestion includes:
+- stable `suggestionId` + `dedupeKey`
+- `title`, `description`, `priority`, `severity`
+- `rationale` and `evidenceRefs[]`
+- policy recommendation (`shouldCreate`, `policyQualified`, `reason`)
+- lifecycle state: `suggested` | `suppressed` | `created`
+- suppression/debug fields when applicable: `suppressedReason`, `matchedTaskId`, `matchedSuggestionId`
+- creation linkage when applicable: `createdTaskId`
+
+### Policy modes
+
+Backend policy modes used by evaluator orchestration:
+- `persist_only`: persist normalized suggestions for manual review only
+- `auto_create_qualified`: auto-create only policy-qualified suggestions
+- `create_all_non_duplicates`: auto-create all non-suppressed, non-duplicate suggestions
+
+Current project settings mapping:
+- `taskEvaluationFollowUpPolicy = "off" | "suggest"` → `persist_only`
+- `taskEvaluationFollowUpPolicy = "create"` → `auto_create_qualified`
+
+### Dedupe + suppression guardrails
+
+Suggestions are suppressed when they are:
+- empty/generic (`empty_or_generic`)
+- missing strong signal (`insufficient_signal`)
+- duplicates of an already-open board task (`duplicate_open_task`)
+- duplicates of a prior eval suggestion for the same parent task (`duplicate_prior_suggestion`)
+
+Suppression reasons and matched IDs are persisted on the suggestion for auditability.
+
+### Task creation provenance
+
+When policy permits creation, evaluator code uses `TaskStore.createTask()` (no ad hoc file writes). Created tasks:
+- are created in `triage`
+- set `sourceParentTaskId` to the evaluated task
+- set `sourceMetadata` with eval provenance (`type=eval_follow_up`, `runId`, `suggestionId`, `policyMode`, `dedupeKey`)
+- include actionable context (problem summary, expected outcome, score/severity, rationale, evidence refs)
+
 ## Non-Goals
 
 This contract does not define:
 
-- follow-up task creation policy
 - eval settings UX
 - eval dashboard/list rendering

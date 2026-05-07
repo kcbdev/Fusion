@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createDatabase, type Database } from "../db.js";
 import { EvalLifecycleError, EvalStore } from "../eval-store.js";
-import { EVIDENCE_EXCERPT_TRUNCATION_MARKER, EVIDENCE_LIMITS, TASK_EVALUATION_EVIDENCE_SOURCE_ORDER } from "../eval-types.js";
+import {
+  EVIDENCE_EXCERPT_TRUNCATION_MARKER,
+  EVIDENCE_LIMITS,
+  TASK_EVALUATION_EVIDENCE_SOURCE_ORDER,
+  buildEvalFollowUpSuggestionId,
+} from "../eval-types.js";
 
 let db: Database;
 let store: EvalStore;
@@ -72,6 +77,19 @@ describe("EvalStore", () => {
       }],
       evidence: [{ type: "task_log", ref: "log:1" }],
       deterministicSignals: [{ signalId: "s1", kind: "test", name: "tests-pass", passed: true }],
+      followUps: [{
+        suggestionId: buildEvalFollowUpSuggestionId("FN-123 missing tests"),
+        dedupeKey: "fn-123:missing-tests",
+        title: "Add regression tests for merged behavior",
+        description: "Investigate uncovered behavior and add targeted regression tests.",
+        priority: "high",
+        severity: "weak",
+        rationale: "Outcome quality signals showed verification gaps.",
+        evidenceRefs: [{ evidenceId: "workflow-1", source: "workflow", note: "verification failure" }],
+        recommendation: { shouldCreate: true, reason: "Actionable and high confidence", policyQualified: true },
+        state: "suggested",
+        policyMode: "persist_only",
+      }],
     });
 
     db.prepare("DELETE FROM tasks WHERE id = ?").run("FN-123");
@@ -84,6 +102,8 @@ describe("EvalStore", () => {
     expect(fetched?.categoryScores[0]?.deterministicScore).toBe(78);
     expect(fetched?.categoryScores[1]?.weight).toBe(0.45);
     expect(fetched?.categoryScores[2]?.band).toBe("acceptable");
+    expect(fetched?.followUps[0]?.suggestionId).toMatch(/^efs-/);
+    expect(fetched?.followUps[0]?.recommendation.policyQualified).toBe(true);
   });
 
   it("persists run window boundaries and evaluated task rollups", () => {
@@ -239,6 +259,35 @@ describe("EvalStore", () => {
         runAudit: [],
       },
     })).toThrow(/sourceOrder must match/);
+  });
+
+  it("persists suppression metadata for dedupe/noise control", () => {
+    const run = store.createRun({ projectId: "p1", scope: "window" });
+    const result = store.createTaskResult(run.id, {
+      taskId: "FN-suppressed",
+      taskSnapshot: { taskId: "FN-suppressed" },
+      status: "scored",
+      followUps: [{
+        suggestionId: "efs-suppress-1",
+        dedupeKey: "dedupe:1",
+        title: "Investigate flaky verification command",
+        description: "Identify root cause and stabilize verification.",
+        priority: "normal",
+        severity: "acceptable",
+        rationale: "Same recommendation already exists in open triage task.",
+        evidenceRefs: [{ evidenceId: "task-activity-2", source: "taskActivity" }],
+        recommendation: { shouldCreate: false, reason: "Duplicate of existing task", policyQualified: false },
+        state: "suppressed",
+        policyMode: "auto_create_qualified",
+        suppressedReason: "duplicate_open_task",
+        matchedTaskId: "FN-existing",
+      }],
+    });
+
+    const fetched = store.getTaskResult(result.id);
+    expect(fetched?.followUps[0]?.state).toBe("suppressed");
+    expect(fetched?.followUps[0]?.suppressedReason).toBe("duplicate_open_task");
+    expect(fetched?.followUps[0]?.matchedTaskId).toBe("FN-existing");
   });
 
   it("round-trips optional empty evidence source groups", () => {

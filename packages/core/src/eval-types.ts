@@ -241,12 +241,76 @@ export interface EvalCategoryScore {
   evidence: EvalEvidenceReference[];
 }
 
+export const EVAL_FOLLOW_UP_POLICY_MODES = [
+  "persist_only",
+  "auto_create_qualified",
+  "create_all_non_duplicates",
+] as const;
+
+export type EvalFollowUpPolicyMode = typeof EVAL_FOLLOW_UP_POLICY_MODES[number];
+
+export const EVAL_FOLLOW_UP_SUGGESTION_STATES = ["suggested", "suppressed", "created"] as const;
+
+export type EvalFollowUpSuggestionState = typeof EVAL_FOLLOW_UP_SUGGESTION_STATES[number];
+
+export const EVAL_FOLLOW_UP_SUPPRESSION_REASONS = [
+  "duplicate_open_task",
+  "duplicate_prior_suggestion",
+  "insufficient_signal",
+  "empty_or_generic",
+  "policy_filtered",
+] as const;
+
+export type EvalFollowUpSuppressionReason = typeof EVAL_FOLLOW_UP_SUPPRESSION_REASONS[number];
+
+export interface EvalFollowUpEvidenceReference {
+  evidenceId: string;
+  source: TaskEvaluationEvidenceSource | "category" | "signal" | "other";
+  note?: string;
+}
+
+export interface EvalFollowUpCreationRecommendation {
+  shouldCreate: boolean;
+  reason: string;
+  policyQualified: boolean;
+}
+
 export interface EvalFollowUpSuggestion {
+  suggestionId: string;
+  dedupeKey: string;
   title: string;
   description: string;
-  priority?: "low" | "normal" | "high" | "urgent";
+  priority: "low" | "normal" | "high" | "urgent";
+  severity: EvalScoreBand;
+  rationale: string;
+  evidenceRefs: EvalFollowUpEvidenceReference[];
+  recommendation: EvalFollowUpCreationRecommendation;
+  state: EvalFollowUpSuggestionState;
+  policyMode: EvalFollowUpPolicyMode;
+  suppressedReason?: EvalFollowUpSuppressionReason;
+  matchedTaskId?: string;
+  matchedSuggestionId?: string;
+  createdTaskId?: string;
   tags?: string[];
   metadata?: Record<string, unknown>;
+}
+
+export function normalizeEvalFollowUpText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[^a-z0-9 ]/g, "")
+    .trim();
+}
+
+export function buildEvalFollowUpSuggestionId(seed: string): string {
+  const normalized = normalizeEvalFollowUpText(seed);
+  let hash = 2166136261;
+  for (let i = 0; i < normalized.length; i += 1) {
+    hash ^= normalized.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `efs-${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
 export interface EvalTaskResult {
