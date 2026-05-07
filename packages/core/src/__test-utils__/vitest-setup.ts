@@ -38,6 +38,27 @@ const fsPromises = requireFromHere("node:fs/promises") as FsPromisesModule;
 const childProcess = requireFromHere("node:child_process") as ChildProcessModule;
 const { mkdtempSync, mkdirSync, rmSync, realpathSync, existsSync } = fs;
 
+type EmitWarningArgs = Parameters<typeof process.emitWarning>;
+type EmitWarningRestArgs = EmitWarningArgs extends [string | Error, ...infer Rest] ? Rest : never;
+
+function installWarningFilter(): void {
+  const warningState = globalThis as typeof globalThis & { __fusionTestWarningFilterInstalled?: boolean };
+  if (warningState.__fusionTestWarningFilterInstalled) return;
+  warningState.__fusionTestWarningFilterInstalled = true;
+
+  const originalEmitWarning = process.emitWarning.bind(process);
+  process.emitWarning = ((warning: string | Error, ...args: EmitWarningRestArgs) => {
+    const warningText = warning instanceof Error ? warning.message : warning;
+    const warningType = typeof args[0] === "string" ? args[0] : undefined;
+    if (warningType === "ExperimentalWarning" && warningText.includes("SQLite is an experimental feature")) {
+      return;
+    }
+    return originalEmitWarning(warning, ...args);
+  }) as typeof process.emitWarning;
+}
+
+installWarningFilter();
+
 const TEST_HOME_PREFIX = "fn-test-home-";
 const DEFAULT_TEST_SUBPROCESS_TIMEOUT_MS = Math.max(
   1_000,
@@ -45,16 +66,6 @@ const DEFAULT_TEST_SUBPROCESS_TIMEOUT_MS = Math.max(
 );
 const BLOCKED_TEST_CLI_PATTERN =
   /(^|[\s"'\\/])(?:claude|droid|paperclipai|hermes|openclaw)(?:\.(?:cmd|bat|ps1|exe))?(?=$|[\s"'\\/])/i;
-
-const originalEmitWarning = process.emitWarning.bind(process);
-process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
-  const message = typeof warning === "string" ? warning : warning?.message ?? "";
-  const type = typeof args[0] === "string" ? args[0] : (args[0] as { type?: string } | undefined)?.type;
-  if (type === "ExperimentalWarning" && message.includes("SQLite is an experimental feature")) {
-    return;
-  }
-  return (originalEmitWarning as (...a: unknown[]) => void)(warning, ...args);
-}) as typeof process.emitWarning;
 
 const originalCwd = process.cwd.bind(process);
 

@@ -8,10 +8,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildPackageDirByName,
+  buildReverseDependencyMap,
   shouldForceFullSuite,
   resolveAffectedPackages,
   decideExecutionPlan,
   computePackageHash,
+  expandWithReverseDependents,
+  listWorkspacePackageInfos,
   readCache,
   writeCache,
   applyCacheToPlan,
@@ -141,6 +145,19 @@ test("resolveAffectedPackages: maps plugin workspace changes", () => {
   assert.deepEqual(result, ["@fusion-plugin-examples/hermes-runtime"]);
 });
 
+test("buildPackageDirByName: uses canonical workspace dirs instead of package aliases", () => {
+  const result = buildPackageDirByName([
+    { name: "@fusion/engine", dir: "packages/engine" },
+    { name: "@fusion/core", dir: "packages/core" },
+    { name: "@fusion-plugin-examples/cursor-runtime", dir: "plugins/fusion-plugin-cursor-runtime" },
+  ]);
+
+  assert.equal(result.get("@fusion/engine"), "packages/engine");
+  assert.equal(result.get("@fusion/core"), "packages/core");
+  assert.equal(result.get("@fusion-plugin-examples/cursor-runtime"), "plugins/fusion-plugin-cursor-runtime");
+  assert.notEqual(result.get("@fusion/engine"), "engine");
+});
+
 // ---------------------------------------------------------------------------
 // decideExecutionPlan
 // ---------------------------------------------------------------------------
@@ -211,6 +228,23 @@ test("decideExecutionPlan: only package files changed → changed mode", () => {
   });
   assert.equal(plan.mode, "changed");
   assert.deepEqual(plan.packages, ["@fusion/engine"]);
+});
+
+test("decideExecutionPlan: expands changed packages with reverse dependents", () => {
+  const plan = decideExecutionPlan({
+    forceFullSuite: false,
+    comparisonBase: "abc123",
+    changedFiles: ["packages/core/src/store.ts"],
+    packageNameByDir: basePackageMap,
+    reverseDependencyMap: new Map([
+      ["@fusion/core", ["@fusion/engine"]],
+      ["@fusion/engine", ["@fusion/dashboard"]],
+      ["@fusion/dashboard", []],
+    ]),
+  });
+
+  assert.equal(plan.mode, "changed");
+  assert.deepEqual(plan.packages, ["@fusion/core", "@fusion/engine", "@fusion/dashboard"]);
 });
 
 test("decideExecutionPlan: no affected package resolved → full", () => {

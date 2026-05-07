@@ -22,6 +22,11 @@ function loadRootPackageJson(): any {
   return JSON.parse(readFileSync(path, "utf-8"));
 }
 
+function hasProjectArg(script: string | undefined, project: string): boolean {
+  const parts = script?.trim().split(/\s+/) ?? [];
+  return parts.some((part, index) => part === "--project" && parts[index + 1] === project);
+}
+
 describe("CLI package.json publishing config", () => {
   const pkg = loadPackageJson("cli");
 
@@ -210,6 +215,7 @@ describe("Scoped @fusion/* packages publishing config", () => {
 
 describe("Workspace bootstrap script contract", () => {
   const rootPkg = loadRootPackageJson();
+  const dashboardPkg = loadPackageJson("dashboard");
 
   it("makes root test changed-only while keeping explicit full-suite and CI-shard commands", () => {
     expect(rootPkg.scripts?.test).toBe("node scripts/test-changed.mjs");
@@ -245,6 +251,21 @@ describe("Workspace bootstrap script contract", () => {
     expect(rootPkg.scripts?.["mobile:build"]).toBe(
       "pnpm --filter @fusion/dashboard build && pnpm --filter @fusion/mobile cap sync",
     );
+  });
+
+  it("keeps dashboard's default test lane curated with explicit deep coverage", () => {
+    const defaultTest = dashboardPkg.scripts?.test;
+    const deepTest = dashboardPkg.scripts?.["test:deep"];
+
+    expect(hasProjectArg(defaultTest, "dashboard-app-quality")).toBe(true);
+    expect(hasProjectArg(defaultTest, "dashboard-api-quality")).toBe(true);
+    expect(hasProjectArg(defaultTest, "dashboard-app")).toBe(false);
+    expect(hasProjectArg(defaultTest, "dashboard-api")).toBe(false);
+
+    expect(hasProjectArg(deepTest, "dashboard-app")).toBe(true);
+    expect(hasProjectArg(deepTest, "dashboard-api")).toBe(true);
+    expect(hasProjectArg(deepTest, "dashboard-app-quality")).toBe(false);
+    expect(hasProjectArg(deepTest, "dashboard-api-quality")).toBe(false);
   });
 });
 

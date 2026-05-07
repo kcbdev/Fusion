@@ -5,18 +5,7 @@ import { cpus } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureTestArtifacts } from "./ensure-test-artifacts.mjs";
-
-const DEFAULT_TEST_PACKAGES = [
-  "@fusion/core",
-  "@fusion/engine",
-  "@fusion/dashboard",
-  "@runfusion/fusion",
-  "@fusion/plugin-sdk",
-  "@fusion/desktop",
-  "@fusion/mobile",
-  "@fusion/droid-cli",
-  "@fusion/pi-claude-cli",
-];
+import { listWorkspacePackageInfos } from "./test-changed.mjs";
 
 function run(command, commandArgs, options = {}) {
   const result = spawnSync(command, commandArgs, {
@@ -70,9 +59,15 @@ export function selectShardPackages(packages, shard, total) {
   return packages.filter((_, index) => index % total === shard - 1);
 }
 
+export function listWorkspaceTestPackages({ projectRoot = process.cwd() } = {}) {
+  return listWorkspacePackageInfos({ projectRoot })
+    .filter((workspacePackage) => workspacePackage.hasTestScript)
+    .map((workspacePackage) => workspacePackage.name);
+}
+
 export function main(argv = process.argv.slice(2), env = process.env) {
   const { shard, total } = parseShardArgs(argv, env);
-  const shardPackages = selectShardPackages(DEFAULT_TEST_PACKAGES, shard, total);
+  const shardPackages = selectShardPackages(listWorkspaceTestPackages(), shard, total);
 
   if (shardPackages.length === 0) {
     console.log(`[ci-test-shard] shard ${shard}/${total} has no assigned packages; skipping.`);

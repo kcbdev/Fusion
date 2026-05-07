@@ -41,7 +41,7 @@ describe("CI workflow (.github/workflows/ci.yml)", () => {
     readmeContent = readFileSync(join(workspaceRoot, "README.md"), "utf-8");
     cliPackageJsonContent = readFileSync(join(workspaceRoot, "packages", "cli", "package.json"), "utf-8");
     extensionSuiteContent = readFileSync(
-      join(workspaceRoot, "packages", "cli", "src", "__tests__", "extension.test.ts"),
+      join(workspaceRoot, "packages", "cli", "src", "__tests__", "extension-integration.test.ts"),
       "utf-8",
     );
     agentExportSuiteContent = readFileSync(
@@ -124,11 +124,13 @@ describe("CI workflow (.github/workflows/ci.yml)", () => {
     expect(cliPackageJsonContent).toContain("FUSION_TEST_SLOW_CLI=1");
     expect(cliPackageJsonContent).toContain('"test:extension-integration"');
     expect(cliPackageJsonContent).toContain("FUSION_TEST_EXTENSION_INTEGRATION=1");
+    expect(cliPackageJsonContent).toContain("extension-integration.test.ts");
     expect(cliPackageJsonContent).toContain('"test:build-exe"');
     expect(cliPackageJsonContent).toContain("FUSION_TEST_BUILD_EXE=1");
 
     expect(extensionSuiteContent).toContain("describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)");
     expect(extensionSuiteContent).toContain("FUSION_TEST_EXTENSION_INTEGRATION");
+    expect(extensionSuiteContent).toContain("dist/extension.js");
 
     expect(agentExportSuiteContent).toContain("describe.skipIf(!SHOULD_RUN_SLOW_CLI)");
     expect(agentExportSuiteContent).toContain("FUSION_TEST_SLOW_CLI");
@@ -169,10 +171,29 @@ describe("PR checks workflow (.github/workflows/pr-checks.yml)", () => {
   it("uses the same deterministic test sharding command as manual CI", () => {
     expect(workflow.jobs?.lint).toBeDefined();
     expect(workflow.jobs?.typecheck).toBeDefined();
+    expect(workflow.jobs?.build).toBeDefined();
     expect(workflow.jobs?.["test-shards"]).toBeDefined();
     expect(workflow.jobs?.["test-shards"]?.strategy?.matrix?.shard).toEqual([1, 2, 3]);
     expect(content).toContain("pnpm test:ci:shard --shard ${{ matrix.shard }} --total 3");
     expect(content).not.toContain("run: pnpm test\n");
+  });
+
+  it("keeps build coverage as an explicit PR gate", () => {
+    const buildSteps = workflow.jobs?.build?.steps ?? [];
+    expect(
+      buildSteps.some(
+        (step: any) => step.name === "Build" && typeof step.run === "string" && step.run.includes("pnpm build"),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not spend PR action minutes on a pre-test workspace build", () => {
+    const testSteps = workflow.jobs?.["test-shards"]?.steps ?? [];
+    expect(
+      testSteps.some(
+        (step: any) => step.name === "Build" || (typeof step.run === "string" && step.run.includes("pnpm build")),
+      ),
+    ).toBe(false);
   });
 });
 

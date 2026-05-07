@@ -45,7 +45,7 @@ pnpm dev               # build + run CLI entrypoint in dev mode
 pnpm dev:ui            # dashboard dev server only
 pnpm lint              # lint all packages
 pnpm test              # changed-only workspace tests (falls back to full suite in safety contexts)
-pnpm test:full         # full workspace test suite (clean-worktree compatible)
+pnpm test:full         # full workspace quality gate (clean-worktree compatible)
 pnpm build             # workspace builds (excludes desktop/mobile)
 pnpm build:all         # full workspace build (includes desktop/mobile)
 pnpm verify:workspace  # canonical lint -> test -> build verification gate
@@ -68,10 +68,10 @@ Fusion codifies workspace verification as a deterministic contract:
 GitHub Actions now runs deterministic test sharding via `pnpm test:ci:shard --shard <index> --total <count>` in both PR checks and manual CI, while keeping local semantics unchanged:
 
 - `pnpm test` remains changed-only local iteration.
-- `pnpm test:full` remains the canonical full local suite.
+- `pnpm test:full` remains the canonical workspace quality gate; dashboard exhaustive coverage is explicit via `pnpm --filter @fusion/dashboard test:deep`.
 - `pnpm verify:workspace` remains the canonical local lint -> test -> build gate.
 
-`test:ci:shard` is a CI-focused entrypoint (`scripts/ci-test-shard.mjs`) that partitions a fixed package list by shard index modulo total shard count so coverage is deterministic and reproducible.
+`test:ci:shard` is a CI-focused entrypoint (`scripts/ci-test-shard.mjs`) that partitions workspace packages with `test` scripts by shard index modulo total shard count so coverage is deterministic and reproducible.
 
 `pnpm test` now uses a changed-only entrypoint (`scripts/test-changed.mjs`) for faster local iteration. It resolves the comparison base from `.changeset/config.json` (`baseBranch`) and runs only affected workspaces from `pnpm-workspace.yaml` (both `packages/*` and `plugins/**`) using safe package-first filtering (`pnpm --filter <pkg> test`). It automatically falls back to the full suite when the run is forced (CI / `--full`), the git comparison base or diff cannot be resolved, no changes are detected, shared/root test infrastructure changes, or changed workspace paths cannot be resolved to a workspace package (fail-safe coverage behavior).
 
@@ -158,6 +158,21 @@ pnpm --filter @runfusion/fusion test:extension-integration
 ```
 
 `test:extension-integration` enables `FUSION_TEST_EXTENSION_INTEGRATION=1` and runs the full fn pi extension integration suite. It remains an explicit opt-in lane so default workspace verification stays fast, while still providing a discoverable command for full extension-tool integration coverage.
+
+## Dashboard Test Lanes
+
+Dashboard tests are split into explicit local lanes. The default dashboard package gate is a curated quality gate that keeps representative app/API coverage without running every exhaustive modal, view, and route permutation on every local or PR pass:
+
+```bash
+pnpm --filter @fusion/dashboard test                # curated app/API quality gate
+pnpm --filter @fusion/dashboard test:deep           # exhaustive app + API suite
+pnpm --filter @fusion/dashboard test:app            # exhaustive React/jsdom app tests
+pnpm --filter @fusion/dashboard test:api            # exhaustive Node API/server tests
+pnpm --filter @fusion/dashboard test:browser-smoke  # local browser layout smoke
+pnpm --filter @fusion/dashboard test:build          # built client output contract
+```
+
+Use the default lane for normal local iteration before PRs. Run `test:deep` when changing broad dashboard architecture, shared modal/view infrastructure, or route registration behavior where the exhaustive permutations are still useful. The built-client contract remains a separate lane because it performs its own production build. `pnpm build` remains an explicit PR gate, and PR test shards avoid a redundant pre-test workspace build to save GitHub Actions minutes.
 
 ## Release Process
 

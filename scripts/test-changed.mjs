@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { cpus, tmpdir } from "node:os";
 import { ensureTestArtifacts } from "./ensure-test-artifacts.mjs";
+import fg from "fast-glob";
+import { parse as parseYaml } from "yaml";
 
 const currentFilePath = fileURLToPath(import.meta.url);
 const scriptDir = path.dirname(currentFilePath);
@@ -110,60 +112,142 @@ function getBaseBranch() {
   return changesetConfig.baseBranch || "main";
 }
 
-function workspacePatterns() {
+function readWorkspacePatterns(projectRoot = rootDir) {
   try {
-    const workspacePath = path.join(rootDir, "pnpm-workspace.yaml");
-    const content = readFileSync(workspacePath, "utf8");
-    return content
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.startsWith("-"))
-      .map((line) => line.replace(/^-\s*/, "").replace(/^['"]|['"]$/g, ""))
-      .filter(Boolean);
+    const workspacePath = path.join(projectRoot, "pnpm-workspace.yaml");
+    const parsed = parseYaml(readFileSync(workspacePath, "utf8"));
+    return Array.isArray(parsed?.packages)
+      ? parsed.packages.filter((pattern) => typeof pattern === "string")
+      : [];
   } catch {
     return ["packages/*"];
   }
 }
 
-function expandWorkspacePattern(pattern) {
-  if (!pattern.includes("*")) {
-    return [pattern.replace(/\/$/, "")];
-  }
-
-  const normalized = pattern.replace(/\/$/, "");
-  if (!normalized.endsWith("/*")) {
+function expandWorkspacePattern(projectRoot, pattern) {
+  if (pattern.trim().startsWith("!")) {
     return [];
   }
 
-  const base = normalized.slice(0, -2);
-  const basePath = path.join(rootDir, base);
-
-  try {
-    return readdirSync(basePath, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => `${base}/${entry.name}`);
-  } catch {
-    return [];
-  }
+  return fg.sync(workspacePatternToPackageJsonGlob(pattern), {
+    absolute: true,
+    cwd: projectRoot,
+    dot: false,
+    onlyFiles: true,
+    unique: true,
+  });
 }
 
-function listWorkspacePackages() {
-  const packageNameByDir = new Map();
-  const dirs = new Set(workspacePatterns().flatMap(expandWorkspacePattern));
+function expandWorkspacePatterns(projectRoot, patterns) {
+  if (!patterns.some((pattern) => pattern.trim().startsWith("!"))) {
+    return patterns.flatMap((pattern) => expandWorkspacePattern(projectRoot, pattern));
+  }
 
-  for (const dir of dirs) {
-    try {
-      const packageJsonPath = path.join(rootDir, dir, "package.json");
-      const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8"));
-      if (typeof pkg.name === "string") {
-        packageNameByDir.set(dir, pkg.name);
+  return fg.sync(patterns.map(workspacePatternToPackageJsonGlob), {
+    absolute: true,
+    cwd: projectRoot,
+    dot: false,
+    onlyFiles: true,
+    unique: true,
+  });
+}
+
+function workspacePatternToPackageJsonGlob(pattern) {
+  const trimmed = pattern.trim();
+  const isNegated = trimmed.startsWith("!");
+  const body = (isNegated ? trimmed.slice(1) : trimmed)
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
+  const packageJsonGlob = body.endsWith("package.json") ? body : `${body}/package.json`;
+  return isNegated ? `!${packageJsonGlob}` : packageJsonGlob;
+}
+
+function collectWorkspaceDependencyNames(pkg) {
+  return [
+    pkg.dependencies,
+    pkg.devDependencies,
+    pkg.peerDependencies,
+    pkg.optionalDependencies,
+  ].flatMap((deps) => deps && typeof deps === "object" ? Object.keys(deps) : []);
+}
+
+export function listWorkspacePackageInfos({ projectRoot = rootDir } = {}) {
+  const packageJsonPaths = [
+    ...new Set(expandWorkspacePatterns(projectRoot, readWorkspacePatterns(projectRoot))),
+  ];
+
+  return packageJsonPaths
+    .map((packageJsonPath) => {
+      try {
+        const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+        if (typeof pkg.name !== "string") {
+          return null;
+        }
+
+        const dir = path.relative(projectRoot, path.dirname(packageJsonPath)).split(path.sep).join("/");
+        return {
+          name: pkg.name,
+          dir,
+          hasTestScript: typeof pkg.scripts?.test === "string",
+          dependencyNames: collectWorkspaceDependencyNames(pkg),
+        };
+      } catch {
+        return null;
       }
-    } catch {
-      // ignore directories without package.json
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.dir.localeCompare(b.dir));
+}
+
+function listWorkspacePackages(workspacePackages = listWorkspacePackageInfos()) {
+  const packageNameByDir = new Map();
+  for (const workspacePackage of workspacePackages) {
+    packageNameByDir.set(workspacePackage.dir, workspacePackage.name);
+    if (workspacePackage.dir.startsWith("packages/")) {
+      packageNameByDir.set(workspacePackage.dir.split("/")[1], workspacePackage.name);
     }
   }
 
   return packageNameByDir;
+}
+
+export function buildPackageDirByName(workspacePackages) {
+  const packageDirByName = new Map();
+  for (const workspacePackage of workspacePackages) {
+    packageDirByName.set(workspacePackage.name, workspacePackage.dir);
+  }
+  return packageDirByName;
+}
+
+export function buildReverseDependencyMap(workspacePackages) {
+  const workspaceNames = new Set(workspacePackages.map((workspacePackage) => workspacePackage.name));
+  const reverseDependencyMap = new Map(workspacePackages.map((workspacePackage) => [workspacePackage.name, []]));
+
+  for (const workspacePackage of workspacePackages) {
+    for (const dependencyName of workspacePackage.dependencyNames ?? []) {
+      if (workspaceNames.has(dependencyName)) {
+        reverseDependencyMap.get(dependencyName)?.push(workspacePackage.name);
+      }
+    }
+  }
+
+  return reverseDependencyMap;
+}
+
+export function expandWithReverseDependents(packageNames, reverseDependencyMap) {
+  const expanded = new Set(packageNames);
+  const queue = [...packageNames];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    for (const dependent of reverseDependencyMap.get(current) ?? []) {
+      if (expanded.has(dependent)) continue;
+      expanded.add(dependent);
+      queue.push(dependent);
+    }
+  }
+
+  return [...expanded];
 }
 
 export function shouldForceFullSuite(changedFiles) {
@@ -188,7 +272,7 @@ export function shouldForceFullSuite(changedFiles) {
       return true;
     }
 
-    if (file.startsWith("packages/") && /vitest|test/.test(path.basename(file))) {
+    if ((file.startsWith("packages/") || file.startsWith("plugins/")) && /vitest|test/.test(path.basename(file))) {
       return false;
     }
 
@@ -230,23 +314,32 @@ function changedFilesSince(baseSha) {
 
 export function resolveAffectedPackages(changedFiles, packageNameByDir) {
   const affected = new Set();
+  const packageDirs = [...packageNameByDir.keys()]
+    .filter((dir) => dir.includes("/"))
+    .sort((a, b) => b.length - a.length);
 
   for (const file of changedFiles) {
-    if (!file.startsWith("packages/") && !file.startsWith("plugins/")) {
+    let packageName = null;
+
+    for (const packageDir of packageDirs) {
+      if (file === packageDir || file.startsWith(`${packageDir}/`)) {
+        packageName = packageNameByDir.get(packageDir);
+        break;
+      }
+    }
+
+    if (!packageName && file.startsWith("packages/")) {
+      const [, dir] = file.split("/");
+      packageName = packageNameByDir.get(dir) ?? packageNameByDir.get(`packages/${dir}`) ?? null;
+    }
+
+    if (!packageName) {
+      if (file.startsWith("packages/") || file.startsWith("plugins/")) {
+        return null;
+      }
       continue;
     }
 
-    const workspaceDir = [...packageNameByDir.keys()]
-      .find((dir) => file === dir || file.startsWith(`${dir}/`));
-
-    if (!workspaceDir) {
-      return null;
-    }
-
-    const packageName = packageNameByDir.get(workspaceDir);
-    if (!packageName) {
-      return null;
-    }
     affected.add(packageName);
   }
 
@@ -587,6 +680,7 @@ export function decideExecutionPlan({
   comparisonBase,
   changedFiles,
   packageNameByDir,
+  reverseDependencyMap,
 }) {
   if (forceFullSuite) return { mode: "full", reason: "forced" };
   if (!comparisonBase) return { mode: "full", reason: "missing-comparison-base" };
@@ -597,7 +691,12 @@ export function decideExecutionPlan({
   const affectedPackages = resolveAffectedPackages(changedFiles, packageNameByDir);
   if (!affectedPackages || affectedPackages.length === 0) return { mode: "full", reason: "no-affected-package" };
 
-  return { mode: "changed", packages: affectedPackages };
+  return {
+    mode: "changed",
+    packages: reverseDependencyMap
+      ? expandWithReverseDependents(affectedPackages, reverseDependencyMap)
+      : affectedPackages,
+  };
 }
 
 export function main(argv = process.argv.slice(2)) {
@@ -626,19 +725,17 @@ export function main(argv = process.argv.slice(2)) {
   const baseBranch = getBaseBranch();
   const comparisonBase = detectComparisonBase(baseBranch);
   const changedFiles = comparisonBase ? changedFilesSince(comparisonBase) : null;
-  const packageNameByDir = listWorkspacePackages();
-
-  // Build reverse map: pkg-name → relative dir (e.g. "packages/engine")
-  const packageDirByName = new Map();
-  for (const [dir, name] of packageNameByDir) {
-    packageDirByName.set(name, dir);
-  }
+  const workspacePackages = listWorkspacePackageInfos();
+  const packageNameByDir = listWorkspacePackages(workspacePackages);
+  const packageDirByName = buildPackageDirByName(workspacePackages);
+  const reverseDependencyMap = buildReverseDependencyMap(workspacePackages);
 
   const plan = decideExecutionPlan({
     forceFullSuite,
     comparisonBase,
     changedFiles,
     packageNameByDir,
+    reverseDependencyMap,
   });
 
   if (plan.mode === "full") {
