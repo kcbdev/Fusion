@@ -26,9 +26,10 @@ export {
   type VerificationResult,
 } from "./verification-utils.js";
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
+import { hostname } from "node:os";
 import {
   getTaskMergeBlocker,
   normalizeMergeConflictStrategy,
@@ -1008,24 +1009,166 @@ ${failureContext.output.slice(0, VERIFICATION_LOG_MAX_CHARS)}
  * the warning text so test assertions can match on it.
  */
 function resetMergeWithWarn(rootDir: string, taskId: string, label: string): void {
-  try {
-    execSync("git reset --merge", { cwd: rootDir, stdio: "pipe" });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    mergerLog.warn(`${taskId}: git reset --merge cleanup failed during ${label}: ${msg}`);
-  }
+  runObservedDestructiveSyncOp(rootDir, taskId, `reset --merge (${label})`, () => {
+    try {
+      execSync("git reset --merge", { cwd: rootDir, stdio: "pipe" });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      mergerLog.warn(`${taskId}: git reset --merge cleanup failed during ${label}: ${msg}`);
+    }
+  });
 }
 
 /** Identity returned by `stashUnrelatedRootDirChanges`. The SHA is the stable
  *  handle (commit object id, never moves) — used for apply / drop instead of
  *  position-relative `stash@{N}` refs that shift when other stashes are
- *  pushed during or after the merge. The label is purely for human display. */
+ *  pushed during or after the merge. The label is purely for human display.
+ *  `rescueShas` lists any race-rescue stashes the autostash captured for
+ *  late-dirty paths (concurrent dev edits during the merger run). They are
+ *  surfaced separately so the caller can log them to the task feed. */
 interface AutostashHandle {
   sha: string;
   label: string;
+  rescueShas?: { sha: string; label: string }[];
 }
 
 const AUTOSTASH_LABEL_PREFIX = "fusion-merger-autostash:";
+
+/** Filename of the advisory "merger active" status file. Lives at
+ *  `<rootDir>/.git/<this filename>` so it travels with the repo and is
+ *  automatically scoped to the right working tree. Not a lock — purely
+ *  informational, intended for dashboards / status lines / pre-Edit hooks
+ *  that want to warn devs that rootDir is volatile until the merge finishes. */
+const ACTIVE_MERGER_STATUS_FILENAME = ".fusion-merger-active.json";
+
+/** Shape of the advisory status file. PID + hostname let readers detect
+ *  stale files left behind by a crashed merger run. */
+export interface ActiveMergerStatus {
+  taskId: string;
+  pid: number;
+  hostname: string;
+  startedAt: string;
+}
+
+/** Write the advisory status file at `<rootDir>/.git/...`. Best-effort:
+ *  failures are logged and the merge proceeds without the advisory — losing
+ *  the dashboard signal is preferable to blocking the merge. Returns the
+ *  path of the file that was written so the caller can pass it back to
+ *  `clearActiveMergerStatus` on cleanup. */
+function writeActiveMergerStatus(rootDir: string, taskId: string): string | null {
+  try {
+    const statusPath = join(rootDir, ".git", ACTIVE_MERGER_STATUS_FILENAME);
+    const payload: ActiveMergerStatus = {
+      taskId,
+      pid: process.pid,
+      hostname: hostname(),
+      startedAt: new Date().toISOString(),
+    };
+    writeFileSync(statusPath, JSON.stringify(payload, null, 2), "utf-8");
+    return statusPath;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    mergerLog.warn(`${taskId}: writeActiveMergerStatus failed (${msg}) — proceeding without advisory file`);
+    return null;
+  }
+}
+
+/** Best-effort delete of the status file. */
+function clearActiveMergerStatus(statusPath: string | null, taskId: string): void {
+  if (!statusPath) return;
+  try {
+    unlinkSync(statusPath);
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return;
+    const msg = err instanceof Error ? err.message : String(err);
+    mergerLog.warn(`${taskId}: clearActiveMergerStatus failed (${msg}) — file may linger as a stale advisory`);
+  }
+}
+
+/** Public reader for tooling (CLI / dashboard / TUI / Claude Code hook).
+ *  Returns null if no merger is active OR if the advisory file is malformed.
+ *  Callers can correlate `pid` + `hostname` with their own process list to
+ *  distinguish a live merger from a stale post-crash file. */
+export function readActiveMergerStatus(rootDir: string): ActiveMergerStatus | null {
+  try {
+    const statusPath = join(rootDir, ".git", ACTIVE_MERGER_STATUS_FILENAME);
+    if (!existsSync(statusPath)) return null;
+    const raw = readFileSync(statusPath, "utf-8");
+    const parsed = JSON.parse(raw) as ActiveMergerStatus;
+    if (!parsed?.taskId || typeof parsed.pid !== "number") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Wrap a destructive op in `rootDir` with snapshot-before / snapshot-after
+ *  observability. Pure logging — does not rescue. Designed for ops that are
+ *  *supposed* to preserve unrelated working-tree edits (e.g. `git reset
+ *  --merge`, `git checkout main`). When such an op silently wipes a path
+ *  that was dirty before, the warning surfaces it as actionable signal
+ *  instead of letting the loss go unnoticed.
+ *
+ *  Not used for the autostash's own `git reset --hard HEAD` / `git clean
+ *  -fd` (those are intentionally destructive and have race-rescue stashes
+ *  capturing dirty state up-front).
+ *
+ *  Synchronous variant — the destructive ops themselves are mostly
+ *  `execSync` for "best-effort cleanup" semantics, so the wrapper matches
+ *  to avoid scattering Promise-juggling at every call site. */
+function runObservedDestructiveSyncOp(
+  rootDir: string,
+  taskId: string,
+  label: string,
+  op: () => void,
+): void {
+  // snapshotDirtyFiles is async by design (uses Promise.all over three git
+  // queries); we read it via a quick sync fallback so the observer doesn't
+  // change the call shape of resetMergeWithWarn et al.
+  let beforeRaw = "";
+  try {
+    beforeRaw = execSync("git status -z --porcelain", { cwd: rootDir, stdio: ["ignore", "pipe", "ignore"] }).toString("utf-8");
+  } catch {
+    // best-effort — skip observation if we can't read status
+    op();
+    return;
+  }
+  const before = parsePorcelainZ(beforeRaw);
+
+  op();
+
+  let afterRaw = "";
+  try {
+    afterRaw = execSync("git status -z --porcelain", { cwd: rootDir, stdio: ["ignore", "pipe", "ignore"] }).toString("utf-8");
+  } catch {
+    return;
+  }
+  const after = parsePorcelainZ(afterRaw);
+
+  const lost = [...before].filter((p) => !after.has(p));
+  if (lost.length > 0) {
+    const sample = lost.slice(0, 10).join(", ");
+    const ellipsis = lost.length > 10 ? ` … (+${lost.length - 10} more)` : "";
+    mergerLog.warn(
+      `${taskId}: destructive op "${label}" cleared ${lost.length} dirty path(s) that were present before — possible silent wipe of unrelated dev edits: ${sample}${ellipsis}`,
+    );
+  }
+}
+
+/** Parse `git status -z --porcelain` into a Set of paths. Matches the same
+ *  three-class extraction as `snapshotDirtyFiles` (modified + staged +
+ *  untracked) but synchronously. Each entry is `XY <path>\0`. */
+function parsePorcelainZ(raw: string): Set<string> {
+  const paths = new Set<string>();
+  for (const entry of raw.split("\0")) {
+    if (!entry) continue;
+    // Format: "XY path" where X = staged status, Y = unstaged status
+    if (entry.length < 4) continue;
+    const path = entry.slice(3);
+    if (path) paths.add(path);
+  }
+  return paths;
+}
 
 /** Find autostashes from PRIOR runs that are still sitting in the stash list.
  *  These are leftovers from past merges whose pop/apply conflicted — under the
@@ -1153,7 +1296,7 @@ async function stashUnrelatedRootDirChanges(
     // primary stash already snapshotted the earlier state. We loop a few
     // times because each rescue stash creation itself races with new writes;
     // bounded so a runaway writer can't pin us forever.
-    const rescueShas: string[] = [];
+    const rescueShas: { sha: string; label: string }[] = [];
     for (let attempt = 0; attempt < 3; attempt++) {
       const stillDirty = await snapshotDirtyFiles(rootDir);
       if (stillDirty.size === 0) break;
@@ -1169,7 +1312,7 @@ async function stashUnrelatedRootDirChanges(
         `git stash store -m ${quoteArg(rescueLabel)} ${rescueSha}`,
         { cwd: rootDir },
       );
-      rescueShas.push(rescueSha);
+      rescueShas.push({ sha: rescueSha, label: rescueLabel });
       mergerLog.warn(
         `${taskId}: race-rescue stash ${rescueSha.slice(0, 7)} captured ${stillDirty.size} late-dirty path(s) (${rescueLabel}) — recover with: cd ${rootDir} && git stash apply ${rescueSha}`,
       );
@@ -1183,12 +1326,12 @@ async function stashUnrelatedRootDirChanges(
     await execAsync("git clean -fd", { cwd: rootDir });
 
     const rescueSuffix = rescueShas.length > 0
-      ? ` + ${rescueShas.length} race-rescue stash(es): ${rescueShas.map((s) => s.slice(0, 7)).join(", ")}`
+      ? ` + ${rescueShas.length} race-rescue stash(es): ${rescueShas.map((r) => r.sha.slice(0, 7)).join(", ")}`
       : "";
     mergerLog.log(
       `${taskId}: stashed ${dirty.size} unrelated dirty path(s) in rootDir as ${sha.slice(0, 7)} (${label})${rescueSuffix}`,
     );
-    return { sha, label };
+    return rescueShas.length > 0 ? { sha, label, rescueShas } : { sha, label };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     mergerLog.warn(
@@ -3262,6 +3405,12 @@ export async function aiMergeTask(
     throw new Error(`Cannot merge ${taskId}: ${mergeBlocker}`);
   }
 
+  // Advisory: announce that rootDir is volatile until this merge finishes.
+  // Dashboards / status lines / pre-Edit hooks can read this file to warn
+  // devs that edits made now may end up in a race-rescue stash. Not a lock —
+  // we explicitly do NOT block dev edits, just make the timing risk legible.
+  const activeStatusPath = writeActiveMergerStatus(rootDir, taskId);
+
   // Pre-merge guard against the common single-checkout setup where rootDir
   // is the developer's working tree. The merge flow below issues several
   // `git reset --hard/--merge` calls and forced checkouts that would
@@ -3269,6 +3418,18 @@ export async function aiMergeTask(
   // here, restore in the finally below — see stashUnrelatedRootDirChanges
   // for the full rationale.
   const autostashHandle = await stashUnrelatedRootDirChanges(rootDir, taskId);
+  // Surface any race-rescue stashes (mid-run dev edits caught between
+  // initial snapshot and the destructive reset) on the task feed so the
+  // operator sees the recovery handle without having to grep `git stash list`.
+  if (autostashHandle?.rescueShas?.length) {
+    for (const r of autostashHandle.rescueShas) {
+      await store.logEntry(
+        taskId,
+        `Race-rescue stash created during pre-merge autostash: ${r.sha.slice(0, 7)} (${r.label})`,
+        `These are working-tree changes that landed AFTER the initial autostash snapshot but BEFORE the destructive reset. Recover with:\n  cd ${rootDir} && git stash apply ${r.sha}`,
+      ).catch(() => undefined);
+    }
+  }
   // Hoisted so the finally block (below) can attach the autostash outcome
   // to the result object the caller will receive.
   let resultForFinally: MergeResult | undefined;
@@ -4682,6 +4843,10 @@ export async function aiMergeTask(
         }
       }
     }
+    // Always clear the advisory status file last, even if everything above
+    // threw — a stale advisory makes the dashboard show a phantom "merge
+    // running" indefinitely, which is worse than a missing one.
+    clearActiveMergerStatus(activeStatusPath, taskId);
   }
 }
 
