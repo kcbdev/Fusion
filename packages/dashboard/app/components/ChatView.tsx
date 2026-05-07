@@ -905,25 +905,28 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
     }
   }, [contextMenu]);
 
-  // Lock the composer textarea against drag-pan on mobile. React's onTouchMove
-  // is registered as a passive listener so preventDefault() inside a JSX
-  // handler is a no-op — we attach a non-passive listener directly to the
-  // textarea element. touchmove cancellation blocks drags but tap (touchstart
-  // + touchend without touchmove in between) is unaffected, so first-tap
-  // focus still works.
+  // While the keyboard is up on mobile, block touchmove gestures that
+  // would otherwise pan the iOS visualViewport (or scroll the document)
+  // and let the composer / header drift. We attach a non-passive listener
+  // to document so that gestures starting anywhere — header, composer
+  // padding, body — are cancelled. The exception is when the touch path
+  // crosses the messages list, which is the one place we DO want pan-y.
+  // useMobileScrollLock only pins document scroll; this complements it
+  // by stopping vv pan on top of the locked layout.
+  // React's synthetic onTouchMove is passive by default, so this has to
+  // be a native addEventListener with { passive: false }.
   useEffect(() => {
-    if (!isMobile) return;
-    const ta = inputRef.current;
-    if (!ta) return;
+    if (!isMobile || !keyboardOpen) return;
     const onTouchMove = (event: TouchEvent) => {
-      if (typeof window === "undefined" || window.innerWidth > 768) return;
+      const target = event.target as Element | null;
+      if (target?.closest(".chat-messages")) return; // allow messages scroll
       event.preventDefault();
     };
-    ta.addEventListener("touchmove", onTouchMove, { passive: false });
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
     return () => {
-      ta.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchmove", onTouchMove);
     };
-  }, [isMobile]);
+  }, [isMobile, keyboardOpen]);
 
   // On mount and on visibility/page restore, if iOS thinks the keyboard is
   // up but the textarea isn't actually focused (or vice versa), the
