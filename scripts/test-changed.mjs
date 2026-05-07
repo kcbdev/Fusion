@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
-import { readFileSync, readdirSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync, mkdirSync, renameSync, mkdtempSync, rmSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { cpus } from "node:os";
+import { cpus, tmpdir } from "node:os";
 import { ensureTestArtifacts } from "./ensure-test-artifacts.mjs";
 
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -37,10 +37,10 @@ function run(command, commandArgs, options = {}) {
   }
 }
 
-function runIsolationCheck(before = false) {
+function runIsolationCheck(before = false, env = process.env) {
   const args = [checkIsolationScript];
   if (before) args.push("--before");
-  run(process.execPath, args);
+  run(process.execPath, args, { env });
 }
 
 export function shouldRunIsolationGuard(env = process.env) {
@@ -49,11 +49,12 @@ export function shouldRunIsolationGuard(env = process.env) {
 
 function runMaybeIsolated(command, commandArgs, options = {}) {
   const enabled = shouldRunIsolationGuard();
-  if (enabled) runIsolationCheck(true);
+  const env = options.env ?? process.env;
+  if (enabled) runIsolationCheck(true, env);
   try {
     run(command, commandArgs, options);
   } finally {
-    if (enabled) runIsolationCheck(false);
+    if (enabled) runIsolationCheck(false, env);
   }
 }
 
@@ -493,15 +494,30 @@ export function defaultTestWorkerBudget(env = process.env) {
 
 const { totalWorkers, concurrency } = defaultTestWorkerBudget(process.env);
 
+export function createIsolatedHomeEnv(env = process.env) {
+  const isolatedHome = realpathSync(mkdtempSync(path.join(tmpdir(), "fusion-test-home-root-")));
+  const nextEnv = {
+    ...env,
+    HOME: isolatedHome,
+    USERPROFILE: isolatedHome,
+  };
+
+  if (process.platform === "win32") {
+    const match = isolatedHome.match(/^([A-Za-z]:)(.*)$/);
+    if (match) {
+      nextEnv.HOMEDRIVE = match[1];
+      nextEnv.HOMEPATH = match[2] || "\\";
+    }
+  }
+
+  return { env: nextEnv, isolatedHome };
+}
+
 const fullSuiteEnv = {
   ...process.env,
   FUSION_TEST_TOTAL_WORKERS: process.env.FUSION_TEST_TOTAL_WORKERS || String(totalWorkers),
   FUSION_TEST_CONCURRENCY: process.env.FUSION_TEST_CONCURRENCY || String(concurrency),
 };
-
-function runFullSuite(forwardedArgs) {
-  runMaybeIsolated("pnpm", [`-r`, `--workspace-concurrency=${workspaceConcurrency}`, "test", ...forwardedArgs], { env: fullSuiteEnv });
-}
 
 export function decideExecutionPlan({
   forceFullSuite,
@@ -536,6 +552,10 @@ export function main(argv = process.argv.slice(2)) {
   run("pnpm", ["sync:fusion-skill:check"]);
   ensureTestArtifacts(rootDir);
 
+  const { env: isolatedHomeEnv, isolatedHome } = createIsolatedHomeEnv(fullSuiteEnv);
+
+  try {
+
   const baseBranch = getBaseBranch();
   const comparisonBase = detectComparisonBase(baseBranch);
   const changedFiles = comparisonBase ? changedFilesSince(comparisonBase) : null;
@@ -567,7 +587,7 @@ export function main(argv = process.argv.slice(2)) {
       console.log("[test-changed] no affected workspace package resolved; running full suite.");
     }
 
-    runFullSuite(forwardedArgs);
+    runMaybeIsolated("pnpm", [`-r`, `--workspace-concurrency=${workspaceConcurrency}`, "test", ...forwardedArgs], { env: isolatedHomeEnv });
     return;
   }
 
@@ -582,8 +602,8 @@ export function main(argv = process.argv.slice(2)) {
       `[test-changed] all changed packages are cache-fresh (${cachedPackages.join(", ")}); nothing to run.`,
     );
     if (shouldRunIsolationGuard()) {
-      runIsolationCheck(true);
-      runIsolationCheck(false);
+      runIsolationCheck(true, isolatedHomeEnv);
+      runIsolationCheck(false, isolatedHomeEnv);
     }
     return;
   }
@@ -594,10 +614,13 @@ export function main(argv = process.argv.slice(2)) {
     console.log(`[test-changed] skipping cached packages: ${cachedPackages.join(", ")}`);
   }
 
-  runMaybeIsolated("pnpm", [...filterArgs, `--workspace-concurrency=${workspaceConcurrency}`, "test", ...forwardedArgs], { env: fullSuiteEnv });
+  runMaybeIsolated("pnpm", [...filterArgs, `--workspace-concurrency=${workspaceConcurrency}`, "test", ...forwardedArgs], { env: isolatedHomeEnv });
 
   // Tests passed — record in cache (never cache failures; process.exit on failure above).
   recordCachePass(activePackages, packageDirByName, { noCache });
+  } finally {
+    rmSync(isolatedHome, { recursive: true, force: true });
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === currentFilePath) {

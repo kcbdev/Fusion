@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, spawn } from "node:child_process";
 
 const scriptPath = path.resolve("scripts/check-test-isolation.mjs");
 
@@ -80,5 +80,38 @@ test("fails when protected .fusion existence changes after baseline", () => {
     const after = runScript([], { cwd, home });
     assert.equal(after.status, 1);
     assert.match(after.stderr, /protected live \.fusion data changed/i);
+  });
+});
+
+test("passes when HOME .fusion is externally active during baseline and check", () => {
+  withFixture(({ cwd, home }) => {
+    const churnScript = `
+      const fs = require("node:fs");
+      const path = require("node:path");
+      const home = process.argv[2];
+      const target = path.join(home, ".fusion", "external-churn.txt");
+      let n = 0;
+      const timer = setInterval(() => {
+        fs.writeFileSync(target, String(n++));
+      }, 120);
+      setTimeout(() => {
+        clearInterval(timer);
+        process.exit(0);
+      }, 3500);
+    `;
+
+    const churn = spawn(process.execPath, ["-e", churnScript, home], {
+      cwd,
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+      stdio: "ignore",
+    });
+
+    const before = runScript(["--before"], { cwd, home });
+    assert.equal(before.status, 0);
+    const after = runScript([], { cwd, home });
+    assert.equal(after.status, 0);
+
+    churn.kill("SIGTERM");
+    rmSync(path.join(home, ".fusion", "external-churn.txt"), { force: true });
   });
 });

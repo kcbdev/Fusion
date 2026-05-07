@@ -85,8 +85,9 @@ Fusion tests must run against disposable test data, never live local state:
 - Workspace/package Vitest configs should use package-local `src/__tests__/setup-test-isolation.ts` shims that call into the shared core bootstrap rather than re-implementing HOME/cwd isolation.
 - Test runs must use temp HOME and temp workspace/project roots so global settings resolve under temporary directories instead of real `~/.fusion`.
 - The repository `.fusion` directory is treated as protected live data; root test entrypoints run `scripts/check-test-isolation.mjs` to fail if tests mutate protected Fusion data paths.
+- `pnpm test` (`scripts/test-changed.mjs`) now creates a disposable temp HOME/USERPROFILE for the entire run (including cache-hit no-op guard checks), so concurrent writes from an active local Fusion session to your real `~/.fusion` do not trigger false positives.
 
-If you add or change test entrypoints, keep this isolation guard path intact so cached/changed-package routes remain protected.
+If you add or change test entrypoints, keep this isolation guard path intact and ensure guard + test execution share the same disposable HOME so changed/full/cached paths stay consistent.
 
 ## Quality Gate Checklist
 

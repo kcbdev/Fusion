@@ -19,6 +19,7 @@ import {
   cacheFilePath,
   shouldRunIsolationGuard,
   defaultTestWorkerBudget,
+  createIsolatedHomeEnv,
 } from "../test-changed.mjs";
 
 import { mkdirSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
@@ -624,4 +625,17 @@ test("defaultTestWorkerBudget: uses CPU-aware defaults and clamps concurrency", 
   assert.ok(budget.totalWorkers >= 4);
   assert.ok(budget.totalWorkers <= 12);
   assert.equal(budget.concurrency, budget.totalWorkers);
+});
+
+test("createIsolatedHomeEnv: returns temp HOME/USERPROFILE pair without mutating input", () => {
+  const baseEnv = { PATH: process.env.PATH || "" };
+  const { env, isolatedHome } = createIsolatedHomeEnv(baseEnv);
+
+  assert.equal(env.HOME, isolatedHome);
+  assert.equal(env.USERPROFILE, isolatedHome);
+  assert.equal(baseEnv.HOME, undefined);
+  assert.equal(baseEnv.USERPROFILE, undefined);
+  assert.match(isolatedHome, /fusion-test-home-root-/);
+
+  rmSync(isolatedHome, { recursive: true, force: true });
 });

@@ -26,7 +26,7 @@ const expectedSections = [
   "Example Plugins",
   "Registering Skills",
   "Registering Workflow Steps",
-  "Plugin Prompt Contributions",
+  "Contributing Prompt Modifications",
   "Plugin Binary Setup Hooks",
 ];
 
