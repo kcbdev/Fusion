@@ -330,11 +330,13 @@ export function registerMessagingScriptRoutes(ctx: ApiRoutesContext): void {
       const shouldWakeImmediately = toType === "agent" && (wakeImmediately === true || metadata?.wakeRecipient === true);
       if (shouldWakeImmediately) {
         try {
-          const { store: scopedStore } = await getProjectContext(req);
+          const { store: scopedStore, projectId } = await getProjectContext(req);
           const resolvedMonitor =
             isHeartbeatMonitorForProject(scopedStore)
               ? heartbeatMonitor
-              : resolveHeartbeatMonitor(scopedStore);
+              : projectId
+                ? resolveHeartbeatMonitor(scopedStore)
+                : undefined;
 
           if (resolvedMonitor) {
             await resolvedMonitor.executeHeartbeat({

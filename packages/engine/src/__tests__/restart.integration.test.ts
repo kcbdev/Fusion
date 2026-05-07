@@ -72,6 +72,43 @@ vi.mock("../agent-session-helpers.js", async () => {
       }
       return { provider: undefined, modelId: undefined };
     },
+    resolvePlanningSessionModel: (
+      taskPlanningModelProvider: string | undefined,
+      taskPlanningModelId: string | undefined,
+      settings: Record<string, unknown> | undefined,
+      assignedAgentRuntimeConfig?: Record<string, unknown>,
+    ) => {
+      const model = typeof assignedAgentRuntimeConfig?.model === "string" ? assignedAgentRuntimeConfig.model : "";
+      const slash = model.indexOf("/");
+      if (slash > 0 && slash < model.length - 1) {
+        return { provider: model.slice(0, slash), modelId: model.slice(slash + 1) };
+      }
+      if (
+        typeof assignedAgentRuntimeConfig?.modelProvider === "string"
+        && typeof assignedAgentRuntimeConfig?.modelId === "string"
+      ) {
+        return {
+          provider: assignedAgentRuntimeConfig.modelProvider,
+          modelId: assignedAgentRuntimeConfig.modelId,
+        };
+      }
+      if (taskPlanningModelProvider && taskPlanningModelId) {
+        return { provider: taskPlanningModelProvider, modelId: taskPlanningModelId };
+      }
+      if (typeof settings?.planningProvider === "string" && typeof settings?.planningModelId === "string") {
+        return { provider: settings.planningProvider as string, modelId: settings.planningModelId as string };
+      }
+      if (typeof settings?.planningGlobalProvider === "string" && typeof settings?.planningGlobalModelId === "string") {
+        return { provider: settings.planningGlobalProvider as string, modelId: settings.planningGlobalModelId as string };
+      }
+      if (typeof settings?.defaultProviderOverride === "string" && typeof settings?.defaultModelIdOverride === "string") {
+        return { provider: settings.defaultProviderOverride as string, modelId: settings.defaultModelIdOverride as string };
+      }
+      if (typeof settings?.defaultProvider === "string" && typeof settings?.defaultModelId === "string") {
+        return { provider: settings.defaultProvider as string, modelId: settings.defaultModelId as string };
+      }
+      return { provider: undefined, modelId: undefined };
+    },
   };
 });
 vi.mock("node:child_process", () => {

@@ -11,7 +11,7 @@ import type { AgentRuntimeOptions } from "./agent-runtime.js";
 import type { SkillSelectionContext } from "./skill-resolver.js";
 import type { PluginRunner } from "./plugin-runner.js";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
-import { resolveTaskExecutionModel, type Settings } from "@fusion/core";
+import { resolveTaskExecutionModel, resolveTaskPlanningModel, type Settings } from "@fusion/core";
 import { resolveRuntime, buildRuntimeResolutionContext, type SessionPurpose } from "./runtime-resolution.js";
 import { createLogger } from "./logger.js";
 import { promptWithFallback, describeModel } from "./pi.js";
@@ -135,6 +135,31 @@ export function resolveExecutorSessionModel(
   return {
     provider: resolvedTaskModel.provider,
     modelId: resolvedTaskModel.modelId,
+  };
+}
+
+export function resolvePlanningSessionModel(
+  taskPlanningModelProvider: string | undefined,
+  taskPlanningModelId: string | undefined,
+  settings: Partial<Settings> | undefined,
+  assignedAgentRuntimeConfig?: Record<string, unknown>,
+): { provider: string | undefined; modelId: string | undefined } {
+  const assignedRuntimeModel = extractRuntimeModel(assignedAgentRuntimeConfig);
+  if (assignedRuntimeModel.provider && assignedRuntimeModel.modelId) {
+    return assignedRuntimeModel;
+  }
+
+  const resolvedTaskPlanningModel = resolveTaskPlanningModel(
+    {
+      planningModelProvider: taskPlanningModelProvider,
+      planningModelId: taskPlanningModelId,
+    },
+    settings,
+  );
+
+  return {
+    provider: resolvedTaskPlanningModel.provider,
+    modelId: resolvedTaskPlanningModel.modelId,
   };
 }
 
