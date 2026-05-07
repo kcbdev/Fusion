@@ -878,7 +878,8 @@ describe("TaskDetailModal", () => {
 
     it("hides Pause/Unpause button for agent-assigned tasks", async () => {
       const { fetchAgent } = await import("../../api");
-      vi.mocked(fetchAgent).mockResolvedValue({ id: "agent-1", name: "Agent 1", role: "executor", state: "active" } as any);
+      const mockFetchAgent = vi.mocked(fetchAgent);
+      mockFetchAgent.mockResolvedValue({ id: "agent-1", name: "Agent 1", role: "executor", state: "active" } as any);
 
       render(
         <TaskDetailModal
@@ -892,15 +893,22 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+      await waitFor(() => {
+        expect(mockFetchAgent).toHaveBeenCalledWith("agent-1", undefined);
+      });
 
-      expect(screen.queryByRole("menuitem", { name: "Pause" })).toBeNull();
-      expect(screen.queryByRole("menuitem", { name: "Unpause" })).toBeNull();
+      await userEvent.click(screen.getByRole("button", { name: /actions/i }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole("menuitem", { name: "Pause" })).toBeNull();
+        expect(screen.queryByRole("menuitem", { name: "Unpause" })).toBeNull();
+      });
     });
 
     it("shows paused-by-agent indicator for agent-paused tasks", async () => {
       const { fetchAgent } = await import("../../api");
-      vi.mocked(fetchAgent).mockResolvedValue({ id: "agent-1", name: "Agent 1", role: "executor", state: "paused" } as any);
+      const mockFetchAgent = vi.mocked(fetchAgent);
+      mockFetchAgent.mockResolvedValue({ id: "agent-1", name: "Agent 1", role: "executor", state: "paused" } as any);
 
       render(
         <TaskDetailModal
@@ -914,9 +922,13 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+      await waitFor(() => {
+        expect(mockFetchAgent).toHaveBeenCalledWith("agent-1", undefined);
+      });
 
-      expect(screen.getByText("Paused by agent")).toBeTruthy();
+      await userEvent.click(screen.getByRole("button", { name: /actions/i }));
+
+      expect(await screen.findByText("Paused by agent")).toBeTruthy();
     });
 
     it("does NOT render Actions dropdown for a non-paused, non-awaiting-approval, non-retryable triage task", () => {
