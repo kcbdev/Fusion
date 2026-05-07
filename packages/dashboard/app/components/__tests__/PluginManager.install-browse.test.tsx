@@ -31,6 +31,8 @@ vi.mock("../../api", () => ({
   fetchPluginSettings: vi.fn(() => Promise.resolve({})),
   updatePluginSettings: vi.fn(() => Promise.resolve({})),
   reloadPlugin: vi.fn(() => Promise.resolve({})),
+  updatePlugin: vi.fn(() => Promise.resolve({})),
+  rescanPlugin: vi.fn(() => Promise.resolve({})),
   browseDirectory: vi.fn(() =>
     Promise.resolve({
       currentPath: "/home/user/plugins/my-plugin",
@@ -119,6 +121,26 @@ describe("PluginManager – browse-driven install workflow", () => {
 
     // The input value should now match the browsed directory
     expect(getPathInput().value).toBe("/home/user/plugins/my-plugin");
+  });
+
+  it("forwards aiScanOnLoad when install checkbox is enabled", async () => {
+    render(<PluginManager addToast={addToast} />);
+    await waitFor(() => expect(fetchPlugins).toHaveBeenCalled());
+
+    await openInstallForm();
+    await userEvent.click(screen.getByLabelText("Enable AI security scan on load"));
+
+    const input = getPathInput();
+    await userEvent.type(input, "/home/user/plugins/my-plugin");
+    const formContainer = input.closest(".plugin-install-form")!;
+    await userEvent.click(within(formContainer as HTMLElement).getByRole("button", { name: /Install Plugin/i }));
+
+    await waitFor(() => {
+      expect(installPlugin).toHaveBeenCalledWith(
+        { path: "/home/user/plugins/my-plugin", aiScanOnLoad: true },
+        undefined,
+      );
+    });
   });
 
   it("sends { path } payload matching the browsed path on install", async () => {

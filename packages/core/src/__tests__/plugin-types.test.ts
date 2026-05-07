@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { PluginLoader } from "../plugin-loader.js";
 import { PluginStore } from "../plugin-store.js";
 import type {
+  PluginSecurityScanResult,
   CreateAiSessionFactory,
   CreateAiSessionOptions,
   FusionPlugin,
@@ -22,6 +23,19 @@ import {
   normalizePluginUiContributionSurface,
   validatePluginManifest,
 } from "../plugin-types.js";
+
+describe("PluginSecurityScanResult", () => {
+  it("supports stable verdict/findings shape", () => {
+    const result: PluginSecurityScanResult = {
+      verdict: "clean",
+      summary: "ok",
+      findings: [],
+      scannedAt: new Date().toISOString(),
+      scannedFiles: ["manifest.json"],
+    };
+    expect(result.verdict).toBe("clean");
+  });
+});
 
 describe("validatePluginManifest", () => {
   // ── Valid Manifests ─────────────────────────────────────────────────

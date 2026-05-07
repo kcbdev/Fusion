@@ -202,6 +202,58 @@ async function REQUEST(
 }
 
 // ══════════════════════════════════════════════════════════════════
+describe("PATCH/POST plugin scan config routes", () => {
+  let pluginStore: PluginStore;
+  let pluginLoader: PluginLoader;
+  let store: TaskStore;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    pluginStore = createMockPluginStore({
+      getPlugin: vi.fn().mockResolvedValue({ ...INSTALLED_PLUGIN, id: "my-plugin", enabled: true, state: "started" }),
+      updatePlugin: vi.fn().mockResolvedValue({ ...INSTALLED_PLUGIN, id: "my-plugin", aiScanOnLoad: true }),
+    });
+    pluginLoader = createMockPluginLoader({ loadPlugin: vi.fn().mockResolvedValue(undefined) });
+    store = createMockTaskStore({ getPluginStore: vi.fn().mockReturnValue(pluginStore) });
+  });
+
+  function buildApp() {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store, { pluginStore, pluginLoader }));
+    return app;
+  }
+
+  it("PATCH /api/plugins/:id updates aiScanOnLoad", async () => {
+    const res = await REQUEST(buildApp(), "PATCH", "/api/plugins/my-plugin", { aiScanOnLoad: true });
+    expect(res.status).toBe(200);
+    expect(pluginStore.updatePlugin).toHaveBeenCalledWith("my-plugin", { aiScanOnLoad: true });
+  });
+
+  it("PATCH /api/plugins/:id returns 400 for invalid body", async () => {
+    const res = await REQUEST(buildApp(), "PATCH", "/api/plugins/my-plugin", { aiScanOnLoad: "yes" });
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH /api/plugins/:id returns 404 for unknown plugin", async () => {
+    (pluginStore.updatePlugin as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("not found"));
+    const res = await REQUEST(buildApp(), "PATCH", "/api/plugins/unknown", { aiScanOnLoad: true });
+    expect(res.status).toBe(404);
+  });
+
+  it("POST /api/plugins/:id/rescan returns plugin payload", async () => {
+    const res = await REQUEST(buildApp(), "POST", "/api/plugins/my-plugin/rescan", {});
+    expect(res.status).toBe(200);
+    expect(pluginLoader.loadPlugin).toHaveBeenCalledWith("my-plugin");
+  });
+
+  it("POST /api/plugins/:id/rescan returns 404 for unknown plugin", async () => {
+    (pluginStore.getPlugin as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("not found"));
+    const res = await REQUEST(buildApp(), "POST", "/api/plugins/unknown/rescan", {});
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("POST /api/plugins mode:install — package root path", () => {
   let pluginStore: PluginStore;
   let pluginLoader: PluginLoader;

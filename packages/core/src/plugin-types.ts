@@ -556,6 +556,25 @@ export interface PluginSetupManifest {
 
 export type PluginState = "installed" | "started" | "stopped" | "error";
 
+export interface PluginSecurityFinding {
+  category: string;
+  severity: "low" | "medium" | "high" | "critical";
+  file: string;
+  excerpt: string;
+  reason: string;
+}
+
+export interface PluginSecurityScanResult {
+  verdict: "clean" | "warning" | "blocked" | "error" | "unavailable";
+  summary: string;
+  findings: PluginSecurityFinding[];
+  scannedAt: string;
+  scannedFiles: string[];
+  scanDurationMs?: number;
+  modelProvider?: string;
+  modelId?: string;
+}
+
 /**
  * Loaded plugin instance with all hooks, tools, routes, and runtimes.
  */
@@ -614,6 +633,8 @@ export interface PluginInstallation {
   /** Last error message (if state is "error") */
   error?: string;
   dependencies?: string[];
+  aiScanOnLoad?: boolean;
+  lastSecurityScan?: PluginSecurityScanResult;
   createdAt: string;
   updatedAt: string;
 }

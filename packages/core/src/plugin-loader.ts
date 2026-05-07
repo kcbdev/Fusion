@@ -39,6 +39,7 @@ import type {
 import { normalizePluginUiContributionDefinition, validatePluginManifest } from "./plugin-types.js";
 import { createLogger } from "./logger.js";
 import { getCreateAiSessionFactory } from "./ai-engine-loader.js";
+import { scanPluginSecurity } from "./plugin-security-scan.js";
 
 // Minimum Fusion version for plugin compatibility checks (can be expanded later)
 const MINIMUM_FUSION_VERSION = "0.1.0";
@@ -190,6 +191,18 @@ export class PluginLoader extends EventEmitter<{
     const pluginPath = this.resolvePluginPath(installation.path);
 
     try {
+      if (installation.aiScanOnLoad) {
+        const scanResult = await scanPluginSecurity({ pluginId, pluginPath });
+        await this.options.pluginStore.updatePlugin(pluginId, { lastSecurityScan: scanResult });
+
+        if (["blocked", "error", "unavailable"].includes(scanResult.verdict)) {
+          const errorMessage = `Security scan ${scanResult.verdict}: ${scanResult.summary}`;
+          await this.options.pluginStore.updatePluginState(pluginId, "error", errorMessage);
+          this.emit("plugin:error", { pluginId, error: new Error(errorMessage) });
+          throw new Error(errorMessage);
+        }
+      }
+
       // Dynamic import the plugin - always bypass cache to get fresh code
       // Our loadedModules cache is cleared on stop, but Node.js ESM cache persists
       const mod = await this.importPluginModule(pluginPath, true);

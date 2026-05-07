@@ -53,6 +53,33 @@ pnpm install
 pnpm test
 ```
 
+### Optional AI Security Scan (Opt-in)
+
+Plugin installs now support an opt-in `aiScanOnLoad` flag. When enabled, Fusion runs an AI security review before loading plugin code.
+
+- **Opt-in:** disabled by default (`aiScanOnLoad: false`)
+- **When it runs:** on plugin load/reload and explicit rescan
+- **Scan inputs (deterministic order):** `manifest.json`, optional `package.json`, optional `README.md`, entry module, then prioritized source files
+- **Boundaries:** excludes `node_modules`, `dist`, lockfiles, binary assets, files over 20 KB each, and enforces a 120 KB total raw-content cap
+
+### Scan Verdicts
+
+- `clean` — no concerning patterns found
+- `warning` — suspicious patterns found; plugin may still load
+- `blocked` — dangerous patterns found; plugin is blocked before import
+- `error` — scan failed to produce a valid decision
+- `unavailable` — AI scan service unavailable
+
+When a plugin is blocked (`blocked`/`error`/`unavailable`), Fusion does **not** execute plugin code for that load attempt and stores the scan result on plugin metadata (`lastSecurityScan`) for operator visibility.
+
+### Author Guidance for Blocked Plugins
+
+If your plugin is blocked:
+- remove dynamic execution patterns (`eval`, shell-outs, hidden network exfiltration behavior)
+- keep behavior explicit in source and manifest
+- document external calls and sensitive operations in README
+- ask operators to run `fn plugin rescan <id>` after publishing fixes
+
 ### Plugin Project Structure
 
 ```

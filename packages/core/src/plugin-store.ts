@@ -10,6 +10,7 @@ import { Database, toJson, fromJson } from "./db.js";
 import type {
   PluginInstallation,
   PluginManifest,
+  PluginSecurityScanResult,
   PluginSettingSchema,
   PluginState,
 } from "./plugin-types.js";
@@ -30,6 +31,7 @@ export interface PluginRegistrationInput {
   manifest: PluginManifest;
   path: string;
   settings?: Record<string, unknown>;
+  aiScanOnLoad?: boolean;
 }
 
 /** Partial update input for a plugin */
@@ -41,6 +43,8 @@ export interface PluginUpdateInput {
   homepage?: string;
   path?: string;
   dependencies?: string[];
+  aiScanOnLoad?: boolean;
+  lastSecurityScan?: PluginSecurityScanResult;
 }
 
 /** Database row shape for the plugins table. */
@@ -58,6 +62,8 @@ interface PluginRow {
   settingsSchema: string | null;
   error: string | null;
   dependencies: string | null;
+  aiScanOnLoad?: number;
+  lastSecurityScan?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -109,6 +115,8 @@ export class PluginStore extends EventEmitter<PluginStoreEvents> {
       settingsSchema: fromJson<Record<string, PluginSettingSchema>>(row.settingsSchema),
       error: row.error || undefined,
       dependencies: fromJson<string[]>(row.dependencies) || [],
+      aiScanOnLoad: row.aiScanOnLoad === 1,
+      lastSecurityScan: fromJson<PluginSecurityScanResult>(row.lastSecurityScan ?? null) ?? undefined,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -184,7 +192,7 @@ export class PluginStore extends EventEmitter<PluginStoreEvents> {
    * Register a new plugin.
    */
   async registerPlugin(input: PluginRegistrationInput): Promise<PluginInstallation> {
-    const { manifest, path, settings = {} } = input;
+    const { manifest, path, settings = {}, aiScanOnLoad = false } = input;
 
     // Validate manifest
     const manifestValidation = validatePluginManifest(manifest);
@@ -239,6 +247,7 @@ export class PluginStore extends EventEmitter<PluginStoreEvents> {
       settings: mergedSettings,
       settingsSchema: manifest.settingsSchema,
       dependencies: manifest.dependencies || [],
+      aiScanOnLoad,
       createdAt: now,
       updatedAt: now,
     };
@@ -247,8 +256,8 @@ export class PluginStore extends EventEmitter<PluginStoreEvents> {
     this.db.prepare(`
       INSERT INTO plugins (
         id, name, version, description, author, homepage, path,
-        enabled, state, settings, settingsSchema, dependencies, createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        enabled, state, settings, settingsSchema, dependencies, aiScanOnLoad, lastSecurityScan, createdAt, updatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       plugin.id,
       plugin.name,
@@ -262,6 +271,8 @@ export class PluginStore extends EventEmitter<PluginStoreEvents> {
       toJson(plugin.settings),
       plugin.settingsSchema ? toJson(plugin.settingsSchema) : null,
       toJson(plugin.dependencies),
+      plugin.aiScanOnLoad ? 1 : 0,
+      null,
       plugin.createdAt,
       plugin.updatedAt,
     );
@@ -477,6 +488,14 @@ export class PluginStore extends EventEmitter<PluginStoreEvents> {
     if (updates.dependencies !== undefined) {
       setClauses.push("dependencies = ?");
       params.push(toJson(updates.dependencies));
+    }
+    if (updates.aiScanOnLoad !== undefined) {
+      setClauses.push("aiScanOnLoad = ?");
+      params.push(updates.aiScanOnLoad ? "1" : "0");
+    }
+    if (updates.lastSecurityScan !== undefined) {
+      setClauses.push("lastSecurityScan = ?");
+      params.push(toJson(updates.lastSecurityScan));
     }
 
     params.push(id);

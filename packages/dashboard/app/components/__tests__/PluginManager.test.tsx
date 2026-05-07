@@ -93,6 +93,8 @@ vi.mock("../../api", () => ({
   })),
   fetchPluginSetupStatus: vi.fn(() => Promise.resolve({ hasSetup: false })),
   installPluginSetup: vi.fn(() => Promise.resolve({ success: true })),
+  updatePlugin: vi.fn(() => Promise.resolve({})),
+  rescanPlugin: vi.fn(() => Promise.resolve({})),
   browseDirectory: vi.fn(() => Promise.resolve({
     currentPath: "/home",
     parentPath: "/",
@@ -123,6 +125,8 @@ import {
   updatePluginSettings,
   fetchPluginSetupStatus,
   installPluginSetup,
+  updatePlugin,
+  rescanPlugin,
 } from "../../api";
 
 const addToast = vi.fn();
@@ -183,6 +187,8 @@ beforeEach(() => {
   vi.mocked(updatePluginSettings).mockResolvedValue({ apiKey: "updated-key" });
   vi.mocked(fetchPluginSetupStatus).mockResolvedValue({ hasSetup: false });
   vi.mocked(installPluginSetup).mockResolvedValue({ success: true });
+  vi.mocked(updatePlugin).mockResolvedValue({} as never);
+  vi.mocked(rescanPlugin).mockResolvedValue({} as never);
   
   // EventSource mock setup
   const eventSourceInstance = {
@@ -558,6 +564,59 @@ describe("PluginManager", () => {
       expect(screen.getByText("Settings")).toBeTruthy();
       expect(screen.getByDisplayValue("test-key")).toBeTruthy();
     });
+  });
+
+  it("calls updatePlugin when AI scan toggle is changed", async () => {
+    vi.mocked(fetchPlugins).mockResolvedValue([{ ...mockPlugins[0], aiScanOnLoad: false } as PluginInstallation]);
+
+    render(<PluginManager addToast={addToast} />);
+    await waitFor(() => expect(screen.getByText("Test Plugin A")).toBeTruthy());
+    await userEvent.click(screen.getAllByTitle("Settings")[0]);
+
+    const checkbox = await screen.findByLabelText("Enable AI scan before load/reload");
+    await userEvent.click(checkbox);
+
+    await waitFor(() => {
+      expect(updatePlugin).toHaveBeenCalledWith("plugin-a", { aiScanOnLoad: true }, undefined);
+    });
+  });
+
+  it("calls rescanPlugin from security card action", async () => {
+    vi.mocked(fetchPlugins).mockResolvedValue([{ ...mockPlugins[0], aiScanOnLoad: true } as PluginInstallation]);
+
+    render(<PluginManager addToast={addToast} />);
+    await waitFor(() => expect(screen.getByText("Test Plugin A")).toBeTruthy());
+    await userEvent.click(screen.getAllByTitle("Settings")[0]);
+
+    await userEvent.click(await screen.findByRole("button", { name: /Rescan and Reload/i }));
+
+    await waitFor(() => {
+      expect(rescanPlugin).toHaveBeenCalledWith("plugin-a", undefined);
+    });
+  });
+
+  it("renders persisted security scan verdict and findings", async () => {
+    vi.mocked(fetchPlugins).mockResolvedValue([{ ...mockPlugins[0], lastSecurityScan: { verdict: "warning", summary: "Suspicious eval usage", findings: [{ category: "exec", severity: "high", file: "src/index.ts", excerpt: "eval(x)", reason: "dynamic execution" }], scannedAt: "2026-05-01T00:00:00.000Z", scannedFiles: ["src/index.ts"] } } as PluginInstallation]);
+
+    render(<PluginManager addToast={addToast} />);
+    await waitFor(() => expect(screen.getByText("Test Plugin A")).toBeTruthy());
+    await userEvent.click(screen.getAllByTitle("Settings")[0]);
+
+    expect(await screen.findByText("warning")).toBeTruthy();
+    expect(screen.getByText("Suspicious eval usage")).toBeTruthy();
+    await userEvent.click(screen.getByText(/Findings \(1\)/));
+    expect(screen.getByText(/dynamic execution/)).toBeTruthy();
+  });
+
+  it("renders blocked verdict in security scan card", async () => {
+    vi.mocked(fetchPlugins).mockResolvedValue([{ ...mockPlugins[0], lastSecurityScan: { verdict: "blocked", summary: "Blocked by scan", findings: [], scannedAt: "2026-05-01T00:00:00.000Z", scannedFiles: [] } } as PluginInstallation]);
+
+    render(<PluginManager addToast={addToast} />);
+    await waitFor(() => expect(screen.getByText("Test Plugin A")).toBeTruthy());
+    await userEvent.click(screen.getAllByTitle("Settings")[0]);
+
+    expect(await screen.findByText("blocked")).toBeTruthy();
+    expect(screen.getByText("Blocked by scan")).toBeTruthy();
   });
 
   it("saves plugin settings", async () => {

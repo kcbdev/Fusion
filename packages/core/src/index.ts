@@ -188,6 +188,8 @@ export { validatePluginManifest, normalizePluginUiContributionSurface, normalize
 export { PluginStore } from "./plugin-store.js";
 export type { PluginStoreEvents, PluginRegistrationInput, PluginUpdateInput } from "./plugin-store.js";
 export { PluginLoader } from "./plugin-loader.js";
+export { scanPluginSecurity } from "./plugin-security-scan.js";
+export type { PluginSecurityScanResult, PluginSecurityFinding } from "./plugin-security-scan.js";
 export type {
   PluginLoaderOptions,
   PluginLoadedEvent,

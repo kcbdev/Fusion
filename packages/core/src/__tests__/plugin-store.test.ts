@@ -101,6 +101,29 @@ describe("PluginStore", () => {
       expect(plugin.dependencies).toEqual(["other-plugin"]);
     });
 
+    it("defaults aiScanOnLoad to false", async () => {
+      const manifest = makeManifest({ id: "scan-default" });
+      const plugin = await store.registerPlugin({ manifest, path: "/path/to/plugin" });
+      expect(plugin.aiScanOnLoad).toBe(false);
+    });
+
+    it("round-trips lastSecurityScan metadata", async () => {
+      const manifest = makeManifest({ id: "scan-roundtrip" });
+      await store.registerPlugin({ manifest, path: "/path/to/plugin", aiScanOnLoad: true });
+      await store.updatePlugin("scan-roundtrip", {
+        lastSecurityScan: {
+          verdict: "warning",
+          summary: "review",
+          findings: [],
+          scannedAt: new Date().toISOString(),
+          scannedFiles: ["manifest.json"],
+        },
+      });
+      const loaded = await store.getPlugin("scan-roundtrip");
+      expect(loaded.aiScanOnLoad).toBe(true);
+      expect(loaded.lastSecurityScan?.verdict).toBe("warning");
+    });
+
     it("registers plugin with settings schema", async () => {
       const manifest = makeManifest({
         settingsSchema: {

@@ -12,8 +12,8 @@
 
 import "./PluginManager.css";
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Package, Settings, Trash2, Plus, X, RefreshCw, RotateCcw, ExternalLink } from "lucide-react";
-import { fetchPlugins, installPlugin, enablePlugin, disablePlugin, uninstallPlugin, fetchPluginSettings, updatePluginSettings, reloadPlugin, fetchPluginSetupStatus, installPluginSetup } from "../api";
+import { Package, Settings, Trash2, Plus, X, RefreshCw, RotateCcw, ExternalLink, Shield } from "lucide-react";
+import { fetchPlugins, installPlugin, enablePlugin, disablePlugin, uninstallPlugin, fetchPluginSettings, updatePluginSettings, reloadPlugin, fetchPluginSetupStatus, installPluginSetup, updatePlugin, rescanPlugin } from "../api";
 import { DirectoryPicker } from "./DirectoryPicker";
 import type { PluginInstallation, PluginState, PluginSettingSchema } from "@fusion/core";
 import type { PluginSetupStatusResponse } from "../api";
@@ -182,6 +182,7 @@ export function PluginManager({ addToast, projectId }: PluginManagerProps) {
   const [showInstall, setShowInstall] = useState(false);
   const [installPath, setInstallPath] = useState("");
   const [installing, setInstalling] = useState(false);
+  const [installAiScanOnLoad, setInstallAiScanOnLoad] = useState(false);
   const [reloadingPluginId, setReloadingPluginId] = useState<string | null>(null);
   const [selectedPlugin, setSelectedPlugin] = useState<PluginInstallation | null>(null);
   const [pluginSettings, setPluginSettings] = useState<Record<string, unknown>>({});
@@ -330,10 +331,11 @@ export function PluginManager({ addToast, projectId }: PluginManagerProps) {
 
     try {
       setInstalling(true);
-      await installPlugin({ path: installPath }, projectId);
+      await installPlugin({ path: installPath, ...(installAiScanOnLoad ? { aiScanOnLoad: true } : {}) }, projectId);
       addToast("Plugin installed successfully", "success");
       setShowInstall(false);
       setInstallPath("");
+      setInstallAiScanOnLoad(false);
       await loadPlugins();
     } catch (err) {
       addToast(`Failed to install plugin: ${err instanceof Error ? err.message : String(err)}`, "error");
@@ -433,6 +435,26 @@ export function PluginManager({ addToast, projectId }: PluginManagerProps) {
     }
   };
 
+  const handleToggleAiScanOnLoad = async (plugin: PluginInstallation, aiScanOnLoad: boolean) => {
+    try {
+      await updatePlugin(plugin.id, { aiScanOnLoad }, projectId);
+      addToast(`AI scan on load ${aiScanOnLoad ? "enabled" : "disabled"}`, "success");
+      await loadPlugins();
+    } catch (err) {
+      addToast(`Failed to update plugin: ${err instanceof Error ? err.message : String(err)}`, "error");
+    }
+  };
+
+  const handleRescan = async (plugin: PluginInstallation) => {
+    try {
+      await rescanPlugin(plugin.id, projectId);
+      addToast(`${plugin.name} rescanned`, "success");
+      await loadPlugins();
+    } catch (err) {
+      addToast(`Failed to rescan plugin: ${err instanceof Error ? err.message : String(err)}`, "error");
+    }
+  };
+
   const handleSelectPlugin = async (plugin: PluginInstallation) => {
     setSelectedPlugin(plugin);
     try {
@@ -497,6 +519,47 @@ export function PluginManager({ addToast, projectId }: PluginManagerProps) {
               <span className="text-muted">Version:</span>
               {selectedPlugin.version}
             </p>
+          </div>
+
+          <div className="plugin-detail-card">
+            <h5 className="plugin-detail-section-heading">Security Scan</h5>
+            <div className="plugin-security-row">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={Boolean(selectedPlugin.aiScanOnLoad)}
+                  onChange={(e) => void handleToggleAiScanOnLoad(selectedPlugin, e.target.checked)}
+                />
+                Enable AI scan before load/reload
+              </label>
+              <button className="btn btn-secondary btn-sm" onClick={() => void handleRescan(selectedPlugin)}>
+                <Shield size={14} /> Rescan and Reload
+              </button>
+            </div>
+            <p className="text-muted">Turning this on only updates configuration. Use Rescan and Reload to run it now.</p>
+            {selectedPlugin.lastSecurityScan ? (
+              <div className="plugin-security-results">
+                <div className="plugin-security-header">
+                  <span className={`plugin-state-badge plugin-security-badge plugin-security-badge--${selectedPlugin.lastSecurityScan.verdict}`}>
+                    {selectedPlugin.lastSecurityScan.verdict}
+                  </span>
+                  <span className="text-muted">{selectedPlugin.lastSecurityScan.scannedAt}</span>
+                </div>
+                <p className="plugin-security-summary">{selectedPlugin.lastSecurityScan.summary}</p>
+                <details>
+                  <summary>Findings ({selectedPlugin.lastSecurityScan.findings.length})</summary>
+                  <ul className="plugin-security-findings">
+                    {selectedPlugin.lastSecurityScan.findings.map((finding, index) => (
+                      <li key={`${finding.file}-${index}`}>
+                        <strong>{finding.severity}</strong> {finding.category} — {finding.file}: {finding.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              </div>
+            ) : (
+              <p className="text-muted">No security scan has been run yet.</p>
+            )}
           </div>
 
           <div className="plugin-detail-card">
@@ -824,6 +887,14 @@ export function PluginManager({ addToast, projectId }: PluginManagerProps) {
               }
             }}
           />
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={installAiScanOnLoad}
+              onChange={(e) => setInstallAiScanOnLoad(e.target.checked)}
+            />
+            Enable AI security scan on load
+          </label>
           <div className="plugin-install-actions">
             <button className="btn btn-primary" onClick={handleInstall} disabled={installing || !installPath.trim()}>
               {installing ? "Installing..." : "Install Plugin"}

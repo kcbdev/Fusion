@@ -198,7 +198,7 @@ export async function runPluginList(projectName?: string): Promise<void> {
  */
 export async function runPluginInstall(
   source: string,
-  options?: { projectName?: string },
+  options?: { projectName?: string; aiScan?: boolean },
 ): Promise<void> {
   const projectName = options?.projectName;
   const { store, loader } = await createPluginLoader(await createPluginStore(projectName), projectName);
@@ -227,6 +227,7 @@ export async function runPluginInstall(
     const plugin = await store.registerPlugin({
       manifest,
       path,
+      aiScanOnLoad: options?.aiScan ?? false,
     });
 
     // Try to load it
@@ -460,6 +461,48 @@ export async function runPluginSettings(
 
   await pluginStore.updatePluginSettings(id, { [key]: parsedValue });
   console.log(`✓ Updated ${id}.${key}`);
+}
+
+export async function runPluginRescan(
+  id: string,
+  options?: { projectName?: string },
+): Promise<void> {
+  const projectName = options?.projectName;
+  const { store, loader } = await createPluginLoader(await createPluginStore(projectName), projectName);
+
+  let plugin;
+  try {
+    plugin = await store.getPlugin(id);
+  } catch {
+    console.error(`Plugin "${id}" not found`);
+    process.exit(1);
+  }
+
+  try {
+    if (plugin.state === "started" && typeof loader.reloadPlugin === "function") {
+      await loader.reloadPlugin(id);
+    } else if (plugin.enabled) {
+      await loader.loadPlugin(id);
+    }
+  } catch (error) {
+    // keep going to show persisted scan verdict/state
+    console.error(`Rescan/load failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const refreshed = await store.getPlugin(id);
+  const scan = refreshed.lastSecurityScan;
+  const verdict = scan?.verdict ?? "unavailable";
+  const summary = scan?.summary ?? refreshed.error ?? "No scan result available";
+  const findingCount = scan?.findings?.length ?? 0;
+
+  console.log(`${refreshed.name}`);
+  console.log(`verdict: ${verdict}`);
+  console.log(`summary: ${summary}`);
+  console.log(`findings: ${findingCount}`);
+
+  if (verdict === "blocked" || verdict === "error" || verdict === "unavailable") {
+    process.exit(1);
+  }
 }
 
 export async function runPluginSetup(

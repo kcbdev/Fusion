@@ -235,6 +235,52 @@
   flex: 1;
 }
 
+.plugin-security-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.plugin-security-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.plugin-security-header {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+.plugin-security-summary {
+  margin: 0;
+}
+
+.plugin-security-badge {
+  font-weight: 700;
+}
+
+.plugin-security-badge--warning,
+.plugin-security-badge--unavailable {
+  color: var(--color-warning);
+}
+
+.plugin-security-badge--blocked,
+.plugin-security-badge--error {
+  color: var(--color-error);
+}
+
+.plugin-security-findings {
+  margin: 0;
+  padding-inline-start: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
 .plugin-detail-actions {
   display: flex;
   gap: var(--space-sm);
@@ -538,6 +584,10 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
+  }
+
+  .plugin-security-row {
+    align-items: flex-start;
   }
 
   .plugin-detail-actions {

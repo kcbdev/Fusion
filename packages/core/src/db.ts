@@ -88,7 +88,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 65;
+const SCHEMA_VERSION = 66;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -654,6 +654,8 @@ CREATE TABLE IF NOT EXISTS plugins (
   settingsSchema TEXT,
   error TEXT,
   dependencies TEXT DEFAULT '[]',
+  aiScanOnLoad INTEGER NOT NULL DEFAULT 0,
+  lastSecurityScan TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL
 );
@@ -1699,6 +1701,8 @@ export class Database {
             settingsSchema TEXT,
             error TEXT,
             dependencies TEXT DEFAULT '[]',
+            aiScanOnLoad INTEGER NOT NULL DEFAULT 0,
+            lastSecurityScan TEXT,
             createdAt TEXT NOT NULL,
             updatedAt TEXT NOT NULL
           )
@@ -2768,6 +2772,13 @@ export class Database {
         `);
         this.db.exec(`CREATE INDEX IF NOT EXISTS idxDistributedTaskIdReservationsPrefixStatus ON distributed_task_id_reservations(prefix, status)`);
         this.db.exec(`CREATE INDEX IF NOT EXISTS idxDistributedTaskIdReservationsExpiry ON distributed_task_id_reservations(status, expiresAt)`);
+      });
+    }
+
+    if (version < 66) {
+      this.applyMigration(66, () => {
+        this.addColumnIfMissing("plugins", "aiScanOnLoad", "INTEGER NOT NULL DEFAULT 0");
+        this.addColumnIfMissing("plugins", "lastSecurityScan", "TEXT");
       });
     }
 

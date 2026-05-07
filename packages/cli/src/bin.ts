@@ -132,7 +132,7 @@ async function loadCommandHandlers() {
   const { runAgentImport } = await import("./commands/agent-import.js");
   const { runAgentExport } = await import("./commands/agent-export.js");
   const { runMessageInbox, runMessageOutbox, runMessageSend, runMessageRead, runMessageDelete, runAgentMailbox } = await import("./commands/message.js");
-  const { runPluginList, runPluginInstall, runPluginUninstall, runPluginEnable, runPluginDisable, runPluginSetupStatus, runPluginSetup, runPluginAvailable, runPluginSettings } = await import("./commands/plugin.js");
+  const { runPluginList, runPluginInstall, runPluginUninstall, runPluginEnable, runPluginDisable, runPluginSetupStatus, runPluginSetup, runPluginAvailable, runPluginSettings, runPluginRescan } = await import("./commands/plugin.js");
   const { runPluginCreate } = await import("./commands/plugin-scaffold.js");
   const { runSkillsSearch, runSkillsInstall } = await import("./commands/skills.js");
   const { runResearchCreate, runResearchList, runResearchShow, runResearchExport, runResearchCancel, runResearchRetry } = await import("./commands/research.js");
@@ -218,6 +218,7 @@ async function loadCommandHandlers() {
     runPluginSetup,
     runPluginAvailable,
     runPluginSettings,
+    runPluginRescan,
     runPluginCreate,
     runSkillsSearch,
     runSkillsInstall,
@@ -339,7 +340,7 @@ Usage:
   fn backup --restore <file> Restore database from a backup file
   fn backup --cleanup        Remove old backups exceeding retention limit
   fn plugin list | ls                List installed plugins
-  fn plugin install <path-or-package> Install a plugin from path or package
+  fn plugin install <path-or-package> [--ai-scan] Install a plugin from path or package
   fn plugin add <path-or-package>     Alias for plugin install
   fn plugin uninstall <id> [--force] Uninstall a plugin
   fn plugin enable <id>             Enable a plugin
@@ -347,6 +348,7 @@ Usage:
   fn plugin available                List built-in plugin catalog entries
   fn plugin settings <id> [key] [value]
                                       Read/update installed plugin settings
+  fn plugin rescan <id>              Rescan and reload a plugin
   fn plugin setup-status <id>        Check plugin setup binary/runtime status
   fn plugin setup <id> [--action install|uninstall]
                                       Install or uninstall plugin setup binaries/runtimes
@@ -567,6 +569,7 @@ async function main() {
     runPluginSetup,
     runPluginAvailable,
     runPluginSettings,
+    runPluginRescan,
     runPluginCreate,
     runSkillsSearch,
     runSkillsInstall,
@@ -1432,10 +1435,10 @@ async function main() {
           case "add": {
             const source = args[2];
             if (!source) {
-              console.error("Usage: fn plugin install <path-or-package> (alias: fn plugin add <path-or-package>)");
+              console.error("Usage: fn plugin install <path-or-package> [--ai-scan] (alias: fn plugin add <path-or-package>)");
               process.exit(1);
             }
-            await runPluginInstall(source, { projectName });
+            await runPluginInstall(source, { projectName, aiScan: args.includes("--ai-scan") });
             break;
           }
           case "uninstall": {
@@ -1467,6 +1470,12 @@ async function main() {
             await runPluginSettings(id, args[3], args[4], { projectName });
             break;
           }
+          case "rescan": {
+            const id = args[2];
+            if (!id) { console.error("Usage: fn plugin rescan <id>"); process.exit(1); }
+            await runPluginRescan(id, { projectName });
+            break;
+          }
           case "setup-status": {
             const id = args[2];
             if (!id) { console.error("Usage: fn plugin setup-status <id>"); process.exit(1); }
@@ -1493,7 +1502,7 @@ async function main() {
           }
           default:
             console.error(`Unknown subcommand: plugin ${sub || ""}`);
-            console.log("Try: fn plugin list | install | add (alias for install) | uninstall | enable | disable | available | settings | setup-status | setup | create");
+            console.log("Try: fn plugin list | install | add (alias for install) | uninstall | enable | disable | available | settings | rescan | setup-status | setup | create");
             process.exit(1);
         }
         break;

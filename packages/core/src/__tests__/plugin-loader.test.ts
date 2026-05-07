@@ -7,6 +7,11 @@ import { tmpdir } from "node:os";
 import { PluginLoader } from "../plugin-loader.js";
 import * as loggerModule from "../logger.js";
 
+const scanPluginSecurityMock = vi.fn();
+vi.mock("../plugin-security-scan.js", () => ({
+  scanPluginSecurity: (...args: unknown[]) => scanPluginSecurityMock(...args),
+}));
+
 vi.mock("@mariozechner/pi-ai", () => ({
   AssistantMessageEventStream: class AssistantMessageEventStream {
     push() {}
@@ -299,6 +304,16 @@ describe("PluginLoader", () => {
   // ── loadPlugin ─────────────────────────────────────────────────────
 
   describe("loadPlugin", () => {
+    beforeEach(() => {
+      scanPluginSecurityMock.mockReset();
+      scanPluginSecurityMock.mockResolvedValue({
+        verdict: "clean",
+        summary: "clean",
+        findings: [],
+        scannedAt: new Date().toISOString(),
+        scannedFiles: ["manifest.json"],
+      });
+    });
     it("loads a valid plugin from file path", async () => {
       await pluginStore.init();
 
@@ -429,6 +444,50 @@ describe("PluginLoader", () => {
       await expect(loader.loadPlugin("disabled-test")).rejects.toThrow(
         "disabled",
       );
+    });
+
+    it("blocks load when ai scan verdict is blocked", async () => {
+      await pluginStore.init();
+      scanPluginSecurityMock.mockResolvedValueOnce({
+        verdict: "blocked",
+        summary: "blocked by scan",
+        findings: [],
+        scannedAt: new Date().toISOString(),
+        scannedFiles: ["manifest.json"],
+      });
+
+      const plugin = makePlugin(makeManifest({ id: "scan-blocked" }));
+      const pluginDir = join(rootDir, "plugins");
+      const pluginPath = await writePluginModule(pluginDir, "index.js", plugin);
+
+      await pluginStore.registerPlugin({
+        manifest: plugin.manifest,
+        path: pluginPath,
+        aiScanOnLoad: true,
+      });
+
+      const loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      await expect(loader.loadPlugin("scan-blocked")).rejects.toThrow("Security scan blocked");
+      expect(loader.isPluginLoaded("scan-blocked")).toBe(false);
+    });
+
+    it("runs ai scan before loading when aiScanOnLoad is enabled", async () => {
+      await pluginStore.init();
+
+      const plugin = makePlugin(makeManifest({ id: "scan-enabled" }));
+      const pluginDir = join(rootDir, "plugins");
+      const pluginPath = await writePluginModule(pluginDir, "index.js", plugin);
+
+      await pluginStore.registerPlugin({
+        manifest: plugin.manifest,
+        path: pluginPath,
+        aiScanOnLoad: true,
+      });
+
+      const loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      await loader.loadPlugin("scan-enabled");
+
+      expect(scanPluginSecurityMock).toHaveBeenCalledWith(expect.objectContaining({ pluginId: "scan-enabled" }));
     });
 
     it("loads dependencies before loading dependent", async () => {

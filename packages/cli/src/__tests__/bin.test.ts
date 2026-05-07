@@ -95,6 +95,7 @@ const commandMocks = vi.hoisted(() => ({
   runPluginSetup: vi.fn(),
   runPluginAvailable: vi.fn(),
   runPluginSettings: vi.fn(),
+  runPluginRescan: vi.fn(),
   runPluginCreate: vi.fn(),
 
   runResearchCreate: vi.fn(),
@@ -219,6 +220,7 @@ vi.mock("../commands/plugin.js", () => ({
   runPluginSetup: commandMocks.runPluginSetup,
   runPluginAvailable: commandMocks.runPluginAvailable,
   runPluginSettings: commandMocks.runPluginSettings,
+  runPluginRescan: commandMocks.runPluginRescan,
 }));
 
 vi.mock("../commands/plugin-scaffold.js", () => ({
@@ -423,9 +425,11 @@ describe("bin command routing and fallbacks", () => {
 
     expect(commandMocks.runPluginInstall).toHaveBeenNthCalledWith(1, "fusion-plugin-hermes-runtime", {
       projectName: "demo",
+      aiScan: false,
     });
     expect(commandMocks.runPluginInstall).toHaveBeenNthCalledWith(2, "fusion-plugin-hermes-runtime", {
       projectName: "demo",
+      aiScan: false,
     });
   });
 
@@ -445,7 +449,7 @@ describe("bin command routing and fallbacks", () => {
   it("errors when plugin install source is missing", async () => {
     await expect(runBin(["plugin", "add"])).rejects.toThrow("process.exit:1");
     expect(errorSpy).toHaveBeenCalledWith(
-      "Usage: fn plugin install <path-or-package> (alias: fn plugin add <path-or-package>)",
+      "Usage: fn plugin install <path-or-package> [--ai-scan] (alias: fn plugin add <path-or-package>)",
     );
   });
 
@@ -453,7 +457,7 @@ describe("bin command routing and fallbacks", () => {
     await expect(runBin(["plugin", "oops"])).rejects.toThrow("process.exit:1");
     expect(errorSpy).toHaveBeenCalledWith("Unknown subcommand: plugin oops");
     expect(logSpy).toHaveBeenCalledWith(
-      "Try: fn plugin list | install | add (alias for install) | uninstall | enable | disable | available | settings | setup-status | setup | create",
+      "Try: fn plugin list | install | add (alias for install) | uninstall | enable | disable | available | settings | rescan | setup-status | setup | create",
     );
   });
 

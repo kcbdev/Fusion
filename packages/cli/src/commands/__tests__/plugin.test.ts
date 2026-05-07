@@ -76,7 +76,7 @@ vi.mock("node:fs/promises", () => ({
   ),
 }));
 
-import { runPluginAvailable, runPluginInstall, runPluginSettings } from "../plugin.js";
+import { runPluginAvailable, runPluginInstall, runPluginSettings, runPluginRescan } from "../plugin.js";
 import { resolveProject } from "../../project-context.js";
 
 describe("plugin commands", () => {
@@ -105,6 +105,25 @@ describe("plugin commands", () => {
     await expect(runPluginAvailable()).resolves.toBeUndefined();
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining("Installable"));
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining("fusion-plugin-agent-browser"));
+  });
+
+  it("exits non-zero when rescan verdict is blocked", async () => {
+    const storeInstance = {
+      init: vi.fn().mockResolvedValue(undefined),
+      registerPlugin: vi.fn(),
+      listPlugins: vi.fn(),
+      getPlugin: vi
+        .fn()
+        .mockResolvedValueOnce({ id: "paperclip-runtime", name: "Paperclip Runtime", enabled: true, state: "started" })
+        .mockResolvedValueOnce({ id: "paperclip-runtime", name: "Paperclip Runtime", enabled: true, state: "error", lastSecurityScan: { verdict: "blocked", summary: "blocked", findings: [], scannedAt: "now", scannedFiles: [] } }),
+      updatePluginSettings: vi.fn().mockResolvedValue(undefined),
+    };
+    mocks.PluginStore.mockImplementationOnce(() => storeInstance as never);
+    mocks.PluginLoader.mockImplementationOnce(() => ({ loadPlugin: vi.fn(), reloadPlugin: vi.fn().mockResolvedValue(undefined) }) as never);
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => { throw new Error(`exit:${code}`); }) as never);
+
+    await expect(runPluginRescan("paperclip-runtime", { projectName: "demo" })).rejects.toThrow("exit:1");
+    expect(exitSpy).toHaveBeenCalledWith(1);
   });
 
   it("reads and updates plugin settings", async () => {

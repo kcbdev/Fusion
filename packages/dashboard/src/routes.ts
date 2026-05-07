@@ -3358,6 +3358,11 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("Plugin install mode is not supported: plugin loader not available");
       }
 
+      const aiScanOnLoad = body.aiScanOnLoad;
+      if (aiScanOnLoad !== undefined && typeof aiScanOnLoad !== "boolean") {
+        throw badRequest("'aiScanOnLoad' must be a boolean when provided");
+      }
+
       // Resolve manifest — supports package root and dist-folder selections
       const { manifestDir, manifest } = await resolvePluginManifest(body.path as string);
 
@@ -3365,13 +3370,19 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         const plugin = await pluginStore.registerPlugin({
           manifest,
           path: manifestDir,
+          ...(typeof aiScanOnLoad === "boolean" ? { aiScanOnLoad } : {}),
         });
 
-        // If enabled, try to load the plugin
+        // If enabled, try to load it. If load fails while aiScanOnLoad=true,
+        // remove the new registration so install does not leave a broken record.
         if (plugin.enabled) {
           try {
             await options.pluginLoader.loadPlugin(plugin.id);
           } catch (loadErr) {
+            if (plugin.aiScanOnLoad) {
+              await pluginStore.unregisterPlugin(plugin.id);
+              throw badRequest(loadErr instanceof Error ? loadErr.message : String(loadErr));
+            }
             runtimeLogger.child("plugin-routes").error(`Failed to load plugin ${plugin.id}`, {
               error: loadErr instanceof Error ? loadErr.message : String(loadErr),
             });
@@ -3380,6 +3391,9 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
         res.status(201).json(plugin);
       } catch (err: unknown) {
+        if (err instanceof ApiError) {
+          throw err;
+        }
         if (err instanceof Error && (err instanceof Error ? err.message : String(err)).includes("already registered")) {
           throw conflict(err instanceof Error ? err.message : String(err));
         }
@@ -3479,6 +3493,68 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
     const updatedPlugin = await pluginStore.getPlugin(id);
     res.json(updatedPlugin);
+  });
+
+  /**
+   * PATCH /api/plugins/:id
+   * Update plugin config.
+   * Body: { aiScanOnLoad: boolean }
+   */
+  router.patch("/plugins/:id", async (req: Request, res: Response) => {
+    const { store: scopedStore } = await getProjectContext(req);
+    const pluginStore = scopedStore.getPluginStore();
+    const id = req.params.id as string;
+
+    if (!req.body || typeof req.body !== "object" || typeof (req.body as { aiScanOnLoad?: unknown }).aiScanOnLoad !== "boolean") {
+      throw badRequest("Request body must be { aiScanOnLoad: boolean }");
+    }
+
+    try {
+      const plugin = await pluginStore.updatePlugin(id, {
+        aiScanOnLoad: (req.body as { aiScanOnLoad: boolean }).aiScanOnLoad,
+      });
+      res.json(plugin);
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.includes("not found")) {
+        throw notFound(`Plugin "${id}" not found`);
+      }
+      throw internalError(err instanceof Error ? err.message : "Failed to update plugin");
+    }
+  });
+
+  /**
+   * POST /api/plugins/:id/rescan
+   * Trigger a fresh plugin scan/load gate via reload or load flow.
+   */
+  router.post("/plugins/:id/rescan", async (req: Request, res: Response) => {
+    const { store: scopedStore } = await getProjectContext(req);
+    const pluginStore = scopedStore.getPluginStore();
+    const id = req.params.id as string;
+
+    let plugin: import("@fusion/core").PluginInstallation;
+    try {
+      plugin = await pluginStore.getPlugin(id);
+    } catch {
+      throw notFound(`Plugin "${id}" not found`);
+    }
+
+    if (!options?.pluginLoader) {
+      throw internalError("Plugin loader not available");
+    }
+
+    try {
+      if (plugin.state === "started" && options.pluginRunner?.reloadPlugin) {
+        await options.pluginRunner.reloadPlugin(id);
+      } else if (plugin.enabled) {
+        await options.pluginLoader.loadPlugin(id);
+      }
+    } catch (reloadErr) {
+      runtimeLogger.child("plugin-routes").error(`Failed to rescan plugin ${id}`, {
+        error: reloadErr instanceof Error ? reloadErr.message : String(reloadErr),
+      });
+    }
+
+    res.json(await pluginStore.getPlugin(id));
   });
 
   /**

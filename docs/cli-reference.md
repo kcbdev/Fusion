@@ -812,14 +812,17 @@ Plugin lifecycle management.
 
 ```bash
 fn plugin list
-fn plugin install <path>
+fn plugin install <path> [--ai-scan]
+fn plugin rescan <id>
 fn plugin uninstall <id> --force
 fn plugin enable <id>
 fn plugin disable <id>
 fn plugin create <name>
 ```
 
-Subcommands: `list|ls`, `install`, `uninstall`, `enable`, `disable`, `create`.
+Subcommands: `list|ls`, `install`, `rescan`, `uninstall`, `enable`, `disable`, `create`.
+
+`fn plugin install --ai-scan` enables AI security scanning on plugin load. `fn plugin rescan <id>` runs a fresh scan/reload cycle and prints plugin name, verdict, summary, and finding count. It exits non-zero for `blocked`, `error`, or `unavailable` verdicts.
 
 ---
 

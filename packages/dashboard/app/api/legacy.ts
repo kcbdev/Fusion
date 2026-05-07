@@ -7736,7 +7736,7 @@ export async function fetchPluginDetail(id: string, projectId?: string): Promise
 
 /** Install a plugin from local path or npm package */
 export async function installPlugin(
-  source: { path: string } | { package: string },
+  source: { path: string; aiScanOnLoad?: boolean } | { package: string; aiScanOnLoad?: boolean },
   projectId?: string,
 ): Promise<PluginInstallation> {
   return api<PluginInstallation>(withProjectId("/plugins", projectId), {
@@ -7803,6 +7803,21 @@ export async function installPluginSetup(id: string, projectId?: string): Promis
 /** Reload a running plugin with updated code */
 export async function reloadPlugin(id: string, projectId?: string): Promise<PluginInstallation> {
   return api<PluginInstallation>(withProjectId(`/plugins/${encodeURIComponent(id)}/reload`, projectId), {
+    method: "POST",
+  });
+}
+
+/** Update plugin security-scan configuration */
+export async function updatePlugin(id: string, updates: { aiScanOnLoad: boolean }, projectId?: string): Promise<PluginInstallation> {
+  return api<PluginInstallation>(withProjectId(`/plugins/${encodeURIComponent(id)}`, projectId), {
+    method: "PATCH",
+    body: JSON.stringify(updates),
+  });
+}
+
+/** Trigger plugin rescan + reload flow */
+export async function rescanPlugin(id: string, projectId?: string): Promise<PluginInstallation> {
+  return api<PluginInstallation>(withProjectId(`/plugins/${encodeURIComponent(id)}/rescan`, projectId), {
     method: "POST",
   });
 }
