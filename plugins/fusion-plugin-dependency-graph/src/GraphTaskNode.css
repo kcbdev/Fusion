@@ -32,6 +32,12 @@
   transform: scale(1.01);
 }
 
+.graph-task-node--in-review {
+  border-inline-start: calc(var(--btn-border-width) * 3) solid var(--in-review);
+  border-start-start-radius: var(--radius-md);
+  border-end-start-radius: var(--radius-md);
+}
+
 .graph-task-active-indicator {
   display: flex;
   align-items: center;

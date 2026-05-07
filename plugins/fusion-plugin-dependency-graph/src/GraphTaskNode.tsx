@@ -59,10 +59,11 @@ export function GraphTaskNode({ style, isHighlighted = false, ...taskCardProps }
     task.currentStep >= 0 &&
     Array.isArray(task.steps) &&
     task.currentStep < task.steps.length;
+  const isInReview = task.column === "in-review";
 
   return (
     <div
-      className={`graph-task-node${isHighlighted ? " graph-task-node--highlighted" : ""}${isActive ? " graph-task-node--active" : ""}`}
+      className={`graph-task-node${isHighlighted ? " graph-task-node--highlighted" : ""}${isActive ? " graph-task-node--active" : ""}${isInReview ? " graph-task-node--in-review" : ""}`}
       style={style}
       draggable={false}
       data-testid={`graph-task-node-${task.id}`}

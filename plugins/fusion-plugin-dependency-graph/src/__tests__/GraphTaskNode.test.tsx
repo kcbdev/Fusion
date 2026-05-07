@@ -78,12 +78,21 @@ describe("GraphTaskNode", () => {
     expect(screen.getByText("Executing")).toBeTruthy();
   });
 
-  it("does not render active indicator for non-active tasks", () => {
+  it("applies in-review visual class and does not apply active class for in-review tasks", () => {
     const props = createProps(createTask({ column: "in-review", status: "idle" }));
     const { container } = render(<GraphTaskNode {...props} />);
 
+    const node = screen.getByTestId("graph-task-node-FN-TEST");
     expect(container.querySelector(".graph-task-active-indicator")).toBeFalsy();
-    expect(screen.getByTestId("graph-task-node-FN-TEST").className).not.toContain("graph-task-node--active");
+    expect(node.className).toContain("graph-task-node--in-review");
+    expect(node.className).not.toContain("graph-task-node--active");
+  });
+
+  it.each(["todo", "triage", "in-progress"] as const)("does not apply in-review class for %s tasks", (column) => {
+    const props = createProps(createTask({ column, status: column === "in-progress" ? "executing" : "idle" }));
+
+    render(<GraphTaskNode {...props} />);
+    expect(screen.getByTestId("graph-task-node-FN-TEST").className).not.toContain("graph-task-node--in-review");
   });
 
   it("does not render active indicator for paused in-progress tasks", () => {

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { Task } from "@fusion/core";
 import { DependencyGraph } from "../DependencyGraph";
@@ -42,35 +42,61 @@ describe("DependencyGraph", () => {
     expect(screen.getByText(/No active tasks/i)).toBeTruthy();
   });
 
-  it("renders graph task nodes at layout coordinates and edges", () => {
-    const { container } = render(<DependencyGraph tasks={[
-      createTask("A", "todo"),
-      createTask("B", "in-progress", ["A"]),
-    ]} onOpenTaskDetail={vi.fn()} />);
+  it("renders only triage/todo/in-progress/in-review nodes from mixed columns", () => {
+    render(
+      <DependencyGraph
+        tasks={[
+          createTask("A", "triage"),
+          createTask("B", "todo"),
+          createTask("C", "in-progress"),
+          createTask("D", "in-review"),
+          createTask("E", "done"),
+          createTask("F", "archived"),
+        ]}
+        onOpenTaskDetail={vi.fn()}
+      />,
+    );
 
     expect(screen.getByTestId("graph-task-node-A")).toBeTruthy();
     expect(screen.getByTestId("graph-task-node-B")).toBeTruthy();
-    expect(container.querySelector(".dependency-graph__nodes-layer")).toBeTruthy();
-    expect(screen.getAllByTestId("dependency-edge")).toHaveLength(1);
-
-    const nodeAStyle = screen.getByTestId("graph-task-node-A").getAttribute("style") ?? "";
-    const nodeBStyle = screen.getByTestId("graph-task-node-B").getAttribute("style") ?? "";
-    expect(nodeAStyle).toContain("left:");
-    expect(nodeAStyle).toContain("top:");
-    expect(nodeBStyle).toContain("left:");
-    expect(nodeBStyle).toContain("top:");
+    expect(screen.getByTestId("graph-task-node-C")).toBeTruthy();
+    expect(screen.getByTestId("graph-task-node-D")).toBeTruthy();
+    expect(screen.queryByTestId("graph-task-node-E")).toBeNull();
+    expect(screen.queryByTestId("graph-task-node-F")).toBeNull();
   });
 
-  it("excludes done and archived nodes", () => {
-    render(<DependencyGraph tasks={[
-      createTask("A", "todo"),
-      createTask("B", "done"),
-      createTask("C", "archived"),
-    ]} onOpenTaskDetail={vi.fn()} />);
+  it("renders zero nodes and edges when only done tasks are provided", () => {
+    const { container } = render(<DependencyGraph tasks={[createTask("A", "done", ["B"]), createTask("B", "done")]} onOpenTaskDetail={vi.fn()} />);
+
+    expect(container.querySelectorAll("[data-testid^='graph-task-node-']")).toHaveLength(0);
+    expect(screen.queryAllByTestId("dependency-edge")).toHaveLength(0);
+  });
+
+  it("renders zero nodes and edges when only archived tasks are provided", () => {
+    const { container } = render(
+      <DependencyGraph tasks={[createTask("A", "archived", ["B"]), createTask("B", "archived")]} onOpenTaskDetail={vi.fn()} />,
+    );
+
+    expect(container.querySelectorAll("[data-testid^='graph-task-node-']")).toHaveLength(0);
+    expect(screen.queryAllByTestId("dependency-edge")).toHaveLength(0);
+  });
+
+  it("drops edge from in-review task to done dependency while keeping node", () => {
+    const { container } = render(<DependencyGraph tasks={[createTask("A", "in-review", ["B"]), createTask("B", "done")]} onOpenTaskDetail={vi.fn()} />);
 
     expect(screen.getByTestId("graph-task-node-A")).toBeTruthy();
     expect(screen.queryByTestId("graph-task-node-B")).toBeNull();
-    expect(screen.queryByTestId("graph-task-node-C")).toBeNull();
+    expect(screen.queryAllByTestId("dependency-edge")).toHaveLength(0);
+    expect(container.querySelector(".graph-task-node--in-review")).toBeTruthy();
+  });
+
+  it("renders edge between in-progress task and in-review dependency", () => {
+    render(<DependencyGraph tasks={[createTask("A", "in-progress", ["B"]), createTask("B", "in-review")]} onOpenTaskDetail={vi.fn()} />);
+
+    expect(screen.getByTestId("graph-task-node-A")).toBeTruthy();
+    expect(screen.getByTestId("graph-task-node-B")).toBeTruthy();
+    expect(screen.getAllByTestId("dependency-edge")).toHaveLength(1);
+    expect(screen.getByTestId("graph-task-node-B").className).toContain("graph-task-node--in-review");
   });
 
   it("renders embedded cards with native dragging disabled", () => {

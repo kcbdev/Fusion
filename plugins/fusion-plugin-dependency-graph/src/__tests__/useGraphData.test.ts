@@ -3,11 +3,11 @@ import { renderHook } from "@testing-library/react";
 import type { Task } from "@fusion/core";
 import { useGraphData } from "../useGraphData";
 
-function createTask(id: string, dependencies: string[] = []): Task {
+function createTask(id: string, column: Task["column"] = "todo", dependencies: string[] = []): Task {
   return {
     id,
     description: id,
-    column: "todo",
+    column,
     dependencies,
     steps: [],
     currentStep: 0,
@@ -27,42 +27,60 @@ describe("useGraphData", () => {
     expect(result.current.edges).toEqual([]);
   });
 
-  it("creates edges in dependent-to-dependency direction for chain", () => {
-    const tasks = [createTask("A", ["B"]), createTask("B", ["C"]), createTask("C")];
-    const { result } = renderHook(() => useGraphData(tasks));
-    expect(result.current.edges).toEqual([
-      { source: "A", target: "B" },
-      { source: "B", target: "C" },
-    ]);
+  describe("orphan dependencies to excluded tasks", () => {
+    it("drops dependency edge to done task while keeping dependent node", () => {
+      const filteredTasks = [createTask("A", "in-progress", ["DONE-1"])];
+      const { result } = renderHook(() => useGraphData(filteredTasks));
+
+      expect(result.current.nodes.map((node) => node.task.id)).toEqual(["A"]);
+      expect(result.current.edges).toEqual([]);
+    });
+
+    it("drops dependency edge to archived task while keeping dependent node", () => {
+      const filteredTasks = [createTask("A", "triage", ["ARCH-1"])];
+      const { result } = renderHook(() => useGraphData(filteredTasks));
+
+      expect(result.current.nodes.map((node) => node.task.id)).toEqual(["A"]);
+      expect(result.current.edges).toEqual([]);
+    });
+
+    it("keeps only included dependency edges when mixed dependencies are present", () => {
+      const filteredTasks = [createTask("A", "in-progress", ["B", "DONE-1", "ARCH-1"]), createTask("B", "todo")];
+      const { result } = renderHook(() => useGraphData(filteredTasks));
+
+      expect(result.current.nodes.map((node) => node.task.id)).toEqual(["A", "B"]);
+      expect(result.current.edges).toEqual([{ source: "A", target: "B" }]);
+    });
+
+    it("shows zero edges when all dependencies are excluded", () => {
+      const filteredTasks = [createTask("A", "in-progress", ["DONE-1", "ARCH-1"])];
+      const { result } = renderHook(() => useGraphData(filteredTasks));
+
+      expect(result.current.nodes.map((node) => node.task.id)).toEqual(["A"]);
+      expect(result.current.edges).toEqual([]);
+    });
   });
 
-  it("creates diamond dependency edges", () => {
-    const tasks = [
-      createTask("A", ["B", "C"]),
-      createTask("B", ["D"]),
-      createTask("C", ["D"]),
-      createTask("D"),
-    ];
-    const { result } = renderHook(() => useGraphData(tasks));
-    expect(result.current.edges).toEqual([
-      { source: "A", target: "B" },
-      { source: "A", target: "C" },
-      { source: "B", target: "D" },
-      { source: "C", target: "D" },
-    ]);
-  });
+  describe("in-review dependency edges", () => {
+    it("renders edges between in-review tasks", () => {
+      const tasks = [createTask("A", "in-review", ["B"]), createTask("B", "in-review")];
+      const { result } = renderHook(() => useGraphData(tasks));
 
-  it("drops orphan dependency references", () => {
-    const { result } = renderHook(() => useGraphData([createTask("A", ["Z"]), createTask("B", ["A"])]));
-    expect(result.current.edges).toEqual([{ source: "B", target: "A" }]);
-  });
+      expect(result.current.edges).toEqual([{ source: "A", target: "B" }]);
+    });
 
-  it("supports disconnected subgraphs", () => {
-    const tasks = [createTask("A", ["B"]), createTask("B"), createTask("X", ["Y"]), createTask("Y")];
-    const { result } = renderHook(() => useGraphData(tasks));
-    expect(result.current.edges).toEqual([
-      { source: "A", target: "B" },
-      { source: "X", target: "Y" },
-    ]);
+    it("renders edge from in-review task to in-progress task", () => {
+      const tasks = [createTask("A", "in-review", ["B"]), createTask("B", "in-progress")];
+      const { result } = renderHook(() => useGraphData(tasks));
+
+      expect(result.current.edges).toEqual([{ source: "A", target: "B" }]);
+    });
+
+    it("renders edge from in-progress task to in-review task", () => {
+      const tasks = [createTask("A", "in-progress", ["B"]), createTask("B", "in-review")];
+      const { result } = renderHook(() => useGraphData(tasks));
+
+      expect(result.current.edges).toEqual([{ source: "A", target: "B" }]);
+    });
   });
 });
