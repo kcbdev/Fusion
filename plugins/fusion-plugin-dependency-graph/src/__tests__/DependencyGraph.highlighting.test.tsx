@@ -100,6 +100,7 @@ describe("DependencyGraph highlighting", () => {
     expect(edgeCB?.className.baseVal || edgeCB?.className).toContain("graph-edge--highlighted");
 
     fireEvent.click(screen.getByTestId("task-C"));
+    expect(onOpenDetail).toHaveBeenCalledTimes(1);
     expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ id: "C" }));
   });
 

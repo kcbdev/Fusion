@@ -111,10 +111,11 @@ describe("DependencyGraph", () => {
     expect(fitToGraph).toHaveBeenCalled();
   });
 
-  it("clicking a card triggers onOpenDetail", () => {
+  it("clicking a card triggers onOpenDetail exactly once", () => {
     const onOpenDetail = vi.fn();
     render(<DependencyGraph tasks={[createTask("A", "in-progress")]} onOpenDetail={onOpenDetail} />);
     fireEvent.click(screen.getByTestId("task-A"));
+    expect(onOpenDetail).toHaveBeenCalledTimes(1);
     expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ id: "A" }));
   });
 

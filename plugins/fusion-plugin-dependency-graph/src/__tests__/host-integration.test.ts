@@ -1,8 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi, afterEach } from "vitest";
 import { definePlugin } from "@fusion/plugin-sdk";
 import { validatePluginManifest } from "@fusion/core";
-import plugin from "../index";
+import plugin, { DependencyGraphDashboardView } from "../index";
 import { getPluginViewId } from "../../../../packages/dashboard/app/plugins/pluginViewRegistry";
+
+vi.mock("@fusion/dashboard/app/components/TaskCard", () => ({
+  TaskCard: ({ task, onOpenDetail }: { task: { id: string }; onOpenDetail: (task: { id: string }) => void }) =>
+    createElement("button", { "data-testid": `task-${task.id}`, onClick: () => onOpenDetail(task) }, task.id),
+}));
+
+afterEach(() => {
+  cleanup();
+});
 
 describe("dependency graph plugin host integration contract", () => {
   it("declares dashboard view manifest shape", () => {
@@ -42,5 +53,21 @@ describe("dependency graph plugin host integration contract", () => {
     if (!view) throw new Error("missing dashboard view");
 
     expect(getPluginViewId(plugin.manifest.id, view.viewId)).toBe("plugin:fusion-plugin-dependency-graph:graph");
+  });
+
+  it("uses host openTaskDetail context when rendered through dashboard view entrypoint", () => {
+    const openTaskDetail = vi.fn();
+    render(
+      createElement(DependencyGraphDashboardView, {
+        context: {
+          tasks: [{ id: "FN-HOST", description: "FN-HOST", column: "todo", dependencies: [], steps: [], currentStep: 0, log: [] }],
+          openTaskDetail,
+        } as never,
+      }),
+    );
+
+    fireEvent.click(screen.getByTestId("task-FN-HOST"));
+    expect(openTaskDetail).toHaveBeenCalledTimes(1);
+    expect(openTaskDetail).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-HOST" }));
   });
 });

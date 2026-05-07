@@ -64,7 +64,7 @@ export function GraphTaskNode({
   onNodeDragEnd,
   ...taskCardProps
 }: GraphTaskNodeProps) {
-  const { task, globalPaused, taskStuckTimeoutMs, lastFetchTimeMs } = taskCardProps;
+  const { task, globalPaused, taskStuckTimeoutMs, lastFetchTimeMs, onOpenDetail } = taskCardProps;
   const isFailed = task.status === "failed";
   const isPaused = task.paused === true;
   const isStuck = isTaskStuck(task, taskStuckTimeoutMs, lastFetchTimeMs);
@@ -102,7 +102,13 @@ export function GraphTaskNode({
       data-current-step={isActive && hasValidCurrentStep ? String(task.currentStep) : undefined}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      onClick={onClick}
+      onClick={(event) => {
+        onClick?.(event);
+        if (event.defaultPrevented) {
+          return;
+        }
+        onOpenDetail(task);
+      }}
       onClickCapture={drag.onClickCapture}
       onPointerDown={drag.onPointerDown}
       onPointerMove={drag.onPointerMove}
@@ -114,7 +120,7 @@ export function GraphTaskNode({
           <span className="graph-task-active-indicator-text">{getStatusLabel(task.status)}</span>
         </div>
       ) : null}
-      <TaskCard {...taskCardProps} disableDrag={true} />
+      <TaskCard {...taskCardProps} onOpenDetail={() => {}} disableDrag={true} />
     </div>
   );
 }

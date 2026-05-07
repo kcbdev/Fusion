@@ -65,6 +65,7 @@ describe("dependency graph interactions", () => {
     render(<DependencyGraph tasks={[createTask("A", "in-progress")]} onOpenDetail={onOpenDetail} />);
 
     fireEvent.click(screen.getByTestId("task-A"));
+    expect(onOpenDetail).toHaveBeenCalledTimes(1);
     expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ id: "A" }));
     expect(screen.getAllByText(/Executing/).length).toBeGreaterThan(0);
   });

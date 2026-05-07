@@ -220,13 +220,26 @@ describe("GraphTaskNode", () => {
     expect(screen.getByTestId("graph-task-node-FN-TEST").hasAttribute("data-current-step")).toBe(false);
   });
 
-  it("clicking card opens task detail", () => {
+  it("clicking card opens task detail exactly once", () => {
     const props = createProps(createTask());
     const { container } = render(<GraphTaskNode {...props} />);
 
     const card = container.querySelector(".card");
     expect(card).toBeTruthy();
     fireEvent.click(card!);
+    expect(props.onOpenDetail).toHaveBeenCalledTimes(1);
+    expect(props.onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-TEST" }));
+  });
+
+  it("clicking active indicator surface opens task detail", () => {
+    const props = createProps(createTask({ column: "in-progress", status: "executing" }));
+    const { container } = render(<GraphTaskNode {...props} />);
+
+    const indicator = container.querySelector(".graph-task-active-indicator");
+    expect(indicator).toBeTruthy();
+    fireEvent.click(indicator!);
+
+    expect(props.onOpenDetail).toHaveBeenCalledTimes(1);
     expect(props.onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-TEST" }));
   });
 
