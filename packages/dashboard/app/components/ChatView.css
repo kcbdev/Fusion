@@ -406,6 +406,46 @@
   overflow-wrap: anywhere;
 }
 
+.chat-message-copy-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: var(--space-xs);
+  margin-left: auto;
+  width: calc(var(--space-lg) * 2);
+  height: calc(var(--space-lg) * 2);
+  min-width: calc(var(--space-lg) * 2);
+  min-height: calc(var(--space-lg) * 2);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface) 35%, transparent);
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+}
+
+.chat-message-copy-action:hover {
+  opacity: 1;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+}
+
+.chat-message-copy-action:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+  opacity: 1;
+}
+
+.chat-message-copy-action--success {
+  color: var(--color-success);
+}
+
+.chat-message-copy-action--error {
+  color: var(--color-error);
+}
+
 .chat-message-content--markdown > :first-child {
   margin-top: 0;
 }
@@ -1160,6 +1200,14 @@
 
   .chat-message--assistant .chat-message-render-toggle {
     opacity: 1;
+  }
+
+  .chat-message-copy-action {
+    opacity: 1;
+    width: calc(var(--space-lg) * 2.25);
+    height: calc(var(--space-lg) * 2.25);
+    min-width: calc(var(--space-lg) * 2.25);
+    min-height: calc(var(--space-lg) * 2.25);
   }
 
   .chat-tool-calls-group-summary,

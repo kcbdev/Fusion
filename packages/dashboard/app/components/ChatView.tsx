@@ -20,6 +20,8 @@ import {
   File,
   Wrench,
   ChevronDown,
+  Copy,
+  Check,
 } from "lucide-react";
 import { useChat, type ChatMessageInfo, type ToolCallInfo } from "../hooks/useChat";
 import { useViewportMode } from "./Header";
@@ -541,6 +543,8 @@ function NewChatDialog({ projectId, onClose, onCreate }: NewChatDialogProps) {
 
 
 
+type CopyFeedbackState = "success" | "error" | null;
+
 interface ChatMessageItemProps {
   message: ChatMessageInfo;
   /**
@@ -562,6 +566,7 @@ interface ChatMessageItemProps {
   activeModelProvider: string | null;
   activeSessionId: string | null;
   mentionAgentsByName: Map<string, Agent>;
+  copyAction?: ReactNode;
 }
 
 // Renders a single chat message bubble. Memoized so the streaming bubble's
@@ -577,6 +582,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
   activeModelProvider,
   activeSessionId,
   mentionAgentsByName,
+  copyAction,
 }: ChatMessageItemProps) {
   const isAssistantMessage = message.role === "assistant";
 
@@ -684,6 +690,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
       {isAssistantMessage
         ? assistantBody
         : <div className="chat-message-content">{renderedUserContent}</div>}
+      {copyAction}
       {renderToolCalls(message.toolCalls)}
       {message.thinkingOutput && (
         <details className="chat-message-thinking">
@@ -745,6 +752,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
+  const [copyFeedbackByMessageId, setCopyFeedbackByMessageId] = useState<Record<string, CopyFeedbackState>>({});
 
   // File mention state and hook
   const [, setFileMentionPopupVisible] = useState(false);
@@ -775,6 +783,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingAttachmentsRef = useRef<PendingAttachment[]>([]);
   const mentionCursorPosRef = useRef(0);
+  const copyFeedbackTimeoutsRef = useRef<Map<string, number>>(new Map());
   const mode = useViewportMode();
   const isMobile = mode === "mobile";
 
@@ -1013,6 +1022,10 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
           URL.revokeObjectURL(attachment.previewUrl);
         }
       }
+      for (const timeoutId of copyFeedbackTimeoutsRef.current.values()) {
+        window.clearTimeout(timeoutId);
+      }
+      copyFeedbackTimeoutsRef.current.clear();
     };
   }, []);
 
@@ -1567,6 +1580,37 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
     setShowAllAsPlain((value) => !value);
   }, []);
 
+  const setCopyFeedback = useCallback((messageId: string, feedback: CopyFeedbackState) => {
+    const existingTimeout = copyFeedbackTimeoutsRef.current.get(messageId);
+    if (existingTimeout) {
+      window.clearTimeout(existingTimeout);
+    }
+
+    setCopyFeedbackByMessageId((current) => ({ ...current, [messageId]: feedback }));
+
+    const timeoutId = window.setTimeout(() => {
+      setCopyFeedbackByMessageId((current) => {
+        const { [messageId]: _removed, ...rest } = current;
+        return rest;
+      });
+      copyFeedbackTimeoutsRef.current.delete(messageId);
+    }, 2000);
+
+    copyFeedbackTimeoutsRef.current.set(messageId, timeoutId);
+  }, []);
+
+  const handleCopyResponse = useCallback(async (messageId: string, content: string) => {
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("Clipboard API unavailable");
+      }
+      await navigator.clipboard.writeText(content);
+      setCopyFeedback(messageId, "success");
+    } catch {
+      setCopyFeedback(messageId, "error");
+    }
+  }, [setCopyFeedback]);
+
   const renderAssistantContent = useCallback(
     (content: string, forcePlain = false) => {
       const showPlainText = forcePlain;
@@ -1584,6 +1628,22 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
     },
     [],
   );
+
+  const showProviderResponseCopy = activeSession?.agentId === FN_AGENT_ID;
+
+  const renderCopyAction = useCallback((messageId: string, content: string, testId?: string) => (
+    <button
+      type="button"
+      className={`btn-icon chat-message-copy-action${copyFeedbackByMessageId[messageId] === "success" ? " chat-message-copy-action--success" : ""}${copyFeedbackByMessageId[messageId] === "error" ? " chat-message-copy-action--error" : ""}`}
+      data-testid={testId ?? `chat-copy-response-${messageId}`}
+      aria-label={copyFeedbackByMessageId[messageId] === "success" ? "Response copied" : copyFeedbackByMessageId[messageId] === "error" ? "Copy failed" : "Copy response"}
+      onClick={() => {
+        void handleCopyResponse(messageId, content);
+      }}
+    >
+      {copyFeedbackByMessageId[messageId] === "success" ? <Check size={14} /> : <Copy size={14} />}
+    </button>
+  ), [copyFeedbackByMessageId, handleCopyResponse]);
 
   return (
     <div className="chat-view">
@@ -1798,6 +1858,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
                   activeModelProvider={activeModelProvider}
                   activeSessionId={activeSession?.id ?? null}
                   mentionAgentsByName={mentionAgentsByName}
+                  copyAction={showProviderResponseCopy && message.role === "assistant" ? renderCopyAction(message.id, message.content) : undefined}
                 />
               ))}
               <div className="chat-message chat-message--assistant chat-message--streaming">
@@ -1815,6 +1876,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
                     {streamingThinking ? "Thinking…" : "Connecting…"}
                   </div>
                 )}
+                {showProviderResponseCopy && streamingText && renderCopyAction("__streaming__", streamingText, "chat-copy-response-streaming")}
                 {renderToolCalls(streamingToolCalls)}
                 {streamingThinking && (
                   <details className="chat-message-thinking">
@@ -1851,6 +1913,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
                   activeModelProvider={activeModelProvider}
                   activeSessionId={activeSession?.id ?? null}
                   mentionAgentsByName={mentionAgentsByName}
+                  copyAction={showProviderResponseCopy && message.role === "assistant" ? renderCopyAction(message.id, message.content) : undefined}
                 />
               ))}
             </>
