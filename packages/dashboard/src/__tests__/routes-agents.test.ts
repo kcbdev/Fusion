@@ -3174,7 +3174,7 @@ describe("Messaging Routes", () => {
     expect(executeHeartbeat).not.toHaveBeenCalled();
   });
 
-  it("uses project-scoped heartbeat monitor resolution when default monitor belongs to another root", async () => {
+  it("no-ops wakeImmediately when monitor root does not match and no scoped project context is provided", async () => {
     const defaultExecuteHeartbeat = vi.fn().mockResolvedValue({ id: "run-default" });
     const projectExecuteHeartbeat = vi.fn().mockResolvedValue({ id: "run-project" });
 
@@ -3217,11 +3217,7 @@ describe("Messaging Routes", () => {
 
     expect(res.status).toBe(201);
     expect(defaultExecuteHeartbeat).not.toHaveBeenCalled();
-    expect(projectExecuteHeartbeat).toHaveBeenCalledWith({
-      agentId: "agent-project-scope",
-      source: "on_demand",
-      triggerDetail: "wake-on-message",
-    });
+    expect(projectExecuteHeartbeat).not.toHaveBeenCalled();
   });
 
   it("returns created message even when wakeImmediately execution throws", async () => {

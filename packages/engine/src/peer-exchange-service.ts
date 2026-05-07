@@ -475,9 +475,10 @@ export class PeerExchangeService {
       const result = await core.applyProjectSettingsSnapshot(sharedState.projectSettings);
       if (sharedState.authMaterial && core.applyAuthMaterialSnapshot) {
         const authResult = core.applyAuthMaterialSnapshot(sharedState.authMaterial);
+        const authResultWithCount = authResult as { authCount?: number };
         const authCount =
-          typeof (authResult as { authCount?: number }).authCount === "number"
-            ? (authResult as { authCount: number }).authCount
+          typeof authResultWithCount.authCount === "number"
+            ? authResultWithCount.authCount
             : Object.keys(sharedState.authMaterial.payload.providerAuth ?? {}).length;
         return { ...result, authCount: Math.max(result.authCount, authCount) };
       }

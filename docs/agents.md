@@ -110,6 +110,17 @@ Executor precedence for task runs:
 
 If the assigned agent runtime model is missing or incomplete, Fusion falls back to the normal task/settings execution hierarchy.
 
+### Assigned-agent identity + planning model precedence for task triage
+
+When a triage/specification run targets a task with `assignedAgentId` and that agent is durable, planning now inherits the assigned agent context instead of only generic triage-role defaults.
+
+Triage inheritance behavior:
+1. The triage system prompt includes assigned-agent identity context and resolves instructions/soul/memory from that agent (including existing rating-aware instruction composition)
+2. Triage memory tools are created with assigned-agent memory context (`createMemoryTools(..., { agentMemory })`), so `fn_memory_search` / `fn_memory_get` can access `.fusion/agent-memory/{agentId}/...` during planning
+3. Planning model resolution prefers a complete assigned-agent runtime model pair first, then task planning overrides, then normal planning/project/global fallbacks
+
+As with execution, incomplete assigned-agent model configuration falls through cleanly to the existing planning hierarchy.
+
 ### Task Detail Agent Log model provenance
 
 The Task Detail → Agent Log model header prefers runtime provenance markers written during execution/review:
