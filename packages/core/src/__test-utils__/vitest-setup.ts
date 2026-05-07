@@ -67,16 +67,6 @@ const DEFAULT_TEST_SUBPROCESS_TIMEOUT_MS = Math.max(
 const BLOCKED_TEST_CLI_PATTERN =
   /(^|[\s"'\\/])(?:claude|droid|paperclipai|hermes|openclaw)(?:\.(?:cmd|bat|ps1|exe))?(?=$|[\s"'\\/])/i;
 
-const originalEmitWarning = process.emitWarning.bind(process);
-process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
-  const message = typeof warning === "string" ? warning : warning?.message ?? "";
-  const type = typeof args[0] === "string" ? args[0] : (args[0] as { type?: string } | undefined)?.type;
-  if (type === "ExperimentalWarning" && message.includes("SQLite is an experimental feature")) {
-    return;
-  }
-  return (originalEmitWarning as (...a: unknown[]) => void)(warning, ...args);
-}) as typeof process.emitWarning;
-
 const originalCwd = process.cwd.bind(process);
 
 function ensureValidCwd(): string {

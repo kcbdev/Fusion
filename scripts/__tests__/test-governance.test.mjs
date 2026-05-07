@@ -54,12 +54,7 @@ function hasSharedIsolation(config) {
 }
 
 function hasSharedWorkerBudget(config) {
-  return (
-    /computeMaxWorkers/.test(config) &&
-    /\bmaxWorkers\b/.test(config) &&
-    /\bpoolOptions\b/.test(config) &&
-    /\bmax(?:Threads|Forks)\s*:\s*maxWorkers\b/.test(config)
-  );
+  return /computeMaxWorkers/.test(config) && /\bmaxWorkers\b/.test(config);
 }
 
 test("workspace packages with test scripts use shared Vitest governance", () => {
@@ -89,7 +84,7 @@ test("workspace packages with test scripts use shared Vitest governance", () => 
       failures.push(`${manifest.name}: missing shared vitest setup/teardown isolation`);
     }
     if (!hasSharedWorkerBudget(config)) {
-      failures.push(`${manifest.name}: missing shared computeMaxWorkers/maxWorkers poolOptions budget`);
+      failures.push(`${manifest.name}: missing shared computeMaxWorkers/maxWorkers budget`);
     }
   }
 

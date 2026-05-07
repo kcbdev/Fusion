@@ -22,6 +22,11 @@ function loadRootPackageJson(): any {
   return JSON.parse(readFileSync(path, "utf-8"));
 }
 
+function hasProjectArg(script: string | undefined, project: string): boolean {
+  const parts = script?.trim().split(/\s+/) ?? [];
+  return parts.some((part, index) => part === "--project" && parts[index + 1] === project);
+}
+
 describe("CLI package.json publishing config", () => {
   const pkg = loadPackageJson("cli");
 
@@ -249,10 +254,18 @@ describe("Workspace bootstrap script contract", () => {
   });
 
   it("keeps dashboard's default test lane curated with explicit deep coverage", () => {
-    expect(dashboardPkg.scripts?.test).toContain("--project dashboard-app-quality");
-    expect(dashboardPkg.scripts?.test).toContain("--project dashboard-api-quality");
-    expect(dashboardPkg.scripts?.["test:deep"]).toContain("--project dashboard-app");
-    expect(dashboardPkg.scripts?.["test:deep"]).toContain("--project dashboard-api");
+    const defaultTest = dashboardPkg.scripts?.test;
+    const deepTest = dashboardPkg.scripts?.["test:deep"];
+
+    expect(hasProjectArg(defaultTest, "dashboard-app-quality")).toBe(true);
+    expect(hasProjectArg(defaultTest, "dashboard-api-quality")).toBe(true);
+    expect(hasProjectArg(defaultTest, "dashboard-app")).toBe(false);
+    expect(hasProjectArg(defaultTest, "dashboard-api")).toBe(false);
+
+    expect(hasProjectArg(deepTest, "dashboard-app")).toBe(true);
+    expect(hasProjectArg(deepTest, "dashboard-api")).toBe(true);
+    expect(hasProjectArg(deepTest, "dashboard-app-quality")).toBe(false);
+    expect(hasProjectArg(deepTest, "dashboard-api-quality")).toBe(false);
   });
 });
 

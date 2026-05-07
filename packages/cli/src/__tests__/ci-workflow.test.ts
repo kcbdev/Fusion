@@ -180,12 +180,20 @@ describe("PR checks workflow (.github/workflows/pr-checks.yml)", () => {
 
   it("keeps build coverage as an explicit PR gate", () => {
     const buildSteps = workflow.jobs?.build?.steps ?? [];
-    expect(buildSteps.some((step: any) => step.name === "Build" && step.run === "pnpm build")).toBe(true);
+    expect(
+      buildSteps.some(
+        (step: any) => step.name === "Build" && typeof step.run === "string" && step.run.includes("pnpm build"),
+      ),
+    ).toBe(true);
   });
 
   it("does not spend PR action minutes on a pre-test workspace build", () => {
     const testSteps = workflow.jobs?.["test-shards"]?.steps ?? [];
-    expect(testSteps.some((step: any) => step.name === "Build" || step.run === "pnpm build")).toBe(false);
+    expect(
+      testSteps.some(
+        (step: any) => step.name === "Build" || (typeof step.run === "string" && step.run.includes("pnpm build")),
+      ),
+    ).toBe(false);
   });
 });
 
