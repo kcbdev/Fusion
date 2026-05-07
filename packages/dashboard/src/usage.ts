@@ -1191,11 +1191,11 @@ async function fetchCodexUsage(): Promise<ProviderUsage> {
         : undefined;
 
       let resetAt: string | undefined;
-      if (win.reset_at) {
-        const msLeft = win.reset_at * 1000 - Date.now();
-        resetMs = msLeft > 0 ? msLeft : 0;
-        resetText = msLeft > 0 ? `resets in ${formatDuration(msLeft)}` : "resetting now";
-        resetAt = new Date(win.reset_at * 1000).toISOString();
+      const parsedReset = _parseResetTimestamp(win.reset_at);
+      if (parsedReset) {
+        resetMs = parsedReset.msLeft;
+        resetText = `resets in ${formatDuration(parsedReset.msLeft)}`;
+        resetAt = parsedReset.resetAt;
       } else if (win.reset_after_seconds) {
         resetMs = win.reset_after_seconds * 1000;
         resetText = `resets in ${formatDuration(resetMs)}`;

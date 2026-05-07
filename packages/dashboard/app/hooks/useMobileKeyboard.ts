@@ -133,8 +133,9 @@ export function useMobileKeyboard(
       return;
     }
 
-    // Full update for resize + focus transitions (real keyboard
-    // open/close events).
+    // Full update — used on resize and focus transitions. These are the
+    // events that signal an actual keyboard open/close, so we want to
+    // re-snapshot offsetTop/height/overlap.
     const update = () => {
       const metrics = getKeyboardMetrics();
       setKeyboardOverlap(metrics.overlap);
@@ -143,13 +144,13 @@ export function useMobileKeyboard(
       setKeyboardOpen(metrics.open);
     };
 
-    // Scroll-only update: visualViewport.scroll fires at 60fps during
-    // an iOS pan with the keyboard up. Routing offsetTop through React
-    // state on every event amplifies the pan into a visible judder via
-    // the .chat-thread translateY(--vv-offset-top) transform. We skip
-    // offsetTop here; it stays pinned to whatever resize/focus last
-    // captured. Other metrics still update so a true viewport shrink
-    // is reflected.
+    // Scroll-only update — fires on every visualViewport pan (60fps on
+    // iOS during a swipe with the keyboard up). Updating offsetTop on
+    // each event amplifies jitter into the .chat-thread transform that
+    // tracks --vv-offset-top, visibly judders the thread, and can shift
+    // it hundreds of px. We deliberately skip offsetTop here and only
+    // update height/keyboardOpen if those changed; offsetTop stays
+    // pinned to whatever resize/focus last set it.
     const updateScrollOnly = () => {
       const metrics = getKeyboardMetrics();
       setKeyboardOverlap(metrics.overlap);

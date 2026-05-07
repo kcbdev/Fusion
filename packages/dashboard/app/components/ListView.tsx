@@ -540,7 +540,6 @@ export function ListView({
         return sortDirection === "asc" ? comparison : -comparison;
       });
     }
-
     return groups;
   }, [tasks, searchQuery, sortField, sortDirection, hideDoneTasks, selectedColumn]);
 

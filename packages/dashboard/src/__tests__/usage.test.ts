@@ -1935,6 +1935,56 @@ describe("usage", () => {
       const expectedMs = Date.now() + 7200 * 1000;
       expect(Math.abs(resetAtDate.getTime() - expectedMs)).toBeLessThan(1000);
     });
+
+    it("calculates weekly pace correctly when Codex reset_at is epoch milliseconds", async () => {
+      const fiveDaysMs = 5 * 24 * 60 * 60 * 1000;
+      const weeklyResetAtMs = Date.now() + fiveDaysMs;
+      const mockResponse = {
+        rate_limit: {
+          secondary_window: {
+            used_percent: 40,
+            limit_window_seconds: 7 * 24 * 60 * 60,
+            reset_at: weeklyResetAtMs,
+          },
+        },
+      };
+
+      mockReadFile.mockImplementation((path: string) => {
+        if (path.includes("codex")) {
+          return JSON.stringify({
+            tokens: {
+              access_token: "test-token",
+            },
+          });
+        }
+        return Promise.reject(new Error("File not found"));
+      });
+
+      const mockReq = { on: vi.fn(), write: vi.fn(), end: vi.fn() };
+      mockRequest.mockImplementation((_options: any, callback: any) => {
+        const mockRes = {
+          statusCode: 200,
+          headers: {},
+          on: vi.fn((event: string, handler: any) => {
+            if (event === "data") handler(Buffer.from(JSON.stringify(mockResponse)));
+            if (event === "end") handler();
+          }),
+        };
+        callback(mockRes);
+        return mockReq;
+      });
+
+      const providers = await fetchAllProviderUsage();
+      const codex = providers.find((p) => p.name === "Codex")!;
+      const weeklyWindow = codex.windows.find((w) => w.label === "Weekly")!;
+
+      expect(weeklyWindow.resetMs).toBeGreaterThan(4.9 * 24 * 60 * 60 * 1000);
+      expect(weeklyWindow.resetMs).toBeLessThanOrEqual(5 * 24 * 60 * 60 * 1000);
+      expect(weeklyWindow.pace).toBeDefined();
+      expect(weeklyWindow.pace!.percentElapsed).toBe(29);
+      expect(weeklyWindow.pace!.status).toBe("ahead");
+      expect(weeklyWindow.pace!.message).toBe("11% over pace");
+    });
   });
 
   describe("Gemini provider", () => {
