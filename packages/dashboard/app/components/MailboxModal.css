@@ -889,12 +889,16 @@
   align-items: center;
   gap: var(--space-sm);
   font-size: 0.85rem;
-  color: var(--text-secondary, var(--text-muted));
+  color: var(--text-muted);
   cursor: pointer;
 }
 
 .message-composer-wake-label input[type="checkbox"] {
   margin: 0;
+}
+
+.message-composer-wake-label:has(input:disabled) {
+  cursor: default;
 }
 
 .message-composer-wake-hint {

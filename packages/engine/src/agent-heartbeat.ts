@@ -401,8 +401,9 @@ export const HEARTBEAT_PROCEDURE = `## Heartbeat Procedure (run every tick, in o
    you expect, and surface any anomalies in your first text output before
    doing anything else. The full content is in the Custom Instructions
    section of your system prompt.
-2. **Inbox** — when fn_read_messages is available, call it. Process any pending
-   messages first; reply with reply_to_message_id when answering.
+2. **Inbox** — when fn_read_messages is available, call it immediately and
+   process unread/pending messages before any other action; reply with
+   reply_to_message_id when answering.
 3. **Wake delta** — read the Wake Delta block above. The wake reason is the
    highest-priority change for this heartbeat. If you were woken by a comment
    or a message, acknowledge it before doing anything else.
@@ -433,8 +434,9 @@ export const HEARTBEAT_NO_TASK_PROCEDURE = `## Heartbeat Procedure (run every ti
    you expect, and surface any anomalies in your first text output before
    doing anything else. The full content is in the Custom Instructions
    section of your system prompt.
-2. **Inbox** — when fn_read_messages is available, call it. Process any pending
-   messages first; reply with reply_to_message_id when answering.
+2. **Inbox** — when fn_read_messages is available, call it immediately and
+   process unread/pending messages before any other action; reply with
+   reply_to_message_id when answering.
 3. **Wake delta** — read the Wake Delta block above. The wake reason is the
    highest-priority change for this heartbeat. If you were woken by a comment
    or a message, acknowledge it before doing anything else.

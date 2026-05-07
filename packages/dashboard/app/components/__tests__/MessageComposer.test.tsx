@@ -197,7 +197,7 @@ describe("MessageComposer", () => {
     });
   });
 
-  it("forwards wakeRecipient metadata when the wake checkbox is ticked for an agent recipient", async () => {
+  it("forwards wakeImmediately when the wake checkbox is ticked for an agent recipient", async () => {
     render(<MessageComposer {...defaultProps} agents={mockAgents} />);
     fireEvent.change(screen.getByTestId("message-composer-recipient"), {
       target: { value: "agent-001" },
@@ -211,14 +211,14 @@ describe("MessageComposer", () => {
     await waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalledWith(
         expect.objectContaining({
-          metadata: { wakeRecipient: true },
+          wakeImmediately: true,
         }),
         undefined,
       );
     });
   });
 
-  it("merges wakeRecipient with replyTo metadata when replying", async () => {
+  it("sends wakeImmediately alongside replyTo metadata when replying", async () => {
     render(
       <MessageComposer
         {...defaultProps}
@@ -236,9 +236,9 @@ describe("MessageComposer", () => {
     await waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalledWith(
         expect.objectContaining({
+          wakeImmediately: true,
           metadata: {
             replyTo: { messageId: "msg-orig" },
-            wakeRecipient: true,
           },
         }),
         undefined,
@@ -246,7 +246,7 @@ describe("MessageComposer", () => {
     });
   });
 
-  it("omits wakeRecipient metadata when the checkbox is left unchecked", async () => {
+  it("omits wakeImmediately when the checkbox is left unchecked", async () => {
     render(<MessageComposer {...defaultProps} agents={mockAgents} />);
     fireEvent.change(screen.getByTestId("message-composer-recipient"), {
       target: { value: "agent-001" },
@@ -258,8 +258,38 @@ describe("MessageComposer", () => {
 
     await waitFor(() => {
       const callArgs = mockSendMessage.mock.calls[0][0];
-      expect(callArgs.metadata).toBeUndefined();
+      expect(callArgs.wakeImmediately).toBeUndefined();
     });
+  });
+
+  it("locks wake checkbox as checked when selected agent is already immediate mode", () => {
+    const immediateAgents: Agent[] = [
+      {
+        ...mockAgents[0],
+        runtimeConfig: { messageResponseMode: "immediate" },
+      },
+    ];
+    render(<MessageComposer {...defaultProps} agents={immediateAgents} />);
+    fireEvent.change(screen.getByTestId("message-composer-recipient"), {
+      target: { value: "agent-001" },
+    });
+
+    const wakeCheckbox = screen.getByTestId("message-composer-wake") as HTMLInputElement;
+    expect(wakeCheckbox.checked).toBe(true);
+    expect(wakeCheckbox.disabled).toBe(true);
+    expect(screen.getByTestId("message-composer-wake-hint").textContent).toContain("already set to immediate response mode");
+  });
+
+  it("hides wake checkbox for non-agent recipients", () => {
+    render(
+      <MessageComposer
+        {...defaultProps}
+        agents={mockAgents}
+        recipient={{ id: "dashboard", type: "user" }}
+      />,
+    );
+
+    expect(screen.queryByTestId("message-composer-wake")).toBeNull();
   });
 
   it("passes projectId to sendMessage", async () => {

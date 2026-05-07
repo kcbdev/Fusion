@@ -7613,6 +7613,7 @@ export interface SendMessageInput {
   content: string;
   type: MessageType;
   metadata?: MessageMetadata;
+  wakeImmediately?: boolean;
 }
 
 /** Fetch inbox messages for the current user. */

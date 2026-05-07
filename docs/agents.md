@@ -639,7 +639,18 @@ The `messageResponseMode` runtime configuration controls when agents are trigger
 | `immediate` | Agent wakes immediately when a message arrives (via hook callback) |
 | `on-heartbeat` | Agent processes messages during normal heartbeat runs only |
 
+In the dashboard **Agent Settings** UI, this is surfaced as **Message Response Mode** with matching help text.
+
 **Important**: Both modes include messages in the execution prompt. The `immediate` mode additionally triggers an immediate heartbeat run when a message arrives, while `on-heartbeat` relies on the agent's next scheduled heartbeat.
+
+### One-off send-time immediate wake override
+
+When sending a message to an agent from the dashboard mailbox composer, users can optionally enable **Wake agent immediately** for that send.
+
+- The checkbox is shown only for agent recipients.
+- If the target agent already uses `messageResponseMode: "immediate"`, the checkbox is shown as checked/locked to reflect that wake behavior is already always-on.
+- The send-time `wakeImmediately` flag is transport-level only; it does **not** change the agent's saved `runtimeConfig.messageResponseMode`.
+- On successful send with `wakeImmediately: true`, the API best-effort invokes an on-demand heartbeat (`triggerDetail: "wake-on-message"`) in the correct project scope.
 
 ### Message Visibility
 

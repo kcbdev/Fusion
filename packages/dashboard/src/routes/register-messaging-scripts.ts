@@ -1,11 +1,12 @@
 import type { Request } from "express";
+import { resolve } from "node:path";
 import { DASHBOARD_USER_ID, MessageStore, type MessageType, type ParticipantType, validateMessageMetadata } from "@fusion/core";
 import { ApiError, badRequest, notFound } from "../api-error.js";
 import { getTerminalService } from "../terminal-service.js";
 import type { ApiRoutesContext } from "./types.js";
 
 export function registerMessagingScriptRoutes(ctx: ApiRoutesContext): void {
-  const { router, options, getProjectContext, rethrowAsApiError } = ctx;
+  const { router, options, getProjectContext, rethrowAsApiError, runtimeLogger } = ctx;
 
   // ── Scripts API ──────────────────────────────────────────────────────────
 
@@ -190,6 +191,44 @@ export function registerMessagingScriptRoutes(ctx: ApiRoutesContext): void {
 
   const VALID_MESSAGE_TYPES: MessageType[] = ["agent-to-agent", "agent-to-user", "user-to-agent", "system"];
   const VALID_PARTICIPANT_TYPES: ParticipantType[] = ["agent", "user", "system"];
+  type HeartbeatMonitorHandle = NonNullable<NonNullable<ApiRoutesContext["options"]>["heartbeatMonitor"]>;
+  const heartbeatMonitor = options?.heartbeatMonitor;
+
+  function isHeartbeatMonitorForProject(scopedStore: import("@fusion/core").TaskStore): boolean {
+    if (!heartbeatMonitor?.rootDir) return true;
+    try {
+      const monitorRoot = resolve(heartbeatMonitor.rootDir);
+      const storeRoot = resolve(scopedStore.getRootDir());
+      return monitorRoot === storeRoot;
+    } catch {
+      return true;
+    }
+  }
+
+  function resolveHeartbeatMonitor(scopedStore: import("@fusion/core").TaskStore): HeartbeatMonitorHandle | undefined {
+    const engineManager = options?.engineManager;
+    if (!engineManager) return undefined;
+    try {
+      const storeRoot = resolve(scopedStore.getRootDir());
+      for (const engine of engineManager.getAllEngines().values()) {
+        if (resolve(engine.getWorkingDirectory()) === storeRoot) {
+          const monitor = engine.getHeartbeatMonitor();
+          if (!monitor) {
+            return undefined;
+          }
+          return {
+            rootDir: engine.getWorkingDirectory(),
+            startRun: monitor.startRun.bind(monitor),
+            executeHeartbeat: monitor.executeHeartbeat.bind(monitor),
+            stopRun: monitor.stopRun.bind(monitor),
+          };
+        }
+      }
+    } catch {
+      // no-op: fallback handled by caller
+    }
+    return undefined;
+  }
 
   router.get("/messages/inbox", async (req, res) => {
     try {
@@ -258,7 +297,7 @@ export function registerMessagingScriptRoutes(ctx: ApiRoutesContext): void {
 
   router.post("/messages", async (req, res) => {
     try {
-      const { toId, toType, content, type, metadata } = req.body;
+      const { toId, toType, content, type, metadata, wakeImmediately } = req.body;
 
       if (!toId || typeof toId !== "string") {
         throw badRequest("toId is required");
@@ -275,6 +314,9 @@ export function registerMessagingScriptRoutes(ctx: ApiRoutesContext): void {
 
       if (metadata !== undefined && (typeof metadata !== "object" || metadata === null || Array.isArray(metadata))) {
         throw badRequest("metadata must be an object");
+      }
+      if (wakeImmediately !== undefined && typeof wakeImmediately !== "boolean") {
+        throw badRequest("wakeImmediately must be a boolean");
       }
 
       try {
@@ -293,6 +335,28 @@ export function registerMessagingScriptRoutes(ctx: ApiRoutesContext): void {
         type,
         metadata,
       });
+
+      const shouldWakeImmediately = toType === "agent" && (wakeImmediately === true || metadata?.wakeRecipient === true);
+      if (shouldWakeImmediately) {
+        try {
+          const { store: scopedStore } = await getProjectContext(req);
+          const resolvedMonitor =
+            isHeartbeatMonitorForProject(scopedStore)
+              ? heartbeatMonitor
+              : resolveHeartbeatMonitor(scopedStore);
+
+          if (resolvedMonitor) {
+            await resolvedMonitor.executeHeartbeat({
+              agentId: toId,
+              source: "on_demand",
+              triggerDetail: "wake-on-message",
+            });
+          }
+        } catch (wakeErr) {
+          runtimeLogger.warn(`POST /api/messages wakeImmediately best-effort wake failed: ${wakeErr instanceof Error ? wakeErr.message : String(wakeErr)}`);
+        }
+      }
+
       res.status(201).json(message);
     } catch (err: unknown) {
       if (err instanceof ApiError) {

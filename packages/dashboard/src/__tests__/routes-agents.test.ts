@@ -3104,6 +3104,198 @@ describe("Messaging Routes", () => {
     expect(res.body.id).toBe("msg-runtime-1");
   });
 
+  it("triggers executeHeartbeat when wakeImmediately is true for agent recipients", async () => {
+    const executeHeartbeat = vi.fn().mockResolvedValue({ id: "run-1" });
+    const wakeApp = express();
+    wakeApp.use(express.json());
+    wakeApp.use("/api", createApiRoutes(store, {
+      heartbeatMonitor: { executeHeartbeat, rootDir } as any,
+    }));
+
+    const res = await REQUEST(
+      wakeApp,
+      "POST",
+      "/api/messages",
+      JSON.stringify({
+        toId: "agent-wake-1",
+        toType: "agent",
+        content: "wake now",
+        type: "user-to-agent",
+        wakeImmediately: true,
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(executeHeartbeat).toHaveBeenCalledWith({
+      agentId: "agent-wake-1",
+      source: "on_demand",
+      triggerDetail: "wake-on-message",
+    });
+  });
+
+  it("does not trigger executeHeartbeat when wakeImmediately is omitted/false or recipient is not an agent", async () => {
+    const executeHeartbeat = vi.fn().mockResolvedValue({ id: "run-1" });
+    const wakeApp = express();
+    wakeApp.use(express.json());
+    wakeApp.use("/api", createApiRoutes(store, {
+      heartbeatMonitor: { executeHeartbeat, rootDir } as any,
+    }));
+
+    const noWake = await REQUEST(
+      wakeApp,
+      "POST",
+      "/api/messages",
+      JSON.stringify({
+        toId: "agent-no-wake",
+        toType: "agent",
+        content: "normal message",
+        type: "user-to-agent",
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    const userRecipient = await REQUEST(
+      wakeApp,
+      "POST",
+      "/api/messages",
+      JSON.stringify({
+        toId: "dashboard",
+        toType: "user",
+        content: "user message",
+        type: "system",
+        wakeImmediately: true,
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(noWake.status).toBe(201);
+    expect(userRecipient.status).toBe(201);
+    expect(executeHeartbeat).not.toHaveBeenCalled();
+  });
+
+  it("uses project-scoped heartbeat monitor resolution when default monitor belongs to another root", async () => {
+    const defaultExecuteHeartbeat = vi.fn().mockResolvedValue({ id: "run-default" });
+    const projectExecuteHeartbeat = vi.fn().mockResolvedValue({ id: "run-project" });
+
+    const engineManager = {
+      getAllEngines: vi.fn().mockReturnValue(new Map([
+        [
+          "project-1",
+          {
+            getWorkingDirectory: () => rootDir,
+            getHeartbeatMonitor: () => ({ executeHeartbeat: projectExecuteHeartbeat }),
+          },
+        ],
+      ])),
+    };
+
+    const wakeApp = express();
+    wakeApp.use(express.json());
+    wakeApp.use("/api", createApiRoutes(store, {
+      heartbeatMonitor: { executeHeartbeat: defaultExecuteHeartbeat, rootDir: join(rootDir, "other-project") } as any,
+      engineManager: engineManager as any,
+    }));
+
+    const res = await REQUEST(
+      wakeApp,
+      "POST",
+      "/api/messages",
+      JSON.stringify({
+        toId: "agent-project-scope",
+        toType: "agent",
+        content: "wake in scoped project",
+        type: "user-to-agent",
+        wakeImmediately: true,
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(defaultExecuteHeartbeat).not.toHaveBeenCalled();
+    expect(projectExecuteHeartbeat).toHaveBeenCalledWith({
+      agentId: "agent-project-scope",
+      source: "on_demand",
+      triggerDetail: "wake-on-message",
+    });
+  });
+
+  it("returns created message even when wakeImmediately execution throws", async () => {
+    const executeHeartbeat = vi.fn().mockRejectedValue(new Error("wake failed"));
+    const wakeApp = express();
+    wakeApp.use(express.json());
+    wakeApp.use("/api", createApiRoutes(store, {
+      heartbeatMonitor: { executeHeartbeat, rootDir } as any,
+    }));
+
+    const res = await REQUEST(
+      wakeApp,
+      "POST",
+      "/api/messages",
+      JSON.stringify({
+        toId: "agent-wake-failure",
+        toType: "agent",
+        content: "wake best effort",
+        type: "user-to-agent",
+        wakeImmediately: true,
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(res.body.toId).toBe("agent-wake-failure");
+    expect(executeHeartbeat).toHaveBeenCalledTimes(1);
+  });
+
+  it("supports metadata.wakeRecipient as an immediate-wake request", async () => {
+    const executeHeartbeat = vi.fn().mockResolvedValue({ id: "run-1" });
+    const wakeApp = express();
+    wakeApp.use(express.json());
+    wakeApp.use("/api", createApiRoutes(store, {
+      heartbeatMonitor: { executeHeartbeat, rootDir } as any,
+    }));
+
+    const res = await REQUEST(
+      wakeApp,
+      "POST",
+      "/api/messages",
+      JSON.stringify({
+        toId: "agent-wake-meta",
+        toType: "agent",
+        content: "wake via metadata",
+        type: "user-to-agent",
+        metadata: { wakeRecipient: true },
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(executeHeartbeat).toHaveBeenCalledWith({
+      agentId: "agent-wake-meta",
+      source: "on_demand",
+      triggerDetail: "wake-on-message",
+    });
+  });
+
+  it("gracefully no-ops wakeImmediately when no heartbeat monitor is configured", async () => {
+    const res = await REQUEST(
+      app,
+      "POST",
+      "/api/messages",
+      JSON.stringify({
+        toId: "agent-no-monitor",
+        toType: "agent",
+        content: "wake request without monitor",
+        type: "user-to-agent",
+        wakeImmediately: true,
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(res.body.toId).toBe("agent-no-monitor");
+  });
+
   it("GET /api/messages/inbox returns dashboard inbox messages", async () => {
     const inboxMessage = messageStore.sendMessage({
       fromId: "agent-1",
@@ -3230,6 +3422,16 @@ describe("Messaging Routes", () => {
           metadata: { replyTo: { messageId: "" } },
         },
         message: "metadata.replyTo.messageId must be a non-empty string",
+      },
+      {
+        body: {
+          toId: "agent-1",
+          toType: "agent",
+          content: "x",
+          type: "user-to-agent",
+          wakeImmediately: "yes",
+        },
+        message: "wakeImmediately must be a boolean",
       },
     ];
 

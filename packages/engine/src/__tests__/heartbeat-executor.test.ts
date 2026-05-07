@@ -1807,6 +1807,13 @@ describe("executeHeartbeat", () => {
       expect(HEARTBEAT_NO_TASK_SYSTEM_PROMPT).toContain("reply_to_message_id");
     });
 
+    it("both heartbeat procedures prioritize inbox processing before wake delta", () => {
+      expect(HEARTBEAT_PROCEDURE).toContain("process unread/pending messages before any other action");
+      expect(HEARTBEAT_NO_TASK_PROCEDURE).toContain("process unread/pending messages before any other action");
+      expect(HEARTBEAT_PROCEDURE.indexOf("**Inbox**")).toBeLessThan(HEARTBEAT_PROCEDURE.indexOf("**Wake delta**"));
+      expect(HEARTBEAT_NO_TASK_PROCEDURE.indexOf("**Inbox**")).toBeLessThan(HEARTBEAT_NO_TASK_PROCEDURE.indexOf("**Wake delta**"));
+    });
+
     it("no-task system prompt processing messages section does not reference fn_task_log", () => {
       const processingMessagesSection = HEARTBEAT_NO_TASK_SYSTEM_PROMPT.split("## Processing Messages")[1] ?? "";
       expect(processingMessagesSection).not.toContain("fn_task_log");

@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { X, Send, Loader2, Bot, AlertCircle } from "lucide-react";
 import type { ParticipantType, MessageType } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
@@ -47,6 +47,11 @@ export function MessageComposer({
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const selectedAgent = useMemo(() => agents.find((agent) => agent.id === toId), [agents, toId]);
+  const recipientIsAgent = toType === "agent";
+  const recipientAlwaysImmediate = recipientIsAgent && selectedAgent?.runtimeConfig?.messageResponseMode === "immediate";
+  const wakeImmediately = recipientIsAgent && (wakeRecipient || recipientAlwaysImmediate);
+
   const isValid = toId.trim() !== "" && content.trim().length > 0 && content.length <= MAX_CONTENT_LENGTH;
 
   const handleSend = useCallback(async () => {
@@ -57,14 +62,11 @@ export function MessageComposer({
 
     try {
       const messageType: MessageType = toType === "agent" ? "user-to-agent" : "system";
-      const includeWake = wakeRecipient && toType === "agent";
       const metadata =
-        replyContext || includeWake
-          ? {
-              ...(replyContext ? { replyTo: { messageId: replyContext.messageId } } : {}),
-              ...(includeWake ? { wakeRecipient: true } : {}),
-            }
+        replyContext
+          ? { replyTo: { messageId: replyContext.messageId } }
           : undefined;
+      const sendWakeImmediately = wakeImmediately;
       await sendMessage(
         {
           toId: toId.trim(),
@@ -72,6 +74,7 @@ export function MessageComposer({
           content: content.trim(),
           type: messageType,
           ...(metadata ? { metadata } : {}),
+          ...(sendWakeImmediately ? { wakeImmediately: true } : {}),
         },
         projectId,
       );
@@ -83,7 +86,7 @@ export function MessageComposer({
     } finally {
       setIsSending(false);
     }
-  }, [isValid, isSending, toId, toType, content, wakeRecipient, replyContext, projectId, onSend, addToast]);
+  }, [isValid, isSending, toId, toType, content, wakeImmediately, replyContext, projectId, onSend, addToast]);
 
   const handleAgentSelect = useCallback((agentId: string) => {
     setToId(agentId);
@@ -174,19 +177,22 @@ export function MessageComposer({
         </div>
 
         {/* Wake recipient toggle (agents only) */}
-        {toType === "agent" && (
+        {recipientIsAgent && (
           <div className="message-composer-field message-composer-field--wake">
             <label className="message-composer-wake-label">
               <input
                 type="checkbox"
-                checked={wakeRecipient}
+                checked={wakeImmediately}
+                disabled={recipientAlwaysImmediate}
                 onChange={(e) => setWakeRecipient(e.target.checked)}
                 data-testid="message-composer-wake"
               />
               <span>
-                Wake recipient immediately
-                <span className="message-composer-wake-hint">
-                  (overrides their messageResponseMode)
+                Wake agent immediately
+                <span className="message-composer-wake-hint" data-testid="message-composer-wake-hint">
+                  {recipientAlwaysImmediate
+                    ? "(agent is already set to immediate response mode)"
+                    : "(one-off override for this message only)"}
                 </span>
               </span>
             </label>
