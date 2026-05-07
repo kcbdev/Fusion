@@ -89,6 +89,21 @@ Intentionally exempt in v1 (remain normal execution plumbing):
 
 For `require-approval` dispositions, execution is intercepted before side effects; the engine creates/reuses a pending approval request keyed by a deterministic dedupe key (`agentId + taskId + toolName + category + resourceType + resourceId + operation`).
 
+Approval-request runtime/storage contract (current implementation):
+
+- The `approval-required` preset normalizes **every** v1 action category (`git-write`, `file-write-delete`, `shell-command`, `network-api`, `task-agent-management`) to `require-approval`.
+- Gated actions persist durable request rows (`approval_requests`) with:
+  - `requester` actor snapshot (`actorId`, `actorType`, `actorName`)
+  - target action payload (`category`, `action`, `summary`, `resourceType`, `resourceId`, optional `context`)
+  - optional execution linkage (`taskId`, `runId`)
+- Lifecycle updates append immutable audit rows (`approval_request_audit_events`) with actor snapshot + optional note (`created`, `approved`, `denied`, `completed`).
+
+Current boundary vs forthcoming UX/runtime pieces:
+
+- **Implemented now:** durable approval request + append-only audit persistence used by runtime action-gating paths.
+- **Not complete yet:** broader pause/resume execution workflow and dashboard mailbox/inbox approval-review surfaces.
+- Treat operator review UI/inbox flow as forthcoming follow-up work; do not assume a finished approval inbox surface in current deployments.
+
 Default and legacy fallback behavior:
 
 - New **non-ephemeral/permanent** agents persist a normalized `permissionPolicy` using preset `unrestricted` when not explicitly provided.

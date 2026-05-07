@@ -179,6 +179,36 @@ Concrete references:
   - `TodoStore` (`todo-store.ts`) — project-scoped todo lists/items with completion, reorder, and composite list+items queries
   - `EvalStore` (`eval-store.ts`) — eval run persistence, per-task eval results with durable snapshots, and append-only run event trails
 
+### Approval request system (`ApprovalRequestStore`)
+
+Schema (migration 68 in `db.ts`) adds two tables:
+
+- `approval_requests`
+  - Identity/lifecycle: `id`, `status`, `requestedAt`, `decidedAt`, `completedAt`, `createdAt`, `updatedAt`
+  - Requester snapshot: `requesterActorId`, `requesterActorType`, `requesterActorName`
+  - Target action payload: `targetActionCategory`, `targetActionOperation`, `targetActionSummary`, `targetResourceType`, `targetResourceId`, `targetContext` (JSON text)
+  - Optional runtime linkage: `taskId`, `runId`
+  - Indexes: `idxApprovalRequestsStatusCreatedAt (status, createdAt)`, `idxApprovalRequestsRequesterCreatedAt (requesterActorId, createdAt)`, `idxApprovalRequestsTaskCreatedAt (taskId, createdAt)`
+- `approval_request_audit_events`
+  - `id`, `requestId`, `eventType`, actor snapshot (`actorId`, `actorType`, `actorName`), optional `note`, `createdAt`
+  - `requestId` is a foreign key to `approval_requests(id)` with `ON DELETE CASCADE`
+  - Index: `idxApprovalRequestAuditRequestCreatedAt (requestId, createdAt, id)`
+
+Store API (`packages/core/src/approval-request-store.ts`):
+
+- `create(input: ApprovalRequestCreateInput)` — inserts a `pending` request and appends a `created` audit event
+- `get(id)` — returns one request or `null`
+- `list(input?: ApprovalRequestListInput)` — filters by `status`, `requesterActorId`, `taskId`, `runId`; ordered `createdAt DESC, id DESC`; paginated by `limit`/`offset`
+- `decide(requestId, status, input: ApprovalRequestDecisionInput)` — applies `pending -> approved|denied`, stamps `decidedAt`, appends `approved`/`denied` audit event
+- `markCompleted(requestId, input: ApprovalRequestCompletionInput)` — applies `approved -> completed`, stamps `completedAt`, appends `completed` audit event
+- `getAuditHistory(requestId)` — returns append-only audit rows ordered `createdAt ASC, rowid ASC`
+
+Lifecycle contract (`types.ts` `isValidApprovalRequestTransition`):
+
+- Primary forward paths: `pending -> approved -> completed` and `pending -> denied`
+- Direct `pending -> completed` and all transitions from `denied`/`completed` (except no-op self-transition) are rejected
+- Same-state transitions (`from === to`) are treated as valid by the helper even though the intended lifecycle is forward-only
+
 ### Shared mesh-state snapshot helpers
 
 `packages/core/src/shared-mesh-state.ts` defines a common snapshot envelope for non-task mesh state export/apply:
