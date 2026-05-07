@@ -29,6 +29,7 @@ export const PROJECT_STORAGE_KEYS: string[] = [
   "kb-usage-provider-order",
   "kb-chat-active-session",
   "kb-files-line-numbers",
+  "fusion-plugin-dependency-graph:positions",
 ];
 
 export function scopedKey(baseKey: string, projectId?: string): string {

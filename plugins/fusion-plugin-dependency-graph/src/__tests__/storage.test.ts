@@ -20,12 +20,22 @@ describe("storage", () => {
     localStorage.clear();
   });
 
-  it("builds project-scoped key", () => {
-    expect(projectScopedKey("proj_123")).toBe("kb:proj_123:dependency-graph-positions");
+  it("builds project-scoped key with canonical base key", () => {
+    expect(projectScopedKey("proj_123")).toBe("kb:proj_123:fusion-plugin-dependency-graph:positions");
+  });
+
+  it("falls back to unscoped key when projectId is missing or empty", () => {
+    expect(projectScopedKey()).toBe("fusion-plugin-dependency-graph:positions");
+    expect(projectScopedKey("")).toBe("fusion-plugin-dependency-graph:positions");
   });
 
   it("persists and restores positions", () => {
     savePositions("proj_123", { "FN-1": { x: 10, y: 20 } });
     expect(loadPositions("proj_123")).toEqual({ "FN-1": { x: 10, y: 20 } });
+  });
+
+  it("returns empty object for invalid JSON", () => {
+    localStorage.setItem("kb:proj_123:fusion-plugin-dependency-graph:positions", "not-json");
+    expect(loadPositions("proj_123")).toEqual({});
   });
 });

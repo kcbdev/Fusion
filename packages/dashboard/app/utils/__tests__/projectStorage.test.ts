@@ -96,9 +96,10 @@ describe("projectStorage", () => {
         "kb-usage-provider-order",
         "kb-chat-active-session",
         "kb-files-line-numbers",
+        "fusion-plugin-dependency-graph:positions",
       ]),
     );
-    expect(PROJECT_STORAGE_KEYS).toHaveLength(20);
+    expect(PROJECT_STORAGE_KEYS).toHaveLength(21);
   });
 
   it("has no overlap between global and project-scoped keys", () => {
