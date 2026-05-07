@@ -49,6 +49,31 @@ export function shouldRunIsolationGuard(env = process.env) {
   return env.FUSION_TEST_DISABLE_ISOLATION_GUARD !== "1";
 }
 
+function pruneFusionTestHomes() {
+  let tmpEntries = [];
+  try {
+    tmpEntries = readdirSync(tmpdir(), { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const entry of tmpEntries) {
+    if (!entry.isDirectory() || !entry.name.startsWith("fusion-test-home-root-")) continue;
+    const rawPath = path.join(tmpdir(), entry.name);
+    let resolvedPath = rawPath;
+    try {
+      resolvedPath = realpathSync(rawPath);
+    } catch {
+      // Keep raw path fallback.
+    }
+    try {
+      rmSync(rawPath, { recursive: true, force: true });
+    } catch {
+      // Best-effort pruning only.
+    }
+  }
+}
+
 function runMaybeIsolated(command, commandArgs, options = {}) {
   const enabled = shouldRunIsolationGuard();
   const env = options.env ?? process.env;
@@ -56,6 +81,7 @@ function runMaybeIsolated(command, commandArgs, options = {}) {
   try {
     run(command, commandArgs, options);
   } finally {
+    pruneFusionTestHomes();
     if (enabled) runIsolationCheck(false, env);
   }
 }
