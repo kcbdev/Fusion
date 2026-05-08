@@ -24,6 +24,9 @@ describe("permanent-agent-gating", () => {
     expect(classifyPermanentAgentToolCall("fn_research_run").category).toBe("network_api");
     expect(classifyPermanentAgentToolCall("fn_task_show").category).toBe("none");
     expect(classifyPermanentAgentToolCall("fn_research_get").category).toBe("none");
+    expect(classifyPermanentAgentToolCall("fn_heartbeat_done")).toEqual({ category: "none", recognized: true });
+    expect(classifyPermanentAgentToolCall("fn_send_message")).toEqual({ category: "none", recognized: true });
+    expect(classifyPermanentAgentToolCall("fn_read_messages")).toEqual({ category: "none", recognized: true });
   });
 
   it("uses only canonical action-category names", () => {
@@ -55,6 +58,20 @@ describe("permanent-agent-gating", () => {
     expect(decision.category).toBe("none");
     expect(decision.recognized).toBe(false);
     expect(decision.disposition).toBe("require-approval");
+  });
+
+  it("allows recognized readonly heartbeat tools under permission policy", () => {
+    const decision = resolvePermanentAgentToolDecision({
+      toolName: "fn_heartbeat_done",
+      gating: {
+        permissionPolicy: {
+          presetId: "approval-required",
+          rules: {},
+        },
+      },
+    });
+
+    expect(decision.disposition).toBe("allow");
   });
 
   it("resolves disposition from policy for sensitive categories", () => {

@@ -82,6 +82,9 @@ const READONLY_FN_TOOLS = new Set([
   "fn_task_update",
   "fn_task_log",
   "fn_task_done",
+  "fn_heartbeat_done",
+  "fn_send_message",
+  "fn_read_messages",
 ]);
 
 const MUTATING_GIT_SUBCOMMANDS = new Set([
