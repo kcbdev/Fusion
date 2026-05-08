@@ -609,7 +609,7 @@ export class HeartbeatMonitor {
         taskId,
         runId,
         targetAction: {
-          category: decision.category === "exempt" ? "shell-command" : decision.category,
+          category: decision.category === "exempt" ? "command_execution" : decision.category,
           action: decision.operation,
           summary: decision.summary,
           resourceType: decision.resourceType,
@@ -621,6 +621,16 @@ export class HeartbeatMonitor {
         const pending = this.getApprovalRequestStore().list({ status: "pending", requesterActorId: agent.id, taskId, limit: 100 });
         return pending.find((request) => request.targetAction.context?.approvalDedupeKey === dedupeKey) ?? null;
       },
+    };
+  }
+
+  private buildPermanentAgentGatingContext(agent: Agent): { permissionPolicy: ReturnType<typeof resolveEffectiveAgentPermissionPolicy> } | undefined {
+    if (isEphemeralAgent(agent)) {
+      return undefined;
+    }
+
+    return {
+      permissionPolicy: resolveEffectiveAgentPermissionPolicy(agent.permissionPolicy),
     };
   }
 
@@ -1835,6 +1845,7 @@ export class HeartbeatMonitor {
           // Skill selection: use waking agent's skills (heartbeat has no role fallback)
           ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
           actionGateContext: this.buildActionGateContext(agent, taskId, run.id),
+          permanentAgentGating: this.buildPermanentAgentGatingContext(agent),
         });
 
         // Track for monitoring

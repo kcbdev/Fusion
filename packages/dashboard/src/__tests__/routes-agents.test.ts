@@ -1883,11 +1883,11 @@ describe("Agent create/update routes", () => {
       permissionPolicy: {
         presetId: "approval-required",
         rules: {
-          "git-write": "require-approval",
-          "file-write-delete": "require-approval",
-          "shell-command": "require-approval",
-          "network-api": "require-approval",
-          "task-agent-management": "require-approval",
+          git_write: "require-approval",
+          file_write_delete: "require-approval",
+          command_execution: "require-approval",
+          network_api: "require-approval",
+          task_agent_mutation: "require-approval",
         },
       },
       instructionsPath: "docs/reviewer.md",
@@ -1936,11 +1936,11 @@ describe("Agent create/update routes", () => {
       permissionPolicy: {
         presetId: "locked-down",
         rules: {
-          "git-write": "block",
-          "file-write-delete": "block",
-          "shell-command": "block",
-          "network-api": "block",
-          "task-agent-management": "block",
+          git_write: "block",
+          file_write_delete: "block",
+          command_execution: "block",
+          network_api: "block",
+          task_agent_mutation: "block",
         },
       },
       totalInputTokens: 42,
@@ -2004,11 +2004,11 @@ describe("Agent create/update routes", () => {
     expect(res.status).toBe(201);
     expect(res.body.permissionPolicy.presetId).toBe("locked-down");
     expect(res.body.permissionPolicy.rules).toEqual({
-      "git-write": "block",
-      "file-write-delete": "block",
-      "shell-command": "block",
-      "network-api": "block",
-      "task-agent-management": "block",
+      git_write: "block",
+      file_write_delete: "block",
+      command_execution: "block",
+      network_api: "block",
+      task_agent_mutation: "block",
     });
   });
 

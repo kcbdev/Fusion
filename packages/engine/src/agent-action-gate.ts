@@ -183,25 +183,25 @@ export function evaluateAgentActionGate(params: {
     const command = extractShellCommand(args);
     const git = classifyGitCommand(command);
     if (git?.write) {
-      category = "git-write";
+      category = "git_write";
       operation = git.operation;
       resourceType = "git";
     } else {
-      category = "shell-command";
+      category = "command_execution";
       operation = git?.operation ?? "shell command";
       resourceType = git ? "git" : "command";
     }
   } else if (params.toolName === "write" || params.toolName === "edit") {
-    category = "file-write-delete";
+    category = "file_write_delete";
     operation = params.toolName;
     resourceType = "file";
     resourceId = typeof args.path === "string" ? args.path : undefined;
   } else if (TASK_AGENT_MANAGEMENT_TOOLS.has(params.toolName)) {
-    category = "task-agent-management";
+    category = "task_agent_mutation";
     operation = params.toolName;
     resourceType = params.toolName.includes("agent") || params.toolName.includes("spawn") ? "agent" : "task";
   } else if (NETWORK_API_TOOLS.has(params.toolName)) {
-    category = "network-api";
+    category = "network_api";
     operation = params.toolName;
     resourceType = "research";
   } else if (EXEMPT_TOOLS.has(params.toolName)) {

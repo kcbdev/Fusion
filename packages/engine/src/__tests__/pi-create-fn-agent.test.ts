@@ -385,6 +385,73 @@ describe("worktree path boundary helpers", () => {
   });
 });
 
+describe("wrapToolsWithPermanentAgentGating", () => {
+  it("blocks policy-blocked actions and skips underlying tool", async () => {
+    const tool = { name: "write", label: "Write", description: "", parameters: {}, execute: vi.fn() };
+    const { wrapToolsWithPermanentAgentGating } = await import("../pi.js");
+    const wrapped = wrapToolsWithPermanentAgentGating([tool as any], {
+      permissionPolicy: {
+        presetId: "locked-down",
+        rules: { file_write_delete: "block" },
+      },
+    });
+
+    const result = await (wrapped[0] as any).execute("t1", { path: "a.ts" });
+    expect((result as any).isError).toBe(true);
+    expect((result as any).details).toEqual(expect.objectContaining({
+      disposition: "block",
+      category: "file_write_delete",
+      toolName: "write",
+    }));
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+
+  it("requires approval for unknown tools and skips underlying tool", async () => {
+    const tool = { name: "plugin_custom", label: "Plugin", description: "", parameters: {}, execute: vi.fn() };
+    const { wrapToolsWithPermanentAgentGating } = await import("../pi.js");
+    const wrapped = wrapToolsWithPermanentAgentGating([tool as any], {
+      permissionPolicy: {
+        presetId: "unrestricted",
+        rules: {
+          git_write: "allow",
+          file_write_delete: "allow",
+          command_execution: "allow",
+          network_api: "allow",
+          task_agent_mutation: "allow",
+        },
+      },
+    });
+
+    const result = await (wrapped[0] as any).execute("t1", { value: 1 });
+    expect((result as any).isError).toBe(true);
+    expect((result as any).details).toEqual(expect.objectContaining({
+      disposition: "require-approval",
+      category: "none",
+      toolName: "plugin_custom",
+      requiresApproval: true,
+    }));
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+
+  it("lets boundary rejections fire before permanent-agent gating", async () => {
+    const tool = { name: "write", label: "Write", description: "", parameters: {}, execute: vi.fn() };
+    const { wrapToolsWithPermanentAgentGating, wrapToolsWithBoundary } = await import("../pi.js");
+    const gated = wrapToolsWithPermanentAgentGating([tool as any], {
+      permissionPolicy: {
+        presetId: "locked-down",
+        rules: { file_write_delete: "block" },
+      },
+    });
+    const wrapped = wrapToolsWithBoundary(gated as any, "/project/.worktrees/fn-001", "/project");
+
+    const result = await (wrapped[0] as any).execute("t1", { path: "/project/README.md" });
+    expect((result as any).isError).toBe(true);
+    expect((result as any).error).toContain("outside the worktree boundary");
+    expect((result as any).details).toBeUndefined();
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+});
+
 describe("wrapToolsWithActionGate", () => {
   it("blocks disallowed actions and skips underlying tool", async () => {
     const tool = { name: "write", label: "Write", description: "", parameters: {}, execute: vi.fn() };
@@ -397,11 +464,11 @@ describe("wrapToolsWithActionGate", () => {
       permissionPolicy: {
         presetId: "locked-down",
         rules: {
-          "git-write": "block",
-          "file-write-delete": "block",
-          "shell-command": "block",
-          "network-api": "block",
-          "task-agent-management": "block",
+          "git_write": "block",
+          "file_write_delete": "block",
+          "command_execution": "block",
+          "network_api": "block",
+          "task_agent_mutation": "block",
         },
       },
       createApprovalRequest: vi.fn(),
@@ -423,11 +490,11 @@ describe("wrapToolsWithActionGate", () => {
       permissionPolicy: {
         presetId: "locked-down",
         rules: {
-          "git-write": "block",
-          "file-write-delete": "block",
-          "shell-command": "block",
-          "network-api": "block",
-          "task-agent-management": "block",
+          "git_write": "block",
+          "file_write_delete": "block",
+          "command_execution": "block",
+          "network_api": "block",
+          "task_agent_mutation": "block",
         },
       },
       createApprovalRequest: vi.fn(),
@@ -451,11 +518,11 @@ describe("wrapToolsWithActionGate", () => {
       permissionPolicy: {
         presetId: "approval-required",
         rules: {
-          "git-write": "require-approval",
-          "file-write-delete": "require-approval",
-          "shell-command": "require-approval",
-          "network-api": "require-approval",
-          "task-agent-management": "require-approval",
+          "git_write": "require-approval",
+          "file_write_delete": "require-approval",
+          "command_execution": "require-approval",
+          "network_api": "require-approval",
+          "task_agent_mutation": "require-approval",
         },
       },
       createApprovalRequest,

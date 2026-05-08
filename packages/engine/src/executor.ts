@@ -737,7 +737,7 @@ export class TaskExecutor {
         taskId,
         runId: this.currentRunContext?.runId,
         targetAction: {
-          category: decision.category === "exempt" ? "shell-command" : decision.category,
+          category: decision.category === "exempt" ? "command_execution" : decision.category,
           action: decision.operation,
           summary: decision.summary,
           resourceType: decision.resourceType,
@@ -754,6 +754,16 @@ export class TaskExecutor {
         const pending = this.approvalRequestStore.list({ status: "pending", requesterActorId: agent.id, taskId, limit: 100 });
         return pending.find((request) => request.targetAction.context?.approvalDedupeKey === dedupeKey) ?? null;
       },
+    };
+  }
+
+  private buildPermanentAgentGatingContext(agent: Agent | null | undefined): { permissionPolicy: ReturnType<typeof resolveEffectiveAgentPermissionPolicy> } | undefined {
+    if (!agent || isEphemeralAgent(agent)) {
+      return undefined;
+    }
+
+    return {
+      permissionPolicy: resolveEffectiveAgentPermissionPolicy(agent.permissionPolicy),
     };
   }
 
@@ -2449,6 +2459,7 @@ export class TaskExecutor {
           runtimeHint: stepSessionRuntimeHint,
           assignedAgentRuntimeConfig: (stepSessionAgent?.runtimeConfig ?? undefined) as Record<string, unknown> | undefined,
           actionGateContext: this.buildActionGateContext(task.id, stepSessionAgent),
+          permanentAgentGating: this.buildPermanentAgentGatingContext(stepSessionAgent),
           // Pass skill selection context from the main executor session
           skillSelection: skillContext.skillSelectionContext,
           // Pass agentStore and messageStore for delegation and messaging tools
@@ -3006,6 +3017,7 @@ export class TaskExecutor {
           // Skill selection: use assigned agent skills if available, otherwise role fallback
           ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
           actionGateContext: this.buildActionGateContext(task.id, assignedAgent),
+          permanentAgentGating: this.buildPermanentAgentGatingContext(assignedAgent),
           taskId: task.id,
           taskTitle: detail.title,
           onFallbackModelUsed: createFallbackModelObserver({
@@ -3323,6 +3335,7 @@ export class TaskExecutor {
                 // Skill selection: use assigned agent skills if available, otherwise role fallback
                 ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
                 actionGateContext: this.buildActionGateContext(task.id, assignedAgent),
+                permanentAgentGating: this.buildPermanentAgentGatingContext(assignedAgent),
               });
               if (retrySessionFile) {
                 this.store.updateTask(task.id, { sessionFile: retrySessionFile }).catch((err: unknown) => {

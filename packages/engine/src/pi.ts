@@ -35,6 +35,7 @@ import {
   type ToolDefinition,
 } from "@mariozechner/pi-coding-agent";
 import { getEnabledPiExtensionPaths, getFusionAgentDir, getLegacyPiAgentDir, reconcileClaudeCliPaths, reconcileDroidCliPaths, resolvePiExtensionProjectRoot } from "@fusion/core";
+import type { PermanentAgentGatingContext } from "@fusion/core";
 import {
   resolveSessionSkills,
   createSkillsOverrideFromSelection,
@@ -49,6 +50,7 @@ import {
   evaluateAgentActionGate,
   type AgentActionGateContext,
 } from "./agent-action-gate.js";
+import { resolvePermanentAgentToolDecision } from "./permanent-agent-gating.js";
 
 export interface AgentResult {
   session: AgentSession;
@@ -480,6 +482,8 @@ export interface AgentOptions {
   taskId?: string;
   taskTitle?: string;
   actionGateContext?: AgentActionGateContext;
+  /** Permanent-agent action gating context forwarded by runtime/session helpers. */
+  permanentAgentGating?: PermanentAgentGatingContext;
 }
 
 function resolveConfiguredModel(
@@ -1007,12 +1011,13 @@ function isWorktreeAllowedPath(
  * message with `content: undefined`, which pi's downstream handling later
  * crashes on with "Cannot read properties of undefined (reading 'filter')".
  */
-function boundaryRejection(message: string) {
+function boundaryRejection(message: string, details?: Record<string, unknown>) {
   return {
     content: [{ type: "text", text: message }],
     isError: true,
     ok: false,
     error: message,
+    ...(details ? { details } : {}),
   };
 }
 
@@ -1067,6 +1072,47 @@ export function wrapToolsWithBoundary(
 
         // Call the original tool implementation with all arguments passed through
         return originalExecute(...args);
+      },
+    };
+  });
+}
+
+export function wrapToolsWithPermanentAgentGating(
+  tools: ToolDefinition[],
+  gating: PermanentAgentGatingContext | undefined,
+): ToolDefinition[] {
+  if (!gating) {
+    return tools;
+  }
+
+  return tools.map((tool) => {
+    const originalExecute = tool.execute as any;
+    return {
+      ...tool,
+      execute: async (...args: any[]) => {
+        const params = (args[1] ?? {}) as Record<string, unknown>;
+        const decision = resolvePermanentAgentToolDecision({
+          toolName: tool.name,
+          args: params,
+          gating,
+        });
+
+        if (decision.disposition === "allow") {
+          return originalExecute(...args);
+        }
+
+        const details: Record<string, unknown> = {
+          disposition: decision.disposition,
+          category: decision.category,
+          toolName: decision.toolName,
+          ...(decision.disposition === "require-approval" ? { requiresApproval: true } : {}),
+        };
+
+        const reason = decision.disposition === "block"
+          ? `Action blocked by permanent-agent policy (${decision.category}) for tool ${decision.toolName}`
+          : `Action requires approval (${decision.category}) before tool ${decision.toolName} can run`;
+
+        return boundaryRejection(reason, details);
       },
     };
   });
@@ -1196,7 +1242,7 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
   if (worktreeProjectRoot) {
     await assertValidWorktreeSession(worktreePath, worktreeProjectRoot);
   }
-  const wrappedTools = wrapToolsWithBoundary(tools, worktreePath, worktreeProjectRoot);
+  const boundaryContext = { worktreePath, worktreeProjectRoot };
 
   // resolvedProjectRoot was computed above (before registerExtensionProviders)
   // and is reused here for resource loader and skill discovery.
@@ -1288,10 +1334,23 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
     // suppress the defaults with `noTools: "builtin"` and register our wrapped
     // tools through `customTools` instead. The wrapped tools preserve the same
     // names (`read`, `bash`, ...) as the built-ins they replace.
-    const customToolList: ToolDefinition[] = wrapToolsWithActionGate([
-      ...(wrappedTools as ToolDefinition[]),
+    const toolChainStart: ToolDefinition[] = [
+      ...(tools as ToolDefinition[]),
       ...(options.customTools ?? []),
-    ], options.actionGateContext);
+    ];
+    const toolsWithPermanentGating = wrapToolsWithPermanentAgentGating(
+      toolChainStart,
+      options.permanentAgentGating,
+    );
+    const toolsWithActionGate = wrapToolsWithActionGate(
+      toolsWithPermanentGating,
+      options.actionGateContext,
+    );
+    const customToolList: ToolDefinition[] = wrapToolsWithBoundary(
+      toolsWithActionGate,
+      boundaryContext.worktreePath,
+      boundaryContext.worktreeProjectRoot,
+    );
     // Last-chance abort hook. Fires *here* — after every awaited setup step
     // in createFnAgent (provider registration, worktree validation, resource
     // loader reload) and immediately before the actual LLM session spawn.

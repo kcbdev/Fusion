@@ -3676,20 +3676,49 @@ export const AGENT_PERMISSIONS = [
 /** A single canonical permission string. */
 export type AgentPermission = (typeof AGENT_PERMISSIONS)[number];
 
+/**
+ * Canonical v1 action categories for permanent-agent runtime gating.
+ *
+ * `none` is a classifier-only result for positively-recognized read-only actions.
+ * It is never stored as a policy rule key.
+ */
+export const PERMANENT_AGENT_ACTION_CATEGORIES = [
+  "git_write",
+  "file_write_delete",
+  "command_execution",
+  "network_api",
+  "task_agent_mutation",
+  "none",
+] as const;
+
+/** A single v1 permanent-agent action category. */
+export type PermanentAgentActionCategory = (typeof PERMANENT_AGENT_ACTION_CATEGORIES)[number];
+
+/** Sensitive runtime categories covered by policy rules (excludes classifier-only `none`). */
+export type PermanentAgentSensitiveActionCategory = Exclude<PermanentAgentActionCategory, "none">;
+
 /** Runtime action categories governed by agent permission policy presets. */
-export const AGENT_PERMISSION_POLICY_ACTION_CATEGORIES = [
-  "git-write",
-  "file-write-delete",
-  "shell-command",
-  "network-api",
-  "task-agent-management",
+export const AGENT_PERMISSION_POLICY_ACTION_CATEGORIES: readonly PermanentAgentSensitiveActionCategory[] = [
+  "git_write",
+  "file_write_delete",
+  "command_execution",
+  "network_api",
+  "task_agent_mutation",
 ] as const;
 
 /** A single runtime action category governed by permission policy. */
-export type AgentPermissionPolicyActionCategory = (typeof AGENT_PERMISSION_POLICY_ACTION_CATEGORIES)[number];
+export type AgentPermissionPolicyActionCategory = PermanentAgentSensitiveActionCategory;
 
 /** How a runtime action category is handled by permission policy. */
 export type AgentPermissionPolicyDisposition = "allow" | "block" | "require-approval";
+
+/** Minimum portable permanent-agent gating context consumed by engine runtime wrappers. */
+export interface PermanentAgentGatingContext {
+  permissionPolicy?: {
+    presetId: string;
+    rules: Partial<Record<PermanentAgentSensitiveActionCategory, AgentPermissionPolicyDisposition>>;
+  };
+}
 
 /** Built-in permission policy preset identifiers for permanent agents. */
 export const AGENT_PERMISSION_POLICY_PRESET_IDS = ["unrestricted", "approval-required", "locked-down"] as const;

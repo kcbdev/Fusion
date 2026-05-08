@@ -14449,4 +14449,53 @@ describe("allowParallelExecution heartbeat gate", () => {
       expect(mockedCreateFnAgent).not.toHaveBeenCalled();
     }
   });
+
+  it("builds permanent-agent gating context for durable assigned agents", () => {
+    const agentStore = makeAgentStore({ ephemeral: false, allowParallelExecution: true, hasActiveRun: false });
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test", { agentStore: agentStore as any });
+
+    const context = (executor as any).buildPermanentAgentGatingContext({
+      id: "agent-perm-1",
+      name: "Perm Agent",
+      type: "normal",
+      permissionPolicy: {
+        presetId: "approval-required",
+        rules: {
+          git_write: "require-approval",
+          file_write_delete: "require-approval",
+          command_execution: "require-approval",
+          network_api: "require-approval",
+          task_agent_mutation: "require-approval",
+        },
+      },
+    });
+
+    expect(context?.permissionPolicy?.presetId).toBe("approval-required");
+  });
+
+  it("omits permanent-agent gating context when no agent is assigned", async () => {
+    const agentStore = makeAgentStore({ ephemeral: false, allowParallelExecution: true, hasActiveRun: false });
+    const store = createMockStore();
+
+    mockedCreateFnAgent.mockResolvedValue({
+      session: {
+        prompt: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn(),
+      },
+    } as any);
+
+    const executor = new TaskExecutor(store, "/tmp/test", { agentStore: agentStore as any });
+
+    await executor.execute({
+      ...TASK_BASE,
+      id: "FN-GATE-3",
+      assignedAgentId: undefined,
+    });
+
+    const hasPermanentGating = mockedCreateFnAgent.mock.calls
+      .map((call) => call[0] as { permanentAgentGating?: unknown })
+      .some((args) => args.permanentAgentGating !== undefined);
+    expect(hasPermanentGating).toBe(false);
+  });
 });

@@ -53,56 +53,45 @@ Built-in preset catalog:
 
 V1 runtime action categories:
 
-- `git-write`
-- `file-write-delete`
-- `shell-command`
-- `network-api`
-- `task-agent-management`
+- `git_write`
+- `file_write_delete`
+- `command_execution`
+- `network_api`
+- `task_agent_mutation`
+- `none` (classifier-only read-only result; never stored as a policy rule key)
+
+`permissionPolicy` uses only the five sensitive categories above (everything except `none`) and the FN-3545 disposition contract:
+
+- `allow`
+- `block`
+- `require-approval`
 
 ### Runtime gate v1 mapping (per tool invocation, permanent agents only)
 
-The engine classifies each tool call with this precedence order (first match wins):
+The engine classifies tool calls by behavior (not namespace alone):
 
-1. `git-write`
-2. `file-write-delete`
-3. `task-agent-management`
-4. `network-api`
-5. `shell-command`
-6. exempt/read-only (`allow`)
-
-Current v1 mapping:
-
-- `file-write-delete`: `write`, `edit`
-- `task-agent-management`: `fn_task_create`, `fn_task_add_dep`, `fn_delegate_task`, `fn_update_agent_config`, `fn_update_identity`, `fn_spawn_agent`
-- `network-api`: `fn_research_run` (explicit tool-owned network/API surface only)
-- `shell-command`: non-git `bash`, and read-only git shell commands
-- `git-write`: mutating `bash` git commands
+- `file_write_delete`: built-in `write` / `edit`, plus persistent write helpers like `fn_task_document_write`, `fn_memory_append`, `fn_task_attach`
+- `command_execution`: built-in `bash` when not classified as mutating git
+- `git_write`: mutating git shell commands run via `bash`
+- `network_api`: external/network-facing tools (for example `fn_research_run`, `fn_research_cancel`, `fn_research_retry`)
+- `task_agent_mutation`: task/agent mutation tools (for example `fn_task_create`, `fn_delegate_task`, `fn_update_agent_config`, `fn_update_identity`)
+- `none`: positively recognized read-only tools (`read`, `grep`, `find`, `ls`, list/show/get-style `fn_*` tools)
 
 `bash` git-write heuristic in v1:
 
 - Mutating git operations include: `git add`, `commit`, `merge`, `rebase`, `cherry-pick`, `am`, `apply`, `stash`, `tag`, `push`, `reset`, `rm`, `mv`, `clean`, `worktree add/remove`, `checkout -b`, `switch -c`, `pull --rebase`, `restore --staged`, and branch/remote mutation forms.
 - Read-only git operations include: `git status`, `diff`, `log`, `show`, `rev-parse`, `branch --show-current`, `branch` listing, and `remote -v`.
 
-Intentionally exempt in v1 (remain normal execution plumbing):
+Unknown/unclassified tool fallback:
 
-- `fn_task_update`, `fn_task_log`, `fn_task_done`, `fn_task_document_write`, mailbox reads, memory reads, and other routine read-only inspection tools.
+- In permanent-agent sessions, unknown tools default to `require-approval` (fail-safe).
+- Category `none` only yields `allow` when the tool is positively recognized as read-only.
 
-For `require-approval` dispositions, execution is intercepted before side effects; the engine creates/reuses a pending approval request keyed by a deterministic dedupe key (`agentId + taskId + toolName + category + resourceType + resourceId + operation`).
+Interim enforcement behavior (pre-persistence path):
 
-Approval-request runtime/storage contract (current implementation):
-
-- The `approval-required` preset normalizes **every** v1 action category (`git-write`, `file-write-delete`, `shell-command`, `network-api`, `task-agent-management`) to `require-approval`.
-- Gated actions persist durable request rows (`approval_requests`) with:
-  - `requester` actor snapshot (`actorId`, `actorType`, `actorName`)
-  - target action payload (`category`, `action`, `summary`, `resourceType`, `resourceId`, optional `context`)
-  - optional execution linkage (`taskId`, `runId`)
-- Lifecycle updates append immutable audit rows (`approval_request_audit_events`) with actor snapshot + optional note (`created`, `approved`, `denied`, `completed`).
-
-Current boundary vs forthcoming UX/runtime pieces:
-
-- **Implemented now:** durable approval request + append-only audit persistence used by runtime action-gating paths.
-- **Not complete yet:** broader pause/resume execution workflow and dashboard mailbox/inbox approval-review surfaces.
-- Treat operator review UI/inbox flow as forthcoming follow-up work; do not assume a finished approval inbox surface in current deployments.
+- Permanent-agent gating short-circuits `block` and `require-approval` actions before tool execution and returns structured tool errors.
+- `require-approval` is preserved as a distinct disposition for later approval workflow integration.
+- This v1 gating layer does **not** create approval requests, pause agents, or depend on approval-request persistence APIs.
 
 Default and legacy fallback behavior:
 

@@ -128,14 +128,22 @@ describe("Runtime Selection Regression Tests", () => {
 
       const { createResolvedAgentSession } = await import("../agent-session-helpers.js");
 
+      const permanentAgentGating = {
+        permissionPolicy: {
+          presetId: "approval-required",
+          rules: { command_execution: "require-approval" as const },
+        },
+      };
+
       await createResolvedAgentSession({
         sessionPurpose: "executor",
         pluginRunner: {} as any,
         cwd: "/test/path",
         systemPrompt: "Test prompt",
+        permanentAgentGating,
       });
 
-      expect(mockCreateSession).toHaveBeenCalled();
+      expect(mockCreateSession).toHaveBeenCalledWith(expect.objectContaining({ permanentAgentGating }));
     });
 
     it("should return runtime metadata along with session", async () => {

@@ -17,7 +17,7 @@ const execAsync = promisify(exec);
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
-import type { AgentStore, MessageStore, TaskDetail, Settings, TaskStore } from "@fusion/core";
+import type { AgentStore, MessageStore, PermanentAgentGatingContext, TaskDetail, Settings, TaskStore } from "@fusion/core";
 
 import {
   createResolvedAgentSession,
@@ -112,6 +112,8 @@ export interface StepSessionExecutorOptions {
   messageStore?: MessageStore;
   /** Optional action-gate context for permanent assigned agents. */
   actionGateContext?: AgentActionGateContext;
+  /** Optional permanent-agent action gating context. */
+  permanentAgentGating?: PermanentAgentGatingContext;
 }
 
 // ── File Scope Extraction ─────────────────────────────────────────────
@@ -987,6 +989,7 @@ Follow instructions precisely and avoid unrelated changes.`,
             // Skill selection from step-session executor options
             ...(this.options.skillSelection ? { skillSelection: this.options.skillSelection } : {}),
             actionGateContext: this.options.actionGateContext,
+            permanentAgentGating: this.options.permanentAgentGating,
             taskId: taskDetail.id,
             taskTitle: taskDetail.title,
             onFallbackModelUsed: createFallbackModelObserver({
