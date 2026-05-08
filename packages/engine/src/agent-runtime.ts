@@ -19,6 +19,7 @@ import type { PermanentAgentGatingContext } from "@fusion/core";
 import type { SkillSelectionContext } from "./skill-resolver.js";
 import type { FallbackModelUsedPayload } from "./pi.js";
 import type { AgentActionGateContext } from "./agent-action-gate.js";
+import type { SystemPromptLayers } from "./prompt-layers.js";
 
 /**
  * Options for creating an agent session.
@@ -36,6 +37,17 @@ export interface AgentRuntimeOptions {
   cwd: string;
   /** System prompt for the agent */
   systemPrompt: string;
+  /**
+   * Optional structured prompt layers for cross-session caching.
+   * When present, runtimes that support prompt caching use the `stable`
+   * layer as a cacheable prefix and the `dynamic` layer as the per-session
+   * suffix. Runtimes that don't support caching ignore this and use
+   * `systemPrompt` (the collapsed string) instead.
+   *
+   * Callers MUST also provide `systemPrompt` as the collapsed equivalent
+   * for backward compatibility.
+   */
+  systemPromptLayers?: SystemPromptLayers;
   /** Tool set to use: "coding" for full tools, "readonly" for read-only access */
   tools?: "coding" | "readonly";
   /** Additional custom tools to merge with the base toolset */

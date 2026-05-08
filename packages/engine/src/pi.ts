@@ -56,6 +56,7 @@ import {
   type AgentActionGateContext,
 } from "./agent-action-gate.js";
 import { resolvePermanentAgentToolDecision } from "./permanent-agent-gating.js";
+import type { SystemPromptLayers } from "./prompt-layers.js";
 
 export interface AgentResult {
   session: AgentSession;
@@ -711,6 +712,11 @@ export type BuiltinWebToolName = "WebSearch" | "WebFetch";
 export interface AgentOptions {
   cwd: string;
   systemPrompt: string;
+  /** Structured prompt layers for cross-session caching. When provided,
+   *  the stable layer is used as systemPromptOverride and the dynamic
+   *  layer as appendSystemPromptOverride. Falls back to systemPrompt
+   *  when not provided. */
+  systemPromptLayers?: SystemPromptLayers;
   tools?: "coding" | "readonly";
   customTools?: ToolDefinition[];
   /** Optional allowlist of builtin runtime web tools to keep enabled. */
@@ -1715,8 +1721,11 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
     cwd: resolvedProjectRoot,
     agentDir: getFusionAgentDir(),
     settingsManager,
-    systemPromptOverride: () => options.systemPrompt,
-    appendSystemPromptOverride: () => [],
+    systemPromptOverride: () => options.systemPromptLayers?.stable ?? options.systemPrompt,
+    appendSystemPromptOverride: () =>
+      options.systemPromptLayers?.dynamic
+        ? [options.systemPromptLayers.dynamic]
+        : [],
     ...(effectiveExtensionPaths.length > 0 ? { additionalExtensionPaths: [...effectiveExtensionPaths] } : {}),
     ...(skillsOverrideFn ? { skillsOverride: skillsOverrideFn } : {}),
   });
