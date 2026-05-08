@@ -174,6 +174,7 @@ Desktop local mode uses an in-process runtime manager (`src/local-runtime.ts`) t
   - App/system: `getSystemInfo()`, `checkForUpdates()`, `getServerPort()`
   - Desktop runtime: `getDesktopRuntimeStatus()`, `startDesktopLocalRuntime()`, `stopDesktopLocalRuntime()`
   - Desktop launch mode: `getDesktopLaunchMode()`, `setDesktopLaunchMode(mode)`
+  - Native shell management: `openConnectionManager()` (invokes `shell:openConnectionManager`)
   - Tray: `updateTrayStatus(status)`
   - Native dialogs: `showExportDialog()`, `showImportDialog()`
   - Event subscriptions (return unsubscribe functions):

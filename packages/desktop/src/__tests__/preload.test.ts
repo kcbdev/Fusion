@@ -56,15 +56,18 @@ describe("preload", () => {
       getDesktopLaunchMode: () => Promise<string>;
       getDesktopLaunchContext: () => Promise<unknown>;
       setDesktopLaunchMode: (mode: "choose" | "local" | "remote") => Promise<string>;
+      openConnectionManager: () => Promise<void>;
     }>("electronAPI");
 
     await api?.getDesktopLaunchMode();
     await api?.getDesktopLaunchContext();
     await api?.setDesktopLaunchMode("local");
+    await api?.openConnectionManager();
 
     expect(mocks.ipcRenderer.invoke).toHaveBeenCalledWith("desktopLaunchMode:getMode");
     expect(mocks.ipcRenderer.invoke).toHaveBeenCalledWith("desktopLaunchMode:getContext");
     expect(mocks.ipcRenderer.invoke).toHaveBeenCalledWith("desktopLaunchMode:setMode", "local");
+    expect(mocks.ipcRenderer.invoke).toHaveBeenCalledWith("shell:openConnectionManager");
   });
 
   it("fusionShell subscribes and unsubscribes state listener", async () => {

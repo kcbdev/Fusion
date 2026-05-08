@@ -37,6 +37,7 @@ export interface FusionAPI {
   getDesktopLaunchMode(): Promise<"choose" | "local" | "remote">;
   setDesktopLaunchMode(mode: "choose" | "local" | "remote"): Promise<"choose" | "local" | "remote">;
   getDesktopLaunchContext(): Promise<{ mode: "remote"; profileId: string; serverBaseUrl: string; serverLabel?: string; authToken?: string } | null>;
+  openConnectionManager(): Promise<void>;
 
   // Tray status
   updateTrayStatus(status: string): Promise<void>;

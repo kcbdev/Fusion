@@ -62,3 +62,8 @@ export interface FusionShellApi {
   openConnectionManager(): Promise<void>;
   subscribe(listener: (state: ShellConnectionState) => void): () => void;
 }
+
+export interface MobileShellDashboardBridge {
+  getState?: () => Promise<ShellConnectionState>;
+  openConnectionManager?: () => Promise<void>;
+}

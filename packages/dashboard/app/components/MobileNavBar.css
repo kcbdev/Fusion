@@ -175,6 +175,15 @@
   letter-spacing: 0.05em;
 }
 
+.mobile-more-shell-connection {
+  padding: 0 16px 12px;
+}
+
+.mobile-more-shell-connection .shell-connection-status {
+  width: 100%;
+  justify-content: flex-start;
+}
+
 .mobile-more-item {
   display: flex;
   align-items: center;

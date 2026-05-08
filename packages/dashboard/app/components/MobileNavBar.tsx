@@ -1,5 +1,5 @@
 import "./MobileNavBar.css";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Activity,
   Bot,
@@ -86,6 +86,7 @@ export interface MobileNavBarProps {
   };
   onOpenNodes?: () => void;
   pluginDashboardViews?: PluginDashboardViewEntry[];
+  shellConnectionControl?: ReactNode;
 }
 
 function GitHubLogo({ size = 20 }: { size?: number }) {
@@ -138,6 +139,7 @@ export function MobileNavBar({
   experimentalFeatures,
   onOpenNodes,
   pluginDashboardViews = [],
+  shellConnectionControl,
 }: MobileNavBarProps) {
   const mode = useViewportMode();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
@@ -390,6 +392,12 @@ export function MobileNavBar({
           <div className="mobile-more-sheet">
             <div className="mobile-more-sheet-handle" />
             <div className="mobile-more-sheet-title">Navigate</div>
+
+            {shellConnectionControl ? (
+              <div className="mobile-more-shell-connection" data-testid="mobile-more-shell-connection">
+                {shellConnectionControl}
+              </div>
+            ) : null}
 
             <button
               type="button"

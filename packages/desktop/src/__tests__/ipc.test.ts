@@ -131,6 +131,7 @@ describe("ipc handlers", () => {
     expect(channels.has("desktopLaunchMode:getContext")).toBe(true);
     expect(channels.has("desktopLaunchMode:setMode")).toBe(true);
     expect(channels.has("platform:get")).toBe(true);
+    expect(channels.has("shell:openConnectionManager")).toBe(true);
   });
 
   it("shell:getState returns desktop shell state", async () => {
@@ -179,6 +180,13 @@ describe("ipc handlers", () => {
     await expect(mocks.ipcHandlers.get("desktopRuntime:getStatus")?.({})).resolves.toEqual({ source: "none", state: "stopped" });
     await expect(mocks.ipcHandlers.get("desktopRuntime:startLocal")?.({})).resolves.toEqual({ source: "embedded-local", state: "running", port: 4510 });
     await expect(mocks.ipcHandlers.get("desktopRuntime:stopLocal")?.({})).resolves.toEqual({ source: "embedded-local", state: "running", port: 9999 });
+  });
+
+  it("shell:openConnectionManager notifies renderer", async () => {
+    const { window } = await registerHandlers();
+    const result = mocks.ipcHandlers.get("shell:openConnectionManager")?.({});
+    expect(result).toBeUndefined();
+    expect(window.webContents.send).toHaveBeenCalledWith("shell:open-connection-manager");
   });
 
   it("shell:saveProfile persists the helper-generated profile", async () => {

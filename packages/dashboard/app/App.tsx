@@ -60,7 +60,8 @@ import { ShellHostProvider, useShellHostContext } from "./context/ShellHostConte
 import { useShellConnection } from "./hooks/useShellConnection";
 import { NativeShellOnboardingModal } from "./components/NativeShellOnboardingModal";
 import { NativeShellConnectionManager } from "./components/NativeShellConnectionManager";
-import { NativeShellConnectionStatus } from "./components/NativeShellConnectionStatus";
+import { ShellConnectionStatus } from "./components/ShellConnectionStatus";
+import { getShellConnectionNativeResult, type ShellConnectionNativeResult } from "./shell-native";
 import type { AiSessionSummary } from "./api";
 import { fetchUnreadCount, fetchTaskDetail, fetchWorkflowSteps } from "./api";
 import { getScopedItem, setScopedItem } from "./utils/projectStorage";
@@ -908,6 +909,7 @@ function AppInner() {
 
   const [shellOnboardingComplete, setShellOnboardingComplete] = useState(false);
   const [shellConnectionManagerOpen, setShellConnectionManagerOpen] = useState(false);
+  const [shellConnectionStatus, setShellConnectionStatus] = useState<ShellConnectionNativeResult | null>(null);
 
   const requiresShellOnboarding = requiresNativeShellOnboarding(shellState, shellReady, shellOnboardingComplete);
 
@@ -917,6 +919,19 @@ function AppInner() {
     }
     setShellConnectionManagerOpen(true);
   }, [shellApi, openConnectionManagerSignal]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getShellConnectionNativeResult(shellHost.host).then((result) => {
+      if (!cancelled) {
+        setShellConnectionStatus(result);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [shellHost.host, shellState.activeProfileId, shellState.desktopMode, shellState.host, shellState.profiles]);
 
   useEffect(() => {
     if (shellState.host !== "desktop-shell") {
@@ -1382,9 +1397,14 @@ function AppInner() {
           researchView: researchEnabled,
         }}
         pluginDashboardViews={pluginDashboardViews}
-        shellConnectionControl={shellApi && shellState.host !== "web" ? (
-          <NativeShellConnectionStatus state={shellState} onManage={() => setShellConnectionManagerOpen(true)} />
-        ) : undefined}
+        shellConnectionControl={
+          !isMobile && shellConnectionStatus ? (
+            <ShellConnectionStatus
+              status={shellConnectionStatus}
+              onError={(message) => addToast(message, "error")}
+            />
+          ) : undefined
+        }
       />
       {viewMode === "project" && currentProject && !nodesOpen && taskView !== "missions" && !modalManager.isPlanningOpen && !sessionBannersHidden && (
         <SessionNotificationBanner
@@ -1484,6 +1504,14 @@ function AppInner() {
           nodesView: nodesEnabled,
         }}
         pluginDashboardViews={pluginDashboardViews}
+        shellConnectionControl={
+          isMobile && shellConnectionStatus ? (
+            <ShellConnectionStatus
+              status={shellConnectionStatus}
+              onError={(message) => addToast(message, "error")}
+            />
+          ) : undefined
+        }
       />
       {viewMode === "project" && currentProject && taskView !== "chat" && taskView !== "mailbox" && taskView !== "insights" && taskView !== "evals" && taskView !== "devserver" && taskView !== "dev-server" && taskView !== "graph" && !isPluginViewId(taskView) && (
         <QuickChatFAB

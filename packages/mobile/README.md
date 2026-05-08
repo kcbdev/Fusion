@@ -10,6 +10,7 @@ Mobile uses a shell-level onboarding flow for first-run connection setup before 
 - **Active-profile fallback:** deleting the active profile automatically promotes the first remaining profile; deleting the last profile resets to an empty state (`activeProfileId: null`, `profiles: []`) so onboarding/manager recovery can reopen cleanly.
 - **Storage boundary:** profile/mode state is stored only in mobile shell-local storage (via native plugin wrappers), not in Fusion project settings/local dashboard project storage.
 - **Bridge contract:** mobile exposes `window.fusionShell` (`getState`, `listProfiles`, `saveProfile`, `deleteProfile`, `setActiveProfile`, `startQrScan`, `openConnectionManager`, `subscribe`) so shared dashboard code can run host-neutrally.
+- **Dashboard-safe capability contract:** shared dashboard helpers should consume the typed `MobileShellDashboardBridge` subset (`getState?`, `openConnectionManager?`). If either function is missing at runtime, treat connection-management as unsupported instead of throwing.
 
 Native wrappers are isolated under `src/plugins/native-shell.ts`, `src/plugins/connection-profiles.ts`, and `src/plugins/qr-scanner.ts` so dashboard code never calls vendor-specific APIs directly.
 

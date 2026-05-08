@@ -353,6 +353,19 @@ describe("MobileNavBar", () => {
     expect(container.querySelector(".mobile-more-sheet")).toBeNull();
   });
 
+  it("renders shell connection control in More sheet when provided", () => {
+    render(
+      <MobileNavBar
+        {...createDefaultProps()}
+        shellConnectionControl={<button type="button">Manage connections</button>}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+
+    expect(screen.getByTestId("mobile-more-shell-connection")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Manage connections" })).toBeInTheDocument();
+  });
+
   it("sheet contains expected navigation items including activity log", () => {
     render(<MobileNavBar {...createDefaultProps()} />);
     fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));

@@ -174,6 +174,12 @@ const mockShellConnectionState = {
   localServer: null,
 };
 
+const mockGetShellConnectionNativeResult = vi.fn(async () => ({
+  hostKind: "browser" as const,
+  available: false,
+  openConnectionManager: async () => ({ ok: false as const, reason: "unsupported" as const }),
+}));
+
 vi.mock("../../hooks/useShellConnection", () => ({
   useShellConnection: vi.fn(() => ({
     shellApi: null,
@@ -181,6 +187,10 @@ vi.mock("../../hooks/useShellConnection", () => ({
     ready: true,
     openConnectionManagerSignal: 0,
   })),
+}));
+
+vi.mock("../../shell-native", () => ({
+  getShellConnectionNativeResult: (...args: unknown[]) => mockGetShellConnectionNativeResult(...args),
 }));
 
 // Mock model-onboarding-state
@@ -3636,6 +3646,62 @@ describe("App board branch filters", () => {
     await waitFor(() => {
       expect(screen.getByText("Alpha Search")).toBeTruthy();
       expect(screen.getByText("Beta Search")).toBeTruthy();
+    });
+  });
+});
+
+describe("App shell connection status plumbing", () => {
+  it("loads shell connection status for native shell host", async () => {
+    mockShellHostContextValue.host = { kind: "desktop-shell", mode: "remote", connectionId: "p1", serverUrl: "https://fusion.example.com" };
+    mockGetShellConnectionNativeResult.mockResolvedValueOnce({
+      hostKind: "desktop-shell",
+      available: true,
+      mode: "remote",
+      profileLabel: "Prod",
+      serverOrigin: "https://fusion.example.com",
+      openConnectionManager: async () => ({ ok: true }),
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(mockGetShellConnectionNativeResult).toHaveBeenCalledWith(mockShellHostContextValue.host);
+      expect(screen.getByTestId("shell-connection-status-button")).toBeInTheDocument();
+    });
+  });
+
+  it("does not render shell connection status in browser mode", async () => {
+    mockShellHostContextValue.host = { kind: "browser" };
+    mockGetShellConnectionNativeResult.mockResolvedValueOnce({
+      hostKind: "browser",
+      available: false,
+      openConnectionManager: async () => ({ ok: false, reason: "unsupported" }),
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(mockGetShellConnectionNativeResult).toHaveBeenCalledWith(mockShellHostContextValue.host);
+    });
+    expect(screen.queryByTestId("shell-connection-status-button")).toBeNull();
+  });
+
+  it("renders shell connection status for mobile shell host", async () => {
+    mockShellHostContextValue.host = { kind: "mobile-shell", mode: "remote", connectionId: "p1", serverUrl: "https://fusion.example.com" };
+    mockGetShellConnectionNativeResult.mockResolvedValueOnce({
+      hostKind: "mobile-shell",
+      available: true,
+      mode: "remote",
+      profileLabel: "Mobile",
+      serverOrigin: "https://fusion.example.com",
+      openConnectionManager: async () => ({ ok: true }),
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(mockGetShellConnectionNativeResult).toHaveBeenCalledWith(mockShellHostContextValue.host);
+      expect(screen.getByTestId("shell-connection-status-button")).toBeInTheDocument();
     });
   });
 });

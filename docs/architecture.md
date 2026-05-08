@@ -30,6 +30,10 @@ Detection priority is deterministic: explicit bootstrapped global from shell han
 
 React consumers read this through `ShellHostProvider` / `useShellHostContext` (`packages/dashboard/app/context/ShellHostContext.tsx`). Do not add ad-hoc host checks in components.
 
+Dashboard chrome now resolves connection-management capabilities through `packages/dashboard/app/shell-native.ts` (`getShellConnectionNativeResult`) and renders status/actions via `ShellConnectionStatus`. Components should receive derived props from App-level wiring, not read `window.fusionAPI`/`window.fusionShell` directly.
+
+Important distinction: `NodeContext.isRemote` indicates browsing a remote mesh node inside the current dashboard instance; shell host `mode: "remote"` indicates how native desktop/mobile launched into this dashboard server. These are separate axes and must not be conflated in UI or routing logic.
+
 ### `window.fusionShell` bridge contract
 
 Canonical dashboard-side types live in `packages/dashboard/app/types/native-shell.d.ts`.
@@ -54,6 +58,7 @@ Shared shell state contract (`ShellConnectionState`):
 
 Desktop-specific bootstrap extension:
 - Electron preload also exposes `getDesktopModeState()` for first-run desktop mode selection (`{ isFirstRun, desktopMode }`).
+- Electron preload exposes `window.fusionAPI.openConnectionManager()` as the renderer-safe desktop entry point for opening native connection management.
 - The dashboard itself does **not** depend on that preload-only helper for steady-state rendering; it consumes shared shell state via `ShellContext` (`packages/dashboard/app/context/ShellContext.tsx`).
 
 Persistence ownership by host:

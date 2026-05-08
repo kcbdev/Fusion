@@ -15,6 +15,13 @@ When running inside Fusion mobile or desktop shells, the dashboard uses a host-n
 
 The shared dashboard must use `window.fusionShell` for shell connectivity concerns (not direct Electron or Capacitor globals).
 
+For dashboard chrome, use the centralized helper/component path:
+- `app/shell-native.ts` (`getShellConnectionNativeResult`) for host-aware capability + non-sensitive metadata resolution
+- `app/components/ShellConnectionStatus.tsx` for rendering shell kind/mode/connection summary and action labels
+- App-level wiring should pass derived props into `Header` / `MobileNavBar`; downstream components should not read `window` bridges directly
+
+Desktop connection-management actions must go through `window.fusionAPI.openConnectionManager()` (wrapped by `shell-native.ts`), not ad-hoc renderer IPC calls.
+
 ## Canonical dashboard host-context contract
 
 Dashboard host detection is centralized in `app/shell-host.ts` and exposed to React via `ShellHostProvider` (`app/context/ShellHostContext.tsx`).
@@ -31,6 +38,11 @@ Bootstrap priority is fixed:
 4. browser fallback
 
 Shell launch query params are removed after bootstrap. UI components should consume `useShellHostContext()` instead of reading `window` globals directly.
+
+Keep host and node concerns separate:
+- `ShellHostContext.mode` (`local` / `remote`) describes how native shell sessions reached this dashboard instance.
+- `NodeContext.isRemote` describes browsing a remote mesh node from within the dashboard.
+These concepts can coexist and should not replace each other.
 
 ## Features
 

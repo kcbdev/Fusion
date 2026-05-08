@@ -68,6 +68,16 @@ describe("Header", () => {
     expect(container.querySelector("header.header")?.getAttribute("data-shell-kind")).toBe("desktop-shell");
   });
 
+  it("renders shell connection control when provided", () => {
+    renderHeader({ shellConnectionControl: <button type="button">Manage connections</button> });
+    expect(screen.getByRole("button", { name: "Manage connections" })).toBeInTheDocument();
+  });
+
+  it("does not render shell connection control when omitted", () => {
+    const { container } = renderHeader({ shellConnectionControl: undefined });
+    expect(container.querySelector(".shell-connection-status")).toBeNull();
+  });
+
   it("renders action buttons", () => {
     renderHeader();
     expect(screen.getByTitle("Import from GitHub")).toBeDefined();
