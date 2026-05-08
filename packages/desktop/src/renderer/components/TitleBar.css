@@ -8,8 +8,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 0 10px;
+  gap: var(--space-md);
+  padding: 0 var(--space-md);
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
@@ -24,19 +24,19 @@
 .desktop-titlebar__brand {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-sm);
   min-width: 0;
 }
 
 .desktop-titlebar__logo {
-  width: 16px;
-  height: 16px;
+  width: var(--space-lg);
+  height: var(--space-lg);
   color: var(--logo-accent, var(--todo));
   flex-shrink: 0;
 }
 
 .desktop-titlebar__title {
-  font-size: 12px;
+  font-size: calc(var(--space-sm) + var(--space-xs));
   font-weight: 600;
   letter-spacing: 0.01em;
   color: var(--text);
@@ -45,7 +45,7 @@
 .desktop-titlebar__controls {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-xs);
 }
 
 .desktop-titlebar__controls--no-drag,
@@ -54,19 +54,19 @@
 }
 
 .desktop-titlebar__control {
-  width: 28px;
-  height: 24px;
+  width: calc(var(--space-lg) + var(--space-lg));
+  height: var(--space-xl);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  font-size: 13px;
+  font-size: calc(var(--space-sm) + var(--space-xs));
   line-height: 1;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
 .desktop-titlebar__control:hover {
@@ -75,8 +75,8 @@
 }
 
 .desktop-titlebar__control:focus-visible {
-  outline: 2px solid var(--todo);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
 }
 
 .desktop-titlebar__control--close:hover {

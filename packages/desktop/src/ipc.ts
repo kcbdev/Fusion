@@ -2,6 +2,9 @@ import { app, type BrowserWindow, ipcMain, type Tray } from "electron";
 import { setupAutoUpdater, showExportSettingsDialog, showImportSettingsDialog } from "./native.js";
 import { type EngineStatus, updateTrayStatus } from "./tray.js";
 import {
+  applyDeleteProfile,
+  applySetActiveProfile,
+  buildSavedProfile,
   getDesktopShellModeState,
   readShellSettings,
   writeShellSettings,
@@ -35,27 +38,6 @@ interface RegisterIpcOptions {
   getServerPort?: () => number | undefined;
 }
 
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
-function createProfileId(): string {
-  return `profile_${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function normalizeServerUrl(serverUrl: string): string {
-  const normalized = serverUrl.trim().replace(/\/$/, "");
-  let parsed: URL;
-  try {
-    parsed = new URL(normalized);
-  } catch {
-    throw new Error("Server URL must be a valid absolute URL");
-  }
-  if (!parsed.protocol || !/^https?:$/.test(parsed.protocol)) {
-    throw new Error("Server URL must use http or https");
-  }
-  return normalized;
-}
 
 function toShellState(
   settings: Awaited<ReturnType<typeof readShellSettings>>,
@@ -122,38 +104,25 @@ export function registerIpcHandlers(mainWindow: BrowserWindow, tray: Tray, optio
 
   ipcMain.handle("shell:saveProfile", async (_event, profile: ShellConnectionProfileInput) => {
     const settings = await readShellSettings();
-    const existing = profile.id ? settings.profiles.find((item) => item.id === profile.id) : undefined;
-    const timestamp = nowIso();
-    const nextProfile: ShellConnectionProfile = {
-      id: existing?.id ?? profile.id ?? createProfileId(),
-      name: profile.name.trim(),
-      serverUrl: normalizeServerUrl(profile.serverUrl),
-      authToken: profile.authToken ?? null,
-      createdAt: existing?.createdAt ?? timestamp,
-      updatedAt: timestamp,
-      lastUsedAt: existing?.lastUsedAt ?? null,
-    };
+    const nextProfile = buildSavedProfile(settings, profile);
+    const existing = settings.profiles.find((item) => item.id === nextProfile.id);
 
-    settings.profiles = existing ? settings.profiles.map((item) => (item.id === existing.id ? nextProfile : item)) : [...settings.profiles, nextProfile];
+    settings.profiles = existing
+      ? settings.profiles.map((item) => (item.id === existing.id ? nextProfile : item))
+      : [...settings.profiles, nextProfile];
     await writeShellSettings(settings);
     await emitShellState(mainWindow, options.getLocalServerState);
     return nextProfile;
   });
 
   ipcMain.handle("shell:deleteProfile", async (_event, profileId: string) => {
-    const settings = await readShellSettings();
-    settings.profiles = settings.profiles.filter((item) => item.id !== profileId);
-    if (settings.activeProfileId === profileId) settings.activeProfileId = null;
+    const settings = applyDeleteProfile(await readShellSettings(), profileId);
     await writeShellSettings(settings);
     await emitShellState(mainWindow, options.getLocalServerState);
   });
 
   ipcMain.handle("shell:setActiveProfile", async (_event, profileId: string | null) => {
-    const settings = await readShellSettings();
-    settings.activeProfileId = profileId && settings.profiles.some((item) => item.id === profileId) ? profileId : null;
-    settings.profiles = settings.profiles.map((item) =>
-      item.id === settings.activeProfileId ? { ...item, lastUsedAt: nowIso(), updatedAt: nowIso() } : item,
-    );
+    const settings = applySetActiveProfile(await readShellSettings(), profileId);
     await writeShellSettings(settings);
     return emitShellState(mainWindow, options.getLocalServerState);
   });

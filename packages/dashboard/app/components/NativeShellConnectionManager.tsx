@@ -16,6 +16,7 @@ export function NativeShellConnectionManager({ open, shellApi, shellState, onClo
   );
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Partial<ShellConnectionProfile>>({});
+  const [deleteCandidate, setDeleteCandidate] = useState<ShellConnectionProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   if (!open) return null;
@@ -28,10 +29,15 @@ export function NativeShellConnectionManager({ open, shellApi, shellState, onClo
   const workingUrl = draft.serverUrl ?? editingProfile?.serverUrl ?? "";
   const workingToken = draft.authToken ?? editingProfile?.authToken ?? "";
 
+  const resetEditor = () => {
+    setEditingProfileId(null);
+    setDraft({});
+    setError(null);
+  };
+
   const saveCurrent = async () => {
     setError(null);
     try {
-      // Early validation for user feedback before bridge persistence rejects.
       const parsed = new URL(workingUrl.trim());
       if (!/^https?:$/.test(parsed.protocol)) {
         throw new Error("Server URL must use http or https");
@@ -48,6 +54,30 @@ export function NativeShellConnectionManager({ open, shellApi, shellState, onClo
     } catch (nextError) {
       setError((nextError as Error).message);
     }
+  };
+
+  const handleScanQr = async () => {
+    setError(null);
+    try {
+      const result = await shellApi.startQrScan();
+      setEditingProfileId("__new__");
+      setDraft({
+        name: "",
+        serverUrl: result.serverUrl,
+        authToken: result.authToken ?? "",
+      });
+    } catch (nextError) {
+      setError((nextError as Error).message);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteCandidate) {
+      return;
+    }
+    await shellApi.deleteProfile(deleteCandidate.id);
+    setDeleteCandidate(null);
+    resetEditor();
   };
 
   return (
@@ -68,29 +98,54 @@ export function NativeShellConnectionManager({ open, shellApi, shellState, onClo
         )}
 
         <div className="native-shell-connection-manager__profiles">
-          {shellState.profiles.map((profile) => (
-            <div className="card native-shell-connection-manager__profile" key={profile.id}>
-              <div>
-                <strong>{profile.name}</strong>
-                <div className="settings-muted">{profile.serverUrl}</div>
-              </div>
+          {shellState.profiles.length === 0 ? (
+            <div className="card native-shell-connection-manager__empty-state">
+              <p className="settings-muted">No remote servers saved yet.</p>
               <div className="native-shell-connection-manager__profile-actions">
                 <button
                   type="button"
                   className="btn btn-sm"
-                  aria-label={`Edit ${profile.name}`}
                   onClick={() => {
-                    setEditingProfileId(profile.id);
-                    setDraft(profile);
+                    setEditingProfileId("__new__");
+                    setDraft({ name: "", serverUrl: "", authToken: "" });
+                    setError(null);
                   }}
                 >
-                  Edit
+                  Add server
                 </button>
-                <button type="button" className="btn btn-sm" aria-label={`Use ${profile.name}`} onClick={() => void shellApi.setActiveProfile(profile.id)}>Use</button>
-                <button type="button" className="btn btn-sm btn-danger" aria-label={`Delete ${profile.name}`} onClick={() => void shellApi.deleteProfile(profile.id)}>Delete</button>
+                {shellState.host === "mobile-shell" && (
+                  <button type="button" className="btn btn-sm" onClick={() => void handleScanQr()}>
+                    Scan QR
+                  </button>
+                )}
               </div>
             </div>
-          ))}
+          ) : (
+            shellState.profiles.map((profile) => (
+              <div className="card native-shell-connection-manager__profile" key={profile.id}>
+                <div>
+                  <strong>{profile.name}</strong>
+                  <div className="settings-muted">{profile.serverUrl}</div>
+                  {profile.id === shellState.activeProfileId && <span className="native-shell-connection-manager__active-pill">Active</span>}
+                </div>
+                <div className="native-shell-connection-manager__profile-actions">
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    aria-label={`Edit ${profile.name}`}
+                    onClick={() => {
+                      setEditingProfileId(profile.id);
+                      setDraft(profile);
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button type="button" className="btn btn-sm" aria-label={`Use ${profile.name}`} onClick={() => void shellApi.setActiveProfile(profile.id)}>Use</button>
+                  <button type="button" className="btn btn-sm btn-danger" aria-label={`Delete ${profile.name}`} onClick={() => setDeleteCandidate(profile)}>Delete</button>
+                </div>
+              </div>
+            ))
+          )}
         </div>
 
         <div className="native-shell-connection-manager__mode-row">
@@ -106,7 +161,7 @@ export function NativeShellConnectionManager({ open, shellApi, shellState, onClo
             Add connection
           </button>
           {shellState.host === "mobile-shell" && (
-            <button type="button" className="btn" onClick={() => void shellApi.startQrScan()}>
+            <button type="button" className="btn" onClick={() => void handleScanQr()}>
               Scan QR
             </button>
           )}
@@ -122,8 +177,19 @@ export function NativeShellConnectionManager({ open, shellApi, shellState, onClo
           {error && <p className="form-error" role="alert">{error}</p>}
         </div>
 
+        {deleteCandidate && (
+          <div className="native-shell-connection-manager__delete-confirm" role="alertdialog" aria-label="Delete server confirmation">
+            <p>Delete <strong>{deleteCandidate.name}</strong>? This removes the saved profile.</p>
+            <div className="native-shell-connection-manager__profile-actions">
+              <button type="button" className="btn btn-sm" onClick={() => setDeleteCandidate(null)}>Cancel</button>
+              <button type="button" className="btn btn-sm btn-danger" onClick={() => void handleConfirmDelete()}>Delete</button>
+            </div>
+          </div>
+        )}
+
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>Close</button>
+          <button type="button" className="btn" onClick={resetEditor}>Cancel</button>
           <button type="button" className="btn btn-primary" onClick={() => void saveCurrent()} disabled={!workingUrl.trim()}>Save</button>
         </div>
       </div>

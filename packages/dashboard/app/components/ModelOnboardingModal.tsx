@@ -32,6 +32,7 @@ import { CustomProviderForm } from "./CustomProviderForm";
 import { PluginSlot } from "./PluginSlot";
 import { appendTokenQuery } from "../auth";
 import { filterVisibleOnboardingAndSettingsProviders } from "./providerVisibility";
+import { useShellConnection } from "../hooks/useShellConnection";
 
 const mapLegacyCustomProviderToConfig = (
   provider: CustomProvider | CustomProviderConfig,
@@ -594,6 +595,11 @@ export function ModelOnboardingModal({
   const [showCustomProviderForm, setShowCustomProviderForm] = useState(false);
   const [customProviderSaving, setCustomProviderSaving] = useState(false);
   const [customProviderError, setCustomProviderError] = useState<string | undefined>();
+  const [shellProfileName, setShellProfileName] = useState("Remote Server");
+  const [shellServerUrl, setShellServerUrl] = useState("");
+  const [shellAuthToken, setShellAuthToken] = useState("");
+  const [shellConnectionSaving, setShellConnectionSaving] = useState(false);
+  const [shellConnectionError, setShellConnectionError] = useState<string | null>(null);
   const apiKeySuccessTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const onboardingContentRef = useRef<HTMLDivElement | null>(null);
   const modalRef = useRef<HTMLDivElement | null>(null);
@@ -605,6 +611,7 @@ export function ModelOnboardingModal({
   });
   const pollCountRef = useRef<number>(0);
   const previousCreatedTaskRef = useRef<Task | null | undefined>(firstCreatedTask);
+  const { shellApi, state: shellState } = useShellConnection();
   const hasTrackedWizardOpenRef = useRef(false);
   const resumedFromStep = persistedState?.currentStep;
   const isResumedFlow = !!persistedState && persistedState.currentStep !== "complete";
@@ -1624,11 +1631,10 @@ export function ModelOnboardingModal({
     onComplete();
   }, [completeOnboarding, onComplete]);
 
-  if (!isOpen) return null;
-
   const githubStatus = getGitHubStatus();
 
   const aiProviders = authProviders.filter((provider) => provider.id !== "github");
+  const showShellConnectionSetup = shellState.host !== "web" && !shellState.activeProfileId;
   const orderedAiProviders = [...aiProviders].sort(compareOnboardingProviders);
   const hasOauthProviders = orderedAiProviders.some((provider) => !provider.type || provider.type === "oauth");
   const hasApiKeyProviders = orderedAiProviders.some((provider) => provider.type === "api_key");
@@ -1637,6 +1643,36 @@ export function ModelOnboardingModal({
   const hasProjectSelected = Boolean(projectId);
   // True when on GitHub step but skipped AI setup (no AI provider connected)
   const aiSetupSkipped = step === "github" && !hasAiProvider;
+
+  const saveShellConnectionProfile = useCallback(async () => {
+    if (!shellApi) {
+      return;
+    }
+    setShellConnectionError(null);
+    setShellConnectionSaving(true);
+    try {
+      const saved = await shellApi.saveProfile({
+        name: shellProfileName,
+        serverUrl: shellServerUrl,
+        authToken: shellAuthToken.trim() ? shellAuthToken : null,
+      });
+      try {
+        await shellApi.setActiveProfile(saved.id);
+      } catch (error) {
+        setShellConnectionError(getErrorMessage(error) || "Saved profile but failed to activate it");
+        return;
+      }
+      setShellServerUrl("");
+      setShellAuthToken("");
+      addToast("Remote server profile saved", "success");
+    } catch (error) {
+      setShellConnectionError(getErrorMessage(error) || "Failed to save shell connection");
+    } finally {
+      setShellConnectionSaving(false);
+    }
+  }, [shellApi, shellProfileName, shellServerUrl, shellAuthToken, addToast]);
+
+  if (!isOpen) return null;
 
   const selectedModelDisplayName = (() => {
     if (!selectedModel) {
@@ -2070,6 +2106,52 @@ export function ModelOnboardingModal({
               <p className="onboarding-helper-text">
                 Research runs require provider credentials and an enabled Research View. After onboarding, verify these in Settings → Authentication and Settings → Experimental Features.
               </p>
+
+              {showShellConnectionSetup && (
+                <div className="card">
+                  <h3 className="onboarding-section-title">Connect remote Fusion server</h3>
+                  <p className="onboarding-helper-text">
+                    Your native shell needs an active remote profile before dashboard handoff can complete.
+                  </p>
+                  <label htmlFor="onboarding-shell-profile-name" className="onboarding-apikey-field-label">Profile name</label>
+                  <input
+                    id="onboarding-shell-profile-name"
+                    className="input"
+                    value={shellProfileName}
+                    onChange={(event) => setShellProfileName(event.target.value)}
+                  />
+                  <label htmlFor="onboarding-shell-server-url" className="onboarding-apikey-field-label">Server URL</label>
+                  <input
+                    id="onboarding-shell-server-url"
+                    className="input"
+                    placeholder="https://your-fusion-host"
+                    value={shellServerUrl}
+                    onChange={(event) => setShellServerUrl(event.target.value)}
+                  />
+                  <label htmlFor="onboarding-shell-token" className="onboarding-apikey-field-label">Auth token (optional)</label>
+                  <input
+                    id="onboarding-shell-token"
+                    className="input"
+                    type="password"
+                    value={shellAuthToken}
+                    onChange={(event) => setShellAuthToken(event.target.value)}
+                  />
+                  {shellConnectionError && <small className="field-error">{shellConnectionError}</small>}
+                  <div className="onboarding-apikey-input-row">
+                    <button type="button" className="btn btn-sm" onClick={() => void shellApi?.openConnectionManager()}>
+                      Open manager
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => void saveShellConnectionProfile()}
+                      disabled={!shellServerUrl.trim() || shellConnectionSaving}
+                    >
+                      {shellConnectionSaving ? "Saving…" : "Save remote server"}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Provider connection status summary */}
               {!authLoading && authProviders.length > 0 && (

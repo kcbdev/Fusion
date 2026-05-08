@@ -16,7 +16,7 @@ function createShellApi() {
     deleteProfile: vi.fn(async () => undefined),
     setActiveProfile: vi.fn(async () => ({ host: "mobile-shell", activeProfileId: "p1", profiles: [] })),
     setDesktopMode: vi.fn(async () => ({ host: "desktop-shell", desktopMode: "remote", activeProfileId: null, profiles: [] })),
-    startQrScan: vi.fn(),
+    startQrScan: vi.fn(async () => ({ serverUrl: "https://qr.example.com", authToken: "token" })),
     openConnectionManager: vi.fn(),
     subscribe: vi.fn(() => () => undefined),
   };
@@ -38,22 +38,23 @@ describe("NativeShellConnectionManager", () => {
     await waitFor(() => expect(shellApi.setDesktopMode).toHaveBeenCalledWith("local"));
   });
 
-  it("activates and deletes profiles", async () => {
+  it("shows active profile indicator and requires delete confirmation", async () => {
     const shellApi = createShellApi();
     render(
       <NativeShellConnectionManager
         open={true}
         shellApi={shellApi}
-        shellState={{ host: "mobile-shell", activeProfileId: null, profiles: [{ id: "p1", name: "Prod", serverUrl: "https://fusion.example.com", authToken: null, createdAt: "", updatedAt: "" }] }}
+        shellState={{ host: "mobile-shell", activeProfileId: "p1", profiles: [{ id: "p1", name: "Prod", serverUrl: "https://fusion.example.com", authToken: null, createdAt: "", updatedAt: "" }] }}
         onClose={vi.fn()}
       />,
     );
 
-    fireEvent.click(screen.getByLabelText("Use Prod"));
+    expect(screen.getByText("Active")).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("Delete Prod"));
+    expect(screen.getByRole("alertdialog", { name: "Delete server confirmation" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
     await waitFor(() => {
-      expect(shellApi.setActiveProfile).toHaveBeenCalledWith("p1");
       expect(shellApi.deleteProfile).toHaveBeenCalledWith("p1");
     });
   });
@@ -78,25 +79,23 @@ describe("NativeShellConnectionManager", () => {
     });
   });
 
-  it("adds a new connection", async () => {
+  it("supports empty-state recovery and QR import", async () => {
     const shellApi = createShellApi();
     render(
       <NativeShellConnectionManager
         open={true}
         shellApi={shellApi}
-        shellState={{ host: "mobile-shell", activeProfileId: "p1", profiles: [{ id: "p1", name: "Prod", serverUrl: "https://fusion.example.com", authToken: null, createdAt: "", updatedAt: "" }] }}
+        shellState={{ host: "mobile-shell", activeProfileId: null, profiles: [] }}
         onClose={vi.fn()}
       />,
     );
 
-    fireEvent.click(screen.getByText("Add connection"));
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Staging" } });
-    fireEvent.change(screen.getByLabelText("Server URL"), { target: { value: "https://staging.example.com" } });
-    fireEvent.click(screen.getByText("Save"));
+    expect(screen.getByText("No remote servers saved yet.")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByText("Scan QR")[0]!);
 
     await waitFor(() => {
-      expect(shellApi.saveProfile).toHaveBeenCalledWith(expect.objectContaining({ id: undefined, name: "Staging", serverUrl: "https://staging.example.com" }));
-      expect(shellApi.setActiveProfile).toHaveBeenCalledWith("p2");
+      expect(shellApi.startQrScan).toHaveBeenCalled();
+      expect(screen.getByDisplayValue("https://qr.example.com")).toBeInTheDocument();
     });
   });
 });

@@ -32,6 +32,26 @@ describe("App shell onboarding gating", () => {
     ).toBe(false);
   });
 
+  it("skips onboarding when an active shell profile exists", () => {
+    expect(
+      requiresNativeShellOnboarding(
+        { host: "mobile-shell", activeProfileId: "profile-1" },
+        true,
+        false,
+      ),
+    ).toBe(false);
+  });
+
+  it("re-requires onboarding after active profile is removed", () => {
+    expect(
+      requiresNativeShellOnboarding(
+        { host: "desktop-shell", desktopMode: "remote", activeProfileId: null },
+        true,
+        false,
+      ),
+    ).toBe(true);
+  });
+
   it("skips onboarding for web host", () => {
     expect(
       requiresNativeShellOnboarding(

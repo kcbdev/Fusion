@@ -56,6 +56,27 @@ vi.mock("../native.js", () => ({
 vi.mock("../shell-settings.js", () => ({
   readShellSettings: mocks.readShellSettings,
   writeShellSettings: mocks.writeShellSettings,
+  buildSavedProfile: (settings: { profiles: Array<{ id: string }>; }, profile: { id?: string; name: string; serverUrl: string }) => ({
+    id: profile.id ?? "generated-id",
+    name: profile.name.trim() || "Remote Server",
+    serverUrl: profile.serverUrl,
+    createdAt: "",
+    updatedAt: "",
+    authToken: null,
+    lastUsedAt: null,
+  }),
+  applyDeleteProfile: (settings: { activeProfileId: string | null; profiles: Array<{ id: string }> }, profileId: string) => {
+    const profiles = settings.profiles.filter((item) => item.id !== profileId);
+    return {
+      ...settings,
+      profiles,
+      activeProfileId: settings.activeProfileId === profileId ? (profiles[0]?.id ?? null) : settings.activeProfileId,
+    };
+  },
+  applySetActiveProfile: (settings: { profiles: Array<{ id: string }> }, profileId: string | null) => ({
+    ...settings,
+    activeProfileId: profileId && settings.profiles.some((item) => item.id === profileId) ? profileId : null,
+  }),
   getDesktopShellModeState: (settings: { hasCompletedModeSelection?: boolean; desktopMode?: "local" | "remote" | null }) => ({
     isFirstRun: !settings.hasCompletedModeSelection || !settings.desktopMode,
     desktopMode: settings.desktopMode ?? null,
@@ -128,15 +149,27 @@ describe("ipc handlers", () => {
     expect(window.webContents.send).toHaveBeenCalledWith("shell:state", expect.any(Object));
   });
 
-  it("shell:saveProfile rejects invalid URLs", async () => {
+  it("shell:saveProfile persists the helper-generated profile", async () => {
     await registerHandlers();
     const handler = mocks.ipcHandlers.get("shell:saveProfile");
+    const result = await handler?.({}, { name: " Prod ", serverUrl: "https://fusion.example.com" });
 
-    await expect(handler?.({}, { name: "Prod", serverUrl: "not-a-url" })).rejects.toThrow(
-      "Server URL must be a valid absolute URL",
-    );
-    await expect(handler?.({}, { name: "Prod", serverUrl: "ftp://fusion.example.com" })).rejects.toThrow(
-      "Server URL must use http or https",
-    );
+    expect(result).toMatchObject({ id: "generated-id", name: "Prod" });
+    expect(mocks.writeShellSettings).toHaveBeenCalledWith(expect.objectContaining({ profiles: [expect.objectContaining({ id: "generated-id" })] }));
+  });
+
+  it("shell:deleteProfile falls back to first remaining profile when deleting active", async () => {
+    mocks.readShellSettings.mockResolvedValueOnce({
+      desktopMode: "remote",
+      hasCompletedModeSelection: true,
+      activeProfileId: "p2",
+      profiles: [{ id: "p1" }, { id: "p2" }],
+    });
+    await registerHandlers();
+
+    const handler = mocks.ipcHandlers.get("shell:deleteProfile");
+    await handler?.({}, "p2");
+
+    expect(mocks.writeShellSettings).toHaveBeenCalledWith(expect.objectContaining({ activeProfileId: "p1" }));
   });
 });

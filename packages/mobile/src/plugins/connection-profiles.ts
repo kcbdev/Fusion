@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Preferences } from "@capacitor/preferences";
 import type { ShellConnectionProfile, ShellConnectionProfileInput } from "../types.js";
 
@@ -12,8 +13,9 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function createId(): string {
-  return `profile_${Math.random().toString(36).slice(2, 10)}`;
+function normalizeName(name: string): string {
+  const normalized = name.trim().replace(/\s+/g, " ");
+  return normalized.length > 0 ? normalized : "Remote Server";
 }
 
 function normalizeUrl(serverUrl: string): string {
@@ -30,15 +32,97 @@ function normalizeUrl(serverUrl: string): string {
   return normalized;
 }
 
+function deterministicBaseId(name: string, serverUrl: string): string {
+  const hash = createHash("sha1").update(`${name}|${serverUrl}`).digest("hex").slice(0, 10);
+  return `profile_${hash}`;
+}
+
+function ensureUniqueName(name: string, profiles: ShellConnectionProfile[], skipId?: string): string {
+  const used = new Set(profiles.filter((profile) => profile.id !== skipId).map((profile) => profile.name.toLocaleLowerCase()));
+  if (!used.has(name.toLocaleLowerCase())) {
+    return name;
+  }
+  let suffix = 2;
+  let candidate = `${name} (${suffix})`;
+  while (used.has(candidate.toLocaleLowerCase())) {
+    suffix += 1;
+    candidate = `${name} (${suffix})`;
+  }
+  return candidate;
+}
+
+function ensureUniqueId(name: string, serverUrl: string, profiles: ShellConnectionProfile[], skipId?: string): string {
+  const base = deterministicBaseId(name, serverUrl);
+  const used = new Set(profiles.filter((profile) => profile.id !== skipId).map((profile) => profile.id));
+  if (!used.has(base)) {
+    return base;
+  }
+  let suffix = 2;
+  let candidate = `${base}_${suffix}`;
+  while (used.has(candidate)) {
+    suffix += 1;
+    candidate = `${base}_${suffix}`;
+  }
+  return candidate;
+}
+
+function normalizePersistedProfile(input: unknown, index: number): ShellConnectionProfile | null {
+  if (!input || typeof input !== "object") {
+    return null;
+  }
+  const candidate = input as Partial<ShellConnectionProfile>;
+  if (typeof candidate.serverUrl !== "string") {
+    return null;
+  }
+
+  let serverUrl: string;
+  try {
+    serverUrl = normalizeUrl(candidate.serverUrl);
+  } catch {
+    return null;
+  }
+
+  const name = normalizeName(typeof candidate.name === "string" ? candidate.name : "");
+  const createdAt = typeof candidate.createdAt === "string" && candidate.createdAt.length > 0 ? candidate.createdAt : nowIso();
+  const updatedAt = typeof candidate.updatedAt === "string" && candidate.updatedAt.length > 0 ? candidate.updatedAt : createdAt;
+
+  return {
+    id: typeof candidate.id === "string" && candidate.id.length > 0 ? candidate.id : `profile_imported_${index}`,
+    name,
+    serverUrl,
+    authToken: typeof candidate.authToken === "string" ? candidate.authToken : null,
+    createdAt,
+    updatedAt,
+    lastUsedAt: typeof candidate.lastUsedAt === "string" ? candidate.lastUsedAt : null,
+  };
+}
+
 function toPersisted(input: unknown): PersistedShellState {
   if (!input || typeof input !== "object") {
     return { activeProfileId: null, profiles: [] };
   }
 
   const candidate = input as Partial<PersistedShellState>;
-  const profiles = Array.isArray(candidate.profiles) ? candidate.profiles.filter((profile) => profile && typeof profile === "object") as ShellConnectionProfile[] : [];
+  const source = Array.isArray(candidate.profiles) ? candidate.profiles : [];
+  const profiles: ShellConnectionProfile[] = [];
+  for (const [index, value] of source.entries()) {
+    const normalized = normalizePersistedProfile(value, index);
+    if (!normalized) {
+      continue;
+    }
+    const uniqueName = ensureUniqueName(normalized.name, profiles);
+    const idAlreadyUsed = profiles.some((profile) => profile.id === normalized.id);
+    const id = idAlreadyUsed ? ensureUniqueId(uniqueName, normalized.serverUrl, profiles) : normalized.id;
+    profiles.push({ ...normalized, name: uniqueName, id });
+  }
+
+  const activeProfileId =
+    typeof candidate.activeProfileId === "string" && profiles.some((profile) => profile.id === candidate.activeProfileId)
+      ? candidate.activeProfileId
+      : null;
+
   return {
-    activeProfileId: typeof candidate.activeProfileId === "string" ? candidate.activeProfileId : null,
+    activeProfileId,
     profiles,
   };
 }
@@ -69,11 +153,14 @@ export async function saveShellProfile(input: ShellConnectionProfileInput): Prom
   const state = await loadShellProfiles();
   const existing = input.id ? state.profiles.find((p) => p.id === input.id) : undefined;
   const timestamp = nowIso();
+  const serverUrl = normalizeUrl(input.serverUrl);
+  const normalizedName = normalizeName(input.name);
+  const name = ensureUniqueName(normalizedName, state.profiles, existing?.id);
 
   const profile: ShellConnectionProfile = {
-    id: existing?.id ?? input.id ?? createId(),
-    name: input.name.trim(),
-    serverUrl: normalizeUrl(input.serverUrl),
+    id: existing?.id ?? ensureUniqueId(name, serverUrl, state.profiles, existing?.id),
+    name,
+    serverUrl,
     authToken: input.authToken ?? null,
     createdAt: existing?.createdAt ?? timestamp,
     updatedAt: timestamp,
@@ -91,7 +178,12 @@ export async function saveShellProfile(input: ShellConnectionProfileInput): Prom
 export async function deleteShellProfile(profileId: string): Promise<void> {
   const state = await loadShellProfiles();
   const profiles = state.profiles.filter((profile) => profile.id !== profileId);
-  const activeProfileId = state.activeProfileId === profileId ? null : state.activeProfileId;
+  const activeProfileId =
+    state.activeProfileId !== profileId
+      ? state.activeProfileId
+      : profiles.length > 0
+        ? profiles[0]?.id ?? null
+        : null;
   await saveShellState({ activeProfileId, profiles });
 }
 
@@ -102,9 +194,10 @@ export async function setActiveShellProfile(profileId: string | null): Promise<P
       ? profileId
       : null;
 
+  const timestamp = nowIso();
   const profiles = state.profiles.map((profile) =>
     profile.id === activeProfileId
-      ? { ...profile, lastUsedAt: nowIso(), updatedAt: nowIso() }
+      ? { ...profile, lastUsedAt: timestamp, updatedAt: timestamp }
       : profile,
   );
 

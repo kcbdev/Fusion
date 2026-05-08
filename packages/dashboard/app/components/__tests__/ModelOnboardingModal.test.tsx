@@ -21,6 +21,7 @@ const mockFetchCustomProviders = vi.fn();
 const mockCreateCustomProvider = vi.fn();
 const mockFetchCursorCliStatus = vi.fn();
 const mockSetCursorCliEnabled = vi.fn();
+const mockUseShellConnection = vi.fn();
 
 vi.mock("../../api", () => ({
   fetchAuthStatus: (...args: unknown[]) => mockFetchAuthStatus(...args),
@@ -107,6 +108,10 @@ vi.mock("../onboarding-events", () => ({
 }));
 
 // Mock ProviderIcon for test isolation
+vi.mock("../../hooks/useShellConnection", () => ({
+  useShellConnection: (...args: unknown[]) => mockUseShellConnection(...args),
+}));
+
 vi.mock("../ProviderIcon", () => ({
   ProviderIcon: ({ provider, size }: { provider: string; size?: string }) => (
     <span data-testid="provider-icon" data-provider={provider} data-size={size}>
@@ -207,6 +212,15 @@ beforeEach(() => {
   mockMarkStepSkipped.mockImplementation(() => {});
   mockGetSkippedSteps.mockReturnValue([]);
   mockGetStepData.mockReturnValue(null);
+  mockUseShellConnection.mockReturnValue({
+    shellApi: null,
+    ready: true,
+    openConnectionManagerSignal: 0,
+    state: { host: "web", activeProfileId: null, profiles: [] },
+    saveProfile: vi.fn(),
+    removeProfile: vi.fn(),
+    setActiveProfile: vi.fn(),
+  });
   // Reset mockFetchAuthStatus to default - use mockImplementation for clear control
   mockFetchAuthStatus.mockReset();
   mockFetchAuthStatus.mockImplementation(() => Promise.resolve({ providers: defaultAuthProviders }));
@@ -4300,3 +4314,4 @@ describe("Custom providers disclosure", () => {
     });
   });
 });
+

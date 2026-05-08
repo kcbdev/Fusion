@@ -101,4 +101,49 @@ describe("shell-settings", () => {
       desktopMode: null,
     });
   });
+
+  it("normalizes invalid profiles, duplicate names, and invalid active id", async () => {
+    mockState.content.set(
+      "/tmp/fusion/shell-connections.json",
+      JSON.stringify({
+        activeProfileId: "missing",
+        profiles: [
+          { id: "p1", name: "", serverUrl: "https://fusion.example.com" },
+          { id: "p2", name: "Remote Server", serverUrl: "https://staging.example.com" },
+          { id: "p3", name: "Bad", serverUrl: "not-a-url" },
+        ],
+      }),
+    );
+
+    const { readShellSettings } = await import("../shell-settings.ts");
+    const settings = await readShellSettings();
+    expect(settings.activeProfileId).toBeNull();
+    expect(settings.profiles).toHaveLength(2);
+    expect(settings.profiles[0]?.name).toBe("Remote Server");
+    expect(settings.profiles[1]?.name).toBe("Remote Server (2)");
+  });
+
+  it("deleting active profile picks fallback and deleting last clears state", async () => {
+    const { applyDeleteProfile } = await import("../shell-settings.ts");
+    const first = { id: "p1", name: "Prod", serverUrl: "https://fusion.example.com", authToken: null, createdAt: "", updatedAt: "" };
+    const second = { id: "p2", name: "Staging", serverUrl: "https://staging.example.com", authToken: null, createdAt: "", updatedAt: "" };
+
+    const withFallback = applyDeleteProfile({
+      desktopMode: "remote",
+      hasCompletedModeSelection: true,
+      activeProfileId: "p2",
+      profiles: [first, second],
+    }, "p2");
+
+    expect(withFallback.activeProfileId).toBe("p1");
+
+    const empty = applyDeleteProfile({
+      desktopMode: "remote",
+      hasCompletedModeSelection: true,
+      activeProfileId: "p1",
+      profiles: [first],
+    }, "p1");
+
+    expect(empty).toMatchObject({ activeProfileId: null, profiles: [] });
+  });
 });

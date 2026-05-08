@@ -85,6 +85,7 @@ For the canonical flow (QR/manual setup, saved profiles, active-profile behavior
 
 Implementation notes:
 - Mobile shell profiles are persisted in shell-local storage (Capacitor Preferences), separate from Fusion project/global settings.
+- Active-profile deletion fallback is shell-owned: deleting the active profile promotes the first remaining profile, and deleting the final profile resets to a clean empty state.
 - The dashboard consumes this through the shared `window.fusionShell` connection APIs.
 
 ### Planning Mode

@@ -66,7 +66,8 @@ Desktop boots through a shell-owned mode chooser before mounting the dashboard a
 - **First run choice:** users choose **Local Fusion (bundled runtime)** or **Remote connection path**.
 - **Mode contract:** `desktopMode` is `"local" | "remote" | null` and `hasCompletedModeSelection` determines whether the renderer treats startup as first-run. IPC also exposes a renderer-safe `{ isFirstRun, desktopMode }` shape via `shell:getDesktopModeState`.
 - **Desktop mode restore:** after selection, mode is persisted and reused on relaunch.
-- **Remote profiles:** multiple saved profiles are supported (`name`, `serverUrl`, optional `authToken`) and can be managed/switched later from the dashboard header connection UI.
+- **Remote profiles:** multiple saved profiles are supported (`name`, `serverUrl`, optional `authToken`) and can be created/edited/switched/deleted from the dashboard connection manager.
+- **Delete fallback:** if the active profile is deleted, desktop shell settings automatically select the first remaining profile; deleting the final profile leaves a valid empty payload (`activeProfileId: null`, `profiles: []`).
 - **Storage boundary:** shell connection state is stored only in desktop-local app data at `app.getPath("userData")/shell-connections.json` and is not written to `.fusion/config.json` or dashboard project storage keys.
 
 ### Production vs dev bootstrap behavior
@@ -157,6 +158,7 @@ Desktop local mode uses an in-process runtime manager (`src/local-server.ts`) th
   - `getState()`, `listProfiles()`, `saveProfile()`, `deleteProfile()`
   - `setActiveProfile()`, `setDesktopMode()`
   - `startQrScan()`, `openConnectionManager()`, `subscribe(listener)`
+  - Together these cover create/delete/switch operations for shell-owned remote profiles without writing to project/global Fusion settings
 - `window.fusionAPI` remains as a backward-compatible alias of `window.electronAPI`.
 
 All preload typings are declared in `src/types.d.ts`.

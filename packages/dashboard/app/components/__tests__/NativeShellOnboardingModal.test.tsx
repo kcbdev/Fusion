@@ -58,7 +58,14 @@ describe("NativeShellOnboardingModal", () => {
 
   it("saves remote profile and redirects to remote dashboard", async () => {
     const saveProfile = vi.fn(async () => ({ id: "p1", serverUrl: "https://fusion.example.com", authToken: "abc" }));
-    const setActiveProfile = vi.fn(async () => ({ host: "mobile-shell", activeProfileId: "p1", profiles: [] }));
+    const setActiveProfile = vi.fn(async () => ({
+      host: "mobile-shell",
+      activeProfileId: "p1",
+      profiles: [
+        { id: "existing", name: "Existing", serverUrl: "https://existing.example.com", createdAt: "", updatedAt: "" },
+        { id: "p1", name: "Remote Server", serverUrl: "https://fusion.example.com", createdAt: "", updatedAt: "" },
+      ],
+    }));
     const onComplete = vi.fn();
     const originalLocation = window.location;
     Object.defineProperty(window, "location", {
@@ -80,7 +87,11 @@ describe("NativeShellOnboardingModal", () => {
           openConnectionManager: vi.fn(),
           subscribe: vi.fn(() => () => undefined),
         }}
-        shellState={{ host: "mobile-shell", activeProfileId: null, profiles: [] }}
+        shellState={{
+          host: "mobile-shell",
+          activeProfileId: "existing",
+          profiles: [{ id: "existing", name: "Existing", serverUrl: "https://existing.example.com", createdAt: "", updatedAt: "" }],
+        }}
         onComplete={onComplete}
       />,
     );
@@ -89,7 +100,7 @@ describe("NativeShellOnboardingModal", () => {
     fireEvent.click(screen.getByText("Continue"));
 
     await waitFor(() => {
-      expect(saveProfile).toHaveBeenCalled();
+      expect(saveProfile).toHaveBeenCalledWith(expect.objectContaining({ name: "Remote Server", serverUrl: "https://fusion.example.com" }));
       expect(setActiveProfile).toHaveBeenCalledWith("p1");
       expect(window.location.href).toContain("https://fusion.example.com");
       expect(window.location.href).toContain("rt=abc");

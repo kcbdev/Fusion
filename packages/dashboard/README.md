@@ -8,7 +8,8 @@ When running inside Fusion mobile or desktop shells, the dashboard uses a host-n
 
 - Shell host detection: `web | mobile-shell | desktop-shell`
 - Shell-first onboarding gate: native-shell connection onboarding runs before dashboard model onboarding when needed
-- Connection management: header status + manage/switch modal for saved profiles; desktop also supports local/remote mode switching
+- Connection management: header status + native-shell connection manager for add/edit/delete/switch of saved profiles; desktop also supports local/remote mode switching
+- Browser fallback: when `window.fusionShell` is unavailable, shell profile actions stay disabled/unsupported while dashboard onboarding and core task flows remain stable
 - Desktop local mode handoff uses dynamic local server port resolution (`getServerPort`) while remote mode points to the active remote profile
 - Browser/PWA mode degrades cleanly when `window.fusionShell` is absent
 
