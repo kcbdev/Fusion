@@ -313,16 +313,57 @@
   word-break: break-word;
 }
 
-.mailbox-reply-context {
+.mailbox-reply-context-wrapper {
   margin-bottom: var(--space-xs);
+}
+
+.mailbox-reply-context {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--space-xs);
+  margin: 0;
   padding: var(--space-sm) var(--space-md);
+  border: 0;
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--text-muted) 12%, transparent);
   color: var(--text-muted);
   font-size: var(--font-size-xs, 0.8rem);
   line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.mailbox-reply-context:hover {
+  background: var(--card-hover);
+}
+
+.mailbox-reply-context:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+.mailbox-reply-context__chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.mailbox-reply-context__nested {
+  margin-top: var(--space-xs);
+  margin-left: var(--space-md);
+  padding-left: var(--space-md);
+  border-left: var(--btn-border-width) solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.mailbox-reply-context__error {
+  color: var(--color-error);
 }
 
 /* Conversation thread */
@@ -633,6 +674,11 @@
     padding: var(--space-xs) var(--space-md);
   }
 
+  .mailbox-modal .mailbox-reply-context__nested {
+    margin-left: var(--space-sm);
+    padding-left: var(--space-sm);
+  }
+
   .mailbox-modal .mailbox-agent-select {
     max-width: 100%;
   }
@@ -720,6 +766,11 @@
 
   .mailbox-view .mailbox-conversation-msg {
     padding: var(--space-xs) var(--space-md);
+  }
+
+  .mailbox-view .mailbox-reply-context__nested {
+    margin-left: var(--space-sm);
+    padding-left: var(--space-sm);
   }
 
   .mailbox-view .mailbox-agent-select {

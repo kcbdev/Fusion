@@ -12,6 +12,8 @@ import {
   RefreshCw,
   MessageSquare,
   User,
+  ChevronRight,
+  ChevronDown,
 } from "lucide-react";
 import type { Message, MessageType, ParticipantType } from "@fusion/core";
 import {
@@ -23,6 +25,7 @@ import {
   markAllMessagesRead,
   deleteMessage,
   fetchConversation,
+  fetchMessage,
   type InboxResponse,
   type OutboxResponse,
   type AgentMailboxResponse,
@@ -135,6 +138,10 @@ export function MailboxModal({
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [agentSubTab, setAgentSubTab] = useState<"inbox" | "outbox">("inbox");
   const [agentMailbox, setAgentMailbox] = useState<AgentMailboxResponse | null>(null);
+  const [replyContextExpanded, setReplyContextExpanded] = useState<Record<string, boolean>>({});
+  const [replyContextLoading, setReplyContextLoading] = useState<Record<string, boolean>>({});
+  const [replyContextErrors, setReplyContextErrors] = useState<Record<string, string>>({});
+  const [replyContextCache, setReplyContextCache] = useState<Map<string, Message>>(new Map());
 
   // ── Data fetching ─────────────────────────────────────────────────────
 
@@ -237,6 +244,9 @@ export function MailboxModal({
 
   const handleOpenMessage = useCallback(async (message: Message) => {
     setSelectedMessage(message);
+    setReplyContextExpanded({});
+    setReplyContextLoading({});
+    setReplyContextErrors({});
     // Only auto-mark as read when viewing the dashboard user's own inbox.
     // Browsing another agent's mailbox must not consume their unread messages
     // out from under them — the agent's heartbeat is the one that reads + acks.
@@ -270,6 +280,9 @@ export function MailboxModal({
   const handleCloseMessage = useCallback(() => {
     setSelectedMessage(null);
     setConversationMessages([]);
+    setReplyContextExpanded({});
+    setReplyContextLoading({});
+    setReplyContextErrors({});
   }, []);
 
   const handleMarkAllRead = useCallback(async () => {
@@ -342,9 +355,117 @@ export function MailboxModal({
     setComposeReplyContext(null);
   }, []);
 
+  const threadMessages = selectedMessage ? buildReplyThread(conversationMessages, selectedMessage) : [];
+
+  const setReplyExpanded = (key: string, isExpanded: boolean) => {
+    setReplyContextExpanded((prev) => ({ ...prev, [key]: isExpanded }));
+  };
+
+  const loadReplyMessage = async (messageId: string) => {
+    const cachedMessage = replyContextCache.get(messageId);
+    if (cachedMessage) {
+      return cachedMessage;
+    }
+
+    setReplyContextLoading((prev) => ({ ...prev, [messageId]: true }));
+    setReplyContextErrors((prev) => ({ ...prev, [messageId]: "" }));
+
+    try {
+      const message = await fetchMessage(messageId, projectId);
+      setReplyContextCache((prev) => {
+        const next = new Map(prev);
+        next.set(messageId, message);
+        return next;
+      });
+      return message;
+    } catch {
+      setReplyContextErrors((prev) => ({ ...prev, [messageId]: "Failed to load replied message. Click to retry." }));
+      return null;
+    } finally {
+      setReplyContextLoading((prev) => ({ ...prev, [messageId]: false }));
+    }
+  };
+
   if (!isOpen) return null;
 
-  const threadMessages = selectedMessage ? buildReplyThread(conversationMessages, selectedMessage) : [];
+  const ReplyContextExpandable = ({
+    ownerMessageId,
+    replyToId,
+    initialMessage,
+    ancestorIds,
+    testId,
+  }: {
+    ownerMessageId: string;
+    replyToId: string;
+    initialMessage?: Message;
+    ancestorIds: Set<string>;
+    testId?: string;
+  }) => {
+    const cacheMessage = replyContextCache.get(replyToId) ?? initialMessage;
+    const rowKey = `${ownerMessageId}-${replyToId}`;
+    const isExpanded = Boolean(replyContextExpanded[rowKey]);
+    const isLoadingReply = Boolean(replyContextLoading[replyToId]);
+    const errorMessage = replyContextErrors[replyToId];
+    const hasCycle = ancestorIds.has(replyToId);
+
+    const handleToggle = async () => {
+      if (isExpanded) {
+        setReplyExpanded(rowKey, false);
+        return;
+      }
+      setReplyExpanded(rowKey, true);
+      if (!cacheMessage && !hasCycle) {
+        await loadReplyMessage(replyToId);
+      }
+    };
+
+    const nextAncestorIds = new Set(ancestorIds);
+    nextAncestorIds.add(replyToId);
+
+    return (
+      <div className="mailbox-reply-context-wrapper">
+        <button
+          type="button"
+          className="mailbox-reply-context"
+          onClick={() => {
+            void handleToggle();
+          }}
+          aria-expanded={isExpanded}
+          data-testid={testId}
+        >
+          <span className="mailbox-reply-context__chevron" aria-hidden="true">
+            {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          </span>
+          <span>
+            ↪ Replying to {cacheMessage ? messagePreview(cacheMessage.content, 60) : `message ${replyToId}`}
+          </span>
+          {isLoadingReply && <Loader2 size={14} className="spin" />}
+        </button>
+
+        {isExpanded && (
+          <div className="mailbox-reply-context__nested" data-testid={`mailbox-reply-expanded-${replyToId}`}>
+            {errorMessage && <div className="mailbox-reply-context__error">{errorMessage}</div>}
+            {cacheMessage && (
+              <>
+                <div className="mailbox-conversation-msg-header">
+                  <span>{participantLabel(cacheMessage.fromId, cacheMessage.fromType)}</span>
+                  <span className="mailbox-message-time">{formatTimestamp(cacheMessage.createdAt)}</span>
+                </div>
+                <div className="mailbox-conversation-msg-body">{cacheMessage.content}</div>
+                {cacheMessage.metadata?.replyTo?.messageId && !nextAncestorIds.has(cacheMessage.metadata.replyTo.messageId) && (
+                  <ReplyContextExpandable
+                    ownerMessageId={cacheMessage.id}
+                    replyToId={cacheMessage.metadata.replyTo.messageId}
+                    ancestorIds={nextAncestorIds}
+                  />
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // ── Render ────────────────────────────────────────────────────────────
 
@@ -519,9 +640,13 @@ export function MailboxModal({
                           <span className="mailbox-message-time">{formatTimestamp(msg.createdAt)}</span>
                         </div>
                         {replyToId && (
-                          <div className="mailbox-reply-context" data-testid={`mailbox-reply-context-${msg.id}`}>
-                            ↪ Replying to {replyToMessage ? messagePreview(replyToMessage.content, 60) : `message ${replyToId}`}
-                          </div>
+                          <ReplyContextExpandable
+                            ownerMessageId={msg.id}
+                            replyToId={replyToId}
+                            initialMessage={replyToMessage}
+                            ancestorIds={new Set([msg.id])}
+                            testId={`mailbox-reply-context-${msg.id}`}
+                          />
                         )}
                         <div className="mailbox-conversation-msg-body">{msg.content}</div>
                       </div>
@@ -533,9 +658,13 @@ export function MailboxModal({
               {(threadMessages.length <= 1) && (
                 <>
                   {selectedMessage.metadata?.replyTo?.messageId && (
-                    <div className="mailbox-reply-context" data-testid="mailbox-selected-reply-context">
-                      ↪ Replying to message {selectedMessage.metadata.replyTo.messageId}
-                    </div>
+                    <ReplyContextExpandable
+                      ownerMessageId={selectedMessage.id}
+                      replyToId={selectedMessage.metadata.replyTo.messageId}
+                      initialMessage={threadMessages.find((candidate) => candidate.id === selectedMessage.metadata?.replyTo?.messageId)}
+                      ancestorIds={new Set([selectedMessage.id])}
+                      testId="mailbox-selected-reply-context"
+                    />
                   )}
                   <div className="mailbox-message-body" data-testid="mailbox-message-body">
                     {selectedMessage.content}

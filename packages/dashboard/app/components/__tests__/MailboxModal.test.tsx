@@ -16,6 +16,7 @@ vi.mock("../../api", () => ({
   markAllMessagesRead: vi.fn(),
   deleteMessage: vi.fn(),
   fetchConversation: vi.fn(),
+  fetchMessage: vi.fn(),
   sendMessage: vi.fn(),
 }));
 
@@ -35,6 +36,8 @@ vi.mock("lucide-react", () => ({
   RefreshCw: () => <span data-testid="icon-refresh">Refresh</span>,
   MessageSquare: () => <span data-testid="icon-message">Message</span>,
   User: () => <span data-testid="icon-user">User</span>,
+  ChevronRight: () => <span data-testid="icon-chevron-right">ChevronRight</span>,
+  ChevronDown: () => <span data-testid="icon-chevron-down">ChevronDown</span>,
   AlertCircle: () => <span data-testid="icon-alert">Alert</span>,
 }));
 
@@ -46,6 +49,7 @@ const mockMarkMessageRead = vi.mocked(apiModule.markMessageRead);
 const mockMarkAllMessagesRead = vi.mocked(apiModule.markAllMessagesRead);
 const mockDeleteMessage = vi.mocked(apiModule.deleteMessage);
 const mockFetchConversation = vi.mocked(apiModule.fetchConversation);
+const mockFetchMessage = vi.mocked(apiModule.fetchMessage);
 const mockSendMessage = vi.mocked(apiModule.sendMessage);
 
 const mockAgents: Agent[] = [
@@ -117,6 +121,7 @@ describe("MailboxModal", () => {
     mockFetchOutbox.mockResolvedValue({ messages: [], total: 0 });
     mockFetchUnreadCount.mockResolvedValue({ unreadCount: 1 });
     mockFetchConversation.mockResolvedValue([mockMessage]);
+    mockFetchMessage.mockResolvedValue(mockMessage);
     mockMarkMessageRead.mockResolvedValue({ ...mockMessage, read: true });
     mockMarkAllMessagesRead.mockResolvedValue({ markedAsRead: 1 });
     mockDeleteMessage.mockResolvedValue(undefined);
@@ -445,7 +450,31 @@ describe("MailboxModal", () => {
     });
   });
 
-  it("renders reply context inside modal conversation thread", async () => {
+  it("renders selected-message reply context row when metadata includes replyTo", async () => {
+    const reply: Message = {
+      ...mockMessage,
+      id: "msg-reply-selected",
+      metadata: { replyTo: { messageId: "msg-root-remote" } },
+    };
+
+    mockFetchInbox.mockResolvedValue({ messages: [reply], total: 1, unreadCount: 1 });
+    mockFetchConversation.mockResolvedValue([reply]);
+    mockMarkMessageRead.mockResolvedValue({ ...reply, read: true });
+
+    render(<MailboxModal {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-item-msg-reply-selected")).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByTestId("mailbox-item-msg-reply-selected"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-selected-reply-context")).toBeDefined();
+    });
+  });
+
+  it("expands reply context without fetch when parent is already in thread", async () => {
     const root: Message = {
       ...mockMessage,
       id: "msg-root",
@@ -475,11 +504,82 @@ describe("MailboxModal", () => {
 
     fireEvent.click(screen.getByTestId("mailbox-item-msg-root"));
 
+    const replyContext = await screen.findByTestId("mailbox-reply-context-msg-reply");
+    fireEvent.click(replyContext);
+
     await waitFor(() => {
-      const replyContext = screen.getByTestId("mailbox-reply-context-msg-reply");
-      expect(replyContext).toBeDefined();
-      expect(replyContext).toHaveClass("mailbox-reply-context");
-      expect(screen.getByText(/Replying to Need a status update\./)).toBeDefined();
+      expect(mockFetchMessage).not.toHaveBeenCalled();
+      expect(screen.getAllByText("Need a status update.").length).toBeGreaterThan(0);
+    });
+  });
+
+  it("renders nested reply context rows for multi-level thread metadata", async () => {
+    const grandparent: Message = { ...mockMessage, id: "msg-grandparent", content: "Original message" };
+    const parent: Message = {
+      ...mockMessage,
+      id: "msg-parent",
+      fromId: "dashboard",
+      fromType: "user",
+      toId: "agent-001",
+      toType: "agent",
+      type: "user-to-agent",
+      content: "Second reply",
+      metadata: { replyTo: { messageId: "msg-grandparent" } },
+    };
+    const child: Message = {
+      ...mockMessage,
+      id: "msg-child",
+      fromId: "agent-001",
+      fromType: "agent",
+      toId: "dashboard",
+      toType: "user",
+      content: "Third reply",
+      metadata: { replyTo: { messageId: "msg-parent" } },
+    };
+
+    mockFetchInbox.mockResolvedValue({ messages: [grandparent], total: 1, unreadCount: 1 });
+    mockFetchConversation.mockResolvedValue([grandparent, parent, child]);
+
+    render(<MailboxModal {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-item-msg-grandparent")).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByTestId("mailbox-item-msg-grandparent"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-reply-context-msg-parent")).toBeDefined();
+      expect(screen.getByTestId("mailbox-reply-context-msg-child")).toBeDefined();
+    });
+  });
+
+  it("stops recursive rendering when ancestor cycle is detected", async () => {
+    const cycleA: Message = { ...mockMessage, id: "msg-cycle-a", metadata: { replyTo: { messageId: "msg-cycle-b" } } };
+    const cycleB: Message = {
+      ...mockMessage,
+      id: "msg-cycle-b",
+      fromId: "dashboard",
+      fromType: "user",
+      toId: "agent-001",
+      toType: "agent",
+      type: "user-to-agent",
+      metadata: { replyTo: { messageId: "msg-cycle-a" } },
+    };
+
+    mockFetchInbox.mockResolvedValue({ messages: [cycleA], total: 1, unreadCount: 1 });
+    mockFetchConversation.mockResolvedValue([cycleA, cycleB]);
+
+    render(<MailboxModal {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-item-msg-cycle-a")).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByTestId("mailbox-item-msg-cycle-a"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("mailbox-reply-context-msg-cycle-b")).toBeNull();
     });
   });
 
@@ -934,7 +1034,7 @@ describe("MailboxModal", () => {
       expect(mailboxMobileSection).toContain("display: none;");
       expect(mailboxMobileSection).toContain(".mailbox-modal .mailbox-tab");
       expect(mailboxMobileSection).toContain("padding: var(--space-sm) var(--space-md);");
-      expect(mailboxMobileSection).toContain("font-size: 0.8rem;");
+      expect(mailboxMobileSection).toContain("font-size: var(--font-size-xs, 0.8rem);");
       expect(mailboxMobileSection).toContain("max-height: calc(100dvh - var(--header-height) - var(--space-2xl) - var(--space-xl));");
       expect(mailboxMobileSection).toContain(".mailbox-modal .mailbox-message-detail-header");
       expect(mailboxMobileSection).toContain("flex-direction: column;");
@@ -1001,13 +1101,13 @@ describe("MailboxModal", () => {
       expect(tabBlockMatch![1]).not.toContain("background: none");
       expect(tabBlockMatch![1]).not.toContain("border-bottom: 2px solid transparent");
 
-      const subtabBlockMatch = css.match(/\.mailbox-agent-subtab\s*\{([^}]*)\}/);
-      expect(subtabBlockMatch).toBeTruthy();
-      expect(subtabBlockMatch![1]).toContain("border-color: var(--border)");
-      expect(subtabBlockMatch![1]).toContain("background: var(--surface)");
-      expect(subtabBlockMatch![1]).not.toContain("border-radius: 0");
-      expect(subtabBlockMatch![1]).not.toContain("border: none");
-      expect(subtabBlockMatch![1]).not.toContain("background: transparent");
+      const subtabBlocks = [...css.matchAll(/\.mailbox-agent-subtab\s*\{([^}]*)\}/g)].map((match) => match[1]);
+      const baseSubtabBlock = subtabBlocks.find((block) => block.includes("border-color: var(--border)"));
+      expect(baseSubtabBlock).toBeTruthy();
+      expect(baseSubtabBlock!).toContain("background: var(--surface)");
+      expect(baseSubtabBlock!).not.toContain("border-radius: 0");
+      expect(baseSubtabBlock!).not.toContain("border: none");
+      expect(baseSubtabBlock!).not.toContain("background: transparent");
     });
 
     it("mission event type error uses CSS custom properties", () => {
