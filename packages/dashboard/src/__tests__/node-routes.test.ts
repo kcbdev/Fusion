@@ -19,6 +19,7 @@ const mockGetMeshState = vi.fn();
 const mockGetNodeVersionInfo = vi.fn();
 const mockSyncPlugins = vi.fn();
 const mockCheckVersionCompatibility = vi.fn();
+const mockListProjectNodePathMappingsForNode = vi.fn();
 
 vi.mock("@fusion/core", async () => {
   const actual = await vi.importActual<typeof import("@fusion/core")>("@fusion/core");
@@ -40,6 +41,7 @@ vi.mock("@fusion/core", async () => {
       getNodeVersionInfo: mockGetNodeVersionInfo,
       syncPlugins: mockSyncPlugins,
       checkVersionCompatibility: mockCheckVersionCompatibility,
+      listProjectNodePathMappingsForNode: mockListProjectNodePathMappingsForNode,
     })),
   };
 });
@@ -158,6 +160,32 @@ describe("Node routes", () => {
       status: "compatible",
       message: "Versions match",
     });
+    mockListProjectNodePathMappingsForNode.mockResolvedValue([]);
+  });
+
+  it("GET /api/nodes/:id/path-mappings returns node mappings", async () => {
+    mockListProjectNodePathMappingsForNode.mockResolvedValue([
+      {
+        projectId: "proj_1",
+        nodeId: "node_local",
+        path: "/tmp/project",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+
+    const res = await request(app, "GET", "/api/nodes/node_local/path-mappings");
+
+    expect(res.status).toBe(200);
+    expect(mockListProjectNodePathMappingsForNode).toHaveBeenCalledWith("node_local");
+  });
+
+  it("GET /api/nodes/:id/path-mappings returns 404 when node missing", async () => {
+    mockListProjectNodePathMappingsForNode.mockRejectedValue(new Error("Node not found: node_missing"));
+
+    const res = await request(app, "GET", "/api/nodes/node_missing/path-mappings");
+
+    expect(res.status).toBe(404);
   });
 
   it("GET /api/nodes returns an empty array when no nodes are registered", async () => {

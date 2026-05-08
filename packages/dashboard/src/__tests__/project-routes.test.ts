@@ -31,6 +31,10 @@ const {
   mockListNodes,
   mockGetNode,
   mockEnsureMemoryFileWithBackend,
+  mockListProjectNodePathMappingsForProject,
+  mockGetProjectNodePathMapping,
+  mockUpsertProjectNodePathMapping,
+  mockRemoveProjectNodePathMapping,
 } = vi.hoisted(() => ({
   mockFsAccess: vi.fn().mockResolvedValue(undefined),
   mockFsStat: vi.fn().mockRejectedValue(Object.assign(new Error("missing"), { code: "ENOENT" })),
@@ -89,6 +93,10 @@ const {
   mockListNodes: vi.fn().mockResolvedValue([]),
   mockGetNode: vi.fn().mockResolvedValue(null),
   mockEnsureMemoryFileWithBackend: vi.fn().mockResolvedValue(true),
+  mockListProjectNodePathMappingsForProject: vi.fn().mockResolvedValue([]),
+  mockGetProjectNodePathMapping: vi.fn().mockResolvedValue(undefined),
+  mockUpsertProjectNodePathMapping: vi.fn(),
+  mockRemoveProjectNodePathMapping: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock node:fs for route handler tests that check path existence
@@ -136,6 +144,10 @@ vi.mock("@fusion/core", async () => {
       reconcileProjectStatuses: mockReconcileProjectStatuses,
       listNodes: mockListNodes,
       getNode: mockGetNode,
+      listProjectNodePathMappingsForProject: mockListProjectNodePathMappingsForProject,
+      getProjectNodePathMapping: mockGetProjectNodePathMapping,
+      upsertProjectNodePathMapping: mockUpsertProjectNodePathMapping,
+      removeProjectNodePathMapping: mockRemoveProjectNodePathMapping,
     })),
     ensureMemoryFileWithBackend: mockEnsureMemoryFileWithBackend,
   };
@@ -162,6 +174,10 @@ import {
   updateGlobalConcurrency,
   fetchProjectTasks,
   fetchTasks,
+  fetchProjectPathMappings,
+  fetchProjectPathMapping,
+  upsertProjectPathMapping,
+  removeProjectPathMapping,
   type ProjectInfo,
   type DetectedProject,
 } from "../../app/api.js";
@@ -352,6 +368,63 @@ describe("Project Routes API Functions", () => {
           method: "POST",
           body: expect.any(String),
         })
+      );
+    });
+  });
+
+  describe("project path mapping API clients", () => {
+    it("fetchProjectPathMappings encodes project id", async () => {
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, []));
+
+      await fetchProjectPathMappings("proj/test+id");
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/projects/proj%2Ftest%2Bid/path-mappings",
+        expect.any(Object),
+      );
+    });
+
+    it("fetchProjectPathMapping encodes project and node ids", async () => {
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, { projectId: "p", nodeId: "n", path: "/tmp", createdAt: "t", updatedAt: "t" }));
+
+      await fetchProjectPathMapping("proj/test", "node/a+b");
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/projects/proj%2Ftest/path-mappings/node%2Fa%2Bb",
+        expect.any(Object),
+      );
+    });
+
+    it("upsertProjectPathMapping sends PUT with path payload", async () => {
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, { projectId: "p", nodeId: "n", path: "/tmp", createdAt: "t", updatedAt: "t" }));
+
+      await upsertProjectPathMapping("proj_1", "node_1", "/tmp/worktree");
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/projects/proj_1/path-mappings/node_1",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({ path: "/tmp/worktree" }),
+        }),
+      );
+    });
+
+    it("removeProjectPathMapping sends DELETE", async () => {
+      globalThis.fetch = vi.fn().mockReturnValue(
+        Promise.resolve({
+          ok: true,
+          status: 204,
+          statusText: "No Content",
+          headers: { get: () => null },
+          text: () => Promise.resolve(""),
+        } as unknown as Response),
+      );
+
+      await removeProjectPathMapping("proj_1", "node_1");
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/projects/proj_1/path-mappings/node_1",
+        expect.objectContaining({ method: "DELETE" }),
       );
     });
   });
@@ -893,6 +966,137 @@ describe("GET /api/projects route handler", () => {
     expect(res.status).toBe(200);
     expect(mockReconcileProjectStatuses).toHaveBeenCalledTimes(1);
     expect((res.body as any[])[0].status).toBe("active");
+  });
+});
+
+describe("project path mapping route handlers", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockListProjectNodePathMappingsForProject.mockResolvedValue([]);
+    mockGetProjectNodePathMapping.mockResolvedValue(undefined);
+    mockUpsertProjectNodePathMapping.mockResolvedValue({
+      projectId: "proj_1",
+      nodeId: "node_1",
+      path: "/tmp/worktree",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+  });
+
+  it("GET /api/projects/:id/path-mappings returns project mappings", async () => {
+    const store = new MockStoreForRoutes();
+    const app = await createApp(store);
+    mockListProjectNodePathMappingsForProject.mockResolvedValue([
+      {
+        projectId: "proj_1",
+        nodeId: "node_1",
+        path: "/tmp/worktree",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+
+    const res = await request(app, "GET", "/api/projects/proj_1/path-mappings");
+
+    expect(res.status).toBe(200);
+    expect(mockListProjectNodePathMappingsForProject).toHaveBeenCalledWith("proj_1");
+  });
+
+  it("GET /api/projects/:id/path-mappings returns 404 when project missing", async () => {
+    const store = new MockStoreForRoutes();
+    const app = await createApp(store);
+    mockListProjectNodePathMappingsForProject.mockRejectedValue(new Error("Project not found: proj_missing"));
+
+    const res = await request(app, "GET", "/api/projects/proj_missing/path-mappings");
+
+    expect(res.status).toBe(404);
+  });
+
+  it("GET /api/projects/:id/path-mappings/:nodeId returns 404 when mapping missing", async () => {
+    const store = new MockStoreForRoutes();
+    const app = await createApp(store);
+    mockGetProjectNodePathMapping.mockResolvedValue(undefined);
+
+    const res = await request(app, "GET", "/api/projects/proj_1/path-mappings/node_1");
+
+    expect(res.status).toBe(404);
+  });
+
+  it("GET /api/projects/:id/path-mappings/:nodeId returns mapping", async () => {
+    const store = new MockStoreForRoutes();
+    const app = await createApp(store);
+    mockGetProjectNodePathMapping.mockResolvedValue({
+      projectId: "proj_1",
+      nodeId: "node_1",
+      path: "/tmp/worktree",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    const res = await request(app, "GET", "/api/projects/proj_1/path-mappings/node_1");
+
+    expect(res.status).toBe(200);
+    expect(mockGetProjectNodePathMapping).toHaveBeenCalledWith("proj_1", "node_1");
+  });
+
+  it("PUT /api/projects/:id/path-mappings/:nodeId validates absolute path", async () => {
+    const store = new MockStoreForRoutes();
+    const app = await createApp(store);
+
+    const res = await request(
+      app,
+      "PUT",
+      "/api/projects/proj_1/path-mappings/node_1",
+      JSON.stringify({ path: "relative/path" }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(400);
+    expect(mockUpsertProjectNodePathMapping).not.toHaveBeenCalled();
+  });
+
+  it("PUT /api/projects/:id/path-mappings/:nodeId upserts mapping", async () => {
+    const store = new MockStoreForRoutes();
+    const app = await createApp(store);
+
+    const res = await request(
+      app,
+      "PUT",
+      "/api/projects/proj_1/path-mappings/node_1",
+      JSON.stringify({ path: "/tmp/worktree" }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockUpsertProjectNodePathMapping).toHaveBeenCalledWith({
+      projectId: "proj_1",
+      nodeId: "node_1",
+      path: "/tmp/worktree",
+    });
+  });
+
+  it("DELETE /api/projects/:id/path-mappings/:nodeId deletes mapping", async () => {
+    const store = new MockStoreForRoutes();
+    const app = await createApp(store);
+
+    const res = await request(app, "DELETE", "/api/projects/proj_1/path-mappings/node_1");
+
+    expect(res.status).toBe(200);
+    expect(mockRemoveProjectNodePathMapping).toHaveBeenCalledWith({
+      projectId: "proj_1",
+      nodeId: "node_1",
+    });
+  });
+
+  it("DELETE /api/projects/:id/path-mappings/:nodeId is idempotent for missing mapping", async () => {
+    const store = new MockStoreForRoutes();
+    const app = await createApp(store);
+    mockRemoveProjectNodePathMapping.mockResolvedValue(undefined);
+
+    const res = await request(app, "DELETE", "/api/projects/proj_1/path-mappings/node_missing");
+
+    expect(res.status).toBe(200);
+    expect((res.body as { success: boolean }).success).toBe(true);
   });
 });
 

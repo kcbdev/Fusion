@@ -52,6 +52,10 @@ import {
   registerProject,
   unregisterProject,
   fetchProjectHealth,
+  fetchProjectPathMappings,
+  fetchProjectPathMapping,
+  upsertProjectPathMapping,
+  removeProjectPathMapping,
   fetchActivityFeed,
   pauseProject,
   resumeProject,
@@ -749,6 +753,64 @@ describe("unregisterProject", () => {
     expect(globalThis.fetch).toHaveBeenCalledWith(
       "/api/projects/proj%2Fwith%2Bspecial",
       expect.any(Object)
+    );
+  });
+});
+
+describe("project path mapping helpers", () => {
+  it("fetchProjectPathMappings encodes project id", async () => {
+    globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, []));
+
+    await fetchProjectPathMappings("proj/test+id");
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/projects/proj%2Ftest%2Bid/path-mappings",
+      expect.any(Object),
+    );
+  });
+
+  it("fetchProjectPathMapping encodes project and node ids", async () => {
+    globalThis.fetch = vi.fn().mockReturnValue(
+      mockFetchResponse(true, { projectId: "proj", nodeId: "node", path: "/tmp", createdAt: "t", updatedAt: "t" }),
+    );
+
+    await fetchProjectPathMapping("proj/test", "node/a+b");
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/projects/proj%2Ftest/path-mappings/node%2Fa%2Bb",
+      expect.any(Object),
+    );
+  });
+
+  it("upsertProjectPathMapping uses PUT", async () => {
+    globalThis.fetch = vi.fn().mockReturnValue(
+      mockFetchResponse(true, { projectId: "proj", nodeId: "node", path: "/tmp", createdAt: "t", updatedAt: "t" }),
+    );
+
+    await upsertProjectPathMapping("proj", "node", "/tmp");
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/projects/proj/path-mappings/node",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify({ path: "/tmp" }) }),
+    );
+  });
+
+  it("removeProjectPathMapping uses DELETE", async () => {
+    globalThis.fetch = vi.fn().mockReturnValue(
+      Promise.resolve({
+        ok: true,
+        status: 204,
+        statusText: "No Content",
+        headers: { get: () => null },
+        text: () => Promise.resolve(""),
+      } as unknown as Response),
+    );
+
+    await removeProjectPathMapping("proj", "node");
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/projects/proj/path-mappings/node",
+      expect.objectContaining({ method: "DELETE" }),
     );
   });
 });

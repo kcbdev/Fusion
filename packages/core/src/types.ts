@@ -3296,6 +3296,19 @@ export interface ProjectNodePathMapping {
   updatedAt: string;
 }
 
+/** Input payload for creating/updating a project-node path mapping. */
+export interface ProjectNodePathMappingUpsertInput {
+  projectId: string;
+  nodeId: string;
+  path: string;
+}
+
+/** Input payload for deleting a project-node path mapping. */
+export interface ProjectNodePathMappingDeleteInput {
+  projectId: string;
+  nodeId: string;
+}
+
 /** Health metrics for a registered project */
 export interface ProjectHealth {
   /** Project ID reference */

@@ -473,6 +473,113 @@ export const registerProjectRoutes: ApiRouteRegistrar = (ctx) => {
   });
 
   /**
+   * GET /api/projects/:id/path-mappings
+   * List all per-node path mappings for a project.
+   */
+  router.get("/projects/:id/path-mappings", async (req, res) => {
+    try {
+      const mappings = await withCentralCore(async (central) => {
+        return await central.listProjectNodePathMappingsForProject(req.params.id);
+      });
+
+      res.json(mappings);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes("Project not found")) {
+        throw notFound(message);
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  /**
+   * GET /api/projects/:id/path-mappings/:nodeId
+   * Get a single project-node path mapping.
+   */
+  router.get("/projects/:id/path-mappings/:nodeId", async (req, res) => {
+    try {
+      const mapping = await withCentralCore(async (central) => {
+        return await central.getProjectNodePathMapping(req.params.id, req.params.nodeId);
+      });
+
+      if (!mapping) {
+        throw notFound("Project-node path mapping not found");
+      }
+
+      res.json(mapping);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  /**
+   * PUT /api/projects/:id/path-mappings/:nodeId
+   * Create or update a project-node path mapping.
+   */
+  router.put("/projects/:id/path-mappings/:nodeId", async (req, res) => {
+    try {
+      const { path } = req.body as { path?: unknown };
+      if (typeof path !== "string" || !path.trim()) {
+        throw badRequest("path is required and must be a non-empty string");
+      }
+      const normalizedPath = path.trim();
+      if (normalizedPath.includes("\0")) {
+        throw badRequest("path cannot contain null bytes");
+      }
+      if (!isAbsolute(normalizedPath)) {
+        throw badRequest("path must be an absolute path");
+      }
+
+      const mapping = await withCentralCore(async (central) => {
+        return await central.upsertProjectNodePathMapping({
+          projectId: req.params.id,
+          nodeId: req.params.nodeId,
+          path: normalizedPath,
+        });
+      });
+
+      res.json(mapping);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes("Project not found") || message.includes("Node not found")) {
+        throw notFound(message);
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  /**
+   * DELETE /api/projects/:id/path-mappings/:nodeId
+   * Remove a project-node path mapping.
+   */
+  router.delete("/projects/:id/path-mappings/:nodeId", async (req, res) => {
+    try {
+      await withCentralCore(async (central) => {
+        await central.removeProjectNodePathMapping({
+          projectId: req.params.id,
+          nodeId: req.params.nodeId,
+        });
+      });
+
+      res.json({ success: true });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  /**
    * PATCH /api/projects/:id
    * Update a project.
    */

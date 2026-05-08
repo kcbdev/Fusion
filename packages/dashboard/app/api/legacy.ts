@@ -80,6 +80,7 @@ import type {
   DockerVolumeMount,
   DockerExtraCli,
   DockerNodeStatus,
+  ProjectNodePathMapping,
 } from "@fusion/core";
 import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
 import type { ScheduledTask, ScheduledTaskCreateInput, ScheduledTaskUpdateInput, AutomationRunResult, Routine, RoutineCreateInput, RoutineUpdateInput, RoutineExecutionResult } from "@fusion/core";
@@ -5734,6 +5735,11 @@ export function fetchNode(id: string): Promise<NodeInfo> {
   return api<NodeInfo>(`/nodes/${encodeURIComponent(id)}`);
 }
 
+/** Fetch all project path mappings for a node */
+export function fetchNodePathMappings(nodeId: string): Promise<ProjectNodePathMapping[]> {
+  return api<ProjectNodePathMapping[]>(`/nodes/${encodeURIComponent(nodeId)}/path-mappings`);
+}
+
 /** Update an existing node */
 export function updateNode(id: string, updates: NodeUpdateInput): Promise<NodeInfo> {
   return api<NodeInfo>(`/nodes/${encodeURIComponent(id)}`, {
@@ -5846,6 +5852,43 @@ export function unregisterProject(id: string): Promise<void> {
   return api<void>(`/projects/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
+}
+
+/** Fetch all per-node path mappings for a project */
+export function fetchProjectPathMappings(projectId: string): Promise<ProjectNodePathMapping[]> {
+  return api<ProjectNodePathMapping[]>(`/projects/${encodeURIComponent(projectId)}/path-mappings`);
+}
+
+/** Fetch a single project-node path mapping */
+export function fetchProjectPathMapping(projectId: string, nodeId: string): Promise<ProjectNodePathMapping> {
+  return api<ProjectNodePathMapping>(
+    `/projects/${encodeURIComponent(projectId)}/path-mappings/${encodeURIComponent(nodeId)}`,
+  );
+}
+
+/** Create or update a project-node path mapping */
+export function upsertProjectPathMapping(
+  projectId: string,
+  nodeId: string,
+  path: string,
+): Promise<ProjectNodePathMapping> {
+  return api<ProjectNodePathMapping>(
+    `/projects/${encodeURIComponent(projectId)}/path-mappings/${encodeURIComponent(nodeId)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ path }),
+    },
+  );
+}
+
+/** Remove a project-node path mapping */
+export function removeProjectPathMapping(projectId: string, nodeId: string): Promise<void> {
+  return api<void>(
+    `/projects/${encodeURIComponent(projectId)}/path-mappings/${encodeURIComponent(nodeId)}`,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
 /** Fetch health metrics for a specific project */

@@ -66,6 +66,8 @@ import type {
   GlobalSettings,
   ProviderAuthEntry,
   ProjectNodePathMapping,
+  ProjectNodePathMappingUpsertInput,
+  ProjectNodePathMappingDeleteInput,
 } from "./types.js";
 import { getAppVersion, parseSemver } from "./app-version.js";
 import { validateDockerNodeConfig } from "./types.js";
@@ -1691,11 +1693,7 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
     return updated;
   }
 
-  async createProjectNodePathMapping(input: {
-    projectId: string;
-    nodeId: string;
-    path: string;
-  }): Promise<ProjectNodePathMapping> {
+  async createProjectNodePathMapping(input: ProjectNodePathMappingUpsertInput): Promise<ProjectNodePathMapping> {
     this.ensureInitialized();
 
     await this.assertProjectNodeMappingTargetsExist(input.projectId, input.nodeId);
@@ -1723,11 +1721,7 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
     };
   }
 
-  async updateProjectNodePathMapping(input: {
-    projectId: string;
-    nodeId: string;
-    path: string;
-  }): Promise<ProjectNodePathMapping> {
+  async updateProjectNodePathMapping(input: ProjectNodePathMappingUpsertInput): Promise<ProjectNodePathMapping> {
     this.ensureInitialized();
 
     await this.assertProjectNodeMappingTargetsExist(input.projectId, input.nodeId);
@@ -1824,8 +1818,52 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
     return rows.map((row) => this.rowToProjectNodePathMapping(row));
   }
 
-  async removeProjectNodePathMapping(projectId: string, nodeId: string): Promise<void> {
+  async listProjectNodePathMappingsForProject(projectId: string): Promise<ProjectNodePathMapping[]> {
     this.ensureInitialized();
+
+    const project = await this.getProject(projectId);
+    if (!project) {
+      throw new Error(`Project not found: ${projectId}`);
+    }
+
+    return this.listProjectNodePathMappings({ projectId });
+  }
+
+  async listProjectNodePathMappingsForNode(nodeId: string): Promise<ProjectNodePathMapping[]> {
+    this.ensureInitialized();
+
+    const node = await this.getNode(nodeId);
+    if (!node) {
+      throw new Error(`Node not found: ${nodeId}`);
+    }
+
+    return this.listProjectNodePathMappings({ nodeId });
+  }
+
+  async upsertProjectNodePathMapping(input: ProjectNodePathMappingUpsertInput): Promise<ProjectNodePathMapping> {
+    this.ensureInitialized();
+
+    const existing = await this.getProjectNodePathMapping(input.projectId, input.nodeId);
+    if (existing) {
+      return this.updateProjectNodePathMapping(input);
+    }
+
+    return this.createProjectNodePathMapping(input);
+  }
+
+  async removeProjectNodePathMapping(
+    inputOrProjectId: ProjectNodePathMappingDeleteInput | string,
+    nodeIdArg?: string,
+  ): Promise<void> {
+    this.ensureInitialized();
+
+    const projectId =
+      typeof inputOrProjectId === "string" ? inputOrProjectId : inputOrProjectId.projectId;
+    const nodeId = typeof inputOrProjectId === "string" ? nodeIdArg : inputOrProjectId.nodeId;
+
+    if (!nodeId) {
+      throw new Error("Node ID is required");
+    }
 
     const result = this.db!
       .prepare("DELETE FROM projectNodePathMappings WHERE projectId = ? AND nodeId = ?")

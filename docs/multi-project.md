@@ -101,6 +101,20 @@ Multi-project deployments use three related node/path records at different layer
 
 These fields are intentionally distinct.
 
+### Path mapping API surface
+
+Dashboard and node workflows should use dedicated mapping endpoints rather than overloading `projects.nodeId`:
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/projects/:id/path-mappings` | List all node-specific absolute paths for one canonical project ID. |
+| GET | `/api/projects/:id/path-mappings/:nodeId` | Read a single project+node mapping. |
+| PUT | `/api/projects/:id/path-mappings/:nodeId` | Upsert a project+node absolute path mapping. |
+| DELETE | `/api/projects/:id/path-mappings/:nodeId` | Remove a project+node mapping. |
+| GET | `/api/nodes/:id/path-mappings` | List all project mappings known for one node. |
+
+These APIs persist/read `projectNodePathMappings` (`projectId` + `nodeId` key). They do **not** assign runtime hosting, and they do **not** change task routing defaults.
+
 ### Runtime placement (`projects.nodeId`)
 
 `ProjectManager` uses project registration data plus isolation mode to pick runtime type:

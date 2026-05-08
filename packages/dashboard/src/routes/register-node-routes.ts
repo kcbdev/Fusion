@@ -94,6 +94,30 @@ export const registerNodeRoutes: ApiRouteRegistrar = (ctx) => {
   });
 
   /**
+   * GET /api/nodes/:id/path-mappings
+   * List all project path mappings for a node.
+   */
+  router.get("/nodes/:id/path-mappings", async (req, res) => {
+    const { CentralCore } = await import("@fusion/core");
+    const central = new CentralCore();
+
+    try {
+      await central.init();
+      const mappings = await central.listProjectNodePathMappingsForNode(req.params.id);
+      res.json(mappings);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      const status = message.includes("Node not found") ? 404 : 500;
+      throw new ApiError(status, message);
+    } finally {
+      await central.close();
+    }
+  });
+
+  /**
    * GET /api/nodes/:id
    * Get node details by ID.
    */

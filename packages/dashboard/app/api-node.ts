@@ -4,7 +4,7 @@
  */
 
 import type { ProjectInfo } from "./api";
-import type { ProjectHealth, Task } from "@fusion/core";
+import type { ProjectHealth, ProjectNodePathMapping, Task } from "@fusion/core";
 import { api, proxyApi } from "./api";
 
 /** Health information for a remote node */
@@ -119,4 +119,9 @@ export async function syncNodeAuth(nodeId: string): Promise<NodeAuthSyncResult> 
     method: "POST",
     body: JSON.stringify({}),
   });
+}
+
+/** Fetch all project path mappings for a node */
+export async function fetchNodeProjectPathMappings(nodeId: string): Promise<ProjectNodePathMapping[]> {
+  return api<ProjectNodePathMapping[]>(`/nodes/${encodeURIComponent(nodeId)}/path-mappings`);
 }

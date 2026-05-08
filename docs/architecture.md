@@ -746,6 +746,18 @@ Custom-provider settings routes are registered in `register-custom-provider-rout
 | PUT | `/api/custom-providers/:id` | Update an existing custom provider by ID (partial updates supported) and return the sanitized provider payload. |
 | DELETE | `/api/custom-providers/:id` | Delete a custom provider by ID and return a success envelope. |
 
+### Project/node path-mapping endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/projects/:id/path-mappings` | List persisted per-node absolute paths for a project (`projectNodePathMappings` rows keyed by `projectId` + `nodeId`). |
+| GET | `/api/projects/:id/path-mappings/:nodeId` | Fetch one project↔node mapping row. |
+| PUT | `/api/projects/:id/path-mappings/:nodeId` | Upsert one mapping row (`path` body field must be absolute). |
+| DELETE | `/api/projects/:id/path-mappings/:nodeId` | Delete one mapping row if present. |
+| GET | `/api/nodes/:id/path-mappings` | List all project mappings known for a node. |
+
+This API surface is intentionally separate from `projects.nodeId` (runtime host placement metadata) and from task-level routing defaults (`defaultNodeId` / `Task.nodeId`).
+
 ### Node settings sync and update-check endpoints
 
 | Method | Path | Description |

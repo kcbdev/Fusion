@@ -9,6 +9,7 @@ import {
   pullNodeSettings,
   fetchNodeSettingsSyncStatus,
   syncNodeAuth,
+  fetchNodeProjectPathMappings,
 } from "../api-node";
 import * as apiModule from "../api";
 
@@ -217,6 +218,16 @@ describe("api-node", () => {
         "/project-health?projectId=proj%2Ftest%2Bspecial",
         { nodeId: "node_abc" },
       );
+    });
+  });
+
+  describe("fetchNodeProjectPathMappings", () => {
+    it("calls api with encoded node id", async () => {
+      mockApi.mockResolvedValueOnce([]);
+
+      await fetchNodeProjectPathMappings("node/abc+def");
+
+      expect(mockApi).toHaveBeenCalledWith("/nodes/node%2Fabc%2Bdef/path-mappings");
     });
   });
 
