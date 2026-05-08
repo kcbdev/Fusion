@@ -1531,20 +1531,60 @@ async function findStashRefBySha(rootDir: string, sha: string): Promise<string |
   }
 }
 
-/** Best-effort drop of an autostash by SHA. Resolves SHA → stash@{N} →
- *  drops. Logs but never throws on failure. */
-async function dropAutostashBySha(rootDir: string, taskId: string, sha: string): Promise<void> {
-  const ref = await findStashRefBySha(rootDir, sha);
-  if (!ref) {
-    mergerLog.log(`${taskId}: autostash ${sha.slice(0, 7)} no longer in stash list (already dropped)`);
-    return;
+/** Drop an autostash by SHA, defending against the TOCTOU race where another
+ *  process pushes a stash between our `findStashRefBySha` and the actual
+ *  `git stash drop stash@{N}` (drop only takes positional refs, so the index
+ *  is what git uses — not our SHA). Without this guard we silently drop
+ *  someone else's stash while leaving ours behind, and the task log lies
+ *  about a clean restore.
+ *
+ *  Strategy: re-resolve ref → SHA, verify the ref still points at our SHA
+ *  with `git rev-parse`, then drop. If the SHA at the ref drifted (race),
+ *  retry up to 5x. Returns whether the drop landed cleanly so callers can
+ *  surface failure to the task feed. */
+async function dropAutostashBySha(
+  rootDir: string,
+  taskId: string,
+  sha: string,
+): Promise<{ dropped: boolean; reason?: string }> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const ref = await findStashRefBySha(rootDir, sha);
+    if (!ref) {
+      mergerLog.log(`${taskId}: autostash ${sha.slice(0, 7)} no longer in stash list (already dropped)`);
+      return { dropped: true };
+    }
+
+    // Defend against the index-shift race: confirm the ref still resolves to
+    // our SHA before dropping. If another process pushed a stash, ref now
+    // points at theirs — back off and re-resolve.
+    let refSha = "";
+    try {
+      const { stdout } = await execAsync(`git rev-parse ${ref}`, { cwd: rootDir, encoding: "utf-8" });
+      refSha = String(stdout).trim();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      mergerLog.warn(`${taskId}: rev-parse ${ref} failed (${msg}) on drop attempt ${attempt + 1} — retrying`);
+      continue;
+    }
+    if (refSha !== sha) {
+      mergerLog.log(`${taskId}: autostash ${sha.slice(0, 7)} shifted off ${ref} (now ${refSha.slice(0, 7)}); re-resolving`);
+      continue;
+    }
+
+    try {
+      await execAsync(`git stash drop ${ref}`, { cwd: rootDir });
+      return { dropped: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Final attempt: surface the failure. Earlier attempts get retried.
+      if (attempt === 4) {
+        mergerLog.warn(`${taskId}: failed to drop autostash ${ref} after ${attempt + 1} attempts (${msg}) — stash will linger in stash list`);
+        return { dropped: false, reason: msg };
+      }
+      mergerLog.warn(`${taskId}: drop ${ref} attempt ${attempt + 1} failed (${msg}) — retrying`);
+    }
   }
-  try {
-    await execAsync(`git stash drop ${ref}`, { cwd: rootDir });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    mergerLog.warn(`${taskId}: failed to drop autostash ${ref} (${msg}) — harmless, will linger in stash list`);
-  }
+  return { dropped: false, reason: "exhausted retry attempts" };
 }
 
 /**
@@ -1800,13 +1840,26 @@ async function restoreUnrelatedRootDirChanges(
   if (!applyConflicted) {
     // Clean apply — drop the stash and we're done.
     mergerLog.log(`${taskId}: restored autostash ${sha.slice(0, 7)} cleanly`);
-    await dropAutostashBySha(rootDir, taskId, sha);
-    await ctx.store
-      .logEntry(
-        taskId,
-        `Restored pre-merge autostash ${sha.slice(0, 7)} cleanly`,
-      )
-      .catch(() => undefined);
+    const dropResult = await dropAutostashBySha(rootDir, taskId, sha);
+    if (dropResult.dropped) {
+      await ctx.store
+        .logEntry(
+          taskId,
+          `Restored pre-merge autostash ${sha.slice(0, 7)} cleanly`,
+        )
+        .catch(() => undefined);
+    } else {
+      // Apply succeeded but drop failed — the working tree has the dev's
+      // changes but the stash is still in the list. Surface honestly so the
+      // operator can `git stash drop` it manually.
+      await ctx.store
+        .logEntry(
+          taskId,
+          `Restored pre-merge autostash ${sha.slice(0, 7)} (apply clean), but stash entry failed to drop and is still in the list`,
+          `Drop failure: ${dropResult.reason ?? "unknown"}\n\nClean up manually with:\n  cd ${rootDir} && git stash list | grep ${sha.slice(0, 7)} && git stash drop <ref>`,
+        )
+        .catch(() => undefined);
+    }
     return { status: "restored", stashSha: sha };
   }
 
@@ -1883,12 +1936,20 @@ async function restoreUnrelatedRootDirChanges(
   mergerLog.log(
     `${taskId}: AI-resolved autostash conflict in ${conflictedFiles.length} file(s); dropping stash ${sha.slice(0, 7)}`,
   );
-  await ctx.store.logEntry(
-    taskId,
-    `Autostash conflict resolved by AI in ${conflictedFiles.length} file(s)`,
-    conflictedFiles.join("\n"),
-  );
-  await dropAutostashBySha(rootDir, taskId, sha);
+  const aiDropResult = await dropAutostashBySha(rootDir, taskId, sha);
+  if (aiDropResult.dropped) {
+    await ctx.store.logEntry(
+      taskId,
+      `Autostash conflict resolved by AI in ${conflictedFiles.length} file(s)`,
+      conflictedFiles.join("\n"),
+    );
+  } else {
+    await ctx.store.logEntry(
+      taskId,
+      `Autostash conflict resolved by AI in ${conflictedFiles.length} file(s), but stash entry failed to drop`,
+      `Resolved files:\n${conflictedFiles.join("\n")}\n\nDrop failure: ${aiDropResult.reason ?? "unknown"}\n\nClean up manually with:\n  cd ${rootDir} && git stash list | grep ${sha.slice(0, 7)} && git stash drop <ref>`,
+    );
+  }
 
   return {
     status: "ai-resolved",

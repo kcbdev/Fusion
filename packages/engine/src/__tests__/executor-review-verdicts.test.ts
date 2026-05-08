@@ -261,6 +261,7 @@ async function captureTools(settingsOverride?: Record<string, unknown>): Promise
     { name: "Preflight", status: "done" },
     { name: "Implement", status: "in-progress" },
     { name: "Testing", status: "pending" },
+    { name: "Docs", status: "pending" },
   ];
   store.updateStep.mockImplementation(async (_taskId: string, stepIndex: number, status: string) => {
     const current = stepStates[stepIndex];

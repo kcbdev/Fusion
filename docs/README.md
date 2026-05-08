@@ -62,6 +62,7 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 |---|---|
 | [Plugin Management](./plugin-management.md) | End-user guide for discovering, installing, enabling, configuring, updating, uninstalling, and troubleshooting Fusion plugins |
 | [Plugin Authoring](./PLUGIN_AUTHORING.md) | Developer guide for building Fusion plugins (manifest, SDK hooks, routes, UI/runtime contributions) |
+| [Even Realities Glasses Plugin](../plugins/fusion-plugin-even-realities-glasses/README.md) | Task-focused Even Realities glasses bridge with quick capture, polling notifications, and agent actions |
 | [Memory Plugin Contract](./memory-plugin-contract.md) | Pluggable memory backend architecture, interface contract, and migration strategy |
 
 ### Audit Reports
