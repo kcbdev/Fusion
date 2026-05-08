@@ -3210,10 +3210,58 @@ describe("Messaging Routes", () => {
     );
 
     expect(res.status).toBe(201);
-    expect(executeHeartbeat).toHaveBeenCalledWith({
-      agentId: "agent-wake-1",
-      source: "on_demand",
-      triggerDetail: "wake-on-message",
+    await vi.waitFor(() => {
+      expect(executeHeartbeat).toHaveBeenCalledWith({
+        agentId: "agent-wake-1",
+        source: "on_demand",
+        triggerDetail: "wake-on-message",
+      });
+    });
+  });
+
+  it("FN-3751: returns 201 immediately without waiting for executeHeartbeat to resolve", async () => {
+    let heartbeatResolved = false;
+    const executeHeartbeat = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            heartbeatResolved = true;
+            resolve({ id: "run-delayed" });
+          }, 500);
+        }),
+    );
+    const wakeApp = express();
+    wakeApp.use(express.json());
+    wakeApp.use("/api", createApiRoutes(store, {
+      heartbeatMonitor: { executeHeartbeat, rootDir } as any,
+    }));
+
+    const startedAt = Date.now();
+    const res = await REQUEST(
+      wakeApp,
+      "POST",
+      "/api/messages",
+      JSON.stringify({
+        toId: "agent-wake-fast",
+        toType: "agent",
+        content: "wake without blocking send",
+        type: "user-to-agent",
+        wakeImmediately: true,
+      }),
+      { "Content-Type": "application/json" },
+    );
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(res.status).toBe(201);
+    expect(elapsedMs).toBeLessThan(100);
+    expect(heartbeatResolved).toBe(false);
+
+    await vi.waitFor(() => {
+      expect(executeHeartbeat).toHaveBeenCalledWith({
+        agentId: "agent-wake-fast",
+        source: "on_demand",
+        triggerDetail: "wake-on-message",
+      });
     });
   });
 
@@ -3327,7 +3375,9 @@ describe("Messaging Routes", () => {
 
     expect(res.status).toBe(201);
     expect(res.body.toId).toBe("agent-wake-failure");
-    expect(executeHeartbeat).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(executeHeartbeat).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("supports metadata.wakeRecipient as an immediate-wake request", async () => {
@@ -3353,10 +3403,12 @@ describe("Messaging Routes", () => {
     );
 
     expect(res.status).toBe(201);
-    expect(executeHeartbeat).toHaveBeenCalledWith({
-      agentId: "agent-wake-meta",
-      source: "on_demand",
-      triggerDetail: "wake-on-message",
+    await vi.waitFor(() => {
+      expect(executeHeartbeat).toHaveBeenCalledWith({
+        agentId: "agent-wake-meta",
+        source: "on_demand",
+        triggerDetail: "wake-on-message",
+      });
     });
   });
 

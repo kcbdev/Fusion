@@ -328,29 +328,33 @@ export function registerMessagingScriptRoutes(ctx: ApiRoutesContext): void {
       });
 
       const shouldWakeImmediately = toType === "agent" && (wakeImmediately === true || metadata?.wakeRecipient === true);
-      if (shouldWakeImmediately) {
-        try {
-          const { store: scopedStore, projectId } = await getProjectContext(req);
-          const resolvedMonitor =
-            isHeartbeatMonitorForProject(scopedStore)
-              ? heartbeatMonitor
-              : projectId
-                ? resolveHeartbeatMonitor(scopedStore)
-                : undefined;
-
-          if (resolvedMonitor) {
-            await resolvedMonitor.executeHeartbeat({
-              agentId: toId,
-              source: "on_demand",
-              triggerDetail: "wake-on-message",
-            });
-          }
-        } catch (wakeErr) {
-          runtimeLogger.warn(`POST /api/messages wakeImmediately best-effort wake failed: ${wakeErr instanceof Error ? wakeErr.message : String(wakeErr)}`);
-        }
-      }
+      const recipientAgentId = toId;
 
       res.status(201).json(message);
+
+      if (shouldWakeImmediately) {
+        void (async () => {
+          try {
+            const { store: scopedStore, projectId } = await getProjectContext(req);
+            const resolvedMonitor =
+              isHeartbeatMonitorForProject(scopedStore)
+                ? heartbeatMonitor
+                : projectId
+                  ? resolveHeartbeatMonitor(scopedStore)
+                  : undefined;
+
+            if (resolvedMonitor) {
+              await resolvedMonitor.executeHeartbeat({
+                agentId: recipientAgentId,
+                source: "on_demand",
+                triggerDetail: "wake-on-message",
+              });
+            }
+          } catch (wakeErr) {
+            runtimeLogger.warn(`POST /api/messages wakeImmediately best-effort wake failed: ${wakeErr instanceof Error ? wakeErr.message : String(wakeErr)}`);
+          }
+        })();
+      }
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;
