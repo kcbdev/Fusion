@@ -1,5 +1,5 @@
 import "./MailboxModal.css";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, type CSSProperties } from "react";
 import {
   X,
   Mail,
@@ -33,6 +33,8 @@ import {
 import { MessageComposer } from "./MessageComposer";
 import type { Agent } from "../api";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
+import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
+import { useViewportMode } from "./Header";
 import { subscribeSse } from "../sse-bus";
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -142,6 +144,20 @@ export function MailboxModal({
   const [replyContextLoading, setReplyContextLoading] = useState<Record<string, boolean>>({});
   const [replyContextErrors, setReplyContextErrors] = useState<Record<string, string>>({});
   const [replyContextCache, setReplyContextCache] = useState<Map<string, Message>>(new Map());
+  const viewportMode = useViewportMode();
+  const isMobile = viewportMode === "mobile";
+  const { keyboardOverlap, viewportHeight, viewportOffsetTop, keyboardOpen } = useMobileKeyboard({ enabled: isMobile });
+  const containerKeyboardStyle = useMemo<CSSProperties | undefined>(() => {
+    if (!keyboardOpen) {
+      return undefined;
+    }
+
+    return {
+      "--keyboard-overlap": `${keyboardOverlap}px`,
+      "--vv-offset-top": `${viewportOffsetTop}px`,
+      ...(viewportHeight != null ? { "--vv-height": `${viewportHeight}px` } : {}),
+    } as CSSProperties;
+  }, [keyboardOpen, keyboardOverlap, viewportHeight, viewportOffsetTop]);
 
   // ── Data fetching ─────────────────────────────────────────────────────
 
@@ -479,7 +495,7 @@ export function MailboxModal({
       aria-modal="true"
       data-testid="mailbox-modal-overlay"
     >
-      <div className="modal modal-lg mailbox-modal" data-testid="mailbox-modal">
+      <div className="modal modal-lg mailbox-modal" style={containerKeyboardStyle} data-testid="mailbox-modal">
         {/* Header */}
         <div className="modal-header mailbox-header">
           <div className="mailbox-title">

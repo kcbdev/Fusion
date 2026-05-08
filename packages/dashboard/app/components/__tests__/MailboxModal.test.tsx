@@ -3,6 +3,7 @@ import { loadAllAppCss } from "../../test/cssFixture";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { MailboxModal } from "../MailboxModal";
 import * as apiModule from "../../api";
+import * as mobileKeyboardModule from "../../hooks/useMobileKeyboard";
 import type { Agent } from "../../api";
 import type { Message } from "@fusion/core";
 
@@ -18,6 +19,14 @@ vi.mock("../../api", () => ({
   fetchConversation: vi.fn(),
   fetchMessage: vi.fn(),
   sendMessage: vi.fn(),
+}));
+
+vi.mock("../../hooks/useMobileKeyboard", () => ({
+  useMobileKeyboard: vi.fn(),
+}));
+
+vi.mock("../Header", () => ({
+  useViewportMode: vi.fn(() => "mobile"),
 }));
 
 // Mock lucide-react icons
@@ -51,6 +60,7 @@ const mockDeleteMessage = vi.mocked(apiModule.deleteMessage);
 const mockFetchConversation = vi.mocked(apiModule.fetchConversation);
 const mockFetchMessage = vi.mocked(apiModule.fetchMessage);
 const mockSendMessage = vi.mocked(apiModule.sendMessage);
+const mockUseMobileKeyboard = vi.mocked(mobileKeyboardModule.useMobileKeyboard);
 
 const mockAgents: Agent[] = [
   {
@@ -117,6 +127,12 @@ const defaultProps = {
 describe("MailboxModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseMobileKeyboard.mockReturnValue({
+      keyboardOverlap: 0,
+      viewportHeight: null,
+      viewportOffsetTop: 0,
+      keyboardOpen: false,
+    });
     mockFetchInbox.mockResolvedValue({ messages: [mockMessage, mockReadMessage], total: 2, unreadCount: 1 });
     mockFetchOutbox.mockResolvedValue({ messages: [], total: 0 });
     mockFetchUnreadCount.mockResolvedValue({ unreadCount: 1 });
@@ -136,6 +152,21 @@ describe("MailboxModal", () => {
   it("renders the modal when isOpen is true", () => {
     render(<MailboxModal {...defaultProps} />);
     expect(screen.getByTestId("mailbox-modal")).toBeDefined();
+  });
+
+  it("applies visual viewport CSS variables when mobile keyboard is open", async () => {
+    mockUseMobileKeyboard.mockReturnValue({
+      keyboardOverlap: 220,
+      viewportHeight: 460,
+      viewportOffsetTop: 28,
+      keyboardOpen: true,
+    });
+
+    render(<MailboxModal {...defaultProps} />);
+
+    const modal = await screen.findByTestId("mailbox-modal");
+    expect(modal.getAttribute("style")).toContain("--vv-offset-top: 28px");
+    expect(modal.getAttribute("style")).toContain("--vv-height: 460px");
   });
 
   it("shows the Mailbox title with unread count badge", async () => {

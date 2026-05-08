@@ -1,5 +1,5 @@
 import "./MailboxModal.css";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, type CSSProperties } from "react";
 import {
   Mail,
   Send,
@@ -31,6 +31,7 @@ import {
 import { MessageComposer } from "./MessageComposer";
 import { subscribeSse } from "../sse-bus";
 import { useViewportMode } from "../hooks/useViewportMode";
+import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -155,6 +156,18 @@ export function MailboxView({
   const viewportMode = useViewportMode();
   const isMobile = viewportMode === "mobile";
   const isSplitPane = !isMobile;
+  const { keyboardOverlap, viewportHeight, viewportOffsetTop, keyboardOpen } = useMobileKeyboard({ enabled: isMobile });
+  const containerKeyboardStyle = useMemo<CSSProperties | undefined>(() => {
+    if (!keyboardOpen) {
+      return undefined;
+    }
+
+    return {
+      "--keyboard-overlap": `${keyboardOverlap}px`,
+      "--vv-offset-top": `${viewportOffsetTop}px`,
+      ...(viewportHeight != null ? { "--vv-height": `${viewportHeight}px` } : {}),
+    } as CSSProperties;
+  }, [keyboardOpen, keyboardOverlap, viewportHeight, viewportOffsetTop]);
 
   // ── Data fetching ─────────────────────────────────────────────────────
 
@@ -714,7 +727,7 @@ export function MailboxView({
   };
 
   return (
-    <div className="mailbox-view" data-testid="mailbox-view">
+    <div className="mailbox-view" style={containerKeyboardStyle} data-testid="mailbox-view">
       {/* Header */}
       <div className="mailbox-header">
         <div className="mailbox-title">

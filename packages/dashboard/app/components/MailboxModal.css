@@ -656,6 +656,20 @@
     padding-bottom: calc(var(--space-md) + env(safe-area-inset-bottom, 0px) + var(--standalone-bottom-gap));
   }
 
+  .mailbox-view[style*="--keyboard-overlap"],
+  .mailbox-modal[style*="--keyboard-overlap"] {
+    height: var(--vv-height, 100dvh);
+    max-height: var(--vv-height, 100dvh);
+    transform: translateY(var(--vv-offset-top, 0px));
+    will-change: transform;
+  }
+
+  .mailbox-view[style*="--keyboard-overlap"] .mailbox-content,
+  .mailbox-modal[style*="--keyboard-overlap"] .mailbox-content {
+    overflow-y: auto;
+    min-height: 0;
+  }
+
   .mailbox-modal .mailbox-message-detail-header {
     flex-direction: column;
     align-items: flex-start;
@@ -734,6 +748,10 @@
     padding: var(--space-md);
     /* Account for mobile nav bar at bottom */
     padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + var(--standalone-bottom-gap) + var(--space-lg));
+  }
+
+  .mailbox-view[style*="--keyboard-overlap"] .mailbox-content {
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--space-md));
   }
 
   .mailbox-view .mailbox-split-layout {

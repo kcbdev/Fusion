@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MessageComposer } from "../MessageComposer";
 import * as apiModule from "../../api";
@@ -41,6 +41,8 @@ const defaultProps = {
 };
 
 describe("MessageComposer", () => {
+  const originalVisualViewport = window.visualViewport;
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockSendMessage.mockResolvedValue({
@@ -54,6 +56,14 @@ describe("MessageComposer", () => {
       read: false,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: originalVisualViewport,
+      writable: true,
     });
   });
 
@@ -169,6 +179,80 @@ describe("MessageComposer", () => {
     render(<MessageComposer {...defaultProps} />);
     fireEvent.click(screen.getByTestId("message-composer-cancel-btn"));
     expect(defaultProps.onCancel).toHaveBeenCalledOnce();
+  });
+
+  it("auto-focuses textarea when reply context is provided", () => {
+    render(
+      <MessageComposer
+        {...defaultProps}
+        recipient={{ id: "agent-001", type: "agent" }}
+        replyContext={{ messageId: "m1", preview: "Previous" }}
+      />,
+    );
+
+    expect(document.activeElement).toBe(screen.getByTestId("message-composer-content"));
+  });
+
+  it("scrolls textarea into view on visualViewport resize when replying", () => {
+    const addEventListener = vi.fn();
+    const removeEventListener = vi.fn();
+    let resizeHandler: (() => void) | undefined;
+
+    addEventListener.mockImplementation((event: string, handler: () => void) => {
+      if (event === "resize") {
+        resizeHandler = handler;
+      }
+    });
+
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: {
+        addEventListener,
+        removeEventListener,
+      },
+      writable: true,
+    });
+
+    if (!("scrollIntoView" in HTMLElement.prototype)) {
+      Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+        configurable: true,
+        value: () => undefined,
+        writable: true,
+      });
+    }
+    const scrollIntoViewSpy = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => undefined);
+
+    render(
+      <MessageComposer
+        {...defaultProps}
+        recipient={{ id: "agent-001", type: "agent" }}
+        replyContext={{ messageId: "m1", preview: "Previous" }}
+      />,
+    );
+
+    expect(addEventListener).toHaveBeenCalledWith("resize", expect.any(Function));
+    resizeHandler?.();
+    expect(scrollIntoViewSpy).toHaveBeenCalledWith({ block: "center", behavior: "auto" });
+
+    scrollIntoViewSpy.mockRestore();
+  });
+
+  it("does not throw when visualViewport is unavailable", () => {
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: undefined,
+      writable: true,
+    });
+
+    expect(() => {
+      render(
+        <MessageComposer
+          {...defaultProps}
+          recipient={{ id: "agent-001", type: "agent" }}
+          replyContext={{ messageId: "m1", preview: "Previous" }}
+        />,
+      );
+    }).not.toThrow();
   });
 
   it("pre-fills recipient when provided", () => {

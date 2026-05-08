@@ -4,6 +4,7 @@ import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import { MailboxView } from "../MailboxView";
 import * as apiModule from "../../api";
 import * as viewportModule from "../../hooks/useViewportMode";
+import * as mobileKeyboardModule from "../../hooks/useMobileKeyboard";
 import type { Agent } from "../../api";
 import type { Message } from "@fusion/core";
 
@@ -23,6 +24,10 @@ vi.mock("../../api", () => ({
 
 vi.mock("../../hooks/useViewportMode", () => ({
   useViewportMode: vi.fn(),
+}));
+
+vi.mock("../../hooks/useMobileKeyboard", () => ({
+  useMobileKeyboard: vi.fn(),
 }));
 
 // Mock lucide-react icons
@@ -55,6 +60,7 @@ const mockDeleteMessage = vi.mocked(apiModule.deleteMessage);
 const mockFetchConversation = vi.mocked(apiModule.fetchConversation);
 const mockSendMessage = vi.mocked(apiModule.sendMessage);
 const mockUseViewportMode = vi.mocked(viewportModule.useViewportMode);
+const mockUseMobileKeyboard = vi.mocked(mobileKeyboardModule.useMobileKeyboard);
 
 const mockAgents: Agent[] = [
   {
@@ -148,6 +154,12 @@ describe("MailboxView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseViewportMode.mockReturnValue("desktop");
+    mockUseMobileKeyboard.mockReturnValue({
+      keyboardOverlap: 0,
+      viewportHeight: null,
+      viewportOffsetTop: 0,
+      keyboardOpen: false,
+    });
     mockFetchUnreadCount.mockResolvedValue({ unreadCount: 2 });
     mockFetchAgents.mockResolvedValue(mockAgents);
     mockSendMessage.mockResolvedValue({ ...mockMessage, id: "msg-sent" });
@@ -451,6 +463,27 @@ describe("MailboxView", () => {
       expect(screen.getByTestId("mailbox-split-empty")).toBeDefined();
       expect(screen.getByTestId("mailbox-inbox-list")).toBeDefined();
     });
+  });
+
+  it("applies visual viewport CSS variables when mobile keyboard is open", async () => {
+    mockUseViewportMode.mockReturnValue("mobile");
+    mockUseMobileKeyboard.mockReturnValue({
+      keyboardOverlap: 240,
+      viewportHeight: 480,
+      viewportOffsetTop: 32,
+      keyboardOpen: true,
+    });
+    mockFetchInbox.mockResolvedValue({
+      messages: [],
+      unreadCount: 0,
+      total: 0,
+    });
+
+    render(<MailboxView {...defaultProps} />);
+
+    const mailboxView = await screen.findByTestId("mailbox-view");
+    expect(mailboxView.getAttribute("style")).toContain("--vv-offset-top: 32px");
+    expect(mailboxView.getAttribute("style")).toContain("--vv-height: 480px");
   });
 
   it("keeps mobile single-pane flow for detail open and back navigation", async () => {
@@ -1386,6 +1419,15 @@ describe("MailboxView", () => {
       expect(css).not.toMatch(/\.mailbox-agent-subtab\s*\{[^}]*border-radius:\s*0;[^}]*\}/);
       expect(css).not.toMatch(/\.mailbox-agent-subtab\s*\{[^}]*border:\s*none;[^}]*\}/);
       expect(css).not.toMatch(/\.mailbox-agent-subtab\s*\{[^}]*background:\s*transparent;[^}]*\}/);
+    });
+
+    it("includes keyboard-overlap viewport anchoring rules for mailbox containers", async () => {
+      const css = loadAllAppCss();
+
+      expect(css).toContain('.mailbox-view[style*="--keyboard-overlap"],');
+      expect(css).toContain('.mailbox-modal[style*="--keyboard-overlap"]');
+      expect(css).toContain("height: var(--vv-height, 100dvh);");
+      expect(css).toContain("transform: translateY(var(--vv-offset-top, 0px));");
     });
 
     it("renders structural elements that mobile CSS targets", async () => {

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { X, Send, Loader2, Bot, AlertCircle } from "lucide-react";
 import type { ParticipantType, MessageType } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
@@ -46,6 +46,7 @@ export function MessageComposer({
   const [wakeRecipient, setWakeRecipient] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const selectedAgent = useMemo(() => agents.find((agent) => agent.id === toId), [agents, toId]);
   const recipientIsAgent = toType === "agent";
@@ -92,6 +93,29 @@ export function MessageComposer({
     setToId(agentId);
     setToType("agent");
   }, []);
+
+  useEffect(() => {
+    if (!replyContext) {
+      return;
+    }
+
+    textareaRef.current?.focus();
+  }, [replyContext]);
+
+  useEffect(() => {
+    if (!replyContext || typeof window === "undefined" || window.visualViewport == null) {
+      return;
+    }
+
+    const handleVisualViewportResize = () => {
+      textareaRef.current?.scrollIntoView({ block: "center", behavior: "auto" });
+    };
+
+    window.visualViewport.addEventListener("resize", handleVisualViewportResize);
+    return () => {
+      window.visualViewport?.removeEventListener("resize", handleVisualViewportResize);
+    };
+  }, [replyContext]);
 
   return (
     <div className="message-composer" data-testid="message-composer">
@@ -161,6 +185,7 @@ export function MessageComposer({
           </label>
           <textarea
             id="message-content"
+            ref={textareaRef}
             className="message-composer-textarea"
             placeholder="Type your message…"
             value={content}
