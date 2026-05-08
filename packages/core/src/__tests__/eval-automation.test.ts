@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDatabase } from "../db.js";
-import { EvalStore } from "../eval-store.js";
+import { EvalLifecycleError, EvalStore } from "../eval-store.js";
 import {
   DEFAULT_TASK_EVALUATION_SCHEDULE,
   createScheduledEvalBatchAutomation,
@@ -153,5 +153,126 @@ describe("eval-automation", () => {
     const run = evalStore.getRun(result.runId)!;
     expect(run.status).toBe("completed");
     expect(run.counts.totalTasks).toBe(0);
+  });
+
+  it("continues batch when individual evaluator throws", async () => {
+    const db = createDatabase("/tmp/fn-eval-automation-4", { inMemory: true });
+    db.init();
+    const evalStore = new EvalStore(db);
+
+    const result = await runScheduledEvalBatch({
+      projectId: "proj",
+      store: {
+        listTasks: async () => [
+          task("FN-1", "done", "2026-05-01T01:00:00.000Z"),
+          task("FN-2", "done", "2026-05-01T02:00:00.000Z"),
+          task("FN-3", "done", "2026-05-01T03:00:00.000Z"),
+        ],
+        getEvalStore: () => evalStore,
+      } as any,
+      startedAt: "2026-05-01T04:00:00.000Z",
+      evaluator: async ({ task: currentTask }) => {
+        if (currentTask.id === "FN-2") throw new Error("boom");
+        return {
+          status: "scored",
+          categoryScores: [],
+          evidence: [],
+          deterministicSignals: [],
+          followUps: [],
+          summary: currentTask.id,
+        };
+      },
+    });
+
+    expect(result.status).toBe("completed");
+    const run = evalStore.getRun(result.runId)!;
+    expect(run.counts).toEqual({ totalTasks: 3, scoredTasks: 2, skippedTasks: 0, erroredTasks: 1 });
+
+    const events = evalStore.listRunEvents(run.id);
+    expect(events.filter((event) => event.type === "error" && event.taskId === "FN-2")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "task_evaluated").map((event) => event.taskId)).toEqual(["FN-1", "FN-3"]);
+  });
+
+  it("marks run failed when listTasks throws", async () => {
+    const db = createDatabase("/tmp/fn-eval-automation-5", { inMemory: true });
+    db.init();
+    const evalStore = new EvalStore(db);
+
+    const result = await runScheduledEvalBatch({
+      projectId: "proj",
+      store: {
+        listTasks: async () => {
+          throw new Error("listTasks failed");
+        },
+        getEvalStore: () => evalStore,
+      } as any,
+      startedAt: "2026-05-01T04:00:00.000Z",
+      evaluator: async () => ({ status: "scored", categoryScores: [], evidence: [], deterministicSignals: [], followUps: [] }),
+    });
+
+    expect(result.status).toBe("failed");
+    const run = evalStore.getRun(result.runId)!;
+    expect(run.status).toBe("failed");
+    expect(run.error).toContain("listTasks failed");
+    const events = evalStore.listRunEvents(run.id);
+    expect(events.some((event) => event.type === "error" && event.message === "Scheduled eval batch failed")).toBe(true);
+  });
+
+  it("propagates active_run_conflict from createRun", async () => {
+    const db = createDatabase("/tmp/fn-eval-automation-6", { inMemory: true });
+    db.init();
+    const evalStore = new EvalStore(db);
+
+    evalStore.createRun({
+      projectId: "proj",
+      trigger: "schedule",
+      scope: "completed-tasks",
+      window: { until: "2026-05-01T04:00:00.000Z" },
+    });
+
+    await expect(
+      runScheduledEvalBatch({
+        projectId: "proj",
+        store: {
+          listTasks: async () => [task("FN-1", "done", "2026-05-01T01:00:00.000Z")],
+          getEvalStore: () => evalStore,
+        } as any,
+        startedAt: "2026-05-01T05:00:00.000Z",
+        evaluator: async () => ({ status: "scored", categoryScores: [], evidence: [], deterministicSignals: [], followUps: [] }),
+      }),
+    ).rejects.toMatchObject({ code: "active_run_conflict" } satisfies Partial<EvalLifecycleError>);
+  });
+
+  it("mixed-status counts are accurate", async () => {
+    const db = createDatabase("/tmp/fn-eval-automation-7", { inMemory: true });
+    db.init();
+    const evalStore = new EvalStore(db);
+
+    const result = await runScheduledEvalBatch({
+      projectId: "proj",
+      store: {
+        listTasks: async () => [
+          task("FN-1", "done", "2026-05-01T01:00:00.000Z"),
+          task("FN-2", "done", "2026-05-01T02:00:00.000Z"),
+          task("FN-3", "done", "2026-05-01T03:00:00.000Z"),
+          task("FN-4", "done", "2026-05-01T04:00:00.000Z"),
+        ],
+        getEvalStore: () => evalStore,
+      } as any,
+      startedAt: "2026-05-01T05:00:00.000Z",
+      evaluator: async ({ task: currentTask }) => {
+        if (currentTask.id === "FN-1" || currentTask.id === "FN-2") {
+          return { status: "scored", categoryScores: [], evidence: [], deterministicSignals: [], followUps: [] };
+        }
+        if (currentTask.id === "FN-3") {
+          return { status: "skipped", categoryScores: [], evidence: [], deterministicSignals: [], followUps: [] };
+        }
+        return { status: "errored", categoryScores: [], evidence: [], deterministicSignals: [], followUps: [] };
+      },
+    });
+
+    const run = evalStore.getRun(result.runId)!;
+    expect(run.counts).toEqual({ totalTasks: 4, scoredTasks: 2, skippedTasks: 1, erroredTasks: 1 });
+    expect(run.evaluatedTaskIds).toEqual(["FN-1", "FN-2", "FN-3", "FN-4"]);
   });
 });
