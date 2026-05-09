@@ -71,7 +71,7 @@ Defaults from `DEFAULT_GLOBAL_SETTINGS`; key scope from `GLOBAL_SETTINGS_KEYS`.
 | `daemonPort` | `number` | `4040` | Port for daemon/serve mode binding. |
 | `daemonHost` | `string` | `"127.0.0.1"` | Host for daemon/serve mode binding. Defaults to localhost only; pass `"0.0.0.0"` to expose on all interfaces. |
 | `settingsSyncEnabled` | `boolean` | `false` | Enable automatic settings synchronization between nodes. |
-| `settingsSyncAuth` | `boolean` | `false` | Include model auth credentials in settings sync operations. |
+| `settingsSyncAuth` | `boolean` | `false` | Include auth-material snapshots (`sharedState.authMaterial` and auth sync endpoints) when settings sync is enabled. Ignored when `settingsSyncEnabled` is `false`. |
 | `settingsSyncInterval` | `number` | `900000` | Automatic sync interval in ms. Valid values: `300000`, `900000`, `1800000`, `3600000`. |
 | `settingsSyncConflictResolution` | `"last-write-wins" \| "always-ask" \| "keep-local" \| "keep-remote"` | `"last-write-wins"` | Conflict strategy for divergent synced settings. |
 | `dashboardCurrentNodeId` | `string` | `undefined` | Currently selected dashboard node ID. Restores the last-viewed node on fresh browser/PWA sessions. `undefined` means viewing the local node. |

@@ -31,6 +31,8 @@ const mockGetSettingsSyncState = vi.fn();
 const mockUpdateSettingsSyncState = vi.fn();
 const mockApplyRemoteSettings = vi.fn();
 const mockGetSettingsForSync = vi.fn();
+const mockGetAuthMaterialSnapshot = vi.fn();
+const mockApplyAuthMaterialSnapshot = vi.fn();
 const mockChatStoreInit = vi.fn().mockResolvedValue(undefined);
 const mockAgentStoreInit = vi.fn().mockResolvedValue(undefined);
 const mockAgentStoreGetAgent = vi.fn().mockResolvedValue(null);
@@ -47,6 +49,8 @@ vi.mock("@fusion/core", () => {
       updateSettingsSyncState = mockUpdateSettingsSyncState;
       applyRemoteSettings = mockApplyRemoteSettings;
       getSettingsForSync = mockGetSettingsForSync;
+      getAuthMaterialSnapshot = mockGetAuthMaterialSnapshot;
+      applyAuthMaterialSnapshot = mockApplyAuthMaterialSnapshot;
     },
     ChatStore: class MockChatStore {
       init = mockChatStoreInit;
@@ -173,6 +177,17 @@ describe("Node settings sync routes", () => {
     mockUpdateSettingsSyncState.mockResolvedValue({});
     mockApplyRemoteSettings.mockResolvedValue({ success: true, globalCount: 1, projectCount: 1, authCount: 0 });
     mockGetSettingsForSync.mockResolvedValue({});
+    mockGetAuthMaterialSnapshot.mockReturnValue({
+      version: 1,
+      exportedAt: "2026-04-14T10:00:00.000Z",
+      checksum: "auth-checksum",
+      payload: { providerAuth: { anthropic: { type: "api_key", key: "sk-ant-test" } } },
+    });
+    mockApplyAuthMaterialSnapshot.mockReturnValue({
+      success: true,
+      authCount: 1,
+      providerAuth: { anthropic: { type: "api_key", key: "sk-ant-received" } },
+    });
     mockAuthStorageSet.mockResolvedValue(undefined);
     mockAuthStorageGetOAuthProviders.mockReturnValue([]);
 
@@ -636,11 +651,25 @@ describe("Node settings sync routes", () => {
     it("emits structured redacted diagnostics for pull-mode auth sync", async () => {
       const remoteNode = createMockRemoteNode();
       mockGetNode.mockResolvedValue(remoteNode);
+      mockApplyAuthMaterialSnapshot.mockReturnValueOnce({
+        success: true,
+        authCount: 1,
+        providerAuth: {
+          google: { type: "api_key", key: "sk-pull-secret-123" },
+        },
+      });
       mockFetch.mockResolvedValue({
         ok: true,
         json: () => Promise.resolve({
-          providers: {
-            google: { type: "api_key", key: "sk-pull-secret-123" },
+          authMaterial: {
+            version: 1,
+            exportedAt: "2026-04-14T10:00:00.000Z",
+            checksum: "auth-checksum",
+            payload: {
+              providerAuth: {
+                google: { type: "api_key", key: "sk-pull-secret-123" },
+              },
+            },
           },
           sourceNodeId: "node-other",
           timestamp: "2026-04-14T10:00:00.000Z",
@@ -781,8 +810,11 @@ describe("Node settings sync routes", () => {
         "POST",
         "/api/settings/auth-receive",
         JSON.stringify({
-          providers: {
-            anthropic: { type: "api_key", key: "sk-ant-received" },
+          authMaterial: {
+            version: 1,
+            exportedAt: "2026-04-14T10:00:00.000Z",
+            checksum: "auth-checksum",
+            payload: { providerAuth: { anthropic: { type: "api_key", key: "sk-ant-received" } } },
           },
           sourceNodeId: "node-remote-001",
           timestamp: "2026-04-14T10:00:00.000Z",
@@ -801,7 +833,12 @@ describe("Node settings sync routes", () => {
         "POST",
         "/api/settings/auth-receive",
         JSON.stringify({
-          providers: { anthropic: { type: "api_key", key: "sk-ant" } },
+          authMaterial: {
+            version: 1,
+            exportedAt: "2026-04-14T10:00:00.000Z",
+            checksum: "auth-checksum",
+            payload: { providerAuth: { anthropic: { type: "api_key", key: "sk-ant" } } },
+          },
           sourceNodeId: "node-remote-001",
           timestamp: "2026-04-14T10:00:00.000Z",
         }),
@@ -819,7 +856,7 @@ describe("Node settings sync routes", () => {
         app,
         "POST",
         "/api/settings/auth-receive",
-        JSON.stringify({ providers: "not-an-object" }),
+        JSON.stringify({ authMaterial: "not-an-object" }),
         { "content-type": "application/json", "Authorization": `Bearer ${localNode.apiKey}` },
       );
 
@@ -835,7 +872,12 @@ describe("Node settings sync routes", () => {
         "POST",
         "/api/settings/auth-receive",
         JSON.stringify({
-          providers: { anthropic: { type: "api_key", key: "sk-ant-secret" } },
+          authMaterial: {
+            version: 1,
+            exportedAt: "2026-04-14T10:00:00.000Z",
+            checksum: "auth-checksum",
+            payload: { providerAuth: { anthropic: { type: "api_key", key: "sk-ant-secret" } } },
+          },
           sourceNodeId: "node-remote-001",
           timestamp: "2026-04-14T10:00:00.000Z",
         }),
@@ -890,11 +932,11 @@ describe("Node settings sync routes", () => {
       );
 
       expect(res.status).toBe(200);
-      expect(res.body.providers).toBeDefined();
+      expect(res.body.authMaterial).toBeDefined();
       expect(res.body.sourceNodeId).toBe("node-local-001");
       // The actual providers depend on what's in ~/.pi/agent/auth.json
-      // Just verify we got a providers object
-      expect(typeof res.body.providers).toBe("object");
+      // Just verify we got a providerAuth snapshot payload
+      expect(typeof res.body.authMaterial.payload.providerAuth).toBe("object");
     });
 
     it("returns 401 when auth header is missing", async () => {

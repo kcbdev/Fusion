@@ -458,16 +458,29 @@ export const registerMeshRoutes: ApiRouteRegistrar = (ctx) => {
           }
         });
 
-        if (sharedState.authMaterial) {
-          emitRemoteRouteDiagnostic({
-            route: "mesh-sync",
-            message: "Ignoring sharedState.authMaterial; use dedicated auth sync routes (/api/nodes/:id/auth/*)",
-            nodeId: senderNodeId,
-            upstreamPath: "/api/mesh/sync",
-            operationStage: "apply-shared-state-auth-material",
-            level: "info",
-          });
-        }
+        await applyDomain("auth-material", async () => {
+          if (!sharedState.authMaterial) return;
+          validateSnapshotEnvelope(sharedState.authMaterial);
+          const applied = central.applyAuthMaterialSnapshot(sharedState.authMaterial as Parameters<typeof central.applyAuthMaterialSnapshot>[0]);
+          const { AuthStorage } = await import("@mariozechner/pi-coding-agent");
+          const { getFusionAuthPath } = await import("../auth-paths.js");
+          const authStorage = AuthStorage.create(getFusionAuthPath());
+          for (const [providerId, credential] of Object.entries(applied.providerAuth)) {
+            if (credential.type === "api_key" && credential.key) {
+              authStorage.set(providerId, { type: "api_key", key: credential.key });
+              continue;
+            }
+            if (credential.type === "oauth" && credential.accessToken && credential.refreshToken && typeof credential.expires === "number") {
+              authStorage.set(providerId, {
+                type: "oauth",
+                access: credential.accessToken,
+                refresh: credential.refreshToken,
+                expires: credential.expires,
+                ...(credential.accountId ? { accountId: credential.accountId } : {}),
+              });
+            }
+          }
+        });
 
         // Intentionally do not close this per-request AgentStore wrapper.
         // AgentStore uses a process-wide DB cache by rootDir; closing here would
@@ -517,6 +530,11 @@ export const registerMeshRoutes: ApiRouteRegistrar = (ctx) => {
       await collectSnapshot("projectSettings", async () => {
         const localGlobal = await store.getGlobalSettingsStore().getSettings();
         return central.getProjectSettingsSnapshot(localGlobal);
+      });
+      await collectSnapshot("authMaterial", async () => {
+        const authPathsModule = await import("./register-settings-sync-helpers.js");
+        const allProviders = await authPathsModule.readStoredAuthProvidersFromDisk();
+        return central.getAuthMaterialSnapshot(authPathsModule.toProviderAuthEntries(allProviders));
       });
 
       await central.close();

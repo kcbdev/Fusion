@@ -1,6 +1,6 @@
 import { ApiError, badRequest } from "../api-error.js";
 import { getFusionAuthPath } from "../auth-paths.js";
-import { readStoredAuthProvidersFromDisk } from "./register-settings-sync-helpers.js";
+import { readStoredAuthProvidersFromDisk, toProviderAuthEntries } from "./register-settings-sync-helpers.js";
 import type { ApiRouteRegistrar } from "./types.js";
 
 export const registerSettingsSyncInboundRoutes: ApiRouteRegistrar = (ctx) => {
@@ -110,12 +110,12 @@ export const registerSettingsSyncInboundRoutes: ApiRouteRegistrar = (ctx) => {
         throw new ApiError(401, "Invalid apiKey");
       }
 
-      const { providers, sourceNodeId, timestamp } = req.body || {};
+      const { authMaterial, sourceNodeId, timestamp } = req.body || {};
 
       // Validate required fields
-      if (!providers || typeof providers !== "object") {
+      if (!authMaterial || typeof authMaterial !== "object") {
         await central.close();
-        throw badRequest("Missing required field: providers");
+        throw badRequest("Missing required field: authMaterial");
       }
       if (!sourceNodeId) {
         await central.close();
@@ -130,14 +130,23 @@ export const registerSettingsSyncInboundRoutes: ApiRouteRegistrar = (ctx) => {
       const { AuthStorage } = await import("@mariozechner/pi-coding-agent");
       const authStorage = AuthStorage.create(getFusionAuthPath());
 
+      const applyResult = central.applyAuthMaterialSnapshot(authMaterial);
       const receivedProviders: string[] = [];
-      for (const [providerId, credential] of Object.entries(providers)) {
-        if (typeof credential === "object" && credential !== null) {
-          const cred = credential as { type: string; key?: string; access?: string; refresh?: string; expires?: number; accountId?: string };
-          if (cred.type === "api_key" && cred.key) {
-            authStorage.set(providerId, { type: "api_key", key: cred.key });
-            receivedProviders.push(providerId);
-          }
+      for (const [providerId, credential] of Object.entries(applyResult.providerAuth)) {
+        if (credential.type === "api_key" && credential.key) {
+          authStorage.set(providerId, { type: "api_key", key: credential.key });
+          receivedProviders.push(providerId);
+          continue;
+        }
+        if (credential.type === "oauth" && credential.accessToken && credential.refreshToken && typeof credential.expires === "number") {
+          authStorage.set(providerId, {
+            type: "oauth",
+            access: credential.accessToken,
+            refresh: credential.refreshToken,
+            expires: credential.expires,
+            ...(credential.accountId ? { accountId: credential.accountId } : {}),
+          });
+          receivedProviders.push(providerId);
         }
       }
 
@@ -194,19 +203,12 @@ export const registerSettingsSyncInboundRoutes: ApiRouteRegistrar = (ctx) => {
       const localPeerInfo = await central.getLocalPeerInfo();
 
       const allProviders = await readStoredAuthProvidersFromDisk();
-
-      // Filter to only API-key-based providers (skip OAuth)
-      const apiKeyProviders: Record<string, { type: string; key: string }> = {};
-      for (const [providerId, cred] of Object.entries(allProviders)) {
-        if (cred.type === "api_key" && cred.key) {
-          apiKeyProviders[providerId] = { type: "api_key", key: cred.key };
-        }
-      }
+      const authMaterial = central.getAuthMaterialSnapshot(toProviderAuthEntries(allProviders));
 
       await central.close();
 
       res.json({
-        providers: apiKeyProviders,
+        authMaterial,
         sourceNodeId: localPeerInfo.nodeId,
         timestamp: new Date().toISOString(),
       });

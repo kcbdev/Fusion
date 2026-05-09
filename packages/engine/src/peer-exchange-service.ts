@@ -18,6 +18,8 @@ export interface PeerExchangeServiceOptions {
   settingsSyncThrottleMs?: number;
   /** Global settings to include in settings sync. Required when settingsSyncEnabled is true. */
   globalSettings?: GlobalSettings;
+  /** When true, include auth material in shared-state exchanges. Default: false. */
+  settingsSyncAuth?: boolean;
   /** Provider auth credentials to include in settings sync. */
   providerAuth?: Record<string, { type: "api_key" | "oauth"; key?: string; accessToken?: string; authenticated?: boolean }>;
 }
@@ -66,6 +68,8 @@ export class PeerExchangeService {
   private cachedSharedStatePayload: SharedMeshStatePayload | null = null;
   /** Global settings provided via options. */
   private globalSettings?: GlobalSettings;
+  /** Whether auth snapshot exchange is enabled. */
+  private settingsSyncAuth: boolean;
   /** Provider auth credentials provided via options. */
   private providerAuth?: Record<string, { type: "api_key" | "oauth"; key?: string; accessToken?: string; authenticated?: boolean }>;
 
@@ -81,6 +85,7 @@ export class PeerExchangeService {
     this.settingsSyncEnabled = options.settingsSyncEnabled ?? false;
     this.settingsSyncThrottleMs = options.settingsSyncThrottleMs ?? 300_000; // 5 minutes default
     this.globalSettings = options.globalSettings;
+    this.settingsSyncAuth = options.settingsSyncAuth ?? false;
     this.providerAuth = options.providerAuth;
   }
 
@@ -457,7 +462,7 @@ export class PeerExchangeService {
       return undefined;
     }
     const projectSettings = await core.getProjectSettingsSnapshot(globalSettings);
-    const authMaterial = core.getAuthMaterialSnapshot(this.providerAuth);
+    const authMaterial = this.settingsSyncAuth ? core.getAuthMaterialSnapshot(this.providerAuth) : undefined;
     this.cachedSharedStatePayload = { projectSettings, authMaterial };
     return this.cachedSharedStatePayload;
   }
@@ -468,17 +473,16 @@ export class PeerExchangeService {
   ): Promise<{ success: boolean; globalCount: number; projectCount: number; authCount: number; error?: string }> {
     const core = this.centralCore as CentralCore & {
       applyProjectSettingsSnapshot?: (snapshot: NonNullable<SharedMeshStatePayload["projectSettings"]>) => Promise<{ success: boolean; globalCount: number; projectCount: number; authCount: number; error?: string }>;
-      applyAuthMaterialSnapshot?: (snapshot: NonNullable<SharedMeshStatePayload["authMaterial"]>) => { success?: boolean; authCount?: number; error?: string } | Record<string, unknown>;
+      applyAuthMaterialSnapshot?: (snapshot: NonNullable<SharedMeshStatePayload["authMaterial"]>) => { success?: boolean; authCount?: number; error?: string; providerAuth?: Record<string, unknown> };
     };
 
     if (sharedState?.projectSettings && core.applyProjectSettingsSnapshot) {
       const result = await core.applyProjectSettingsSnapshot(sharedState.projectSettings);
-      if (sharedState.authMaterial && core.applyAuthMaterialSnapshot) {
+      if (this.settingsSyncAuth && sharedState.authMaterial && core.applyAuthMaterialSnapshot) {
         const authResult = core.applyAuthMaterialSnapshot(sharedState.authMaterial);
-        const authResultWithCount = authResult as { authCount?: number };
         const authCount =
-          typeof authResultWithCount.authCount === "number"
-            ? authResultWithCount.authCount
+          typeof authResult.authCount === "number"
+            ? authResult.authCount
             : Object.keys(sharedState.authMaterial.payload.providerAuth ?? {}).length;
         return { ...result, authCount: Math.max(result.authCount, authCount) };
       }

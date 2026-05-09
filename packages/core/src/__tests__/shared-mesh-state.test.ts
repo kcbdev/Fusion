@@ -56,7 +56,16 @@ describe("shared-mesh-state", () => {
     const activitySnapshot = createActivityLogSnapshot([], exportedAt);
     const auditSnapshot = createRunAuditSnapshot([], exportedAt);
     const settingsSnapshot = createProjectSettingsSnapshot({ global: {} }, exportedAt);
-    const authSnapshot = createAuthMaterialSnapshot({}, exportedAt);
+    const authSnapshot = createAuthMaterialSnapshot({
+      anthropic: { type: "api_key", key: "sk-ant" },
+      "openai-codex": {
+        type: "oauth",
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        expires: 1_900_000_000_000,
+        accountId: "acct-1",
+      },
+    }, exportedAt);
 
     for (const snapshot of [
       taskSnapshot,

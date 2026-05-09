@@ -2,7 +2,7 @@ import type { ProjectSettings } from "@fusion/core";
 import { basename } from "node:path";
 import { ApiError, badRequest, notFound } from "../api-error.js";
 import { getFusionAuthPath } from "../auth-paths.js";
-import { fetchFromRemoteNode, readStoredAuthProvidersFromDisk } from "./register-settings-sync-helpers.js";
+import { fetchFromRemoteNode, readStoredAuthProvidersFromDisk, toProviderAuthEntries } from "./register-settings-sync-helpers.js";
 import type { ApiRouteRegistrar } from "./types.js";
 
 export const registerSettingsSyncRoutes: ApiRouteRegistrar = (ctx) => {
@@ -338,26 +338,14 @@ export const registerSettingsSyncRoutes: ApiRouteRegistrar = (ctx) => {
       const authStorage = AuthStorage.create(getFusionAuthPath());
 
       if (direction === "push") {
-        // Get OAuth provider IDs to exclude
-        const oauthProviders = authStorage.getOAuthProviders();
-        const oauthIds = new Set(oauthProviders.map((p) => p.id));
-
         const allProviders = await readStoredAuthProvidersFromDisk();
-
-        // Filter to only API-key-based providers (skip OAuth)
-        const apiKeyProviders: Record<string, { type: string; key: string }> = {};
-        for (const [providerId, cred] of Object.entries(allProviders)) {
-          if (oauthIds.has(providerId)) continue;
-          if (cred.type === "api_key" && cred.key) {
-            apiKeyProviders[providerId] = { type: "api_key", key: cred.key };
-          }
-        }
+        const authMaterial = central.getAuthMaterialSnapshot(toProviderAuthEntries(allProviders));
 
         // Send to remote
         await fetchFromRemoteNode(node, "/api/settings/auth-receive", {
           method: "POST",
           body: {
-            providers: apiKeyProviders,
+            authMaterial,
             sourceNodeId: localPeerInfo.nodeId,
             timestamp,
           },
@@ -370,7 +358,7 @@ export const registerSettingsSyncRoutes: ApiRouteRegistrar = (ctx) => {
 
         await central.close();
 
-        const providerNames = Object.keys(apiKeyProviders);
+        const providerNames = Object.keys(authMaterial.payload.providerAuth ?? {});
         emitAuthSyncAuditLog({
           operation: "sync",
           direction: "push",
@@ -384,16 +372,29 @@ export const registerSettingsSyncRoutes: ApiRouteRegistrar = (ctx) => {
       } else {
         // Pull: fetch remote auth and apply locally
         const remoteAuth = await fetchFromRemoteNode(node, "/api/settings/auth-export") as {
-          providers: Record<string, { type: string; key: string }>;
+          authMaterial: import("@fusion/core").AuthMaterialSnapshot;
           sourceNodeId: string;
           timestamp: string;
         };
 
+        const applied = central.applyAuthMaterialSnapshot(remoteAuth.authMaterial);
+
         // Write received credentials to local AuthStorage
         const syncedProviders: string[] = [];
-        for (const [providerId, credential] of Object.entries(remoteAuth.providers || {})) {
+        for (const [providerId, credential] of Object.entries(applied.providerAuth)) {
           if (credential.type === "api_key" && credential.key) {
             authStorage.set(providerId, { type: "api_key", key: credential.key });
+            syncedProviders.push(providerId);
+            continue;
+          }
+          if (credential.type === "oauth" && credential.accessToken && credential.refreshToken && typeof credential.expires === "number") {
+            authStorage.set(providerId, {
+              type: "oauth",
+              access: credential.accessToken,
+              refresh: credential.refreshToken,
+              expires: credential.expires,
+              ...(credential.accountId ? { accountId: credential.accountId } : {}),
+            });
             syncedProviders.push(providerId);
           }
         }

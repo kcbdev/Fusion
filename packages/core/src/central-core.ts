@@ -3171,9 +3171,14 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
     return createAuthMaterialSnapshot(providerAuth);
   }
 
-  applyAuthMaterialSnapshot(snapshot: AuthMaterialSnapshot): Record<string, ProviderAuthEntry> {
+  applyAuthMaterialSnapshot(snapshot: AuthMaterialSnapshot): { success: true; authCount: number; providerAuth: Record<string, ProviderAuthEntry> } {
     validateSnapshotEnvelope(snapshot);
-    return { ...(snapshot.payload.providerAuth ?? {}) };
+    const providerAuth = { ...(snapshot.payload.providerAuth ?? {}) };
+    return {
+      success: true,
+      authCount: Object.keys(providerAuth).length,
+      providerAuth,
+    };
   }
 
   // ── Settings Sync API ─────────────────────────────────────────────────

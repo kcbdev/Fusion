@@ -1,5 +1,5 @@
 import { readFile as fsReadFile } from "node:fs/promises";
-import type { NodeConfig } from "@fusion/core";
+import type { AuthMaterialSnapshot, NodeConfig, ProviderAuthEntry } from "@fusion/core";
 import { ApiError } from "../api-error.js";
 import { getAuthFileCandidates, type StoredAuthProvider } from "../auth-paths.js";
 
@@ -17,6 +17,37 @@ export async function readStoredAuthProvidersFromDisk(): Promise<Record<string, 
     }
   }
   return merged;
+}
+
+export function toProviderAuthEntries(
+  providers: Record<string, StoredAuthProvider>,
+): Record<string, ProviderAuthEntry> {
+  const providerAuth: Record<string, ProviderAuthEntry> = {};
+  for (const [providerId, credential] of Object.entries(providers)) {
+    if (credential?.type === "api_key" && credential.key) {
+      providerAuth[providerId] = { type: "api_key", key: credential.key };
+      continue;
+    }
+    if (
+      credential?.type === "oauth"
+      && typeof credential.access === "string"
+      && typeof credential.refresh === "string"
+      && typeof credential.expires === "number"
+    ) {
+      providerAuth[providerId] = {
+        type: "oauth",
+        accessToken: credential.access,
+        refreshToken: credential.refresh,
+        expires: credential.expires,
+        accountId: credential.accountId,
+      };
+    }
+  }
+  return providerAuth;
+}
+
+export function getProviderNamesFromAuthSnapshot(snapshot: AuthMaterialSnapshot): string[] {
+  return Object.keys(snapshot.payload.providerAuth ?? {});
 }
 
 /**

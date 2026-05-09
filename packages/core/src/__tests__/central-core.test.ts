@@ -2917,12 +2917,22 @@ describe("CentralCore", () => {
       const legacy = await syncCentral.getSettingsForSync({});
       const snapshot = await syncCentral.getProjectSettingsSnapshot({});
       const result = await syncCentral.applyProjectSettingsSnapshot(snapshot);
-      const authSnapshot = syncCentral.getAuthMaterialSnapshot({ foo: { providerId: "foo", accountLabel: "acct" } as any });
+      const authSnapshot = syncCentral.getAuthMaterialSnapshot({
+        foo: {
+          type: "oauth",
+          accessToken: "access-token",
+          refreshToken: "refresh-token",
+          expires: Date.now() + 60_000,
+          accountId: "acct",
+        },
+      });
 
       expect(snapshot.payload.global).toEqual(legacy.global);
       expect(snapshot.payload.projects).toEqual(legacy.projects);
       expect(typeof result.success).toBe("boolean");
-      expect(syncCentral.applyAuthMaterialSnapshot(authSnapshot).foo.providerId).toBe("foo");
+      const authApplyResult = syncCentral.applyAuthMaterialSnapshot(authSnapshot);
+      expect(authApplyResult.authCount).toBe(1);
+      expect(authApplyResult.providerAuth.foo.accountId).toBe("acct");
     } finally {
       await syncCentral.close();
       rmSync(tempDir + "-snapshot", { recursive: true, force: true });

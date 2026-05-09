@@ -244,7 +244,7 @@ Lifecycle contract (`types.ts` `isValidApprovalRequestTransition`):
   - `ActivityLogSnapshot` (`entries`)
   - `RunAuditSnapshot` (`entries`)
   - `ProjectSettingsSnapshot` (`global`, `projects`)
-  - `AuthMaterialSnapshot` (`providerAuth`)
+  - `AuthMaterialSnapshot` (`providerAuth`, with API-key and OAuth credential shapes)
 
 Intentional exclusions from shared snapshots:
 - Task/agent blob contents (`PROMPT.md`, task document bodies, attachment bytes, JSONL run logs)
@@ -799,10 +799,10 @@ The client treats mapping persistence as part of onboarding success. If mapping 
 | POST | `/api/nodes/:id/settings/push` | Push local settings to a remote node. |
 | POST | `/api/nodes/:id/settings/pull` | Pull settings from a remote node. |
 | GET | `/api/nodes/:id/settings/sync-status` | Get sync status and diff summary. |
-| POST | `/api/nodes/:id/auth/sync` | Sync model auth credentials. |
+| POST | `/api/nodes/:id/auth/sync` | Sync model auth snapshots (push/pull, checksum/version validated). |
 | POST | `/api/settings/sync-receive` | Receive pushed settings (inbound). |
-| POST | `/api/settings/auth-receive` | Receive auth credentials (inbound). |
-| GET | `/api/settings/auth-export` | Export local auth credentials. |
+| POST | `/api/settings/auth-receive` | Receive `AuthMaterialSnapshot` and persist via auth storage. |
+| GET | `/api/settings/auth-export` | Export local `AuthMaterialSnapshot`. |
 | GET | `/api/update-check` | Read cached/TTL-guarded npm update status for `@runfusion/fusion` (respects `updateCheckEnabled`). |
 | POST | `/api/update-check/refresh` | Clear cached update data and force a fresh npm update check. |
 | GET | `/api/updates/check` | Perform an on-demand npm registry check for the latest `@runfusion/fusion` version (no cache). |

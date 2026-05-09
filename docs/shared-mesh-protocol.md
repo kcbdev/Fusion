@@ -46,7 +46,7 @@ This document is the canonical contract for Fusion multi-leader mesh replication
 | Agent definitions/configuration | Strongly coordinated | Durable config replicated; runtime process handles excluded |
 | Agent runtime state (heartbeat ticks, local process internals, worktree paths) | Node-local only | Exposed as local telemetry, not global truth |
 | Project settings | Strongly coordinated | Existing settings payloads remain canonical payload shape |
-| Auth material / provider credentials | Queued-for-later (secured transport only) | Explicit auth channel; never merged as ordinary settings data |
+| Auth material / provider credentials | Queued-for-later (secured transport only) | Explicit auth snapshot channel (`sharedState.authMaterial`); never merged as ordinary settings payload |
 | Execution runs / live activity streams | Node-local + queued summary | Live events local; durable run outcomes appended later |
 | Audit / event streams (`activityLog`, `runAuditEvents`) | Append-only replicated | Immutable event replication with origin metadata |
 | Filesystem blobs (`.fusion/tasks/*` prompts/logs/attachments) | Queued-for-later | Metadata in replicated records, blob transfer out-of-band |
@@ -72,6 +72,23 @@ Every replicated record uses:
 - `precondition?` (base revision / expected epoch)
 
 `PeerSyncRequest` / `PeerSyncResponse` remain mesh exchange carriers. v1 envelopes are payloads exchanged through current mesh sync infrastructure and follow-on sync endpoints.
+
+### Auth snapshot contract (v1)
+
+Auth replication uses `AuthMaterialSnapshot` (`version`, `exportedAt`, `checksum`, `payload`) with:
+- `payload.providerAuth: Record<string, ProviderAuthEntry>`
+- `ProviderAuthEntry.type`: `api_key | oauth`
+- `api_key` fields: `key`
+- `oauth` fields: `accessToken`, `refreshToken`, `expires`, optional `accountId`
+
+Transport paths:
+- Mesh shared-state channel: `POST /api/mesh/sync` (`sharedState.authMaterial`)
+- Explicit node auth channel: `POST /api/nodes/:id/auth/sync` and inbound `POST /api/settings/auth-receive` / `GET /api/settings/auth-export`
+
+Security/redaction rules:
+- Auth snapshots are only exchanged over API-key-authenticated node links.
+- Raw secrets (`key`, `accessToken`, `refreshToken`, bearer headers) MUST NOT be logged.
+- Route diagnostics may emit provider names/counts only.
 
 ## 7. Quorum and acknowledgements
 

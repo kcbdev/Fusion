@@ -2829,6 +2829,12 @@ export interface ProviderAuthEntry {
   key?: string;
   /** OAuth access token (for "oauth" type). Omitted for API key providers. */
   accessToken?: string;
+  /** OAuth refresh token (for "oauth" type). */
+  refreshToken?: string;
+  /** OAuth credential expiry epoch milliseconds. */
+  expires?: number;
+  /** Optional OAuth account identifier. */
+  accountId?: string;
   /** Whether this credential has been validated. */
   authenticated?: boolean;
 }
