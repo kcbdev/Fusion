@@ -166,6 +166,43 @@ describe("ApprovalRequestStore", () => {
     expect(store.getAuditHistory(created.id).map((e) => e.eventType)).toEqual(["created", "denied"]);
   });
 
+  it("persists immutable actor snapshots and decision audit metadata", () => {
+    const requester = { ...REQUESTER };
+    const approver = { ...APPROVER };
+    const created = store.create({
+      requester,
+      targetAction: {
+        category: "command_execution",
+        action: "bash",
+        summary: "Run pnpm test",
+        resourceType: "command",
+        resourceId: "pnpm test",
+      },
+      taskId: "FN-3552",
+    });
+
+    requester.actorName = "Mutated Requester";
+    const decided = store.decide(created.id, "approved", { actor: approver, note: "ship it" });
+    approver.actorName = "Mutated Approver";
+
+    const fetched = store.get(created.id);
+    expect(fetched?.requester.actorName).toBe("Executor");
+    expect(decided.decidedAt).toBeTruthy();
+
+    const history = store.getAuditHistory(created.id);
+    expect(history).toHaveLength(2);
+    expect(history[0]).toMatchObject({
+      eventType: "created",
+      actor: { actorId: "agent-1", actorName: "Executor" },
+    });
+    expect(history[1]).toMatchObject({
+      eventType: "approved",
+      actor: { actorId: "user:dashboard", actorName: "Dashboard User" },
+      note: "ship it",
+    });
+    expect(history[1]?.createdAt).toBeTruthy();
+  });
+
   it("rejects invalid transitions", () => {
     const created = createSampleRequest();
 
@@ -176,6 +213,18 @@ describe("ApprovalRequestStore", () => {
     store.decide(created.id, "approved", { actor: APPROVER });
     expect(() => store.decide(created.id, "denied", { actor: APPROVER })).toThrow(
       "Invalid approval request transition: approved -> denied",
+    );
+  });
+
+  it("keeps denied requests terminal and disallows completion", () => {
+    const created = createSampleRequest();
+    store.decide(created.id, "denied", { actor: APPROVER, note: "not safe" });
+
+    expect(() => store.markCompleted(created.id, { actor: REQUESTER, note: "should never execute" })).toThrow(
+      "Invalid approval request transition: denied -> completed",
+    );
+    expect(() => store.decide(created.id, "approved", { actor: APPROVER })).toThrow(
+      "Invalid approval request transition: denied -> approved",
     );
   });
 
