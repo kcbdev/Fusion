@@ -15,35 +15,28 @@ const THEME_DATA_FILENAME = "theme-data.css";
 /**
  * Get the resolved URL for theme-data.css.
  *
- * This function handles both HTTP/HTTPS origins and Electron file:// contexts.
- * Using document.baseURI ensures the stylesheet path resolves correctly regardless
- * of whether the app is served over HTTP or loaded from a file:// URL.
- *
- * For file:// URLs, the path is derived relative to the HTML file's directory.
- * For HTTP/HTTPS URLs, the path is derived relative to the HTML file's directory
- * (same as file://) to ensure correct resolution in nested deployments.
+ * NOTE: index.html contains an inline pre-hydration copy of this logic.
+ * Keep both implementations behaviorally equivalent.
  */
 function getThemeDataUrl(): string {
-  // Get base URL from document.baseURI (most reliable across contexts)
-  // Falls back to document.location.href if baseURI is unavailable
   const base = document.baseURI || (typeof document.location !== "undefined" ? document.location.href : "");
 
   if (!base) {
-    // Fallback to absolute path if no base available
     return `/${THEME_DATA_FILENAME}`;
   }
 
-  // Derive path relative to HTML file directory
-  // Handle two cases:
-  // 1. Base ends with "/" (directory path): replace trailing "/" with "/filename"
-  // 2. Base ends with filename: replace filename with "/filename"
-  if (base.endsWith("/")) {
-    // Directory path: replace trailing "/" with "/theme-data.css"
-    return base.slice(0, -1) + `/${THEME_DATA_FILENAME}`;
-  } else {
-    // Filename path: replace last segment with "/theme-data.css"
+  if (base.startsWith("http://") || base.startsWith("https://")) {
+    return new URL(`/${THEME_DATA_FILENAME}`, base).toString();
+  }
+
+  if (base.startsWith("file://")) {
+    if (base.endsWith("/")) {
+      return base.slice(0, -1) + `/${THEME_DATA_FILENAME}`;
+    }
     return base.replace(/\/[^/]+$/, `/${THEME_DATA_FILENAME}`);
   }
+
+  return `/${THEME_DATA_FILENAME}`;
 }
 
 // Check if we're in a browser environment
@@ -430,6 +423,42 @@ export function getThemeInitScript(): string {
         document.documentElement.setAttribute('data-theme', effectiveMode);
         document.documentElement.setAttribute('data-color-theme', colorTheme);
         document.documentElement.style.fontSize = fontScale + '%';
+        if (colorTheme !== 'default') {
+          var base = document.baseURI || (document.location && document.location.href) || '';
+          var themeDataUrl;
+          if (!base) {
+            themeDataUrl = '/theme-data.css';
+          } else if (base.indexOf('http://') === 0 || base.indexOf('https://') === 0) {
+            themeDataUrl = new URL('/theme-data.css', base).toString();
+          } else if (base.indexOf('file://') === 0) {
+            if (base.endsWith('/')) {
+              themeDataUrl = base.slice(0, -1) + '/theme-data.css';
+            } else {
+              var lastSlashIndex = base.lastIndexOf('/');
+              themeDataUrl = lastSlashIndex >= 0
+                ? base.slice(0, lastSlashIndex) + '/theme-data.css'
+                : '/theme-data.css';
+            }
+          } else {
+            themeDataUrl = '/theme-data.css';
+          }
+
+          var existingLink = document.getElementById('theme-data');
+          if (existingLink && existingLink.tagName === 'LINK') {
+            if (existingLink.href !== themeDataUrl) {
+              existingLink.href = themeDataUrl;
+            }
+            if (existingLink.parentNode === document.head && document.head.lastChild !== existingLink) {
+              document.head.appendChild(existingLink);
+            }
+          } else {
+            var link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = themeDataUrl;
+            link.id = 'theme-data';
+            document.head.appendChild(link);
+          }
+        }
       } catch (e) {
         document.documentElement.setAttribute('data-theme', 'dark');
         document.documentElement.setAttribute('data-color-theme', 'default');

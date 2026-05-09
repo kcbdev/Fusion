@@ -649,8 +649,7 @@ describe("useTheme", () => {
       }
     });
 
-    it("resolves theme-data.css relative to document.baseURI for HTTP paths", () => {
-      // Simulate a non-root HTTP path like http://localhost:3000/some/path/
+    it("resolves theme-data.css to origin root for HTTP sub-paths", () => {
       Object.defineProperty(document, "baseURI", {
         value: "http://localhost:3000/some/path/",
         configurable: true,
@@ -662,12 +661,12 @@ describe("useTheme", () => {
         result.current.setColorTheme("ocean");
       });
 
-      const link = document.getElementById("theme-data");
+      const link = document.getElementById("theme-data") as HTMLLinkElement | null;
       expect(link).not.toBeNull();
-      // URL resolution should work with non-root base path
-      expect(link?.getAttribute("href")?.endsWith("theme-data.css")).toBe(true);
+      const resolved = new URL(link!.href);
+      expect(resolved.origin).toBe("http://localhost:3000");
+      expect(resolved.pathname).toBe("/theme-data.css");
 
-      // Clean up
       Object.defineProperty(document, "baseURI", {
         value: "http://localhost:3000/",
         configurable: true,
@@ -779,8 +778,8 @@ describe("useTheme", () => {
       // The link should exist and href should be updated to the correct value
       const link = document.getElementById("theme-data") as HTMLLinkElement;
       expect(link).not.toBeNull();
-      // href should be updated to resolve correctly for the new baseURI
-      expect(link?.href).toBe("http://localhost:3000/some/nested/path/theme-data.css");
+      // HTTP(S) always resolves to origin-root stylesheet path.
+      expect(link?.href).toBe("http://localhost:3000/theme-data.css");
 
       // Clean up
       link?.remove();
@@ -1210,17 +1209,42 @@ describe("getThemeInitScript", () => {
     expect(script).toContain("effectiveMode");
   });
 
-  it("index.html uses correct URL replacement pattern", () => {
-    // Verify that the inline script in index.html uses the correct URL replacement
-    // pattern (handle both directory paths and filename paths) rather than buggy concatenation
+  it("pre-hydration script resolves theme-data path like runtime loader", () => {
+    const script = getThemeInitScript();
+    const runScript = () => {
+      window.eval(script);
+    };
+
+    localStorage.setItem(COLOR_THEME_STORAGE_KEY, "ocean");
+
+    Object.defineProperty(document, "baseURI", {
+      value: "http://localhost:4040/tasks/FN-3773",
+      configurable: true,
+    });
+    runScript();
+    let link = document.getElementById("theme-data") as HTMLLinkElement | null;
+    expect(link).not.toBeNull();
+    expect(new URL(link!.href).origin).toBe("http://localhost:4040");
+    expect(new URL(link!.href).pathname).toBe("/theme-data.css");
+
+    link?.remove();
+    Object.defineProperty(document, "baseURI", {
+      value: "file:///Users/me/Projects/kb/packages/dashboard/dist/client/index.html",
+      configurable: true,
+    });
+    runScript();
+    link = document.getElementById("theme-data") as HTMLLinkElement | null;
+    expect(link).not.toBeNull();
+    expect(link!.href).toBe("file:///Users/me/Projects/kb/packages/dashboard/dist/client/theme-data.css");
+  });
+
+  it("index.html uses HTTP root-absolute and file-relative theme URL logic", () => {
     const indexHtml = readFileSync(resolve(PACKAGE_ROOT, "app/index.html"), "utf8");
 
-    // The correct pattern: check if base ends with '/' and use slice or replace accordingly
-    // The buggy pattern: base.substring(0, 7) + dirPath + 'theme-data.css'
+    expect(indexHtml).toContain("new URL('/theme-data.css', base)");
     expect(indexHtml).toContain("base.endsWith('/')");
     expect(indexHtml).toContain("base.slice(0, -1)");
 
-    // Ensure the buggy pattern is NOT present
     expect(indexHtml).not.toContain("base.substring(0, 7)");
     expect(indexHtml).not.toContain("pathMatch");
   });

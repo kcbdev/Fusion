@@ -446,6 +446,45 @@ describe("API Error Handling Middleware", () => {
         expect(res.body).not.toContain("<html");
       }
     });
+
+    it("redirects /tasks/:id to canonical ?task query", async () => {
+      const app = createServer(store);
+      const res = await GET(app, "/tasks/FN-9999");
+
+      expect(res.status).toBe(301);
+      expect(res.headers.location).toBe("/?task=FN-9999");
+    });
+
+    it("preserves project query when redirecting /tasks/:id", async () => {
+      const app = createServer(store);
+      const res = await GET(app, "/tasks/FN-9999?project=demo");
+
+      expect(res.status).toBe(301);
+      expect(res.headers.location).toBe("/?task=FN-9999&project=demo");
+    });
+
+    it("does not redirect invalid /tasks/:id", async () => {
+      const app = createServer(store, { headless: true });
+      const res = await GET(app, "/tasks/not-a-task");
+
+      expect(res.status).toBe(404);
+      expect(res.headers.location).toBeUndefined();
+    });
+
+    it("keeps canonical query deep-link behavior unchanged", async () => {
+      const previousClientDir = process.env.FUSION_CLIENT_DIR;
+      process.env.FUSION_CLIENT_DIR = join(__dirname, "..", "..", "app");
+      try {
+        const app = createServer(store);
+        const res = await GET(app, "/?task=FN-9999");
+
+        expect(res.status).toBe(200);
+        expect(typeof res.body).toBe("string");
+        expect(res.body).toContain("<div id=\"root\"></div>");
+      } finally {
+        process.env.FUSION_CLIENT_DIR = previousClientDir;
+      }
+    });
   });
 
   describe("planning API route content types", () => {

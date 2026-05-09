@@ -1183,6 +1183,23 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
   });
 
   if (!isHeadless) {
+    app.get("/tasks/:id", (req, res, next) => {
+      const taskId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      if (!taskId || !/^[A-Z]+-\d+$/.test(taskId)) {
+        next();
+        return;
+      }
+
+      const params = new URLSearchParams();
+      params.set("task", taskId);
+      const project = typeof req.query.project === "string" ? req.query.project : undefined;
+      if (project) {
+        params.set("project", project);
+      }
+
+      res.redirect(301, `/?${params.toString()}`);
+    });
+
     // SPA fallback. Only serve index.html for navigation requests — never for
     // hashed asset URLs (/assets/*, /icons/*, /fonts/*) or any path that looks
     // like a static file. Returning index.html for a missing JS chunk poisons

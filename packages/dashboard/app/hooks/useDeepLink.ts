@@ -40,10 +40,28 @@ export function useDeepLink(options: UseDeepLinkOptions): UseDeepLinkResult {
   // Prevent duplicate fetches when project switching causes the effect to re-run.
   const deepLinkFetchedRef = useRef(false);
 
+  // Guard against StrictMode double-effect path rewrites.
+  const pathRewroteRef = useRef(false);
+
   // Track whether the currently open detail modal came from a deep-link.
   const deepLinkTaskIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (!pathRewroteRef.current) {
+      const pathMatch = window.location.pathname.match(/^\/tasks\/([A-Z]+-\d+)\/?$/);
+      if (pathMatch) {
+        const taskIdFromPath = pathMatch[1];
+        if (/^[A-Z]+-\d+$/.test(taskIdFromPath)) {
+          const params = new URLSearchParams(window.location.search);
+          params.set("task", taskIdFromPath);
+          const query = params.toString();
+          const existingState = window.history.state ?? {};
+          window.history.replaceState(existingState, "", query ? `/?${query}` : "/");
+          pathRewroteRef.current = true;
+        }
+      }
+    }
+
     const params = new URLSearchParams(window.location.search);
     const projectParam = params.get("project");
     const taskId = params.get("task");

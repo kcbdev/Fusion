@@ -36,7 +36,14 @@ describe("useDeepLink", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    window.history.replaceState = vi.fn();
+    window.history.replaceState = vi.fn((_state, _unused, url) => {
+      if (typeof url === "string" && url.length > 0) {
+        Object.defineProperty(window, "location", {
+          configurable: true,
+          value: new URL(url, "http://localhost:3000"),
+        });
+      }
+    }) as typeof window.history.replaceState;
     Object.defineProperty(window, "location", {
       configurable: true,
       value: new URL("http://localhost:3000/"),
@@ -83,7 +90,51 @@ describe("useDeepLink", () => {
     });
   });
 
-  it("fetches and opens task detail for task deep-link", async () => {
+  it("rewrites /tasks/:id path and opens detail", async () => {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: new URL("http://localhost:3000/tasks/FN-9999"),
+    });
+
+    const { openTaskDetail } = renderUseDeepLink();
+
+    await waitFor(() => {
+      expect(window.history.replaceState).toHaveBeenCalledWith(expect.anything(), "", "/?task=FN-9999");
+      expect(mockFetchTaskDetail).toHaveBeenCalledWith("FN-9999", "proj_123");
+      expect(openTaskDetail).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("preserves project query when rewriting /tasks/:id path", async () => {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: new URL("http://localhost:3000/tasks/FN-9999?project=proj_456"),
+    });
+
+    const { setCurrentProject } = renderUseDeepLink();
+
+    await waitFor(() => {
+      expect(window.history.replaceState).toHaveBeenCalledWith(expect.anything(), "", "/?project=proj_456&task=FN-9999");
+      expect(setCurrentProject).toHaveBeenCalledWith(otherProject);
+      expect(mockFetchTaskDetail).toHaveBeenCalledWith("FN-9999", "proj_456");
+    });
+  });
+
+  it("ignores invalid /tasks/:id path", async () => {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: new URL("http://localhost:3000/tasks/not-a-task-id"),
+    });
+
+    renderUseDeepLink();
+
+    await waitFor(() => {
+      expect(window.history.replaceState).not.toHaveBeenCalled();
+      expect(mockFetchTaskDetail).not.toHaveBeenCalled();
+    });
+  });
+
+  it("fetches and opens task detail for existing ?task deep-link without path rewrite", async () => {
     Object.defineProperty(window, "location", {
       configurable: true,
       value: new URL("http://localhost:3000/?task=FN-123"),
@@ -95,6 +146,8 @@ describe("useDeepLink", () => {
       expect(mockFetchTaskDetail).toHaveBeenCalledWith("FN-123", "proj_123");
       expect(openTaskDetail).toHaveBeenCalledTimes(1);
     });
+
+    expect(window.history.replaceState).not.toHaveBeenCalledWith(expect.anything(), "", "/?task=FN-123");
   });
 
   it("switches project and uses project param for task fetch", async () => {
