@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { streamChatResponse } from "../legacy";
+import { attachChatStream, streamChatResponse } from "../legacy";
 
 function createChunkedStream(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
@@ -138,5 +138,83 @@ describe("streamChatResponse SSE parser", () => {
 
     expect(onError).toHaveBeenCalledWith("Timed out waiting for first response event");
     vi.useRealTimers();
+  });
+});
+
+describe("attachChatStream", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("replays buffered events and done", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        createChunkedStream([
+          "event: text\n",
+          "data: \"Hello\"\n\n",
+          "event: done\n",
+          "data: {\"messageId\":\"m-1\"}\n\n",
+        ]),
+        { status: 200 },
+      ),
+    );
+
+    const textChunks: string[] = [];
+    const donePayloads: Array<{ messageId: string }> = [];
+
+    attachChatStream("s-1", {
+      onText: (data) => textChunks.push(data),
+      onDone: (data) => donePayloads.push(data),
+      onError: vi.fn(),
+    });
+
+    await vi.waitFor(() => {
+      expect(textChunks).toEqual(["Hello"]);
+      expect(donePayloads).toEqual([{ messageId: "m-1" }]);
+    });
+  });
+
+  it("delivers live events after replay", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        createChunkedStream([
+          "event: text\n",
+          "data: \"A\"\n\n",
+          "event: text\n",
+          "data: \"B\"\n\n",
+        ]),
+        { status: 200 },
+      ),
+    );
+
+    const textChunks: string[] = [];
+
+    attachChatStream("s-1", {
+      onText: (data) => textChunks.push(data),
+      onError: vi.fn(),
+    });
+
+    await vi.waitFor(() => {
+      expect(textChunks).toEqual(["A", "B"]);
+    });
+  });
+
+  it("aborts fetch when close is called", async () => {
+    let signal: AbortSignal | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
+      signal = init?.signal;
+      return new Promise<Response>(() => {
+        // keep open until aborted
+      });
+    });
+
+    const stream = attachChatStream("s-1", { onError: vi.fn() });
+    await vi.waitFor(() => {
+      expect(signal).toBeDefined();
+    });
+
+    stream.close();
+    expect(signal?.aborted).toBe(true);
+    expect(stream.isConnected()).toBe(false);
   });
 });

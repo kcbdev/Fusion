@@ -5,6 +5,7 @@ import {
   fetchChatMessages,
   updateChatSession,
   deleteChatSession,
+  attachChatStream,
   streamChatResponse,
   cancelChatResponse,
   fetchAgents,
@@ -329,6 +330,56 @@ export function useChat(
     setIsStreaming(false);
   }, []);
 
+  const attachIfGenerating = useCallback((sessionId: string) => {
+    if (streamRef.current || !sessionId) {
+      return true;
+    }
+
+    cancelledByUserRef.current = false;
+    setIsStreaming(true);
+
+    const { handlers } = createChatStreamHandlers({
+      sessionId,
+      tempUserMessageId: "",
+      setStreamingText,
+      setStreamingThinking,
+      setStreamingToolCalls,
+      cancelStreamingFlushesRef,
+      addToast,
+      onFallbackSession: (data, fallbackSessionId) => {
+        const nextModel = parseModelDescriptor(data.fallbackModel);
+        setSessions((prev) => prev.map((session) =>
+          session.id === fallbackSessionId ? { ...session, ...nextModel } : session,
+        ));
+        setActiveSession((prev) => prev && prev.id === fallbackSessionId ? { ...prev, ...nextModel } : prev);
+      },
+      onDone: () => {
+        setStreamingText("");
+        setStreamingThinking("");
+        setStreamingToolCalls([]);
+        setIsStreaming(false);
+        isStreamingRef.current = false;
+        streamRef.current = null;
+        void loadMessages(sessionId);
+      },
+      onError: (data) => {
+        setStreamingText("");
+        setStreamingThinking("");
+        setStreamingToolCalls([]);
+        setIsStreaming(false);
+        isStreamingRef.current = false;
+        streamRef.current = null;
+        const errorMessage = typeof data === "string" && data.trim() ? data : "Failed to get response";
+        addToast?.(errorMessage, "error");
+        void loadMessages(sessionId);
+      },
+    });
+
+    const stream = attachChatStream(sessionId, handlers, projectId);
+    streamRef.current = stream;
+    return true;
+  }, [addToast, loadMessages, projectId]);
+
   // Select a session
   const selectSession = useCallback(
     (id: string, sessionOverride?: ChatSessionInfo) => {
@@ -363,8 +414,8 @@ export function useChat(
       // all streaming state. Showing "Connecting…" immediately tells the
       // user the AI is still working.
       if (session?.isGenerating) {
-        setIsStreaming(true);
         setStreamingText("");
+        attachIfGenerating(session.id);
       }
 
       // Persist active session to localStorage
@@ -374,7 +425,7 @@ export function useChat(
         removeScopedItem(ACTIVE_SESSION_STORAGE_KEY, projectId);
       }
     },
-    [sessions, loadMessages, projectId, resetTransientComposerState],
+    [attachIfGenerating, sessions, loadMessages, projectId, resetTransientComposerState],
   );
 
   // Update the ref to point to the actual selectSession function
@@ -637,7 +688,13 @@ export function useChat(
   // Recovery mode polling: if reloaded mid-generation, keep waiting state alive
   // until generation finishes and messages can be reloaded.
   useEffect(() => {
-    if (!isStreaming || streamRef.current || !activeSessionRef.current) return;
+    if (!activeSessionRef.current?.isGenerating) return;
+
+    if (!streamRef.current) {
+      attachIfGenerating(activeSessionRef.current.id);
+    }
+
+    if (!isStreamingRef.current || streamRef.current || !activeSessionRef.current) return;
 
     const interval = setInterval(async () => {
       if (!isStreamingRef.current || streamRef.current || !activeSessionRef.current) {
@@ -662,7 +719,7 @@ export function useChat(
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [isStreaming, loadMessages, projectId]);
+  }, [attachIfGenerating, loadMessages, projectId, activeSession]);
 
   // SSE real-time updates
   useEffect(() => {
@@ -692,6 +749,10 @@ export function useChat(
       // If this is the active session, update it too
       if (activeSessionRef.current?.id === updatedSession.id) {
         setActiveSession(updatedSession);
+        if (updatedSession.isGenerating && !streamRef.current) {
+          setStreamingText("");
+          attachIfGenerating(updatedSession.id);
+        }
       }
     };
 
@@ -782,7 +843,7 @@ export function useChat(
     });
 
     return unsubscribe;
-  }, [projectId]);
+  }, [attachIfGenerating, projectId]);
 
   // Cleanup on unmount
   useEffect(() => {

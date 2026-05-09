@@ -11,6 +11,7 @@ vi.mock("../../api", () => ({
   createChatSession: vi.fn(),
   fetchChatMessages: vi.fn(),
   streamChatResponse: vi.fn(),
+  attachChatStream: vi.fn(),
   cancelChatResponse: vi.fn(),
 }));
 
@@ -20,6 +21,7 @@ const mockFetchChatSession = vi.mocked(apiModule.fetchChatSession);
 const mockCreateChatSession = vi.mocked(apiModule.createChatSession);
 const mockFetchChatMessages = vi.mocked(apiModule.fetchChatMessages);
 const mockStreamChatResponse = vi.mocked(apiModule.streamChatResponse);
+const mockAttachChatStream = vi.mocked(apiModule.attachChatStream);
 const mockCancelChatResponse = vi.mocked(apiModule.cancelChatResponse);
 
 function makeSession(overrides: Partial<ChatSession> & Pick<ChatSession, "id" | "agentId">): ChatSession {
@@ -57,6 +59,7 @@ describe("useQuickChat", () => {
       session: { ...makeSession({ id: "session-001", agentId: "agent-001" }), isGenerating: false },
     });
     mockStreamChatResponse.mockReturnValue({ close: vi.fn(), isConnected: () => true });
+    mockAttachChatStream.mockReturnValue({ close: vi.fn(), isConnected: () => true });
     mockCancelChatResponse.mockResolvedValue({ success: true });
   });
 
@@ -1305,21 +1308,17 @@ describe("useQuickChat", () => {
       });
     });
 
-    it("clears recovery streaming state when polling detects generation complete", async () => {
-      vi.useFakeTimers({ shouldAdvanceTime: true });
-
+    it("clears recovery streaming state when attach stream completes", async () => {
       const session = { ...makeSession({ id: "session-001", agentId: "agent-001" }), isGenerating: true };
       mockFetchResumeChatSession.mockResolvedValue({ session });
-      mockFetchChatMessages.mockResolvedValue({ messages: [] });
-
-      // After first poll, server reports generation is done and has a new assistant message
-      mockFetchChatSession.mockResolvedValue({
-        session: { ...makeSession({ id: "session-001", agentId: "agent-001" }), isGenerating: false },
-      });
       mockFetchChatMessages.mockResolvedValue({
         messages: [
           { id: "msg-1", sessionId: "session-001", role: "assistant", content: "Done", thinkingOutput: null, metadata: null, createdAt: new Date().toISOString() },
         ],
+      });
+      mockAttachChatStream.mockImplementation((_sessionId, handlers) => {
+        setTimeout(() => handlers.onDone?.({ messageId: "msg-1" }), 0);
+        return { close: vi.fn(), isConnected: () => true };
       });
 
       const { result } = renderHook(() => useQuickChat("proj-123"));
@@ -1329,21 +1328,10 @@ describe("useQuickChat", () => {
       });
 
       await waitFor(() => {
-        expect(result.current.isStreaming).toBe(true);
-      });
-
-      // Advance time to trigger the polling interval (3s)
-      await act(async () => {
-        vi.advanceTimersByTime(3500);
-      });
-
-      await waitFor(() => {
         expect(result.current.isStreaming).toBe(false);
         expect(result.current.streamingText).toBe("");
         expect(result.current.messages.some((m) => m.id === "msg-1")).toBe(true);
       });
-
-      vi.useRealTimers();
     });
   });
 });

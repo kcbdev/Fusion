@@ -48,25 +48,37 @@ function createSSEResponse(): {
 const mockInit = vi.fn().mockResolvedValue(undefined);
 
 // Create mock functions before vi.mock
-const { mockCreateFnAgent, mockChatStreamManager, mockSendMessage, mockCancelGeneration, mockBeginGeneration } = vi.hoisted(() => {
+const {
+  mockCreateFnAgent,
+  mockChatStreamManager,
+  mockSendMessage,
+  mockCancelGeneration,
+  mockBeginGeneration,
+  mockIsGenerating,
+  mockGetActiveGenerationId,
+} = vi.hoisted(() => {
   // Store subscribers per session for broadcast simulation
-  const subscribers = new Map<string, Set<(event: any, eventId?: number) => void>>();
+  const subscribers = new Map<string, Set<{ callback: (event: any, eventId?: number) => void; generationId?: number }>>();
 
   const chatStreamManager = {
-    subscribe: vi.fn((sessionId: string, callback: (event: any, eventId?: number) => void) => {
+    subscribe: vi.fn((sessionId: string, callback: (event: any, eventId?: number) => void, options?: { generationId?: number }) => {
       if (!subscribers.has(sessionId)) {
         subscribers.set(sessionId, new Set());
       }
-      subscribers.get(sessionId)!.add(callback);
+      const entry = { callback, generationId: options?.generationId };
+      subscribers.get(sessionId)!.add(entry);
       return () => {
-        subscribers.get(sessionId)?.delete(callback);
+        subscribers.get(sessionId)?.delete(entry);
       };
     }),
-    broadcast: vi.fn((sessionId: string, event: any) => {
+    broadcast: vi.fn((sessionId: string, event: any, options?: { generationId?: number }) => {
       const callbacks = subscribers.get(sessionId);
       if (callbacks) {
         let eventId = 1;
-        for (const callback of callbacks) {
+        for (const { callback, generationId } of callbacks) {
+          if (options?.generationId !== undefined && generationId !== undefined && options.generationId !== generationId) {
+            continue;
+          }
           callback(event, eventId++);
         }
       }
@@ -88,7 +100,7 @@ const { mockCreateFnAgent, mockChatStreamManager, mockSendMessage, mockCancelGen
     __triggerDone: (sessionId: string, messageId: string) => {
       const callbacks = subscribers.get(sessionId);
       if (callbacks) {
-        for (const callback of callbacks) {
+        for (const { callback } of callbacks) {
           callback({ type: "done", data: { messageId } }, 1);
         }
       }
@@ -96,7 +108,7 @@ const { mockCreateFnAgent, mockChatStreamManager, mockSendMessage, mockCancelGen
     __triggerError: (sessionId: string, error: string) => {
       const callbacks = subscribers.get(sessionId);
       if (callbacks) {
-        for (const callback of callbacks) {
+        for (const { callback } of callbacks) {
           callback({ type: "error", data: error }, 1);
         }
       }
@@ -108,6 +120,8 @@ const { mockCreateFnAgent, mockChatStreamManager, mockSendMessage, mockCancelGen
     mockSendMessage: vi.fn(),
     mockCancelGeneration: vi.fn(),
     mockBeginGeneration: vi.fn(() => ({ generationId: 1, abortController: new AbortController() })),
+    mockIsGenerating: vi.fn(() => false),
+    mockGetActiveGenerationId: vi.fn(() => undefined),
     mockChatStreamManager: chatStreamManager,
   };
 });
@@ -164,6 +178,8 @@ vi.mock("../chat.js", () => {
       sendMessage = mockSendMessage;
       cancelGeneration = mockCancelGeneration;
       beginGeneration = mockBeginGeneration;
+      isGenerating = mockIsGenerating;
+      getActiveGenerationId = mockGetActiveGenerationId;
     },
     chatStreamManager: mockChatStreamManager,
     checkRateLimit: vi.fn().mockReturnValue(true),
@@ -266,6 +282,8 @@ function createMockChatManager() {
     sendMessage: mockSendMessage,
     cancelGeneration: mockCancelGeneration,
     beginGeneration: mockBeginGeneration,
+    isGenerating: mockIsGenerating,
+    getActiveGenerationId: mockGetActiveGenerationId,
   };
 }
 
@@ -314,6 +332,8 @@ describe("Chat API Routes", () => {
     mockDeleteMessage.mockReset();
     mockSendMessage.mockReset();
     mockCancelGeneration.mockReset();
+    mockIsGenerating.mockReset();
+    mockGetActiveGenerationId.mockReset();
     mockAgentStoreInit.mockResolvedValue(undefined);
     mockAgentStoreGetAgent.mockReset();
     mockGetOrCreateProjectStore.mockReset();
@@ -323,6 +343,8 @@ describe("Chat API Routes", () => {
     mockGetMessages.mockReturnValue([]);
     mockGetLastMessageForSessions.mockReturnValue(new Map());
     mockCancelGeneration.mockReturnValue(false);
+    mockIsGenerating.mockReturnValue(false);
+    mockGetActiveGenerationId.mockReturnValue(undefined);
 
     // Default agent mock - agent with model config
     mockAgentStoreGetAgent.mockResolvedValue({
@@ -1015,30 +1037,27 @@ describe("Chat API Routes", () => {
         store: any,
         chatStore: any,
         chatManager: any,
+        routePath = "/chat/sessions/:id/messages",
+        method: "get" | "post" = "post",
       ): Promise<void> {
-        // Dynamically import to get the current module state (with mocks applied)
         const { createApiRoutes } = await import("../routes.js");
         const router = createApiRoutes(store, {
           chatStore,
           chatManager,
         });
 
-        // Find the SSE route handler
         const stack = router.stack || [];
         const handler = stack.find(
           (layer: any) =>
-            layer.route?.path === "/chat/sessions/:id/messages" &&
-            layer.route?.methods?.post,
+            layer.route?.path === routePath &&
+            layer.route?.methods?.[method],
         );
 
         if (!handler) {
-          throw new Error(`SSE route handler not found. Stack has ${stack.length} layers.`);
+          throw new Error(`SSE route handler not found (${method.toUpperCase()} ${routePath}). Stack has ${stack.length} layers.`);
         }
 
-        // Get the actual handler function from the layer
         const routeHandler = handler.route.stack[handler.route.stack.length - 1].handle;
-
-        // The handler is wrapped in middleware (rateLimit), so we need to call next
         const next = vi.fn();
         await routeHandler(req, res, next);
       }
@@ -1103,6 +1122,117 @@ describe("Chat API Routes", () => {
         expect(true).toBe(true);
       });
 
+
+      it("attach stream returns 404 for unknown session", async () => {
+        mockGetSession.mockReturnValue(null);
+
+        const response = await request(
+          app,
+          "GET",
+          "/api/chat/sessions/chat-missing/stream",
+        );
+
+        expect(response.status).toBe(404);
+      });
+
+      it("attach stream replays buffered events and ends when not generating", async () => {
+        mockGetSession.mockReturnValue(sampleSession);
+        mockIsGenerating.mockReturnValue(false);
+        mockChatStreamManager.getBufferedEvents.mockReturnValue([
+          { id: 2, event: "text", data: JSON.stringify("hello") },
+          { id: 3, event: "done", data: JSON.stringify({ messageId: "msg-1" }) },
+        ]);
+
+        const req = createSSERequest();
+        const { res, chunks } = createSSEResponse();
+        req.params = { id: "chat-abc123" };
+        req.query = {} as any;
+        req.headers = {} as any;
+
+        await invokeSSEHandler(req, res, store, mockChatStore, mockChatManager, "/chat/sessions/:id/stream", "get");
+
+        const output = chunks.join("");
+        expect(output).toContain("id: 2");
+        expect(output).toContain("event: text");
+        expect(output).toContain("id: 3");
+        expect(output).toContain("event: done");
+        expect(res.end).toHaveBeenCalled();
+        expect(mockChatStreamManager.subscribe).not.toHaveBeenCalled();
+      });
+
+      it("attach stream replays buffered events and receives live generation events", async () => {
+        mockGetSession.mockReturnValue(sampleSession);
+        mockIsGenerating.mockReturnValue(true);
+        mockGetActiveGenerationId.mockReturnValue(42);
+        mockChatStreamManager.getBufferedEvents.mockReturnValue([
+          { id: 5, event: "text", data: JSON.stringify("buffer") },
+        ]);
+
+        const req = createSSERequest();
+        const { res, chunks } = createSSEResponse();
+        req.params = { id: "chat-abc123" };
+        req.query = {} as any;
+        req.headers = {} as any;
+
+        await invokeSSEHandler(req, res, store, mockChatStore, mockChatManager, "/chat/sessions/:id/stream", "get");
+        expect(mockChatStreamManager.subscribe).toHaveBeenCalledWith(
+          "chat-abc123",
+          expect.any(Function),
+          { generationId: 42 },
+        );
+
+        const subscriber = mockChatStreamManager.subscribe.mock.calls.at(-1)?.[1] as ((event: any, id?: number) => void);
+        subscriber({ type: "text", data: "live" }, 6);
+        subscriber({ type: "done", data: { messageId: "msg-2" } }, 7);
+
+        const output = chunks.join("");
+        expect(output).toContain("id: 5");
+        expect(output).toContain("data: \"buffer\"");
+        expect(output).toContain("data: \"live\"");
+      });
+
+      it("attach stream honors Last-Event-ID replay cutoff", async () => {
+        mockGetSession.mockReturnValue(sampleSession);
+        mockIsGenerating.mockReturnValue(false);
+
+        const req = createSSERequest();
+        const { res } = createSSEResponse();
+        req.params = { id: "chat-abc123" };
+        req.query = {} as any;
+        req.headers = { "last-event-id": "9" } as any;
+
+        await invokeSSEHandler(req, res, store, mockChatStore, mockChatManager, "/chat/sessions/:id/stream", "get");
+
+        expect(mockChatStreamManager.getBufferedEvents).toHaveBeenCalledWith("chat-abc123", 9);
+      });
+
+      it("attach stream filters out events from a different generation", async () => {
+        mockGetSession.mockReturnValue(sampleSession);
+        mockIsGenerating.mockReturnValue(true);
+        mockGetActiveGenerationId.mockReturnValue(7);
+        mockChatStreamManager.getBufferedEvents.mockReturnValue([]);
+
+        const req = createSSERequest();
+        const { res, chunks } = createSSEResponse();
+        req.params = { id: "chat-abc123" };
+        req.query = {} as any;
+        req.headers = {} as any;
+
+        await invokeSSEHandler(req, res, store, mockChatStore, mockChatManager, "/chat/sessions/:id/stream", "get");
+        mockChatStreamManager.broadcast("chat-abc123", { type: "text", data: "wrong" }, { generationId: 8 });
+        const subscriber = mockChatStreamManager.subscribe.mock.calls.at(-1)?.[1] as ((event: any, id?: number) => void);
+        subscriber({ type: "text", data: "right" }, 3);
+        subscriber({ type: "done", data: { messageId: "msg-3" } }, 4);
+
+        const output = chunks.join("");
+        expect(mockChatStreamManager.subscribe).toHaveBeenCalledWith(
+          "chat-abc123",
+          expect.any(Function),
+          { generationId: 7 },
+        );
+        expect(output).toContain("right");
+        expect(output).not.toContain("wrong");
+      });
 
       it("SSE route passes through tool_start and tool_end events", async () => {
         mockGetSession.mockReturnValue(sampleSession);

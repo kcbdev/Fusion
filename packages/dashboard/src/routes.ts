@@ -976,6 +976,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   });
   registerChatRoutes(routeContext, {
     parseLastEventId,
+    replayBufferedSSE,
     validateOptionalModelField,
     upload,
   });

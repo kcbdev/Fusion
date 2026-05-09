@@ -6,6 +6,7 @@ import {
   fetchChatSession,
   createChatSession,
   fetchChatMessages,
+  attachChatStream,
   streamChatResponse,
   cancelChatResponse,
 } from "../api";
@@ -268,6 +269,59 @@ export function useQuickChat(
     [projectId],
   );
 
+  const attachIfGenerating = useCallback((sessionId: string) => {
+    if (streamRef.current || !sessionId) {
+      return true;
+    }
+
+    cancelledByUserRef.current = false;
+    setIsStreaming(true);
+
+    const { handlers } = createChatStreamHandlers({
+      sessionId,
+      tempUserMessageId: "",
+      setStreamingText,
+      setStreamingThinking,
+      setStreamingToolCalls,
+      cancelStreamingFlushesRef,
+      addToast,
+      onFallbackSession: (data, fallbackSessionId) => {
+        const nextModel = parseModelDescriptor(data.fallbackModel);
+        setSessions((prev) => prev.map((session) =>
+          session.id === fallbackSessionId ? { ...session, ...nextModel } : session,
+        ));
+        setActiveSession((prev) => prev && prev.id === fallbackSessionId ? { ...prev, ...nextModel } : prev);
+      },
+      onDone: () => {
+        setStreamingText("");
+        setStreamingThinking("");
+        setStreamingToolCalls([]);
+        setIsStreaming(false);
+        isStreamingRef.current = false;
+        streamRef.current = null;
+        void fetchChatMessages(sessionId, { limit: 50 }, projectId).then((data) => {
+          setMessages(data.messages.map(mapChatMessageToInfo));
+        }).catch(() => {});
+      },
+      onError: (data) => {
+        setStreamingText("");
+        setStreamingThinking("");
+        setStreamingToolCalls([]);
+        setIsStreaming(false);
+        isStreamingRef.current = false;
+        streamRef.current = null;
+        const errorMessage = typeof data === "string" && data.trim() ? data : "Failed to get response";
+        addToast?.(errorMessage, "error");
+        void fetchChatMessages(sessionId, { limit: 50 }, projectId).then((resp) => {
+          setMessages(resp.messages.map(mapChatMessageToInfo));
+        }).catch(() => {});
+      },
+    });
+
+    streamRef.current = attachChatStream(sessionId, handlers, projectId);
+    return true;
+  }, [addToast, projectId]);
+
   // Fetch existing sessions and find/create one for the given target
   const initializeSession = useCallback(
     async (agentId: string, modelProvider?: string, modelId?: string) => {
@@ -295,8 +349,8 @@ export function useQuickChat(
           // After a reload/HMR, the server keeps generating but the UI loses
           // all streaming state. Show the "Connecting…" indicator immediately.
           if (existingSession.isGenerating) {
-            setIsStreaming(true);
             setStreamingText("");
+            attachIfGenerating(existingSession.id);
           }
         } else {
           const newSession = await createSessionForTarget(target);
@@ -319,7 +373,7 @@ export function useQuickChat(
         setSessionsLoading(false);
       }
     },
-    [projectId, addToast, createSessionForTarget],
+    [attachIfGenerating, projectId, addToast, createSessionForTarget],
   );
 
   // Load messages for the active session
@@ -352,7 +406,13 @@ export function useQuickChat(
   // Poll every 3s until the server reports isGenerating=false, then reload messages
   // and clear streaming state.
   useEffect(() => {
-    if (!isStreaming || streamRef.current || !activeSession) return;
+    if (!activeSession?.isGenerating) return;
+
+    if (!streamRef.current) {
+      attachIfGenerating(activeSession.id);
+    }
+
+    if (!isStreamingRef.current || streamRef.current || !activeSession) return;
 
     const interval = setInterval(async () => {
       // Re-check conditions inside the callback (state may have changed)
@@ -379,7 +439,7 @@ export function useQuickChat(
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [isStreaming, activeSession, projectId]);
+  }, [activeSession, attachIfGenerating, projectId]);
 
   // Reload messages from server (for same-session revisit)
   const reloadMessages = useCallback(async () => {
@@ -463,7 +523,11 @@ export function useQuickChat(
 
     resetTransientComposerState();
     setActiveSession(session);
-  }, [resetTransientComposerState]);
+    if (session.isGenerating) {
+      setStreamingText("");
+      attachIfGenerating(session.id);
+    }
+  }, [attachIfGenerating, resetTransientComposerState]);
 
   const startModelChat = useCallback(
     async (modelProvider: string, modelId: string) => {

@@ -8321,19 +8321,21 @@ export function cancelChatResponse(
  *  When attachments are provided, the request body is sent as multipart form data;
  *  otherwise it uses the existing JSON payload path.
  */
+export interface ChatStreamHandlers {
+  onThinking?: (data: string) => void;
+  onText?: (data: string) => void;
+  onToolStart?: (data: { toolName: string; args?: Record<string, unknown> }) => void;
+  onToolEnd?: (data: { toolName: string; isError: boolean; result?: unknown }) => void;
+  onFallback?: (data: { primaryModel: string; fallbackModel: string; triggerPoint: "session-creation" | "prompt-time" }) => void;
+  onDone?: (data: { messageId: string; message?: ChatMessage }) => void;
+  onError?: (data: string) => void;
+  onConnectionStateChange?: (state: StreamConnectionState) => void;
+}
+
 export function streamChatResponse(
   sessionId: string,
   content: string,
-  handlers: {
-    onThinking?: (data: string) => void;
-    onText?: (data: string) => void;
-    onToolStart?: (data: { toolName: string; args?: Record<string, unknown> }) => void;
-    onToolEnd?: (data: { toolName: string; isError: boolean; result?: unknown }) => void;
-    onFallback?: (data: { primaryModel: string; fallbackModel: string; triggerPoint: "session-creation" | "prompt-time" }) => void;
-    onDone?: (data: { messageId: string; message?: ChatMessage }) => void;
-    onError?: (data: string) => void;
-    onConnectionStateChange?: (state: StreamConnectionState) => void;
-  },
+  handlers: ChatStreamHandlers,
   attachments?: File[],
   projectId?: string,
   options?: { maxReconnectAttempts?: number; firstEventTimeoutMs?: number },
@@ -8567,6 +8569,192 @@ export function streamChatResponse(
     close: () => {
       closedByUser = true;
       clearFirstEventTimer();
+      abortController.abort();
+    },
+    isConnected: () => !closedByUser,
+  };
+}
+
+export function attachChatStream(
+  sessionId: string,
+  handlers: ChatStreamHandlers,
+  projectId?: string,
+  options?: { lastEventId?: number },
+): { close: () => void; isConnected: () => boolean } {
+  const url = buildApiUrl(withProjectId(`/chat/sessions/${encodeURIComponent(sessionId)}/stream`, projectId));
+  const abortController = new AbortController();
+  let closedByUser = false;
+  let terminated = false;
+
+  const dispatchEvent = (eventName: string, rawData: string): void => {
+    if (!eventName) {
+      return;
+    }
+
+    switch (eventName) {
+      case "thinking":
+        try {
+          handlers.onThinking?.(JSON.parse(rawData));
+        } catch {
+          handlers.onThinking?.(rawData);
+        }
+        break;
+      case "text":
+        try {
+          handlers.onText?.(JSON.parse(rawData));
+        } catch {
+          handlers.onText?.(rawData);
+        }
+        break;
+      case "tool_start":
+        try {
+          handlers.onToolStart?.(JSON.parse(rawData));
+        } catch {
+          // skip malformed event
+        }
+        break;
+      case "tool_end":
+        try {
+          handlers.onToolEnd?.(JSON.parse(rawData));
+        } catch {
+          // skip malformed event
+        }
+        break;
+      case "fallback":
+        try {
+          handlers.onFallback?.(JSON.parse(rawData));
+        } catch {
+          // skip malformed event
+        }
+        break;
+      case "done":
+        terminated = true;
+        try {
+          const parsed = JSON.parse(rawData) as { messageId?: unknown; message?: unknown };
+          handlers.onDone?.({
+            messageId: typeof parsed.messageId === "string" ? parsed.messageId : "",
+            ...(parsed.message && typeof parsed.message === "object" ? { message: parsed.message as ChatMessage } : {}),
+          });
+        } catch {
+          handlers.onDone?.({ messageId: "" });
+        }
+        break;
+      case "error":
+        terminated = true;
+        try {
+          const parsed = JSON.parse(rawData);
+          handlers.onError?.(parsed.message || parsed);
+        } catch {
+          handlers.onError?.(rawData || "Stream error");
+        }
+        break;
+    }
+  };
+
+  (async () => {
+    try {
+      const requestHeaders = withTokenHeader();
+      if (typeof options?.lastEventId === "number") {
+        requestHeaders["Last-Event-ID"] = String(options.lastEventId);
+      }
+
+      const res = await fetch(url, {
+        method: "GET",
+        headers: requestHeaders,
+        signal: abortController.signal,
+      });
+
+      if (!res.ok) {
+        const errorBody = await res.text();
+        let errorMsg = `Request failed: ${res.status}`;
+        try {
+          const parsed = JSON.parse(errorBody);
+          errorMsg = parsed.error || errorMsg;
+        } catch { /* use default */ }
+        handlers.onError?.(errorMsg);
+        return;
+      }
+
+      if (!res.body) {
+        handlers.onError?.("No response body");
+        return;
+      }
+
+      handlers.onConnectionStateChange?.("connected");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let currentEvent = "";
+      let currentDataLines: string[] = [];
+
+      const processLines = (chunk: string, flushPendingEvent = false): void => {
+        buffer += chunk;
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        if (flushPendingEvent && buffer.length > 0) {
+          lines.push(buffer);
+          buffer = "";
+        }
+
+        for (const rawLine of lines) {
+          const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+
+          if (line.startsWith("event:")) {
+            currentEvent = line.slice(6).trim();
+          } else if (line.startsWith("data:")) {
+            const value = line.slice(5);
+            currentDataLines.push(value.startsWith(" ") ? value.slice(1) : value);
+          } else if (line === "") {
+            const currentData = currentDataLines.join("\n");
+            dispatchEvent(currentEvent, currentData);
+            currentEvent = "";
+            currentDataLines = [];
+          }
+        }
+
+        if (flushPendingEvent && currentEvent && currentDataLines.length > 0) {
+          const trailingData = currentDataLines.join("\n");
+          dispatchEvent(currentEvent, trailingData);
+          currentEvent = "";
+          currentDataLines = [];
+        }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          processLines(decoder.decode(), true);
+          break;
+        }
+
+        processLines(decoder.decode(value, { stream: true }));
+      }
+
+      const hasUndispatchedTrailingFragment =
+        buffer.length > 0 || currentEvent.length > 0 || currentDataLines.length > 0;
+
+      if (!terminated && !closedByUser && !hasUndispatchedTrailingFragment) {
+        return;
+      }
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        if (!closedByUser && !terminated) {
+          handlers.onError?.("Connection aborted");
+        }
+        return;
+      }
+      if (closedByUser) {
+        return;
+      }
+      handlers.onError?.(err instanceof Error ? err.message : "Connection error");
+    }
+  })();
+
+  return {
+    close: () => {
+      closedByUser = true;
       abortController.abort();
     },
     isConnected: () => !closedByUser,

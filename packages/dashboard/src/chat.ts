@@ -1226,6 +1226,13 @@ export class ChatManager {
   }
 
   /**
+   * Return the active generation ID for a session, if any.
+   */
+  getActiveGenerationId(sessionId: string): number | undefined {
+    return this.activeGenerations.get(sessionId)?.generationId;
+  }
+
+  /**
    * Return all session IDs that currently have an active generation.
    * Useful for batch-enriching session lists without N+1 lookups.
    */

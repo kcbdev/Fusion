@@ -17,6 +17,7 @@ vi.mock("../../api", () => ({
   updateChatSession: vi.fn(),
   deleteChatSession: vi.fn(),
   streamChatResponse: vi.fn(),
+  attachChatStream: vi.fn(),
   cancelChatResponse: vi.fn(),
   fetchAgents: vi.fn().mockResolvedValue([
     { id: "agent-001", name: "Alpha", role: "executor", state: "idle", icon: undefined, createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z", metadata: {} },
@@ -50,6 +51,7 @@ const mockFetchChatMessages = vi.mocked(apiModule.fetchChatMessages);
 const mockUpdateChatSession = vi.mocked(apiModule.updateChatSession);
 const mockDeleteChatSession = vi.mocked(apiModule.deleteChatSession);
 const mockStreamChatResponse = vi.mocked(apiModule.streamChatResponse);
+const mockAttachChatStream = vi.mocked(apiModule.attachChatStream);
 const mockCancelChatResponse = vi.mocked(apiModule.cancelChatResponse);
 const mockFetchAgents = vi.mocked(apiModule.fetchAgents);
 
@@ -100,6 +102,7 @@ describe("useChat", () => {
     });
     mockDeleteChatSession.mockResolvedValue({ success: true });
     mockStreamChatResponse.mockReturnValue({ close: vi.fn(), isConnected: () => true });
+    mockAttachChatStream.mockReturnValue({ close: vi.fn(), isConnected: () => true });
     mockCancelChatResponse.mockResolvedValue({ success: true });
   });
 
@@ -2066,18 +2069,23 @@ describe("useChat", () => {
       });
     });
 
-    it("clears recovery streaming state when SSE delivers assistant message", async () => {
-      let subscribeHandler: Record<string, (event: MessageEvent) => void> = {};
-      mockSubscribeSse.mockImplementation((_url, options) => {
-        if (options?.events) {
-          subscribeHandler = options.events as typeof subscribeHandler;
-        }
-        return () => {};
-      });
-
+    it("clears recovery streaming state when attach stream completes", async () => {
       const session = { ...makeSession({ id: "session-001", agentId: "agent-001" }), isGenerating: true };
       mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
-      mockFetchChatMessages.mockResolvedValue({ messages: [] });
+      mockFetchChatMessages.mockResolvedValue({
+        messages: [
+          makeMessage({
+            id: "msg-assistant-001",
+            sessionId: "session-001",
+            role: "assistant",
+            content: "Generated response",
+          }),
+        ],
+      });
+      mockAttachChatStream.mockImplementation((_sessionId, handlers) => {
+        setTimeout(() => handlers.onDone?.({ messageId: "msg-assistant-001" }), 0);
+        return { close: vi.fn(), isConnected: () => true };
+      });
 
       const { result } = renderHook(() => useChat("proj-123"));
 
@@ -2087,24 +2095,6 @@ describe("useChat", () => {
 
       act(() => {
         result.current.selectSession("session-001");
-      });
-
-      await waitFor(() => {
-        expect(result.current.isStreaming).toBe(true);
-      });
-
-      // Simulate SSE delivering the completed assistant message
-      const assistantMessage = makeMessage({
-        id: "msg-assistant-001",
-        sessionId: "session-001",
-        role: "assistant",
-        content: "Generated response",
-      });
-
-      act(() => {
-        subscribeHandler["chat:message:added"](
-          new MessageEvent("chat:message:added", { data: JSON.stringify(assistantMessage) }),
-        );
       });
 
       await waitFor(() => {

@@ -5,11 +5,12 @@ import { basename, join, resolve } from "node:path";
 import type { EnrichedChatSession, ChatAttachment } from "@fusion/core";
 import { ApiError, badRequest, internalError, notFound } from "../api-error.js";
 import { rateLimit, RATE_LIMITS } from "../rate-limit.js";
-import { writeSSEEvent } from "../sse-buffer.js";
+import { writeSSEEvent, type SessionBufferedEvent } from "../sse-buffer.js";
 import type { ApiRoutesContext } from "./types.js";
 
 interface ChatRouteDeps {
   parseLastEventId: (req: import("express").Request) => number | undefined;
+  replayBufferedSSE: (res: import("express").Response, bufferedEvents: SessionBufferedEvent[]) => boolean;
   validateOptionalModelField: (value: unknown, fieldName: string) => string | undefined;
   upload: import("multer").Multer;
 }
@@ -41,7 +42,7 @@ function resolveAttachmentPath(rootDir: string, sessionId: string, filename: str
 
 export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): void {
   const { router, options, getProjectContext, chatLogger, rethrowAsApiError } = ctx;
-  const { parseLastEventId, validateOptionalModelField, upload } = deps;
+  const { parseLastEventId, replayBufferedSSE, validateOptionalModelField, upload } = deps;
 
   const uploadChatAttachment: import("express").RequestHandler = (req, res, next) => {
     upload.single("file")(req, res, (err?: unknown) => {
@@ -464,6 +465,88 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
   });
 
   /**
+   * GET /api/chat/sessions/:id/stream
+   * Attach to an in-flight generation stream for an existing session.
+   */
+  router.get("/chat/sessions/:id/stream", rateLimit(RATE_LIMITS.sse), async (req, res) => {
+    try {
+      const chatStore = options?.chatStore;
+      const chatManager = options?.chatManager;
+      if (!chatStore || !chatManager) {
+        throw internalError("Chat store or manager not available");
+      }
+
+      const sessionId = String(req.params.id);
+      const session = chatStore.getSession(sessionId);
+      if (!session) {
+        throw notFound(`Chat session ${sessionId} not found`);
+      }
+
+      const { projectId } = await getProjectContext(req);
+      if (projectId !== undefined && session.projectId !== projectId) {
+        throw notFound(`Chat session ${sessionId} not found`);
+      }
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+      res.write(": connected\n\n");
+
+      const { chatStreamManager } = await import("../chat.js");
+      const lastEventId = parseLastEventId(req);
+      const buffered = chatStreamManager.getBufferedEvents(sessionId, lastEventId ?? 0);
+      if (!replayBufferedSSE(res, buffered)) {
+        res.end();
+        return;
+      }
+
+      if (!chatManager.isGenerating(sessionId)) {
+        res.end();
+        return;
+      }
+
+      const generationId = chatManager.getActiveGenerationId(sessionId);
+      if (generationId === undefined) {
+        res.end();
+        return;
+      }
+
+      const unsubscribe = chatStreamManager.subscribe(sessionId, (event, eventId) => {
+        const data = (event as { data?: unknown }).data;
+        if (!writeSSEEvent(res, event.type, JSON.stringify(data ?? {}), eventId)) {
+          unsubscribe();
+          return;
+        }
+
+        if (event.type === "done" || event.type === "error") {
+          unsubscribe();
+          res.end();
+        }
+      }, { generationId });
+
+      const heartbeat = setInterval(() => {
+        if (res.writableEnded) {
+          clearInterval(heartbeat);
+          return;
+        }
+        res.write(": heartbeat\n\n");
+      }, 30_000);
+
+      req.on("close", () => {
+        clearInterval(heartbeat);
+        unsubscribe();
+      });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err, "Failed to attach chat stream");
+    }
+  });
+
+  /**
    * POST /api/chat/sessions/:id/messages
    * Send a message and stream AI response via SSE.
    * Body: { content: string, modelProvider?: string, modelId?: string }
@@ -687,6 +770,7 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
       "POST /chat/sessions/:id/attachments",
       "GET /chat/sessions/:id/attachments/:filename",
       "DELETE /chat/sessions/:id/attachments/:filename",
+      "GET /chat/sessions/:id/stream",
       "POST /chat/sessions/:id/messages",
       "POST /chat/sessions/:id/cancel",
       "DELETE /chat/sessions/:id/messages/:messageId",
