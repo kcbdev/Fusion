@@ -120,4 +120,23 @@ describe("streamChatResponse SSE parser", () => {
       expect(donePayloads).toEqual([{ messageId: "" }]);
     });
   });
+
+  it("fires onError when no stream events arrive before timeout", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(": connected\n\n"));
+      },
+    }), { status: 200 }));
+
+    const onError = vi.fn();
+    streamChatResponse("s-1", "hi", { onError }, undefined, undefined, { firstEventTimeoutMs: 1_000 });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1_100);
+
+    expect(onError).toHaveBeenCalledWith("Timed out waiting for first response event");
+    vi.useRealTimers();
+  });
 });

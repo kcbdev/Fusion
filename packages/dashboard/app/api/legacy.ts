@@ -8315,20 +8315,38 @@ export function streamChatResponse(
   },
   attachments?: File[],
   projectId?: string,
-  options?: { maxReconnectAttempts?: number },
+  options?: { maxReconnectAttempts?: number; firstEventTimeoutMs?: number },
 ): { close: () => void; isConnected: () => boolean } {
   const url = buildApiUrl(withProjectId(`/chat/sessions/${encodeURIComponent(sessionId)}/messages`, projectId));
-
-  void options;
 
   const abortController = new AbortController();
   let closedByUser = false;
   let terminated = false;
+  let receivedStreamEvent = false;
+  const firstEventTimeoutMs = Math.max(1_000, options?.firstEventTimeoutMs ?? 60_000);
+  let firstEventTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearFirstEventTimer = (): void => {
+    if (firstEventTimer) {
+      clearTimeout(firstEventTimer);
+      firstEventTimer = null;
+    }
+  };
+
+  const markFirstEventReceived = (): void => {
+    if (receivedStreamEvent) {
+      return;
+    }
+    receivedStreamEvent = true;
+    clearFirstEventTimer();
+  };
 
   const dispatchEvent = (eventName: string, rawData: string): void => {
     if (!eventName) {
       return;
     }
+
+    markFirstEventReceived();
 
     switch (eventName) {
       case "thinking":
@@ -8427,6 +8445,14 @@ export function streamChatResponse(
       }
 
       handlers.onConnectionStateChange?.("connected");
+      firstEventTimer = setTimeout(() => {
+        if (terminated || closedByUser || receivedStreamEvent) {
+          return;
+        }
+        terminated = true;
+        handlers.onError?.("Timed out waiting for first response event");
+        abortController.abort();
+      }, firstEventTimeoutMs);
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -8498,14 +8524,20 @@ export function streamChatResponse(
       if (!terminated && !closedByUser && !hasUndispatchedTrailingFragment) {
         handlers.onError?.("Connection closed unexpectedly");
       }
+      clearFirstEventTimer();
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        if (!closedByUser) {
+        if (!closedByUser && !terminated) {
           handlers.onError?.("Connection aborted");
         }
+        clearFirstEventTimer();
         return;
       }
-      if (closedByUser) return;
+      if (closedByUser) {
+        clearFirstEventTimer();
+        return;
+      }
+      clearFirstEventTimer();
       handlers.onError?.(err instanceof Error ? err.message : "Connection error");
     }
   })();
@@ -8513,6 +8545,7 @@ export function streamChatResponse(
   return {
     close: () => {
       closedByUser = true;
+      clearFirstEventTimer();
       abortController.abort();
     },
     isConnected: () => !closedByUser,

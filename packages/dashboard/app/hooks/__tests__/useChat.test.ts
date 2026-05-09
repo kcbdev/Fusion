@@ -456,6 +456,46 @@ describe("useChat", () => {
     });
   });
 
+  it("sets isStreaming true during first send and clears on delayed done", async () => {
+    const session = makeSession({
+      id: "session-001",
+      agentId: "agent-001",
+      title: "Test Session",
+    });
+
+    mockFetchChatSessions.mockResolvedValue({ sessions: [session] });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+
+    const { result } = renderHook(() => useChat(undefined, "project-123"));
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.selectSession("session-001");
+    });
+
+    mockStreamChatResponse.mockImplementation((_sessionId, _content, handlers) => {
+      setTimeout(() => {
+        handlers.onDone?.({ messageId: "msg-001" });
+      }, 200);
+      return { close: vi.fn(), isConnected: () => true };
+    });
+
+    act(() => {
+      void result.current.sendMessage("Hello");
+    });
+
+    await waitFor(() => {
+      expect(result.current.isStreaming).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(result.current.isStreaming).toBe(false);
+    });
+  });
+
   it("uses done payload assistant snapshot when no text chunks were streamed", async () => {
     const session = makeSession({ id: "session-001", agentId: "agent-001" });
     mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
