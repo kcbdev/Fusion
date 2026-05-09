@@ -7669,4 +7669,42 @@ describe("commitOrAmendMergeWithFixes", () => {
     expect(result).toEqual({ ok: true, reason: "branch-already-merged" });
     expect(mockedExecSync.mock.calls.some((call) => String(call[0]) === "git merge-base --is-ancestor def456 abc123")).toBe(true);
   });
+
+  it("treats squash-restore 'Already up to date' with no staged changes as already-merged success", async () => {
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.includes("git diff --cached --name-only")) return "" as any;
+      if (cmdStr === "git diff --name-only") return "" as any;
+      if (cmdStr.includes("git status -z --porcelain")) return "" as any;
+      if (cmdStr === "git rev-parse HEAD") return "abc123" as any;
+      if (cmdStr === "git rev-parse fusion/fn-9999") return "def456" as any;
+      if (cmdStr === "git merge-base def456 abc123") return "zzz999" as any;
+      if (cmdStr === "git diff --stat abc123..fusion/fn-9999") return "" as any;
+      if (cmdStr === "git ls-files --others --exclude-standard") return "" as any;
+      if (cmdStr.includes("git log -1 --pretty=%B HEAD")) return "commit message without trailer" as any;
+      if (cmdStr === "git merge-base --is-ancestor def456 abc123") throw new Error("not ancestor");
+      if (cmdStr === "git reset --hard abc123") return "" as any;
+      if (cmdStr === "git clean -fd") return "" as any;
+      if (cmdStr === "git merge --squash fusion/fn-9999") return "Already up to date." as any;
+      return "" as any;
+    });
+
+    const result = await commitOrAmendMergeWithFixes(
+      "/tmp/root",
+      "FN-9999",
+      "fusion/fn-9999",
+      "",
+      true,
+      "abc123",
+      "",
+      undefined,
+      DEFAULT_SETTINGS,
+      undefined,
+      null,
+      null,
+      new Set(),
+    );
+
+    expect(result).toEqual({ ok: true, reason: "branch-already-merged" });
+  });
 });

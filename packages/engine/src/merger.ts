@@ -2763,6 +2763,7 @@ export async function commitOrAmendMergeWithFixes(
       // No commit and no staged content can still be recoverable when the
       // in-merge fix path cleared the previous squash index state. Rebuild the
       // squash from branch -> preAttemptHeadSha and continue normally.
+      let squashRestoreReportedUpToDate = false;
       try {
         await execAsync(`git reset --hard ${preAttemptHeadSha}`, {
           cwd: rootDir,
@@ -2772,13 +2773,22 @@ export async function commitOrAmendMergeWithFixes(
           cwd: rootDir,
           encoding: "utf-8",
         });
-        await execAsync(`git merge --squash ${branch}`, {
+        const { stdout: squashRestoreOut, stderr: squashRestoreErr } = await execAsync(`git merge --squash ${branch}`, {
           cwd: rootDir,
           encoding: "utf-8",
         });
+        const squashRestoreText = `${squashRestoreOut || ""}\n${squashRestoreErr || ""}`;
+        squashRestoreReportedUpToDate = /already up to date/i.test(squashRestoreText);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        mergerLog.warn(`${taskId}: failed to restore squash state before finalize: ${msg}`);
+        const stderr = typeof err === "object" && err !== null && "stderr" in err ? String((err as { stderr?: unknown }).stderr ?? "") : "";
+        const stdout = typeof err === "object" && err !== null && "stdout" in err ? String((err as { stdout?: unknown }).stdout ?? "") : "";
+        const combined = `${stdout}\n${stderr}\n${msg}`;
+        if (/conflict|CONFLICT/i.test(combined)) {
+          resetMergeWithWarn(rootDir, taskId, "squash-restore conflict");
+          throw new Error(`${taskId}: squash-restore fallback hit merge conflicts while finalizing verification-fix merge`);
+        }
+        mergerLog.warn(`${taskId}: failed to restore squash state before finalize: ${msg}; stderr=${stderr.trim() || "<empty>"}`);
       }
 
       const { stdout: restoredStagedOut } = await execAsync("git diff --cached --name-only", {
@@ -2786,6 +2796,10 @@ export async function commitOrAmendMergeWithFixes(
         encoding: "utf-8",
       });
       if (restoredStagedOut.trim().length === 0) {
+        if (squashRestoreReportedUpToDate) {
+          mergerLog.log(`${taskId}: squash-restore reported already up to date; treating as branch-already-merged`);
+          return { ok: true, reason: "branch-already-merged" };
+        }
         mergerLog.warn(
           `${taskId}: refusing to record merge — no commit was created and no changes are staged after squash-restore.`,
         );
