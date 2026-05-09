@@ -45,6 +45,7 @@
 
 .create-room-modal-member-row {
   display: flex;
+  width: 100%;
   align-items: center;
   gap: var(--space-sm);
   text-align: left;
@@ -73,7 +74,7 @@
 .create-room-modal-member-role {
   margin-left: auto;
   color: var(--text-muted);
-  font-size: var(--space-sm);
+  font-size: var(--space-md);
 }
 
 .create-room-modal-empty {

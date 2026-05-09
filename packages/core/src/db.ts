@@ -88,7 +88,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 69;
+const SCHEMA_VERSION = 70;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -2633,6 +2633,57 @@ export class Database {
     if (version < 69) {
       this.applyMigration(69, () => {
         this.addColumnIfMissing("tasks", "reviewState", "TEXT");
+      });
+    }
+
+    if (version < 70) {
+      this.applyMigration(70, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS chat_rooms (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            description TEXT,
+            projectId TEXT,
+            createdBy TEXT,
+            status TEXT NOT NULL DEFAULT 'active',
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL
+          )
+        `);
+        this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idxChatRoomsSlug ON chat_rooms(projectId, slug)`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxChatRoomsProjectId ON chat_rooms(projectId)`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxChatRoomsStatus ON chat_rooms(status)`);
+
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS chat_room_members (
+            roomId TEXT NOT NULL,
+            agentId TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'member',
+            addedAt TEXT NOT NULL,
+            PRIMARY KEY (roomId, agentId),
+            FOREIGN KEY (roomId) REFERENCES chat_rooms(id) ON DELETE CASCADE
+          )
+        `);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxChatRoomMembersAgentId ON chat_room_members(agentId)`);
+
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS chat_room_messages (
+            id TEXT PRIMARY KEY,
+            roomId TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            thinkingOutput TEXT,
+            metadata TEXT,
+            attachments TEXT,
+            senderAgentId TEXT,
+            mentions TEXT,
+            createdAt TEXT NOT NULL,
+            FOREIGN KEY (roomId) REFERENCES chat_rooms(id) ON DELETE CASCADE
+          )
+        `);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxChatRoomMessagesRoomCreatedAt ON chat_room_messages(roomId, createdAt)`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxChatRoomMessagesRoomId ON chat_room_messages(roomId)`);
       });
     }
 

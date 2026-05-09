@@ -42,7 +42,11 @@ import type {
   AgentRating,
   AgentRatingSummary,
   AgentRatingInput,
+  ChatAttachment,
   ChatMessage,
+  ChatRoom,
+  ChatRoomMember,
+  ChatRoomMessage,
   EnrichedChatSession,
   TodoList,
   TodoItem,
@@ -8052,6 +8056,27 @@ export interface ChatMessageListResponse {
   messages: ChatMessage[];
 }
 
+export interface ChatRoomListResponse {
+  rooms: ChatRoom[];
+}
+
+export interface ChatRoomResponse {
+  room: ChatRoom;
+  members?: ChatRoomMember[];
+}
+
+export interface ChatRoomMembersResponse {
+  members: ChatRoomMember[];
+}
+
+export interface ChatRoomMessageListResponse {
+  messages: ChatRoomMessage[];
+}
+
+export interface ChatRoomMessageResponse {
+  message: ChatRoomMessage;
+}
+
 /** Fetch all chat sessions for a project */
 export function fetchChatSessions(projectId?: string, status?: string): Promise<ChatSessionListResponse> {
   const search = new URLSearchParams();
@@ -8164,6 +8189,114 @@ export function deleteChatMessage(
     },
   );
 }
+
+export function fetchChatRooms(
+  options: { status?: string; agentId?: string } = {},
+  projectId?: string,
+): Promise<ChatRoomListResponse> {
+  const search = new URLSearchParams();
+  if (projectId) search.set("projectId", projectId);
+  if (options.status) search.set("status", options.status);
+  if (options.agentId) search.set("agentId", options.agentId);
+  const qs = search.toString();
+  return api<ChatRoomListResponse>(`/chat/rooms${qs ? `?${qs}` : ""}`);
+}
+
+export function fetchChatRoom(id: string, projectId?: string): Promise<ChatRoomResponse> {
+  return api<ChatRoomResponse>(withProjectId(`/chat/rooms/${encodeURIComponent(id)}`, projectId));
+}
+
+export function createChatRoom(
+  input: { name: string; description?: string | null; createdBy?: string | null; memberAgentIds?: string[] },
+  projectId?: string,
+): Promise<ChatRoomResponse> {
+  const body = { ...input, ...(projectId ? { projectId } : {}) };
+  return api<ChatRoomResponse>(withProjectId("/chat/rooms", projectId), {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateChatRoom(
+  id: string,
+  updates: { name?: string; description?: string | null; status?: "active" | "archived" },
+  projectId?: string,
+): Promise<{ room: ChatRoom }> {
+  return api<{ room: ChatRoom }>(withProjectId(`/chat/rooms/${encodeURIComponent(id)}`, projectId), {
+    method: "PATCH",
+    body: JSON.stringify(updates),
+  });
+}
+
+export function deleteChatRoom(id: string, projectId?: string): Promise<{ success: boolean }> {
+  return api<{ success: boolean }>(withProjectId(`/chat/rooms/${encodeURIComponent(id)}`, projectId), {
+    method: "DELETE",
+  });
+}
+
+export function fetchChatRoomMembers(id: string, projectId?: string): Promise<ChatRoomMembersResponse> {
+  return api<ChatRoomMembersResponse>(withProjectId(`/chat/rooms/${encodeURIComponent(id)}/members`, projectId));
+}
+
+export function addChatRoomMember(
+  id: string,
+  input: { agentId: string; role?: "owner" | "member" },
+  projectId?: string,
+): Promise<{ member: ChatRoomMember }> {
+  return api<{ member: ChatRoomMember }>(withProjectId(`/chat/rooms/${encodeURIComponent(id)}/members`, projectId), {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function removeChatRoomMember(id: string, agentId: string, projectId?: string): Promise<{ success: boolean }> {
+  return api<{ success: boolean }>(
+    withProjectId(`/chat/rooms/${encodeURIComponent(id)}/members/${encodeURIComponent(agentId)}`, projectId),
+    { method: "DELETE" },
+  );
+}
+
+export function fetchChatRoomMessages(
+  id: string,
+  opts?: { limit?: number; offset?: number; before?: string },
+  projectId?: string,
+): Promise<ChatRoomMessageListResponse> {
+  const search = new URLSearchParams();
+  if (opts?.limit !== undefined) search.set("limit", String(opts.limit));
+  if (opts?.offset !== undefined) search.set("offset", String(opts.offset));
+  if (opts?.before) search.set("before", opts.before);
+  const qs = search.toString();
+  return api<ChatRoomMessageListResponse>(
+    withProjectId(`/chat/rooms/${encodeURIComponent(id)}/messages${qs ? `?${qs}` : ""}`, projectId),
+  );
+}
+
+export function postChatRoomMessage(
+  id: string,
+  input: { content: string; senderAgentId?: null; mentions?: string[]; attachments?: File[] | ChatAttachment[] },
+  projectId?: string,
+): Promise<ChatRoomMessageResponse> {
+  return api<ChatRoomMessageResponse>(withProjectId(`/chat/rooms/${encodeURIComponent(id)}/messages`, projectId), {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteChatRoomMessage(
+  id: string,
+  messageId: string,
+  projectId?: string,
+): Promise<{ success: boolean }> {
+  return api<{ success: boolean }>(
+    withProjectId(`/chat/rooms/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}`, projectId),
+    { method: "DELETE" },
+  );
+}
+
+/**
+ * Room POST /messages in FN-3808 is persist-only (201 JSON response).
+ * Do not add streamChatRoomResponse until FN-3810 introduces AI invocation/streaming.
+ */
 
 /** Cancel an in-flight chat generation. */
 export function cancelChatResponse(

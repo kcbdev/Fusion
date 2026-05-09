@@ -877,6 +877,16 @@ export type {
   ChatSessionCreateInput,
   ChatSessionUpdateInput,
   ChatMessagesFilter,
+  ChatRoomStatus,
+  RoomMemberRole,
+  ChatRoom,
+  ChatRoomMember,
+  ChatRoomMessage,
+  ChatRoomMessageWithMentions,
+  ChatRoomCreateInput,
+  ChatRoomUpdateInput,
+  ChatRoomMessageCreateInput,
+  ChatRoomMessagesFilter,
 } from "./chat-types.js";
 export { ChatStore } from "./chat-store.js";
 export type { ChatStoreEvents } from "./chat-store.js";

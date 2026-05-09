@@ -167,3 +167,75 @@ export interface ChatMessagesFilter {
    */
   before?: string;
 }
+
+// ── Room Chat Types ──────────────────────────────────────────────────
+
+export type ChatRoomStatus = "active" | "archived";
+
+export type RoomMemberRole = "owner" | "member";
+
+export interface ChatRoom {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  projectId: string | null;
+  createdBy: string | null;
+  status: ChatRoomStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatRoomMember {
+  roomId: string;
+  agentId: string;
+  role: RoomMemberRole;
+  addedAt: string;
+}
+
+export interface ChatRoomMessage {
+  id: string;
+  roomId: string;
+  role: ChatMessageRole;
+  content: string;
+  thinkingOutput: string | null;
+  metadata: Record<string, unknown> | null;
+  attachments?: ChatAttachment[];
+  senderAgentId: string | null;
+  mentions: string[];
+  createdAt: string;
+}
+
+/**
+ * Alias retained for callers that explicitly reason about parsed mention payloads.
+ */
+export type ChatRoomMessageWithMentions = ChatRoomMessage;
+
+export interface ChatRoomCreateInput {
+  name: string;
+  description?: string | null;
+  projectId?: string | null;
+  createdBy?: string | null;
+}
+
+export interface ChatRoomUpdateInput {
+  name?: string;
+  description?: string | null;
+  status?: ChatRoomStatus;
+}
+
+export interface ChatRoomMessageCreateInput {
+  role: ChatMessageRole;
+  content: string;
+  thinkingOutput?: string | null;
+  metadata?: Record<string, unknown> | null;
+  attachments?: ChatAttachment[];
+  senderAgentId?: string | null;
+  mentions?: string[];
+}
+
+export interface ChatRoomMessagesFilter {
+  limit?: number;
+  offset?: number;
+  before?: string;
+}

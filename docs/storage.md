@@ -202,6 +202,9 @@ Additional backend notes:
 | `agentRatings` *(migration-created)* | Agent performance ratings (1-5), optional reviewer metadata, and run/task attribution. |
 | `chat_sessions` *(migration-created)* | Chat session metadata (agent/project/model/status/title timestamps). |
 | `chat_messages` *(migration-created)* | Chat message history per session (`role`, `content`, thinking output, metadata). |
+| `chat_rooms` *(migration-created)* | Room metadata (`name`, `slug`, `description`, `projectId`, `createdBy`, status and timestamps). |
+| `chat_room_members` *(migration-created)* | Room membership map with composite PK `(roomId, agentId)` and role (`owner`/`member`). |
+| `chat_room_messages` *(migration-created)* | Room message history with `senderAgentId`, JSON `mentions`, attachments/metadata blobs, ordered by `createdAt`. |
 | `runAuditEvents` *(migration-created)* | Run audit trail events across database/git/filesystem mutation domains. |
 | `mission_contract_assertions` *(migration-created)* | Milestone contract assertions used by mission validator workflows. |
 | `mission_feature_assertions` *(migration-created)* | Many-to-many links between mission features and contract assertions. |
@@ -216,6 +219,15 @@ Additional backend notes:
 | `eval_run_events` | Append-only eval run event trail (`runId` FK cascade, ordered by `seq`) for orchestration/debug auditing and downstream API/UI drill-down. |
 
 ---
+
+### Chat rooms (migration 70)
+
+`ChatStore` now persists room chat data across three tables: `chat_rooms`, `chat_room_members`, and `chat_room_messages`.
+
+- `chat_rooms` stores canonical room identity (`id`, normalized `name`, unique `slug` scoped by `projectId`), metadata (`description`, `createdBy`), lifecycle status, and timestamps.
+- `chat_room_members` links agents to rooms via composite primary key `(roomId, agentId)` and tracks `role` plus `addedAt`.
+- `chat_room_messages` stores room history with message role/content, optional `thinkingOutput`, JSON `metadata`, JSON `attachments`, optional `senderAgentId`, and JSON `mentions`.
+- Foreign keys from members/messages to `chat_rooms(id)` use `ON DELETE CASCADE`, so deleting a room automatically removes memberships and room message history.
 
 ## 5) Issues Found
 

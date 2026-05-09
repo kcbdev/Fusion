@@ -594,6 +594,38 @@ export function createSSE(
       send(`event: chat:message:deleted\ndata: ${JSON.stringify({ id: messageId })}\n\n`);
     };
 
+    const onChatRoomCreated = (room: unknown) => {
+      send(`event: chat:room:created\ndata: ${JSON.stringify(room)}\n\n`);
+    };
+
+    const onChatRoomUpdated = (room: unknown) => {
+      send(`event: chat:room:updated\ndata: ${JSON.stringify(room)}\n\n`);
+    };
+
+    const onChatRoomDeleted = (roomId: string) => {
+      send(`event: chat:room:deleted\ndata: ${JSON.stringify({ id: roomId })}\n\n`);
+    };
+
+    const onChatRoomMemberAdded = (member: unknown) => {
+      send(`event: chat:room:member:added\ndata: ${JSON.stringify(member)}\n\n`);
+    };
+
+    const onChatRoomMemberRemoved = (payload: unknown) => {
+      send(`event: chat:room:member:removed\ndata: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    const onChatRoomMessageAdded = (message: unknown) => {
+      send(`event: chat:room:message:added\ndata: ${JSON.stringify(message)}\n\n`);
+    };
+
+    const onChatRoomMessageUpdated = (message: unknown) => {
+      send(`event: chat:room:message:updated\ndata: ${JSON.stringify(message)}\n\n`);
+    };
+
+    const onChatRoomMessageDeleted = (messageId: string) => {
+      send(`event: chat:room:message:deleted\ndata: ${JSON.stringify({ id: messageId })}\n\n`);
+    };
+
     // --- Automation store event handlers ---
     const onScheduleCreated = (schedule: unknown) => {
       send(`event: schedule:created\ndata: ${JSON.stringify(schedule)}\n\n`);
@@ -695,6 +727,14 @@ export function createSSE(
         chatStore.off("chat:session:deleted", onChatSessionDeleted);
         chatStore.off("chat:message:added", onChatMessageAdded);
         chatStore.off("chat:message:deleted", onChatMessageDeleted);
+        chatStore.off("chat:room:created", onChatRoomCreated);
+        chatStore.off("chat:room:updated", onChatRoomUpdated);
+        chatStore.off("chat:room:deleted", onChatRoomDeleted);
+        chatStore.off("chat:room:member:added", onChatRoomMemberAdded);
+        chatStore.off("chat:room:member:removed", onChatRoomMemberRemoved);
+        chatStore.off("chat:room:message:added", onChatRoomMessageAdded);
+        chatStore.off("chat:room:message:updated", onChatRoomMessageUpdated);
+        chatStore.off("chat:room:message:deleted", onChatRoomMessageDeleted);
       }
       if (automationStore) {
         automationStore.off("schedule:created", onScheduleCreated);
@@ -797,6 +837,14 @@ export function createSSE(
       chatStore.on("chat:session:deleted", onChatSessionDeleted);
       chatStore.on("chat:message:added", onChatMessageAdded);
       chatStore.on("chat:message:deleted", onChatMessageDeleted);
+      chatStore.on("chat:room:created", onChatRoomCreated);
+      chatStore.on("chat:room:updated", onChatRoomUpdated);
+      chatStore.on("chat:room:deleted", onChatRoomDeleted);
+      chatStore.on("chat:room:member:added", onChatRoomMemberAdded);
+      chatStore.on("chat:room:member:removed", onChatRoomMemberRemoved);
+      chatStore.on("chat:room:message:added", onChatRoomMessageAdded);
+      chatStore.on("chat:room:message:updated", onChatRoomMessageUpdated);
+      chatStore.on("chat:room:message:deleted", onChatRoomMessageDeleted);
     }
 
     if (automationStore) {

@@ -704,6 +704,16 @@ Key server capabilities:
   - Quick Chat resume uses targeted lookup params: `agentId`, optional `modelProvider` + `modelId`, plus `resume=1`
   - Validation requires `modelProvider` and `modelId` together; partial model pairs return `400`
   - Targeted lookup returns only the newest matching active session (or `null`) to avoid scanning every active session client-side
+- **Chat Room API**: `/api/chat/rooms*` (`register-chat-room-routes.ts`)
+  - `GET /api/chat/rooms` → `200 { rooms }`; query supports `projectId`, `status`, and `agentId`
+  - `POST /api/chat/rooms` → `201 { room, members }`; validates `name`, returns `409` on slug collisions
+  - `GET/PATCH/DELETE /api/chat/rooms/:id` → room read/update/delete (`404` for unknown room)
+  - `GET/POST/DELETE /api/chat/rooms/:id/members[/:agentId]` → member list/add/remove (`400` for invalid body, `404` for unknown room/member)
+  - `GET /api/chat/rooms/:id/messages` + `POST /api/chat/rooms/:id/messages` + `DELETE /api/chat/rooms/:id/messages/:messageId`
+    - Room message POST is persist-only (`201 { message }`) and rejects non-null `senderAgentId` in v1
+  - `POST /api/chat/rooms/:id/messages/:messageId/attachments` records attachment metadata on an existing room message
+  - Error contract follows existing API patterns: `400` validation failures, `404` missing resources, `409` duplicate-slug conflicts, `503` when chat store is unavailable
+  - SSE fan-out on `/api/events` now includes: `chat:room:created`, `chat:room:updated`, `chat:room:deleted`, `chat:room:member:added`, `chat:room:member:removed`, `chat:room:message:added`, `chat:room:message:updated`, `chat:room:message:deleted`
 - **Task log stream**: `/api/tasks/:id/logs/stream` (`server.ts`)
   - SSE endpoint for live task log streaming with project scope resolution
 - **Dev-server stream**: `/api/dev-server/logs/stream` (`dev-server-routes.ts`)

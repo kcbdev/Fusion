@@ -767,6 +767,111 @@ describe("ChatStore", () => {
     });
   });
 
+  // ── Room CRUD Tests ───────────────────────────────────────────
+
+  describe("Room CRUD", () => {
+    it("creates room with normalized slug and member list", () => {
+      const room = store.createRoom({
+        name: "#Engineering Team",
+        projectId: "proj-1",
+        createdBy: "agent-owner",
+        memberAgentIds: ["agent-owner", "agent-2"],
+      });
+
+      expect(room.id).toMatch(/^room-/);
+      expect(room.name).toBe("Engineering Team");
+      expect(room.slug).toBe("engineering-team");
+
+      const members = store.listRoomMembers(room.id);
+      expect(members).toHaveLength(2);
+      expect(members.find((m) => m.agentId === "agent-owner")?.role).toBe("owner");
+    });
+
+    it("rejects slug collision in same project and allows across projects", () => {
+      store.createRoom({ name: "engineering", projectId: "proj-1" });
+      expect(() => store.createRoom({ name: "#Engineering", projectId: "proj-1" })).toThrow(
+        "already exists",
+      );
+      expect(() => store.createRoom({ name: "#Engineering", projectId: "proj-2" })).not.toThrow();
+    });
+
+    it("supports get list update delete and member operations", () => {
+      const room = store.createRoom({ name: "general", projectId: "proj-1", createdBy: "agent-1" });
+      expect(store.getRoom(room.id)?.id).toBe(room.id);
+      expect(store.getRoomBySlug("proj-1", "general")?.id).toBe(room.id);
+      expect(store.listRooms({ projectId: "proj-1" })).toHaveLength(1);
+
+      const updated = store.updateRoom(room.id, { name: "#General Chat", description: "main", status: "archived" });
+      expect(updated?.slug).toBe("general-chat");
+      expect(updated?.status).toBe("archived");
+
+      const added = store.addRoomMember(room.id, "agent-2");
+      const addedAgain = store.addRoomMember(room.id, "agent-2");
+      expect(added.agentId).toBe("agent-2");
+      expect(addedAgain.agentId).toBe("agent-2");
+      expect(store.listRoomMembers(room.id).filter((m) => m.agentId === "agent-2")).toHaveLength(1);
+
+      expect(store.listRoomsForAgent("agent-2", { projectId: "proj-1", status: "archived" })).toHaveLength(1);
+      expect(store.removeRoomMember(room.id, "agent-2")).toBe(true);
+      expect(store.removeRoomMember(room.id, "agent-2")).toBe(false);
+
+      expect(store.deleteRoom(room.id)).toBe(true);
+      expect(store.getRoom(room.id)).toBeUndefined();
+    });
+
+    it("cascades member and message deletion with room delete", () => {
+      const room = store.createRoom({ name: "ops", projectId: "proj-1" });
+      store.addRoomMember(room.id, "agent-1");
+      store.addRoomMessage(room.id, { role: "user", content: "hello", mentions: ["agent-1"] });
+
+      store.deleteRoom(room.id);
+
+      expect(store.listRoomMembers(room.id)).toHaveLength(0);
+      expect(store.getRoomMessages(room.id)).toHaveLength(0);
+    });
+  });
+
+  describe("Room messages", () => {
+    it("adds and lists room messages with before cursor, mentions, and attachment append", async () => {
+      const room = store.createRoom({ name: "support", projectId: "proj-1" });
+      const first = store.addRoomMessage(room.id, { role: "user", content: "first", mentions: ["agent-1"] });
+      await new Promise((r) => setTimeout(r, 5));
+      const second = store.addRoomMessage(room.id, { role: "assistant", content: "second", senderAgentId: "agent-1" });
+
+      const loadedFirst = store.getRoomMessage(first.id);
+      expect(loadedFirst?.mentions).toEqual(["agent-1"]);
+
+      const beforeList = store.getRoomMessages(room.id, { before: second.createdAt });
+      expect(beforeList.map((m) => m.id)).toEqual([first.id]);
+
+      const updated = store.addRoomMessageAttachment(room.id, second.id, {
+        id: "att-room",
+        filename: "room.txt",
+        originalName: "room.txt",
+        mimeType: "text/plain",
+        size: 10,
+        createdAt: new Date().toISOString(),
+      });
+      expect(updated.attachments).toHaveLength(1);
+    });
+
+    it("deleteRoomMessage emits event and bumps room updatedAt", async () => {
+      const deletedHandler = vi.fn();
+      store.on("chat:room:message:deleted", deletedHandler);
+
+      const room = store.createRoom({ name: "alerts", projectId: "proj-1" });
+      const msg = store.addRoomMessage(room.id, { role: "user", content: "hello" });
+      const afterAdd = store.getRoom(room.id)!;
+      await new Promise((r) => setTimeout(r, 5));
+
+      expect(store.deleteRoomMessage(msg.id)).toBe(true);
+      const afterDelete = store.getRoom(room.id)!;
+
+      expect(deletedHandler).toHaveBeenCalledWith(msg.id);
+      expect(new Date(afterDelete.updatedAt).getTime()).toBeGreaterThan(new Date(afterAdd.updatedAt).getTime());
+    });
+  });
+
   // ── Event Emission Tests ─────────────────────────────────────────
 
   describe("Event emission", () => {
@@ -897,6 +1002,30 @@ describe("ChatStore", () => {
 
       expect(handler).toHaveBeenCalledTimes(1);
       expect(handler.mock.calls[0][0].status).toBe("archived");
+    });
+
+    it("emits room lifecycle and message events", () => {
+      const createdHandler = vi.fn();
+      const memberAddedHandler = vi.fn();
+      const messageAddedHandler = vi.fn();
+      const roomDeletedHandler = vi.fn();
+      store.on("chat:room:created", createdHandler);
+      store.on("chat:room:member:added", memberAddedHandler);
+      store.on("chat:room:message:added", messageAddedHandler);
+      store.on("chat:room:deleted", roomDeletedHandler);
+
+      const room = store.createRoom({
+        name: "eng",
+        projectId: "proj-1",
+        memberAgentIds: ["agent-1"],
+      });
+      store.addRoomMessage(room.id, { role: "user", content: "hi" });
+      store.deleteRoom(room.id);
+
+      expect(createdHandler).toHaveBeenCalledWith(room);
+      expect(memberAddedHandler).toHaveBeenCalledTimes(1);
+      expect(messageAddedHandler).toHaveBeenCalledTimes(1);
+      expect(roomDeletedHandler).toHaveBeenCalledWith(room.id);
     });
   });
 });
