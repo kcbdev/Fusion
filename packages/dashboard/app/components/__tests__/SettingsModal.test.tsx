@@ -530,6 +530,15 @@ describe("SettingsModal", () => {
         expect(projectPayload.persistAgentToolOutput).toBeUndefined();
       }
     });
+
+    it("renders global default tracking repo control", async () => {
+      renderModal({ initialSection: "global-general" });
+      await waitForSettingsModalReady();
+
+      const input = screen.getByLabelText("Global default tracking repo") as HTMLInputElement;
+      expect(input.value).toBe("");
+      expect(screen.getByText(/Projects inherit this value when they do not set a project default tracking repo/i)).toBeInTheDocument();
+    });
   });
 
   describe("Project General", () => {
@@ -1854,6 +1863,35 @@ describe("SettingsModal", () => {
       const payload = mockUpdateSettings.mock.calls[0][0];
       expect(payload.pushAfterMerge).toBe(true);
       expect(payload.pushRemote).toBe("upstream main");
+    });
+
+    it("renders and saves github issue tracking controls", async () => {
+      renderModal({ initialSection: "merge" });
+      await waitForSettingsModalReady();
+
+      expect(screen.getByRole("heading", { name: "GitHub Issue Tracking" })).toBeInTheDocument();
+      expect(screen.getByRole("checkbox", { name: "Default GitHub tracking ON for new tasks" })).not.toBeChecked();
+      expect(screen.getByLabelText("Project default tracking repo")).toBeInTheDocument();
+
+      const authModeSelect = screen.getByLabelText("GitHub auth mode") as HTMLSelectElement;
+      expect(authModeSelect.value).toBe("gh-cli");
+      expect(screen.queryByLabelText("GitHub personal access token")).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("checkbox", { name: "Default GitHub tracking ON for new tasks" }));
+      await userEvent.type(screen.getByLabelText("Project default tracking repo"), "octo/repo");
+      await userEvent.selectOptions(authModeSelect, "token");
+      await userEvent.type(screen.getByLabelText("GitHub personal access token"), "ghp_test_token");
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(mockUpdateSettings).toHaveBeenCalled();
+      });
+
+      const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
+      expect(payload.githubTrackingEnabledByDefault).toBe(true);
+      expect(payload.githubTrackingDefaultRepo).toBe("octo/repo");
+      expect(payload.githubAuthMode).toBe("token");
+      expect(payload.githubAuthToken).toBe("ghp_test_token");
     });
   });
 

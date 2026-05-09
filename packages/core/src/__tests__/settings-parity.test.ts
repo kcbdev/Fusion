@@ -69,6 +69,23 @@ describe("settings key parity", () => {
     expect(DEFAULT_PROJECT_SETTINGS.completionDocumentationMode).toBe("off");
   });
 
+  it("keeps github tracking keys in expected scopes with documented defaults", () => {
+    expect(DEFAULT_PROJECT_SETTINGS.githubTrackingEnabledByDefault).toBe(false);
+    expect(DEFAULT_PROJECT_SETTINGS.githubTrackingDefaultRepo).toBeUndefined();
+    expect(DEFAULT_PROJECT_SETTINGS.githubAuthMode).toBe("gh-cli");
+    expect(DEFAULT_PROJECT_SETTINGS.githubAuthToken).toBeUndefined();
+    expect(DEFAULT_GLOBAL_SETTINGS.githubTrackingDefaultRepo).toBeUndefined();
+
+    expect(isProjectSettingsKey("githubTrackingEnabledByDefault")).toBe(true);
+    expect(isGlobalSettingsKey("githubTrackingEnabledByDefault")).toBe(false);
+    expect(isProjectSettingsKey("githubAuthMode")).toBe(true);
+    expect(isGlobalSettingsKey("githubAuthMode")).toBe(false);
+    expect(isProjectSettingsKey("githubAuthToken")).toBe(true);
+    expect(isGlobalSettingsKey("githubAuthToken")).toBe(false);
+    expect(isProjectSettingsKey("githubTrackingDefaultRepo")).toBe(true);
+    expect(isGlobalSettingsKey("githubTrackingDefaultRepo")).toBe(true);
+  });
+
   it("keeps remoteAccess scoped to global settings only", () => {
     const globalKeys = GLOBAL_SETTINGS_KEYS as readonly string[];
     const projectKeys = PROJECT_SETTINGS_KEYS as readonly string[];
@@ -89,10 +106,10 @@ describe("settings key parity", () => {
     expect((DEFAULT_PROJECT_SETTINGS as Record<string, unknown>).experimentalFeatures).toBeUndefined();
   });
 
-  it("No key appears in both GLOBAL_SETTINGS_KEYS and PROJECT_SETTINGS_KEYS", () => {
+  it("only intentional shared keys appear in both global and project scopes", () => {
     const projectKeySet = new Set(PROJECT_SETTINGS_KEYS as readonly string[]);
     const overlap = (GLOBAL_SETTINGS_KEYS as readonly string[]).filter((key) => projectKeySet.has(key));
-    expect(overlap).toEqual([]);
+    expect(overlap).toEqual(["githubTrackingDefaultRepo"]);
   });
 });
 

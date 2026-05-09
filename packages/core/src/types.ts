@@ -1616,6 +1616,9 @@ export interface GlobalSettings {
    *  header. Defaults to true (visible). The button is also hidden once the
    *  user has clicked it (tracked client-side in localStorage). */
   showGitHubStarButton?: boolean;
+  /** Global fallback GitHub tracking repo in `owner/repo` format (FN-3868).
+   *  Used when a project has no githubTrackingDefaultRepo. */
+  githubTrackingDefaultRepo?: string;
   /** Cadence for automatic update checks. The dashboard's `/update-check`
    *  route uses this to decide whether to consult npm or return a cached
    *  result.
@@ -1848,6 +1851,9 @@ export interface RemoteAccessProjectSettings {
   tokenStrategy: RemoteAccessTokenStrategyConfig;
   lifecycle: RemoteAccessLifecycleConfig;
 }
+
+/** GitHub authentication strategy used by project issue-tracking settings (FN-3868). */
+export type GithubAuthMode = "gh-cli" | "token";
 
 /**
  * Project-level settings stored in `.fusion/config.json`.
@@ -2187,6 +2193,18 @@ export interface ProjectSettings {
   /** Optional template used for GitHub issue comments posted on task completion.
    *  Supports `{taskId}` and `{taskTitle}` placeholders. */
   githubCommentTemplate?: string;
+  /** When true, new tasks default GitHub tracking to enabled for this project (FN-3868).
+   *  Default: false. */
+  githubTrackingEnabledByDefault?: boolean;
+  /** Project default GitHub tracking repo in `owner/repo` format (FN-3868).
+   *  Falls back to global githubTrackingDefaultRepo when unset. */
+  githubTrackingDefaultRepo?: string;
+  /** GitHub auth strategy for issue-tracking API calls in this project (FN-3868).
+   *  Default: "gh-cli". */
+  githubAuthMode?: GithubAuthMode;
+  /** Personal access token used when githubAuthMode is "token" (FN-3868).
+   *  Stored as a plain settings string in this phase. */
+  githubAuthToken?: string;
   /** When true, automatic database backups are enabled. Default: false. */
   autoBackupEnabled?: boolean;
   /** Cron expression for backup schedule. Default: "0 2 * * *" (daily at 2 AM). */

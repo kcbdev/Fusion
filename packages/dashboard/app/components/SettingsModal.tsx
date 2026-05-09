@@ -1600,6 +1600,8 @@ export function SettingsModal({
         ...form,
         worktreeInitCommand: form.worktreeInitCommand?.trim() || undefined,
         taskPrefix: form.taskPrefix?.trim() || undefined,
+        githubTrackingDefaultRepo: form.githubTrackingDefaultRepo?.trim() || undefined,
+        githubAuthToken: form.githubAuthToken?.trim() || undefined,
         overlapIgnorePaths: (form.overlapIgnorePaths ?? []).map((path) => path.trim()).filter((path) => path.length > 0),
         experimentalFeatures: normalizeExperimentalFeaturesForSave(form.experimentalFeatures),
       };
@@ -1987,6 +1989,20 @@ export function SettingsModal({
                 Once you click the Star button it&apos;s hidden automatically. Uncheck this to keep
                 it hidden even before clicking.
               </small>
+            </div>
+            <div className="form-group">
+              <label htmlFor="globalGithubTrackingDefaultRepo">Global default tracking repo</label>
+              <input
+                id="globalGithubTrackingDefaultRepo"
+                type="text"
+                className="input"
+                placeholder="owner/repo"
+                value={form.githubTrackingDefaultRepo ?? ""}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, githubTrackingDefaultRepo: e.target.value || undefined }))
+                }
+              />
+              <small>Projects inherit this value when they do not set a project default tracking repo.</small>
             </div>
             <CliBinaryPanel />
             <div className="form-group">
@@ -3561,6 +3577,61 @@ export function SettingsModal({
                     When enabled, Fusion holds the PR in In Review until at least one approving GitHub review has been submitted. Useful on free private repos where GitHub&apos;s required-reviewer enforcement isn&apos;t available — without this, a fresh PR with no required checks is treated as immediately mergeable.
                   </small>
                 </details>
+              </div>
+            )}
+            <h4 className="settings-section-heading settings-section-heading--spaced">GitHub Issue Tracking</h4>
+            <div className="form-group">
+              <label htmlFor="githubTrackingEnabledByDefault" className="checkbox-label">
+                <input
+                  id="githubTrackingEnabledByDefault"
+                  type="checkbox"
+                  checked={form.githubTrackingEnabledByDefault ?? false}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, githubTrackingEnabledByDefault: e.target.checked }))
+                  }
+                />
+                Default GitHub tracking ON for new tasks
+              </label>
+            </div>
+            <div className="form-group">
+              <label htmlFor="projectGithubTrackingDefaultRepo">Project default tracking repo</label>
+              <input
+                id="projectGithubTrackingDefaultRepo"
+                type="text"
+                className="input"
+                placeholder="owner/repo"
+                value={form.githubTrackingDefaultRepo ?? ""}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, githubTrackingDefaultRepo: e.target.value || undefined }))
+                }
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="githubAuthMode">GitHub auth mode</label>
+              <select
+                id="githubAuthMode"
+                className="select"
+                value={form.githubAuthMode ?? "gh-cli"}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, githubAuthMode: e.target.value as "gh-cli" | "token" }))
+                }
+              >
+                <option value="gh-cli">GitHub CLI (gh auth)</option>
+                <option value="token">Personal access token</option>
+              </select>
+            </div>
+            {(form.githubAuthMode ?? "gh-cli") === "token" && (
+              <div className="form-group">
+                <label htmlFor="githubAuthToken">GitHub personal access token</label>
+                <input
+                  id="githubAuthToken"
+                  type="password"
+                  className="input"
+                  value={form.githubAuthToken ?? ""}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, githubAuthToken: e.target.value || undefined }))
+                  }
+                />
               </div>
             )}
             <div className="form-group">
