@@ -6,12 +6,26 @@ const maxWorkers = computeMaxWorkers();
 
 export default defineConfig({
   resolve: {
-    alias: {
-      "@fusion/core": fileURLToPath(new URL("../../packages/core/src/index.ts", import.meta.url)),
-      "@fusion/plugin-sdk": fileURLToPath(new URL("../../packages/plugin-sdk/src/index.ts", import.meta.url)),
-      "@fusion/dashboard": fileURLToPath(new URL("../../packages/dashboard", import.meta.url)),
-      "lucide-react": fileURLToPath(new URL("../../packages/dashboard/node_modules/lucide-react", import.meta.url)),
-    },
+    alias: [
+      {
+        find: /^@fusion-plugin-examples\/dependency-graph\/dashboard-view$/,
+        replacement: fileURLToPath(new URL("./src/dashboard-view.tsx", import.meta.url)),
+      },
+      {
+        find: /^@fusion-plugin-examples\/dependency-graph$/,
+        replacement: fileURLToPath(new URL("./src/index.ts", import.meta.url)),
+      },
+      { find: "@fusion/core", replacement: fileURLToPath(new URL("../../packages/core/src/index.ts", import.meta.url)) },
+      {
+        find: "@fusion/plugin-sdk",
+        replacement: fileURLToPath(new URL("../../packages/plugin-sdk/src/index.ts", import.meta.url)),
+      },
+      { find: "@fusion/dashboard", replacement: fileURLToPath(new URL("../../packages/dashboard", import.meta.url)) },
+      {
+        find: "lucide-react",
+        replacement: fileURLToPath(new URL("../../packages/dashboard/node_modules/lucide-react", import.meta.url)),
+      },
+    ],
   },
   test: {
     include: ["src/**/*.test.{ts,tsx}"],

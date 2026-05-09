@@ -4,6 +4,17 @@ declare module "@fusion/dashboard/app/utils/taskStuck" {
   export function isTaskStuck(task: Task, taskStuckTimeoutMs?: number, lastFetchTimeMs?: number): boolean;
 }
 
+declare module "@fusion/dashboard/app/plugins/types" {
+  import type { Task, TaskDetail, WorkflowStep } from "@fusion/core";
+
+  export interface PluginDashboardViewContext {
+    tasks: Task[];
+    projectId?: string;
+    workflowSteps?: WorkflowStep[];
+    openTaskDetail?: (task: Task | TaskDetail) => void;
+  }
+}
+
 declare module "@fusion/dashboard/app/components/TaskCard" {
   import type { Column, Task, TaskDetail } from "@fusion/core";
   import type { ReactElement } from "react";

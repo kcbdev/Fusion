@@ -2,7 +2,6 @@ import { mkdtempSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { PluginLoader, PluginStore } from "@fusion/core";
 import { afterEach, describe, expect, it } from "vitest";
 import plugin from "../index";
@@ -25,10 +24,15 @@ describe("dependency graph plugin index", () => {
     );
   });
 
-  it("loads src/index.ts via Node dynamic import", async () => {
-    const moduleUrl = pathToFileURL(join(process.cwd(), "src/index.ts")).href;
-    const module = await import(moduleUrl);
-    expect(module.default?.manifest?.id).toBe("fusion-plugin-dependency-graph");
+  it("is loadable through package exports", async () => {
+    const entryModule = await import("@fusion-plugin-examples/dependency-graph");
+    expect(entryModule.default?.manifest?.id).toBe("fusion-plugin-dependency-graph");
+    expect(entryModule.default?.dashboardViews?.[0]).toEqual(
+      expect.objectContaining({ componentPath: "./dashboard-view" }),
+    );
+
+    const viewModule = await import("@fusion-plugin-examples/dependency-graph/dashboard-view");
+    expect(typeof viewModule.default).toBe("function");
   });
 
   it("is loadable by PluginLoader without throwing", async () => {
@@ -38,7 +42,7 @@ describe("dependency graph plugin index", () => {
     const pluginStore = new PluginStore(rootDir, { inMemoryDb: true, centralGlobalDir: rootDir });
     await pluginStore.init();
 
-    const pluginPath = join(process.cwd(), "src/index.ts");
+    const pluginPath = join(process.cwd(), "dist/index.js");
     await pluginStore.registerPlugin({ manifest: plugin.manifest, path: pluginPath });
 
     const loader = new PluginLoader({

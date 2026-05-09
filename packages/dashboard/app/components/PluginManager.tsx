@@ -414,7 +414,13 @@ export function PluginManager({ addToast, projectId }: PluginManagerProps) {
 
   const handleEnable = async (plugin: PluginInstallation) => {
     try {
-      await enablePlugin(plugin.id, projectId);
+      const enabledPlugin = await enablePlugin(plugin.id, projectId);
+      if (enabledPlugin.state === "error") {
+        addToast(`Failed to enable ${plugin.name}: ${enabledPlugin.error ?? "Unknown error"}`, "error");
+        await loadPlugins();
+        return;
+      }
+
       addToast(`${plugin.name} enabled for this project`, "success");
       await loadPlugins();
     } catch (err) {

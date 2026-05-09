@@ -517,7 +517,7 @@ describe("PluginManager", () => {
 
   it("enables plugin when toggle is clicked", async () => {
     vi.mocked(fetchPlugins).mockResolvedValueOnce([{ ...mockPlugins[0], enabled: false }]);
-    vi.mocked(enablePlugin).mockResolvedValueOnce({ ...mockPlugins[0], enabled: true });
+    vi.mocked(enablePlugin).mockResolvedValueOnce({ ...mockPlugins[0], enabled: true, state: "started" });
 
     render(<PluginManager addToast={addToast} />);
 
@@ -533,6 +533,53 @@ describe("PluginManager", () => {
 
     await waitFor(() => {
       expect(enablePlugin).toHaveBeenCalledWith("plugin-a", undefined);
+    });
+
+    expect(addToast).toHaveBeenCalledWith("Test Plugin A enabled for this project", "success");
+    expect(addToast).not.toHaveBeenCalledWith(expect.stringContaining("Failed to enable"), "error");
+  });
+
+  it("shows loader error toast when enable returns error state", async () => {
+    vi.mocked(fetchPlugins).mockResolvedValueOnce([{ ...mockPlugins[0], enabled: false }]);
+    vi.mocked(enablePlugin).mockResolvedValueOnce({
+      ...mockPlugins[0],
+      enabled: true,
+      state: "error",
+      error: "Cannot find module dependency-graph",
+    });
+
+    render(<PluginManager addToast={addToast} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Test Plugin A")).toBeTruthy();
+    });
+
+    await userEvent.click(screen.getByRole("checkbox"));
+
+    await waitFor(() => {
+      expect(addToast).toHaveBeenCalledWith(
+        expect.stringContaining("Cannot find module dependency-graph"),
+        "error",
+      );
+    });
+
+    expect(addToast).not.toHaveBeenCalledWith("Test Plugin A enabled for this project", "success");
+  });
+
+  it("shows transport error toast when enable request rejects", async () => {
+    vi.mocked(fetchPlugins).mockResolvedValueOnce([{ ...mockPlugins[0], enabled: false }]);
+    vi.mocked(enablePlugin).mockRejectedValueOnce(new Error("network"));
+
+    render(<PluginManager addToast={addToast} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Test Plugin A")).toBeTruthy();
+    });
+
+    await userEvent.click(screen.getByRole("checkbox"));
+
+    await waitFor(() => {
+      expect(addToast).toHaveBeenCalledWith("Failed to enable plugin: network", "error");
     });
   });
 

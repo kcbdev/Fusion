@@ -16,4 +16,6 @@ export function DependencyGraphDashboardView({ context }: { context?: PluginDash
   });
 }
 
+export default DependencyGraphDashboardView;
+
 export { DependencyGraph };
