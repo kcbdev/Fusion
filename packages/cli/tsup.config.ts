@@ -36,6 +36,8 @@ const whatsappChatPluginSrc = join(__dirname, "..", "..", "plugins", "fusion-plu
 const whatsappChatPluginDest = join(__dirname, "dist", "plugins", "fusion-plugin-whatsapp-chat");
 const roadmapPluginSrc = join(__dirname, "..", "..", "plugins", "fusion-plugin-roadmap");
 const roadmapPluginDest = join(__dirname, "dist", "plugins", "fusion-plugin-roadmap");
+const reportsPluginSrc = join(__dirname, "..", "..", "plugins", "fusion-plugin-reports");
+const reportsPluginDest = join(__dirname, "dist", "plugins", "fusion-plugin-reports");
 const dashboardClientStub = `<!doctype html>
 <html lang="en">
   <head>
@@ -177,6 +179,21 @@ export default defineConfig({
     } else {
       console.warn(
         `WARNING: Roadmap plugin source not found at ${roadmapPluginSrc}; bundled auto-install will be unavailable.`,
+      );
+    }
+
+    if (existsSync(reportsPluginDest)) {
+      rmSync(reportsPluginDest, { recursive: true, force: true });
+    }
+    if (existsSync(reportsPluginSrc)) {
+      mkdirSync(reportsPluginDest, { recursive: true });
+      cpSync(join(reportsPluginSrc, "manifest.json"), join(reportsPluginDest, "manifest.json"));
+      cpSync(join(reportsPluginSrc, "package.json"), join(reportsPluginDest, "package.json"));
+      cpSync(join(reportsPluginSrc, "src"), join(reportsPluginDest, "src"), { recursive: true });
+      console.log("Copied reports plugin to dist/plugins/fusion-plugin-reports/");
+    } else {
+      console.warn(
+        `WARNING: Reports plugin source not found at ${reportsPluginSrc}; bundled auto-install will be unavailable.`,
       );
     }
 
