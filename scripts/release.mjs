@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Local release: consume changesets, bump versions, publish to npm, push tag.
+// Local release: consume changesets, bump versions, publish to npm, push tag,
+// and sync the homebrew tap formula (homebrew-tap/Formula/fusion.rb).
 //
 // This is a local-machine alternative to the `version.yml` CI workflow.
 // Trade-off: CI publishes with npm provenance via OIDC; this script does not.
@@ -379,6 +380,75 @@ function cleanupSmoke(dir) {
   try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
 }
 
+/**
+ * After the npm publish + tag push, sync `homebrew-tap/Formula/fusion.rb` to
+ * the new version: rewrite the tarball `url` and recompute its sha256 from the
+ * registry, then commit and push the tap formula update on top of the release
+ * commit. The npm registry can take a few seconds to surface a freshly
+ * published tarball, so we retry briefly. Failures are non-fatal — the user
+ * can re-run the bump manually if needed; the release itself is already out.
+ */
+function bumpHomebrewTap(version) {
+  const formulaPath = join("homebrew-tap", "Formula", "fusion.rb");
+  if (!existsSync(formulaPath)) {
+    warn(`Homebrew tap formula not found at ${formulaPath} — skipping tap bump.`);
+    return;
+  }
+
+  const tarballUrl = `https://registry.npmjs.org/@runfusion/fusion/-/fusion-${version}.tgz`;
+  info(`Fetching ${tarballUrl} to compute sha256…`);
+
+  let sha256;
+  const maxAttempts = 6;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const r = spawnSync(
+      "bash",
+      ["-c", `set -o pipefail; curl -sfL "${tarballUrl}" | shasum -a 256 | awk '{print $1}'`],
+      { stdio: "pipe", encoding: "utf8" }
+    );
+    const out = (r.stdout || "").trim();
+    if (r.status === 0 && /^[0-9a-f]{64}$/.test(out)) {
+      sha256 = out;
+      break;
+    }
+    if (attempt < maxAttempts) {
+      warn(`  npm registry not ready (attempt ${attempt}/${maxAttempts}); retrying in 5s…`);
+      spawnSync("sleep", ["5"]);
+    }
+  }
+  if (!sha256) {
+    warn(`Could not fetch sha256 for ${tarballUrl} after ${maxAttempts} attempts. Update ${formulaPath} manually.`);
+    return;
+  }
+
+  const raw = readFileSync(formulaPath, "utf8");
+  const patched = raw
+    .replace(/^(\s*url\s+)"[^"]*"/m, `$1"${tarballUrl}"`)
+    .replace(/^(\s*sha256\s+)"[0-9a-f]{64}"/m, `$1"${sha256}"`);
+  if (patched === raw) {
+    warn(`Formula at ${formulaPath} unchanged — could not match url/sha256 lines (already at v${version}?). No tap commit created.`);
+    return;
+  }
+  writeFileSync(formulaPath, patched);
+
+  run(`git add ${formulaPath}`);
+  const commit = run(
+    `git commit -m "chore(tap): bump fusion to v${version}" -m "Auto-bumped by scripts/release.mjs after npm publish."`,
+    { allowFail: true, capture: true }
+  );
+  if (commit.status !== 0) {
+    warn(`Tap commit failed (working tree may already be clean). Inspect ${formulaPath} manually.`);
+    return;
+  }
+
+  const push = run("git push origin main", { allowFail: true, capture: true });
+  if (push.status !== 0) {
+    warn(`Failed to push tap bump commit to origin/main. Run \`git push origin main\` manually.`);
+    return;
+  }
+  ok(`Homebrew tap formula bumped to v${version} (sha256 ${sha256.slice(0, 12)}…) and pushed.`);
+}
+
 function findPackageDir(name) {
   // Most packages live under packages/<basename>; do an exact match on package.json name.
   const roots = ["packages"];
@@ -524,6 +594,12 @@ run("git push origin main");
 info(`Creating and pushing tag v${version}…`);
 run(`git tag v${version}`);
 run(`git push origin v${version}`);
+
+// --- Homebrew tap bump ----------------------------------------------------
+// Sync homebrew-tap/Formula/fusion.rb (url + sha256) to the new version so
+// `brew install runfusion/tap/fusion` stays in lockstep with npm.
+info("Bumping homebrew tap formula…");
+bumpHomebrewTap(version);
 
 // --- GitHub Release ------------------------------------------------------
 
