@@ -2710,48 +2710,49 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     return sorted.slice(offset, offset + Math.max(0, limit));
   }
 
-  /** List only live-board tasks modified after `since`; archived snapshots in archiveDb are excluded. */
+  /**
+   * List slim task rows with `updatedAt` strictly greater than the cursor.
+   *
+   * Uses strict `>` cursor semantics (rows where `updatedAt === since` are excluded),
+   * returns rows ordered by `updatedAt ASC`, defaults limit to 50, and caps at 200.
+   * Archived tasks are excluded by default unless `opts.includeArchived` is true.
+   *
+   * Callers should re-invoke this method with the last returned task's `updatedAt`
+   * as the next `since` cursor.
+   */
   async listTasksModifiedSince(
     since: string,
-    limit: number,
-    opts?: { projectId?: string; slim?: boolean },
-  ): Promise<Task[]> {
-    if (typeof since !== "string" || since.trim().length === 0) {
-      throw new TypeError("since must be a non-empty string");
+    limit?: number,
+    opts?: { includeArchived?: boolean },
+  ): Promise<{ tasks: Task[]; hasMore: boolean }> {
+    if (Number.isNaN(Date.parse(since))) {
+      throw new TypeError("listTasksModifiedSince: invalid since cursor");
     }
 
-    const resolvedLimit = limit === undefined ? 50 : limit;
-    if (!Number.isFinite(resolvedLimit) || !Number.isInteger(resolvedLimit) || resolvedLimit <= 0) {
-      throw new TypeError("limit must be a finite positive integer");
-    }
-    if (resolvedLimit > 200) {
-      throw new TypeError("limit must be less than or equal to 200");
-    }
+    const defaultLimit = 50;
+    const resolvedLimit = typeof limit !== "number" || !Number.isFinite(limit)
+      ? defaultLimit
+      : Math.max(1, Math.min(200, Math.floor(limit)));
+    const includeArchived = opts?.includeArchived ?? false;
+    const selectClause = this.getTaskSelectClause(true);
 
-    // projectId is reserved for future cross-project queries.
-    void opts?.projectId;
+    const rows = includeArchived
+      ? (this.db.prepare(
+        `SELECT ${selectClause} FROM tasks WHERE updatedAt > ? ORDER BY updatedAt ASC LIMIT ?`,
+      ).all(since, resolvedLimit + 1) as TaskRow[])
+      : (this.db.prepare(
+        `SELECT ${selectClause} FROM tasks WHERE updatedAt > ? AND "column" != 'archived' ORDER BY updatedAt ASC LIMIT ?`,
+      ).all(since, resolvedLimit + 1) as TaskRow[]);
 
-    const slim = opts?.slim === true;
-    const selectClause = this.getTaskSelectClause(slim);
-    const rows = this.db.prepare(
-      `SELECT ${selectClause} FROM tasks WHERE updatedAt > ? AND "column" != 'archived' ORDER BY updatedAt ASC LIMIT ?`,
-    ).all(since, resolvedLimit) as TaskRow[];
-
-    return Promise.all(rows.map(async (row) => {
+    const hasMore = rows.length > resolvedLimit;
+    const tasks = rows.slice(0, resolvedLimit).map((row) => {
       const task = this.rowToTask(row);
+      task.timedExecutionMs = this.computeTimedExecutionMs(task.log);
+      task.log = [];
+      return task;
+    });
 
-      if (slim) {
-        task.timedExecutionMs = this.computeTimedExecutionMs(task.log);
-        task.log = [];
-      }
-
-      if (!slim || task.steps.length > 0) {
-        return task;
-      }
-
-      const steps = await this.parseStepsFromPrompt(task.id);
-      return steps.length > 0 ? { ...task, steps } : task;
-    }));
+    return { tasks, hasMore };
   }
 
   /**

@@ -29,83 +29,87 @@ describe("TaskStore.listTasksModifiedSince", () => {
     );
   }
 
-  it("returns an empty array for an empty store", async () => {
-    const changes = await store.listTasksModifiedSince("2026-01-01T00:00:00.000Z", 50);
-    expect(changes).toEqual([]);
+  it("returns empty tasks and hasMore false when nothing matches", async () => {
+    const result = await store.listTasksModifiedSince("2026-01-01T00:00:00.000Z", 50);
+    expect(result).toEqual({ tasks: [], hasMore: false });
   });
 
-  it("returns no rows when all updatedAt are <= since", async () => {
+  it("returns rows in updatedAt ASC order using strict greater-than cursor", async () => {
     await createTaskWithUpdatedAt("FN-1", "2026-01-01T00:00:00.000Z");
-    await createTaskWithUpdatedAt("FN-2", "2026-01-01T00:00:00.500Z");
+    await createTaskWithUpdatedAt("FN-2", "2026-01-01T00:00:00.002Z");
+    await createTaskWithUpdatedAt("FN-3", "2026-01-01T00:00:00.001Z");
 
-    const changes = await store.listTasksModifiedSince("2026-01-01T00:00:00.500Z", 50);
-    expect(changes).toEqual([]);
-  });
-
-  it("uses a strict greater-than cursor boundary", async () => {
-    const since = "2026-01-01T00:00:00.000Z";
-    await createTaskWithUpdatedAt("FN-1", since);
-    await createTaskWithUpdatedAt("FN-2", "2026-01-01T00:00:00.001Z");
-
-    const changes = await store.listTasksModifiedSince(since, 50);
-    expect(changes.map((task) => task.id)).toEqual(["FN-2"]);
-  });
-
-  it("returns tasks in updatedAt ascending order", async () => {
-    await createTaskWithUpdatedAt("FN-1", "2026-01-01T00:00:00.003Z");
-    await createTaskWithUpdatedAt("FN-2", "2026-01-01T00:00:00.001Z");
-    await createTaskWithUpdatedAt("FN-3", "2026-01-01T00:00:00.002Z");
-
-    const changes = await store.listTasksModifiedSince("2026-01-01T00:00:00.000Z", 50);
-    expect(changes.map((task) => task.id)).toEqual(["FN-2", "FN-3", "FN-1"]);
-    expect(changes.map((task) => task.updatedAt)).toEqual([
+    const result = await store.listTasksModifiedSince("2026-01-01T00:00:00.000Z");
+    expect(result.hasMore).toBe(false);
+    expect(result.tasks.map((task) => task.id)).toEqual(["FN-3", "FN-2"]);
+    expect(result.tasks.map((task) => task.updatedAt)).toEqual([
       "2026-01-01T00:00:00.001Z",
       "2026-01-01T00:00:00.002Z",
-      "2026-01-01T00:00:00.003Z",
     ]);
   });
 
-  it("applies the limit cap to earliest modified tasks", async () => {
+  it("sets hasMore true when trimmed and false when exactly limit rows match", async () => {
     for (let i = 1; i <= 5; i += 1) {
       await createTaskWithUpdatedAt(`FN-${i}`, `2026-01-01T00:00:00.00${i}Z`);
     }
 
-    const changes = await store.listTasksModifiedSince("2026-01-01T00:00:00.000Z", 2);
-    expect(changes.map((task) => task.id)).toEqual(["FN-1", "FN-2"]);
+    const trimmed = await store.listTasksModifiedSince("2026-01-01T00:00:00.000Z", 2);
+    expect(trimmed.tasks.map((task) => task.id)).toEqual(["FN-1", "FN-2"]);
+    expect(trimmed.hasMore).toBe(true);
+
+    const exact = await store.listTasksModifiedSince("2026-01-01T00:00:00.000Z", 5);
+    expect(exact.tasks).toHaveLength(5);
+    expect(exact.hasMore).toBe(false);
   });
 
-  it.each([
-    ["limit=0", "2026-01-01T00:00:00.000Z", 0, "finite positive integer"],
-    ["limit=-1", "2026-01-01T00:00:00.000Z", -1, "finite positive integer"],
-    ["limit=201", "2026-01-01T00:00:00.000Z", 201, "less than or equal to 200"],
-    ["limit non-numeric", "2026-01-01T00:00:00.000Z", Number.NaN, "finite positive integer"],
-    ["since non-string", 123 as unknown as string, 50, "since must be a non-empty string"],
-    ["since empty", "", 50, "since must be a non-empty string"],
-  ])("validates inputs: %s", async (_name, since, limit, message) => {
-    await expect(store.listTasksModifiedSince(since, limit as number)).rejects.toThrow(TypeError);
-    await expect(store.listTasksModifiedSince(since, limit as number)).rejects.toThrow(message);
+  it("uses default limit 50 and clamps above max to 200", async () => {
+    for (let i = 1; i <= 220; i += 1) {
+      const padded = i.toString().padStart(3, "0");
+      await createTaskWithUpdatedAt(`FN-${i}`, `2026-01-01T00:00:00.${padded}Z`);
+    }
+
+    const defaultLimited = await store.listTasksModifiedSince("2026-01-01T00:00:00.000Z", Number.NaN);
+    expect(defaultLimited.tasks).toHaveLength(50);
+    expect(defaultLimited.hasMore).toBe(true);
+
+    const maxLimited = await store.listTasksModifiedSince("2026-01-01T00:00:00.000Z", 1000);
+    expect(maxLimited.tasks).toHaveLength(200);
+    expect(maxLimited.hasMore).toBe(true);
   });
 
-  it("applies slim mode log stripping and timedExecution aggregation", async () => {
-    await createTaskWithUpdatedAt("FN-1", "2026-01-01T00:00:00.000Z");
-    await store.logEntry("FN-1", "[timing] Step finished in 123ms");
-
-    const full = await store.listTasksModifiedSince("2026-01-01T00:00:00.000Z", 50);
-    expect(full).toHaveLength(1);
-    expect(full[0]?.log.length).toBeGreaterThan(0);
-
-    const slim = await store.listTasksModifiedSince("2026-01-01T00:00:00.000Z", 50, { slim: true });
-    expect(slim).toHaveLength(1);
-    expect(slim[0]?.log).toEqual([]);
-    expect(typeof slim[0]?.timedExecutionMs).toBe("number");
-    expect(slim[0]?.timedExecutionMs).toBeGreaterThan(0);
-  });
-
-  it("excludes archived-column tasks", async () => {
+  it.each([0, -5])("clamps limit below 1 to 1 (limit=%s)", async (limit) => {
     await createTaskWithUpdatedAt("FN-1", "2026-01-01T00:00:00.001Z");
+    await createTaskWithUpdatedAt("FN-2", "2026-01-01T00:00:00.002Z");
+
+    const result = await store.listTasksModifiedSince("2026-01-01T00:00:00.000Z", limit);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]?.id).toBe("FN-1");
+    expect(result.hasMore).toBe(true);
+  });
+
+  it.each(["", "not-a-date", "yesterday"])("throws on invalid since cursor: %s", async (since) => {
+    await expect(store.listTasksModifiedSince(since, 50)).rejects.toThrow(TypeError);
+    await expect(store.listTasksModifiedSince(since, 50)).rejects.toThrow("listTasksModifiedSince: invalid since cursor");
+  });
+
+  it("excludes archived tasks by default and includes them when requested", async () => {
+    await createTaskWithUpdatedAt("FN-1", "2026-01-01T00:00:00.001Z", "todo");
     await createTaskWithUpdatedAt("FN-2", "2026-01-01T00:00:00.002Z", "archived");
 
-    const changes = await store.listTasksModifiedSince("2026-01-01T00:00:00.000Z", 50);
-    expect(changes.map((task) => task.id)).toEqual(["FN-1"]);
+    const excluded = await store.listTasksModifiedSince("2026-01-01T00:00:00.000Z");
+    expect(excluded.tasks.map((task) => task.id)).toEqual(["FN-1"]);
+
+    const included = await store.listTasksModifiedSince("2026-01-01T00:00:00.000Z", 50, { includeArchived: true });
+    expect(included.tasks.map((task) => task.id)).toEqual(["FN-1", "FN-2"]);
+  });
+
+  it("returns slim tasks with no prompt body and empty log", async () => {
+    await createTaskWithUpdatedAt("FN-1", "2026-01-01T00:00:00.001Z");
+    await store.logEntry("FN-1", "timing marker");
+
+    const result = await store.listTasksModifiedSince("2026-01-01T00:00:00.000Z", 50);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]?.prompt).toBeUndefined();
+    expect(result.tasks[0]?.log).toEqual([]);
   });
 });
