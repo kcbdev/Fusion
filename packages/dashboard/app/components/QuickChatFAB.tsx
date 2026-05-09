@@ -980,6 +980,7 @@ export function QuickChatFAB({
   // slides down on top of it.
   const suppressVvShrinkRef = useRef(false);
   const isUserScrollingRef = useRef(false);
+  const lastScrolledOpenSessionKeyRef = useRef<string | null>(null);
 
   // Pin the document at the top while the panel is open on mobile.
   // Otherwise iOS can leave window.scrollY > 0 (e.g. after the keyboard
@@ -1426,6 +1427,26 @@ export function QuickChatFAB({
     setIsUserScrolling(false);
     isUserScrollingRef.current = false;
   }, []);
+
+  useLayoutEffect(() => {
+    const sessionId = activeSession?.id ?? null;
+    if (!isOpen || !sessionId) {
+      lastScrolledOpenSessionKeyRef.current = null;
+      return;
+    }
+    if (messages.length === 0) return;
+
+    const openSessionKey = `${isOpen}:${sessionId}`;
+    if (lastScrolledOpenSessionKeyRef.current === openSessionKey) return;
+
+    const messagesEl = messagesRef.current;
+    if (!messagesEl) return;
+
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    setIsUserScrolling(false);
+    isUserScrollingRef.current = false;
+    lastScrolledOpenSessionKeyRef.current = openSessionKey;
+  }, [isOpen, activeSession?.id, messages.length]);
 
   // Auto-scroll messages when user is near the live tail.
   useEffect(() => {

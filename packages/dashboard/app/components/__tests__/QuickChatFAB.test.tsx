@@ -472,4 +472,32 @@ describe("QuickChatFAB session-first UX", () => {
     expect(scrollTopValue).toBe(1200);
     expect(screen.queryByTestId("quick-chat-jump-to-latest")).toBeNull();
   });
+
+  it("snaps to bottom when switching sessions while open", async () => {
+    mockFetchChatMessages
+      .mockResolvedValueOnce({ messages: [{ id: "msg-1", sessionId: "session-model", role: "assistant", content: "A", createdAt: new Date().toISOString() }] })
+      .mockResolvedValueOnce({ messages: [{ id: "msg-2", sessionId: "session-agent", role: "assistant", content: "B", createdAt: new Date().toISOString() }] });
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const messages = await screen.findByTestId("quick-chat-messages");
+    let scrollTopValue = 0;
+    let scrollHeightValue = 1100;
+    Object.defineProperty(messages, "scrollHeight", { configurable: true, get: () => scrollHeightValue });
+    Object.defineProperty(messages, "scrollTop", {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    fireEvent.change(await screen.findByTestId("quick-chat-session-dropdown"), { target: { value: "session-agent" } });
+    scrollHeightValue = 1700;
+
+    await waitFor(() => {
+      expect(scrollTopValue).toBe(1700);
+    });
+  });
 });

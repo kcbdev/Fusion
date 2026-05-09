@@ -1,6 +1,6 @@
 // ChatView.css is imported eagerly from App.tsx to avoid a flash of
 // unstyled content when the lazy chunk loads. Do not re-import here.
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
@@ -777,6 +777,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isUserScrollingRef = useRef(false);
+  const lastScrolledSessionIdRef = useRef<string | null>(null);
   const hideSkillMenuTimeoutRef = useRef<number | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -877,6 +878,24 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
     setIsUserScrolling(false);
     isUserScrollingRef.current = false;
   }, []);
+
+  useLayoutEffect(() => {
+    const sessionId = activeSession?.id ?? null;
+    if (!sessionId) {
+      lastScrolledSessionIdRef.current = null;
+      return;
+    }
+    if (messages.length === 0) return;
+    if (lastScrolledSessionIdRef.current === sessionId) return;
+
+    const messagesContainer = messagesContainerRef.current;
+    if (!messagesContainer) return;
+
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    setIsUserScrolling(false);
+    isUserScrollingRef.current = false;
+    lastScrolledSessionIdRef.current = sessionId;
+  }, [activeSession?.id, messages.length]);
 
   // Scroll thread container to bottom on new messages or streaming when user is near live tail.
   // Avoid Element.scrollIntoView() here because on mobile Safari it can

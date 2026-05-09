@@ -3142,6 +3142,113 @@ describe("ChatView mobile behavior", () => {
       restoreMatchMedia.mockRestore();
     }
   });
+
+  it("snaps to bottom when opening a session with loaded messages", async () => {
+    const restoreMatchMedia = mockDesktopViewport();
+    try {
+      setupMockChat({ activeSession: activeSessionFixture, messages: [] });
+      const { rerender } = render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const messagesContainer = document.querySelector(".chat-messages") as HTMLDivElement;
+      let scrollTopValue = 0;
+      Object.defineProperty(messagesContainer, "scrollHeight", { configurable: true, get: () => 950 });
+      Object.defineProperty(messagesContainer, "scrollTop", {
+        configurable: true,
+        get: () => scrollTopValue,
+        set: (value: number) => {
+          scrollTopValue = value;
+        },
+      });
+
+      setupMockChat({
+        activeSession: activeSessionFixture,
+        messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z" }],
+      });
+      rerender(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(scrollTopValue).toBe(950);
+      });
+    } finally {
+      restoreMatchMedia.mockRestore();
+    }
+  });
+
+  it("snaps to bottom when switching active session id", async () => {
+    const restoreMatchMedia = mockDesktopViewport();
+    try {
+      setupMockChat({
+        activeSession: activeSessionFixture,
+        messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z" }],
+      });
+      const { rerender } = render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const messagesContainer = document.querySelector(".chat-messages") as HTMLDivElement;
+      let scrollTopValue = 0;
+      let scrollHeightValue = 900;
+      Object.defineProperty(messagesContainer, "scrollHeight", { configurable: true, get: () => scrollHeightValue });
+      Object.defineProperty(messagesContainer, "scrollTop", {
+        configurable: true,
+        get: () => scrollTopValue,
+        set: (value: number) => {
+          scrollTopValue = value;
+        },
+      });
+
+      setupMockChat({
+        activeSession: { ...activeSessionFixture, id: "session-002" },
+        messages: [{ id: "msg-101", sessionId: "session-002", role: "assistant", content: "Two", createdAt: "2026-04-08T00:01:00.000Z" }],
+      });
+      scrollHeightValue = 1300;
+      rerender(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(scrollTopValue).toBe(1300);
+      });
+    } finally {
+      restoreMatchMedia.mockRestore();
+    }
+  });
+
+  it("does not clobber scroll position on same-session history pagination", async () => {
+    const restoreMatchMedia = mockDesktopViewport();
+    try {
+      setupMockChat({
+        activeSession: activeSessionFixture,
+        messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z" }],
+      });
+
+      const { rerender } = render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+      const messagesContainer = document.querySelector(".chat-messages") as HTMLDivElement;
+      let scrollTopValue = 700;
+      Object.defineProperty(messagesContainer, "scrollHeight", { configurable: true, get: () => 1200 });
+      Object.defineProperty(messagesContainer, "clientHeight", { configurable: true, get: () => 200 });
+      Object.defineProperty(messagesContainer, "scrollTop", {
+        configurable: true,
+        get: () => scrollTopValue,
+        set: (value: number) => {
+          scrollTopValue = value;
+        },
+      });
+
+      fireEvent.scroll(messagesContainer);
+
+      setupMockChat({
+        activeSession: activeSessionFixture,
+        messages: [
+          { id: "msg-000", sessionId: "session-001", role: "assistant", content: "Older", createdAt: "2026-04-07T23:59:00.000Z" },
+          { id: "msg-001", sessionId: "session-001", role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z" },
+        ],
+      });
+      rerender(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(scrollTopValue).toBe(700);
+      });
+    } finally {
+      restoreMatchMedia.mockRestore();
+    }
+  });
 });
 
 describe("ChatView mobile CSS contract", () => {
