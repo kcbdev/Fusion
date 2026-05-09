@@ -50,7 +50,7 @@ import {
   sendErrorResponse,
   unauthorized,
 } from "./api-error.js";
-import { resolvePluginManifest } from "./plugin-routes.js";
+import { createPluginRouter, resolvePluginManifest } from "./plugin-routes.js";
 import { hermesRuntimeMetadata } from "@fusion-plugin-examples/hermes-runtime";
 import { openclawRuntimeMetadata } from "@fusion-plugin-examples/openclaw-runtime";
 
@@ -4463,6 +4463,19 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Dev server mount intentionally stays in this late position to keep route
   // precedence unchanged relative to existing wildcard handlers.
   registerIntegratedDevServerRouter({ router, store });
+
+  if (options?.pluginStore && options?.pluginLoader) {
+    const pluginRunner = options.pluginRunner as Parameters<typeof createPluginRouter>[2];
+    router.use(
+      "/plugins",
+      createPluginRouter(
+        options.pluginStore,
+        options.pluginLoader,
+        pluginRunner,
+        store,
+      ),
+    );
+  }
 
   // Scripts and messaging routes are registered by registerMessagingScriptRoutes().
 

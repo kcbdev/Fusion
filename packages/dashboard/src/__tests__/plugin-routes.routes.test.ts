@@ -57,6 +57,15 @@ function createMockPluginLoader(overrides: Partial<PluginLoader> = {}): PluginLo
     stopAllPlugins: vi.fn().mockResolvedValue(undefined),
     invokeHook: vi.fn().mockResolvedValue(undefined),
     reloadPlugin: vi.fn().mockResolvedValue(undefined),
+    createRouteContext: vi.fn().mockImplementation(async (pluginId: string, ctx: Record<string, unknown>) => ({
+      pluginId,
+      taskStore: ctx.taskStore,
+      settings: ctx.settings ?? {},
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+      emitEvent: vi.fn(),
+      createAiSession: (ctx as { createAiSession?: unknown }).createAiSession,
+      resolveProjectTaskStore: ctx.resolveProjectTaskStore,
+    })),
     ...overrides,
   } as unknown as PluginLoader;
 }

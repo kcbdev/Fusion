@@ -2710,6 +2710,50 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     return sorted.slice(offset, offset + Math.max(0, limit));
   }
 
+  /** List only live-board tasks modified after `since`; archived snapshots in archiveDb are excluded. */
+  async listTasksModifiedSince(
+    since: string,
+    limit: number,
+    opts?: { projectId?: string; slim?: boolean },
+  ): Promise<Task[]> {
+    if (typeof since !== "string" || since.trim().length === 0) {
+      throw new TypeError("since must be a non-empty string");
+    }
+
+    const resolvedLimit = limit === undefined ? 50 : limit;
+    if (!Number.isFinite(resolvedLimit) || !Number.isInteger(resolvedLimit) || resolvedLimit <= 0) {
+      throw new TypeError("limit must be a finite positive integer");
+    }
+    if (resolvedLimit > 200) {
+      throw new TypeError("limit must be less than or equal to 200");
+    }
+
+    // projectId is reserved for future cross-project queries.
+    void opts?.projectId;
+
+    const slim = opts?.slim === true;
+    const selectClause = this.getTaskSelectClause(slim);
+    const rows = this.db.prepare(
+      `SELECT ${selectClause} FROM tasks WHERE updatedAt > ? AND "column" != 'archived' ORDER BY updatedAt ASC LIMIT ?`,
+    ).all(since, resolvedLimit) as TaskRow[];
+
+    return Promise.all(rows.map(async (row) => {
+      const task = this.rowToTask(row);
+
+      if (slim) {
+        task.timedExecutionMs = this.computeTimedExecutionMs(task.log);
+        task.log = [];
+      }
+
+      if (!slim || task.steps.length > 0) {
+        return task;
+      }
+
+      const steps = await this.parseStepsFromPrompt(task.id);
+      return steps.length > 0 ? { ...task, steps } : task;
+    }));
+  }
+
   /**
    * Returns the ID of a task currently in an active merge status ("merging" or
    * "merging-pr"), optionally excluding a specific task ID.
