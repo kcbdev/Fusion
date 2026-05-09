@@ -261,7 +261,7 @@ describe("TaskDetailModal", () => {
       expect(screen.queryByText("Commits")).toBeNull();
     });
 
-    it("shows 9 tabs for done task with workflow steps and commit SHA (Commits merged into Changes)", () => {
+    it("shows 10 tabs for done task with workflow steps and commit SHA (Commits merged into Changes)", () => {
       const { container } = render(
         <TaskDetailModal
           task={makeTask({

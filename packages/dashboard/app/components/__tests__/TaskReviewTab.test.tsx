@@ -95,6 +95,30 @@ describe("TaskReviewTab", () => {
     expect(addToast).toHaveBeenCalledWith("GitHub rate limit reached", "error");
   });
 
+  it("renders PR-mode empty state when no review items are available", async () => {
+    const task = makeTask({
+      reviewState: {
+        source: "pull-request",
+        summary: { reviewDecision: "REVIEW_REQUIRED", reviewers: [], blockingReasons: [], checks: [] },
+        items: [],
+        addressing: [],
+      },
+    });
+
+    apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
+    render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+
+    expect(await screen.findByText("No review items yet.")).toBeInTheDocument();
+  });
+
+  it("shows load error when initial review fetch fails", async () => {
+    apiMocks.fetchTaskReview.mockRejectedValue(new Error("boom"));
+
+    render(<TaskReviewTab task={makeTask()} addToast={vi.fn()} />);
+
+    expect(await screen.findByText("Failed to load review data.")).toBeInTheDocument();
+  });
+
   it("renders PR decision and status modifiers", async () => {
     const task = makeTask({
       reviewState: {
@@ -129,6 +153,11 @@ describe("TaskReviewTab", () => {
             body: "Fix null handling",
             author: { login: "reviewer" },
             createdAt: new Date().toISOString(),
+            path: "src/parser.ts",
+            summary: "Parser guard is missing",
+            threadId: "thread-1",
+            line: 42,
+            url: "https://example.test/thread/1",
           },
         ],
         addressing: [{ itemId: "ri-1", status: "queued", selectedAt: new Date().toISOString() }],
@@ -144,7 +173,16 @@ describe("TaskReviewTab", () => {
     fireEvent.click(await screen.findByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: "Request revision" }));
 
-    expect(apiMocks.reviseTaskReviewItems).toHaveBeenCalledWith(task.id, [expect.objectContaining({ id: "ri-1", source: "pr-review" })], undefined);
+    expect(apiMocks.reviseTaskReviewItems).toHaveBeenCalledWith(task.id, [expect.objectContaining({
+      id: "ri-1",
+      source: "pr-review",
+      threadId: "thread-1",
+      filePath: "src/parser.ts",
+      lineNumber: 42,
+      author: "reviewer",
+      summary: "Parser guard is missing",
+      url: "https://example.test/thread/1",
+    })], undefined);
   });
 
   it("refreshes and updates direct-mode reviewer-agent content", async () => {
@@ -218,6 +256,63 @@ describe("TaskReviewTab", () => {
     render(<TaskReviewTab task={task} addToast={vi.fn()} />);
     expect(await screen.findByText("code review Step 2: REVISE")).toBeInTheDocument();
     expect(screen.getAllByText("REVISE").length).toBeGreaterThan(0);
+  });
+
+  it("renders all persisted addressing progress states from snapshots", async () => {
+    const task = makeTask();
+    apiMocks.fetchTaskReview.mockResolvedValue({
+      reviewState: {
+        source: "reviewer-agent",
+        summary: { verdict: "REVISE", reviewType: "code", summary: "Needs updates" },
+        items: [],
+        addressing: [
+          {
+            itemId: "ri-queued",
+            status: "queued",
+            selectedAt: new Date().toISOString(),
+            snapshot: { itemId: "ri-queued", sourceMode: "direct", source: "reviewer-agent", summary: "queued item", body: "queued body" },
+          },
+          {
+            itemId: "ri-progress",
+            status: "in-progress",
+            selectedAt: new Date().toISOString(),
+            startedAt: new Date().toISOString(),
+            snapshot: { itemId: "ri-progress", sourceMode: "direct", source: "reviewer-agent", summary: "in progress item", body: "in progress body" },
+          },
+          {
+            itemId: "ri-addressed",
+            status: "addressed",
+            selectedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            snapshot: { itemId: "ri-addressed", sourceMode: "direct", source: "reviewer-agent", summary: "addressed item", body: "addressed body" },
+          },
+          {
+            itemId: "ri-failed",
+            status: "failed",
+            selectedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            error: "Patch failed",
+            snapshot: { itemId: "ri-failed", sourceMode: "direct", source: "reviewer-agent", summary: "failed item", body: "failed body" },
+          },
+        ],
+      },
+      automationStatus: null,
+      emptyMessage: null,
+    });
+
+    render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+
+    expect(await screen.findByText("queued item")).toBeInTheDocument();
+    expect(screen.getByText("in progress item")).toBeInTheDocument();
+    expect(screen.getByText("addressed item")).toBeInTheDocument();
+    expect(screen.getByText("failed item")).toBeInTheDocument();
+    expect(screen.queryByText("No review items yet.")).not.toBeInTheDocument();
+    expect(screen.getByText(/Error: Patch failed/)).toBeInTheDocument();
+
+    expect(screen.getByText("queued").className).toContain("task-review-tab__status--queued");
+    expect(screen.getByText("in-progress").className).toContain("task-review-tab__status--in-progress");
+    expect(screen.getByText("addressed").className).toContain("task-review-tab__status--addressed");
+    expect(screen.getByText("failed").className).toContain("task-review-tab__status--failed");
   });
 
   it("renders persisted addressing snapshot entries after reload", async () => {
