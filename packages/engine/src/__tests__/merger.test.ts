@@ -4807,6 +4807,58 @@ describe("resolveTaskDiffBaseRef", () => {
 
     expect(diffBase).toBeUndefined();
   });
+
+  // FN-3898 regression: legacy/imported tasks may have a stale baseCommitSha
+  // and no baseBranch. After pre-merge rebase the recorded SHA is older than
+  // the new merge-base, so `baseCommitSha..branch` includes every unrelated
+  // commit landed on main since the fork — inflating scope warnings.
+  it("tightens to merge-base(HEAD, main) when baseBranch is missing and baseCommitSha is an outdated ancestor", async () => {
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      // No baseBranch → outer merge-base block is skipped.
+      // Display recovery: merge-base(HEAD, main).
+      if (cmdStr === 'git merge-base "HEAD" main') return "current-main-sha" as any;
+      // baseCommitSha is still an ancestor of HEAD…
+      if (cmdStr === 'git merge-base --is-ancestor "old-base-sha" "HEAD"') return "" as any;
+      // …and recoveredBase descends baseCommitSha (rebase fast-forwarded).
+      if (cmdStr === 'git merge-base --is-ancestor "old-base-sha" "current-main-sha"') return "" as any;
+      throw new Error(`Unexpected command: ${cmdStr}`);
+    });
+
+    const diffBase = await resolveTaskDiffBaseRef({
+      cwd: "/tmp/root",
+      headRef: "HEAD",
+      baseBranch: undefined,
+      baseCommitSha: "old-base-sha",
+    });
+
+    expect(diffBase).toBe("current-main-sha");
+  });
+
+  // Preserves the FN-2855 path: when the recovered merge-base is NOT a
+  // descendant of baseCommitSha (e.g., baseCommitSha lives on a deleted
+  // upstream feature branch), keep the task-scoped SHA rather than widening
+  // the diff range.
+  it("keeps baseCommitSha when recoveredBase does not descend it", async () => {
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      if (cmdStr === 'git merge-base "HEAD" main') return "unrelated-main-sha" as any;
+      if (cmdStr === 'git merge-base --is-ancestor "feature-base-sha" "HEAD"') return "" as any;
+      if (cmdStr === 'git merge-base --is-ancestor "feature-base-sha" "unrelated-main-sha"') {
+        throw new Error("not an ancestor");
+      }
+      throw new Error(`Unexpected command: ${cmdStr}`);
+    });
+
+    const diffBase = await resolveTaskDiffBaseRef({
+      cwd: "/tmp/root",
+      headRef: "HEAD",
+      baseBranch: undefined,
+      baseCommitSha: "feature-base-sha",
+    });
+
+    expect(diffBase).toBe("feature-base-sha");
+  });
 });
 
 describe("aiMergeTask — post-merge workflow steps", () => {

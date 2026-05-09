@@ -3095,17 +3095,62 @@ export async function resolveTaskDiffBaseRef({
     }
   }
 
+  // Display recovery (mirrors dashboard `resolveDiffBase` with
+  // `enableDisplayRecovery: true`): when baseBranch is missing — common for
+  // legacy/imported tasks — compute merge-base(headRef, main) so we can
+  // tighten an outdated-but-still-ancestor baseCommitSha after a pre-merge
+  // rebase. Without this the scope warning compares against a stale
+  // baseCommitSha and surfaces every unrelated commit landed on main since
+  // the task forked.
+  let recoveredBase: string | undefined;
+  if (!baseBranch?.trim()) {
+    try {
+      const { stdout } = await execAsync(`git merge-base ${quotedHeadRef} main`, {
+        cwd,
+        encoding: "utf-8",
+      });
+      recoveredBase = stdout.trim() || undefined;
+    } catch {
+      try {
+        const { stdout } = await execAsync(`git merge-base ${quotedHeadRef} ${quoteArg("origin/main")}`, {
+          cwd,
+          encoding: "utf-8",
+        });
+        recoveredBase = stdout.trim() || undefined;
+      } catch {
+        // no recovery available
+      }
+    }
+  }
+
   if (baseCommitSha) {
     try {
       await execAsync(`git merge-base --is-ancestor ${quoteArg(baseCommitSha)} ${quotedHeadRef}`, {
         cwd,
         encoding: "utf-8",
       });
+      // Prefer recoveredBase only if it's strictly tighter (a descendant of
+      // baseCommitSha). When baseCommitSha lives on a deleted feature branch
+      // it won't be an ancestor of merge-base(HEAD, main), so we keep the
+      // task-scoped SHA — preserves the FN-2855 nulled-baseBranch path.
+      if (recoveredBase && recoveredBase !== baseCommitSha) {
+        try {
+          await execAsync(`git merge-base --is-ancestor ${quoteArg(baseCommitSha)} ${quoteArg(recoveredBase)}`, {
+            cwd,
+            encoding: "utf-8",
+          });
+          return recoveredBase;
+        } catch {
+          // recoveredBase not a descendant — keep baseCommitSha
+        }
+      }
       return baseCommitSha;
     } catch {
       // stale or unreachable — fall through
     }
   }
+
+  if (recoveredBase) return recoveredBase;
 
   try {
     const { stdout } = await execAsync(`git rev-parse ${quoteArg(`${headRef}~1`)}`, {
