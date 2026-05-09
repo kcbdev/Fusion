@@ -189,9 +189,9 @@ Additional backend notes:
 | `mission_events` | Mission event log with ordered sequence numbers and metadata payloads. |
 | `plugins` | Plugin registry, lifecycle state, dependency metadata, and settings blobs. |
 | `routines` | Routine definitions (trigger config, steps/command, catch-up policy, run history, and persisted `agentId` ownership metadata). Legacy databases missing routine fields (including `agentId`) are backfilled during init-time compatibility migration. |
-| `roadmaps` | Standalone roadmap metadata. |
-| `roadmap_milestones` | Milestones within roadmaps (`roadmapId` FK). |
-| `roadmap_features` | Features within roadmap milestones (`milestoneId` FK). |
+| `roadmaps` | Roadmap plugin metadata (owned/registered by `plugins/fusion-plugin-roadmap`). |
+| `roadmap_milestones` | Milestones within roadmaps (`roadmapId` FK), owned/registered by roadmap plugin schema hooks. |
+| `roadmap_features` | Features within roadmap milestones (`milestoneId` FK), owned/registered by roadmap plugin schema hooks. |
 | `project_insights` | Extracted project insights with fingerprint-based deduplication and provenance metadata. |
 | `project_insight_runs` | Insight extraction run history with durable lifecycle metadata (`lifecycle` JSON includes terminalReason/cause, failureClass, retryable flag, cancellationRequestedAt, timeoutAt, retry lineage fields). Terminal rows are immutable for state transitions. |
 | `project_insight_run_events` | Append-only per-run lifecycle trail (`seq`, `type`, `message`, optional `status`/`classification`/`metadata`) used by cancel/retry/timeout auditing and API inspection. |

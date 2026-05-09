@@ -177,12 +177,8 @@ Concrete references:
   - Core schema tables include: `tasks`, `config`, `workflow_steps`, `activityLog`, `archivedTasks`, `automations`, `agents`, `agentHeartbeats`, approval tables (`approval_requests`, `approval_request_audit_events`), `task_documents`, `task_document_revisions`, mission hierarchy tables (`missions`, `milestones`, `slices`, `mission_features`, `mission_events`), plugin/routine tables (`plugins`, `routines`), roadmap tables (`roadmaps`, `roadmap_milestones`, `roadmap_features`), insight tables (`project_insights`, `project_insight_runs`), research tables (`research_runs`, `research_exports`, `research_run_events`), eval tables (`eval_runs`, `eval_task_results`, `eval_run_events`), todo tables (`todo_lists`, `todo_items`), `__meta`
   - Migration-created tables include: `ai_sessions`, `messages`, `agentRatings`, `chat_sessions`, `chat_messages`, `runAuditEvents`, `mission_contract_assertions`, `mission_feature_assertions`, `mission_validator_runs`, `mission_validator_failures`, `mission_fix_feature_lineage`
   - `ai_sessions.status` lifecycle includes `draft` (pre-start planning session), then `generating`, `awaiting_input`, terminal `complete` / `error`
-- **Standalone roadmap model**: `packages/core/src/roadmap-types.ts`, `roadmap-ordering.ts`, `roadmap-store.ts`
-  - Roadmap-first entity types (`Roadmap`, `RoadmapMilestone`, `RoadmapFeature`)
-  - Pure ordering helpers for contiguous 0-based milestone/feature order and deterministic cross-milestone feature moves
-  - `RoadmapStore` for CRUD operations, deterministic ordering, and atomic reorder/move operations
-  - Dashboard API routes in `packages/dashboard/src/roadmap-routes.ts`
-  - Exported from `@fusion/core` for downstream persistence/API/UI work
+- **Roadmap feature ownership**: roadmap contracts, ordering/handoff helpers, and persistence live in `plugins/fusion-plugin-roadmap` (package `@fusion-plugin-examples/roadmap`) rather than `@fusion/core`
+  - Dashboard route adapter remains in `packages/dashboard/src/roadmap-routes.ts` and consumes the plugin API
 - **CentralCore**: `packages/core/src/central-core.ts`
   - Global project registry, health, central activity feed, global concurrency
   - Backed by `packages/core/src/central-db.ts` (`~/.fusion/fusion-central.db`)
@@ -197,7 +193,6 @@ Concrete references:
   - `ReflectionStore` (`reflection-store.ts`) — agent reflection records and performance snapshots
   - `PluginStore` (`plugin-store.ts`) — plugin registry/state/settings persistence
   - `RoutineStore` (`routine-store.ts`) — recurring routine definitions and run history
-  - `RoadmapStore` (`roadmap-store.ts`) — standalone roadmap CRUD with deterministic ordering and atomic reorder/move operations
   - `TodoStore` (`todo-store.ts`) — project-scoped todo lists/items with completion, reorder, and composite list+items queries
   - `EvalStore` (`eval-store.ts`) — eval run persistence, per-task eval results with durable snapshots, and append-only run event trails
 
