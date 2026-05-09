@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Database, createDatabase } from "@fusion/core";
 import { RoadmapStore } from "../roadmap-store.js";
+import { ensureRoadmapSchema } from "../../roadmap-schema.js";
 import type {
   RoadmapCreateInput,
   RoadmapUpdateInput,
@@ -33,6 +34,7 @@ describe("RoadmapStore", () => {
     // Database instances explicitly (search for `persistDb`).
     db = new Database(join(tmpDir, ".fusion"), { inMemory: true });
     db.init();
+    ensureRoadmapSchema(db);
     store = new RoadmapStore(db);
   });
 

@@ -1,46 +1,6 @@
-import type { Database } from "@fusion/core";
 import { definePlugin } from "@fusion/plugin-sdk";
 import { createRoadmapPluginRoutes } from "./routes/roadmap-routes.js";
-
-export function ensureRoadmapSchema(db: Database): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS roadmaps (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      description TEXT,
-      createdAt TEXT NOT NULL,
-      updatedAt TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS roadmap_milestones (
-      id TEXT PRIMARY KEY,
-      roadmapId TEXT NOT NULL,
-      title TEXT NOT NULL,
-      description TEXT,
-      orderIndex INTEGER NOT NULL,
-      createdAt TEXT NOT NULL,
-      updatedAt TEXT NOT NULL,
-      FOREIGN KEY (roadmapId) REFERENCES roadmaps(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS roadmap_features (
-      id TEXT PRIMARY KEY,
-      milestoneId TEXT NOT NULL,
-      title TEXT NOT NULL,
-      description TEXT,
-      orderIndex INTEGER NOT NULL,
-      createdAt TEXT NOT NULL,
-      updatedAt TEXT NOT NULL,
-      FOREIGN KEY (milestoneId) REFERENCES roadmap_milestones(id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idxRoadmapMilestonesRoadmapOrder
-      ON roadmap_milestones(roadmapId, orderIndex, createdAt, id);
-
-    CREATE INDEX IF NOT EXISTS idxRoadmapFeaturesMilestoneOrder
-      ON roadmap_features(milestoneId, orderIndex, createdAt, id);
-  `);
-}
+import { ensureRoadmapSchema } from "./roadmap-schema.js";
 
 const plugin = definePlugin({
   manifest: {
@@ -109,5 +69,6 @@ export {
 export { RoadmapStore } from "./store/roadmap-store.js";
 export type { RoadmapStoreEvents } from "./store/roadmap-store.js";
 
+export { ensureRoadmapSchema } from "./roadmap-schema.js";
 export { RoadmapDashboardView } from "./dashboard-view.js";
 export * from "./server/index.js";

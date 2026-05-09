@@ -12,6 +12,7 @@
 
 - `manifest.json` — plugin metadata and dashboard view declaration
 - `src/index.ts` — plugin definition (`onSchemaInit`, routes, dashboard view metadata)
+- `src/roadmap-schema.ts` — canonical roadmap DDL used by `hooks.onSchemaInit`
 - `src/server/index.ts` — backend server exports
 - `src/dashboard-view.tsx` — dashboard view entry export for host registration
 - `src/dashboard/RoadmapsView.tsx` — plugin-owned roadmap planner page
@@ -27,5 +28,7 @@
 - `./dashboard-view`: Roadmaps dashboard view export for host registry wiring
 
 ## Notes
+
+Roadmap tables are plugin-owned and created via `hooks.onSchemaInit` in `src/index.ts`, which delegates to `src/roadmap-schema.ts`. Core database bootstrap no longer creates roadmap tables/indexes.
 
 The plugin keeps a single canonical dashboard entrypoint (`./dashboard-view`) and accepts host-supplied dashboard context (`projectId`, optional `addToast`). Do not deep-import dashboard internals from this plugin.

@@ -1,6 +1,9 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { rm } from "node:fs/promises";
+import { Database } from "@fusion/core";
+import { afterEach, describe, expect, it } from "vitest";
 import plugin, {
   RoadmapStore,
   applyRoadmapFeatureReorder,
@@ -15,6 +18,13 @@ import plugin, {
 } from "../index.js";
 
 describe("roadmap-planner package surface", () => {
+  const tmpDirs: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(tmpDirs.map((dir) => rm(dir, { recursive: true, force: true })));
+    tmpDirs.length = 0;
+  });
+
   it("keeps manifest and plugin entry metadata aligned", () => {
     const manifest = JSON.parse(readFileSync(resolve(process.cwd(), "manifest.json"), "utf8")) as {
       id: string;
@@ -39,6 +49,32 @@ describe("roadmap-planner package surface", () => {
 
   it("exports plugin manifest with roadmap id", () => {
     expect(plugin.manifest.id).toBe("roadmap-planner");
+  });
+
+  it("registers onSchemaInit hook that creates roadmap tables and indexes", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "roadmap-plugin-schema-test-"));
+    tmpDirs.push(tmpDir);
+
+    const db = new Database(join(tmpDir, ".fusion"), { inMemory: true });
+    db.init();
+
+    expect(plugin.hooks?.onSchemaInit).toBeTypeOf("function");
+    plugin.hooks?.onSchemaInit?.(db);
+
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>;
+    const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as Array<{ name: string }>;
+
+    expect(tables.map((row) => row.name)).toEqual(expect.arrayContaining([
+      "roadmaps",
+      "roadmap_milestones",
+      "roadmap_features",
+    ]));
+    expect(indexes.map((row) => row.name)).toEqual(expect.arrayContaining([
+      "idxRoadmapMilestonesRoadmapOrder",
+      "idxRoadmapFeaturesMilestoneOrder",
+    ]));
+
+    db.close();
   });
 
   it("re-exports roadmap domain symbols", () => {
