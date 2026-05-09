@@ -115,6 +115,7 @@ export {
   buildNtfyClickUrl,
   sendNtfyNotification,
   formatTaskIdentifier,
+  getActiveNotificationService,
   type NtfyNotifierOptions,
   type NtfyNotificationPriority,
   type NtfyNotificationConfigInput,

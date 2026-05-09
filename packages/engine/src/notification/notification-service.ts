@@ -41,6 +41,7 @@ export class NotificationService {
   private notificationsEnabled = false;
   private ntfyProvider?: NtfyNotificationProvider;
   private webhookProvider?: WebhookNotificationProvider;
+  private refreshInFlight: Promise<void> | null = null;
 
   constructor(
     private readonly store: NotificationServiceStore,
@@ -236,8 +237,19 @@ export class NotificationService {
   }
 
   private handleMessageSent = (message: Message): void => {
+    void this.handleMessageSentAsync(message);
+  };
+
+  private async handleMessageSentAsync(message: Message): Promise<void> {
+    schedulerLog.log(
+      `NotificationService.handleMessageSent messageId=${message.id} type=${message.type} notificationsEnabled=${String(this.notificationsEnabled)} hasNtfyProvider=${String(Boolean(this.ntfyProvider))}`,
+    );
+
     if (!this.notificationsEnabled) {
-      return;
+      await this.refreshNotificationState("message:sent");
+      if (!this.notificationsEnabled) {
+        return;
+      }
     }
 
     let eventType: NotificationEvent;
@@ -270,7 +282,11 @@ export class NotificationService {
         preview,
       },
     });
-  };
+
+    schedulerLog.log(
+      `NotificationService.handleMessageSent scheduled eventType=${eventType} messageId=${message.id}`,
+    );
+  }
 
   private setNotificationsEnabledFromSettings(settings: Settings): void {
     this.notificationsEnabled = Boolean(
@@ -281,11 +297,35 @@ export class NotificationService {
 
   async dispatch(eventType: NotificationEvent, payload: NotificationPayload): Promise<void> {
     if (!this.notificationsEnabled) {
-      return;
+      await this.refreshNotificationState("manual-dispatch");
+      if (!this.notificationsEnabled) {
+        return;
+      }
     }
 
     const dedupTaskId = payload.taskId ?? "global";
     this.maybeNotify(dedupTaskId, eventType, payload);
+  }
+
+  private async refreshNotificationState(reason: string): Promise<void> {
+    if (this.refreshInFlight) {
+      await this.refreshInFlight;
+      return;
+    }
+
+    this.refreshInFlight = (async () => {
+      const settings = await this.store.getSettings();
+      this.setNotificationsEnabledFromSettings(settings);
+      await this.syncNtfyProvider(settings);
+      await this.syncWebhookProvider(settings);
+      schedulerLog.log(`NotificationService refreshed notification state reason=${reason} enabled=${String(this.notificationsEnabled)}`);
+    })();
+
+    try {
+      await this.refreshInFlight;
+    } finally {
+      this.refreshInFlight = null;
+    }
   }
 
   private createTaskPayload(task: Task, event: NotificationEvent): NotificationPayload {
@@ -300,10 +340,12 @@ export class NotificationService {
   private maybeNotify(taskId: string, eventType: NotificationEvent, payload: NotificationPayload): void {
     const key = `${taskId}:${eventType}`;
     if (this.notifiedEvents.has(key)) {
+      schedulerLog.log(`NotificationService.maybeNotify suppressed duplicate key=${key}`);
       return;
     }
 
     this.notifiedEvents.add(key);
+    schedulerLog.log(`NotificationService.maybeNotify dispatching key=${key}`);
     this.dispatcher.dispatch(eventType, payload).catch(() => {
       // best effort dispatch
     });

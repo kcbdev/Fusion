@@ -136,7 +136,7 @@ export function buildNtfyClickUrl(options: {
  * Send a notification to ntfy.
  * Errors are logged and swallowed so callers can treat delivery as best-effort.
  */
-export async function sendNtfyNotification({
+export async function sendNtfyNotificationWithResult({
   ntfyBaseUrl,
   topic,
   title,
@@ -144,7 +144,7 @@ export async function sendNtfyNotification({
   priority = "default",
   clickUrl,
   signal,
-}: SendNtfyNotificationInput): Promise<void> {
+}: SendNtfyNotificationInput): Promise<{ ok: boolean; status: number; statusText: string } | null> {
   try {
     const headers: Record<string, string> = {
       Title: title,
@@ -167,12 +167,23 @@ export async function sendNtfyNotification({
     if (!response.ok) {
       schedulerLog.log(`Ntfy notification failed: ${response.status} ${response.statusText}`);
     }
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+    };
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
-      return;
+      return null;
     }
     schedulerLog.log(`Failed to send ntfy notification: ${err}`);
+    return null;
   }
+}
+
+export async function sendNtfyNotification(input: SendNtfyNotificationInput): Promise<void> {
+  await sendNtfyNotificationWithResult(input);
 }
 
 /**
@@ -181,6 +192,10 @@ export async function sendNtfyNotification({
  * notifications to the pluggable provider-based notification module.
  */
 let activeNotificationService: NotificationService | undefined;
+
+export function getActiveNotificationService(): NotificationService | undefined {
+  return activeNotificationService;
+}
 
 export interface FallbackNotificationInput {
   primaryModel: string;

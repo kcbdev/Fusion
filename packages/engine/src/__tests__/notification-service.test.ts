@@ -3,7 +3,11 @@ import { EventEmitter } from "node:events";
 import type { Message, NotificationProvider, Settings, Task } from "@fusion/core";
 import { NotificationService } from "../notification/notification-service.js";
 import { NtfyNotificationProvider } from "../notification/ntfy-provider.js";
+import { schedulerLog } from "../logger.js";
 
+vi.mock("../logger.js", () => ({
+  schedulerLog: { log: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
 type Listener = (...args: any[]) => void | Promise<void>;
 
 function createStore(settings: Partial<Settings> = {}) {
@@ -235,8 +239,43 @@ describe("NotificationService", () => {
     expect(sendNotification).not.toHaveBeenCalled();
   });
 
-  it("does not dispatch mailbox notifications when disabled", async () => {
-    const store = createStore({ ntfyEnabled: false, webhookEnabled: false });
+  it("refreshes notification settings for message events when startup settings were stale", async () => {
+    let calls = 0;
+    const store = createStore();
+    store.getSettings = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) {
+        return { ntfyEnabled: false, ntfyTopic: "topic" } as Settings;
+      }
+      return { ntfyEnabled: true, ntfyTopic: "topic" } as Settings;
+    });
+
+    const messageStore = new EventEmitter();
+    const sendNotification = vi.fn(async () => ({ success: true, providerId: "mock" }));
+    const provider: NotificationProvider = {
+      getProviderId: () => "mock",
+      isEventSupported: () => true,
+      sendNotification,
+    };
+
+    const service = new NotificationService(store as any, { messageStore: messageStore as any });
+    service.registerProvider(provider);
+    await service.start();
+
+    messageStore.emit("message:sent", createMessage());
+
+    await vi.waitFor(() => {
+      expect(sendNotification).toHaveBeenCalledWith(
+        "message:agent-to-user",
+        expect.objectContaining({ event: "message:agent-to-user" }),
+      );
+    });
+    expect(schedulerLog.log).toHaveBeenCalledWith(
+      expect.stringContaining("NotificationService refreshed notification state reason=message:sent enabled=true"),
+    );
+  });
+
+  it("does not dispatch mailbox notifications when disabled", async () => {    const store = createStore({ ntfyEnabled: false, webhookEnabled: false });
     const messageStore = new EventEmitter();
     const sendNotification = vi.fn(async () => ({ success: true, providerId: "mock" }));
     const provider: NotificationProvider = {

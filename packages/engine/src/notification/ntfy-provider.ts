@@ -11,8 +11,9 @@ import {
   buildNtfyClickUrl,
   formatTaskIdentifier,
   resolveNtfyEvents,
-  sendNtfyNotification,
+  sendNtfyNotificationWithResult,
 } from "../notifier.js";
+import { schedulerLog } from "../logger.js";
 
 export interface NtfyProviderConfig {
   /** ntfy topic name */
@@ -75,11 +76,16 @@ export class NtfyNotificationProvider implements NotificationProvider {
 
   isEventSupported(event: NotificationEvent): boolean {
     if (!SUPPORTED_EVENTS.has(event as SupportedNtfyEvent)) {
+      schedulerLog.log(`NtfyNotificationProvider event filtered unsupported event=${event}`);
       return false;
     }
 
     const enabledEvents = this.config?.events ?? [...DEFAULT_NTFY_EVENTS];
-    return enabledEvents.includes(event as NtfyNotificationEvent);
+    const allowed = enabledEvents.includes(event as NtfyNotificationEvent);
+    schedulerLog.log(
+      `NtfyNotificationProvider allowlist event=${event} decision=${allowed ? "allowed" : "filtered-by-event"}`,
+    );
+    return allowed;
   }
 
   async sendNotification(
@@ -173,7 +179,20 @@ export class NtfyNotificationProvider implements NotificationProvider {
     };
 
     const content = contentByEvent[event as SupportedNtfyEvent];
-    await sendNtfyNotification({
+    const resolvedBaseUrl = this.config.ntfyBaseUrl?.trim() || "https://ntfy.sh";
+    const host = (() => {
+      try {
+        return new URL(resolvedBaseUrl).host;
+      } catch {
+        return "invalid-host";
+      }
+    })();
+
+    schedulerLog.log(
+      `NtfyNotificationProvider send event=${event} host=${host} topic=${this.config.topic}`,
+    );
+
+    const response = await sendNtfyNotificationWithResult({
       ntfyBaseUrl: this.config.ntfyBaseUrl,
       topic: this.config.topic,
       title: content.title,
@@ -183,6 +202,14 @@ export class NtfyNotificationProvider implements NotificationProvider {
       signal: this.abortController?.signal,
     });
 
-    return { success: true, providerId: this.getProviderId() };
+    schedulerLog.log(
+      `NtfyNotificationProvider delivery event=${event} status=${response?.status ?? "error"} ok=${String(response?.ok ?? false)}`,
+    );
+
+    return {
+      success: Boolean(response?.ok),
+      providerId: this.getProviderId(),
+      ...(response?.ok ? {} : { error: response ? `${response.status} ${response.statusText}` : "request failed" }),
+    };
   }
 }

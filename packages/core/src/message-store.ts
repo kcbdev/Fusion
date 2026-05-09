@@ -14,7 +14,10 @@ import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import { fromJson, toJsonNullable } from "./db.js";
+import { createLogger } from "./logger.js";
 import { DASHBOARD_USER_ID, normalizeMessageParticipant, validateMessageMetadata, type Message, type MessageCreateInput, type MessageFilter, type MessageType, type Mailbox, type ParticipantType } from "./types.js";
+
+const messageStoreLog = createLogger("message-store");
 
 // ── Event Types ─────────────────────────────────────────────────────
 
@@ -163,6 +166,7 @@ export class MessageStore extends EventEmitter<MessageStoreEvents> {
     );
 
     this.db.bumpLastModified();
+    messageStoreLog.log(`MessageStore emitting message:sent id=${message.id} type=${message.type} fromId=${message.fromId} toId=${message.toId}`);
     this.emit("message:sent", message);
     this.emit("message:received", message);
 

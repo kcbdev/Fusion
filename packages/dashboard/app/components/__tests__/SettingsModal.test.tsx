@@ -2774,6 +2774,30 @@ describe("SettingsModal", () => {
       });
     });
 
+    it("calls testNotification with ntfy message-event config when message test button clicked", async () => {
+      const addToast = vi.fn();
+      mockFetchSettings.mockResolvedValueOnce({ ...defaultSettings, ntfyEnabled: true, ntfyTopic: "test-topic" });
+      renderModal({ addToast });
+      await waitForSettingsModalReady();
+      await openNotificationsSection();
+
+      await userEvent.click(screen.getByRole("button", { name: /Test message notification/ }));
+
+      await waitFor(() => {
+        expect(mockTestNotification).toHaveBeenCalledWith(
+          "ntfy",
+          { messageEventType: "message:agent-to-user" },
+          undefined,
+        );
+      });
+      expect(addToast).toHaveBeenCalledWith(
+        "Test notification sent — check your ntfy app inbox!",
+        "success",
+      );
+      expect(screen.getByText("Test notification sent — check your ntfy app inbox!")).toBeInTheDocument();
+      expect(screen.getAllByText("Test notification sent — check your ntfy app inbox!")[0].closest(".notification-test-feedback")).toHaveAttribute("aria-live", "polite");
+    });
+
     it("calls testNotification with webhook provider ID when webhook test button clicked", async () => {
       renderModal();
       await waitForSettingsModalReady();
@@ -2791,6 +2815,8 @@ describe("SettingsModal", () => {
           undefined,
         );
       });
+      expect(within(webhookCard).getByText("Test notification sent — check your webhook endpoint!")).toBeInTheDocument();
+      expect(within(webhookCard).getByText("Test notification sent — check your webhook endpoint!").closest(".notification-test-feedback")).toHaveAttribute("aria-live", "polite");
     });
 
     it("preserves existing ntfy settings in backward compat", async () => {

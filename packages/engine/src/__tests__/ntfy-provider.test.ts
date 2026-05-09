@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  sendNtfyNotification: vi.fn(async () => undefined),
+  sendNtfyNotificationWithResult: vi.fn(async () => ({ ok: true, status: 200, statusText: 'OK' })),
   buildNtfyClickUrl: vi.fn(() => "http://dash/?project=p1&task=FN-1"),
 }));
 
@@ -9,7 +9,7 @@ vi.mock("../notifier.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../notifier.js")>();
   return {
     ...actual,
-    sendNtfyNotification: mocks.sendNtfyNotification,
+    sendNtfyNotificationWithResult: mocks.sendNtfyNotificationWithResult,
     buildNtfyClickUrl: mocks.buildNtfyClickUrl,
   };
 });
@@ -20,7 +20,7 @@ describe("NtfyNotificationProvider", () => {
   let provider: NtfyNotificationProvider;
 
   beforeEach(async () => {
-    mocks.sendNtfyNotification.mockClear();
+    mocks.sendNtfyNotificationWithResult.mockClear();
     mocks.buildNtfyClickUrl.mockClear();
     provider = new NtfyNotificationProvider();
     await provider.initialize({
@@ -53,7 +53,7 @@ describe("NtfyNotificationProvider", () => {
       metadata: { fromId: "agent-1", toId: "agent-2", preview: "preview text", messageId: "msg-1" },
     });
 
-    expect(mocks.sendNtfyNotification).toHaveBeenCalledWith(
+    expect(mocks.sendNtfyNotificationWithResult).toHaveBeenCalledWith(
       expect.objectContaining({
         topic: "topic-a",
         title: expectedTitle,
@@ -79,7 +79,7 @@ describe("NtfyNotificationProvider", () => {
   it("shutdown aborts internal AbortController", async () => {
     await provider.shutdown();
     await provider.sendNotification("in-review" as any, { taskId: "FN-1", taskTitle: "T", event: "in-review" as any });
-    expect(mocks.sendNtfyNotification).toHaveBeenCalledWith(expect.objectContaining({ signal: undefined }));
+    expect(mocks.sendNtfyNotificationWithResult).toHaveBeenCalledWith(expect.objectContaining({ signal: undefined }));
   });
 
   it("uses fallback identifier from id+description when no title", async () => {
@@ -89,7 +89,7 @@ describe("NtfyNotificationProvider", () => {
       event: "failed" as any,
     });
 
-    expect(mocks.sendNtfyNotification).toHaveBeenCalledWith(
+    expect(mocks.sendNtfyNotificationWithResult).toHaveBeenCalledWith(
       expect.objectContaining({ message: expect.stringContaining('Task "FN-1: desc"') }),
     );
   });
@@ -137,7 +137,7 @@ describe("NtfyNotificationProvider", () => {
       },
     });
 
-    expect(mocks.sendNtfyNotification).toHaveBeenCalledWith(
+    expect(mocks.sendNtfyNotificationWithResult).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "Re: reply preview",
       }),

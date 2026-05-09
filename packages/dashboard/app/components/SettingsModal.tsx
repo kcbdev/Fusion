@@ -511,6 +511,7 @@ export function SettingsModal({
 
   // Test notification state
   const [testNotificationLoading, setTestNotificationLoading] = useState<Record<string, boolean>>({});
+  const [testNotificationResult, setTestNotificationResult] = useState<Record<string, { status: "success" | "error"; message: string }>>({});
   const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
   const [presetDraft, setPresetDraft] = useState<ModelPreset | null>(null);
 
@@ -1151,8 +1152,8 @@ export function SettingsModal({
     }
   }, [addToast, loadAuthStatus]);
 
-  const handleTestProviderNotification = useCallback(async (providerId: "ntfy" | "webhook") => {
-    if (providerId === "ntfy") {
+  const handleTestProviderNotification = useCallback(async (providerId: "ntfy" | "webhook" | "ntfy-message") => {
+    if (providerId === "ntfy" || providerId === "ntfy-message") {
       if (!form.ntfyEnabled || !form.ntfyTopic || !/^[a-zA-Z0-9_-]{1,64}$/.test(form.ntfyTopic)) {
         return;
       }
@@ -1173,6 +1174,11 @@ export function SettingsModal({
     }
 
     setTestNotificationLoading((prev) => ({ ...prev, [providerId]: true }));
+    setTestNotificationResult((prev) => {
+      const next = { ...prev };
+      delete next[providerId];
+      return next;
+    });
     try {
       const config = providerId === "ntfy"
         ? {
@@ -1180,19 +1186,31 @@ export function SettingsModal({
           ntfyTopic: form.ntfyTopic,
           ...(form.ntfyBaseUrl?.trim() ? { ntfyBaseUrl: form.ntfyBaseUrl.trim() } : {}),
         }
-        : {
-          webhookUrl: form.webhookUrl,
-          webhookFormat: form.webhookFormat || "generic",
-        };
-      const result = await testNotification(providerId, config, projectId);
+        : providerId === "ntfy-message"
+          ? { messageEventType: "message:agent-to-user" }
+          : {
+            webhookUrl: form.webhookUrl,
+            webhookFormat: form.webhookFormat || "generic",
+          };
+      const result = await testNotification(providerId === "ntfy-message" ? "ntfy" : providerId, config, projectId);
       if (result.success) {
-        const providerName = providerId === "ntfy" ? "ntfy app" : "webhook endpoint";
-        addToast(`Test notification sent — check your ${providerName}!`, "success");
+        const providerName = providerId === "ntfy"
+          ? "ntfy app"
+          : providerId === "ntfy-message"
+            ? "ntfy app inbox"
+            : "webhook endpoint";
+        const successMessage = `Test notification sent — check your ${providerName}!`;
+        setTestNotificationResult((prev) => ({ ...prev, [providerId]: { status: "success", message: successMessage } }));
+        addToast(successMessage, "success");
       } else {
-        addToast("Failed to send test notification", "error");
+        const failureMessage = "Failed to send test notification";
+        setTestNotificationResult((prev) => ({ ...prev, [providerId]: { status: "error", message: failureMessage } }));
+        addToast(failureMessage, "error");
       }
     } catch (err) {
-      addToast(getErrorMessage(err) || "Failed to send test notification", "error");
+      const failureMessage = getErrorMessage(err) || "Failed to send test notification";
+      setTestNotificationResult((prev) => ({ ...prev, [providerId]: { status: "error", message: failureMessage } }));
+      addToast(failureMessage, "error");
     } finally {
       setTestNotificationLoading((prev) => ({ ...prev, [providerId]: false }));
     }
@@ -4589,13 +4607,43 @@ export function SettingsModal({
                       onClick={() => handleTestProviderNotification("ntfy")}
                       disabled={
                         testNotificationLoading["ntfy"] ||
+                        testNotificationLoading["ntfy-message"] ||
+                        !form.ntfyEnabled ||
                         !form.ntfyTopic ||
                         !/^[a-zA-Z0-9_-]{1,64}$/.test(form.ntfyTopic)
                       }
                     >
                       {testNotificationLoading["ntfy"] ? "Sending…" : "Test notification"}
                     </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => handleTestProviderNotification("ntfy-message")}
+                      disabled={
+                        testNotificationLoading["ntfy"] ||
+                        testNotificationLoading["ntfy-message"] ||
+                        !form.ntfyEnabled ||
+                        !form.ntfyTopic ||
+                        !/^[a-zA-Z0-9_-]{1,64}$/.test(form.ntfyTopic)
+                      }
+                    >
+                      {testNotificationLoading["ntfy-message"] ? "Sending…" : "Test message notification"}
+                    </button>
                   </div>
+                  {(testNotificationResult["ntfy"] || testNotificationResult["ntfy-message"]) && (
+                    <div className="notification-test-feedback" aria-live="polite">
+                      {testNotificationResult["ntfy"] && (
+                        <small className={`notification-test-feedback-item notification-test-feedback-item--${testNotificationResult["ntfy"].status}`}>
+                          {testNotificationResult["ntfy"].message}
+                        </small>
+                      )}
+                      {testNotificationResult["ntfy-message"] && (
+                        <small className={`notification-test-feedback-item notification-test-feedback-item--${testNotificationResult["ntfy-message"].status}`}>
+                          {testNotificationResult["ntfy-message"].message}
+                        </small>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -4683,6 +4731,13 @@ export function SettingsModal({
                       {testNotificationLoading["webhook"] ? "Sending…" : "Test notification"}
                     </button>
                   </div>
+                  {testNotificationResult["webhook"] && (
+                    <div className="notification-test-feedback" aria-live="polite">
+                      <small className={`notification-test-feedback-item notification-test-feedback-item--${testNotificationResult["webhook"].status}`}>
+                        {testNotificationResult["webhook"].message}
+                      </small>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

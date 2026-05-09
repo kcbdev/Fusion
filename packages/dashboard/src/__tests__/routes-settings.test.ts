@@ -44,11 +44,12 @@ const mockCentralListProjects = vi.fn().mockResolvedValue([]);
 const mockCentralInit = vi.fn().mockResolvedValue(undefined);
 const mockCentralClose = vi.fn().mockResolvedValue(undefined);
 const mockCentralReconcileProjectStatuses = vi.fn().mockResolvedValue(undefined);
-const { mockPerformUpdateCheck, mockClearUpdateCheckCache, mockExecSync, mockExecFile } = vi.hoisted(() => ({
+const { mockPerformUpdateCheck, mockClearUpdateCheckCache, mockExecSync, mockExecFile, mockGetActiveNotificationService } = vi.hoisted(() => ({
   mockPerformUpdateCheck: vi.fn(),
   mockClearUpdateCheckCache: vi.fn(),
   mockExecSync: vi.fn(),
   mockExecFile: vi.fn(),
+  mockGetActiveNotificationService: vi.fn(),
 }));
 
 vi.mock("../update-check.js", async () => {
@@ -141,6 +142,7 @@ vi.mock("@fusion/engine", async () => {
   promptWithFallback: vi.fn(async (session: { prompt: (message: string) => Promise<void> }, prompt: string) => {
     await session.prompt(prompt);
   }),
+  getActiveNotificationService: mockGetActiveNotificationService,
   AgentReflectionService: class MockAgentReflectionService {
     async generateReflection(): Promise<import("@fusion/core").AgentReflection | null> {
       throw new Error("Reflection service unavailable in route tests");
@@ -1698,6 +1700,7 @@ describe("POST /settings/test-notification", () => {
 
   beforeEach(() => {
     store = createMockStore();
+    mockGetActiveNotificationService.mockReset();
     fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
   });
 
@@ -1732,6 +1735,38 @@ describe("POST /settings/test-notification", () => {
         }),
       }),
     );
+  });
+
+  it("ntfy provider dispatches a message-event pipeline test when messageEventType is provided", async () => {
+    const dispatchSpy = vi.fn().mockResolvedValue(undefined);
+    mockGetActiveNotificationService.mockReturnValue({ dispatch: dispatchSpy });
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ntfyEnabled: true,
+      ntfyTopic: "test-topic",
+    });
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/settings/test-notification",
+      JSON.stringify({ providerId: "ntfy", messageEventType: "message:agent-to-user" }),
+      { "content-type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true });
+    expect(dispatchSpy).toHaveBeenCalledWith(
+      "message:agent-to-user",
+      expect.objectContaining({
+        event: "message:agent-to-user",
+        metadata: expect.objectContaining({
+          fromId: "system",
+          toId: "user",
+          preview: "Fusion test message notification",
+        }),
+      }),
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("ntfy provider uses config override for baseUrl", async () => {

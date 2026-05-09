@@ -41,8 +41,9 @@ import {
   writeProjectMemoryFile,
   updatePiExtensionDisabledIds,
 } from "@fusion/core";
-import { createFnAgent as engineCreateFnAgent } from "@fusion/engine";
+import { createFnAgent as engineCreateFnAgent, getActiveNotificationService } from "@fusion/engine";
 import QRCode from "qrcode";
+import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
@@ -1899,6 +1900,43 @@ export function registerSettingsMemoryRoutes(ctx: ApiRoutesContext, deps: Settin
       const settings = await scopedStore.getSettings();
 
       if (providerId === "ntfy") {
+        const requestedMessageEventType = config.messageEventType ?? body.messageEventType;
+        if (requestedMessageEventType !== undefined) {
+          if (
+            requestedMessageEventType !== "message:agent-to-user"
+            && requestedMessageEventType !== "message:agent-to-agent"
+          ) {
+            throw badRequest("messageEventType must be message:agent-to-user or message:agent-to-agent");
+          }
+
+          const notificationService = getActiveNotificationService();
+          if (!notificationService) {
+            throw new ApiError(502, "Notification service is not active");
+          }
+
+          try {
+            const messageType = requestedMessageEventType.split(":")[1] ?? "agent-to-user";
+            await notificationService.dispatch(requestedMessageEventType, {
+              taskId: undefined,
+              taskTitle: undefined,
+              event: requestedMessageEventType,
+              metadata: {
+                messageId: `test-${crypto.randomUUID()}`,
+                fromId: "system",
+                fromType: "agent",
+                toId: "user",
+                toType: "user",
+                type: messageType,
+                preview: "Fusion test message notification",
+              },
+            });
+            res.json({ success: true });
+            return;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new ApiError(502, `Failed to dispatch message notification: ${message}`);
+          }
+        }
         if (!settings.ntfyEnabled) {
           throw badRequest("ntfy notifications are not enabled");
         }
