@@ -770,7 +770,8 @@ export class ChatManager {
 
     const ambientCandidates = roomMembers
       .map((member) => agentsById.get(member.agentId))
-      .filter((agent): agent is Agent => Boolean(agent) && !seenDirect.has(agent.id));
+      .filter((agent): agent is Agent => agent !== undefined)
+      .filter((agent) => !seenDirect.has(agent.id));
 
     const ambient = ambientCandidates.slice(0, ROOM_AMBIENT_MAX_RESPONDERS);
     if (ambientCandidates.length > ROOM_AMBIENT_MAX_RESPONDERS) {
