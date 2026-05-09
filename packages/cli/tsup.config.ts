@@ -54,6 +54,76 @@ const dashboardClientStub = `<!doctype html>
 </html>
 `;
 
+type BundlePluginEntryOptions = {
+  pluginId: string;
+  srcDir: string;
+  destDir: string;
+  withMcpAsset?: boolean;
+};
+
+async function bundlePluginEntry({ pluginId, srcDir, destDir, withMcpAsset = false }: BundlePluginEntryOptions) {
+  if (existsSync(destDir)) {
+    rmSync(destDir, { recursive: true, force: true });
+  }
+  if (!existsSync(srcDir)) {
+    console.warn(
+      `WARNING: Plugin source not found at ${srcDir}; ${pluginId} will be unavailable in the published package.`,
+    );
+    return;
+  }
+
+  mkdirSync(destDir, { recursive: true });
+  cpSync(join(srcDir, "manifest.json"), join(destDir, "manifest.json"));
+
+  const srcPkg = JSON.parse(readFileSync(join(srcDir, "package.json"), "utf-8"));
+  const destPkg = {
+    name: srcPkg.name,
+    version: srcPkg.version,
+    type: "module",
+    exports: { ".": { import: "./bundled.js" } },
+    private: true,
+  };
+  writeFileSync(join(destDir, "package.json"), JSON.stringify(destPkg, null, 2));
+
+  const srcEntry = join(srcDir, "src", "index.ts");
+  const builtEntry = join(srcDir, "dist", "index.js");
+  const entry = existsSync(srcEntry) ? srcEntry : builtEntry;
+  if (!existsSync(entry)) {
+    throw new Error(`No entry found for ${pluginId} (looked for src/index.ts and dist/index.js)`);
+  }
+
+  await esbuildBuild({
+    entryPoints: [entry],
+    bundle: true,
+    format: "esm",
+    platform: "node",
+    target: "node22",
+    outfile: join(destDir, "bundled.js"),
+    external: ["@fusion/core", "@fusion/engine"],
+    alias: {
+      "@fusion/plugin-sdk": join(__dirname, "..", "plugin-sdk", "src", "index.ts"),
+    },
+    logLevel: "warning",
+  });
+
+  if (withMcpAsset) {
+    const mcpServerAsset = join(srcDir, "src", "mcp-schema-server.cjs");
+    if (!existsSync(mcpServerAsset)) {
+      throw new Error(
+        `[tsup] Missing required bridge asset for ${pluginId} at ${mcpServerAsset}; expected committed source file mcp-schema-server.cjs.`,
+      );
+    }
+    cpSync(mcpServerAsset, join(destDir, "mcp-schema-server.cjs"));
+  }
+
+  const bundledOutput = join(destDir, "bundled.js");
+  if (!existsSync(bundledOutput)) {
+    throw new Error(`[tsup] Missing bundled output for ${pluginId}: expected ${bundledOutput}`);
+  }
+
+  console.log(`Bundled plugin ${pluginId} to dist/plugins/${pluginId}/bundled.js`);
+}
+
 export default defineConfig({
   entry: ["src/bin.ts", "src/extension.ts"],
   format: ["esm"],
@@ -137,20 +207,11 @@ export default defineConfig({
       );
     }
 
-    if (existsSync(dependencyGraphPluginDest)) {
-      rmSync(dependencyGraphPluginDest, { recursive: true, force: true });
-    }
-    if (existsSync(dependencyGraphPluginSrc)) {
-      mkdirSync(dependencyGraphPluginDest, { recursive: true });
-      cpSync(join(dependencyGraphPluginSrc, "manifest.json"), join(dependencyGraphPluginDest, "manifest.json"));
-      cpSync(join(dependencyGraphPluginSrc, "package.json"), join(dependencyGraphPluginDest, "package.json"));
-      cpSync(join(dependencyGraphPluginSrc, "src"), join(dependencyGraphPluginDest, "src"), { recursive: true });
-      console.log("Copied dependency graph plugin to dist/plugins/fusion-plugin-dependency-graph/");
-    } else {
-      console.warn(
-        `WARNING: Dependency graph plugin source not found at ${dependencyGraphPluginSrc}; bundled auto-install will be unavailable.`,
-      );
-    }
+    await bundlePluginEntry({
+      pluginId: "fusion-plugin-dependency-graph",
+      srcDir: dependencyGraphPluginSrc,
+      destDir: dependencyGraphPluginDest,
+    });
 
     if (existsSync(whatsappChatPluginDest)) {
       rmSync(whatsappChatPluginDest, { recursive: true, force: true });
@@ -200,71 +261,12 @@ export default defineConfig({
     // Bundle each runtime plugin into a self-contained ESM file so npm/npx
     // installs can load them without the workspace `@fusion/plugin-sdk`.
     for (const pluginId of RUNTIME_PLUGIN_IDS) {
-      const pluginSrcDir = join(__dirname, "..", "..", "plugins", pluginId);
-      const pluginDestDir = join(__dirname, "dist", "plugins", pluginId);
-
-      if (existsSync(pluginDestDir)) {
-        rmSync(pluginDestDir, { recursive: true, force: true });
-      }
-      if (!existsSync(pluginSrcDir)) {
-        console.warn(
-          `WARNING: Runtime plugin source not found at ${pluginSrcDir}; ${pluginId} will be unavailable in the published package.`,
-        );
-        continue;
-      }
-
-      mkdirSync(pluginDestDir, { recursive: true });
-
-      cpSync(join(pluginSrcDir, "manifest.json"), join(pluginDestDir, "manifest.json"));
-
-      // Stripped package.json: no dependencies (workspace SDK is inlined into
-      // bundled.js), exports point at the bundle. Keeps the published tarball
-      // self-contained without leaking workspace-only metadata.
-      const srcPkg = JSON.parse(readFileSync(join(pluginSrcDir, "package.json"), "utf-8"));
-      const destPkg = {
-        name: srcPkg.name,
-        version: srcPkg.version,
-        type: "module",
-        exports: { ".": { import: "./bundled.js" } },
-        private: true,
-      };
-      writeFileSync(join(pluginDestDir, "package.json"), JSON.stringify(destPkg, null, 2));
-
-      // Pick the best available entry: built dist/index.js if present, else
-      // raw src/index.ts (esbuild can transpile TS).
-      const builtEntry = join(pluginSrcDir, "dist", "index.js");
-      const srcEntry = join(pluginSrcDir, "src", "index.ts");
-      const entry = existsSync(builtEntry) ? builtEntry : srcEntry;
-
-      if (!existsSync(entry)) {
-        console.warn(`WARNING: No entry found for ${pluginId} (looked for dist/index.js and src/index.ts)`);
-        continue;
-      }
-
-      await esbuildBuild({
-        entryPoints: [entry],
-        bundle: true,
-        format: "esm",
-        platform: "node",
-        target: "node22",
-        outfile: join(pluginDestDir, "bundled.js"),
-        // @fusion/core and @fusion/engine are loaded by the host process at
-        // runtime; the SDK is inlined.
-        external: ["@fusion/core", "@fusion/engine"],
-        logLevel: "warning",
+      await bundlePluginEntry({
+        pluginId,
+        srcDir: join(__dirname, "..", "..", "plugins", pluginId),
+        destDir: join(__dirname, "dist", "plugins", pluginId),
+        withMcpAsset: RUNTIME_PLUGINS_WITH_MCP_SCHEMA_SERVER.has(pluginId),
       });
-
-      if (RUNTIME_PLUGINS_WITH_MCP_SCHEMA_SERVER.has(pluginId)) {
-        const mcpServerAsset = join(pluginSrcDir, "src", "mcp-schema-server.cjs");
-        if (!existsSync(mcpServerAsset)) {
-          throw new Error(
-            `[tsup] Missing required bridge asset for ${pluginId} at ${mcpServerAsset}; expected committed source file mcp-schema-server.cjs.`,
-          );
-        }
-        cpSync(mcpServerAsset, join(pluginDestDir, "mcp-schema-server.cjs"));
-      }
-
-      console.log(`Bundled runtime plugin ${pluginId} to dist/plugins/${pluginId}/bundled.js`);
     }
 
     if (existsSync(dashboardClientDest)) {

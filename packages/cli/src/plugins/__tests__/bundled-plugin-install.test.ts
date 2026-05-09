@@ -195,9 +195,9 @@ beforeEach(() => {
 });
 
 describe("resolvePluginEntryPath", () => {
-  it("prefers src/index.ts over bundled.js when both exist in workspace contexts", () => {
+  it("prefers bundled.js when both bundled and source entries exist", () => {
     mockExistsSync.mockImplementation((p: string) => p.endsWith("/src/index.ts") || p.endsWith("/bundled.js"));
-    expect(resolvePluginEntryPath("/tmp/plugin")).toBe("/tmp/plugin/src/index.ts");
+    expect(resolvePluginEntryPath("/tmp/plugin")).toBe("/tmp/plugin/bundled.js");
   });
 
   it("prefers bundled.js when source entry is unavailable", () => {
@@ -205,14 +205,14 @@ describe("resolvePluginEntryPath", () => {
     expect(resolvePluginEntryPath("/tmp/plugin")).toBe("/tmp/plugin/bundled.js");
   });
 
-  it("prefers src/index.ts over dist/index.js in workspace contexts", () => {
+  it("prefers dist/index.js when bundled.js is unavailable", () => {
     mockExistsSync.mockImplementation((p: string) => p.endsWith("/src/index.ts") || p.endsWith("/dist/index.js"));
-    expect(resolvePluginEntryPath("/tmp/plugin")).toBe("/tmp/plugin/src/index.ts");
+    expect(resolvePluginEntryPath("/tmp/plugin")).toBe("/tmp/plugin/dist/index.js");
   });
 
-  it("falls back to dist/index.js when source entry is unavailable", () => {
-    mockExistsSync.mockImplementation((p: string) => p.endsWith("/dist/index.js"));
-    expect(resolvePluginEntryPath("/tmp/plugin")).toBe("/tmp/plugin/dist/index.js");
+  it("falls back to src/index.ts for workspace-dev plugins without build outputs", () => {
+    mockExistsSync.mockImplementation((p: string) => p.endsWith("/src/index.ts"));
+    expect(resolvePluginEntryPath("/tmp/plugin")).toBe("/tmp/plugin/src/index.ts");
   });
 });
 
@@ -412,10 +412,11 @@ describe("ensureBundledDependencyGraphPluginInstalled", () => {
     );
   });
 
-  it("registers Hermes from source entry when both src and dist entries exist", async () => {
+  it("registers Hermes from bundled.js when bundled, src, and dist entries all exist", async () => {
     const manifest = makeManifest({ id: HERMES_PLUGIN_ID, name: "Hermes Runtime" });
     mockExistsSync.mockImplementation((p: string) => {
       if (p.endsWith("manifest.json") && p.includes(HERMES_PLUGIN_ID)) return true;
+      if (p.endsWith("/bundled.js") && p.includes(HERMES_PLUGIN_ID)) return true;
       if (p.endsWith("/src/index.ts") && p.includes(HERMES_PLUGIN_ID)) return true;
       if (p.endsWith("/dist/index.js") && p.includes(HERMES_PLUGIN_ID)) return true;
       return false;
@@ -434,6 +435,6 @@ describe("ensureBundledDependencyGraphPluginInstalled", () => {
 
     expect(result).toBe("installed");
     const registerCall = store.registerPlugin.mock.calls[0]?.[0] as { path: string };
-    expect(registerCall.path).toContain(`${HERMES_PLUGIN_ID}/src/index.ts`);
+    expect(registerCall.path).toContain(`${HERMES_PLUGIN_ID}/bundled.js`);
   });
 });

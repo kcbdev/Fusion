@@ -98,17 +98,20 @@ describe("CLI package.json publishing config", () => {
     );
 
     function extractStringArray(name: string): string[] {
-      const m = tsupRaw.match(new RegExp(`${name}:\\s*\\[([\\s\\S]*?)\\]`, "m"));
-      if (!m) return [];
-      return [...m[1].matchAll(/["']([^"']+)["']/g)].map((mm) => mm[1]);
+      const matches = [...tsupRaw.matchAll(new RegExp(`${name}:\\s*\\[([\\s\\S]*?)\\]`, "gm"))];
+      const values = matches.flatMap((m) =>
+        [...m[1].matchAll(/["']([^"']+)["']/g)].map((mm) => mm[1]),
+      );
+      return [...new Set(values)];
     }
 
     function extractRegexes(name: string): RegExp[] {
-      const m = tsupRaw.match(new RegExp(`${name}:\\s*\\[([\\s\\S]*?)\\]`, "m"));
-      if (!m) return [];
+      const matches = [...tsupRaw.matchAll(new RegExp(`${name}:\\s*\\[([\\s\\S]*?)\\]`, "gm"))];
       // Match `/PATTERN/flags` where PATTERN may contain escaped slashes (`\/`).
-      return [...m[1].matchAll(/\/((?:\\\/|[^/\n])+)\/[gimsuy]*/g)].map(
-        (mm) => new RegExp(mm[1].replace(/\\\//g, "/")),
+      return matches.flatMap((m) =>
+        [...m[1].matchAll(/\/((?:\\\/|[^/\n])+)\/[gimsuy]*/g)].map(
+          (mm) => new RegExp(mm[1].replace(/\\\//g, "/")),
+        ),
       );
     }
 
@@ -125,6 +128,8 @@ describe("CLI package.json publishing config", () => {
       "cpu-features": "transitive dep of dockerode (via ssh2)",
       "@homebridge/node-pty-prebuilt-multiarch":
         "aliased as node-pty in dependencies; the alias entry satisfies the import",
+      "@fusion/core": "plugin-entry bundling external only; not a runtime dep of the CLI bin",
+      "@fusion/engine": "plugin-entry bundling external only; not a runtime dep of the CLI bin",
     };
 
     it("parses externals from tsup.config.ts", () => {

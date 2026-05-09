@@ -158,15 +158,24 @@ describe("CLI bundle output", () => {
     expect(existsSync(join(stagedRoot, "src", "process-manager.ts"))).toBe(true);
   });
 
-  it("dist/plugins/fusion-plugin-dependency-graph/ is staged with a valid manifest", () => {
+  it("dist/plugins/fusion-plugin-dependency-graph/ is staged as bundled runtime output", () => {
     const stagedRoot = join(cliRoot, "dist", "plugins", "fusion-plugin-dependency-graph");
     const manifestPath = join(stagedRoot, "manifest.json");
+    const packageJsonPath = join(stagedRoot, "package.json");
 
     expect(existsSync(manifestPath)).toBe(true);
     const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as { id?: string; name?: string };
     expect(manifest.id).toBe("fusion-plugin-dependency-graph");
     expect(typeof manifest.name).toBe("string");
     expect(manifest.name?.length).toBeGreaterThan(0);
+
+    expect(existsSync(join(stagedRoot, "bundled.js"))).toBe(true);
+    expect(existsSync(join(stagedRoot, "src"))).toBe(false);
+
+    const stagedPkg = JSON.parse(readFileSync(packageJsonPath, "utf-8")) as {
+      exports?: { "."?: { import?: string } };
+    };
+    expect(stagedPkg.exports?.["."]?.import).toBe("./bundled.js");
   });
 
   it("dist/plugins/fusion-plugin-whatsapp-chat/ is staged with a valid manifest", () => {
