@@ -18,7 +18,7 @@ Fusion intentionally uses multiple realtime mechanisms. Keep their ownership bou
 - Endpoint: `GET /api/events`
 - Browser owner: `packages/dashboard/app/sse-bus.ts`
 - Main task consumer: `packages/dashboard/app/hooks/useTasks.ts`
-- Additional consumers: `packages/dashboard/app/App.tsx` (mailbox unread updates)
+- Additional consumers: `packages/dashboard/app/App.tsx` (mailbox unread updates + approval banner trigger handling for new `awaiting-approval` transitions)
 
 Contract: **one `EventSource` per URL**, fan-out via `subscribeSse(...)`.
 

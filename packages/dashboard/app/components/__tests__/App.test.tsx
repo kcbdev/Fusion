@@ -537,7 +537,7 @@ vi.mock("../../hooks/useViewportMode", () => ({
   getViewportMode: () => "desktop",
 }));
 
-import { App } from "../../App";
+import { App, didEnterAwaitingApproval } from "../../App";
 import { AUTH_TOKEN_RECOVERY_REQUIRED_EVENT } from "../../auth";
 import { fetchAuthStatus, fetchSettings, fetchGlobalSettings, fetchTaskDetail, fetchUnreadCount, updateSettings, runScript, fetchScripts, fetchModels, fetchPluginDashboardViews } from "../../api";
 import { __resetShellHostContextForTests } from "../../shell-host";
@@ -684,6 +684,14 @@ describe("App backend-unreachable first-run flow", () => {
   });
 });
 
+describe("didEnterAwaitingApproval", () => {
+  it("returns true only when status newly enters awaiting-approval", () => {
+    expect(didEnterAwaitingApproval("awaiting-approval", "in-progress")).toBe(true);
+    expect(didEnterAwaitingApproval("awaiting-approval", "awaiting-approval")).toBe(false);
+    expect(didEnterAwaitingApproval("done", "in-progress")).toBe(false);
+  });
+});
+
 describe("App mailbox unread count", () => {
   it("logs a warning when unread count fetch fails and keeps the zero-count fallback", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -735,6 +743,156 @@ describe("App mailbox unread count", () => {
       expect(fetchUnreadCount).toHaveBeenCalledTimes(2);
       expect(fetchUnreadCount).toHaveBeenLastCalledWith("proj_123");
     });
+  });
+});
+
+describe("App approval notification banner", () => {
+  it("shows banner when a task newly enters awaiting-approval", async () => {
+    mockUseTasks.mockImplementation(() => ({
+      tasks: [{ id: "FN-1", title: "Task", description: "x", status: "in-progress", column: "in-progress", dependencies: [], steps: [], currentStep: 0, log: [], createdAt: "", updatedAt: "" }],
+      createTask: mockCreateTask,
+      moveTask: vi.fn(),
+      deleteTask: vi.fn(),
+      mergeTask: vi.fn(),
+      retryTask: vi.fn(),
+      updateTask: vi.fn(),
+      duplicateTask: vi.fn(),
+      archiveTask: vi.fn(),
+      unarchiveTask: vi.fn(),
+      archiveAllDone: vi.fn(),
+      pauseTask: vi.fn(),
+      resetTask: vi.fn(),
+      loadArchivedTasks: vi.fn(),
+      ingestCreatedTasks: vi.fn(),
+      lastFetchTimeMs: Date.now(),
+    }));
+
+    render(<App />);
+
+    await waitFor(() => expect(mockSubscribeSse).toHaveBeenCalled());
+
+    const mailboxSubscriptionCall = mockSubscribeSse.mock.calls.find(
+      ([url, sub]) => String(url).startsWith("/api/events") && typeof (sub as { events?: Record<string, unknown> })?.events?.["task:updated"] === "function",
+    );
+    const subscriptionConfig = mailboxSubscriptionCall?.[1] as {
+      events: Record<string, (event: MessageEvent) => void>;
+    };
+
+    await act(async () => {
+      subscriptionConfig.events["task:updated"](
+        new MessageEvent("task:updated", {
+          data: JSON.stringify({ id: "FN-1", status: "awaiting-approval", updatedAt: "2026-05-05T10:00:00.000Z" }),
+        }),
+      );
+    });
+
+    expect(screen.getByLabelText("Approval requests")).toBeInTheDocument();
+  });
+
+  it("persists dismissals and suppresses repeat alerts for the same approval item", async () => {
+    mockUseTasks.mockImplementation(() => ({
+      tasks: [{ id: "FN-4", title: "Task", description: "x", status: "in-progress", column: "in-progress", dependencies: [], steps: [], currentStep: 0, log: [], createdAt: "", updatedAt: "" }],
+      createTask: mockCreateTask,
+      moveTask: vi.fn(),
+      deleteTask: vi.fn(),
+      mergeTask: vi.fn(),
+      retryTask: vi.fn(),
+      updateTask: vi.fn(),
+      duplicateTask: vi.fn(),
+      archiveTask: vi.fn(),
+      unarchiveTask: vi.fn(),
+      archiveAllDone: vi.fn(),
+      pauseTask: vi.fn(),
+      resetTask: vi.fn(),
+      loadArchivedTasks: vi.fn(),
+      ingestCreatedTasks: vi.fn(),
+      lastFetchTimeMs: Date.now(),
+    }));
+
+    const { unmount } = render(<App />);
+
+    await waitFor(() => expect(mockSubscribeSse).toHaveBeenCalled());
+
+    const mailboxSubscriptionCall = mockSubscribeSse.mock.calls.find(
+      ([url, sub]) => String(url).startsWith("/api/events") && typeof (sub as { events?: Record<string, unknown> })?.events?.["task:updated"] === "function",
+    );
+    const subscriptionConfig = mailboxSubscriptionCall?.[1] as {
+      events: Record<string, (event: MessageEvent) => void>;
+    };
+
+    await act(async () => {
+      subscriptionConfig.events["task:updated"](
+        new MessageEvent("task:updated", {
+          data: JSON.stringify({ id: "FN-4", status: "awaiting-approval", updatedAt: "2026-05-05T10:00:00.000Z" }),
+        }),
+      );
+    });
+
+    fireEvent.click(screen.getByLabelText("Dismiss approval notification banner"));
+    expect(screen.queryByLabelText("Approval requests")).toBeNull();
+
+    unmount();
+    render(<App />);
+
+    const latestSubscription = mockSubscribeSse.mock.calls
+      .slice()
+      .reverse()
+      .find(([, sub]) => typeof (sub as { events?: Record<string, unknown> })?.events?.["task:updated"] === "function");
+    const latestConfig = latestSubscription?.[1] as {
+      events: Record<string, (event: MessageEvent) => void>;
+    };
+
+    await act(async () => {
+      latestConfig.events["task:updated"](
+        new MessageEvent("task:updated", {
+          data: JSON.stringify({ id: "FN-4", status: "awaiting-approval", updatedAt: "2026-05-05T10:00:00.000Z" }),
+        }),
+      );
+    });
+
+    expect(screen.queryByLabelText("Approval requests")).toBeNull();
+  });
+
+  it("does not show banner for already-awaiting tasks", async () => {
+    mockUseTasks.mockImplementation(() => ({
+      tasks: [{ id: "FN-2", title: "Task", description: "x", status: "awaiting-approval", column: "triage", dependencies: [], steps: [], currentStep: 0, log: [], createdAt: "", updatedAt: "" }],
+      createTask: mockCreateTask,
+      moveTask: vi.fn(),
+      deleteTask: vi.fn(),
+      mergeTask: vi.fn(),
+      retryTask: vi.fn(),
+      updateTask: vi.fn(),
+      duplicateTask: vi.fn(),
+      archiveTask: vi.fn(),
+      unarchiveTask: vi.fn(),
+      archiveAllDone: vi.fn(),
+      pauseTask: vi.fn(),
+      resetTask: vi.fn(),
+      loadArchivedTasks: vi.fn(),
+      ingestCreatedTasks: vi.fn(),
+      lastFetchTimeMs: Date.now(),
+    }));
+
+    render(<App />);
+
+    await waitFor(() => expect(mockSubscribeSse).toHaveBeenCalled());
+
+    const mailboxSubscriptionCall = mockSubscribeSse.mock.calls.find(
+      ([url, sub]) => String(url).startsWith("/api/events") && typeof (sub as { events?: Record<string, unknown> })?.events?.["task:updated"] === "function",
+    );
+    const subscriptionConfig = mailboxSubscriptionCall?.[1] as {
+      events: Record<string, (event: MessageEvent) => void>;
+    };
+
+    await act(async () => {
+      subscriptionConfig.events["task:updated"](
+        new MessageEvent("task:updated", {
+          data: JSON.stringify({ id: "FN-2", status: "awaiting-approval", updatedAt: "2026-05-05T10:00:00.000Z" }),
+        }),
+      );
+    });
+
+    expect(screen.queryByLabelText("Approval requests")).toBeNull();
   });
 });
 
