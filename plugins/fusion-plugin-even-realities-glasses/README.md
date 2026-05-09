@@ -4,10 +4,9 @@
 
 ## Scope (v1)
 
-- Read board/task status through Fusion dashboard HTTP APIs (`/api/tasks*`)
 - Quick capture text into new tasks
 - Polling-based task transition notifications
-- Agent actions: start work (`in-progress`) and request review (`in-review`)
+- Selected task workflow actions from glasses
 
 Out of scope in v1: missions, roadmaps, search, multi-project routing, cloud/remote deployment orchestration.
 
@@ -50,27 +49,77 @@ curl -X POST http://localhost:4040/api/plugins/fusion-plugin-even-realities-glas
   -d '{"text":"hey fusion, file a bug about the merge gate"}'
 ```
 
-Response:
+## Agent actions
+
+All action routes require `Authorization: Bearer <apiKey>` and `enableAgentActions=true`.
+
+### Endpoints
+
+| Method | Path |
+| --- | --- |
+| POST | `/actions/start-work` |
+| POST | `/actions/request-review` |
+| POST | `/actions/approve-plan` |
+| POST | `/actions/accept-review` |
+| POST | `/actions/return-to-agent` |
+| POST | `/actions/retry` |
+
+Request body:
+
+```json
+{ "taskId": "FN-123" }
+```
+
+Success response:
 
 ```json
 {
-  "task": {
-    "id": "FN-1234",
-    "description": "file a bug about the merge gate\nfile a bug about the merge gate",
-    "column": "triage"
-  },
-  "card": {
-    "id": "task-FN-1234",
-    "kind": "task",
-    "title": "FN-1234: file a bug about the merge gate",
-    "bodyLines": [
-      "file a bug about the merge gate\nfile a bug about the merge gate",
-      "Column: triage"
-    ],
-    "accentColor": "yellow"
-  }
+  "task": { "id": "FN-123" },
+  "card": { "kind": "task", "taskId": "FN-123" }
 }
 ```
+
+Error envelope:
+
+```json
+{ "error": "message" }
+```
+
+Status mapping:
+- `401`: missing/wrong API key
+- `403`: `enableAgentActions` disabled
+- `400`: invalid input (for example empty `taskId`)
+- `404`: task not found
+- `409`: action not allowed for current column/status
+- `500`: unexpected internal error
+
+Preconditions and mutations:
+
+| Action | Allowed preconditions | Mutation |
+| --- | --- | --- |
+| `start-work` | `column ∈ {triage, todo}` and `status` not in `{planning, needs-replan, awaiting-approval, awaiting-user-review}` | `moveTask(id, "in-progress")` |
+| `request-review` | `column === "in-progress"` | `moveTask(id, "in-review")` |
+| `approve-plan` | `column === "triage"` and `status === "awaiting-approval"` | `moveTask(id, "todo")` then `updateTask(id, { status: undefined })` |
+| `accept-review` | `column === "in-review"` | `updateTask(id, { status: null, assigneeUserId: null })` |
+| `return-to-agent` | `column === "in-review"` | `updateTask(id, { assigneeUserId: null, status: null, assignedAgentId: null })` then `moveTask(id, "todo")` |
+| `retry` (in-review branch) | `column === "in-review"` and `status ∈ {failed, stuck-killed}` | `updateTask(id, { status: null, error: null, stuckKillCount: 0, mergeRetries: 0 })` |
+| `retry` (triage/planning branch) | `column === "triage"` and (`status ∈ {failed, planning, needs-replan}` or `(stuckKillCount ?? 0) > 0`) | `updateTask(id, { status: "needs-replan", error: null, worktree: null, branch: null, baseBranch: null, baseCommitSha: null, stuckKillCount: 0, recoveryRetryCount: null, nextRecoveryAt: null })` |
+| `retry` (general failed branch) | `status ∈ {failed, stuck-killed}` and not covered by branches above | `updateTask(id, { status: null, error: null, worktree: null, branch: null, baseBranch: null, baseCommitSha: null, stuckKillCount: 0, recoveryRetryCount: null, nextRecoveryAt: null })` then `moveTask(id, "todo")` |
+
+Example:
+
+```bash
+curl -X POST http://localhost:4040/api/plugins/fusion-plugin-even-realities-glasses/actions/start-work \
+  -H "Authorization: Bearer <apiKey>" \
+  -H "Content-Type: application/json" \
+  -d '{"taskId":"FN-123"}'
+```
+
+### Known limitations (v1)
+
+- `startWork` does not allocate a worktree directly. Tasks can enter `in-progress` with `worktree: null`; executor `createWorktree` flow allocates on first dispatch.
+- `approvePlan` performs move-then-clear; re-fetched responses may present `task.status == null`.
+- `retry` triage/planning branch does not delete on-disk `PROMPT.md` and does not run dashboard retry step-reset / branch-inspection logic.
 
 ## Notifications
 

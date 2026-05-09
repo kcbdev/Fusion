@@ -1,17 +1,11 @@
 import { definePlugin } from "@fusion/plugin-sdk";
 import type { FusionPlugin, PluginContext, PluginRouteDefinition, PluginRouteResponse } from "@fusion/plugin-sdk";
-import { requestReview, startWork } from "./agent-actions.js";
 import { FusionApiClient } from "./fusion-api-client.js";
 import { createNotifier } from "./notifier.js";
 import { quickCaptureRoutes } from "./routes/quick-capture-routes.js";
 import { createNotificationRoutes } from "./routes/notification-routes.js";
-import {
-  agentActionsEnabled,
-  getFusionBaseUrl,
-  getFusionToken,
-  getNotifyColumns,
-  settingsSchema,
-} from "./settings.js";
+import { agentActionRoutes } from "./routes/agent-action-routes.js";
+import { getFusionBaseUrl, getFusionToken, getNotifyColumns, settingsSchema } from "./settings.js";
 import { StubGlassesTransport } from "./transport.js";
 
 export type PluginDb = {
@@ -63,30 +57,6 @@ const coreRoutes: PluginRouteDefinition[] = [
   },
   {
     method: "POST",
-    path: "/actions/start-work",
-    handler: async (req, ctx) => {
-      const { instance, error } = getInstanceOrResponse(ctx);
-      if (!instance) return error as PluginRouteResponse;
-      const taskId = typeof (req as { body?: { taskId?: unknown } }).body?.taskId === "string" ? (req as { body?: { taskId?: string } }).body?.taskId : undefined;
-      if (!taskId) return { status: 400, body: { error: "taskId is required" } };
-      const card = await startWork(taskId, { apiClient: instance.client, enableAgentActions: agentActionsEnabled(ctx.settings), logger: ctx.logger });
-      return { status: 200, body: { ok: true, card: card ?? null } };
-    },
-  },
-  {
-    method: "POST",
-    path: "/actions/request-review",
-    handler: async (req, ctx) => {
-      const { instance, error } = getInstanceOrResponse(ctx);
-      if (!instance) return error as PluginRouteResponse;
-      const taskId = typeof (req as { body?: { taskId?: unknown } }).body?.taskId === "string" ? (req as { body?: { taskId?: string } }).body?.taskId : undefined;
-      if (!taskId) return { status: 400, body: { error: "taskId is required" } };
-      const card = await requestReview(taskId, { apiClient: instance.client, enableAgentActions: agentActionsEnabled(ctx.settings), logger: ctx.logger });
-      return { status: 200, body: { ok: true, card: card ?? null } };
-    },
-  },
-  {
-    method: "POST",
     path: "/reconnect",
     handler: async (_req, ctx) => {
       const { instance, error } = getInstanceOrResponse(ctx);
@@ -111,7 +81,7 @@ const plugin: FusionPlugin = definePlugin({
     settingsSchema,
   },
   state: "installed",
-  routes: [...coreRoutes, ...quickCaptureRoutes, ...notificationRoutes],
+  routes: [...coreRoutes, ...quickCaptureRoutes, ...agentActionRoutes, ...notificationRoutes],
   hooks: {
     onSchemaInit: (db) => {
       (db as PluginDb).exec(`
