@@ -1,5 +1,5 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatSession } from "@fusion/core";
 import * as apiModule from "../../api";
 import { FN_AGENT_ID, useQuickChat } from "../useQuickChat";
@@ -36,6 +36,14 @@ function makeSession(overrides: Partial<ChatSession> & Pick<ChatSession, "id" | 
   };
 }
 
+const setDocumentVisibilityState = (state: DocumentVisibilityState) => {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    get: () => state,
+  });
+  fireEvent(document, new Event("visibilitychange"));
+};
+
 describe("useQuickChat", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -50,6 +58,11 @@ describe("useQuickChat", () => {
     });
     mockStreamChatResponse.mockReturnValue({ close: vi.fn(), isConnected: () => true });
     mockCancelChatResponse.mockResolvedValue({ success: true });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.useRealTimers();
   });
 
   it("sendMessage returns a promise that resolves on stream completion", async () => {
@@ -871,6 +884,131 @@ describe("useQuickChat", () => {
 
     await waitFor(() => {
       expect(addToast).toHaveBeenCalledWith("No API key for provider: openai-codex", "error");
+    });
+  });
+
+  it("suppresses Load failed toast when tab is hidden", async () => {
+    const existingSession = makeSession({ id: "session-existing", agentId: "agent-001" });
+    const addToast = vi.fn();
+    let onErrorHandler: ((data: string) => void) | undefined;
+
+    mockFetchResumeChatSession.mockResolvedValueOnce({ session: existingSession });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+
+    mockStreamChatResponse.mockImplementation((_sessionId, _content, handlers) => {
+      onErrorHandler = handlers.onError;
+      return { close: vi.fn(), isConnected: () => true };
+    });
+
+    setDocumentVisibilityState("hidden");
+    const { result } = renderHook(() => useQuickChat("proj-123", addToast));
+
+    await act(async () => {
+      await result.current.switchSession("agent-001");
+    });
+
+    await act(async () => {
+      const sendPromise = result.current.sendMessage("Hello");
+      onErrorHandler?.("Load failed");
+      await sendPromise;
+    });
+
+    await waitFor(() => {
+      expect(addToast).not.toHaveBeenCalledWith("Load failed", "error");
+    });
+  });
+
+  it("shows Load failed toast when tab remains visible", async () => {
+    const existingSession = makeSession({ id: "session-existing", agentId: "agent-001" });
+    const addToast = vi.fn();
+    let onErrorHandler: ((data: string) => void) | undefined;
+
+    mockFetchResumeChatSession.mockResolvedValueOnce({ session: existingSession });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+
+    mockStreamChatResponse.mockImplementation((_sessionId, _content, handlers) => {
+      onErrorHandler = handlers.onError;
+      return { close: vi.fn(), isConnected: () => true };
+    });
+
+    setDocumentVisibilityState("visible");
+    const { result } = renderHook(() => useQuickChat("proj-123", addToast));
+
+    await act(async () => {
+      await result.current.switchSession("agent-001");
+    });
+
+    await expect(act(async () => {
+      const sendPromise = result.current.sendMessage("Hello");
+      onErrorHandler?.("Load failed");
+      await sendPromise;
+    })).rejects.toThrow("Load failed");
+
+    await waitFor(() => {
+      expect(addToast).toHaveBeenCalledWith("Load failed", "error");
+    });
+  });
+
+  it("suppresses Failed to fetch shortly after hidden to visible transition", async () => {
+    const existingSession = makeSession({ id: "session-existing", agentId: "agent-001" });
+    const addToast = vi.fn();
+    let onErrorHandler: ((data: string) => void) | undefined;
+
+    mockFetchResumeChatSession.mockResolvedValueOnce({ session: existingSession });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+
+    mockStreamChatResponse.mockImplementation((_sessionId, _content, handlers) => {
+      onErrorHandler = handlers.onError;
+      return { close: vi.fn(), isConnected: () => true };
+    });
+
+    setDocumentVisibilityState("hidden");
+    const { result } = renderHook(() => useQuickChat("proj-123", addToast));
+
+    await act(async () => {
+      await result.current.switchSession("agent-001");
+    });
+
+    await act(async () => {
+      setDocumentVisibilityState("visible");
+      const sendPromise = result.current.sendMessage("Hello");
+      onErrorHandler?.("Failed to fetch");
+      await sendPromise;
+    });
+
+    await waitFor(() => {
+      expect(addToast).not.toHaveBeenCalledWith("Failed to fetch", "error");
+    });
+  });
+
+  it("still shows toast for non-suspension errors regardless of visibility", async () => {
+    const existingSession = makeSession({ id: "session-existing", agentId: "agent-001" });
+    const addToast = vi.fn();
+    let onErrorHandler: ((data: string) => void) | undefined;
+
+    mockFetchResumeChatSession.mockResolvedValueOnce({ session: existingSession });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+
+    mockStreamChatResponse.mockImplementation((_sessionId, _content, handlers) => {
+      onErrorHandler = handlers.onError;
+      return { close: vi.fn(), isConnected: () => true };
+    });
+
+    setDocumentVisibilityState("hidden");
+    const { result } = renderHook(() => useQuickChat("proj-123", addToast));
+
+    await act(async () => {
+      await result.current.switchSession("agent-001");
+    });
+
+    await expect(act(async () => {
+      const sendPromise = result.current.sendMessage("Hello");
+      onErrorHandler?.("Request failed: 500");
+      await sendPromise;
+    })).rejects.toThrow("Request failed: 500");
+
+    await waitFor(() => {
+      expect(addToast).toHaveBeenCalledWith("Request failed: 500", "error");
     });
   });
 

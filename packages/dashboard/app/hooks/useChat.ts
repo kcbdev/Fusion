@@ -35,6 +35,7 @@ export interface ChatSessionInfo {
 export type { ChatMessageInfo, FallbackInfo, ToolCallInfo } from "./chatTypes";
 import type { ChatMessageInfo, FallbackInfo, ToolCallInfo } from "./chatTypes";
 import { createChatStreamHandlers } from "./createChatStreamHandlers";
+import { isLikelyTabSuspensionError, useTabVisibilitySuspension } from "./visibilitySuspension";
 
 export interface UseChatReturn {
   // Session state
@@ -488,6 +489,7 @@ export function useChat(
   const sendMessageRef = useRef<(content: string, attachments?: File[]) => void>(() => {
     // no-op until sendMessage is defined
   });
+  const visibilitySuspension = useTabVisibilitySuspension();
 
   const sendMessage = useCallback(
     (content: string, attachments?: File[]) => {
@@ -591,7 +593,19 @@ export function useChat(
           isStreamingRef.current = false;
           streamRef.current = null;
           console.error("[useChat] Stream error:", data);
-          addToast?.(typeof data === "string" && data.trim() ? data : "Failed to get response", "error");
+          const errorMessage = typeof data === "string" && data.trim() ? data : "Failed to get response";
+          const shouldSuppressSuspensionError = typeof data === "string"
+            && isLikelyTabSuspensionError(data)
+            && (visibilitySuspension.isHiddenNow() || visibilitySuspension.wasRecentlyHidden(5000));
+
+          if (shouldSuppressSuspensionError) {
+            console.info("[useChat] Suppressed tab-suspension stream error:", data);
+            if (activeSession?.id) {
+              void loadMessages(activeSession.id);
+            }
+          } else {
+            addToast?.(errorMessage, "error");
+          }
 
           if (!cancelledByUserRef.current) {
             const queuedMessage = pendingMessageRef.current.trim();
@@ -606,7 +620,7 @@ export function useChat(
 
       streamRef.current = streamChatResponse(activeSession.id, content, handlers, attachments, projectId);
     },
-    [activeSession, projectId, refreshSessions, addToast],
+    [activeSession, projectId, refreshSessions, addToast, loadMessages, visibilitySuspension],
   );
 
   sendMessageRef.current = sendMessage;

@@ -20,6 +20,7 @@ export const FN_AGENT_ID = "__fn_agent__";
 export type { ChatMessageInfo, FallbackInfo, ToolCallInfo } from "./chatTypes";
 import type { ChatMessageInfo, FallbackInfo, ToolCallInfo } from "./chatTypes";
 import { createChatStreamHandlers } from "./createChatStreamHandlers";
+import { isLikelyTabSuspensionError, useTabVisibilitySuspension } from "./visibilitySuspension";
 
 interface ModelSelection {
   modelProvider?: string;
@@ -539,6 +540,7 @@ export function useQuickChat(
   }, []);
 
   const sendMessageRef = useRef<(content: string, attachments?: File[]) => Promise<void>>(() => Promise.resolve());
+  const visibilitySuspension = useTabVisibilitySuspension();
 
   /**
    * Send a message using SSE streaming.
@@ -647,8 +649,19 @@ export function useQuickChat(
             isStreamingRef.current = false;
             streamRef.current = null;
             console.error("[useQuickChat] Stream error:", data);
-            addToast?.(typeof data === "string" && data.trim() ? data : "Failed to get response", "error");
-            sendCompletionRef.current?.reject(new Error(typeof data === "string" ? data : "Failed to get response"));
+
+            const errorMessage = typeof data === "string" && data.trim() ? data : "Failed to get response";
+            const shouldSuppressSuspensionError = typeof data === "string"
+              && isLikelyTabSuspensionError(data)
+              && (visibilitySuspension.isHiddenNow() || visibilitySuspension.wasRecentlyHidden(5000));
+
+            if (shouldSuppressSuspensionError) {
+              console.info("[useQuickChat] Suppressed tab-suspension stream error:", data);
+              sendCompletionRef.current?.resolve();
+            } else {
+              addToast?.(errorMessage, "error");
+              sendCompletionRef.current?.reject(new Error(errorMessage));
+            }
             sendCompletionRef.current = null;
 
             if (!cancelledByUserRef.current) {
@@ -672,7 +685,7 @@ export function useQuickChat(
       void completionPromise.catch(() => {});
       return completionPromise;
     },
-    [activeSession, projectId, addToast, reloadMessages],
+    [activeSession, projectId, addToast, reloadMessages, visibilitySuspension],
   );
 
   sendMessageRef.current = sendMessage;
