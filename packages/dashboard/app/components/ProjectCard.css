@@ -25,6 +25,12 @@
   transform: translateY(0);
 }
 
+.project-card:focus-visible {
+  outline: none;
+  border-color: var(--todo);
+  box-shadow: var(--focus-ring-strong);
+}
+
 .project-card-loading {
   opacity: 0.7;
   pointer-events: none;
@@ -177,6 +183,12 @@
   background: var(--card-hover);
   border-color: var(--text-dim);
   color: var(--text);
+}
+
+.project-card-action:focus-visible {
+  outline: none;
+  border-color: var(--todo);
+  box-shadow: var(--focus-ring-strong);
 }
 
 .project-card-action:disabled {

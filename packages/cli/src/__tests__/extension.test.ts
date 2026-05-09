@@ -1473,16 +1473,33 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       const tool = api.tools.get("fn_research_run")!;
       const researchStore = store.getResearchStore();
 
-      setTimeout(() => {
+      const promoteRun = () => {
         const queuedRun = researchStore.listRuns({ limit: 1 })[0];
         if (!queuedRun) {
-          return;
+          return false;
         }
+
         researchStore.updateRun(queuedRun.id, { status: "running" });
         researchStore.updateRun(queuedRun.id, {
           status: "completed",
           results: { summary: "done", findings: [{ heading: "h1", content: "f1", sources: [] }], citations: [] },
         });
+        return true;
+      };
+
+      setTimeout(() => {
+        if (promoteRun()) {
+          return;
+        }
+
+        const retryTimer = setInterval(() => {
+          if (!promoteRun()) {
+            return;
+          }
+          clearInterval(retryTimer);
+        }, 25);
+
+        setTimeout(() => clearInterval(retryTimer), 500);
       }, 25);
 
       const result = await tool.execute(

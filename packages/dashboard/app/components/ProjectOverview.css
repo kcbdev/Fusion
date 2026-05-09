@@ -175,6 +175,12 @@
   box-shadow: var(--shadow-sm);
 }
 
+.project-filter-tab:focus-visible {
+  outline: none;
+  border-color: var(--todo);
+  box-shadow: var(--focus-ring-strong);
+}
+
 .project-filter-tab.has-errors {
   color: var(--color-error);
 }
