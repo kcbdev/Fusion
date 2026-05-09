@@ -16,6 +16,7 @@ import { SessionNotificationBanner } from "./components/SessionNotificationBanne
 import { CliBinaryInstallBanner } from "./components/CliBinaryInstallBanner";
 import { SetupWarningBanner } from "./components/SetupWarningBanner";
 import { UpdateAvailableBanner } from "./components/UpdateAvailableBanner";
+import { ApprovalNotificationBanner } from "./components/ApprovalNotificationBanner";
 import { OnboardingResumeCard } from "./components/OnboardingResumeCard";
 import { PostOnboardingRecommendations } from "./components/PostOnboardingRecommendations";
 import {
@@ -126,6 +127,53 @@ const ACTIVE_CHAT_SESSION_STORAGE_KEY = "kb-chat-active-session";
 const WORKING_BRANCH_FILTER_STORAGE_KEY = "kb-dashboard-working-branch-filter";
 const BASE_BRANCH_FILTER_STORAGE_KEY = "kb-dashboard-base-branch-filter";
 const NO_BRANCH_FILTER_VALUE = "__fusion:no-branch__";
+const APPROVAL_BANNER_DISMISSED_STORAGE_KEY = "fusion:approval-banner-dismissed";
+
+interface ApprovalBannerCandidate {
+  dedupeKey: string;
+  updatedAtMs: number;
+}
+
+export function didEnterAwaitingApproval(nextStatus: string | undefined, previousStatus: string | undefined): boolean {
+  return nextStatus === "awaiting-approval" && previousStatus !== "awaiting-approval";
+}
+
+function parseDateMs(value: string | undefined): number {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function loadApprovalBannerDismissals(): Map<string, number> {
+  if (typeof window === "undefined") return new Map();
+  try {
+    const raw = window.localStorage.getItem(APPROVAL_BANNER_DISMISSED_STORAGE_KEY);
+    if (!raw) return new Map();
+    const parsed = JSON.parse(raw) as Record<string, number>;
+    const map = new Map<string, number>();
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        map.set(key, value);
+      }
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+function persistApprovalBannerDismissals(map: Map<string, number>): void {
+  if (typeof window === "undefined") return;
+  try {
+    const data: Record<string, number> = {};
+    for (const [key, value] of map) {
+      data[key] = value;
+    }
+    window.localStorage.setItem(APPROVAL_BANNER_DISMISSED_STORAGE_KEY, JSON.stringify(data));
+  } catch {
+    // no-op
+  }
+}
 
 function buildRemoteDashboardUrl(serverUrl: string, authToken?: string | null): string {
   const url = new URL(serverUrl);
@@ -385,6 +433,10 @@ function AppInner() {
   const [mailboxUnreadCount, setMailboxUnreadCount] = useState(0);
   const [mailboxPendingApprovalCount, setMailboxPendingApprovalCount] = useState(0);
   const [chatHasUnreadResponse, setChatHasUnreadResponse] = useState(false);
+  const [approvalBannerCandidate, setApprovalBannerCandidate] = useState<ApprovalBannerCandidate | null>(null);
+  const taskStatusByIdRef = useRef<Map<string, string | undefined>>(new Map());
+  const seenApprovalKeysRef = useRef<Set<string>>(new Set());
+  const approvalDismissalsRef = useRef<Map<string, number>>(loadApprovalBannerDismissals());
 
   const refreshMailboxUnreadCount = useCallback(() => {
     fetchUnreadCount(currentProject?.id)
@@ -397,6 +449,19 @@ function AppInner() {
       });
   }, [currentProject?.id]);
 
+  useEffect(() => {
+    const next = new Map<string, string | undefined>();
+    const nextSeen = new Set<string>();
+    for (const task of tasks) {
+      next.set(task.id, task.status);
+      if (task.status === "awaiting-approval") {
+        nextSeen.add(`task:${task.id}`);
+      }
+    }
+    taskStatusByIdRef.current = next;
+    seenApprovalKeysRef.current = nextSeen;
+  }, [tasks]);
+
   // Initial fetch + live updates from mailbox SSE events.
   useEffect(() => {
     refreshMailboxUnreadCount();
@@ -407,15 +472,70 @@ function AppInner() {
     }
     const query = params.size > 0 ? `?${params.toString()}` : "";
 
+    const triggerApprovalBanner = (candidate: ApprovalBannerCandidate) => {
+      const dismissedAt = approvalDismissalsRef.current.get(candidate.dedupeKey);
+      if (dismissedAt !== undefined && candidate.updatedAtMs <= dismissedAt) {
+        return;
+      }
+      setApprovalBannerCandidate(candidate);
+    };
+
     return subscribeSse(`/api/events${query}`, {
+      onReconnect: refreshMailboxUnreadCount,
       events: {
         "message:sent": refreshMailboxUnreadCount,
         "message:received": refreshMailboxUnreadCount,
         "message:read": refreshMailboxUnreadCount,
         "message:deleted": refreshMailboxUnreadCount,
-        "approval:requested": refreshMailboxUnreadCount,
+        "approval:requested": (event: MessageEvent) => {
+          refreshMailboxUnreadCount();
+          try {
+            const payload = JSON.parse(event.data) as { id?: string; taskId?: string; updatedAt?: string; createdAt?: string };
+            const dedupeKey = payload.id ? `approval:${payload.id}` : payload.taskId ? `task:${payload.taskId}` : undefined;
+            if (!dedupeKey || seenApprovalKeysRef.current.has(dedupeKey)) {
+              return;
+            }
+            seenApprovalKeysRef.current.add(dedupeKey);
+            triggerApprovalBanner({
+              dedupeKey,
+              updatedAtMs: parseDateMs(payload.updatedAt ?? payload.createdAt),
+            });
+          } catch {
+            // no-op
+          }
+        },
         "approval:updated": refreshMailboxUnreadCount,
         "approval:decided": refreshMailboxUnreadCount,
+        "task:updated": (event: MessageEvent) => {
+          try {
+            const payload = JSON.parse(event.data) as { id?: string; status?: string; updatedAt?: string };
+            if (!payload?.id) {
+              return;
+            }
+            const dedupeKey = `task:${payload.id}`;
+            const previousStatus = taskStatusByIdRef.current.get(payload.id);
+            taskStatusByIdRef.current.set(payload.id, payload.status);
+            if (payload.status !== "awaiting-approval") {
+              seenApprovalKeysRef.current.delete(dedupeKey);
+              approvalDismissalsRef.current.delete(dedupeKey);
+              persistApprovalBannerDismissals(approvalDismissalsRef.current);
+              return;
+            }
+            if (seenApprovalKeysRef.current.has(dedupeKey)) {
+              return;
+            }
+            if (didEnterAwaitingApproval(payload.status, previousStatus)) {
+              seenApprovalKeysRef.current.add(dedupeKey);
+              triggerApprovalBanner({
+                dedupeKey,
+                updatedAtMs: parseDateMs(payload.updatedAt),
+              });
+              refreshMailboxUnreadCount();
+            }
+          } catch {
+            // no-op
+          }
+        },
       },
     });
   }, [currentProject?.id, refreshMailboxUnreadCount]);
@@ -1441,6 +1561,20 @@ function AppInner() {
           hasAiProvider={hasAiProvider}
           hasGithub={hasGithub}
           onDismiss={handleDismissSetupWarning}
+        />
+      )}
+      {viewMode === "project" && currentProject && approvalBannerCandidate && (
+        <ApprovalNotificationBanner
+          pendingCount={Math.max(mailboxPendingApprovalCount, 1)}
+          onOpenMailbox={() => handleTaskViewChange("mailbox")}
+          onDismiss={() => {
+            approvalDismissalsRef.current.set(
+              approvalBannerCandidate.dedupeKey,
+              Math.max(Date.now(), approvalBannerCandidate.updatedAtMs),
+            );
+            persistApprovalBannerDismissals(approvalDismissalsRef.current);
+            setApprovalBannerCandidate(null);
+          }}
         />
       )}
       <div
