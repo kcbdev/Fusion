@@ -711,8 +711,8 @@
 }
 
 .agent-card--clickable:focus-visible {
-  outline: 2px solid var(--focus-ring, var(--state-active-border));
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
 }
 
 .agent-empty {
