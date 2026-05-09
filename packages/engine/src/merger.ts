@@ -2563,6 +2563,10 @@ async function buildDeterministicMergeMessage(params: {
  *
  * @internal Exported for integration tests only — not part of the public API.
  */
+type MergeFinalizeResult =
+  | { ok: true; reason: "completed" | "head-task-trailer" | "branch-already-merged" }
+  | { ok: false; reason: "fix-produced-no-content" | "unknown-phantom" };
+
 export async function commitOrAmendMergeWithFixes(
   rootDir: string,
   taskId: string,
@@ -2577,7 +2581,7 @@ export async function commitOrAmendMergeWithFixes(
   aiSummary?: string | null,
   aiSubject?: string | null,
   fixModifiedFiles: ReadonlySet<string> = new Set(),
-): Promise<boolean> {
+): Promise<MergeFinalizeResult> {
   try {
     // Build an allowlist of paths we are permitted to stage.
     // Allowlist = (already staged by squash) ∪ (unstaged ∩ fixModifiedFiles)
@@ -2681,16 +2685,59 @@ export async function commitOrAmendMergeWithFixes(
     const headMoved = currentHead !== preAttemptHeadSha;
 
     if (!hasStaged && !headMoved) {
-      // FN-1858 guardrail: never claim merge success when we cannot prove this
-      // task produced commit content. This finalize path distinguishes three
-      // terminal states: (1) committed-by-AI (HEAD already has this task ID),
-      // (2) no-op fix where squash state was cleared and must be restored, and
-      // (3) real phantom where there is truly no task content to commit.
-      if (await headCarriesTaskIdTrailer(rootDir, taskId)) {
+      // FN-1858/FN-3842 guardrail: never claim merge success when we cannot
+      // prove content landed. Check known-success states first, then fallback.
+      const { stdout: branchTipOut } = await execAsync(`git rev-parse ${branch}`, {
+        cwd: rootDir,
+        encoding: "utf-8",
+      });
+      const branchTip = branchTipOut.trim();
+      const trailerOnHead = await headCarriesTaskIdTrailer(rootDir, taskId);
+      const { stdout: mergeBaseOut } = await execAsync(`git merge-base ${branchTip} ${preAttemptHeadSha}`, {
+        cwd: rootDir,
+        encoding: "utf-8",
+      });
+      const mergeBase = mergeBaseOut.trim();
+      const { stdout: diffStatOut } = await execAsync(`git diff --stat ${preAttemptHeadSha}..${branch}`, {
+        cwd: rootDir,
+        encoding: "utf-8",
+      });
+      const diffStatSummary = diffStatOut.split("\n").slice(0, 20).join("\n");
+      const { stdout: stagedCountOut } = await execAsync("git diff --cached --name-only", {
+        cwd: rootDir,
+        encoding: "utf-8",
+      });
+      const { stdout: unstagedCountOut } = await execAsync("git diff --name-only", {
+        cwd: rootDir,
+        encoding: "utf-8",
+      });
+      const { stdout: untrackedCountOut } = await execAsync("git ls-files --others --exclude-standard", {
+        cwd: rootDir,
+        encoding: "utf-8",
+      });
+      const stagedCount = stagedCountOut.split("\n").filter(Boolean).length;
+      const unstagedCount = unstagedCountOut.split("\n").filter(Boolean).length;
+      const untrackedCount = untrackedCountOut.split("\n").filter(Boolean).length;
+
+      const diagnostics =
+        `${taskId}: phantom-guard diagnostics\n` +
+        `  taskId=${taskId}\n` +
+        `  preAttemptHeadSha=${preAttemptHeadSha}\n` +
+        `  currentHead=${currentHead}\n` +
+        `  branch=${branch}\n` +
+        `  branchTip=${branchTip}\n` +
+        `  mergeBase(branchTip, preAttemptHeadSha)=${mergeBase}\n` +
+        `  headCarriesTaskIdTrailer=${String(trailerOnHead)}\n` +
+        `  stagedCount=${stagedCount} unstagedCount=${unstagedCount} untrackedCount=${untrackedCount}\n` +
+        `  fixModifiedFilesCount=${fixModifiedFiles.size}\n` +
+        `  diffStat(preAttemptHeadSha..branch)\n${diffStatSummary || "  <empty>"}`;
+      mergerLog.warn(diagnostics);
+
+      if (trailerOnHead) {
         mergerLog.log(
           `${taskId}: HEAD already carries Fusion-Task-Id trailer — treating in-merge fix finalize as no-op success`,
         );
-        return true;
+        return { ok: true, reason: "head-task-trailer" };
       }
 
       // No commit and no staged content can still be recoverable when the
@@ -2720,10 +2767,9 @@ export async function commitOrAmendMergeWithFixes(
       });
       if (restoredStagedOut.trim().length === 0) {
         mergerLog.warn(
-          `${taskId}: refusing to record merge — no commit was created and no changes are staged. ` +
-          `This usually means the AI agent never ran git commit and the in-merge fix had nothing to add.`,
+          `${taskId}: refusing to record merge — no commit was created and no changes are staged after squash-restore.`,
         );
-        return false;
+        return { ok: false, reason: "fix-produced-no-content" };
       }
 
       mergerLog.log(`${taskId}: restored squash state after no-op verification fix; proceeding to commit`);
@@ -2765,7 +2811,7 @@ export async function commitOrAmendMergeWithFixes(
         { cwd: rootDir },
       );
       mergerLog.log(`${taskId}: created fresh merge commit after verification fix (no prior commit to amend)`);
-      return true;
+      return { ok: true, reason: "completed" };
     }
 
     // HEAD moved — AI agent committed already. Amend with deterministic
@@ -2776,11 +2822,11 @@ export async function commitOrAmendMergeWithFixes(
       { cwd: rootDir },
     );
     mergerLog.log(`${taskId}: amended merge commit with verification fixes (deterministic message)`);
-    return true;
+    return { ok: true, reason: "completed" };
   } catch (err: unknown) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     mergerLog.warn(`${taskId}: failed to finalize merge commit: ${errorMessage}`);
-    return false;
+    return { ok: false, reason: "unknown-phantom" };
   }
 }
 
@@ -5062,12 +5108,17 @@ export async function aiMergeTask(
                 aiMergeSubject,
                 verificationFixModifiedFiles,
               );
-              if (!finalized) {
+              if (!finalized.ok) {
                 // Phantom-merge guard: refused to fabricate a commit. Reset
                 // any leftover squash state and propagate failure.
+                const { stdout: currentHeadOut } = await execAsync("git rev-parse HEAD", { cwd: rootDir, encoding: "utf-8" });
+                const { stdout: branchTipOut } = await execAsync(`git rev-parse ${branch}`, { cwd: rootDir, encoding: "utf-8" });
                 resetMergeWithWarn(rootDir, taskId, "verification-fix finalize");
+                const classification = finalized.reason === "fix-produced-no-content"
+                  ? "fix produced no content"
+                  : "unknown phantom";
                 throw new Error(
-                  `${taskId}: verification fix succeeded but no merge commit could be created — refusing to mark merge complete.`,
+                  `${taskId}: verification fix finalize failed (${classification}); preAttemptHeadSha=${preAttemptHeadSha}; currentHead=${currentHeadOut.trim()}; branch=${branch}; branchTip=${branchTipOut.trim()}.`,
                 );
               }
               return true; // Merge succeeds
@@ -5176,14 +5227,19 @@ export async function aiMergeTask(
               aiMergeSubject,
               buildFixModifiedFiles,
             );
-            if (!finalized) {
+            if (!finalized.ok) {
               // Phantom-merge guard: the verification fix passed but no
               // commit could be produced (no staged content + HEAD never
               // moved). Reset and propagate failure rather than silently
               // mutating a previous task's commit.
+              const { stdout: currentHeadOut } = await execAsync("git rev-parse HEAD", { cwd: rootDir, encoding: "utf-8" });
+              const { stdout: branchTipOut } = await execAsync(`git rev-parse ${branch}`, { cwd: rootDir, encoding: "utf-8" });
               resetMergeWithWarn(rootDir, taskId, "build-verification fix finalize");
+              const classification = finalized.reason === "fix-produced-no-content"
+                ? "fix produced no content"
+                : "unknown phantom";
               throw new Error(
-                `${taskId}: build verification fix succeeded but no merge commit could be created — refusing to mark merge complete.`,
+                `${taskId}: build verification fix finalize failed (${classification}); preAttemptHeadSha=${preAttemptHeadSha}; currentHead=${currentHeadOut.trim()}; branch=${branch}; branchTip=${branchTipOut.trim()}.`,
               );
             }
             return true; // Merge succeeds
