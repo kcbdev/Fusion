@@ -1371,6 +1371,35 @@ describe("TaskCard provider icons on agent row", () => {
     expect(screen.getByTestId("provider-icon-anthropic")).toBeDefined();
   });
 
+  it("keeps assigned agent badge accessible when label is visually collapsible", async () => {
+    vi.mocked(fetchAgent).mockResolvedValue({
+      id: "agent-robot",
+      name: "Task Robot",
+      role: "executor",
+      state: "active",
+      metadata: {},
+      heartbeatHistory: [],
+      completedRuns: [],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    } as any);
+
+    const { container } = render(
+      <TaskCard
+        task={makeTask({ modelProvider: "anthropic", assignedAgentId: "agent-robot" })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    await waitFor(() => {
+      const badge = container.querySelector(".card-agent-badge");
+      expect(badge).not.toBeNull();
+      expect(badge?.getAttribute("title")).toBe("Assigned to Task Robot");
+      expect(badge?.querySelector(".visually-hidden")?.textContent).toContain("Assigned to Task Robot");
+    });
+  });
+
   it("deduplicates when executor and validator use same provider", () => {
     render(
       <TaskCard
@@ -1676,8 +1705,9 @@ describe("TaskCard agent badge", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByTitle("Assigned to Task Robot")).toBeDefined();
-      expect(screen.getByText("Task Robot")).toBeDefined();
+      const badge = screen.getByTitle("Assigned to Task Robot");
+      expect(badge).toBeDefined();
+      expect(badge.querySelector(".visually-hidden")?.textContent).toContain("Assigned to Task Robot");
     });
   });
 

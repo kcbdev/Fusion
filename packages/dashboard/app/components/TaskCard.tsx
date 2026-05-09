@@ -1663,9 +1663,10 @@ function TaskCardComponent({
               title={`Assigned to ${agentName ?? task.assignedAgentId}`}
             >
               <Bot size={11} />
-              <span className="card-agent-badge-text">
+              <span className="card-agent-badge-text" aria-hidden="true">
                 {abbreviateBadge(agentName ?? task.assignedAgentId, 15)}
               </span>
+              <span className="visually-hidden">Assigned to {agentName ?? task.assignedAgentId}</span>
             </span>
           )}
         </div>
