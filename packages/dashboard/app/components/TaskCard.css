@@ -33,7 +33,7 @@
 }
 .card.file-drop-target {
   border: 2px dashed var(--todo);
-  background: rgba(88, 166, 255, 0.08);
+  background: color-mix(in srgb, var(--todo) 8%, transparent);
 }
 
 /* Agent-active glow: animated border glow when an agent is actively working on a task.
@@ -41,8 +41,8 @@
 .card.agent-active {
   border-color: var(--in-progress);
   box-shadow:
-    0 0 8px rgba(var(--in-progress-rgb), 0.4),
-    0 0 20px rgba(var(--in-progress-rgb), 0.15);
+    0 0 8px color-mix(in srgb, var(--in-progress) 40%, transparent),
+    0 0 20px color-mix(in srgb, var(--in-progress) 15%, transparent);
   animation: agent-glow 2.5s ease-in-out infinite;
 }
 
@@ -50,13 +50,13 @@
   0%,
   100% {
     box-shadow:
-      0 0 8px rgba(var(--in-progress-rgb), 0.4),
-      0 0 20px rgba(var(--in-progress-rgb), 0.15);
+      0 0 8px color-mix(in srgb, var(--in-progress) 40%, transparent),
+      0 0 20px color-mix(in srgb, var(--in-progress) 15%, transparent);
   }
   50% {
     box-shadow:
-      0 0 12px rgba(var(--in-progress-rgb), 0.6),
-      0 0 28px rgba(var(--in-progress-rgb), 0.25);
+      0 0 12px color-mix(in srgb, var(--in-progress) 60%, transparent),
+      0 0 28px color-mix(in srgb, var(--in-progress) 25%, transparent);
   }
 }
 
@@ -158,7 +158,7 @@
 
 .card-status-badge.paused {
   background: var(--status-done-bg-deep);
-  color: var(--text-muted, #8b949e);
+  color: var(--text-muted);
 }
 
 .card-status-badge.awaiting-approval {
@@ -188,7 +188,7 @@
 }
 .card-status-badge--archived {
   background: var(--status-archived-bg);
-  color: var(--text-muted, #8b949e);
+  color: var(--text-muted);
 }
 
 .card.stuck {
@@ -344,23 +344,23 @@
    Distinct from agent-active (purple glow), failed (red left border + error block), and paused (dimmed opacity). */
 .card.awaiting-approval {
   border-left: 3px solid var(--triage);
-  background: rgba(210, 153, 34, 0.06);
+  background: color-mix(in srgb, var(--triage) 6%, transparent);
   animation: approval-pulse 3s ease-in-out infinite;
 }
 
 @keyframes approval-pulse {
   0%,
   100% {
-    background: rgba(210, 153, 34, 0.06);
+    background: color-mix(in srgb, var(--triage) 6%, transparent);
   }
   50% {
-    background: rgba(210, 153, 34, 0.12);
+    background: color-mix(in srgb, var(--triage) 12%, transparent);
   }
 }
 
 .card.paused {
   opacity: 0.55;
-  border-left: 3px solid var(--text-secondary, #888);
+  border-left: 3px solid var(--text-muted);
   cursor: default;
 }
 

@@ -251,8 +251,8 @@
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  padding: 10px 8px;
-  gap: 2px;
+  padding: var(--space-sm) var(--space-sm);
+  gap: calc(var(--space-xs) / 2);
   background: color-mix(in srgb, var(--text) 10%, transparent);
   scrollbar-color: var(--border) transparent;
   scrollbar-width: thin;
@@ -1195,7 +1195,7 @@
 
 .auth-section-hint {
   padding: var(--space-md) var(--space-lg);
-  margin-bottom: 12px;
+  margin-bottom: var(--space-md);
   background: var(--bg-tertiary);
   border-radius: var(--radius-md);
   font-size: 13px;
@@ -1203,7 +1203,7 @@
   border-left: 3px solid var(--text-muted);
 }
 .auth-provider-group {
-  margin-bottom: 10px;
+  margin-bottom: calc(var(--space-sm) + var(--space-xs) / 2);
 }
 .auth-group-label {
   font-size: 11px;
@@ -1211,14 +1211,14 @@
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--text-muted);
-  margin-bottom: 4px;
+  margin-bottom: var(--space-xs);
   padding: 0 4px;
 }
 .auth-provider-card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  margin-bottom: 4px;
+  margin-bottom: var(--space-xs);
   overflow: hidden;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
@@ -1236,7 +1236,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
+  padding: var(--space-sm) var(--space-md);
   gap: 12px;
 }
 .auth-provider-info {
@@ -1273,7 +1273,7 @@
 .auth-apikey-section {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-xs);
   align-items: flex-end;
   flex-shrink: 0;
 }
@@ -1514,11 +1514,11 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: var(--space-xs);
     border-left: none;
     border-bottom: 2px solid transparent;
     border-radius: var(--radius-md) var(--radius-md) 0 0;
-    padding: 6px 12px;
+    padding: calc(var(--space-xs) + var(--space-xs) / 2) var(--space-md);
     white-space: nowrap;
   }
 
@@ -1593,7 +1593,7 @@
   }
 
   .form-group {
-    padding: 0 14px;
+    padding: 0 calc(var(--space-md) + var(--space-xs) / 2);
   }
 
   .settings-scope-banner {
@@ -1638,25 +1638,25 @@
   }
 
   .auth-section-hint {
-    margin: 0 14px 12px;
-    padding: 10px 14px;
+    margin: 0 calc(var(--space-md) + var(--space-xs) / 2) var(--space-md);
+    padding: calc(var(--space-sm) + var(--space-xs) / 2) calc(var(--space-md) + var(--space-xs) / 2);
   }
 
   .auth-provider-group {
-    margin-bottom: 12px;
+    margin-bottom: var(--space-md);
   }
 
   .auth-group-label {
-    padding: 0 14px;
+    padding: 0 calc(var(--space-md) + var(--space-xs) / 2);
   }
 
   .auth-provider-card {
-    margin: 0 14px 8px;
+    margin: 0 calc(var(--space-md) + var(--space-xs) / 2) var(--space-sm);
   }
 
   .auth-provider-header {
     flex-wrap: wrap;
-    padding: 10px 14px;
+    padding: calc(var(--space-sm) + var(--space-xs) / 2) calc(var(--space-md) + var(--space-xs) / 2);
     gap: 10px;
   }
 
@@ -1698,7 +1698,7 @@
   }
 
   .auth-hint {
-    padding: 12px 14px 0;
+    padding: var(--space-md) calc(var(--space-md) + var(--space-xs) / 2) 0;
   }
 
   /* Settings modal: model preset controls stack cleanly on narrow screens */
