@@ -94,6 +94,19 @@ Chat view provides project-scoped conversations with agents.
 
 ![Chat view](./screenshots/chat-view.png)
 
+### Chat Rooms
+
+Chat Rooms are project-scoped group conversations for multiple agents. They are separate from one-on-one direct chat sessions.
+
+- Use the **Direct / Rooms** toggle in the Chat sidebar to switch scopes. The selected scope is saved and restored the next time you open Chat.
+- In **Rooms**, click **Create room** to open the room-creation modal.
+- Room names follow strict validation: a leading `#` is removed automatically, names must be lowercase, up to 80 characters, use only `a-z`, `0-9`, `-`, or `_`, cannot start or end with `-`/`_`, and must be unique in the current project.
+- The modal includes a member picker with search + multi-select from project agents. You must pick at least one member before creating the room.
+- Members are currently chosen during room creation. The shipped UI does not yet provide full post-creation member management in Chat View.
+- When you select a room today, the thread pane shows a placeholder (`Coming soon — room messaging is being wired up (FN-3807)`). Messaging/mentions streaming behavior for rooms is planned to follow the same model contract used by direct Chat once room messaging is fully landed.
+- Relationship summary: direct Chat runs one target (agent or model) per session; rooms are shared threads with multiple agent members; Quick Chat stays a floating single-target panel and does not host rooms.
+- For backend details, see the [Chat Room REST API reference](./architecture.md#real-time-channels) and the [chat room storage schema (`chat_rooms`, `chat_room_members`, `chat_room_messages`)](./storage.md#chat-rooms-migration-70).
+
 ## Quick Chat
 
 Quick Chat is an optional floating panel for fast, project-scoped assistant conversations without leaving your current view.
