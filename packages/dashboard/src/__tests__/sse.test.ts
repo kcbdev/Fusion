@@ -2,7 +2,13 @@ import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Request, Response } from "express";
 import type { TaskStore, AutomationStore } from "@fusion/core";
-import { createSSE, disconnectSSEClient, getActiveSSEConnections, markSSEClientAlive } from "../sse.js";
+import {
+  createSSE,
+  disconnectSSEClient,
+  emitApprovalSseEvent,
+  getActiveSSEConnections,
+  markSSEClientAlive,
+} from "../sse.js";
 
 class MockSocket extends EventEmitter {
   destroyed = false;
@@ -99,6 +105,45 @@ function openSseConnectionWithAutomation(clientId: string, projectId?: string) {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("approval SSE events", () => {
+  it("relays approval events to connected clients", () => {
+    const connection = openSseConnection("approval-relay");
+
+    emitApprovalSseEvent("approval:requested", { id: "apr-1", status: "pending" });
+    emitApprovalSseEvent("approval:updated", { id: "apr-1", status: "pending" });
+    emitApprovalSseEvent("approval:decided", { id: "apr-1", status: "approved" });
+
+    expect(connection.res.write).toHaveBeenCalledWith(
+      `event: approval:requested\ndata: ${JSON.stringify({ id: "apr-1", status: "pending" })}\n\n`,
+    );
+    expect(connection.res.write).toHaveBeenCalledWith(
+      `event: approval:updated\ndata: ${JSON.stringify({ id: "apr-1", status: "pending" })}\n\n`,
+    );
+    expect(connection.res.write).toHaveBeenCalledWith(
+      `event: approval:decided\ndata: ${JSON.stringify({ id: "apr-1", status: "approved" })}\n\n`,
+    );
+
+    connection.req.emit("close");
+  });
+
+  it("filters project-scoped approval events to matching project connections", () => {
+    const projectA = openSseConnection("approval-project", "project-a");
+    const projectB = openSseConnection("approval-project", "project-b");
+
+    emitApprovalSseEvent("approval:requested", { id: "apr-a" }, "project-a");
+
+    expect(projectA.res.write).toHaveBeenCalledWith(
+      `event: approval:requested\ndata: ${JSON.stringify({ id: "apr-a" })}\n\n`,
+    );
+    expect(projectB.res.write).not.toHaveBeenCalledWith(
+      `event: approval:requested\ndata: ${JSON.stringify({ id: "apr-a" })}\n\n`,
+    );
+
+    projectA.req.emit("close");
+    projectB.req.emit("close");
+  });
 });
 
 describe("automation store SSE events", () => {
