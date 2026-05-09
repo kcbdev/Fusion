@@ -50,6 +50,10 @@ const settingsSchema: Record<string, PluginSettingSchema> = {
 
 const connections = new Map<string, WhatsAppConnection>();
 
+function getConnectionKey(ctx: PluginContext): string {
+  return `${ctx.taskStore.getRootDir()}::${ctx.pluginId}`;
+}
+
 export function getSettingString(settings: Record<string, unknown>, key: string): string | undefined {
   const value = settings[key];
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -159,7 +163,7 @@ function getDbFromTaskStore(ctx: PluginContext): PluginDb {
 }
 
 function getConnectionOrResponse(ctx: PluginContext): { connection?: WhatsAppConnection; error?: PluginRouteResponse } {
-  const connection = connections.get(ctx.pluginId);
+  const connection = connections.get(getConnectionKey(ctx));
   if (!connection) {
     return { error: { status: 503, body: { error: "WhatsApp connection is not initialized" } } };
   }
@@ -242,14 +246,15 @@ const plugin: FusionPlugin = definePlugin({
     onLoad: async (ctx) => {
       const db = getDbFromTaskStore(ctx);
       const connection = new WhatsAppConnection(ctx, plugin.manifest.version, generateReply, db);
-      connections.set(ctx.pluginId, connection);
+      connections.set(getConnectionKey(ctx), connection);
       await connection.start();
     },
-    onUnload: async () => {
-      for (const [pluginId, connection] of connections.entries()) {
-        await connection.stop();
-        connections.delete(pluginId);
-      }
+    onUnload: async (ctx) => {
+      const connectionKey = getConnectionKey(ctx);
+      const connection = connections.get(connectionKey);
+      if (!connection) return;
+      await connection.stop();
+      connections.delete(connectionKey);
     },
   },
 });

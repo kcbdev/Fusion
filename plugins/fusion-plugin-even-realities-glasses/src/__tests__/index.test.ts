@@ -51,6 +51,6 @@ describe("even realities plugin", () => {
     const res = await statusRoute?.handler({}, ctx);
 
     expect(res).toMatchObject({ status: 200, body: { connected: true } });
-    await plugin.hooks?.onUnload?.();
+    await plugin.hooks?.onUnload?.(ctx);
   });
 });

@@ -306,7 +306,7 @@ const plugin: FusionPlugin = {
 | Hook | Signature | When It Fires |
 |------|-----------|---------------|
 | `onLoad` | `(ctx: PluginContext) => Promise<void> \| void` | Plugin first loaded and started |
-| `onUnload` | `() => Promise<void> \| void` | Plugin stopped/shutdown |
+| `onUnload` | `(ctx: PluginContext) => Promise<void> \| void` | Plugin stopped/shutdown |
 | `onTaskCreated` | `(task: Task, ctx: PluginContext) => Promise<void> \| void` | New task created |
 | `onTaskMoved` | `(task: Task, fromColumn: string, toColumn: string, ctx: PluginContext) => Promise<void> \| void` | Task moved between columns |
 | `onTaskCompleted` | `(task: Task, ctx: PluginContext) => Promise<void> \| void` | Task reached "done" |
@@ -315,6 +315,7 @@ const plugin: FusionPlugin = {
 
 ### Hook Behavior
 
+- **Context parity**: `onUnload` receives the same `PluginContext` shape as `onLoad`.
 - **Timeout**: 5 seconds per invocation (logged and skipped if exceeded)
 - **Error Isolation**: Hook failures never block other hooks or abort startup
 - **Optional**: Only define the hooks you need
@@ -1266,8 +1267,9 @@ export default definePlugin({
     onTaskCreated: (task, ctx) => {
       ctx.logger.info(`Task created: ${task.id}`);
     },
-    onUnload: () => {
-      // Cleanup
+    onUnload: (ctx) => {
+      // Cleanup with the same context shape passed to onLoad
+      ctx.logger.info("Shutting down plugin");
     },
   },
 } satisfies FusionPlugin);

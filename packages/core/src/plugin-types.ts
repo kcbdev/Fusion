@@ -154,7 +154,7 @@ export interface PluginLogger {
 /** Lifecycle hook: called when plugin is loaded */
 export type PluginOnLoad = (ctx: PluginContext) => Promise<void> | void;
 /** Lifecycle hook: called when plugin is unloaded */
-export type PluginOnUnload = () => Promise<void> | void;
+export type PluginOnUnload = (ctx: PluginContext) => Promise<void> | void;
 /** Lifecycle hook: called during database schema initialization */
 export type PluginOnSchemaInit = (db: Database) => Promise<void> | void;
 /** Lifecycle hook: called when a task is created */

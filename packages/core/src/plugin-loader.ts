@@ -374,8 +374,9 @@ export class PluginLoader extends EventEmitter<{
 
     // Call onUnload with timeout
     try {
+      const ctx = await this.createContext(oldPlugin);
       await this.withTimeout(
-        this.safeCallHook(oldPlugin, "onUnload", []),
+        this.safeCallHook(oldPlugin, "onUnload", [ctx]),
         timeoutMs,
         `onUnload timeout for ${pluginId}`,
       );
@@ -645,8 +646,9 @@ export class PluginLoader extends EventEmitter<{
 
     try {
       // Call onUnload hook
+      const ctx = await this.createContext(plugin);
       await this.withTimeout(
-        this.safeCallHook(plugin, "onUnload", []),
+        this.safeCallHook(plugin, "onUnload", [ctx]),
         5000,
         `onUnload timeout for ${pluginId}`,
       );

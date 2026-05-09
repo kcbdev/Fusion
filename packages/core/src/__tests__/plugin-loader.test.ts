@@ -129,6 +129,8 @@ function droidPluginModulePath(): string {
 // Mock TaskStore for testing
 const mockTaskStore = {
   logActivity: vi.fn(),
+  getRootDir: () => "/tmp/plugin-loader-test-root",
+  getPluginStore: vi.fn(),
 } as any;
 
 type MockStructuredLogger = {
@@ -783,6 +785,42 @@ export default plugin;
 
       await loader.stopPlugin("remove-test");
       expect(loader.isPluginLoaded("remove-test")).toBe(false);
+    });
+
+    it("passes plugin context to onUnload", async () => {
+      await pluginStore.init();
+
+      const plugin = makePlugin(makeManifest({ id: "stop-context-test" }));
+      const pluginDir = join(rootDir, "plugins");
+      const pluginPath = await writePluginWithHooks(
+        pluginDir,
+        "stop-context.js",
+        {
+          onUnload:
+            "(ctx => { globalThis.__pluginUnloadCtx = { pluginId: ctx.pluginId, taskStore: ctx.taskStore }; })",
+        },
+        plugin.manifest,
+      );
+
+      await pluginStore.registerPlugin({
+        manifest: plugin.manifest,
+        path: pluginPath,
+      });
+
+      const loader = new PluginLoader({
+        pluginStore,
+        taskStore: mockTaskStore,
+      });
+
+      await loader.loadPlugin("stop-context-test");
+      await loader.stopPlugin("stop-context-test");
+
+      const unloadCtx = (globalThis as { __pluginUnloadCtx?: { pluginId: string; taskStore: unknown } })
+        .__pluginUnloadCtx;
+      expect(unloadCtx).toBeDefined();
+      expect(unloadCtx?.pluginId).toBe("stop-context-test");
+      expect(unloadCtx?.taskStore).toBe(mockTaskStore);
+      delete (globalThis as { __pluginUnloadCtx?: unknown }).__pluginUnloadCtx;
     });
 
     it("no-ops for non-loaded plugin", async () => {

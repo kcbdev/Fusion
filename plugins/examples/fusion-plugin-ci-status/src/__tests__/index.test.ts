@@ -185,7 +185,7 @@ describe("ci-status plugin", () => {
       await plugin.hooks.onLoad?.(ctx as any);
       vi.clearAllMocks();
 
-      await plugin.hooks.onUnload?.();
+      await plugin.hooks.onUnload?.(ctx as any);
 
       expect(ctx.logger.info).toHaveBeenCalledWith("CI Status plugin unloaded");
     });

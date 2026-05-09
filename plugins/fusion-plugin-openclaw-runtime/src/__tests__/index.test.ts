@@ -144,6 +144,7 @@ describe("openclaw-runtime plugin", () => {
   });
 
   it("onUnload does not throw", () => {
-    expect(() => plugin.hooks!.onUnload?.()).not.toThrow();
+    const ctx = createMockContext() as any;
+    expect(() => plugin.hooks!.onUnload?.(ctx)).not.toThrow();
   });
 });
