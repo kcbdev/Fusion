@@ -33,8 +33,6 @@ import {
 } from "./api-error.js";
 import { getOrCreateProjectStore } from "./project-store-resolver.js";
 
-const ROADMAP_PLUGIN_ID = "fusion-plugin-roadmap";
-const ROADMAP_PLUGIN_ROUTE_NAMESPACE = "roadmap-planner";
 
 // PluginRunner interface for optional plugin runner
 function isPluginRouteResponse(result: unknown): result is import("@fusion/core").PluginRouteResponse {
@@ -535,8 +533,7 @@ export function createPluginRouter(
     const pluginRoutes = pluginRunner.getPluginRoutes();
 
     for (const { pluginId, route } of pluginRoutes) {
-      const routePluginId = pluginId === ROADMAP_PLUGIN_ID ? ROADMAP_PLUGIN_ROUTE_NAMESPACE : pluginId;
-      const fullPath = `/${routePluginId}${route.path.startsWith("/") ? route.path : `/${route.path}`}`;
+      const fullPath = `/${pluginId}${route.path.startsWith("/") ? route.path : `/${route.path}`}`;
 
       const handler = catchHandler(async (req: Request, res: Response) => {
         // Get the plugin context

@@ -3131,7 +3131,6 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Keep this call at the current position to preserve precedence with
   // surrounding route handlers. registerIntegratedRouters() mounts:
   // - /missions
-  // - /roadmaps
   // - /insights
   // - /todos
   registerIntegratedRouters({

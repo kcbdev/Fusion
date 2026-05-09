@@ -17,7 +17,6 @@ export interface UseAppSettingsResult {
   settingsLoaded: boolean;
   experimentalFeatures: Record<string, boolean>;
   insightsEnabled: boolean;
-  roadmapEnabled: boolean;
   memoryEnabled: boolean;
   devServerEnabled: boolean;
   todosEnabled: boolean;
@@ -46,7 +45,6 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [experimentalFeatures, setExperimentalFeatures] = useState<Record<string, boolean>>({});
   const [insightsEnabled, setInsightsEnabled] = useState(false);
-  const [roadmapEnabled, setRoadmapEnabled] = useState(false);
   const [memoryEnabled, setMemoryEnabled] = useState(false);
   const [devServerEnabled, setDevServerEnabled] = useState(false);
   const [todosEnabled, setTodosEnabled] = useState(false);
@@ -78,7 +76,6 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
       setExperimentalFeatures(settings.experimentalFeatures ?? {});
       const features = settings.experimentalFeatures ?? {};
       setInsightsEnabled(features.insights === true);
-      setRoadmapEnabled(features.roadmap === true);
       setMemoryEnabled(features.memoryView === true);
       setDevServerEnabled(features.devServerView === true || features.devServer === true);
       setTodosEnabled(features.todoView === true);
@@ -95,7 +92,6 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
     setSettingsLoaded(false);
     setExperimentalFeatures({});
     setInsightsEnabled(false);
-    setRoadmapEnabled(false);
     setMemoryEnabled(false);
     setDevServerEnabled(false);
     setTodosEnabled(false);
@@ -177,7 +173,6 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
     settingsLoaded,
     experimentalFeatures,
     insightsEnabled,
-    roadmapEnabled,
     memoryEnabled,
     devServerEnabled,
     todosEnabled,

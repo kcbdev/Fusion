@@ -226,7 +226,7 @@ describe("Header", () => {
     it("hides legacy roadmaps overflow item when roadmap plugin view is present", () => {
       renderHeader({
         onChangeView: noop,
-        experimentalFeatures: { roadmap: true },
+        experimentalFeatures: {},
         pluginDashboardViews: [
           {
             pluginId: "fusion-plugin-roadmap",
@@ -253,7 +253,7 @@ describe("Header", () => {
       renderHeader({
         onChangeView: noop,
         showSkillsTab: false,
-        experimentalFeatures: { insights: false, roadmap: false, memoryView: false, devServerView: false, researchView: false },
+        experimentalFeatures: { insights: false, memoryView: false, devServerView: false, researchView: false },
       });
 
       fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));

@@ -70,13 +70,13 @@ describe("MobileNavBar", () => {
     expect(screen.getByTestId("mobile-nav-tab-more")).toBeDefined();
   });
 
-  it("does not render legacy roadmaps tab when experimentalFeatures.roadmap is true", () => {
-    render(<MobileNavBar {...createDefaultProps()} experimentalFeatures={{ roadmap: true }} />);
+  it("does not render legacy roadmaps tab", () => {
+    render(<MobileNavBar {...createDefaultProps()} experimentalFeatures={{}} />);
     expect(screen.queryByTestId("mobile-nav-tab-roadmaps")).toBeNull();
   });
 
   it("keeps skills available without rendering legacy roadmaps destinations", () => {
-    render(<MobileNavBar {...createDefaultProps()} showSkillsTab={true} experimentalFeatures={{ roadmap: true }} />);
+    render(<MobileNavBar {...createDefaultProps()} showSkillsTab={true} experimentalFeatures={{}} />);
 
     expect(screen.getByTestId("mobile-nav-tab-skills")).toBeDefined();
     expect(screen.queryByTestId("mobile-nav-tab-roadmaps")).toBeNull();
@@ -86,7 +86,7 @@ describe("MobileNavBar", () => {
   });
 
   it("keeps skills top-level regardless of legacy roadmaps view value", () => {
-    render(<MobileNavBar {...createDefaultProps()} view="board" showSkillsTab={true} experimentalFeatures={{ roadmap: true }} />);
+    render(<MobileNavBar {...createDefaultProps()} view="board" showSkillsTab={true} experimentalFeatures={{}} />);
 
     expect(screen.getByTestId("mobile-nav-tab-skills")).toBeDefined();
 
@@ -387,8 +387,8 @@ describe("MobileNavBar", () => {
     expect(screen.getByTestId("mobile-more-item-settings")).toBeDefined();
   });
 
-  it("does not show legacy roadmaps in more sheet when experimentalFeatures.roadmap is true", () => {
-    render(<MobileNavBar {...createDefaultProps()} experimentalFeatures={{ roadmap: true }} />);
+  it("does not show legacy roadmaps in more sheet", () => {
+    render(<MobileNavBar {...createDefaultProps()} experimentalFeatures={{}} />);
     fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
     expect(screen.queryByTestId("mobile-more-item-roadmaps")).toBeNull();
   });
@@ -397,7 +397,7 @@ describe("MobileNavBar", () => {
     render(
       <MobileNavBar
         {...createDefaultProps()}
-        experimentalFeatures={{ roadmap: true }}
+        experimentalFeatures={{}}
         pluginDashboardViews={[
           {
             pluginId: "roadmap-planner",

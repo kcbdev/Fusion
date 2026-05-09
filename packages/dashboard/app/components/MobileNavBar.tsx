@@ -75,7 +75,6 @@ export interface MobileNavBarProps {
   /** Experimental feature flags controlling visibility of nav items. */
   experimentalFeatures?: {
     insights?: boolean;
-    roadmap?: boolean;
     memoryView?: boolean;
     devServer?: boolean;
     devServerView?: boolean;

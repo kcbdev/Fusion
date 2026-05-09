@@ -237,7 +237,7 @@ export interface HeaderProps {
   /** Whether the current view is a remote node */
   isRemote?: boolean;
   /** Experimental feature flags controlling visibility of nav items. */
-  experimentalFeatures?: { insights?: boolean; roadmap?: boolean; memoryView?: boolean; devServer?: boolean; devServerView?: boolean; researchView?: boolean; evalsView?: boolean };
+  experimentalFeatures?: { insights?: boolean; memoryView?: boolean; devServer?: boolean; devServerView?: boolean; researchView?: boolean; evalsView?: boolean };
   pluginDashboardViews?: PluginDashboardViewEntry[];
   shellConnectionControl?: ReactNode;
 }
@@ -358,11 +358,6 @@ export function Header({
     return Object.entries(overflowScripts).sort(([a], [b]) => a.localeCompare(b));
   }, [overflowScripts]);
 
-  const hasRoadmapsPluginView = useMemo(
-    () => pluginDashboardViews.some((entry) => entry.pluginId === "roadmap-planner"),
-    [pluginDashboardViews],
-  );
-
   const hasViewOverflowItems = useMemo(() => {
     return !!(
       onChangeView ||
@@ -376,7 +371,7 @@ export function Header({
       !hideFullNav ||
       pluginDashboardViews.some((entry) => entry.view.placement !== "primary")
     );
-  }, [onChangeView, experimentalFeatures, todosEnabled, showSkillsTab, hideFullNav, pluginDashboardViews, hasRoadmapsPluginView]);
+  }, [onChangeView, experimentalFeatures, todosEnabled, showSkillsTab, hideFullNav, pluginDashboardViews]);
 
   const getEffectiveViewport = useCallback(() => {
     const vv = window.visualViewport;

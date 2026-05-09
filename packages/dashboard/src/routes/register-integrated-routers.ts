@@ -6,7 +6,6 @@ import { createInsightsRouter } from "../insights-routes.js";
 import { createEvalsRouter } from "../evals-routes.js";
 import { createResearchRouter } from "../research-routes.js";
 import { createTodoRouter } from "../todo-routes.js";
-import { createRoadmapRouter } from "../roadmap-routes.js";
 import { createDevServerRouter } from "../dev-server-routes.js";
 import type { AiSessionStore } from "../ai-session-store.js";
 
@@ -37,7 +36,6 @@ export function registerIntegratedRouters({
   router.use("/evals", createEvalsRouter(store));
   router.use("/research", createResearchRouter(store));
   router.use("/todos", createTodoRouter(store));
-  router.use("/roadmaps", createRoadmapRouter(store));
 }
 
 export function registerIntegratedDevServerRouter({ router, store }: DevServerRouterOptions): void {

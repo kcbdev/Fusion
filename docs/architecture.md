@@ -177,8 +177,7 @@ Concrete references:
   - Core schema tables include: `tasks`, `config`, `workflow_steps`, `activityLog`, `archivedTasks`, `automations`, `agents`, `agentHeartbeats`, approval tables (`approval_requests`, `approval_request_audit_events`), `task_documents`, `task_document_revisions`, mission hierarchy tables (`missions`, `milestones`, `slices`, `mission_features`, `mission_events`), plugin/routine tables (`plugins`, `routines`), roadmap tables (`roadmaps`, `roadmap_milestones`, `roadmap_features`), insight tables (`project_insights`, `project_insight_runs`), research tables (`research_runs`, `research_exports`, `research_run_events`), eval tables (`eval_runs`, `eval_task_results`, `eval_run_events`), todo tables (`todo_lists`, `todo_items`), `__meta`
   - Migration-created tables include: `ai_sessions`, `messages`, `agentRatings`, `chat_sessions`, `chat_messages`, `runAuditEvents`, `mission_contract_assertions`, `mission_feature_assertions`, `mission_validator_runs`, `mission_validator_failures`, `mission_fix_feature_lineage`
   - `ai_sessions.status` lifecycle includes `draft` (pre-start planning session), then `generating`, `awaiting_input`, terminal `complete` / `error`
-- **Roadmap feature ownership**: roadmap contracts, ordering/handoff helpers, and persistence live in `plugins/fusion-plugin-roadmap` (package `@fusion-plugin-examples/roadmap`) rather than `@fusion/core`
-  - Dashboard route adapter remains in `packages/dashboard/src/roadmap-routes.ts` and consumes the plugin API
+- **Roadmap feature ownership**: roadmap contracts, ordering/handoff helpers, persistence, routes, and dashboard UI live in `plugins/fusion-plugin-roadmap` (package `@fusion-plugin-examples/roadmap`) rather than dashboard/core ownership.
 - **CentralCore**: `packages/core/src/central-core.ts`
   - Global project registry, health, central activity feed, global concurrency
   - Backed by `packages/core/src/central-db.ts` (`~/.fusion/fusion-central.db`)
@@ -403,7 +402,7 @@ Key roadmap invariants:
 - Milestones: `GET /:roadmapId/milestones`, `POST /:roadmapId/milestones`, `PATCH /milestones/:milestoneId`, `DELETE /milestones/:milestoneId`, `POST /:roadmapId/milestones/reorder`
 - Features: `GET /milestones/:milestoneId/features`, `POST /milestones/:milestoneId/features`, `PATCH /features/:featureId`, `DELETE /features/:featureId`, `POST /milestones/:milestoneId/features/reorder`, `POST /features/:featureId/move`
 - Export/Handoff: `GET /:roadmapId/export`, `GET /:roadmapId/handoff`, `GET /:roadmapId/handoff/mission`, `GET /:roadmapId/milestones/:milestoneId/features/:featureId/handoff/task`
-- Note: the integrated dashboard server may still mount legacy `/api/roadmaps` routes for compatibility, but frontend callers should use the plugin namespace.
+- Dashboard host no longer mounts legacy `/api/roadmaps`; roadmap REST traffic goes through the plugin namespace only.
 
 **Database schema:**
 - `roadmaps` — roadmap metadata (id, title, description, timestamps)
@@ -678,7 +677,7 @@ Key server capabilities:
 - Insights routes (`insights-routes.ts`)
 - Evals routes (`evals-routes.ts`) — `/api/evals` read surface for eval result listing/filtering, drill-down detail, and eval run metadata
 - Research routes (`research-routes.ts`) — `/api/research` surface for runs, details, cancel/retry, exports, create-task, and attach-task actions; supports graceful degradation envelopes via availability payloads when capabilities are unavailable
-- Roadmap routes (`roadmap-routes.ts`)
+- Plugin-defined roadmap routes under `plugin-routes.ts` dispatch (`/api/plugins/roadmap-planner/...`)
 - Project-scoped store reuse via `project-store-resolver.ts`
 - Rate limiting (`rate-limit.ts`)
 - Static SPA hosting (Vite build output)
@@ -724,7 +723,7 @@ Key server capabilities:
 - Task detail surface is shared through `TaskDetailContent` (exported from `TaskDetailModal.tsx`): desktop/tablet `ListView` renders it inline in the split right pane, while mobile and non-list entry points continue using `TaskDetailModal`.
 - In desktop split mode, `ListView` now uses a compact sidebar-first control layout (count/actions/summary chips + collapsible "View options" panel) to keep list controls dense alongside the inline detail pane; mobile keeps the card-first flow with a toolbar "View options" entry point for the same visibility/filter toggles.
 - Chat system UI: `ChatView.tsx`, `QuickChatFAB.tsx`
-- Planning/roadmap/insight UI: `MissionManager.tsx`, `RoadmapsView.tsx`, `TodoView.tsx`, `InsightsView.tsx`, `DocumentsView.tsx`
+- Planning/insight UI: `MissionManager.tsx`, `TodoView.tsx`, `InsightsView.tsx`, `DocumentsView.tsx` (roadmap view is plugin-owned)
 - Dev server UI: `DevServerView.tsx` (controls + status/log panel + embedded preview with iframe fallback messaging)
 
 ### CSS Architecture
@@ -742,7 +741,7 @@ The dashboard's CSS is split between a consolidated global stylesheet and modula
 
 **Lazy-loaded views** (bundle size optimization):
 The following 15 views are lazy-loaded via `React.lazy()` with `<Suspense fallback={null}>`:
-- `AgentsView`, `RoadmapsView`, `TodoView`, `NodesView`, `ChatView`, `MemoryView`, `ResearchView`
+- `AgentsView`, `TodoView`, `NodesView`, `ChatView`, `MemoryView`, `ResearchView`
 - `DevServerView`, `InsightsView`, `DocumentsView`, `SkillsView`
 - `SetupWizardModal`, `PluginManager`, `PiExtensionsManager`, `AgentDetailView
 
@@ -752,13 +751,13 @@ A `prefetchLazyViews()` function runs once on mount via `requestIdleCallback` to
 - Task + realtime: `useTasks.ts`, `useBadgeWebSocket.ts`, `useAiSessionSync.ts`
 - Chat: `useChat.ts`, `useQuickChat.ts`
 - Documents/insights/memory: `useDocuments.ts`, `useInsights.ts`, `useMemoryBackendStatus.ts`, `useMemoryData.ts`
-- Planning/roadmaps: `useRoadmaps.ts`
+- Plugin roadmap state/hooks: owned by `plugins/fusion-plugin-roadmap/src/dashboard/*`
 - Dev server: `useDevServer.ts` (status hydration, command controls, reconnect stream handling, project-scope reset)
 - Project/agents/setup: `useProjects.ts`, `useCurrentProject.ts`, `useAgents.ts`, `useSetupReadiness.ts`
 - UX/platform helpers: `useFavorites.ts`, `useAuthOnboarding.ts`, `useDeepLink.ts`, `useTerminal.ts`
 
 ### Planning and decomposition features
-- Backend planners: `planning.ts`, `subtask-breakdown.ts`, `roadmap-suggestions.ts`
+- Backend planners: `planning.ts`, `subtask-breakdown.ts` (roadmap suggestion generation is plugin-owned)
 - UI modals: `PlanningModeModal.tsx`, `SubtaskBreakdownModal.tsx`, milestone interview flows
 - Multi-task creation endpoints are wired under planning/subtask routes in `routes.ts`
 

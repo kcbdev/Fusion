@@ -536,7 +536,6 @@ function AppInner() {
     settingsLoaded,
     experimentalFeatures,
     insightsEnabled,
-    roadmapEnabled,
     memoryEnabled,
     devServerEnabled,
     todosEnabled,
@@ -1386,7 +1385,6 @@ function AppInner() {
         isRemote={isRemote}
         experimentalFeatures={{
           insights: insightsEnabled,
-          roadmap: roadmapEnabled,
           memoryView: memoryEnabled,
           devServer: devServerEnabled,
           devServerView: devServerEnabled,
@@ -1492,7 +1490,6 @@ function AppInner() {
         showSkillsTab={skillsEnabled}
         experimentalFeatures={{
           insights: insightsEnabled,
-          roadmap: roadmapEnabled,
           memoryView: memoryEnabled,
           devServer: devServerEnabled,
           devServerView: devServerEnabled,

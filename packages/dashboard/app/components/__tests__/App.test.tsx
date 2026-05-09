@@ -16,7 +16,7 @@ const defaultSettings: Settings = {
   worktreeInitCommand: "",
   testCommand: "",
   buildCommand: "",
-  experimentalFeatures: { insights: true, roadmap: true, skillsView: true, agentsView: true, memoryView: true, evalsView: true },
+  experimentalFeatures: { insights: true, skillsView: true, agentsView: true, memoryView: true, evalsView: true },
 };
 
  
@@ -2025,7 +2025,7 @@ describe("App view switching", () => {
     // Override the default mock to exclude agentsView
     vi.mocked(fetchSettings).mockResolvedValue({
       ...defaultSettings,
-      experimentalFeatures: { insights: true, roadmap: true, skillsView: true }, // no agentsView
+      experimentalFeatures: { insights: true, skillsView: true }, // no agentsView
     });
 
     render(<App />);
@@ -2201,7 +2201,7 @@ describe("App view switching", () => {
     // Keep at least one overflow item enabled so the overflow trigger still renders.
     (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ...defaultSettings,
-      experimentalFeatures: { insights: false, roadmap: true },
+      experimentalFeatures: { insights: false },
     });
 
     render(<App />);
