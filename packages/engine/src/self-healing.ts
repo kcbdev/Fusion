@@ -701,7 +701,7 @@ export class SelfHealingManager {
       const branchPatchIdCommand = `git diff ${shellQuote(branchBase)}..${shellQuote(branchTip)} | git patch-id`;
       const { stdout: branchPatchIdOut } = await execAsync(branchPatchIdCommand, {
         cwd: repoDir,
-        shell: true,
+        shell: "/bin/sh",
         timeout: 60_000,
         maxBuffer: 32 * 1024 * 1024,
       });
@@ -717,7 +717,7 @@ export class SelfHealingManager {
       const basePatchMapCommand = `git log -n 200 -p --format='%H' ${shellQuote(baseBranch)} | git patch-id`;
       const { stdout: basePatchIdsOut } = await execAsync(basePatchMapCommand, {
         cwd: repoDir,
-        shell: true,
+        shell: "/bin/sh",
         timeout: 60_000,
         maxBuffer: 32 * 1024 * 1024,
       });
@@ -1659,15 +1659,12 @@ export class SelfHealingManager {
 
           const mergeDetails: MergeDetails = {
             commitSha: landed.sha,
-            strategy: "squash",
-            branch: baseBranch,
             mergedAt: new Date().toISOString(),
             mergeConfirmed: true,
             prNumber: task.prInfo?.number,
           };
 
           await this.store.updateTask(task.id, {
-            column: "done",
             status: null,
             error: null,
             mergeRetries: 0,

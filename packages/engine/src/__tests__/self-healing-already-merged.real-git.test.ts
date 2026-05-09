@@ -14,7 +14,24 @@ function git(repo: string, command: string): string {
   return execSync(command, { cwd: repo, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
 }
 
-type TaskMap = Map<string, Task & { comments?: string[] }>;
+type TaskMap = Map<string, Task>;
+
+function makeTask(overrides: Partial<Task> & Pick<Task, "id">): Task {
+  const { id, ...rest } = overrides;
+  return {
+    id,
+    title: overrides.title ?? id,
+    description: overrides.description ?? id,
+    column: overrides.column ?? "in-review",
+    dependencies: overrides.dependencies ?? [],
+    steps: overrides.steps ?? [],
+    currentStep: overrides.currentStep ?? 0,
+    log: overrides.log ?? [],
+    createdAt: overrides.createdAt ?? new Date().toISOString(),
+    updatedAt: overrides.updatedAt ?? new Date().toISOString(),
+    ...rest,
+  } as Task;
+}
 
 function createStore(tasks: TaskMap, settings: Partial<Settings> = {}): TaskStore & EventEmitter {
   const emitter = new EventEmitter();
@@ -39,12 +56,12 @@ function createStore(tasks: TaskMap, settings: Partial<Settings> = {}): TaskStor
     }),
     updateTask: vi.fn(async (id: string, updates: Partial<Task>) => {
       const current = tasks.get(id)!;
-      tasks.set(id, { ...current, ...updates, updatedAt: new Date().toISOString() });
+      tasks.set(id, { ...current, ...updates, updatedAt: new Date().toISOString() } as Task);
       return tasks.get(id);
     }),
     moveTask: vi.fn(async (id: string, column: Task["column"]) => {
       const current = tasks.get(id)!;
-      tasks.set(id, { ...current, column, columnMovedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+      tasks.set(id, { ...current, column, columnMovedAt: new Date().toISOString(), updatedAt: new Date().toISOString() } as Task);
     }),
     logEntry: vi.fn(async (id: string, message: string) => {
       const current = tasks.get(id)!;
@@ -94,7 +111,7 @@ describeIfGit("SelfHealingManager recoverAlreadyMergedReviewTasks (real git)", (
     git(repo, `git worktree add ${JSON.stringify(worktreePath)} -b fusion/fn-test-1`);
 
     const tasks: TaskMap = new Map([
-      ["FN-TEST-1", { id: "FN-TEST-1", column: "in-review", status: "failed", mergeRetries: 3, paused: false, baseBranch: "main", branch: "fusion/fn-test-1", worktree: worktreePath, steps: [], log: [], updatedAt: new Date().toISOString() } as Task],
+      ["FN-TEST-1", makeTask({ id: "FN-TEST-1", column: "in-review", status: "failed", mergeRetries: 3, paused: false, baseBranch: "main", branch: "fusion/fn-test-1", worktree: worktreePath })],
     ]);
     const store = createStore(tasks);
     const manager = new SelfHealingManager(store, { rootDir: repo, getExecutingTaskIds: () => new Set() });
@@ -106,8 +123,7 @@ describeIfGit("SelfHealingManager recoverAlreadyMergedReviewTasks (real git)", (
     expect(task.status).toBeNull();
     expect(task.mergeRetries).toBe(0);
     expect(task.mergeDetails?.commitSha).toBe(landedSha);
-    expect(task.mergeDetails?.strategy).toBe("squash");
-    expect(task.mergeDetails?.branch).toBe("main");
+    expect(task.mergeDetails?.mergeConfirmed).toBe(true);
     expect(existsSync(worktreePath)).toBe(false);
     expect(git(repo, "git worktree list")).not.toContain(worktreePath);
   });
@@ -130,7 +146,7 @@ describeIfGit("SelfHealingManager recoverAlreadyMergedReviewTasks (real git)", (
     git(repo, `git worktree add ${JSON.stringify(worktreePath)} fusion/fn-test-2`);
 
     const tasks: TaskMap = new Map([
-      ["FN-TEST-2", { id: "FN-TEST-2", column: "in-review", status: "failed", mergeRetries: 3, paused: false, baseBranch: "main", branch: "fusion/fn-test-2", baseCommitSha: git(repo, "git merge-base main fusion/fn-test-2"), worktree: worktreePath, steps: [], log: [], updatedAt: new Date().toISOString() } as Task],
+      ["FN-TEST-2", makeTask({ id: "FN-TEST-2", column: "in-review", status: "failed", mergeRetries: 3, paused: false, baseBranch: "main", branch: "fusion/fn-test-2", baseCommitSha: git(repo, "git merge-base main fusion/fn-test-2"), worktree: worktreePath })],
     ]);
     const store = createStore(tasks);
     const manager = new SelfHealingManager(store, { rootDir: repo, getExecutingTaskIds: () => new Set() });
@@ -156,7 +172,7 @@ describeIfGit("SelfHealingManager recoverAlreadyMergedReviewTasks (real git)", (
     git(repo, `git worktree add ${JSON.stringify(worktreePath)} fusion/fn-test-3`);
 
     const tasks: TaskMap = new Map([
-      ["FN-TEST-3", { id: "FN-TEST-3", column: "in-review", status: "failed", mergeRetries: 3, paused: false, baseBranch: "main", branch: "fusion/fn-test-3", worktree: worktreePath, steps: [], log: [], updatedAt: new Date().toISOString() } as Task],
+      ["FN-TEST-3", makeTask({ id: "FN-TEST-3", column: "in-review", status: "failed", mergeRetries: 3, paused: false, baseBranch: "main", branch: "fusion/fn-test-3", worktree: worktreePath })],
     ]);
     const store = createStore(tasks);
     const manager = new SelfHealingManager(store, { rootDir: repo, getExecutingTaskIds: () => new Set() });
@@ -181,7 +197,7 @@ describeIfGit("SelfHealingManager recoverAlreadyMergedReviewTasks (real git)", (
     git(repo, `git worktree add ${JSON.stringify(worktreePath)} -b fusion/fn-test-4`);
 
     const tasks: TaskMap = new Map([
-      ["FN-TEST-4", { id: "FN-TEST-4", column: "in-review", status: "failed", mergeRetries: 3, paused: false, baseBranch: "main", branch: "fusion/fn-test-4", worktree: worktreePath, steps: [], log: [], updatedAt: new Date().toISOString() } as Task],
+      ["FN-TEST-4", makeTask({ id: "FN-TEST-4", column: "in-review", status: "failed", mergeRetries: 3, paused: false, baseBranch: "main", branch: "fusion/fn-test-4", worktree: worktreePath })],
     ]);
     const store = createStore(tasks);
     const manager = new SelfHealingManager(store, { rootDir: repo, getExecutingTaskIds: () => new Set() });
@@ -198,7 +214,7 @@ describeIfGit("SelfHealingManager recoverAlreadyMergedReviewTasks (real git)", (
   it("short-circuits when paused", async () => {
     const repo = setupRepo();
     const tasks: TaskMap = new Map([
-      ["FN-TEST-5", { id: "FN-TEST-5", column: "in-review", status: "failed", mergeRetries: 3, paused: false, baseBranch: "main", branch: "fusion/fn-test-5", steps: [], log: [], updatedAt: new Date().toISOString() } as Task],
+      ["FN-TEST-5", makeTask({ id: "FN-TEST-5", column: "in-review", status: "failed", mergeRetries: 3, paused: false, baseBranch: "main", branch: "fusion/fn-test-5" })],
     ]);
 
     const globalPausedStore = createStore(tasks, { globalPause: true, enginePaused: false });
