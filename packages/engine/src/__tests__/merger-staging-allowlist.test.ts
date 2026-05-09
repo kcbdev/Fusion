@@ -185,7 +185,7 @@ describe("commitOrAmendMergeWithFixes — staging allowlist", () => {
       new Set<string>(), // empty fixModifiedFiles
     );
 
-    expect(result).toBe(true);
+    expect(result).toEqual({ ok: true, reason: expect.any(String) });
 
     // The unrelated file must NOT appear in the commit
     const committedFiles = execSync("git diff --name-only HEAD~1 HEAD", {
@@ -228,7 +228,7 @@ describe("commitOrAmendMergeWithFixes — staging allowlist", () => {
       new Set(["README.md"]), // fix agent touched this
     );
 
-    expect(result).toBe(true);
+    expect(result).toEqual({ ok: true, reason: expect.any(String) });
 
     const committedFiles = execSync("git diff --name-only HEAD~1 HEAD", {
       cwd: dir,
@@ -266,7 +266,7 @@ describe("commitOrAmendMergeWithFixes — staging allowlist", () => {
       new Set(["feature-c.ts"]), // fix agent touched the same file the squash staged
     );
 
-    expect(result).toBe(true);
+    expect(result).toEqual({ ok: true, reason: expect.any(String) });
 
     // The committed file must contain the fix agent's content, not the squash's
     const committedContent = execSync("git show HEAD:feature-c.ts", {
@@ -305,7 +305,7 @@ describe("commitOrAmendMergeWithFixes — staging allowlist", () => {
       new Set(["new-fixture.ts"]), // fix agent created this file
     );
 
-    expect(result).toBe(true);
+    expect(result).toEqual({ ok: true, reason: expect.any(String) });
 
     const committedFiles = execSync("git diff --name-only HEAD~1 HEAD", {
       cwd: dir,
@@ -340,7 +340,7 @@ describe("commitOrAmendMergeWithFixes — staging allowlist", () => {
       new Set<string>(), // empty — the WIP file is not fix-agent-produced
     );
 
-    expect(result).toBe(true);
+    expect(result).toEqual({ ok: true, reason: expect.any(String) });
 
     const committedFiles = execSync("git diff --name-only HEAD~1 HEAD", {
       cwd: dir,
@@ -392,7 +392,7 @@ describe("commitOrAmendMergeWithFixes — staging allowlist", () => {
       new Set(["README.md"]), // only the agent's file is in the allowlist
     );
 
-    expect(result).toBe(true);
+    expect(result).toEqual({ ok: true, reason: expect.any(String) });
 
     const committedFiles = execSync("git diff --name-only HEAD~1 HEAD", {
       cwd: dir,
@@ -453,7 +453,7 @@ describe("commitOrAmendMergeWithFixes — staging allowlist", () => {
     );
 
     // Must NOT trip the phantom-merge guard: the trailer says we're done.
-    expect(result).toBe(true);
+    expect(result).toEqual({ ok: true, reason: expect.any(String) });
 
     // No new commit should have been fabricated.
     const newHead = git("git rev-parse HEAD").trim();
@@ -571,7 +571,7 @@ describe("commitOrAmendMergeWithFixes — embedded-space paths round-trip", () =
       new Set([spacedPath]), // fix agent touched this tracked file
     );
 
-    expect(result).toBe(true);
+    expect(result).toEqual({ ok: true, reason: expect.any(String) });
 
     // Verify both the squash file and the spaced file were committed.
     const committedFiles = execSync("git diff --name-only HEAD~1 HEAD", {
@@ -615,7 +615,7 @@ describe("commitOrAmendMergeWithFixes — embedded-space paths round-trip", () =
       new Set<string>(), // empty allowlist
     );
 
-    expect(result).toBe(true);
+    expect(result).toEqual({ ok: true, reason: expect.any(String) });
 
     const committedFiles = execSync("git diff --name-only HEAD~1 HEAD", {
       cwd: dir,
