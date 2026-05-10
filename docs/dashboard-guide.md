@@ -110,6 +110,7 @@ Chat Rooms are project-scoped group conversations for multiple agents. They are 
 - Confirming delete calls `rooms.deleteRoom(roomId)` and permanently removes the room and its messages ("This action cannot be undone. This room and all its messages will be permanently deleted."); failures surface a `Failed to delete room` toast.
 - Selecting a room opens the room thread pane with loading and empty states, then renders room messages from `rooms.messages` as `ChatMessageInfo` entries in the same thread UI used for direct Chat.
 - Submitting the room composer calls `rooms.sendRoomMessage(...)`, which posts the user message to `POST /api/chat/rooms/:id/messages`.
+- After a successful room send, the room composer is cleared (matching direct-chat composer behavior) so stale text is not left in the input.
 - The dashboard backend now orchestrates room responders on that POST: mentioned members are routed as direct responders, additional ambient members may reply (up to the room ambient responder cap), and each assistant reply is persisted with `senderAgentId` via `chatStore.addRoomMessage(...)`.
 - The UI still avoids optimistic room echo; it renders both the persisted user message and persisted assistant room replies from `chat:room:message:*` SSE events, so room threads stay server-authoritative.
 - Relationship summary: direct Chat runs one target (agent or model) per session; rooms are shared threads with multiple agent members and now use the same message contract as direct Chat; Quick Chat stays a floating single-target panel and does not host rooms.

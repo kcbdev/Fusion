@@ -1282,7 +1282,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
         return;
       }
       await rooms.sendRoomMessage(trimmed);
-      setMessageInput("");
+      clearComposerState();
       return;
     }
 

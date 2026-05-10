@@ -215,6 +215,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks();
+  localStorage.removeItem("fusion:chat-scope");
 });
 
 describe("ChatView", () => {
@@ -1125,6 +1126,85 @@ describe("ChatView", () => {
     await userEvent.type(textarea, "Hello world{enter}");
 
     expect(sendMessage).toHaveBeenCalledWith("Hello world", []);
+  });
+
+  it("clears room composer on Enter after successful room send", async () => {
+    localStorage.setItem("fusion:chat-scope", "rooms");
+    const sendRoomMessage = vi.fn().mockResolvedValue(undefined);
+    setupMockChat({ activeSession: activeSessionFixture, messages: [] });
+    setupMockRooms({
+      activeRoom: {
+        id: "room-001",
+        projectId: "proj-123",
+        name: "backend",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        updatedAt: "2026-04-08T00:00:00.000Z",
+      },
+      sendRoomMessage,
+    });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+    const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
+    await userEvent.type(textarea, "Room hello{enter}");
+
+    await waitFor(() => {
+      expect(sendRoomMessage).toHaveBeenCalledWith("Room hello");
+    });
+    expect(textarea.value).toBe("");
+    localStorage.removeItem("fusion:chat-scope");
+  });
+
+  it("clears room composer on send button click after successful room send", async () => {
+    localStorage.setItem("fusion:chat-scope", "rooms");
+    const sendRoomMessage = vi.fn().mockResolvedValue(undefined);
+    const sendMessage = vi.fn();
+    setupMockChat({ activeSession: activeSessionFixture, messages: [], sendMessage });
+    setupMockRooms({
+      activeRoom: {
+        id: "room-001",
+        projectId: "proj-123",
+        name: "backend",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        updatedAt: "2026-04-08T00:00:00.000Z",
+      },
+      sendRoomMessage,
+    });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+    const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
+    await userEvent.type(textarea, "Room click hello");
+    await userEvent.click(screen.getByTestId("chat-send-btn"));
+
+    await waitFor(() => {
+      expect(sendRoomMessage).toHaveBeenCalledWith("Room click hello");
+    });
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("");
+    localStorage.removeItem("fusion:chat-scope");
+  });
+
+  it("keeps direct chat send behavior unchanged when chat rooms are enabled", async () => {
+    localStorage.setItem("fusion:chat-scope", "direct");
+    const sendMessage = vi.fn();
+    const sendRoomMessage = vi.fn();
+    setupMockChat({
+      activeSession: activeSessionFixture,
+      messages: [],
+      sendMessage,
+    });
+    setupMockRooms({ sendRoomMessage });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+    const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
+    await userEvent.type(textarea, "Direct hello{enter}");
+
+    expect(sendMessage).toHaveBeenCalledWith("Direct hello", []);
+    expect(sendRoomMessage).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("");
+    localStorage.removeItem("fusion:chat-scope");
   });
 
   it("does not send on Shift+Enter", async () => {
