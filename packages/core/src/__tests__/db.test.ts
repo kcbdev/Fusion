@@ -26,10 +26,31 @@ function makeTmpDir(): string {
   return dir;
 }
 
-afterAll(async () => {
+async function cleanupTmpDirsAsync(): Promise<void> {
   const cleanup = Array.from(createdTmpDirs);
-  createdTmpDirs.clear();
-  await Promise.all(cleanup.map((dir) => rm(dir, { recursive: true, force: true })));
+  await Promise.all(
+    cleanup.map(async (dir) => {
+      await rm(dir, { recursive: true, force: true });
+      createdTmpDirs.delete(dir);
+    }),
+  );
+}
+
+function cleanupTmpDirsSync(): void {
+  const cleanup = Array.from(createdTmpDirs);
+  for (const dir of cleanup) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // best-effort fallback during teardown
+    } finally {
+      createdTmpDirs.delete(dir);
+    }
+  }
+}
+
+afterAll(() => {
+  cleanupTmpDirsSync();
 });
 
 describe("Database", () => {
@@ -50,9 +71,7 @@ describe("Database", () => {
     } catch {
       // already closed
     }
-    const cleanup = Array.from(createdTmpDirs);
-    createdTmpDirs.clear();
-    await Promise.all(cleanup.map((dir) => rm(dir, { recursive: true, force: true })));
+    await cleanupTmpDirsAsync();
   });
 
   describe("initialization", () => {
