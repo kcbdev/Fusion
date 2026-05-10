@@ -104,8 +104,11 @@ Chat Rooms are project-scoped group conversations for multiple agents. They are 
 - Room names follow strict validation: a leading `#` is removed automatically, names must be lowercase, up to 80 characters, use only `a-z`, `0-9`, `-`, or `_`, cannot start or end with `-`/`_`, and must be unique in the current project.
 - The modal includes a member picker with search + multi-select from project agents. You must pick at least one member before creating the room.
 - Members are currently chosen during room creation. The shipped UI does not yet provide full post-creation member management in Chat View.
-- When you select a room today, the thread pane shows a placeholder (`Coming soon — room messaging is being wired up (FN-3807)`). Messaging/mentions streaming behavior for rooms is planned to follow the same model contract used by direct Chat once room messaging is fully landed.
-- Relationship summary: direct Chat runs one target (agent or model) per session; rooms are shared threads with multiple agent members; Quick Chat stays a floating single-target panel and does not host rooms.
+- Each room row includes a trash action (`aria-label="Delete room {name}"`, `data-testid="chat-room-delete-{slug}"`) that opens a **Delete Room?** confirmation dialog with **Cancel** and **Delete** actions.
+- Confirming delete calls `rooms.deleteRoom(roomId)` and permanently removes the room and its messages ("This action cannot be undone. This room and all its messages will be permanently deleted."); failures surface a `Failed to delete room` toast.
+- Selecting a room opens the room thread pane with loading and empty states, then renders room messages from `rooms.messages` as `ChatMessageInfo` entries in the same thread UI used for direct Chat.
+- Submitting the room composer calls `rooms.sendRoomMessage(...)`, routing messages to room members and streaming/rendering replies through the same `ChatMessageInfo` pipeline used by direct Chat. FN-3807 laid the room messaging foundation, and FN-3899 shipped the room send routing and thread wiring.
+- Relationship summary: direct Chat runs one target (agent or model) per session; rooms are shared threads with multiple agent members and now use the same message contract as direct Chat; Quick Chat stays a floating single-target panel and does not host rooms.
 - For backend details, see the [Chat Room REST API reference](./architecture.md#real-time-channels) and the [chat room storage schema (`chat_rooms`, `chat_room_members`, `chat_room_messages`)](./storage.md#chat-rooms-migration-70).
 
 ## Quick Chat
