@@ -38,11 +38,12 @@ const fail = (s) => {
   process.exit(1);
 };
 
-function run(cmd, { capture = false, allowFail = false } = {}) {
+function run(cmd, { capture = false, allowFail = false, cwd } = {}) {
   const r = spawnSync(cmd, {
     shell: true,
     stdio: capture ? "pipe" : "inherit",
     encoding: "utf8",
+    cwd,
   });
   if (r.status !== 0 && !allowFail) fail(`Command failed: ${cmd}`);
   return { status: r.status, stdout: (r.stdout || "").trim() };
@@ -431,17 +432,20 @@ function bumpHomebrewTap(version) {
   }
   writeFileSync(formulaPath, patched);
 
-  run(`git add ${formulaPath}`);
+  // homebrew-tap is a sibling clone (gitignored in this repo) with its own git
+  // history; run git inside that working tree, not the main repo.
+  const tapCwd = "homebrew-tap";
+  run(`git add Formula/fusion.rb`, { cwd: tapCwd });
   const commit = run(
     `git commit -m "chore(tap): bump fusion to v${version}" -m "Auto-bumped by scripts/release.mjs after npm publish."`,
-    { allowFail: true, capture: true }
+    { allowFail: true, capture: true, cwd: tapCwd }
   );
   if (commit.status !== 0) {
     warn(`Tap commit failed (working tree may already be clean). Inspect ${formulaPath} manually.`);
     return;
   }
 
-  const push = run("git push origin main", { allowFail: true, capture: true });
+  const push = run("git push origin main", { allowFail: true, capture: true, cwd: tapCwd });
   if (push.status !== 0) {
     warn(`Failed to push tap bump commit to origin/main. Run \`git push origin main\` manually.`);
     return;
