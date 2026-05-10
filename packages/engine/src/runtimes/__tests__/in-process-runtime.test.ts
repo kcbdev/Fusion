@@ -15,6 +15,7 @@ const {
   mockSelfHealingCtor,
   mockRecoverNoProgressNoTaskDoneFailures,
   mockRunStartupRecovery,
+  mockRecoverInterruptedRuns,
   mockExecutorCtor,
   mockResumeOrphaned,
   mockTaskStoreSettings,
@@ -31,6 +32,7 @@ const {
   mockSelfHealingCtor: vi.fn(),
   mockRecoverNoProgressNoTaskDoneFailures: vi.fn().mockResolvedValue(0),
   mockRunStartupRecovery: vi.fn().mockResolvedValue(undefined),
+  mockRecoverInterruptedRuns: vi.fn().mockResolvedValue(undefined),
   mockExecutorCtor: vi.fn(),
   mockResumeOrphaned: vi.fn().mockResolvedValue(undefined),
   mockTaskStoreSettings: {} as Record<string, unknown>,
@@ -154,6 +156,14 @@ vi.mock("../../self-healing.js", async () => {
         runStartupRecovery: mockRunStartupRecovery,
       };
     }),
+  };
+});
+
+vi.mock("../../restart-recovery-coordinator.js", async () => {
+  return {
+    RestartRecoveryCoordinator: vi.fn().mockImplementation(() => ({
+      recoverInterruptedRuns: mockRecoverInterruptedRuns,
+    })),
   };
 });
 
@@ -320,11 +330,11 @@ describe("InProcessRuntime", () => {
       expect(mockSelfHealingStart).toHaveBeenCalled();
     }, 30000);
 
-    it("runs self-healing startup recovery immediately after orphan resume on startup", async () => {
+    it("runs startup recovery immediately after interrupted-run coordination on startup", async () => {
       await runtime.start();
 
-      expect(mockRecoverNoProgressNoTaskDoneFailures).toHaveBeenCalledTimes(1);
-      expect(mockResumeOrphaned).toHaveBeenCalledTimes(1);
+      expect(mockRecoverInterruptedRuns).toHaveBeenCalledTimes(1);
+      expect(mockResumeOrphaned).not.toHaveBeenCalled();
       expect(mockRunStartupRecovery).toHaveBeenCalledTimes(1);
     }, 30000);
 
@@ -333,7 +343,7 @@ describe("InProcessRuntime", () => {
 
       await runtime.start();
 
-      expect(mockRecoverNoProgressNoTaskDoneFailures).not.toHaveBeenCalled();
+      expect(mockRecoverInterruptedRuns).not.toHaveBeenCalled();
       expect(mockResumeOrphaned).not.toHaveBeenCalled();
       expect(mockRunStartupRecovery).not.toHaveBeenCalled();
     }, 30000);
@@ -342,20 +352,17 @@ describe("InProcessRuntime", () => {
       mockTaskStoreSettings.enginePaused = true;
 
       await runtime.start();
-      mockRecoverNoProgressNoTaskDoneFailures.mockClear();
+      mockRecoverInterruptedRuns.mockClear();
       mockResumeOrphaned.mockClear();
       mockRunStartupRecovery.mockClear();
 
       mockTaskStoreSettings.enginePaused = false;
       await runtime.resumeAfterUnpause();
 
-      expect(mockRecoverNoProgressNoTaskDoneFailures).toHaveBeenCalledTimes(1);
-      expect(mockResumeOrphaned).toHaveBeenCalledTimes(1);
+      expect(mockRecoverInterruptedRuns).toHaveBeenCalledTimes(1);
+      expect(mockResumeOrphaned).not.toHaveBeenCalled();
       expect(mockRunStartupRecovery).toHaveBeenCalledTimes(1);
-      expect(mockRecoverNoProgressNoTaskDoneFailures.mock.invocationCallOrder[0]).toBeLessThan(
-        mockResumeOrphaned.mock.invocationCallOrder[0],
-      );
-      expect(mockResumeOrphaned.mock.invocationCallOrder[0]).toBeLessThan(
+      expect(mockRecoverInterruptedRuns.mock.invocationCallOrder[0]).toBeLessThan(
         mockRunStartupRecovery.mock.invocationCallOrder[0],
       );
     }, 30000);
@@ -364,15 +371,15 @@ describe("InProcessRuntime", () => {
       mockTaskStoreSettings.enginePaused = true;
 
       await runtime.start();
-      mockRecoverNoProgressNoTaskDoneFailures.mockClear();
+      mockRecoverInterruptedRuns.mockClear();
       mockResumeOrphaned.mockClear();
       mockRunStartupRecovery.mockClear();
 
       mockTaskStoreSettings.enginePaused = false;
       await Promise.all([runtime.resumeAfterUnpause(), runtime.resumeAfterUnpause()]);
 
-      expect(mockRecoverNoProgressNoTaskDoneFailures).toHaveBeenCalledTimes(1);
-      expect(mockResumeOrphaned).toHaveBeenCalledTimes(1);
+      expect(mockRecoverInterruptedRuns).toHaveBeenCalledTimes(1);
+      expect(mockResumeOrphaned).not.toHaveBeenCalled();
       expect(mockRunStartupRecovery).toHaveBeenCalledTimes(1);
     }, 30000);
 

@@ -33,6 +33,7 @@ import { runtimeLog } from "../logger.js";
 import { StuckTaskDetector } from "../stuck-task-detector.js";
 import type { UsageLimitPauser } from "../usage-limit-detector.js";
 import { SelfHealingManager } from "../self-healing.js";
+import { RestartRecoveryCoordinator } from "../restart-recovery-coordinator.js";
 import { MeshLeaseManager } from "../mesh-lease-manager.js";
 import { PluginRunner } from "../plugin-runner.js";
 import { MissionAutopilot } from "../mission-autopilot.js";
@@ -125,6 +126,7 @@ export class InProcessRuntime
   private startupRecoveryDeferred = false;
   /** Prevent duplicate unpause recovery dispatches from racing each other. */
   private resumeAfterUnpauseRunning = false;
+  private restartRecoveryCoordinator?: RestartRecoveryCoordinator;
 
   /**
    * @param config - Runtime configuration
@@ -636,6 +638,7 @@ export class InProcessRuntime
       });
       this.selfHealingManager.start();
       this.stuckTaskDetector.start();
+      this.restartRecoveryCoordinator = new RestartRecoveryCoordinator(this.taskStore, this.executor);
 
       // 8. Set up event forwarding from TaskStore
       this.setupEventForwarding();
@@ -912,13 +915,9 @@ export class InProcessRuntime
   }
 
   private async resumeStartupRecoverySequence(): Promise<void> {
-    // Requeue no-progress no-task_done failures before resumeOrphaned can
-    // restart other orphaned executions.
-    await this.selfHealingManager!.recoverNoProgressNoTaskDoneFailures();
-
-    // Resume orphaned in-progress tasks before the broader self-healing scan
-    // so the executor can claim or fast-path eligible tasks first.
-    await this.executor!.resumeOrphaned();
+    // Restart recovery decides when interrupted runs can safely resume versus
+    // when they must be reset to todo for a clean retry.
+    await this.restartRecoveryCoordinator!.recoverInterruptedRuns();
 
     // Some "stuck" tasks are already orphaned by the time the runtime boots:
     // they no longer have a tracked session/worktree, so the stuck detector

@@ -181,6 +181,7 @@ Port 4040 is the production dashboard port. A user's live dashboard session is t
 ## Architecture
 
 - Merge deadlock self-healing now has three layered defenses: `SelfHealingManager.recoverAlreadyMergedReviewTasks()` and `SelfHealingManager.clearStaleBlockedBy()` in `packages/engine/src/self-healing.ts`, plus the paused-aware in-review scope filter in `packages/engine/src/scheduler.ts` (`inReviewWithWorktree` excludes `paused` tasks). Together these auto-finalize already-landed retry-exhausted review tasks, clear stale downstream blockers, and prevent paused review cards from re-blocking overlap dispatch.
+- Restart recovery is coordinated through `RestartRecoveryCoordinator` (`packages/engine/src/restart-recovery-coordinator.ts`), which classifies interrupted `in-progress` runs at runtime startup: no-progress `fn_task_done` failures are safely requeued to `todo`, then remaining orphaned work is resumed via the executor.
 
 ## Engine Process Rules
 
