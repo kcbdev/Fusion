@@ -218,6 +218,12 @@ Additional backend notes:
 | `eval_task_results` | Per-task eval outcomes linked to runs (`runId` FK cascade), including durable task snapshots and structured score payloads. `categoryScores[]` stores canonical per-category fields (`category`, `deterministicScore`, `aiScore`, `finalScore`, `weight`, `band`, `rationale`, `evidence[]`), plus `overallScore` derived from category finals. Also stores deterministic/AI signal payloads, summary rationale, structured follow-up suggestions (`suggestionId`, `dedupeKey`, recommendation, lifecycle state, suppression fields, optional `createdTaskId` linkage), and a bounded `TaskEvaluationEvidenceBundle` (fixed source-order groups, capped entry counts, max 500-char excerpts with truncation marker) embedded in result metadata for backward-compatible persistence. |
 | `eval_run_events` | Append-only eval run event trail (`runId` FK cascade, ordered by `seq`) for orchestration/debug auditing and downstream API/UI drill-down. |
 
+### Schema self-heal on init
+
+`Database.init()` now runs an unconditional schema-compatibility reconciliation pass after versioned migrations. The pass unions table definitions from `SCHEMA_SQL` plus `MIGRATION_ONLY_TABLE_SCHEMAS`, then backfills missing columns with `addColumnIfMissing()` for tables that already exist.
+
+Invariant: after init, every declared column for covered tables exists regardless of `__meta.schemaVersion`, preventing legacy drift from causing `no such column` regressions on newly added fields.
+
 ---
 
 ### Chat rooms (migration 70)

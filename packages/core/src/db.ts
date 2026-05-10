@@ -688,6 +688,7 @@ CREATE TABLE IF NOT EXISTS routines (
   nextRunAt TEXT,
   runCount INTEGER DEFAULT 0,
   runHistory TEXT DEFAULT '[]',
+  scope TEXT DEFAULT 'project',
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL
 );
@@ -789,6 +790,266 @@ CREATE INDEX IF NOT EXISTS idxTodoListsProjectId ON todo_lists(projectId);
 CREATE INDEX IF NOT EXISTS idxTodoItemsListId ON todo_items(listId);
 CREATE INDEX IF NOT EXISTS idxTodoItemsSortOrder ON todo_items(listId, sortOrder);
 `;
+
+const TABLE_LEVEL_CONSTRAINT_PREFIXES = new Set([
+  "PRIMARY",
+  "FOREIGN",
+  "UNIQUE",
+  "CHECK",
+  "CONSTRAINT",
+]);
+
+function normalizeSqlIdentifier(identifier: string): string {
+  const trimmed = identifier.trim();
+  if (!trimmed) return trimmed;
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+      (trimmed.startsWith("`") && trimmed.endsWith("`")) ||
+      (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function parseCreateTableSchemasFromSql(sql: string): Map<string, Map<string, string>> {
+  const schema = new Map<string, Map<string, string>>();
+  const createTableRegex = /CREATE TABLE\s+(?:IF NOT EXISTS\s+)?((?:["`]|\[)?[A-Za-z_][A-Za-z0-9_]*(?:["`]|\])?)\s*\(([\s\S]*?)\)\s*;/g;
+
+  for (const match of sql.matchAll(createTableRegex)) {
+    const tableName = normalizeSqlIdentifier(match[1]);
+    const body = match[2] ?? "";
+    const columns = new Map<string, string>();
+
+    for (const rawLine of body.split("\n")) {
+      const noComment = rawLine.replace(/--.*$/, "").trim();
+      if (!noComment) continue;
+      const line = noComment.endsWith(",") ? noComment.slice(0, -1).trim() : noComment;
+      if (!line) continue;
+
+      const firstWord = line.split(/\s+/, 1)[0]?.toUpperCase() ?? "";
+      if (TABLE_LEVEL_CONSTRAINT_PREFIXES.has(firstWord)) continue;
+
+      const columnMatch = line.match(/^((?:["`]|\[)?[A-Za-z_][A-Za-z0-9_]*(?:["`]|\])?)\s+(.+)$/);
+      if (!columnMatch) continue;
+      const columnName = normalizeSqlIdentifier(columnMatch[1]);
+      const columnDefinition = columnMatch[2].trim();
+      if (!columnDefinition) continue;
+      columns.set(columnName, columnDefinition);
+    }
+
+    schema.set(tableName, columns);
+  }
+
+  return schema;
+}
+
+const SCHEMA_TABLE_SCHEMAS = parseCreateTableSchemasFromSql(SCHEMA_SQL);
+
+export function getSchemaSqlTableSchemas(): Map<string, Map<string, string>> {
+  return new Map([...SCHEMA_TABLE_SCHEMAS].map(([table, columns]) => [table, new Map(columns)]));
+}
+
+export function getSchemaCompatibilityTableSchemas(): Map<string, Map<string, string>> {
+  const tables = getSchemaSqlTableSchemas();
+  for (const [table, columns] of Object.entries(MIGRATION_ONLY_TABLE_SCHEMAS)) {
+    tables.set(table, new Map(Object.entries(columns)));
+  }
+  return tables;
+}
+
+export const MIGRATION_ONLY_TABLE_SCHEMAS: Record<string, Record<string, string>> = {
+  ai_sessions: {
+    id: "TEXT PRIMARY KEY",
+    type: "TEXT NOT NULL",
+    status: "TEXT NOT NULL",
+    title: "TEXT NOT NULL",
+    inputPayload: "TEXT NOT NULL",
+    conversationHistory: "TEXT DEFAULT '[]'",
+    currentQuestion: "TEXT",
+    result: "TEXT",
+    thinkingOutput: "TEXT DEFAULT ''",
+    error: "TEXT",
+    projectId: "TEXT",
+    createdAt: "TEXT NOT NULL",
+    updatedAt: "TEXT NOT NULL",
+    lockedByTab: "TEXT",
+    lockedAt: "TEXT",
+    archived: "INTEGER DEFAULT 0",
+  },
+  messages: {
+    id: "TEXT PRIMARY KEY",
+    fromId: "TEXT NOT NULL",
+    fromType: "TEXT NOT NULL",
+    toId: "TEXT NOT NULL",
+    toType: "TEXT NOT NULL",
+    content: "TEXT NOT NULL",
+    type: "TEXT NOT NULL",
+    read: "INTEGER DEFAULT 0",
+    metadata: "TEXT",
+    createdAt: "TEXT NOT NULL",
+    updatedAt: "TEXT NOT NULL",
+  },
+  agentRatings: {
+    id: "TEXT PRIMARY KEY",
+    agentId: "TEXT NOT NULL",
+    raterType: "TEXT NOT NULL",
+    raterId: "TEXT",
+    score: "INTEGER NOT NULL CHECK(score BETWEEN 1 AND 5)",
+    category: "TEXT",
+    comment: "TEXT",
+    runId: "TEXT",
+    taskId: "TEXT",
+    createdAt: "TEXT NOT NULL",
+  },
+  chat_sessions: {
+    id: "TEXT PRIMARY KEY",
+    agentId: "TEXT NOT NULL",
+    title: "TEXT",
+    status: "TEXT NOT NULL DEFAULT 'active'",
+    projectId: "TEXT",
+    modelProvider: "TEXT",
+    modelId: "TEXT",
+    createdAt: "TEXT NOT NULL",
+    updatedAt: "TEXT NOT NULL",
+    cliSessionFile: "TEXT",
+  },
+  chat_messages: {
+    id: "TEXT PRIMARY KEY",
+    sessionId: "TEXT NOT NULL",
+    role: "TEXT NOT NULL",
+    content: "TEXT NOT NULL",
+    thinkingOutput: "TEXT",
+    metadata: "TEXT",
+    createdAt: "TEXT NOT NULL",
+    attachments: "TEXT",
+  },
+  runAuditEvents: {
+    id: "TEXT PRIMARY KEY",
+    timestamp: "TEXT NOT NULL",
+    taskId: "TEXT",
+    agentId: "TEXT NOT NULL",
+    runId: "TEXT NOT NULL",
+    domain: "TEXT NOT NULL",
+    mutationType: "TEXT NOT NULL",
+    target: "TEXT NOT NULL",
+    metadata: "TEXT",
+  },
+  mission_contract_assertions: {
+    id: "TEXT PRIMARY KEY",
+    milestoneId: "TEXT NOT NULL",
+    title: "TEXT NOT NULL",
+    assertion: "TEXT NOT NULL",
+    status: "TEXT NOT NULL DEFAULT 'pending'",
+    orderIndex: "INTEGER NOT NULL DEFAULT 0",
+    createdAt: "TEXT NOT NULL",
+    updatedAt: "TEXT NOT NULL",
+  },
+  mission_feature_assertions: {
+    featureId: "TEXT NOT NULL",
+    assertionId: "TEXT NOT NULL",
+    createdAt: "TEXT NOT NULL",
+  },
+  mission_validator_runs: {
+    id: "TEXT PRIMARY KEY",
+    featureId: "TEXT NOT NULL",
+    milestoneId: "TEXT NOT NULL",
+    sliceId: "TEXT NOT NULL",
+    status: "TEXT NOT NULL DEFAULT 'running'",
+    triggerType: "TEXT NOT NULL DEFAULT 'auto'",
+    implementationAttempt: "INTEGER NOT NULL DEFAULT 0",
+    validatorAttempt: "INTEGER NOT NULL DEFAULT 0",
+    summary: "TEXT",
+    blockedReason: "TEXT",
+    startedAt: "TEXT NOT NULL",
+    completedAt: "TEXT",
+    createdAt: "TEXT NOT NULL",
+    updatedAt: "TEXT NOT NULL",
+    taskId: "TEXT",
+  },
+  mission_validator_failures: {
+    id: "TEXT PRIMARY KEY",
+    runId: "TEXT NOT NULL",
+    featureId: "TEXT NOT NULL",
+    assertionId: "TEXT NOT NULL",
+    message: "TEXT",
+    expected: "TEXT",
+    actual: "TEXT",
+    createdAt: "TEXT NOT NULL",
+  },
+  mission_fix_feature_lineage: {
+    id: "TEXT PRIMARY KEY",
+    sourceFeatureId: "TEXT NOT NULL",
+    fixFeatureId: "TEXT NOT NULL",
+    runId: "TEXT NOT NULL",
+    failedAssertionIds: "TEXT NOT NULL DEFAULT '[]'",
+    createdAt: "TEXT NOT NULL",
+  },
+  verification_cache: {
+    treeSha: "TEXT NOT NULL",
+    testCommand: "TEXT NOT NULL DEFAULT ''",
+    buildCommand: "TEXT NOT NULL DEFAULT ''",
+    recordedAt: "TEXT NOT NULL",
+    taskId: "TEXT",
+  },
+  approval_requests: {
+    id: "TEXT PRIMARY KEY",
+    status: "TEXT NOT NULL",
+    requesterActorId: "TEXT NOT NULL",
+    requesterActorType: "TEXT NOT NULL",
+    requesterActorName: "TEXT NOT NULL",
+    targetActionCategory: "TEXT NOT NULL",
+    targetActionOperation: "TEXT NOT NULL",
+    targetActionSummary: "TEXT NOT NULL",
+    targetResourceType: "TEXT NOT NULL",
+    targetResourceId: "TEXT NOT NULL",
+    targetContext: "TEXT",
+    taskId: "TEXT",
+    runId: "TEXT",
+    requestedAt: "TEXT NOT NULL",
+    decidedAt: "TEXT",
+    completedAt: "TEXT",
+    createdAt: "TEXT NOT NULL",
+    updatedAt: "TEXT NOT NULL",
+  },
+  approval_request_audit_events: {
+    id: "TEXT PRIMARY KEY",
+    requestId: "TEXT NOT NULL",
+    eventType: "TEXT NOT NULL",
+    actorId: "TEXT NOT NULL",
+    actorType: "TEXT NOT NULL",
+    actorName: "TEXT NOT NULL",
+    note: "TEXT",
+    createdAt: "TEXT NOT NULL",
+  },
+  chat_rooms: {
+    id: "TEXT PRIMARY KEY",
+    name: "TEXT NOT NULL",
+    slug: "TEXT NOT NULL",
+    description: "TEXT",
+    projectId: "TEXT",
+    createdBy: "TEXT",
+    status: "TEXT NOT NULL DEFAULT 'active'",
+    createdAt: "TEXT NOT NULL",
+    updatedAt: "TEXT NOT NULL",
+  },
+  chat_room_members: {
+    roomId: "TEXT NOT NULL",
+    agentId: "TEXT NOT NULL",
+    role: "TEXT NOT NULL DEFAULT 'member'",
+    addedAt: "TEXT NOT NULL",
+  },
+  chat_room_messages: {
+    id: "TEXT PRIMARY KEY",
+    roomId: "TEXT NOT NULL",
+    role: "TEXT NOT NULL",
+    content: "TEXT NOT NULL",
+    thinkingOutput: "TEXT",
+    metadata: "TEXT",
+    attachments: "TEXT",
+    senderAgentId: "TEXT",
+    mentions: "TEXT",
+    createdAt: "TEXT NOT NULL",
+  },
+};
 
 // ── Database Class ───────────────────────────────────────────────────
 
@@ -1064,7 +1325,7 @@ export class Database {
     this.migrate();
 
     // Compatibility backfills that must run even when schemaVersion is current.
-    this.ensureTasksSchemaCompatibility();
+    this.ensureSchemaCompatibility();
     this.ensureRoutinesSchemaCompatibility();
     this.ensureInsightRunsSchemaCompatibility();
     this.ensureEvalTaskResultsSchemaCompatibility();
@@ -1088,26 +1349,23 @@ export class Database {
    * re-run even if a previous migration partially applied.
    */
   /**
-   * Applies idempotent compatibility fixes for legacy tasks checkout lease columns.
+   * Applies unconditional column reconciliation for all known project DB tables.
    *
-   * FN-3879 documented a self-heal for missing checkout lease columns, but the
-   * original column adds lived only in the `version < 20` migration block. Some
-   * legacy/mesh-synced databases report `schemaVersion >= 20` despite never
-   * receiving those columns, so task listing queries can fail with `no such
-   * column: checkoutNodeId`. Running this unconditionally on init guarantees the
-   * canonical lease columns exist.
+   * FN-3879 introduced a tasks checkout-column self-heal, FN-3898 formalized it,
+   * and FN-3887 generalized the guardrail so migration-version drift no longer
+   * determines whether additive columns exist. Invariant: every column declared
+   * in SCHEMA_SQL or MIGRATION_ONLY_TABLE_SCHEMAS exists on any live table after
+   * this method returns, regardless of the persisted schemaVersion.
    */
-  private ensureTasksSchemaCompatibility(): void {
-    if (!this.hasTable("tasks")) {
-      return;
-    }
+  private ensureSchemaCompatibility(): void {
+    const knownTableSchemas = getSchemaCompatibilityTableSchemas();
 
-    this.addColumnIfMissing("tasks", "checkedOutBy", "TEXT");
-    this.addColumnIfMissing("tasks", "checkedOutAt", "TEXT");
-    this.addColumnIfMissing("tasks", "checkoutNodeId", "TEXT");
-    this.addColumnIfMissing("tasks", "checkoutRunId", "TEXT");
-    this.addColumnIfMissing("tasks", "checkoutLeaseRenewedAt", "TEXT");
-    this.addColumnIfMissing("tasks", "checkoutLeaseEpoch", "INTEGER DEFAULT 0");
+    for (const [tableName, columns] of knownTableSchemas) {
+      if (!this.hasTable(tableName)) continue;
+      for (const [columnName, columnDefinition] of columns) {
+        this.addColumnIfMissing(tableName, columnName, columnDefinition);
+      }
+    }
   }
 
   /**
@@ -1122,21 +1380,6 @@ export class Database {
       return;
     }
 
-    this.addColumnIfMissing("routines", "agentId", "TEXT NOT NULL DEFAULT ''");
-    this.addColumnIfMissing("routines", "command", "TEXT");
-    this.addColumnIfMissing("routines", "steps", "TEXT");
-    this.addColumnIfMissing("routines", "timeoutMs", "INTEGER");
-    this.addColumnIfMissing("routines", "catchUpPolicy", "TEXT NOT NULL DEFAULT 'run_one'");
-    this.addColumnIfMissing("routines", "executionPolicy", "TEXT NOT NULL DEFAULT 'queue'");
-    this.addColumnIfMissing("routines", "catchUpLimit", "INTEGER DEFAULT 5");
-    this.addColumnIfMissing("routines", "lastRunAt", "TEXT");
-    this.addColumnIfMissing("routines", "lastRunResult", "TEXT");
-    this.addColumnIfMissing("routines", "nextRunAt", "TEXT");
-    this.addColumnIfMissing("routines", "runCount", "INTEGER DEFAULT 0");
-    this.addColumnIfMissing("routines", "runHistory", "TEXT DEFAULT '[]'");
-    this.addColumnIfMissing("routines", "scope", "TEXT DEFAULT 'project'");
-    this.addColumnIfMissing("routines", "enabled", "INTEGER DEFAULT 1");
-
     this.db.exec("UPDATE routines SET agentId = '' WHERE agentId IS NULL");
     this.db.exec("UPDATE routines SET scope = 'project' WHERE scope IS NULL OR TRIM(scope) = ''");
 
@@ -1146,21 +1389,17 @@ export class Database {
   }
 
   /**
-   * Applies idempotent compatibility fixes for the project_insight_runs table.
+   * Applies idempotent post-schema compatibility fixes for project_insight_runs.
    *
-   * The `lifecycle` and `cancelledAt` columns were added to SCHEMA_SQL and
-   * retroactively inserted into migration v33's CREATE TABLE, with a safety-net
-   * in migration v59.  However, databases that were already at v59+ when the
-   * commit landed never re-run v59, leaving the columns missing.  Running this
-   * unconditionally on every init guarantees the columns exist.
+   * Column reconciliation is handled by ensureSchemaCompatibility(); this method
+   * remains focused on index creation that should run after the generic column
+   * backfill pass.
    */
   private ensureInsightRunsSchemaCompatibility(): void {
     if (!this.hasTable("project_insight_runs")) {
       return;
     }
 
-    this.addColumnIfMissing("project_insight_runs", "lifecycle", "TEXT");
-    this.addColumnIfMissing("project_insight_runs", "cancelledAt", "TEXT");
     this.db.exec(`CREATE INDEX IF NOT EXISTS idxInsightRunsProjectTriggerStatus ON project_insight_runs(projectId, trigger, status)`);
   }
 

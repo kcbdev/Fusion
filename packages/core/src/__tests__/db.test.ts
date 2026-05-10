@@ -1,5 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { Database, createDatabase, toJson, toJsonNullable, fromJson, normalizeTaskComments } from "../db.js";
+import {
+  Database,
+  createDatabase,
+  toJson,
+  toJsonNullable,
+  fromJson,
+  normalizeTaskComments,
+  getSchemaSqlTableSchemas,
+  MIGRATION_ONLY_TABLE_SCHEMAS,
+} from "../db.js";
 import { DEFAULT_PROJECT_SETTINGS } from "../types.js";
 import { TaskStore } from "../store.js";
 import { mkdtempSync, existsSync, readFileSync, rmSync } from "node:fs";
@@ -1191,6 +1200,95 @@ describe("schema migrations", () => {
     db.close();
   });
 
+  it("reconciles missing columns across all SCHEMA_SQL tables even when schemaVersion is current", () => {
+    tmpDir = makeTmpDir();
+    const fusionDir = join(tmpDir, ".fusion");
+    const dbSourcePath = fileURLToPath(new URL("../db.ts", import.meta.url));
+    const source = readFileSync(dbSourcePath, "utf8");
+    const versionMatch = source.match(/^const SCHEMA_VERSION = (\d+);/m);
+    expect(versionMatch).not.toBeNull();
+    const schemaVersion = Number(versionMatch?.[1]);
+
+    const legacyDb = new Database(fusionDir);
+    legacyDb.exec("CREATE TABLE IF NOT EXISTS __meta (key TEXT PRIMARY KEY, value TEXT)");
+
+    const schemaTables = getSchemaSqlTableSchemas();
+    const indexedColumnsByTable = new Map<string, Set<string>>();
+    for (const match of source.matchAll(/CREATE INDEX IF NOT EXISTS\s+\w+\s+ON\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]+)\)/g)) {
+      const table = match[1];
+      const cols = match[2]
+        .split(",")
+        .map((column) => column.trim().replace(/\s+(ASC|DESC)$/i, ""));
+      const set = indexedColumnsByTable.get(table) ?? new Set<string>();
+      cols.forEach((column) => set.add(column));
+      indexedColumnsByTable.set(table, set);
+    }
+
+    const requiredDrops = new Map<string, string>([
+      ["tasks", "checkoutNodeId"],
+      ["agents", "currentTaskId"],
+      ["missions", "autoAdvance"],
+      ["routines", "agentId"],
+    ]);
+
+    const isSafeToDrop = (definition: string): boolean => {
+      const upper = definition.toUpperCase();
+      if (upper.includes("PRIMARY KEY")) return false;
+      if (upper.includes("NOT NULL") && !upper.includes("DEFAULT")) return false;
+      return true;
+    };
+
+    for (const [tableName, columns] of schemaTables) {
+      const entries = [...columns.entries()];
+      const dropped = new Set<string>();
+      const indexedColumns = indexedColumnsByTable.get(tableName) ?? new Set<string>();
+      entries.forEach(([name, definition], index) => {
+        if (index % 4 === 0 && entries.length > 1 && isSafeToDrop(definition) && !indexedColumns.has(name)) {
+          dropped.add(name);
+        }
+      });
+      const forcedDrop = requiredDrops.get(tableName);
+      if (forcedDrop) dropped.add(forcedDrop);
+
+      const kept = entries.filter(([name]) => !dropped.has(name));
+      const chosen = kept.length > 0 ? kept : entries.slice(0, 1);
+      const columnSql = chosen.map(([name, def]) => `  ${name} ${def}`).join(",\n");
+      legacyDb.exec(`CREATE TABLE IF NOT EXISTS ${tableName} (\n${columnSql}\n)`);
+    }
+
+    const validatorColumns = Object.entries(MIGRATION_ONLY_TABLE_SCHEMAS.mission_validator_runs)
+      .filter(([name, definition], index) => name === "id" || (name !== "taskId" && (index % 4 !== 0 || !isSafeToDrop(definition))))
+      .map(([name, def]) => `  ${name} ${def}`)
+      .join(",\n");
+    legacyDb.exec(`CREATE TABLE IF NOT EXISTS mission_validator_runs (\n${validatorColumns}\n)`);
+
+    legacyDb.exec(`INSERT INTO __meta (key, value) VALUES ('schemaVersion', '${schemaVersion}')`);
+    legacyDb.exec("INSERT INTO __meta (key, value) VALUES ('lastModified', '1000')");
+    legacyDb.close();
+
+    const opened = new Database(fusionDir);
+    opened.init();
+
+    for (const [tableName, columns] of schemaTables) {
+      const actualColumns = new Set(
+        (opened.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>).map((column) => column.name),
+      );
+      for (const [columnName] of columns) {
+        expect(actualColumns.has(columnName), `expected column ${tableName}.${columnName} after init() but it is missing`).toBe(true);
+      }
+    }
+
+    const missionValidatorColumns = new Set(
+      (opened.prepare("PRAGMA table_info(mission_validator_runs)").all() as Array<{ name: string }>).map((column) => column.name),
+    );
+    expect(
+      missionValidatorColumns.has("taskId"),
+      "expected column mission_validator_runs.taskId after init() but it is missing",
+    ).toBe(true);
+
+    opened.close();
+  });
+
   it("backfills missing checkout lease columns when schemaVersion is already current", () => {
     tmpDir = makeTmpDir();
     const fusionDir = join(tmpDir, ".fusion");
@@ -1221,6 +1319,8 @@ describe("schema migrations", () => {
 
     const db = new Database(fusionDir);
     db.init();
+
+    expect(() => db.prepare("SELECT checkoutNodeId FROM tasks WHERE id = 'FN-lease'").get()).not.toThrow();
 
     const columns = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
     const columnNames = columns.map((column) => column.name);
