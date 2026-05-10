@@ -813,6 +813,18 @@ export function decideExecutionPlan({
   };
 }
 
+export function normalizeForwardedArgs(argv) {
+  const normalized = [];
+
+  for (const arg of argv) {
+    if (arg === "--full" || arg === "--no-cache") continue;
+    if (arg === "--silent" || arg.startsWith("--silent=")) continue;
+    normalized.push(arg);
+  }
+
+  return normalized;
+}
+
 export function main(argv = process.argv.slice(2)) {
   const forceFullSuite =
     process.env.CI === "true" ||
@@ -823,7 +835,7 @@ export function main(argv = process.argv.slice(2)) {
     process.env.FUSION_TEST_NO_CACHE === "1" ||
     argv.includes("--no-cache");
 
-  const forwardedArgs = argv.filter((arg) => arg !== "--full" && arg !== "--no-cache");
+  const forwardedArgs = normalizeForwardedArgs(argv);
 
   run("pnpm", ["sync:fusion-skill:check"]);
   ensureTestArtifacts(rootDir);

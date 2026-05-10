@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   decideExecutionPlan,
+  normalizeForwardedArgs,
   resolveAffectedPackages,
   shouldForceFullSuite,
 } from "../../../../scripts/test-changed.mjs";
@@ -54,6 +55,12 @@ describe("root test command changed-only planning", () => {
     expect(shouldForceFullSuite([".github/workflows/ci.yml"])).toBe(true);
     expect(shouldForceFullSuite(["package.json"])).toBe(true);
     expect(shouldForceFullSuite(["packages/core/src/store.ts"])).toBe(false);
+  });
+
+  it("strips forwarded silent flags so package vitest scripts do not receive duplicates", () => {
+    expect(
+      normalizeForwardedArgs(["--full", "--silent", "--silent=passed-only", "--reporter=dot"]),
+    ).toEqual(["--reporter=dot"]);
   });
 });
 
