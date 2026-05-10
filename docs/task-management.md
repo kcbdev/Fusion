@@ -219,7 +219,7 @@ Research document content appears in the existing **Documents** tab in Task Deta
 
 The task detail modal exposes multiple tabs.
 
-In read mode, task metadata includes lightweight inline controls: priority can be changed from the priority chip, and execution mode can be toggled with a one-click lightning-bolt fast-mode button (Fast ↔ Standard) without opening full edit mode.
+In read mode, task metadata includes lightweight inline controls: priority can be changed from the priority chip, and execution mode can be toggled with a one-click lightning-bolt fast-mode button (Fast ↔ Standard) without opening full edit mode. These controls are intentionally aligned as a paired row (matched control height, baseline alignment, and mobile-safe wrapping) so frequent priority/mode changes stay quick and visually consistent.
 
 Task settings edited from the modal now auto-save as you edit (change/blur with debounce for text-like fields). This includes title, description, dependencies, working/base branch (`branch`/`baseBranch`), workflow-step selection, model overrides in the edit form, and source issue metadata. The footer Save button remains available, but normal field edits no longer depend on a manual save click.
 
