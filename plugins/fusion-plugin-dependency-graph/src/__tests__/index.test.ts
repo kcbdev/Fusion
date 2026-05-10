@@ -60,9 +60,7 @@ describe("dependency graph plugin index", () => {
     expect(result.status, `Node import check failed: ${result.stderr || result.stdout}`).toBe(0);
   });
 
-  const hasPluginLoaderPrereqs = existsSync(join(process.cwd(), "dist/index.js"));
-  const pluginLoaderTest = hasPluginLoaderPrereqs ? it : it.skip;
-  pluginLoaderTest("is loadable by PluginLoader without throwing", async () => {
+  it("is loadable by PluginLoader without throwing", async () => {
     const rootDir = mkdtempSync(join(tmpdir(), "fn-3737-plugin-loader-"));
     testDirs.push(rootDir);
 
