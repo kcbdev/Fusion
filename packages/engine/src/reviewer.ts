@@ -18,9 +18,9 @@ import { reviewerLog } from "./logger.js";
 import { checkSessionError } from "./usage-limit-detector.js";
 import {
   resolveAgentInstructions,
-  buildSystemPromptWithInstructions,
   buildPluginPromptSection,
 } from "./agent-instructions.js";
+import { buildPromptLayers, collapsePromptLayers } from "./prompt-layers.js";
 import { createFallbackModelObserver } from "./fallback-model-observer.js";
 import { createMemoryGetTool, createMemorySearchTool, createWebFetchTool } from "./agent-tools.js";
 
@@ -405,26 +405,36 @@ export async function reviewStep(
     }
   }
   const reviewerBasePrompt = resolveAgentPrompt("reviewer", options.agentPrompts) || REVIEWER_SYSTEM_PROMPT;
+  // Memory goes in the dynamic layer (not concatenated onto basePrompt) so the
+  // stable prefix is byte-identical across sessions even if memory changes.
+  // The leading "\n" separator is no longer needed — buildPromptLayers handles
+  // section joining with "\n\n".
   const memorySection = options.rootDir && options.settings?.memoryEnabled !== false
-    ? "\n" + buildReviewerMemoryInstructions(options.rootDir, options.settings)
+    ? buildReviewerMemoryInstructions(options.rootDir, options.settings)
     : "";
-  const reviewerSystemPrompt = buildSystemPromptWithInstructions(
-    reviewerBasePrompt + memorySection,
-    reviewerInstructions,
-  );
-  const reviewerContributions = options.pluginRunner
-    ?.getPromptContributionsForSurface("reviewer")
-    ?? [];
-  if (reviewerContributions.length > 0) {
-    reviewerLog.log(`applied ${reviewerContributions.length} plugin prompt contributions for reviewer surface`);
-  }
+
+  // Build structured layers for cross-session prompt caching.
+  // The stable layer (base prompt only) is byte-identical across all
+  // reviewer sessions in this task, enabling cache hits. Memory goes
+  // into the dynamic layer because it can change between sessions.
   const reviewerPluginContributions = buildPluginPromptSection(
     "reviewer",
     options.pluginRunner,
   );
-  const reviewerSystemPromptFinal = reviewerPluginContributions
-    ? `${reviewerSystemPrompt}\n\n${reviewerPluginContributions}`
-    : reviewerSystemPrompt;
+  if (reviewerPluginContributions) {
+    reviewerLog.log(`applied plugin prompt contributions for reviewer surface`);
+  }
+
+  const layers = buildPromptLayers({
+    basePrompt: reviewerBasePrompt,
+    agentInstructions: reviewerInstructions,
+    memorySection,
+    pluginContributions: reviewerPluginContributions,
+  });
+
+  // Collapsed string for backward compatibility with runtimes that don't
+  // support layers (plugin runtimes, older pi versions).
+  const reviewerSystemPromptFinal = collapsePromptLayers(layers);
 
   // Build skill selection context (assigned agent skills take precedence over role fallback)
   let skillContext = undefined;
@@ -495,6 +505,7 @@ export async function reviewStep(
       pluginRunner: options.pluginRunner,
       cwd,
       systemPrompt: reviewerSystemPromptFinal,
+      systemPromptLayers: layers,
       tools: "readonly",
       customTools: [createWebFetchTool(), ...(memoryTools ?? [])],
       onText: agentLogger ? agentLogger.onText : (delta) => options.onText?.(delta),

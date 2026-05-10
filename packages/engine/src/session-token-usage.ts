@@ -90,3 +90,21 @@ export async function accumulateSessionTokenUsage(
     log.warn(`${taskId}: session token usage accumulate failed: ${message}`);
   }
 }
+
+/**
+ * Compute the cache hit ratio: `cachedTokens / (inputTokens + cachedTokens)`.
+ * Returns a number in [0, 1], or 0 when both arguments are 0.
+ *
+ * Compatible with stored `task.tokenUsage` fields: pass `inputTokens` (which
+ * includes cache-write tokens per `accumulateSessionTokenUsage`) and
+ * `cachedTokens` (cache-read tokens). Note this differs slightly from the
+ * Anthropic console metric, which excludes cache-write from the denominator.
+ */
+export function computeCacheHitRatio(
+  inputTokens: number,
+  cachedTokens: number,
+): number {
+  const total = inputTokens + cachedTokens;
+  if (total === 0) return 0;
+  return cachedTokens / total;
+}

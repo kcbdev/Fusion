@@ -56,6 +56,7 @@ import {
   type AgentActionGateContext,
 } from "./agent-action-gate.js";
 import { resolvePermanentAgentToolDecision } from "./permanent-agent-gating.js";
+import type { SystemPromptLayers } from "./prompt-layers.js";
 
 export interface AgentResult {
   session: AgentSession;
@@ -711,6 +712,11 @@ export type BuiltinWebToolName = "WebSearch" | "WebFetch";
 export interface AgentOptions {
   cwd: string;
   systemPrompt: string;
+  /** Structured prompt layers for cross-session caching. When provided,
+   *  the stable layer is used as systemPromptOverride and the dynamic
+   *  layer as appendSystemPromptOverride. Falls back to systemPrompt
+   *  when not provided. */
+  systemPromptLayers?: SystemPromptLayers;
   tools?: "coding" | "readonly";
   customTools?: ToolDefinition[];
   /** Optional allowlist of builtin runtime web tools to keep enabled. */
@@ -1715,8 +1721,11 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
     cwd: resolvedProjectRoot,
     agentDir: getFusionAgentDir(),
     settingsManager,
-    systemPromptOverride: () => options.systemPrompt,
-    appendSystemPromptOverride: () => [],
+    systemPromptOverride: () => options.systemPromptLayers?.stable ?? options.systemPrompt,
+    appendSystemPromptOverride: () =>
+      options.systemPromptLayers?.dynamic
+        ? [options.systemPromptLayers.dynamic]
+        : [],
     ...(effectiveExtensionPaths.length > 0 ? { additionalExtensionPaths: [...effectiveExtensionPaths] } : {}),
     ...(skillsOverrideFn ? { skillsOverride: skillsOverrideFn } : {}),
   });
@@ -1748,6 +1757,17 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
       boundaryContext.worktreePath,
       boundaryContext.worktreeProjectRoot,
     );
+    // Sort tools alphabetically by name for deterministic ordering.
+    // Prompt caching requires the tool list to be byte-identical across
+    // sessions — reordering breaks cache prefix matching.
+    // Exception: fn_heartbeat_done must remain last (stable terminal signal
+    // required by the heartbeat executor — see agent-heartbeat.ts).
+    customToolList.sort((a, b) => a.name.localeCompare(b.name));
+    const heartbeatDoneIdx = customToolList.findIndex((t) => t.name === "fn_heartbeat_done");
+    if (heartbeatDoneIdx >= 0 && heartbeatDoneIdx < customToolList.length - 1) {
+      const [doneTool] = customToolList.splice(heartbeatDoneIdx, 1);
+      customToolList.push(doneTool);
+    }
     // Last-chance abort hook. Fires *here* — after every awaited setup step
     // in createFnAgent (provider registration, worktree validation, resource
     // loader reload) and immediately before the actual LLM session spawn.
@@ -1774,7 +1794,7 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
           ...customToolList.map((tool) => tool.name),
           ...options.builtinToolsAllowlist,
         ]),
-      ];
+      ].sort();
     }
 
     return createAgentSession(createSessionOptions);

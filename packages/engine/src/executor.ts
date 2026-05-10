@@ -53,6 +53,7 @@ import {
   buildSystemPromptWithInstructions,
   buildPluginPromptSection,
 } from "./agent-instructions.js";
+import { buildPromptLayers, collapsePromptLayers } from "./prompt-layers.js";
 import type { AgentReflectionService } from "./agent-reflection.js";
 import { createRunAuditor, generateSyntheticRunId, type EngineRunContext } from "./run-audit.js";
 import { evaluateSpecStaleness, getPromptPath } from "./spec-staleness.js";
@@ -3077,21 +3078,23 @@ export class TaskExecutor {
 
         // Resolve per-agent custom instructions for the executor role
         const executorInstructions = await this.resolveInstructionsForRole("executor");
-        const executorSystemPrompt = buildSystemPromptWithInstructions(
-          getExecutorSystemPrompt(settings),
-          executorInstructions,
-        );
-        const executorSystemContributions = this.options.pluginRunner?.getPromptContributionsForSurface("executor-system") ?? [];
-        if (executorSystemContributions.length > 0) {
-          executorLog.log(`${task.id}: applied ${executorSystemContributions.length} plugin prompt contributions for executor-system surface`);
-        }
+
+        // Build structured layers for cross-session prompt caching.
         const executorPluginContributions = buildPluginPromptSection(
           "executor-system",
           this.options.pluginRunner,
         );
-        const executorSystemPromptFinal = executorPluginContributions
-          ? `${executorSystemPrompt}\n\n${executorPluginContributions}`
-          : executorSystemPrompt;
+        if (executorPluginContributions) {
+          executorLog.log(`${task.id}: applied plugin prompt contributions for executor-system surface`);
+        }
+
+        const executorLayers = buildPromptLayers({
+          basePrompt: getExecutorSystemPrompt(settings),
+          agentInstructions: executorInstructions,
+          pluginContributions: executorPluginContributions,
+        });
+
+        const executorSystemPromptFinal = collapsePromptLayers(executorLayers);
 
         // sessionFile must be let because it's destructured alongside session which is reassigned
         // eslint-disable-next-line prefer-const
@@ -3101,6 +3104,7 @@ export class TaskExecutor {
           pluginRunner: this.options.pluginRunner,
           cwd: worktreePath,
           systemPrompt: executorSystemPromptFinal,
+          systemPromptLayers: executorLayers,
           tools: "coding",
           customTools,
           onText: agentLogger.onText,
@@ -3430,6 +3434,7 @@ export class TaskExecutor {
                 pluginRunner: this.options.pluginRunner,
                 cwd: worktreePath,
                 systemPrompt: executorSystemPromptFinal,
+                systemPromptLayers: executorLayers,
                 tools: "coding",
                 customTools,
                 onText: agentLogger.onText,
