@@ -9,6 +9,7 @@ import {
 const MockDependencyGraphDashboardView = () => createElement("div", { "data-testid": "dep-graph-view" });
 const MockRoadmapDashboardView = () => createElement("div", { "data-testid": "roadmap-view" });
 const MockCliPrintingPressWizardView = () => createElement("div", { "data-testid": "cli-printing-press-view" });
+const MockCliPrintingPressManageView = () => createElement("div", { "data-testid": "cli-printing-press-manage-view" });
 
 vi.mock("@fusion-plugin-examples/dependency-graph/dashboard-view", () => ({
   DependencyGraphDashboardView: (...args: unknown[]) => MockDependencyGraphDashboardView(...args),
@@ -20,6 +21,10 @@ vi.mock("@fusion-plugin-examples/roadmap/dashboard-view", () => ({
 
 vi.mock("@fusion-plugin-examples/cli-printing-press/dashboard-view", () => ({
   CliPrintingPressWizardView: (...args: unknown[]) => MockCliPrintingPressWizardView(...args),
+}));
+
+vi.mock("@fusion-plugin-examples/cli-printing-press/manage-view", () => ({
+  CliPrintingPressManageView: (...args: unknown[]) => MockCliPrintingPressManageView(...args),
 }));
 
 describe("registerBundledPluginViews", () => {
@@ -34,6 +39,7 @@ describe("registerBundledPluginViews", () => {
     expect(getPluginViewComponent("fusion-plugin-dependency-graph", "graph")).toBeTruthy();
     expect(getPluginViewComponent("roadmap-planner", "roadmaps")).toBeTruthy();
     expect(getPluginViewComponent("fusion-plugin-cli-printing-press", "wizard")).toBeTruthy();
+    expect(getPluginViewComponent("fusion-plugin-cli-printing-press", "manage")).toBeTruthy();
   });
 
   it("is idempotent when called more than once", () => {
@@ -52,6 +58,7 @@ describe("registerBundledPluginViews", () => {
     expect(isPluginViewRegistered("fusion-plugin-dependency-graph", "graph")).toBe(true);
     expect(isPluginViewRegistered("roadmap-planner", "roadmaps")).toBe(true);
     expect(isPluginViewRegistered("fusion-plugin-cli-printing-press", "wizard")).toBe(true);
+    expect(isPluginViewRegistered("fusion-plugin-cli-printing-press", "manage")).toBe(true);
     // Unknown plugin/view should not be registered
     expect(isPluginViewRegistered("unknown-plugin", "unknown")).toBe(false);
   });

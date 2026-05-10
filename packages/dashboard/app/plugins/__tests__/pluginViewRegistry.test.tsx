@@ -35,10 +35,13 @@ describe("pluginViewRegistry", () => {
     expect(getPluginViewComponent("plugin-b", "missing")).toBeNull();
   });
 
-  it("resolves cli printing press wizard entries", () => {
-    const View = lazy(async () => ({ default: () => <div>Wizard</div> }));
-    registerPluginView("fusion-plugin-cli-printing-press", "wizard", View);
-    expect(getPluginViewComponent("fusion-plugin-cli-printing-press", "wizard")).toBe(View);
+  it("resolves cli printing press wizard and manage entries", () => {
+    const WizardView = lazy(async () => ({ default: () => <div>Wizard</div> }));
+    const ManageView = lazy(async () => ({ default: () => <div>Manage</div> }));
+    registerPluginView("fusion-plugin-cli-printing-press", "wizard", WizardView);
+    registerPluginView("fusion-plugin-cli-printing-press", "manage", ManageView);
+    expect(getPluginViewComponent("fusion-plugin-cli-printing-press", "wizard")).toBe(WizardView);
+    expect(getPluginViewComponent("fusion-plugin-cli-printing-press", "manage")).toBe(ManageView);
   });
 
   it("keeps all registered plugin views discoverable by key iteration", () => {

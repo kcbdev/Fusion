@@ -25,6 +25,7 @@ export interface ServiceDraft {
   credential: CredentialPattern;
   createdAt: string;
   updatedAt: string;
+  regeneratedAt?: string;
 }
 
 export type WizardStep = "basics" | "transport" | "endpoints" | "credentials" | "review";

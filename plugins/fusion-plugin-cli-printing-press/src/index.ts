@@ -20,8 +20,17 @@ const plugin = definePlugin({
       placement: "primary",
       order: 60,
     },
+    {
+      viewId: "manage",
+      label: "Manage Service CLIs",
+      componentPath: "./manage-view",
+      icon: "List",
+      placement: "primary",
+      order: 61,
+    },
   ],
 });
 
 export default plugin;
 export { CliPrintingPressWizardView } from "./dashboard-view.js";
+export { CliPrintingPressManageView } from "./manage-view.js";

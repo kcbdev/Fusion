@@ -12,6 +12,10 @@
     "./dashboard-view": {
       "types": "./src/dashboard-view.tsx",
       "import": "./src/dashboard-view.tsx"
+    },
+    "./manage-view": {
+      "types": "./src/manage-view.tsx",
+      "import": "./src/manage-view.tsx"
     }
   },
   "scripts": {

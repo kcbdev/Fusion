@@ -11,6 +11,14 @@
       "icon": "Wand2",
       "placement": "primary",
       "order": 60
+    },
+    {
+      "viewId": "manage",
+      "label": "Manage Service CLIs",
+      "componentPath": "./manage-view",
+      "icon": "List",
+      "placement": "primary",
+      "order": 61
     }
   ]
 }

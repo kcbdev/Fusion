@@ -35,6 +35,23 @@ describe("wizard routes", () => {
     expect(invalidRes.status).toBe(400);
     expect((invalidRes.body as { errors: Record<string, string> }).errors.slug).toBeTruthy();
 
+    const putRes = await route("PUT", "/drafts/:id").handler({ params: { id }, body: { ...makeDraft(), id, name: "Renamed" } }, ctx);
+    expect(putRes.status).toBe(200);
+    expect((putRes.body as { name: string }).name).toBe("Renamed");
+
+    const invalidPutRes = await route("PUT", "/drafts/:id").handler({ params: { id }, body: { ...makeDraft(), id, baseUrl: "invalid-url" } }, ctx);
+    expect(invalidPutRes.status).toBe(400);
+
+    const missingPutRes = await route("PUT", "/drafts/:id").handler({ params: { id: "missing" }, body: { ...makeDraft(), id: "missing" } }, ctx);
+    expect(missingPutRes.status).toBe(404);
+
+    const regenRes = await route("POST", "/drafts/:id/regenerate").handler({ params: { id } }, ctx);
+    expect(regenRes.status).toBe(200);
+    expect((regenRes.body as { stub: boolean }).stub).toBe(true);
+
+    const missingRegenRes = await route("POST", "/drafts/:id/regenerate").handler({ params: { id: "missing" } }, ctx);
+    expect(missingRegenRes.status).toBe(404);
+
     const deleteRes = await route("DELETE", "/drafts/:id").handler({ params: { id } }, ctx);
     expect(deleteRes.status).toBe(204);
   });

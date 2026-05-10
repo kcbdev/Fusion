@@ -49,6 +49,18 @@ async function loadCliPrintingPressWizardView(): Promise<{ default: PluginViewCo
   return { default: component as PluginViewComponent };
 }
 
+async function loadCliPrintingPressManageView(): Promise<{ default: PluginViewComponent }> {
+  const moduleId = "@fusion-plugin-examples/cli-printing-press/manage-view";
+  const exportName = "CliPrintingPressManageView";
+  const mod = await import("@fusion-plugin-examples/cli-printing-press/manage-view") as unknown as Record<string, ComponentType<{ context?: PluginDashboardViewContext }>>;
+  const component = mod[exportName];
+  if (!component) {
+    console.warn(`[plugin-views] Missing export ${exportName} from ${moduleId}`);
+    return { default: createMissingPluginView(moduleId, exportName) };
+  }
+  return { default: component as PluginViewComponent };
+}
+
 export function registerBundledPluginViews(): void {
   if (registered) return;
   registered = true;
@@ -69,6 +81,12 @@ export function registerBundledPluginViews(): void {
     "fusion-plugin-cli-printing-press",
     "wizard",
     lazy(loadCliPrintingPressWizardView),
+  );
+
+  registerPluginView(
+    "fusion-plugin-cli-printing-press",
+    "manage",
+    lazy(loadCliPrintingPressManageView),
   );
 }
 

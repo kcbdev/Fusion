@@ -13,7 +13,7 @@ describe("cli-printing-press plugin", () => {
     expect(validation.valid).toBe(true);
   });
 
-  it("registers the wizard dashboard view", () => {
+  it("registers the wizard and manage dashboard views", () => {
     expect(plugin.dashboardViews).toEqual([
       {
         viewId: "wizard",
@@ -22,6 +22,14 @@ describe("cli-printing-press plugin", () => {
         icon: "Wand2",
         placement: "primary",
         order: 60,
+      },
+      {
+        viewId: "manage",
+        label: "Manage Service CLIs",
+        componentPath: "./manage-view",
+        icon: "List",
+        placement: "primary",
+        order: 61,
       },
     ]);
   });
