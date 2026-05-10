@@ -1044,6 +1044,7 @@ interface AutostashHandle {
 }
 
 const AUTOSTASH_LABEL_PREFIX = "fusion-merger-autostash:";
+const AUTOSTASH_TIMESTAMP_RE = /^fusion-merger-autostash:[A-Za-z]+-\d+:(?:race-rescue-\d+:)?(\d+)$/;
 
 /** Return the set of paths a stash commit recorded as changed against its
  *  parent (HEAD-at-stash-time). Used to compare a new dirty snapshot against
@@ -1246,6 +1247,7 @@ export function parsePorcelainZ(raw: string): Set<string> {
 async function listOrphanedAutostashes(
   rootDir: string,
 ): Promise<Array<{ sha: string; ref: string; label: string }>> {
+
   try {
     const { stdout } = await execAsync(
       `git stash list --format="%H %gd %s"`,
@@ -1272,6 +1274,98 @@ async function listOrphanedAutostashes(
 function parseAutostashTaskId(label: string): string | null {
   const match = /^fusion-merger-autostash:([A-Za-z]+-\d+):/.exec(label.trim());
   return match?.[1] ?? null;
+}
+
+export interface AutostashOrphanRecord {
+  sha: string;
+  ref: string;
+  label: string;
+  sourceTaskId: string | null;
+  createdAt: string | null;
+  changedPaths: string[];
+  classification: "subsumed" | "live" | "unknown";
+}
+
+function parseAutostashCreatedAt(label: string): string | null {
+  const match = AUTOSTASH_TIMESTAMP_RE.exec(label.trim());
+  if (!match) return null;
+  const ts = Number.parseInt(match[1] ?? "", 10);
+  if (!Number.isFinite(ts)) return null;
+  return new Date(ts).toISOString();
+}
+
+async function classifyAutostashOrphan(rootDir: string, sha: string): Promise<"subsumed" | "live" | "unknown"> {
+  try {
+    const stashFiles = await listStashChangedPaths(rootDir, sha);
+    if (stashFiles.size === 0) return "subsumed";
+    const pathsArg = [...stashFiles].map(quoteArg).join(" ");
+    const { stdout: pathDiffOut } = await execAsync(
+      `git diff --name-only HEAD ${quoteArg(sha)} -- ${pathsArg}`,
+      { cwd: rootDir, encoding: "utf-8" },
+    );
+    return pathDiffOut.trim() === "" ? "subsumed" : "live";
+  } catch {
+    return "unknown";
+  }
+}
+
+export async function listAutostashOrphans(rootDir: string): Promise<AutostashOrphanRecord[]> {
+  const orphans = await listOrphanedAutostashes(rootDir);
+  const records: AutostashOrphanRecord[] = [];
+  for (const orphan of orphans) {
+    const changedPaths = [...(await listStashChangedPaths(rootDir, orphan.sha))];
+    records.push({
+      sha: orphan.sha,
+      ref: orphan.ref,
+      label: orphan.label,
+      sourceTaskId: parseAutostashTaskId(orphan.label),
+      createdAt: parseAutostashCreatedAt(orphan.label),
+      changedPaths,
+      classification: await classifyAutostashOrphan(rootDir, orphan.sha),
+    });
+  }
+  return records;
+}
+
+export async function notifyAutostashOrphans(store: TaskStore, rootDir: string): Promise<AutostashOrphanRecord[]> {
+  const records = await listAutostashOrphans(rootDir);
+  store.emit("merger:autostashOrphans", { rootDir, records });
+  return records;
+}
+
+export async function applyAutostashBySha(
+  rootDir: string,
+  sha: string,
+): Promise<{ ok: true } | { ok: false; reason: string; stderr?: string }> {
+  try {
+    await execAsync(`git stash apply ${quoteArg(sha)}`, { cwd: rootDir, encoding: "utf-8" });
+    return { ok: true };
+  } catch (err: unknown) {
+    const stderr = err && typeof err === "object" && "stderr" in err ? String((err as { stderr?: string }).stderr ?? "") : "";
+    const stdout = err && typeof err === "object" && "stdout" in err ? String((err as { stdout?: string }).stdout ?? "") : "";
+    const message = err instanceof Error ? err.message : String(err);
+    const details = `${stderr}\n${stdout}\n${message}`;
+    if (/CONFLICT|could not apply|would be overwritten/i.test(details)) {
+      return { ok: false, reason: "conflict", stderr: stderr || details };
+    }
+    return { ok: false, reason: "apply_failed", stderr: stderr || details };
+  }
+}
+
+export async function getAutostashDiff(rootDir: string, sha: string): Promise<string> {
+  const maxBytes = 64 * 1024;
+  const { stdout } = await execAsync(`git stash show -p ${quoteArg(sha)}`, {
+    cwd: rootDir,
+    encoding: "utf-8",
+    maxBuffer: 5 * 1024 * 1024,
+  });
+  const diff = String(stdout);
+  if (Buffer.byteLength(diff, "utf-8") <= maxBytes) return diff;
+  let truncated = diff;
+  while (Buffer.byteLength(truncated, "utf-8") > maxBytes) {
+    truncated = truncated.slice(0, Math.max(0, Math.floor(truncated.length * 0.9)));
+  }
+  return `${truncated}\n… (diff truncated)`;
 }
 
 /**
@@ -1446,9 +1540,9 @@ async function sweepAutostashOrphans(
       )
       .catch(() => undefined);
   }
-}
 
-const AUTOSTASH_TIMESTAMP_RE = /^fusion-merger-autostash:[A-Za-z]+-\d+:(?:race-rescue-\d+:)?(\d+)$/;
+  await notifyAutostashOrphans(store, rootDir).catch(() => undefined);
+}
 
 export async function sweepStaleAutostashes(
   rootDir: string,
@@ -1488,6 +1582,10 @@ export const __test__ = {
   dropAutostashHandle,
   isAutostashLive,
   sweepStaleAutostashes,
+  listAutostashOrphans,
+  applyAutostashBySha,
+  getAutostashDiff,
+  notifyAutostashOrphans,
 };
 
 async function stashUnrelatedRootDirChanges(
@@ -1644,7 +1742,7 @@ async function findStashRefBySha(rootDir: string, sha: string): Promise<string |
  *  with `git rev-parse`, then drop. If the SHA at the ref drifted (race),
  *  retry up to 5x. Returns whether the drop landed cleanly so callers can
  *  surface failure to the task feed. */
-async function dropAutostashBySha(
+export async function dropAutostashBySha(
   rootDir: string,
   taskId: string,
   sha: string,

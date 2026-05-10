@@ -1251,6 +1251,13 @@ Git dashboard routes are registered in `register-git-github.ts`.
 - If restore fails with unresolved developer work (`failed`/`conflict-needs-manual`), cleanup uses a keep-if-live rule so still-live stashes are preserved for manual recovery.
 - `sweepAutostashOrphans()` keeps its subsumed/live classification for prior-run leftovers, and `sweepStaleAutostashes()` adds an age-based backstop that drops `fusion-merger-autostash:*` entries older than the configured threshold (default 24h).
 
+#### Stash Recovery surface
+- Orphans are typically residual `fusion-merger-autostash:*` entries from older merge runs where restore could not safely complete.
+- Existing task-scoped surfacing remains: merger warnings still log to `mergerLog.warn` and `store.logEntry` for the active merge task.
+- New global surfacing adds `merger:autostashOrphans` TaskStore events, engine helpers (`listAutostashOrphans`, `getAutostashDiff`, `applyAutostashBySha`, `dropAutostashBySha`), and dashboard API endpoints under `/api/stash-recovery/*`.
+- Dashboard operators can inspect orphan counts, review diffs, apply stashes, and explicitly drop entries with confirmation.
+- Decision: recovery stays user-gated. Auto-apply was rejected because clean-tree checks are racy, stash placement is ambiguous after source task merge, and apply conflicts can produce hard-to-untangle state. `sweepAutostashOrphans` continues to auto-drop only subsumed entries while preserving live developer work.
+
 ### Conflict handling
 `merger.ts` includes conflict classification and auto-resolution helpers:
 - lock files (`LOCKFILE_PATTERNS`)

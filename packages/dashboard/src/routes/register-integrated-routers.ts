@@ -8,6 +8,7 @@ import { createResearchRouter } from "../research-routes.js";
 import { createTodoRouter } from "../todo-routes.js";
 import { createDevServerRouter } from "../dev-server-routes.js";
 import type { AiSessionStore } from "../ai-session-store.js";
+import { createStashRecoveryRouter } from "./register-stash-recovery-routes.js";
 
 interface IntegratedRoutersOptions {
   router: Router;
@@ -36,6 +37,7 @@ export function registerIntegratedRouters({
   router.use("/evals", createEvalsRouter(store));
   router.use("/research", createResearchRouter(store));
   router.use("/todos", createTodoRouter(store));
+  router.use("/stash-recovery", createStashRecoveryRouter(store));
 }
 
 export function registerIntegratedDevServerRouter({ router, store }: DevServerRouterOptions): void {

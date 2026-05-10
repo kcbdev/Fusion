@@ -12,6 +12,7 @@ import {
   Folder,
   GitBranch,
   Grid3X3,
+  History,
   LayoutGrid,
   Lightbulb,
   Loader2,
@@ -55,6 +56,7 @@ export interface MobileNavBarProps {
   mailboxUnreadCount?: number;
   mailboxPendingApprovalCount?: number;
   chatHasUnreadResponse?: boolean;
+  stashOrphanCount?: number;
   onOpenGitManager?: () => void;
   onOpenWorkflowSteps?: () => void;
   onOpenSchedules?: () => void;
@@ -120,6 +122,7 @@ export function MobileNavBar({
   mailboxUnreadCount = 0,
   mailboxPendingApprovalCount = 0,
   chatHasUnreadResponse = false,
+  stashOrphanCount = 0,
   onOpenGitManager,
   onOpenWorkflowSteps,
   onOpenSchedules,
@@ -235,6 +238,7 @@ export function MobileNavBar({
     || (todosOpen && todoViewEnabled)
     || (view === "skills" && !showSkillsTopLevel)
     || view === "graph"
+    || view === "stash-recovery"
     || (isPluginViewId(view) && !topLevelPrimaryPluginViews.some((entry) => buildPluginTaskViewId(entry.pluginId, entry.view.viewId) === view));
 
   return (
@@ -627,6 +631,17 @@ export function MobileNavBar({
             )}
 
 
+
+            <button
+              type="button"
+              className="mobile-more-item"
+              data-testid="mobile-more-item-stash-recovery"
+              onClick={() => handleMoreAction(() => onChangeView("stash-recovery"))}
+            >
+              <History />
+              <span>Stash Recovery</span>
+              {stashOrphanCount > 0 ? <span className="mobile-more-item-badge">{formatCount(stashOrphanCount)}</span> : null}
+            </button>
 
             {experimentalFeatures?.researchView && (
               <button

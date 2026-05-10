@@ -65,7 +65,7 @@ import { NativeShellConnectionManager } from "./components/NativeShellConnection
 import { ShellConnectionStatus } from "./components/ShellConnectionStatus";
 import { getShellConnectionNativeResult, type ShellConnectionNativeResult } from "./shell-native";
 import type { AiSessionSummary } from "./api";
-import { fetchUnreadCount, fetchTaskDetail, fetchWorkflowSteps } from "./api";
+import { api, fetchUnreadCount, fetchTaskDetail, fetchWorkflowSteps } from "./api";
 import { getScopedItem, setScopedItem } from "./utils/projectStorage";
 import { subscribeSse } from "./sse-bus";
 import { AUTH_TOKEN_RECOVERY_REQUIRED_EVENT } from "./auth";
@@ -92,6 +92,7 @@ const SkillsView = lazy(() => import("./components/SkillsView").then((m) => ({ d
 const MemoryView = lazy(() => import("./components/MemoryView").then((m) => ({ default: m.MemoryView })));
 const DevServerView = lazy(() => import("./components/DevServerView").then((m) => ({ default: m.DevServerView })));
 const _TodoView = lazy(() => import("./components/TodoView").then((m) => ({ default: m.TodoView })));
+const StashRecoveryView = lazy(() => import("./components/StashRecoveryView").then((m) => ({ default: m.StashRecoveryView })));
 
 // Warm lazy chunks during browser idle so first navigation to each view is
 // instant. Each chunk is ~10–80 kB; total prefetch finishes well under a
@@ -117,6 +118,7 @@ function prefetchLazyViews() {
     void import("./components/MemoryView");
     void import("./components/DevServerView");
     void import("./components/TodoView");
+    void import("./components/StashRecoveryView");
   });
 }
 
@@ -433,6 +435,7 @@ function AppInner() {
   const [mailboxUnreadCount, setMailboxUnreadCount] = useState(0);
   const [mailboxPendingApprovalCount, setMailboxPendingApprovalCount] = useState(0);
   const [chatHasUnreadResponse, setChatHasUnreadResponse] = useState(false);
+  const [stashOrphanCount, setStashOrphanCount] = useState(0);
   const [approvalBannerCandidate, setApprovalBannerCandidate] = useState<ApprovalBannerCandidate | null>(null);
   const taskStatusByIdRef = useRef<Map<string, string | undefined>>(new Map());
   const seenApprovalKeysRef = useRef<Set<string>>(new Set());
@@ -545,6 +548,24 @@ function AppInner() {
       setChatHasUnreadResponse(false);
     }
   }, [taskView]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const data = await api<{ count: number }>("/stash-recovery/orphans");
+        if (!cancelled) setStashOrphanCount(data.count ?? 0);
+      } catch {
+        if (!cancelled) setStashOrphanCount(0);
+      }
+    };
+    void load();
+    const timer = window.setInterval(() => void load(), 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [currentProject?.id]);
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -1275,6 +1296,16 @@ function AppInner() {
       );
     }
 
+    if (taskView === "stash-recovery") {
+      return (
+        <PageErrorBoundary>
+          <Suspense fallback={null}>
+            <StashRecoveryView />
+          </Suspense>
+        </PageErrorBoundary>
+      );
+    }
+
     if (taskView === "insights") {
       if (!settingsLoaded || !insightsEnabled) {
         return null;
@@ -1463,6 +1494,7 @@ function AppInner() {
         mailboxUnreadCount={mailboxUnreadCount}
         mailboxPendingApprovalCount={mailboxPendingApprovalCount}
         chatHasUnreadResponse={chatHasUnreadResponse}
+        stashOrphanCount={stashOrphanCount}
         onOpenSchedules={openSchedulesWithNav}
         onOpenGitManager={openGitManagerWithNav}
         onOpenNodes={handleOpenNodesWithNav}
@@ -1612,6 +1644,7 @@ function AppInner() {
         mailboxUnreadCount={mailboxUnreadCount}
         mailboxPendingApprovalCount={mailboxPendingApprovalCount}
         chatHasUnreadResponse={chatHasUnreadResponse}
+        stashOrphanCount={stashOrphanCount}
         onOpenGitManager={openGitManagerWithNav}
         onOpenWorkflowSteps={openWorkflowStepsWithNav}
         onOpenSchedules={openSchedulesWithNav}

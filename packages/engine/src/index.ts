@@ -20,7 +20,16 @@ export { Scheduler, type SchedulerOptions } from "./scheduler.js";
 export { MeshLeaseManager, type MeshLeaseManagerOptions, type LeaseRecoveryContext } from "./mesh-lease-manager.js";
 export { MissionAutopilot, type MissionAutopilotOptions } from "./mission-autopilot.js";
 export { MissionExecutionLoop, type MissionExecutionLoopOptions, type ValidationResult, loopLog } from "./mission-execution-loop.js";
-export { aiMergeTask, type MergerOptions } from "./merger.js";
+export {
+  aiMergeTask,
+  listAutostashOrphans,
+  applyAutostashBySha,
+  dropAutostashBySha,
+  getAutostashDiff,
+  notifyAutostashOrphans,
+  type MergerOptions,
+  type AutostashOrphanRecord,
+} from "./merger.js";
 export { reviewStep, type ReviewType, type ReviewVerdict, type ReviewResult, type ReviewOptions } from "./reviewer.js";
 export { createFnAgent, promptWithFallback, describeModel, setHostExtensionPaths, getHostExtensionPaths, type AgentOptions, type AgentResult } from "./pi.js";
 

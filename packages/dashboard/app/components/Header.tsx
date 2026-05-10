@@ -188,6 +188,8 @@ export interface HeaderProps {
   mailboxPendingApprovalCount?: number;
   /** Whether chat has an unread assistant response */
   chatHasUnreadResponse?: boolean;
+  /** Count of orphaned merger autostashes for stash recovery indicator. */
+  stashOrphanCount?: number;
   onOpenSchedules?: () => void;
   onOpenGitManager?: () => void;
   onOpenNodes?: () => void;
@@ -257,6 +259,7 @@ export function Header({
   mailboxUnreadCount = 0,
   mailboxPendingApprovalCount = 0,
   chatHasUnreadResponse = false,
+  stashOrphanCount = 0,
   onOpenSchedules,
   onOpenGitManager,
   onOpenNodes,
@@ -1179,7 +1182,7 @@ export function Header({
               <>
                 <button
                   ref={viewOverflowTriggerRef}
-                  className={`view-toggle-btn${["research", "skills", "insights", "memory", "dev-server", "devserver", "graph"].includes(view) || (experimentalFeatures?.evalsView && view === "evals") || (todosEnabled && todosOpen) || isPluginViewId(view) ? " active" : ""}`}
+                  className={`view-toggle-btn${["research", "skills", "insights", "memory", "dev-server", "devserver", "graph", "stash-recovery"].includes(view) || (experimentalFeatures?.evalsView && view === "evals") || (todosEnabled && todosOpen) || isPluginViewId(view) ? " active" : ""}`}
                   onClick={() => setIsViewOverflowOpen((prev) => !prev)}
                   title="More views"
                   aria-label="More views"
@@ -1210,6 +1213,20 @@ export function Header({
                         <span>Evals</span>
                       </button>
                     )}
+                    <button
+                      className={`view-toggle-overflow-item${view === "stash-recovery" ? " active" : ""}`}
+                      onClick={() => {
+                        onChangeView("stash-recovery");
+                        setIsViewOverflowOpen(false);
+                      }}
+                      role="menuitem"
+                      data-testid="view-overflow-stash-recovery"
+                    >
+                      <History size={14} />
+                      <span>Stash Recovery</span>
+                      {stashOrphanCount > 0 ? <span className="btn-badge">{stashOrphanCount}</span> : null}
+                    </button>
+
                     {experimentalFeatures?.researchView && (
                       <button
                         className={`view-toggle-overflow-item${view === "research" ? " active" : ""}`}

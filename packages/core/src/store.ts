@@ -427,6 +427,18 @@ export interface TaskStoreEvents {
   "task:merged": [result: MergeResult];
   "settings:updated": [data: { settings: Settings; previous: Settings }];
   "agent:log": [entry: AgentLogEntry];
+  "merger:autostashOrphans": [data: {
+    rootDir: string;
+    records: Array<{
+      sha: string;
+      ref: string;
+      label: string;
+      sourceTaskId: string | null;
+      createdAt: string | null;
+      changedPaths: string[];
+      classification: "subsumed" | "live" | "unknown";
+    }>;
+  }];
 }
 
 /**
