@@ -2600,7 +2600,7 @@ describe("SelfHealingManager", () => {
       managerWithRecovery.stop();
     });
 
-    it("filters out non-candidates", async () => {
+    it("filters out non-candidates but still evaluates paused failed candidates", async () => {
       const managerWithRecovery = new SelfHealingManager(store, {
         rootDir: "/tmp/test-project",
         getExecutingTaskIds: () => new Set(["FN-executing"]),
@@ -2613,12 +2613,17 @@ describe("SelfHealingManager", () => {
         { id: "FN-executing", column: "in-review", paused: false, status: "failed", mergeRetries: 3, mergeDetails: undefined, log: [] },
         { id: "FN-confirmed", column: "in-review", paused: false, status: "failed", mergeRetries: 3, mergeDetails: { mergeConfirmed: true }, log: [] },
       ]);
+      mockedExecSync.mockImplementation(() => "" as any);
 
       const result = await managerWithRecovery.recoverAlreadyMergedReviewTasks();
 
       expect(result).toBe(0);
       expect(store.updateTask).not.toHaveBeenCalled();
       expect(store.moveTask).not.toHaveBeenCalled();
+      expect(mockedExecSync).toHaveBeenCalledWith(
+        expect.stringContaining("Fusion-Task-Id: FN-paused"),
+        expect.any(Object),
+      );
 
       managerWithRecovery.stop();
     });

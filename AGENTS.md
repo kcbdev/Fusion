@@ -178,6 +178,10 @@ Port 4040 is the production dashboard port. A user's live dashboard session is t
 - Run `kill`, `kill -9`, `pkill`, or `killall` against processes on port 4040
 - Start a test server on port 4040 — always use `--port 0` for random free port
 
+## Architecture
+
+- Merge deadlock self-healing now has three layered defenses: `SelfHealingManager.recoverAlreadyMergedReviewTasks()` and `SelfHealingManager.clearStaleBlockedBy()` in `packages/engine/src/self-healing.ts`, plus the paused-aware in-review scope filter in `packages/engine/src/scheduler.ts` (`inReviewWithWorktree` excludes `paused` tasks). Together these auto-finalize already-landed retry-exhausted review tasks, clear stale downstream blockers, and prevent paused review cards from re-blocking overlap dispatch.
+
 ## Engine Process Rules
 
 The engine (`packages/engine`) runs the executor, merger, scheduler, IPC host, and dashboard-facing activity loop on a single Node event loop. **Blocking that loop stalls every task concurrently in-flight.**

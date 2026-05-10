@@ -1807,7 +1807,6 @@ export class SelfHealingManager {
    *
    * Candidate filter:
    * - `column === "in-review"`
-   * - not paused
    * - `status === "failed"`
    * - `(mergeRetries ?? 0) >= MAX_AUTO_MERGE_RETRIES`
    * - `mergeDetails.mergeConfirmed !== true`
@@ -1830,7 +1829,6 @@ export class SelfHealingManager {
       const tasks = await this.store.listTasks({ column: "in-review", slim: true });
       const candidates = tasks.filter((task) =>
         task.column === "in-review" &&
-        !task.paused &&
         task.status === "failed" &&
         (task.mergeRetries ?? 0) >= MAX_AUTO_MERGE_RETRIES &&
         task.mergeDetails?.mergeConfirmed !== true &&
