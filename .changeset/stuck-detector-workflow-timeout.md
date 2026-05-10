@@ -2,4 +2,4 @@
 "@runfusion/fusion": patch
 ---
 
-Keep stuck task detection active by falling back to the workflow step timeout when no explicit stuck timeout is configured.
+Keep stuck task detection active by default with an explicit task-stuck timeout default, without coupling it to workflow step timeout settings.

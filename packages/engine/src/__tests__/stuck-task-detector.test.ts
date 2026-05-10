@@ -718,7 +718,7 @@ describe("StuckTaskDetector", () => {
       vi.useRealTimers();
     });
 
-    it("falls back to workflow step timeout when stuck timeout is unset", async () => {
+    it("does not couple stuck detection to workflow step timeout", async () => {
       store = createMockStore({
         getSettings: vi.fn().mockResolvedValue({
           taskStuckTimeoutMs: undefined,
@@ -736,19 +736,17 @@ describe("StuckTaskDetector", () => {
 
       await customDetector.checkNow();
 
-      expect(onStuck).toHaveBeenCalledWith(
-        expect.objectContaining({ taskId: "FN-001", reason: "inactivity" }),
-      );
-      expect(session.dispose).toHaveBeenCalled();
+      expect(onStuck).not.toHaveBeenCalled();
+      expect(session.dispose).not.toHaveBeenCalled();
 
       vi.useRealTimers();
     });
 
-    it("does nothing when both stuck and workflow timeouts are disabled", async () => {
+    it("kills stuck sessions when the project default stuck timeout is present", async () => {
       store = createMockStore({
         getSettings: vi.fn().mockResolvedValue({
-          taskStuckTimeoutMs: undefined,
-          workflowStepTimeoutMs: undefined,
+          taskStuckTimeoutMs: 600_000,
+          workflowStepTimeoutMs: 60_000,
         }),
       });
       const onStuck = vi.fn();
@@ -758,12 +756,14 @@ describe("StuckTaskDetector", () => {
       customDetector.trackTask("FN-001", session);
 
       vi.useFakeTimers({ shouldAdvanceTime: true });
-      vi.advanceTimersByTime(61_000);
+      vi.advanceTimersByTime(601_000);
 
       await customDetector.checkNow();
 
-      expect(onStuck).not.toHaveBeenCalled();
-      expect(session.dispose).not.toHaveBeenCalled();
+      expect(onStuck).toHaveBeenCalledWith(
+        expect.objectContaining({ taskId: "FN-001", reason: "inactivity" }),
+      );
+      expect(session.dispose).toHaveBeenCalled();
 
       vi.useRealTimers();
     });
