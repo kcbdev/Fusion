@@ -651,6 +651,13 @@ describe("AgentsView", () => {
       expect(screen.getAllByText("Details").length).toBeGreaterThanOrEqual(4);
     });
 
+    it("keeps a visible icon affordance on View Details buttons when labels are compacted", async () => {
+      render(<AgentsView addToast={mockAddToast} />);
+
+      const detailsButton = await screen.findByRole("button", { name: "View details for Test Agent 1" });
+      expect(detailsButton.querySelector("svg")).toBeTruthy();
+    });
+
     it("opens matching detail view when clicking View Details button", async () => {
       render(<AgentsView addToast={mockAddToast} />);
 
@@ -1976,7 +1983,7 @@ describe("AgentsView", () => {
   });
 
   describe("Run Now button", () => {
-    it("renders sidebar action labels with wrapper spans for icon-only compaction (FN-3902)", async () => {
+    it("renders compact sidebar action controls with visible icon affordances (FN-3902/FN-3923)", async () => {
       const activeWithoutTaskId = { ...mockAgents[1] };
       delete activeWithoutTaskId.taskId;
       mockFetchAgents.mockResolvedValue([
@@ -1997,6 +2004,7 @@ describe("AgentsView", () => {
       expect(runNowButton.querySelector(".agent-card-action-label")).toBeTruthy();
       expect(pauseButton.querySelector(".agent-card-action-label")).toBeTruthy();
       expect(detailsButton?.querySelector(".agent-card-action-label")).toBeTruthy();
+      expect(detailsButton?.querySelector("svg")).toBeTruthy();
     });
 
     it("shows Run Now button for active agent without taskId", async () => {

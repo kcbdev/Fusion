@@ -1445,7 +1445,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
                       title={`View details for ${agent.name}`}
                       aria-label={`View details for ${agent.name}`}
                     >
-                      <span className="agent-card-action-label">Details</span>
+                      <ChevronRight size={14} /> <span className="agent-card-action-label">Details</span>
                     </button>
                     {(agent.state === "idle" || agent.state === "paused") && (
                       <button
