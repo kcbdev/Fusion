@@ -179,4 +179,58 @@ describe("useGraphInteraction", () => {
     expect(result.current.zoom).toBe(1);
     expect(result.current.pan).toEqual({ x: 0, y: 0 });
   });
+
+  it("allows panning across full graph width when zoomed to 2x", () => {
+    const { result } = renderHook(() => useGraphInteraction());
+
+    act(() => {
+      result.current.setGraphBounds({ minX: 0, minY: 0, maxX: 2000, maxY: 1200 });
+      for (let i = 0; i < 10; i += 1) {
+        result.current.zoomIn();
+      }
+      result.current.onPointerDown(1, { x: 200, y: 200 });
+      result.current.onPointerMove(1, { x: 1200, y: 200 }, 800, 600);
+      result.current.onPointerMove(1, { x: -2200, y: 200 }, 800, 600);
+      result.current.onPointerUp(1);
+    });
+
+    expect(result.current.zoom).toBeGreaterThanOrEqual(2);
+    expect(result.current.pan.x).toBeGreaterThanOrEqual(800 - 2000 * result.current.zoom);
+    expect(result.current.pan.x).toBeLessThanOrEqual(0);
+  });
+
+  it("uses zoom-aware pan limits at max zoom", () => {
+    const { result } = renderHook(() => useGraphInteraction());
+
+    act(() => {
+      result.current.setGraphBounds({ minX: 0, minY: 0, maxX: 2000, maxY: 1200 });
+      for (let i = 0; i < 30; i += 1) {
+        result.current.zoomIn();
+      }
+    });
+
+    act(() => {
+      result.current.onPointerDown(1, { x: 300, y: 200 });
+      result.current.onPointerMove(1, { x: -6000, y: 200 }, 800, 600);
+      result.current.onPointerUp(1);
+    });
+
+    expect(result.current.zoom).toBe(3);
+    expect(result.current.pan.x).toBe(800 - 2000 * 3);
+  });
+
+  it("fits graphs with negative coordinates using full min/max bounds", () => {
+    const { result } = renderHook(() => useGraphInteraction());
+
+    act(() => {
+      result.current.fitToGraph(new Map([
+        ["A", { x: -500, y: -200 }],
+        ["B", { x: 900, y: 500 }],
+      ]), 900, 700, { nodeWidth: 280, nodeHeight: 100 });
+    });
+
+    expect(result.current.zoom).toBeGreaterThan(0.1);
+    expect(result.current.pan.x).toBeLessThanOrEqual(550);
+    expect(result.current.pan.y).toBeLessThanOrEqual(260);
+  });
 });

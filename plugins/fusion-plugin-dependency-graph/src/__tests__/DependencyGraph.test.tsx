@@ -11,6 +11,7 @@ const handleKeyDown = vi.fn();
 const onPointerDown = vi.fn();
 const onPointerMove = vi.fn();
 const onPointerUp = vi.fn();
+const setGraphBounds = vi.fn();
 
 vi.mock("@fusion/dashboard/app/components/TaskCard", () => ({
   TaskCard: ({ task, onOpenDetail, disableDrag }: { task: Task; onOpenDetail: (task: Task) => void; disableDrag?: boolean }) => (
@@ -32,6 +33,7 @@ vi.mock("../useGraphInteraction", () => ({
     onPointerUp,
     onWheelZoom: vi.fn(),
     handleKeyDown,
+    setGraphBounds,
   }),
 }));
 
@@ -49,6 +51,7 @@ describe("DependencyGraph", () => {
     onPointerDown.mockReset();
     onPointerMove.mockReset();
     onPointerUp.mockReset();
+    setGraphBounds.mockReset();
   });
 
   afterEach(() => {
@@ -86,6 +89,7 @@ describe("DependencyGraph", () => {
   it("auto-fits on initial load with active tasks", () => {
     render(<DependencyGraph tasks={[createTask("A", "todo")]} onOpenTaskDetail={vi.fn()} />);
     expect(fitToGraph).toHaveBeenCalled();
+    expect(setGraphBounds).toHaveBeenCalled();
   });
 
   it("forwards keyboard events to interaction hook", () => {

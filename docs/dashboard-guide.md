@@ -73,6 +73,7 @@ Behavior:
 - Uses Sugiyama-style layered auto-layout to place nodes by dependency depth
 - Renders directed bezier dependency edges (dependent → dependency) with arrowheads
 - Supports cursor-centered wheel zoom, pinch zoom, keyboard shortcuts (`Ctrl/Cmd+=`, `Ctrl/Cmd+-`, `Ctrl/Cmd+0`, `Ctrl/Cmd+Shift+F`, `Escape`), and fit/reset controls via the floating toolbar with live zoom percentage
+- Pan limits are zoom-aware and based on full graph extents (including negative auto-layout origins), so zoomed-in views can still pan to every rendered node instead of getting trapped by fixed viewport-only bounds
 - Dependency graph nodes reuse the same `TaskCard` UI as board/list views, so status badges, progress/steps, mission badges, retry/archive controls, and active-task glow stay visually consistent
 - Active graph nodes also add a dedicated top status indicator bar and current-step row highlighting so in-progress execution state stays visible even when zoomed out
 - Clicking a graph card opens task details via the host detail handler (`onOpenDetail`, with `onOpenTaskDetail` fallback), while clicking the same card again or empty canvas clears selection

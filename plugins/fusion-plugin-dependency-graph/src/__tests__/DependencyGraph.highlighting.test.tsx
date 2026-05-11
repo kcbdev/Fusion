@@ -23,6 +23,7 @@ vi.mock("../useGraphInteraction", () => ({
     onPointerUp: vi.fn(),
     onWheelZoom: vi.fn(),
     handleKeyDown: vi.fn(),
+    setGraphBounds: vi.fn(),
   }),
 }));
 
