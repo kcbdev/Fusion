@@ -2484,6 +2484,24 @@ describe("Chat Session Delete Button CSS", () => {
   });
 });
 
+describe("ChatView CSS — mobile thread switcher", () => {
+  const css = loadAllAppCss();
+
+  it("includes mobile session switcher trigger and dropdown tokenized contracts", () => {
+    const triggerMatch = css.match(/\.chat-mobile-session-trigger\s*\{([^}]*)\}/);
+    const dropdownMatch = css.match(/\.chat-mobile-session-dropdown\s*\{([^}]*)\}/);
+    expect(triggerMatch).toBeTruthy();
+    expect(dropdownMatch).toBeTruthy();
+    expect(triggerMatch?.[1]).toContain("min-height: calc(var(--space-lg) * 2)");
+    expect(dropdownMatch?.[1]).toContain("background: var(--surface)");
+    expect(dropdownMatch?.[1]).toContain("border: 1px solid var(--border)");
+  });
+
+  it("keeps mobile override for header identity overflow visible so dropdown can render", () => {
+    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.chat-thread-header-identity\s*\{[^}]*overflow:\s*visible;/);
+  });
+});
+
 describe("ChatView CSS — nested flexbox scrolling fix", () => {
   const css = loadAllAppCss();
 
@@ -3048,6 +3066,73 @@ describe("ChatView mobile behavior", () => {
       // Back button should trigger selectSession("") to return to list view
       expect(selectSession).toHaveBeenCalledWith("");
     } finally {
+      restoreMatchMedia.mockRestore();
+    }
+  });
+
+  it("mobile mode: thread header title opens quick session switcher and closes after selection", async () => {
+    const restoreMatchMedia = mockMobileViewport();
+    const selectSession = vi.fn();
+    try {
+      setupMockChat({
+        sessions: [
+          { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+          { id: "session-002", agentId: "agent-002", status: "active", title: "Another Chat", createdAt: "2026-04-07T00:00:00.000Z", updatedAt: "2026-04-07T00:00:00.000Z" },
+        ],
+        filteredSessions: [
+          { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+          { id: "session-002", agentId: "agent-002", status: "active", title: "Another Chat", createdAt: "2026-04-07T00:00:00.000Z", updatedAt: "2026-04-07T00:00:00.000Z" },
+        ],
+        activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+        selectSession,
+      });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      await userEvent.click(screen.getByTestId("chat-mobile-session-trigger"));
+      expect(screen.getByTestId("chat-mobile-session-dropdown")).toBeInTheDocument();
+
+      await userEvent.click(screen.getByTestId("chat-mobile-session-option-session-002"));
+      expect(selectSession).toHaveBeenCalledWith("session-002");
+      expect(screen.queryByTestId("chat-mobile-session-dropdown")).not.toBeInTheDocument();
+    } finally {
+      restoreMatchMedia.mockRestore();
+    }
+  });
+
+  it("mobile mode: quick session switcher closes on outside click and is not shown for rooms", async () => {
+    const restoreMatchMedia = mockMobileViewport();
+    try {
+      setupMockChat({ activeSession: activeSessionFixture });
+      const initialRender = render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      expect(screen.queryByTestId("chat-mobile-session-trigger")).toBeInTheDocument();
+      await userEvent.click(screen.getByTestId("chat-mobile-session-trigger"));
+      expect(screen.getByTestId("chat-mobile-session-dropdown")).toBeInTheDocument();
+
+      fireEvent.mouseDown(document.body);
+      await waitFor(() => {
+        expect(screen.queryByTestId("chat-mobile-session-dropdown")).not.toBeInTheDocument();
+      });
+
+      initialRender.unmount();
+
+      localStorage.setItem("fusion:chat-scope", "rooms");
+      setupMockRooms({
+        activeRoom: {
+          id: "room-001",
+          projectId: "proj-123",
+          name: "backend",
+          createdAt: "2026-04-08T00:00:00.000Z",
+          updatedAt: "2026-04-08T00:00:00.000Z",
+        },
+      });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+      expect(screen.queryByTestId("chat-mobile-session-trigger")).not.toBeInTheDocument();
+      expect(screen.getByText("#backend")).toBeInTheDocument();
+    } finally {
+      localStorage.setItem("fusion:chat-scope", "direct");
       restoreMatchMedia.mockRestore();
     }
   });

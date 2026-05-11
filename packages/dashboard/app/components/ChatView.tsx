@@ -781,6 +781,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   const [isDragOver, setIsDragOver] = useState(false);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
   const [copyFeedbackByMessageId, setCopyFeedbackByMessageId] = useState<Record<string, CopyFeedbackState>>({});
+  const [mobileSessionMenuOpen, setMobileSessionMenuOpen] = useState(false);
 
   // File mention state and hook
   const [, setFileMentionPopupVisible] = useState(false);
@@ -804,6 +805,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   }, [fileMention.mentionActive]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const mobileSessionMenuRef = useRef<HTMLDivElement>(null);
   const isUserScrollingRef = useRef(false);
   const lastAnchoredSessionStateRef = useRef<{ sessionId: string; loaded: boolean; hasMessages: boolean } | null>(null);
   const hideSkillMenuTimeoutRef = useRef<number | null>(null);
@@ -1704,6 +1706,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   const handleSessionClick = useCallback(
     (id: string) => {
       selectSession(id);
+      setMobileSessionMenuOpen(false);
       if (isMobile) setSidebarVisible(false);
     },
     [selectSession, isMobile],
@@ -1713,6 +1716,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   const handleBack = useCallback(() => {
     selectSession("");
     setSidebarVisible(true);
+    setMobileSessionMenuOpen(false);
   }, [selectSession]);
 
   // Render empty state (no active session)
@@ -1738,6 +1742,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     : activeSession?.title || agentsMap.get(activeSession?.agentId ?? "")?.name || activeSession?.agentId || "Chat";
 
   const showThreadHeaderModelTag = Boolean(activeModelTag && activeModelTag !== threadHeaderTitle);
+  const showMobileSessionSwitcher = isMobile && chatScope === "direct" && !!activeSession;
 
   const agentName =
     agentsMap.get(activeSession?.agentId ?? "")?.name ||
@@ -1765,6 +1770,30 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   const toggleAllAsPlain = useCallback(() => {
     setShowAllAsPlain((value) => !value);
   }, []);
+
+  useEffect(() => {
+    if (!mobileSessionMenuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (mobileSessionMenuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      setMobileSessionMenuOpen(false);
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [mobileSessionMenuOpen]);
+
+  useEffect(() => {
+    if (!isMobile || chatScope !== "direct" || sidebarVisible) {
+      setMobileSessionMenuOpen(false);
+    }
+  }, [isMobile, chatScope, sidebarVisible]);
 
   const setCopyFeedback = useCallback((messageId: string, feedback: CopyFeedbackState) => {
     const existingTimeout = copyFeedbackTimeoutsRef.current.get(messageId);
@@ -2245,9 +2274,45 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
               </button>
             )}
             <div className="chat-thread-header-identity" data-testid="chat-thread-header-identity">
-              {activeModelProvider ? <ProviderIcon provider={activeModelProvider} size="md" /> : <Bot size={16} />}
-              <span className="chat-thread-header-title">{threadHeaderTitle}</span>
-              {showThreadHeaderModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
+              {showMobileSessionSwitcher ? (
+                <div className="chat-mobile-session-menu" ref={mobileSessionMenuRef}>
+                  <button
+                    type="button"
+                    className="btn-icon chat-mobile-session-trigger"
+                    data-testid="chat-mobile-session-trigger"
+                    aria-haspopup="menu"
+                    aria-expanded={mobileSessionMenuOpen}
+                    onClick={() => setMobileSessionMenuOpen((open) => !open)}
+                  >
+                    {activeModelProvider ? <ProviderIcon provider={activeModelProvider} size="md" /> : <Bot size={16} />}
+                    <span className="chat-thread-header-title">{threadHeaderTitle}</span>
+                    {showThreadHeaderModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
+                    <ChevronDown aria-hidden="true" />
+                  </button>
+                  {mobileSessionMenuOpen && (
+                    <div className="chat-mobile-session-dropdown" role="menu" data-testid="chat-mobile-session-dropdown">
+                      {filteredSessions.map((session) => (
+                        <button
+                          key={session.id}
+                          type="button"
+                          role="menuitem"
+                          className={`chat-mobile-session-option${activeSession?.id === session.id ? " chat-mobile-session-option--active" : ""}`}
+                          data-testid={`chat-mobile-session-option-${session.id}`}
+                          onClick={() => handleSessionClick(session.id)}
+                        >
+                          <span className="chat-mobile-session-option-title">{session.title || "Untitled"}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  {activeModelProvider ? <ProviderIcon provider={activeModelProvider} size="md" /> : <Bot size={16} />}
+                  <span className="chat-thread-header-title">{threadHeaderTitle}</span>
+                  {showThreadHeaderModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
+                </>
+              )}
             </div>
             {hasThreadInView && (
               <button

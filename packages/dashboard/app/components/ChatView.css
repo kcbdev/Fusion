@@ -377,6 +377,101 @@
   min-width: 0;
 }
 
+.chat-mobile-session-menu {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.chat-mobile-session-trigger {
+  width: 100%;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-sm);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  padding: var(--space-xs) var(--space-sm);
+  min-height: calc(var(--space-lg) * 2);
+}
+
+.chat-mobile-session-trigger .chat-thread-header-title,
+.chat-mobile-session-trigger .chat-model-tag {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-mobile-session-trigger svg:last-child {
+  margin-left: auto;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.chat-mobile-session-trigger:hover {
+  background: var(--card-hover);
+}
+
+.chat-mobile-session-trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+.chat-mobile-session-dropdown {
+  position: absolute;
+  top: calc(100% + var(--space-xs));
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  z-index: 4;
+  max-height: calc(var(--space-xl) * 10);
+  overflow-y: auto;
+}
+
+.chat-mobile-session-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  min-height: calc(var(--space-lg) * 2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  padding: var(--space-sm) var(--space-md);
+}
+
+.chat-mobile-session-option:hover {
+  background: var(--card-hover);
+}
+
+.chat-mobile-session-option:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+.chat-mobile-session-option--active {
+  background: color-mix(in srgb, var(--todo) 12%, transparent);
+}
+
+.chat-mobile-session-option-title {
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .chat-thread-header-new-chat {
   flex-shrink: 0;
 }
@@ -1343,7 +1438,11 @@
     flex: 1 1 auto;
     min-width: 0;
     white-space: nowrap;
-    overflow: hidden;
+    overflow: visible;
+  }
+
+  .chat-mobile-session-menu {
+    width: 100%;
   }
 
   .chat-thread-header-identity .chat-thread-header-title,
