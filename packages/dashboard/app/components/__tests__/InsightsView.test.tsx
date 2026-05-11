@@ -69,6 +69,9 @@ vi.mock("lucide-react", () => ({
   Clock: ({ size = 24, className = "" }: { size?: number; className?: string }) => (
     <span data-testid="clock-icon" className={className}>{`Clock-${size}`}</span>
   ),
+  Settings: ({ size = 24, className = "" }: { size?: number; className?: string }) => (
+    <span data-testid="settings-icon" className={className}>{`Settings-${size}`}</span>
+  ),
 }));
 
 import { useInsights } from "../../hooks/useInsights";
@@ -333,6 +336,46 @@ describe("InsightsView", () => {
 
       expect(screen.getByTestId("run-error")).toBeInTheDocument();
       expect(screen.getAllByText("No working memory to analyze").length).toBeGreaterThan(0);
+    });
+
+    it("should show friendly active-run conflict error and still render latest run details", () => {
+      mockUseInsights.mockReturnValue({
+        sections: mockSections,
+        loading: false,
+        error: null,
+        latestRun: {
+          id: "INSR-11",
+          projectId: "test",
+          trigger: "manual",
+          status: "running",
+          summary: null,
+          error: null,
+          insightsCreated: 0,
+          insightsUpdated: 0,
+          inputMetadata: {},
+          outputMetadata: {},
+          createdAt: "2024-01-01T00:00:00Z",
+          startedAt: "2024-01-01T00:00:01Z",
+          completedAt: null,
+        },
+        isRunInFlight: false,
+        runError: "Insight generation is already running",
+        refresh: vi.fn(),
+        runInsights: vi.fn(),
+        dismiss: vi.fn(),
+        createTask: vi.fn(),
+        dismissStates: new Map(),
+        createTaskStates: new Map(),
+        totalCount: 0,
+        dismissedCount: 0,
+      });
+
+      render(<InsightsView {...defaultProps} />);
+
+      expect(screen.getByTestId("run-error")).toBeInTheDocument();
+      expect(screen.getByText("Insight generation is already running")).toBeInTheDocument();
+      expect(screen.getByTestId("latest-run")).toBeInTheDocument();
+      expect(screen.getByText("Latest run: running")).toBeInTheDocument();
     });
 
     it("should render global empty state when all sections are empty", () => {

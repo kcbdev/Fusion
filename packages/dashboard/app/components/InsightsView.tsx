@@ -216,6 +216,12 @@ export function InsightsView({ projectId, addToast, onClose, onCreateTask, model
       addToast("Insight generation started", "success");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to start generation";
+      if (message === "Insight generation is already running") {
+        setStatusMessage("Insight generation is already running. Showing the active run.");
+        setStatusType("info");
+        addToast("Insight generation is already running", "info");
+        return;
+      }
       setStatusMessage(message);
       setStatusType("error");
       addToast(message, "error");

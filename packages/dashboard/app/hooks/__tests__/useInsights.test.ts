@@ -14,8 +14,20 @@ vi.mock("../../api", () => ({
   archiveInsight: vi.fn(),
   unarchiveInsight: vi.fn(),
   triggerInsightRun: vi.fn(),
+  fetchInsightRun: vi.fn(),
   fetchInsightRuns: vi.fn(),
   getInsightCreateTaskData: vi.fn(),
+  ApiRequestError: class ApiRequestError extends Error {
+    status: number;
+    details?: Record<string, unknown>;
+
+    constructor(message: string, status: number, details?: Record<string, unknown>) {
+      super(message);
+      this.name = "ApiRequestError";
+      this.status = status;
+      this.details = details;
+    }
+  },
 }));
 
 // Mock lucide-react icons used in the view
@@ -45,8 +57,10 @@ import {
   archiveInsight,
   unarchiveInsight,
   triggerInsightRun,
+  fetchInsightRun,
   fetchInsightRuns,
   getInsightCreateTaskData,
+  ApiRequestError,
 } from "../../api";
 
 const mockFetchInsights = vi.mocked(fetchInsights);
@@ -54,6 +68,7 @@ const mockDismissInsight = vi.mocked(dismissInsight);
 const mockArchiveInsight = vi.mocked(archiveInsight);
 const mockUnarchiveInsight = vi.mocked(unarchiveInsight);
 const mockTriggerInsightRun = vi.mocked(triggerInsightRun);
+const mockFetchInsightRun = vi.mocked(fetchInsightRun);
 const mockFetchInsightRuns = vi.mocked(fetchInsightRuns);
 const mockGetInsightCreateTaskData = vi.mocked(getInsightCreateTaskData);
 
@@ -280,7 +295,7 @@ describe("useInsights", () => {
         await result.current.runInsights();
       });
 
-      expect(mockTriggerInsightRun).toHaveBeenCalledWith("manual", undefined, "project-1");
+      expect(mockTriggerInsightRun).toHaveBeenCalledWith("manual", undefined, "project-1", undefined, undefined);
       expect(result.current.latestRun?.status).toBe("completed");
       expect(result.current.isRunInFlight).toBe(false);
       expect(mockFetchInsights.mock.calls.length).toBeGreaterThanOrEqual(2);
@@ -322,6 +337,88 @@ describe("useInsights", () => {
       expect(result.current.isRunInFlight).toBe(false);
       // Initial load only; failed run should not trigger refresh.
       expect(mockFetchInsights).toHaveBeenCalledTimes(1);
+    });
+
+    it("should hydrate latestRun and set friendly error on structured active-run conflict", async () => {
+      mockFetchInsights.mockResolvedValue({ insights: [], count: 0 });
+      mockFetchInsightRuns.mockResolvedValue({ runs: [] });
+      mockFetchInsightRun.mockResolvedValue({
+        id: "RUN-2",
+        projectId: "project-1",
+        trigger: "manual",
+        status: "running",
+        summary: null,
+        error: null,
+        insightsCreated: 0,
+        insightsUpdated: 0,
+        inputMetadata: {},
+        outputMetadata: {},
+        createdAt: "2024-01-01T00:00:00Z",
+        startedAt: "2024-01-01T00:00:01Z",
+        completedAt: null,
+      });
+      mockTriggerInsightRun.mockRejectedValue(
+        new ApiRequestError("backend raw conflict", 409, {
+          code: "ACTIVE_RUN_CONFLICT",
+          activeRunId: "RUN-2",
+          activeRunStatus: "running",
+        }),
+      );
+
+      const { result } = renderHook(() => useInsights("project-1"));
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      await act(async () => {
+        await expect(result.current.runInsights()).rejects.toBeInstanceOf(Error);
+      });
+
+      expect(mockFetchInsightRun).toHaveBeenCalledWith("RUN-2", "project-1");
+      expect(result.current.latestRun?.id).toBe("RUN-2");
+      expect(result.current.runError).toBe("Insight generation is already running");
+      expect(result.current.isRunInFlight).toBe(false);
+    });
+
+    it("should clear stale runError on orphan-recovery success path", async () => {
+      mockFetchInsights.mockResolvedValue({ insights: [], count: 0 });
+      mockFetchInsightRuns.mockResolvedValue({ runs: [] });
+      mockTriggerInsightRun
+        .mockRejectedValueOnce(new Error("Previous failure"))
+        .mockResolvedValueOnce({
+          id: "RUN-3",
+          projectId: "project-1",
+          trigger: "manual",
+          status: "completed",
+          summary: "Recovered and completed",
+          error: null,
+          insightsCreated: 1,
+          insightsUpdated: 0,
+          inputMetadata: {},
+          outputMetadata: {},
+          createdAt: "2024-01-01T00:00:00Z",
+          startedAt: "2024-01-01T00:00:01Z",
+          completedAt: "2024-01-01T00:00:10Z",
+        });
+
+      const { result } = renderHook(() => useInsights("project-1"));
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      await act(async () => {
+        await expect(result.current.runInsights()).rejects.toThrow("Previous failure");
+      });
+      expect(result.current.runError).toBe("Previous failure");
+
+      await act(async () => {
+        await result.current.runInsights();
+      });
+
+      expect(result.current.latestRun?.id).toBe("RUN-3");
+      expect(result.current.runError).toBeNull();
     });
 
     it("should propagate trigger errors and always clear in-flight state", async () => {

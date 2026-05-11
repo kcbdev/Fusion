@@ -11,11 +11,13 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
 import type { Insight, InsightCategory, InsightStatus, InsightRun } from "@fusion/core";
 import {
+  ApiRequestError,
   fetchInsights,
   dismissInsight,
   archiveInsight,
   unarchiveInsight,
   triggerInsightRun,
+  fetchInsightRun,
   fetchInsightRuns,
   getInsightCreateTaskData,
 } from "../api";
@@ -203,6 +205,20 @@ export function useInsights(projectId?: string): UseInsightsResult {
         setRunError(run.error);
       }
     } catch (err) {
+      if (err instanceof ApiRequestError && err.status === 409 && err.details?.code === "ACTIVE_RUN_CONFLICT") {
+        const activeRunId = typeof err.details.activeRunId === "string" ? err.details.activeRunId : null;
+        if (activeRunId) {
+          try {
+            const activeRun = await fetchInsightRun(activeRunId, projectId);
+            setLatestRun(activeRun);
+          } catch {
+            // Fall back to existing latest run state if hydration fails.
+          }
+        }
+        setRunError("Insight generation is already running");
+        throw err;
+      }
+
       const message = err instanceof Error ? err.message : "Failed to generate insights";
       setRunError(message);
       throw err;

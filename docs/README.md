@@ -83,6 +83,7 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 | [Test Audit Report](./test-audit-report.md) | Test coverage and effectiveness audit with recommendations |
 | [Skipped Test Inventory](./skipped-test-inventory.md) | Current intentional test-skip inventory and reconciliation status for older skip follow-ups |
 | [Dev Server Module Boundary Audit](./dev-server-module-boundary-audit.md) | Boundary/ownership audit for parallel `dev-server-*` vs `devserver-*` dashboard modules and FN-2212 prioritization guidance |
+| [spawn_agent Approval Evaluation (FN-3973)](./spawn-agent-approval-evaluation.md) | Decision to keep fn_spawn_agent under generic action-gate governance rather than durable agent provisioning policy |
 | [Dashboard Load Performance](./performance/dashboard-load.md) | SQLite index analysis and optimization for dashboard boot path queries |
 | [CLI Printing Press Plugin Design](./design/cli-printing-press-plugin.md) | Architecture design for the CLI printing press bundled plugin (FN-3762) |
 | [CLI Printing Press Research](./research/cli-printing-press.md) | Upstream `cli-printing-press` analysis and Fusion integration mapping (FN-3761) |

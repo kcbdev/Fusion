@@ -88,6 +88,80 @@ const INSIGHT_CATEGORY_BY_MEMORY_CATEGORY: Record<MemoryInsightCategory, Insight
 };
 
 const activeRunControllers = new Map<string, AbortController>();
+const ORPHAN_GRACE_MS = 30_000;
+
+function getRunAgeMs(run: { startedAt: string | null; createdAt: string }, nowMs: number): number {
+  const anchor = run.startedAt ?? run.createdAt;
+  const anchorMs = Date.parse(anchor);
+  if (!Number.isFinite(anchorMs)) return 0;
+  return Math.max(0, nowMs - anchorMs);
+}
+
+function maybeRecoverOrphanedActiveRun(params: {
+  insightStore: InsightStore;
+  run: ReturnType<InsightStore["getRun"]>;
+  trigger: InsightRunTrigger;
+  now: Date;
+}): boolean {
+  const { insightStore, run, trigger, now } = params;
+  if (!run || !["pending", "running"].includes(run.status)) {
+    return false;
+  }
+
+  if (activeRunControllers.has(run.id)) {
+    return false;
+  }
+
+  const ageMs = getRunAgeMs(run, now.getTime());
+  if (ageMs <= ORPHAN_GRACE_MS) {
+    return false;
+  }
+
+  const nowIso = now.toISOString();
+  insightStore.appendRunEvent(run.id, {
+    type: "warning",
+    status: run.status,
+    classification: "non_retryable",
+    message: `Recovered orphaned active run after ${ageMs}ms without controller ownership`,
+    metadata: {
+      recovery: "orphaned_active_run",
+      trigger,
+      ageMs,
+      graceMs: ORPHAN_GRACE_MS,
+      hadController: false,
+      anchorTimestamp: run.startedAt ?? run.createdAt,
+    },
+  });
+
+  const failed = insightStore.updateRun(run.id, {
+    status: "failed",
+    summary: "Recovered orphaned run",
+    error: "Run was marked active but had no live controller after grace period",
+    completedAt: nowIso,
+    lifecycle: {
+      ...run.lifecycle,
+      terminalReason: "failed",
+      terminalCause: "orphaned_active_run_recovered",
+      failureClass: "non_retryable",
+      retryable: false,
+    },
+  });
+
+  if (failed) {
+    insightStore.appendRunEvent(run.id, {
+      type: "status_changed",
+      status: "failed",
+      classification: "non_retryable",
+      message: "Run marked failed after orphaned active-run recovery",
+      metadata: {
+        recovery: "orphaned_active_run",
+      },
+    });
+    return true;
+  }
+
+  return false;
+}
 
 async function withAbort<T>(signal: AbortSignal, task: Promise<T>): Promise<T> {
   if (signal.aborted) {
@@ -347,6 +421,16 @@ export function createInsightsRouter(store: TaskStore): Router {
         };
       }
 
+      const existingActiveRun = insightStore.findActiveRun(projectId, trigger);
+      if (existingActiveRun) {
+        maybeRecoverOrphanedActiveRun({
+          insightStore,
+          run: existingActiveRun,
+          trigger,
+          now: new Date(),
+        });
+      }
+
       const run = await executeInsightRunLifecycle({
         store: insightStore,
         projectId,
@@ -377,7 +461,15 @@ export function createInsightsRouter(store: TaskStore): Router {
       res.status(201).json(run);
     } catch (error) {
       if (error instanceof InsightLifecycleError && error.code === "active_run_conflict") {
-        throw new ApiError(409, error.message);
+        const projectId = getProjectId(req) ?? "";
+        const trigger: InsightRunTrigger = (req.body.trigger as InsightRunTrigger) ?? "manual";
+        const activeRun = getInsightStore().findActiveRun(projectId, trigger);
+        throw new ApiError(409, "Insight generation is already running", {
+          code: "ACTIVE_RUN_CONFLICT",
+          activeRunId: activeRun?.id,
+          activeRunStatus: activeRun?.status,
+          trigger,
+        });
       }
       rethrowAsApiError(error, "Failed to create insight run");
     }

@@ -304,6 +304,10 @@ Intentional exclusions from shared snapshots:
   - persisted failure classification (`cancelled`, `timed_out`, `retryable_transient`, `non_retryable`) and retry lineage metadata
   - append-only durable event trail in `project_insight_run_events`
 - Dashboard routes (`insights-routes.ts`) consume the core executor/store APIs for run start, cancel, retry, and event inspection (`/api/insights/runs/:id/events`)
+- `POST /api/insights/run` preserves the single-active-run guarantee while adding orphan recovery for stale `pending|running` rows:
+  - a conflicting active row is only auto-recovered when there is no in-memory controller ownership (`activeRunControllers` has no entry) **and** run age (`startedAt ?? createdAt`) exceeds the grace window (`ORPHAN_GRACE_MS = 30_000`)
+  - recovered rows are durably marked `failed` with lifecycle terminal metadata (`terminalReason=failed`, `terminalCause=orphaned_active_run_recovered`, `failureClass=non_retryable`, `retryable=false`) and warning/status events appended to `project_insight_run_events`
+  - true live conflicts continue returning HTTP 409 with structured payload details `{ code: "ACTIVE_RUN_CONFLICT", activeRunId, activeRunStatus, trigger }` so the dashboard can hydrate and display the existing active run instead of surfacing a raw backend exception
 - `POST /api/insights/:id/create-task` remains a draft-payload endpoint (returns `suggestedTitle`/`suggestedDescription`); the dashboard `InsightsView` now uses that payload to create a real task through the normal app task-creation path (`column: triage`, `sourceType: dashboard_ui`, source metadata indicating insights origin)
 - Backed by `project_insights`, `project_insight_runs`, and `project_insight_run_events`
 
