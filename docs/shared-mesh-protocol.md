@@ -110,16 +110,15 @@ For `strong` writes:
 ## 9. Offline queueing and replay
 
 When a strong/queued write cannot reach quorum:
-- Persist queue entry durably with:
-  - `intentId`, `entityType`, `entityId`, `writeClass`
-  - `originNodeId`, `originSeq`, `leaseEpoch`, `fenceToken`
-  - retry counters, first/last attempt timestamps, next attempt time
-- Local node may expose optimistic local result as `queued` only (not globally committed).
+- Persist queue entry durably in `meshWriteQueue` (`status`: `pending | replaying | applied | failed`).
+- Retryable queueing is limited to transport/outage failures: HTTP `502/503/504`, timeout/abort, and transport errors (`TypeError` fetch/network rejections, or Node-style `ECONNREFUSED`, `ENOTFOUND`, `ETIMEDOUT`, `ECONNRESET`).
+- Non-retryable HTTP failures (`400/401/403/404/409/422`) are recorded as immediate failures and are not queued for replay.
+- `applied` and `failed` rows are retained as durable reconciliation history (no auto-cleanup in v1).
 
 Replay ordering:
-1. Sort by `(leaseEpoch asc, originSeq asc, createdAt asc, intentId asc)`.
-2. Re-validate preconditions and fence tokens.
-3. Commit, reject, or reconcile with deterministic outcome.
+1. Sort by `(createdAt asc, id asc)`.
+2. Transition idempotently on the same row (`pending → replaying → applied|failed`) while incrementing `attemptCount` on each attempt.
+3. Re-validate preconditions/fencing and record deterministic outcome.
 
 ## 10. Reconciliation
 
@@ -142,14 +141,29 @@ On node startup:
 
 ## 12. Degraded reads and staleness
 
-Read responses for shared entities include staleness metadata:
-- `source`: `local-committed` | `local-queued` | `replica`
-- `lastGlobalCommitAt`
-- `replicationLagMs`
-- `queueDepth`
-- `isStale`
+Mesh state reads expose a canonical `MeshDegradedReadState` contract:
 
-In degraded mode, clients may read last-known global state plus queued-local overlays, but must be able to distinguish them.
+```ts
+type MeshDegradedReadState = {
+  mode: "fresh" | "degraded";
+  asOf: string;
+  sourceNodeId: string | null;
+  snapshotVersion: string | null;
+  stalenessMs: number;
+  queueDepth: number;
+  pendingWriteCount: number;
+  failedWriteCount: number;
+};
+```
+
+Rules:
+- `mode="fresh"` only when data came from the live mesh read path.
+- `mode="degraded"` when read falls back to `meshSharedSnapshots`.
+- `asOf` comes from snapshot `capturedAt`; `stalenessMs = Date.now() - new Date(asOf).getTime()`.
+- `snapshotVersion` is the stored 64-char SHA-256 hex digest of snapshot payload.
+- `queueDepth` is computed from queue rows where `status IN ('pending','replaying','failed')`.
+
+API behavior must never hide fallback mode: degraded reads are explicit so clients can distinguish stale last-known state from fresh cluster state.
 
 ## 13. End-to-end v1 write path
 

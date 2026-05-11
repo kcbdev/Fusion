@@ -620,6 +620,12 @@ Implemented in `agent-heartbeat.ts`:
 - `PeerExchangeService` (`peer-exchange-service.ts`) — peer sync orchestration
 - `MeshLeaseManager` (`mesh-lease-manager.ts`) — canonical abandoned-lease detection + recovery path
 
+### Outage ownership boundaries (degraded reads + queued write replay)
+- `CentralCore` owns durable outage state in central persistence (`meshSharedSnapshots` + `meshWriteQueue`) and computes canonical degraded-read metadata (`MeshDegradedReadState`) for API consumers.
+- `PeerExchangeService` owns retryability classification for sync/apply failures, queue insertion for retryable failures, and replay execution after successful peer sync using queue ordering `(createdAt ASC, id ASC)`.
+- `NodeHealthMonitor` provides liveness transitions as replay hints only; `online` is a trigger to attempt replay, not proof that replay succeeded.
+- Dashboard mesh routes (`register-mesh-routes.ts`) preserve `GET /api/mesh/state` array shape and attach per-node degraded `readState` metadata so stale fallback data is explicit during partitions.
+
 ### Mesh task lease ownership and recovery
 
 Task ownership is persisted in shared task metadata so all nodes agree on one canonical lease view. The persisted lease fields are:

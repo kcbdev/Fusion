@@ -34,6 +34,7 @@ Per-project task data remains in each repo’s `.fusion/fusion.db`.
 Peer/mesh coordination spans core + engine, with startup ownership in CLI process entrypoints:
 
 - Topology visibility is now cluster-wide from any connected node: dashboard mesh reads aggregate remote local snapshots and dedupe by `nodeId`, with fallback to last-known local mesh state when a peer is temporarily unreachable.
+- Outage tolerance persistence is central and project-scoped: degraded mesh snapshots and queued write replay rows are stored with `projectId` keys so partitions in one project do not blur reconciliation state across other registered projects.
 - `NodeDiscovery` and `NodeConnection` in `@fusion/core` handle discovery and remote node connectivity/auth primitives.
 - `PeerExchangeService` in `@fusion/engine` coordinates node-to-node sync/exchange workflows.
 - `MeshLeaseManager` in `@fusion/engine` is the single authority for stale lease detection and abandoned-work recovery across nodes.
