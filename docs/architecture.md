@@ -621,9 +621,9 @@ Implemented in `agent-heartbeat.ts`:
 - `MeshLeaseManager` (`mesh-lease-manager.ts`) — canonical abandoned-lease detection + recovery path
 
 ### Outage ownership boundaries (degraded reads + queued write replay)
-- `CentralCore` owns durable outage state in central persistence (`meshSharedSnapshots` + `meshWriteQueue`) and computes canonical degraded-read metadata (`MeshDegradedReadState`) for API consumers.
-- `PeerExchangeService` owns retryability classification for sync/apply failures, queue insertion for retryable failures, and replay execution after successful peer sync using queue ordering `(createdAt ASC, id ASC)`.
-- `NodeHealthMonitor` provides liveness transitions as replay hints only; `online` is a trigger to attempt replay, not proof that replay succeeded.
+- `CentralCore` owns durable outage state in central persistence (`meshSharedSnapshots` + `meshWriteQueue`) and exposes stable assertion methods: `recordMeshSnapshot`, `getLatestMeshSnapshot`, `enqueueMeshWrite`, `listPendingMeshWrites`, `markMeshWriteReplayStarted`, `markMeshWriteApplied`, `markMeshWriteFailed`, and `getMeshDegradedReadState`.
+- `PeerExchangeService` owns retryability classification for sync/apply failures, queue insertion for retryable failures, replay execution (`replayPendingWritesForNode(targetNodeId)`), and observable sync results (`queuedWriteId`, `replaySummary`) for partition/replay assertions.
+- `NodeHealthMonitor` provides liveness transitions as replay hints only via deterministic recovery callback `onNodeRecovered(nodeId, previousStatus)`; `online` is a trigger to attempt replay, not proof that replay succeeded.
 - Dashboard mesh routes (`register-mesh-routes.ts`) preserve `GET /api/mesh/state` array shape and attach per-node degraded `readState` metadata so stale fallback data is explicit during partitions.
 
 ### Mesh task lease ownership and recovery

@@ -39,7 +39,7 @@ describe("CentralDatabase", () => {
 
     it("should initialize schema version", () => {
       db.init();
-      expect(db.getSchemaVersion()).toBe(9);
+      expect(db.getSchemaVersion()).toBe(10);
     });
 
     it("should seed lastModified on init", () => {
@@ -95,6 +95,8 @@ describe("CentralDatabase", () => {
       expect(tableNames).toContain("nodes");
       expect(tableNames).toContain("peerNodes");
       expect(tableNames).toContain("projectNodePathMappings");
+      expect(tableNames).toContain("meshSharedSnapshots");
+      expect(tableNames).toContain("meshWriteQueue");
       expect(tableNames).toContain("__meta");
     });
 
@@ -217,7 +219,7 @@ describe("CentralDatabase", () => {
 
       db.init();
 
-      expect(db.getSchemaVersion()).toBe(9);
+      expect(db.getSchemaVersion()).toBe(10);
 
       const nodeColumns = db.prepare("PRAGMA table_info(nodes)").all() as Array<{ name: string }>;
       const nodeColumnNames = nodeColumns.map((column) => column.name);
@@ -282,7 +284,7 @@ describe("CentralDatabase", () => {
 
       db.init();
 
-      expect(db.getSchemaVersion()).toBe(9);
+      expect(db.getSchemaVersion()).toBe(10);
 
       const nodeColumns = db.prepare("PRAGMA table_info(nodes)").all() as Array<{ name: string }>;
       const nodeColumnNames = nodeColumns.map((column) => column.name);
@@ -370,7 +372,7 @@ describe("CentralDatabase", () => {
 
       db.init();
 
-      expect(db.getSchemaVersion()).toBe(9);
+      expect(db.getSchemaVersion()).toBe(10);
 
       const nodeColumns = db.prepare("PRAGMA table_info(nodes)").all() as Array<{ name: string }>;
       expect(nodeColumns.map((column) => column.name)).toContain("dockerConfig");
@@ -520,7 +522,7 @@ describe("CentralDatabase", () => {
 
       db.init();
 
-      expect(db.getSchemaVersion()).toBe(9);
+      expect(db.getSchemaVersion()).toBe(10);
 
       const mappings = db
         .prepare("SELECT projectId, nodeId, path FROM projectNodePathMappings ORDER BY projectId")
@@ -530,6 +532,30 @@ describe("CentralDatabase", () => {
         { projectId: "proj_1", nodeId: "node_local", path: "/tmp/proj-1" },
         { projectId: "proj_2", nodeId: "node_local", path: "/tmp/proj-2" },
       ]);
+    });
+
+    it("should migrate from v9 to v10 with mesh outage tables", () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS __meta (key TEXT PRIMARY KEY, value TEXT);
+        CREATE TABLE IF NOT EXISTS plugin_installs (id TEXT PRIMARY KEY, name TEXT NOT NULL, version TEXT NOT NULL, path TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS project_plugin_states (projectPath TEXT NOT NULL, pluginId TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'installed', createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, PRIMARY KEY (projectPath, pluginId));
+      `);
+      db.prepare("INSERT INTO __meta (key, value) VALUES ('schemaVersion', '9')").run();
+      db.prepare("INSERT INTO __meta (key, value) VALUES ('lastModified', ?)").run(String(Date.now()));
+
+      db.init();
+
+      expect(db.getSchemaVersion()).toBe(10);
+
+      const snapshotCols = db.prepare("PRAGMA table_info(meshSharedSnapshots)").all() as Array<{ name: string }>;
+      expect(snapshotCols.map((c) => c.name)).toEqual(
+        expect.arrayContaining(["nodeId", "projectId", "scope", "payload", "snapshotVersion", "capturedAt", "sourceNodeId", "sourceRunId", "staleAfter", "updatedAt"]),
+      );
+
+      const queueCols = db.prepare("PRAGMA table_info(meshWriteQueue)").all() as Array<{ name: string }>;
+      expect(queueCols.map((c) => c.name)).toEqual(
+        expect.arrayContaining(["id", "originNodeId", "targetNodeId", "projectId", "scope", "entityType", "entityId", "operation", "payload", "intentVersion", "status", "attemptCount", "lastAttemptAt", "lastError", "createdAt", "updatedAt", "appliedAt"]),
+      );
     });
   });
 

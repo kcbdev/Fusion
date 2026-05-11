@@ -1,4 +1,4 @@
-import type { NodeMeshState, PeerSyncRequest, PeerSyncResponse, SettingsSyncPayload } from "./types.js";
+import type { MeshWriteQueueEntry, NodeMeshState, PeerSyncRequest, PeerSyncResponse, SettingsSyncPayload } from "./types.js";
 
 export const SHARED_MESH_PROTOCOL_ID = "fusion.shared-mesh" as const;
 export const SHARED_MESH_PROTOCOL_VERSION = "1.0" as const;
@@ -157,6 +157,25 @@ export function createFenceToken(leaseEpoch: number, coordinatorNodeId: string, 
 
 export function isProtocolRef(value: { protocol?: string; version?: string } | null | undefined): value is SharedMeshProtocolRef {
   return value?.protocol === SHARED_MESH_PROTOCOL_ID && value.version === SHARED_MESH_PROTOCOL_VERSION;
+}
+
+const RETRYABLE_NODE_ERROR_CODES = ["ECONNREFUSED", "ENOTFOUND", "ETIMEDOUT", "ECONNRESET"] as const;
+
+export function isRetryableMeshWriteFailure(statusCode?: number, errorMessage?: string): boolean {
+  if (statusCode !== undefined) {
+    return statusCode === 502 || statusCode === 503 || statusCode === 504;
+  }
+  const message = (errorMessage ?? "").toLowerCase();
+  if (message.includes("timeout") || message.includes("abort")) return true;
+  if (message.includes("typeerror") || message.includes("network")) return true;
+  return RETRYABLE_NODE_ERROR_CODES.some((code) => message.includes(code.toLowerCase()));
+}
+
+export function compareMeshWriteReplayOrder(a: Pick<MeshWriteQueueEntry, "createdAt" | "id">, b: Pick<MeshWriteQueueEntry, "createdAt" | "id">): number {
+  if (a.createdAt === b.createdAt) {
+    return a.id.localeCompare(b.id);
+  }
+  return a.createdAt.localeCompare(b.createdAt);
 }
 
 export function classifyReadStaleness(params: {

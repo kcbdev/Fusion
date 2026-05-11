@@ -1392,6 +1392,116 @@ describe("CentralCore", () => {
       expect(remote?.nodeType).toBe("remote");
     });
 
+    describe("mesh outage persistence", () => {
+      it("persists and reloads mesh snapshot records", async () => {
+        await central.recordMeshSnapshot({
+          nodeId: "node-a",
+          projectId: "proj-1",
+          scope: "mesh.state",
+          payload: { value: 1 },
+          snapshotVersion: "a".repeat(64),
+          capturedAt: "2026-05-10T00:00:00.000Z",
+          sourceNodeId: "node-b",
+        });
+
+        const loaded = await central.getLatestMeshSnapshot({ nodeId: "node-a", projectId: "proj-1", scope: "mesh.state" });
+        expect(loaded?.payload).toEqual({ value: 1 });
+        expect(loaded?.snapshotVersion).toBe("a".repeat(64));
+        expect(loaded?.sourceNodeId).toBe("node-b");
+      });
+
+      it("supports queue lifecycle transitions and filters", async () => {
+        const entry = await central.enqueueMeshWrite({
+          originNodeId: "origin-1",
+          targetNodeId: "target-1",
+          projectId: "proj-1",
+          scope: "mesh.settings",
+          entityType: "project-settings",
+          entityId: "settings",
+          operation: "upsert",
+          payload: { ok: true },
+          intentVersion: "v1",
+        });
+
+        expect(entry.status).toBe("pending");
+
+        const replaying = await central.markMeshWriteReplayStarted(entry.id);
+        expect(replaying.status).toBe("replaying");
+        expect(replaying.attemptCount).toBe(1);
+
+        const failed = await central.markMeshWriteFailed(entry.id, { lastError: "timeout" });
+        expect(failed.status).toBe("failed");
+        expect(failed.lastError).toBe("timeout");
+
+        const failedRows = await central.listPendingMeshWrites({ targetNodeId: "target-1", status: "failed" });
+        expect(failedRows.map((row) => row.id)).toContain(entry.id);
+
+        const applied = await central.markMeshWriteApplied(entry.id, {});
+        expect(applied.status).toBe("applied");
+        expect(applied.appliedAt).toBeTruthy();
+      });
+
+      it("computes degraded read state from durable snapshot and queue", async () => {
+        await central.recordMeshSnapshot({
+          nodeId: "node-degraded",
+          scope: "mesh.tasks",
+          payload: { tasks: [] },
+          snapshotVersion: "b".repeat(64),
+          capturedAt: new Date(Date.now() - 5_000).toISOString(),
+          sourceNodeId: "node-source",
+        });
+
+        await central.enqueueMeshWrite({
+          originNodeId: "origin-2",
+          targetNodeId: "target-2",
+          scope: "mesh.tasks",
+          entityType: "task",
+          entityId: "T-1",
+          operation: "create",
+          payload: { id: "T-1" },
+          intentVersion: "v1",
+        });
+
+        const state = await central.getMeshDegradedReadState({ nodeId: "node-degraded", scope: "mesh.tasks" });
+        expect(state.mode).toBe("degraded");
+        expect(state.sourceNodeId).toBe("node-source");
+        expect(state.snapshotVersion).toBe("b".repeat(64));
+        expect(state.stalenessMs).toBeGreaterThanOrEqual(0);
+        expect(state.queueDepth).toBeGreaterThanOrEqual(1);
+      });
+
+      it("keeps queue and snapshots across close and re-init", async () => {
+        const initial = new CentralCore(tempDir);
+        await initial.init();
+        await initial.recordMeshSnapshot({
+          nodeId: "node-restart",
+          scope: "mesh.restart",
+          payload: { restart: true },
+          snapshotVersion: "c".repeat(64),
+          capturedAt: "2026-05-10T00:00:00.000Z",
+        });
+        const queued = await initial.enqueueMeshWrite({
+          originNodeId: "origin-restart",
+          targetNodeId: "target-restart",
+          scope: "mesh.restart",
+          entityType: "task",
+          entityId: "R-1",
+          operation: "update",
+          payload: { id: "R-1" },
+          intentVersion: "v1",
+        });
+        await initial.close();
+
+        const restarted = new CentralCore(tempDir);
+        await restarted.init();
+        const snapshot = await restarted.getLatestMeshSnapshot({ nodeId: "node-restart", scope: "mesh.restart" });
+        const queue = await restarted.listPendingMeshWrites({ targetNodeId: "target-restart" });
+        expect(snapshot?.payload).toEqual({ restart: true });
+        expect(queue.map((row) => row.id)).toContain(queued.id);
+        await restarted.close();
+      });
+    });
+
     describe("peer exchange methods", () => {
       it("should register a gossip peer and preserve its nodeId", async () => {
         const peerInfo = {

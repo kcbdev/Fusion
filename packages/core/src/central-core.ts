@@ -68,6 +68,16 @@ import type {
   ProjectNodePathMapping,
   ProjectNodePathMappingUpsertInput,
   ProjectNodePathMappingDeleteInput,
+  MeshSnapshotQuery,
+  MeshSnapshotRecord,
+  MeshSnapshotRecordInput,
+  MeshWriteQueueEntry,
+  MeshWriteQueueFilter,
+  MeshWriteQueueInput,
+  MeshWriteApplyResult,
+  MeshWriteFailureResult,
+  MeshDegradedReadState,
+  MeshWriteReplaySummary,
 } from "./types.js";
 import { getAppVersion, parseSemver } from "./app-version.js";
 import { validateDockerNodeConfig } from "./types.js";
@@ -1398,6 +1408,168 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
     );
 
     return snapshots;
+  }
+
+  async recordMeshSnapshot(input: MeshSnapshotRecordInput): Promise<MeshSnapshotRecord> {
+    this.ensureInitialized();
+    const now = new Date().toISOString();
+    this.db!.prepare(
+      `INSERT INTO meshSharedSnapshots (nodeId, projectId, scope, payload, snapshotVersion, capturedAt, sourceNodeId, sourceRunId, staleAfter, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(nodeId, projectId, scope) DO UPDATE SET
+         payload = excluded.payload,
+         snapshotVersion = excluded.snapshotVersion,
+         capturedAt = excluded.capturedAt,
+         sourceNodeId = excluded.sourceNodeId,
+         sourceRunId = excluded.sourceRunId,
+         staleAfter = excluded.staleAfter,
+         updatedAt = excluded.updatedAt`
+    ).run(
+      input.nodeId,
+      input.projectId ?? null,
+      input.scope,
+      JSON.stringify(input.payload),
+      input.snapshotVersion,
+      input.capturedAt,
+      input.sourceNodeId ?? null,
+      input.sourceRunId ?? null,
+      input.staleAfter ?? null,
+      now,
+    );
+    this.db!.bumpLastModified();
+    return { ...input, projectId: input.projectId ?? null, sourceNodeId: input.sourceNodeId ?? null, sourceRunId: input.sourceRunId ?? null, staleAfter: input.staleAfter ?? null, updatedAt: now };
+  }
+
+  async getLatestMeshSnapshot(query: MeshSnapshotQuery): Promise<MeshSnapshotRecord | null> {
+    this.ensureInitialized();
+    const row = this.db!.prepare(
+      `SELECT * FROM meshSharedSnapshots WHERE nodeId = ? AND projectId IS ? AND scope = ?`
+    ).get(query.nodeId, query.projectId ?? null, query.scope) as {
+      nodeId: string; projectId: string | null; scope: string; payload: string; snapshotVersion: string; capturedAt: string; sourceNodeId: string | null; sourceRunId: string | null; staleAfter: string | null; updatedAt: string;
+    } | undefined;
+    if (!row) return null;
+    return {
+      nodeId: row.nodeId,
+      projectId: row.projectId,
+      scope: row.scope,
+      payload: fromJson<Record<string, unknown>>(row.payload) ?? {},
+      snapshotVersion: row.snapshotVersion,
+      capturedAt: row.capturedAt,
+      sourceNodeId: row.sourceNodeId,
+      sourceRunId: row.sourceRunId,
+      staleAfter: row.staleAfter,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  async enqueueMeshWrite(input: MeshWriteQueueInput): Promise<MeshWriteQueueEntry> {
+    this.ensureInitialized();
+    const now = new Date().toISOString();
+    const id = `mq_${randomUUID().replace(/-/g, "").slice(0, 24)}`;
+    this.db!.prepare(
+      `INSERT INTO meshWriteQueue (id, originNodeId, targetNodeId, projectId, scope, entityType, entityId, operation, payload, intentVersion, status, attemptCount, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`
+    ).run(
+      id,
+      input.originNodeId,
+      input.targetNodeId,
+      input.projectId ?? null,
+      input.scope,
+      input.entityType,
+      input.entityId,
+      input.operation,
+      JSON.stringify(input.payload),
+      input.intentVersion,
+      now,
+      now,
+    );
+    this.db!.bumpLastModified();
+    return (await this.listPendingMeshWrites({ targetNodeId: input.targetNodeId })).find((entry) => entry.id === id)!;
+  }
+
+  async listPendingMeshWrites(filter: MeshWriteQueueFilter = {}): Promise<MeshWriteQueueEntry[]> {
+    this.ensureInitialized();
+    const conditions: string[] = [];
+    const values: Array<string> = [];
+    if (filter.originNodeId) { conditions.push("originNodeId = ?"); values.push(filter.originNodeId); }
+    if (filter.targetNodeId) { conditions.push("targetNodeId = ?"); values.push(filter.targetNodeId); }
+    if (filter.status) { conditions.push("status = ?"); values.push(filter.status); }
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const rows = this.db!.prepare(
+      `SELECT * FROM meshWriteQueue ${whereClause} ORDER BY createdAt ASC, id ASC`
+    ).all(...values) as Array<{ id: string; originNodeId: string; targetNodeId: string; projectId: string | null; scope: string; entityType: string; entityId: string; operation: string; payload: string; intentVersion: string; status: MeshWriteQueueEntry["status"]; attemptCount: number; lastAttemptAt: string | null; lastError: string | null; createdAt: string; updatedAt: string; appliedAt: string | null }>;
+    return rows.map((row) => ({ ...row, payload: fromJson<Record<string, unknown>>(row.payload) ?? {} }));
+  }
+
+  async markMeshWriteReplayStarted(id: string): Promise<MeshWriteQueueEntry> {
+    this.ensureInitialized();
+    const now = new Date().toISOString();
+    this.db!.prepare(
+      `UPDATE meshWriteQueue SET status = 'replaying', attemptCount = attemptCount + 1, lastAttemptAt = ?, updatedAt = ? WHERE id = ?`
+    ).run(now, now, id);
+    this.db!.bumpLastModified();
+    return this.getMeshWriteQueueEntryById(id);
+  }
+
+  async markMeshWriteApplied(id: string, result: MeshWriteApplyResult): Promise<MeshWriteQueueEntry> {
+    this.ensureInitialized();
+    const now = new Date().toISOString();
+    this.db!.prepare(
+      `UPDATE meshWriteQueue SET status = 'applied', appliedAt = ?, updatedAt = ? WHERE id = ?`
+    ).run(result.appliedAt ?? now, now, id);
+    this.db!.bumpLastModified();
+    return this.getMeshWriteQueueEntryById(id);
+  }
+
+  async markMeshWriteFailed(id: string, result: MeshWriteFailureResult): Promise<MeshWriteQueueEntry> {
+    this.ensureInitialized();
+    const now = new Date().toISOString();
+    this.db!.prepare(
+      `UPDATE meshWriteQueue SET status = 'failed', lastError = ?, updatedAt = ? WHERE id = ?`
+    ).run(result.lastError, now, id);
+    this.db!.bumpLastModified();
+    return this.getMeshWriteQueueEntryById(id);
+  }
+
+  async getMeshDegradedReadState(query: MeshSnapshotQuery): Promise<MeshDegradedReadState> {
+    this.ensureInitialized();
+    const snapshot = await this.getLatestMeshSnapshot(query);
+    const now = Date.now();
+    const counts = this.db!.prepare(
+      `SELECT
+        SUM(CASE WHEN status IN ('pending','replaying','failed') THEN 1 ELSE 0 END) AS queueDepth,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pendingWriteCount,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failedWriteCount
+       FROM meshWriteQueue`
+    ).get() as { queueDepth: number | null; pendingWriteCount: number | null; failedWriteCount: number | null };
+
+    const asOf = snapshot?.capturedAt ?? new Date(now).toISOString();
+    return {
+      mode: snapshot ? "degraded" : "fresh",
+      asOf,
+      sourceNodeId: snapshot?.sourceNodeId ?? null,
+      snapshotVersion: snapshot?.snapshotVersion ?? null,
+      stalenessMs: Math.max(0, now - Date.parse(asOf)),
+      queueDepth: counts.queueDepth ?? 0,
+      pendingWriteCount: counts.pendingWriteCount ?? 0,
+      failedWriteCount: counts.failedWriteCount ?? 0,
+    };
+  }
+
+  async replayPendingMeshWritesForNode(targetNodeId: string): Promise<MeshWriteReplaySummary> {
+    this.ensureInitialized();
+    const pending = await this.listPendingMeshWrites({ targetNodeId, status: "pending" });
+    return { replayed: pending.length, applied: 0, failed: 0, queuedWriteIds: pending.map((entry) => entry.id) };
+  }
+
+  private getMeshWriteQueueEntryById(id: string): MeshWriteQueueEntry {
+    const row = this.db!.prepare(`SELECT * FROM meshWriteQueue WHERE id = ?`).get(id) as
+      | { id: string; originNodeId: string; targetNodeId: string; projectId: string | null; scope: string; entityType: string; entityId: string; operation: string; payload: string; intentVersion: string; status: MeshWriteQueueEntry["status"]; attemptCount: number; lastAttemptAt: string | null; lastError: string | null; createdAt: string; updatedAt: string; appliedAt: string | null }
+      | undefined;
+    if (!row) {
+      throw new Error(`Mesh write queue entry not found: ${id}`);
+    }
+    return { ...row, payload: fromJson<Record<string, unknown>>(row.payload) ?? {} };
   }
 
   /**

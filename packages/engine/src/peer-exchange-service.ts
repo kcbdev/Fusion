@@ -1,9 +1,11 @@
 import type {
   CentralCore,
   GlobalSettings,
+  MeshWriteReplaySummary,
   SettingsSyncPayload,
   SharedMeshStatePayload,
 } from "@fusion/core";
+import { isRetryableMeshWriteFailure } from "@fusion/core";
 import type { NodeConfig, PeerSyncRequest, PeerSyncResponse } from "@fusion/core";
 import { peerExchangeLog } from "./logger.js";
 
@@ -42,6 +44,8 @@ export interface SyncResult {
   settingsApplied?: boolean;
   /** The settings version (checksum) observed on the remote node. */
   settingsVersion?: string;
+  queuedWriteId?: string;
+  replaySummary?: MeshWriteReplaySummary;
 }
 
 /**
@@ -357,12 +361,15 @@ export class PeerExchangeService {
         clearTimeout(timeoutId);
 
         if (!response.ok) {
+          const errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+          const queuedWriteId = await this.enqueueRetryableSyncWrite(node, request, response.status, errorMessage);
           return {
             nodeId: node.id,
             success: false,
             added: 0,
             updated: 0,
-            error: `HTTP ${response.status}: ${response.statusText}`,
+            error: errorMessage,
+            queuedWriteId,
           };
         }
 
@@ -420,11 +427,14 @@ export class PeerExchangeService {
           `${peerResponse.newPeers.length} new to sender`
         );
 
+        const replaySummary = await this.replayPendingWritesForNode(node.id);
+
         const result: SyncResult = {
           nodeId: node.id,
           success: true,
           added: mergeResult.added.length,
           updated: mergeResult.updated.length,
+          replaySummary,
         };
 
         // Only include settings fields when settingsSyncEnabled is true
@@ -440,11 +450,86 @@ export class PeerExchangeService {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("abort")) {
-        return { nodeId: node.id, success: false, added: 0, updated: 0, error: "Timeout (10s)" };
-      }
-      return { nodeId: node.id, success: false, added: 0, updated: 0, error: message };
+      const normalizedMessage = message.includes("abort") ? "Timeout (10s)" : message;
+      const queuedWriteId = await this.enqueueRetryableSyncWrite(node, undefined, undefined, normalizedMessage);
+      return { nodeId: node.id, success: false, added: 0, updated: 0, error: normalizedMessage, queuedWriteId };
     }
+  }
+
+  async replayPendingWritesForNode(targetNodeId: string): Promise<MeshWriteReplaySummary> {
+    const node = await this.centralCore.getNode(targetNodeId);
+    if (!node?.url) {
+      return { replayed: 0, applied: 0, failed: 0, queuedWriteIds: [] };
+    }
+
+    const pending = await this.centralCore.listPendingMeshWrites({ targetNodeId, status: "pending" });
+    let applied = 0;
+    let failed = 0;
+
+    for (const entry of pending) {
+      await this.centralCore.markMeshWriteReplayStarted(entry.id);
+      try {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (node.apiKey) headers.Authorization = `Bearer ${node.apiKey}`;
+        const response = await fetch(`${node.url}/api/mesh/sync`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(entry.payload?.request ?? {}),
+        });
+        if (!response.ok) {
+          await this.centralCore.markMeshWriteFailed(entry.id, { lastError: `HTTP ${response.status}: ${response.statusText}` });
+          failed += 1;
+          continue;
+        }
+        await this.centralCore.markMeshWriteApplied(entry.id, {});
+        applied += 1;
+      } catch (error) {
+        await this.centralCore.markMeshWriteFailed(entry.id, {
+          lastError: error instanceof Error ? error.message : String(error),
+        });
+        failed += 1;
+      }
+    }
+
+    return {
+      replayed: pending.length,
+      applied,
+      failed,
+      queuedWriteIds: pending.map((entry) => entry.id),
+    };
+  }
+
+  private async enqueueRetryableSyncWrite(
+    node: NodeConfig,
+    request: PeerSyncRequest | undefined,
+    statusCode: number | undefined,
+    message: string,
+  ): Promise<string | undefined> {
+    if (!isRetryableMeshWriteFailure(statusCode, message)) {
+      return undefined;
+    }
+
+    const localNode = (await this.centralCore.listNodes()).find((n) => n.type === "local");
+    if (!localNode) {
+      return undefined;
+    }
+
+    const entry = await this.centralCore.enqueueMeshWrite({
+      originNodeId: localNode.id,
+      targetNodeId: node.id,
+      projectId: null,
+      scope: "mesh.sync",
+      entityType: "shared-state-sync",
+      entityId: node.id,
+      operation: "sync",
+      payload: {
+        request: request ?? {},
+        error: message,
+      },
+      intentVersion: "1.0",
+    });
+
+    return entry.id;
   }
 
   private async getSharedStateSettingsBundle(): Promise<SharedMeshStatePayload | undefined> {

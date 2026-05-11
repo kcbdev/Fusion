@@ -3,6 +3,7 @@ import { nodeHealthMonitorLog } from "./logger.js";
 
 export interface NodeHealthMonitorOptions {
   checkIntervalMs?: number;
+  onNodeRecovered?: (nodeId: string, previousStatus: NodeStatus) => Promise<void> | void;
 }
 
 export interface NodeHealthCheckSummary {
@@ -19,12 +20,14 @@ export class NodeHealthMonitor {
   private running = false;
   private lastKnownStatus = new Map<string, NodeStatus>();
   private activeCheck: Promise<NodeHealthCheckSummary> | null = null;
+  private readonly onNodeRecovered?: (nodeId: string, previousStatus: NodeStatus) => Promise<void> | void;
 
   constructor(
     private readonly centralCore: CentralCore,
     options: NodeHealthMonitorOptions = {}
   ) {
     this.checkIntervalMs = options.checkIntervalMs ?? 60_000;
+    this.onNodeRecovered = options.onNodeRecovered;
   }
 
   async start(): Promise<void> {
@@ -134,6 +137,9 @@ export class NodeHealthMonitor {
             nodeHealthMonitorLog.log(
               `Remote node ${node.name} (${node.id}) recovered: ${previousStatus} → online`
             );
+            if (this.onNodeRecovered) {
+              await this.onNodeRecovered(node.id, previousStatus);
+            }
           }
         }
       } catch (error) {

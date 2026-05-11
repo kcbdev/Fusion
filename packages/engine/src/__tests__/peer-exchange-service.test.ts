@@ -52,6 +52,12 @@ describe("PeerExchangeService", () => {
   let mockGetProjectSettingsSnapshot: ReturnType<typeof vi.fn>;
   let mockGetAuthMaterialSnapshot: ReturnType<typeof vi.fn>;
   let mockApplyProjectSettingsSnapshot: ReturnType<typeof vi.fn>;
+  let mockEnqueueMeshWrite: ReturnType<typeof vi.fn>;
+  let mockListPendingMeshWrites: ReturnType<typeof vi.fn>;
+  let mockMarkMeshWriteReplayStarted: ReturnType<typeof vi.fn>;
+  let mockMarkMeshWriteApplied: ReturnType<typeof vi.fn>;
+  let mockMarkMeshWriteFailed: ReturnType<typeof vi.fn>;
+  let mockGetNode: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -67,6 +73,12 @@ describe("PeerExchangeService", () => {
     mockGetProjectSettingsSnapshot = vi.fn();
     mockGetAuthMaterialSnapshot = vi.fn();
     mockApplyProjectSettingsSnapshot = vi.fn();
+    mockEnqueueMeshWrite = vi.fn();
+    mockListPendingMeshWrites = vi.fn();
+    mockMarkMeshWriteReplayStarted = vi.fn();
+    mockMarkMeshWriteApplied = vi.fn();
+    mockMarkMeshWriteFailed = vi.fn();
+    mockGetNode = vi.fn();
 
     mockCentralCore = {
       listNodes: mockListNodes,
@@ -78,10 +90,23 @@ describe("PeerExchangeService", () => {
       getProjectSettingsSnapshot: mockGetProjectSettingsSnapshot,
       getAuthMaterialSnapshot: mockGetAuthMaterialSnapshot,
       applyProjectSettingsSnapshot: mockApplyProjectSettingsSnapshot,
+      enqueueMeshWrite: mockEnqueueMeshWrite,
+      listPendingMeshWrites: mockListPendingMeshWrites,
+      markMeshWriteReplayStarted: mockMarkMeshWriteReplayStarted,
+      markMeshWriteApplied: mockMarkMeshWriteApplied,
+      markMeshWriteFailed: mockMarkMeshWriteFailed,
+      getNode: mockGetNode,
     } as unknown as CentralCore;
 
     mockFetch = vi.fn();
     globalThis.fetch = mockFetch;
+
+    mockListPendingMeshWrites.mockResolvedValue([]);
+    mockGetNode.mockResolvedValue(makeNode());
+    mockEnqueueMeshWrite.mockResolvedValue({ id: "mq-1" });
+    mockMarkMeshWriteReplayStarted.mockResolvedValue(undefined);
+    mockMarkMeshWriteApplied.mockResolvedValue(undefined);
+    mockMarkMeshWriteFailed.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -333,6 +358,53 @@ describe("PeerExchangeService", () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("HTTP 401");
+      expect(mockEnqueueMeshWrite).not.toHaveBeenCalled();
+    });
+
+    it("queues retryable failures and returns queued write id", async () => {
+      const node = makeNode();
+      mockListNodes.mockResolvedValue([makeNode({ id: "node_local", type: "local", status: "online" })]);
+      mockGetAllKnownPeerInfo.mockResolvedValue([]);
+      mockReportMeshState.mockResolvedValue({});
+      mockFetch.mockResolvedValue({ ok: false, status: 503, statusText: "Service Unavailable" });
+      mockEnqueueMeshWrite.mockResolvedValue({ id: "mq-queued-1" });
+
+      const service = new PeerExchangeService(mockCentralCore);
+      const result = await service.syncWithNode(node);
+
+      expect(result.success).toBe(false);
+      expect(result.queuedWriteId).toBe("mq-queued-1");
+      expect(mockEnqueueMeshWrite).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports replay summary after successful sync", async () => {
+      const node = makeNode();
+      setupSuccessfulSync(node);
+      mockListPendingMeshWrites.mockResolvedValue([
+        {
+          id: "mq-1",
+          originNodeId: "node_local",
+          targetNodeId: node.id,
+          projectId: null,
+          scope: "mesh.sync",
+          entityType: "shared-state-sync",
+          entityId: node.id,
+          operation: "sync",
+          payload: { request: { senderNodeId: "node_local", knownPeers: [], senderNodeUrl: "", timestamp: "2026-04-01T12:00:00.000Z" } },
+          intentVersion: "1.0",
+          status: "pending",
+          attemptCount: 0,
+          createdAt: "2026-04-01T12:00:00.000Z",
+          updatedAt: "2026-04-01T12:00:00.000Z",
+        },
+      ]);
+
+      const service = new PeerExchangeService(mockCentralCore);
+      const result = await service.syncWithNode(node);
+
+      expect(result.replaySummary).toEqual({ replayed: 1, applied: 1, failed: 0, queuedWriteIds: ["mq-1"] });
+      expect(mockMarkMeshWriteReplayStarted).toHaveBeenCalledWith("mq-1");
+      expect(mockMarkMeshWriteApplied).toHaveBeenCalledWith("mq-1", {});
     });
   });
 

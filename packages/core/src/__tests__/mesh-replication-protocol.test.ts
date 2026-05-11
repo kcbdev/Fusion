@@ -3,6 +3,7 @@ import {
   SHARED_MESH_PROTOCOL_ID,
   SHARED_MESH_PROTOCOL_VERSION,
   classifyReadStaleness,
+  compareMeshWriteReplayOrder,
   createFenceToken,
   getCoordinationModeForEntity,
   getDefaultWriteClassForEntity,
@@ -11,6 +12,7 @@ import {
   isMeshWriteClass,
   isProtocolRef,
   isQuorumSatisfied,
+  isRetryableMeshWriteFailure,
 } from "../mesh-replication-protocol.js";
 
 describe("mesh-replication-protocol", () => {
@@ -55,6 +57,23 @@ describe("mesh-replication-protocol", () => {
   it("validates protocol refs", () => {
     expect(isProtocolRef({ protocol: "fusion.shared-mesh", version: "1.0" })).toBe(true);
     expect(isProtocolRef({ protocol: "fusion.shared-mesh", version: "2.0" })).toBe(false);
+  });
+
+  it("orders replay rows by createdAt then id", () => {
+    const a = { createdAt: "2026-05-10T00:00:00.000Z", id: "b" };
+    const b = { createdAt: "2026-05-10T00:00:00.000Z", id: "a" };
+    const c = { createdAt: "2026-05-10T00:00:01.000Z", id: "a" };
+
+    expect(compareMeshWriteReplayOrder(a, b)).toBeGreaterThan(0);
+    expect(compareMeshWriteReplayOrder(b, a)).toBeLessThan(0);
+    expect(compareMeshWriteReplayOrder(a, c)).toBeLessThan(0);
+  });
+
+  it("classifies retryable mesh failures", () => {
+    expect(isRetryableMeshWriteFailure(503)).toBe(true);
+    expect(isRetryableMeshWriteFailure(409)).toBe(false);
+    expect(isRetryableMeshWriteFailure(undefined, "TypeError: fetch failed ECONNREFUSED")).toBe(true);
+    expect(isRetryableMeshWriteFailure(undefined, "validation error 422")).toBe(false);
   });
 
   it("classifies read staleness from queue depth and lag", () => {
