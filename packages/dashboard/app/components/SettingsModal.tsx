@@ -3560,19 +3560,38 @@ export function SettingsModal({
               </details>
             </div>
             <div className="form-group">
-              <label htmlFor="verificationFixRetries">Verification fix retries</label>
+              <label htmlFor="verificationFixRetries">Verification auto-fix retries</label>
               <input
                 id="verificationFixRetries"
+                className="input"
                 type="number"
                 min={0}
                 max={3}
-                value={form.verificationFixRetries ?? ""}
+                step={1}
+                value={form.verificationFixRetries ?? 3}
                 onChange={(e) => {
-                  const val = e.target.value;
-                  setForm((f) => ({ ...f, verificationFixRetries: val === "" ? undefined : Number(val) } as SettingsFormState));
+                  const rawValue = e.target.value;
+                  if (rawValue === "") {
+                    setForm((f) => ({ ...f, verificationFixRetries: undefined } as SettingsFormState));
+                    return;
+                  }
+
+                  const parsedValue = Number.parseInt(rawValue, 10);
+                  if (!Number.isFinite(parsedValue)) {
+                    setForm((f) => ({ ...f, verificationFixRetries: undefined } as SettingsFormState));
+                    return;
+                  }
+
+                  const clampedValue = Math.max(0, Math.min(3, parsedValue));
+                  setForm((f) => ({ ...f, verificationFixRetries: clampedValue } as SettingsFormState));
                 }}
               />
-              <small>Number of automatic fix attempts after failed merge verification (0–3)</small>
+              <details className="settings-option-details">
+                <summary>More details</summary>
+                <small>
+                  Controls in-merge fix attempts after deterministic test/build verification failures (0-3).
+                </small>
+              </details>
             </div>
             <div className="form-group">
               <label htmlFor="mergeStrategy">Auto-completion mode</label>

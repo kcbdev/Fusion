@@ -1896,23 +1896,65 @@ describe("SettingsModal", () => {
       expect(payload.pushRemote).toBe("upstream main");
     });
 
-    it("renders and saves verification fix retries", async () => {
-      renderModal({ initialSection: "merge" });
-      await waitForSettingsModalReady();
+    describe("verificationFixRetries", () => {
+      it("shows default value 3 when verificationFixRetries is not set", async () => {
+        mockFetchSettings.mockResolvedValueOnce({
+          ...defaultSettings,
+          verificationFixRetries: undefined,
+        });
 
-      const retriesInput = screen.getByLabelText("Verification fix retries") as HTMLInputElement;
-      expect(retriesInput.value).toBe("2");
+        renderModal({ initialSection: "merge" });
+        await waitForSettingsModalReady();
 
-      await userEvent.clear(retriesInput);
-      await userEvent.type(retriesInput, "1");
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
-
-      await waitFor(() => {
-        expect(mockUpdateSettings).toHaveBeenCalled();
+        const retriesInput = screen.getByLabelText("Verification auto-fix retries") as HTMLInputElement;
+        expect(retriesInput.value).toBe("3");
       });
 
-      const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
-      expect(payload.verificationFixRetries).toBe(1);
+      it.each([0, 1, 2, 3])("persists valid value %i", async (value) => {
+        renderModal({ initialSection: "merge" });
+        await waitForSettingsModalReady();
+
+        const retriesInput = screen.getByLabelText("Verification auto-fix retries") as HTMLInputElement;
+        fireEvent.change(retriesInput, { target: { value: String(value) } });
+        await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+        await waitFor(() => {
+          expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
+        });
+
+        const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
+        expect(payload.verificationFixRetries).toBe(value);
+      });
+
+      it("clamps out-of-range values", async () => {
+        renderModal({ initialSection: "merge" });
+        await waitForSettingsModalReady();
+
+        const retriesInput = screen.getByLabelText("Verification auto-fix retries") as HTMLInputElement;
+
+        fireEvent.change(retriesInput, { target: { value: "5" } });
+        expect(retriesInput.value).toBe("3");
+
+        fireEvent.change(retriesInput, { target: { value: "-1" } });
+        expect(retriesInput.value).toBe("0");
+      });
+
+      it("saving after clearing input persists undefined and falls back to visible default 3", async () => {
+        renderModal({ initialSection: "merge" });
+        await waitForSettingsModalReady();
+
+        const retriesInput = screen.getByLabelText("Verification auto-fix retries") as HTMLInputElement;
+        await userEvent.clear(retriesInput);
+        await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+        await waitFor(() => {
+          expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
+        });
+
+        const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
+        expect(payload.verificationFixRetries).toBeUndefined();
+        expect(retriesInput.value).toBe("3");
+      });
     });
 
     it("renders and saves github issue tracking controls", async () => {
