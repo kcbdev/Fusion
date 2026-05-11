@@ -145,6 +145,18 @@ Completion gating treats dependencies as resolved only when the dependency task 
 
 Auto-merge recovery follow-up creation is deduplicated: Fusion creates at most one active (`not done/archived`) recovery task per unresolved parent failure, and merge-conflict recovery also deduplicates by active branch ownership to prevent parallel duplicate follow-ups on the same conflict branch.
 
+### Landed-task state reconciliation (maintenance)
+
+If a task already shipped (`column: done`) but still carries transient failure metadata (`status: failed`, `error`, `worktree`, `blockedBy`, recovery retry fields), reconcile through supported TaskStore/API paths so SQLite and task JSON stay in sync.
+
+Recommended pattern:
+- Audit first (dry-run) for contradictory `done` + transient-failure state.
+- Apply reconciliation with TaskStore-backed mutations (for example `moveTask(id, "done")` for done-normalization cleanup).
+- Add one durable reconciliation log entry explaining why stale transient fields were cleared (avoid duplicating historical failure logs).
+- Re-audit after apply and resolve or explicitly disposition any related stale follow-up tasks.
+
+Do **not** patch `.fusion/fusion.db` directly without synchronizing `.fusion/tasks/*/task.json` through a supported store-backed path.
+
 ## Task Execution Modes
 
 Each task has an execution mode that controls how the executor agent approaches the task:
