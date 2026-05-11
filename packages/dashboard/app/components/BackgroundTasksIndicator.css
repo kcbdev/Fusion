@@ -26,12 +26,12 @@
 
 .background-tasks-indicator__pill--attention {
   background: var(--triage);
-  color: #fff;
+  color: var(--accent-text);
   border-color: var(--triage);
 }
 
 .background-tasks-indicator__pill--attention:hover {
-  background: color-mix(in srgb, var(--triage) 85%, #000);
+  background: color-mix(in srgb, var(--triage) 85%, var(--text));
 }
 
 .background-tasks-indicator__popover {
