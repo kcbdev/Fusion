@@ -2,6 +2,15 @@
 
 Generates HTML system activity reports with multi-agent review.
 
+## Scaffold seams (interim)
+
+The plugin currently exports four interim scaffold seams to unblock downstream implementation work:
+
+- `resolveEnabledCadences` / `ReportsCadence` (`src/cadence.ts`) — interim cadence-resolution seam; scheduled cadence registry + cron/sentinel wiring lands in FN-3779.
+- `aggregateReportData` + aggregation types (`src/aggregation.ts`) — interim aggregation seam; real aggregation orchestration lands in FN-3780.
+- `startReportsPipeline` + pipeline dependency interfaces (`src/pipeline.ts`) — interim orchestrator seam to keep call sites stable while FN-3779/FN-3780 wire real runtime components.
+- `createInMemoryReportsRunsStore` + run record/store types (`src/runs-store.ts`) — interim in-memory run state store; persistent store replacement lands in FN-3784.
+
 ## Review Panel
 
 The plugin exposes `runReviewPanel()` / `runGeneratedReportReview()` to fan out a generated report draft to multiple reviewer agents in parallel.

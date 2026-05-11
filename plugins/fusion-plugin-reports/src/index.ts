@@ -121,6 +121,10 @@ export async function runGeneratedReportReview(input: RunGeneratedReportReviewIn
 export default plugin;
 
 export * from "./settings.js";
+export * from "./cadence.js";
+export * from "./aggregation.js";
+export * from "./pipeline.js";
+export * from "./runs-store.js";
 export * from "./review-types.js";
 export * from "./review-panel.js";
 export { ensureReportSchema } from "./report-schema.js";
