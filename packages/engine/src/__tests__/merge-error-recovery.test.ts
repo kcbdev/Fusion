@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
-import type { Settings } from "@fusion/core";
+import type { Settings, Task } from "@fusion/core";
 
 const testState = vi.hoisted(() => {
   class MockVerificationError extends Error {
@@ -49,6 +49,7 @@ type MockTask = {
   mergeRetries: number;
   status: string | null;
   error: string | null;
+  steps?: Array<{ status: string }>;
   mergeDetails?: { mergeConfirmed?: boolean } | null;
   verificationFailureCount?: number;
   mergeConflictBounceCount?: number;
@@ -137,6 +138,7 @@ function createEngine(
   options: {
     getMergeStrategy?: (settings: Settings) => "direct" | "pull-request";
     processPullRequestMerge?: (...args: unknown[]) => Promise<"merged" | "waiting" | "skipped">;
+    getTaskMergeBlocker?: (task: Task) => string | null | undefined;
   } = {},
 ): ProjectEngine {
   testState.currentStore = store;
@@ -598,6 +600,35 @@ describe("ProjectEngine merge error recovery", () => {
     expect(hasErrorLog(errorSpy, "after non-conflict error")).toBe(false);
   });
 
+  it("parks merge-confirmed tasks in stable failed state when finalization is blocked by incomplete steps", async () => {
+    const store = makeStore({
+      tasks: [
+        makeTask({
+          mergeDetails: { mergeConfirmed: true },
+          steps: [{ status: "in-progress" }],
+        }),
+      ],
+    });
+
+    const engine = createEngine(store, {
+      getTaskMergeBlocker: (task) =>
+        task.steps?.some((step) => step.status === "in-progress")
+          ? "task has incomplete steps"
+          : undefined,
+    });
+    await runMergeCycle(engine);
+
+    expect(store.moveTask).not.toHaveBeenCalledWith(TASK_ID, "done");
+    expect(store.updateTask).toHaveBeenCalledWith(TASK_ID, {
+      status: "failed",
+      error: "Merge confirmed but finalization blocked: task has incomplete steps",
+    });
+    expect(store.logEntry).toHaveBeenCalledWith(
+      TASK_ID,
+      expect.stringContaining("finalization blocked"),
+    );
+  });
+
   it("does not park merge-confirmed tasks as failed when finalize loses in-review ownership", async () => {
     const store = makeStore({
       tasks: [
@@ -615,7 +646,7 @@ describe("ProjectEngine merge error recovery", () => {
     await runMergeCycle(engine);
 
     expect(store.moveTask).toHaveBeenCalledWith(TASK_ID, "done");
-    expect(store.updateTask).toHaveBeenCalledWith(TASK_ID, { status: null });
+    expect(store.updateTask).toHaveBeenCalledWith(TASK_ID, { status: null, error: null });
     expect(store.updateTask).not.toHaveBeenCalledWith(TASK_ID, {
       status: "failed",
       mergeRetries: 3,

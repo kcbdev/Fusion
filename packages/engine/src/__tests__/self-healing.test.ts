@@ -3039,6 +3039,43 @@ describe("SelfHealingManager", () => {
 
       managerWithRecovery.stop();
     });
+
+    it("parks merge-confirmed tasks when finalization is blocked by incomplete steps", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+      });
+
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-353",
+          column: "in-review",
+          paused: false,
+          status: null,
+          error: null,
+          mergeDetails: {
+            mergeConfirmed: true,
+            mergedAt: "2026-01-01T00:00:00.000Z",
+          },
+          steps: [{ status: "in-progress" }],
+          log: [],
+        },
+      ]);
+
+      const result = await managerWithRecovery.recoverMergedReviewTasks();
+
+      expect(result).toBe(0);
+      expect(store.moveTask).not.toHaveBeenCalledWith("FN-353", "done");
+      expect(store.updateTask).toHaveBeenCalledWith("FN-353", {
+        status: "failed",
+        error: "Merge confirmed but finalization blocked: task has incomplete steps",
+      });
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-353",
+        expect.stringContaining("finalization blocked"),
+      );
+
+      managerWithRecovery.stop();
+    });
   });
 
   describe("recoverStuckMergeDeadlocks", () => {
@@ -3337,6 +3374,47 @@ describe("SelfHealingManager", () => {
 
       expect(first).toBe(1);
       expect(second).toBe(0);
+
+      managerWithRecovery.stop();
+    });
+
+    it("keeps already-landed tasks in-review when merge blocker still reports incomplete steps", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ globalPause: false, enginePaused: false });
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-incomplete",
+          column: "in-review",
+          paused: false,
+          status: "failed",
+          mergeRetries: 3,
+          mergeDetails: undefined,
+          baseBranch: "main",
+          branch: "fusion/fn-incomplete",
+          steps: [{ status: "in-progress" }],
+          log: [],
+        },
+      ]);
+      mockedExecSync.mockImplementation((command: string | Buffer) => {
+        if (String(command).includes("Fusion-Task-Id: FN-incomplete")) return "abc123\n" as any;
+        return "tip\n" as any;
+      });
+
+      const result = await managerWithRecovery.recoverAlreadyMergedReviewTasks();
+
+      expect(result).toBe(0);
+      expect(store.moveTask).not.toHaveBeenCalledWith("FN-incomplete", "done");
+      expect(store.updateTask).toHaveBeenCalledWith(
+        "FN-incomplete",
+        expect.objectContaining({
+          status: "failed",
+          error: "Merge confirmed but finalization blocked: task has incomplete steps",
+        }),
+      );
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-incomplete",
+        expect.stringContaining("finalization blocked"),
+      );
 
       managerWithRecovery.stop();
     });

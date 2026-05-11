@@ -1073,8 +1073,12 @@ export class ProjectEngine {
     updatedAt?: string | null;
     mergeDetails?: { mergeConfirmed?: boolean } | null;
   }): boolean {
-    // Already-confirmed merges always eligible — just need to move to done
-    if (task.mergeDetails?.mergeConfirmed) return true;
+    // Merge-confirmed tasks use the fast-path finalizer, which applies blocker
+    // checks after clearing transient status/error state. Once that path parks
+    // a blocked task as failed, skip future auto-merge retries.
+    if (task.mergeDetails?.mergeConfirmed) {
+      return task.status !== "failed";
+    }
     if (this.options.getTaskMergeBlocker?.(task as Task)) return false;
     // Terminal failure: don't let the cooldown sweep re-attempt a merge that
     // already gave up (verification cap, conflict-bounce cap, or non-conflict
@@ -1262,6 +1266,26 @@ export class ProjectEngine {
             // in-review by auto-recovery after a successful merge) — just
             // complete the task without re-running the merge process.
             if (task.mergeDetails?.mergeConfirmed) {
+              const blockerReason = this.options.getTaskMergeBlocker?.({
+                ...(task as Task),
+                status: undefined,
+                error: undefined,
+              });
+              if (blockerReason) {
+                await store.updateTask(taskId, {
+                  status: "failed",
+                  error: `Merge confirmed but finalization blocked: ${blockerReason}`,
+                });
+                await store.logEntry(
+                  taskId,
+                  `Merge confirmed finalization blocked — ${blockerReason}. Task parked in in-review for manual completion.`,
+                );
+                runtimeLog.warn(
+                  `Auto-merge: ${taskId} merge-confirmed finalize blocked — ${blockerReason}`,
+                );
+                continue;
+              }
+
               runtimeLog.log(
                 `Auto-merge: ${taskId} already has mergeConfirmed — moving to done`,
               );
@@ -1269,7 +1293,7 @@ export class ProjectEngine {
                 taskId,
                 "Merge already confirmed; completing task (recovered from post-merge state inconsistency)",
               );
-              await store.updateTask(taskId, { status: null });
+              await store.updateTask(taskId, { status: null, error: null });
               try {
                 await store.moveTask(taskId, "done");
               } catch (error) {

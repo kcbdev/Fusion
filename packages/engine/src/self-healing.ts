@@ -1875,6 +1875,25 @@ export class SelfHealingManager {
       let recovered = 0;
       for (const task of mergedButNotDone) {
         try {
+          const blocker = getTaskMergeBlocker({
+            ...task,
+            status: undefined,
+            error: undefined,
+            steps: task.steps ?? [],
+            workflowStepResults: task.workflowStepResults,
+          });
+          if (blocker) {
+            await this.store.updateTask(task.id, {
+              status: "failed",
+              error: `Merge confirmed but finalization blocked: ${blocker}`,
+            });
+            await this.store.logEntry(
+              task.id,
+              `Auto-recovery skipped: merge confirmed but finalization blocked — ${blocker}`,
+            );
+            continue;
+          }
+
           await this.store.updateTask(task.id, {
             status: null,
             error: null,
@@ -2069,6 +2088,26 @@ export class SelfHealingManager {
             mergeConfirmed: true,
             prNumber: task.prInfo?.number,
           };
+
+          const blocker = getTaskMergeBlocker({
+            ...task,
+            status: undefined,
+            error: undefined,
+            steps: task.steps ?? [],
+            workflowStepResults: task.workflowStepResults,
+          });
+          if (blocker) {
+            await this.store.updateTask(task.id, {
+              status: "failed",
+              error: `Merge confirmed but finalization blocked: ${blocker}`,
+              mergeDetails,
+            });
+            await this.store.logEntry(
+              task.id,
+              `Auto-recovery parked task in in-review: merged content found on ${baseBranch} (${landed.sha.slice(0, 8)}) but finalization blocked — ${blocker}`,
+            );
+            continue;
+          }
 
           await this.store.updateTask(task.id, {
             status: null,
