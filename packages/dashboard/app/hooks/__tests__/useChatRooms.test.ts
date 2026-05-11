@@ -182,7 +182,7 @@ describe("useChatRooms", () => {
     expect(result.current.activeRoom).toBeNull();
   });
 
-  it("sendRoomMessage posts without optimistic insert", async () => {
+  it("sendRoomMessage resyncs room messages from server after post", async () => {
     const active = room("room-1", "one", "2026-05-09T01:00:00.000Z");
     mockFetchChatRooms.mockResolvedValueOnce({ rooms: [active] });
     const { result } = renderHook(() => useChatRooms("proj-1"));
@@ -193,17 +193,20 @@ describe("useChatRooms", () => {
     act(() => result.current.selectRoom("room-1"));
     await waitFor(() => expect(result.current.activeRoom?.id).toBe("room-1"));
 
+    mockFetchChatRoomMessages.mockResolvedValueOnce({
+      messages: [
+        roomMessage("msg-user", "room-1", "hello"),
+        { ...roomMessage("msg-assistant", "room-1", "Room reply"), role: "assistant", senderAgentId: "agent-1" },
+      ],
+    });
+
     await act(async () => {
       await result.current.sendRoomMessage("hello");
     });
 
     expect(mockPostChatRoomMessage).toHaveBeenCalledWith("room-1", { content: "hello" }, "proj-1");
-    expect(result.current.messages).toHaveLength(0);
-
-    act(() => {
-      capturedEvents["chat:room:message:added"]?.({ data: JSON.stringify(roomMessage("msg-1", "room-1", "hello")) } as MessageEvent);
-    });
-    expect(result.current.messages).toHaveLength(1);
+    expect(mockFetchChatRoomMessages).toHaveBeenLastCalledWith("room-1", { limit: 100 }, "proj-1");
+    expect(result.current.messages.map((message) => message.id)).toEqual(["msg-user", "msg-assistant"]);
   });
 
   it("tears down sse subscription on unmount", async () => {

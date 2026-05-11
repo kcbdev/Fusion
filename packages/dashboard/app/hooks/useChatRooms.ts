@@ -168,15 +168,26 @@ export function useChatRooms(
   }, [projectId]);
 
   const sendRoomMessage = useCallback(async (content: string, opts?: { attachments?: ChatAttachment[] }) => {
-    const roomId = activeRoomRef.current?.id;
+    const activeRoomSnapshot = activeRoomRef.current;
+    const roomId = activeRoomSnapshot?.id;
     if (!roomId) {
       throw new Error("Select a room before sending a message");
     }
 
-    await postChatRoomMessage(roomId, {
+    const postResult = await postChatRoomMessage(roomId, {
       content,
       ...(opts?.attachments ? { attachments: opts.attachments } : {}),
     }, projectId);
+
+    if (postResult.message?.createdAt && activeRoomSnapshot) {
+      setRooms((previous) => upsertRoom(previous, { ...activeRoomSnapshot, updatedAt: postResult.message.createdAt }));
+    }
+
+    const latestMessages = await fetchChatRoomMessages(roomId, { limit: 100 }, projectId);
+    if (activeRoomRef.current?.id !== roomId) {
+      return;
+    }
+    setMessages(latestMessages.messages);
   }, [projectId]);
 
   useEffect(() => {

@@ -282,7 +282,7 @@ Intentional exclusions from shared snapshots:
 - The hook subscribes to `/api/events` and consumes `chat:room:created`, `chat:room:updated`, `chat:room:deleted`, `chat:room:member:added`, `chat:room:member:removed`, `chat:room:message:added`, `chat:room:message:updated`, and `chat:room:message:deleted` to keep UI state in sync.
 - Room messages persist through `POST /api/chat/rooms/:id/messages`; the route persists the user message first, then calls `ChatManager.sendRoomMessage(...)` to orchestrate room-member responders and persist assistant room replies with `chatStore.addRoomMessage(...)`.
 - `sendRoomMessage(...)` uses existing room-member + mention resolution rules: mentioned members are direct responders, non-mentioned members are ambient responders (capped by `ROOM_AMBIENT_MAX_RESPONDERS`), and non-member mentions are handled explicitly by the manager instead of silently disappearing.
-- UI does not optimistically insert room messages; it renders persisted user + assistant room messages from `chat:room:message:*` SSE events.
+- UI does not optimistically insert room messages; `useChatRooms.sendRoomMessage()` re-fetches authoritative room messages immediately after `POST /api/chat/rooms/:id/messages` so persisted assistant replies remain visible across SSE timing gaps, then continues applying `chat:room:message:*` events for live updates.
 - Mention UI in rooms keeps direct-chat behavior unchanged while adding room affordances:
   - `AgentMentionPopup` receives room membership context and shows members first with a `status-dot` member indicator (`aria-label="Room member"`).
   - With an empty mention filter in room mode, only room members are listed; a hint row prompts the user to type to search non-members.
