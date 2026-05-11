@@ -33,6 +33,11 @@ export const DEFAULT_TASK_PRIORITY: TaskPriority = "normal";
 export const HIGH_FANOUT_BLOCKER_TODO_THRESHOLD = 5;
 
 /**
+ * Default age gate (ms) before a high fan-out blocker is escalated in dashboards.
+ */
+export const STALE_HIGH_FANOUT_BLOCKER_AGE_THRESHOLD_MS = 2 * 60 * 60 * 1000;
+
+/**
  * Execution mode for task implementation.
  * Controls how the executor agent approaches the task:
  * - "standard": Full execution with complete review workflow (default)
@@ -2195,6 +2200,10 @@ export interface ProjectSettings {
    *  than this duration, the task is considered stuck and will be terminated and retried.
    *  Default: 600000 (10 minutes). Set to 0 to disable. */
   taskStuckTimeoutMs?: number;
+  /** Age threshold in milliseconds before a blocker with high todo fan-out is escalated.
+   *  Blocker age is measured from columnMovedAt when available, otherwise updatedAt.
+   *  Only blockers currently in in-progress or in-review are eligible. */
+  staleHighFanoutBlockerAgeThresholdMs?: number;
   /** TTL in milliseconds for persisted AI planning/subtask/mission interview sessions.
    *  Sessions older than this cutoff are expired by the dashboard session cleanup loop.
    *  Valid range: 600000 (10 minutes) to 2592000000 (30 days).

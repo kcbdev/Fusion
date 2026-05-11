@@ -28,6 +28,7 @@ describe("useAppSettings", () => {
       enginePaused: false,
       prAuthAvailable: true,
       taskStuckTimeoutMs: 600000,
+      staleHighFanoutBlockerAgeThresholdMs: 7200000,
       showQuickChatFAB: false,
     } as never);
 
@@ -46,6 +47,7 @@ describe("useAppSettings", () => {
       expect(result.current.prAuthAvailable).toBe(true);
       expect(result.current.settingsLoaded).toBe(true);
       expect(result.current.taskStuckTimeoutMs).toBe(600000);
+      expect(result.current.staleHighFanoutBlockerAgeThresholdMs).toBe(7200000);
       expect(result.current.showQuickChatFAB).toBe(false);
     });
 

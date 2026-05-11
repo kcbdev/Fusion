@@ -264,7 +264,7 @@ A persistent footer status bar at the bottom of the dashboard displays real-time
 - **Stuck**: Count of tasks in "in-progress" with no activity for longer than the project's `taskStuckTimeoutMs` setting (shown only when > 0 and the setting is enabled). Uses the same `isTaskStuck()` predicate as task cards and list rows, so the footer count always matches the visible stuck indicators on the board
 - **Queued**: Count of tasks in "todo" column
 - **In Review**: Count of tasks in "in-review" column
-- **High Fan-out**: Shows the worst current blocker in `in-progress`/`in-review` once it reaches **5 todo dependents**; rank order is highest todo count, then highest active total, then stable task ID.
+- **Escalated blocker summary**: FN-3942 surfaces immediate high fan-out blockers (`activeTodoCount >= 5`); FN-3954 upgrades long-lived high fan-out blockers to an explicit **Escalated** summary in the footer, ranked by todo fan-out, active total, age, then task ID.
 - **Executor State**: Current state badge (Idle/Running/Paused)
 - **Last Activity**: Relative timestamp of most recent task event
 
@@ -275,7 +275,7 @@ A persistent footer status bar at the bottom of the dashboard displays real-time
 
 **Features**:
 - **Shared task list**: Task counts are derived from the same task list used by the board and list views, so the footer always matches the board state exactly. Stuck task detection uses a shared `isTaskStuck()` utility (see `utils/taskStuck.ts`) so the footer count and individual card/row indicators are always consistent.
-- **Thresholded blocker escalation**: Task cards keep ordinary `Blocks N` visibility for non-critical chains while escalating only blockers with `activeTodoCount >= 5` to a distinct `High fan-out` signal. Done/archived downstream tasks never contribute to the threshold.
+- **Age-based escalation**: Task cards keep ordinary `Blocks N` visibility for non-critical chains, show immediate **High fan-out** at `activeTodoCount >= 5`, and only switch to **Escalated** when that high fan-out blocker remains in blocking columns longer than `staleHighFanoutBlockerAgeThresholdMs` (`columnMovedAt ?? updatedAt`). Done/archived downstream tasks never contribute to the threshold.
 - **Footer-safe layout**: Project-view content (board, list view, agents view) automatically reserves space for the fixed footer using a CSS custom property (`--executor-footer-height`). The `project-content--with-footer` wrapper class sets this token to 36px on desktop and 32px on mobile, ensuring all content remains fully visible and scrollable above the status bar
 - Real-time updates via 5-second polling for executor state (globalPause, enginePaused, maxConcurrent)
 - Responsive design: collapses labels on mobile screens (<768px); footer height reduces from 36px to 32px

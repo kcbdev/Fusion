@@ -444,6 +444,11 @@
   color: var(--text);
 }
 
+.card-fanout-badge--escalated {
+  color: var(--color-error);
+  background: color-mix(in srgb, var(--color-error) 16%, transparent);
+}
+
 .card-scope-badge[data-tooltip]:hover::after,
 .card-fanout-badge[data-tooltip]:hover::after {
   content: attr(data-tooltip);

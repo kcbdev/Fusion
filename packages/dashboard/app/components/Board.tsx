@@ -51,6 +51,8 @@ interface BoardProps {
   taskStuckTimeoutMs?: number;
   /** Called when user clicks a mission badge on a task card */
   onOpenMission?: (missionId: string) => void;
+  /** Age threshold in milliseconds before high fan-out blockers escalate in dashboard surfaces. */
+  staleHighFanoutBlockerAgeThresholdMs?: number;
   /** Timestamp (ms) when task data was last confirmed fresh from the server. Used for freshness-aware stuck detection. */
   lastFetchTimeMs?: number;
 }
@@ -71,13 +73,15 @@ function areWorkflowNameLookupsEqual(previous: ReadonlyMap<string, string>, next
   return true;
 }
 
-export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask, onOpenDetail, addToast, onQuickCreate, onNewTask, autoMerge, onToggleAutoMerge, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, onLoadArchivedTasks, searchQuery = "", availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, taskStuckTimeoutMs, onOpenMission, lastFetchTimeMs }: BoardProps) {
+export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask, onOpenDetail, addToast, onQuickCreate, onNewTask, autoMerge, onToggleAutoMerge, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, onLoadArchivedTasks, searchQuery = "", availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, taskStuckTimeoutMs, onOpenMission, staleHighFanoutBlockerAgeThresholdMs, lastFetchTimeMs }: BoardProps) {
   const [archivedCollapsed, setArchivedCollapsed] = useState(true);
   const archivedLoadedRef = useRef(false);
   const { fetchBatch } = useBatchBadgeFetch(projectId);
   const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [workflowStepNameLookup, setWorkflowStepNameLookup] = useState<ReadonlyMap<string, string>>(EMPTY_WORKFLOW_STEP_NAME_LOOKUP);
-  const blockerFanoutMap = useBlockerFanout(tasks);
+  const blockerFanoutMap = useBlockerFanout(tasks, {
+    staleHighFanoutAgeThresholdMs: staleHighFanoutBlockerAgeThresholdMs,
+  });
   // Normalized search-active signal: trimmed and non-empty
   const isSearchActive = searchQuery.trim() !== "";
   const tasksByColumnCacheRef = useRef<Record<ColumnType, Task[]>>({

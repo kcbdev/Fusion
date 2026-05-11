@@ -1,6 +1,10 @@
 import "./ExecutorStatusBar.css";
 import { useMemo, useState } from "react";
-import { HIGH_FANOUT_BLOCKER_TODO_THRESHOLD, type Task } from "@fusion/core";
+import {
+  HIGH_FANOUT_BLOCKER_TODO_THRESHOLD,
+  STALE_HIGH_FANOUT_BLOCKER_AGE_THRESHOLD_MS,
+  type Task,
+} from "@fusion/core";
 import { AlertTriangle, Clock, Folder, Pause, Play, Zap } from "lucide-react";
 import { computeBlockerFanoutMap } from "../hooks/useBlockerFanout";
 import { useExecutorStats } from "../hooks/useExecutorStats";
@@ -14,6 +18,8 @@ interface ExecutorStatusBarProps {
   projectId?: string;
   /** Project-level stuck task timeout in milliseconds (undefined = disabled) */
   taskStuckTimeoutMs?: number;
+  /** Age threshold in milliseconds before high fan-out blockers escalate in dashboard surfaces. */
+  staleHighFanoutBlockerAgeThresholdMs?: number;
   /** Background AI sessions */
   backgroundSessions?: AiSessionSummary[];
   backgroundGenerating?: number;
@@ -79,7 +85,7 @@ function getStateDisplay(state: ExecutorState): { label: string; color: string; 
  * - Executor state badge (idle/running/paused)
  * - Last activity timestamp
  */
-export function ExecutorStatusBar({ tasks, projectId, taskStuckTimeoutMs, backgroundSessions, backgroundGenerating, backgroundNeedsInput, onOpenBackgroundSession, onDismissBackgroundSession, lastFetchTimeMs, currentProjectPath, onOpenProjectDirectory, keyboardOpen }: ExecutorStatusBarProps) {
+export function ExecutorStatusBar({ tasks, projectId, taskStuckTimeoutMs, staleHighFanoutBlockerAgeThresholdMs, backgroundSessions, backgroundGenerating, backgroundNeedsInput, onOpenBackgroundSession, onDismissBackgroundSession, lastFetchTimeMs, currentProjectPath, onOpenProjectDirectory, keyboardOpen }: ExecutorStatusBarProps) {
   if (keyboardOpen) return null;
   const { stats, loading, error } = useExecutorStats(tasks, projectId, taskStuckTimeoutMs, lastFetchTimeMs);
   const [isProjectPathVisible, setIsProjectPathVisible] = useState(false);
@@ -88,29 +94,23 @@ export function ExecutorStatusBar({ tasks, projectId, taskStuckTimeoutMs, backgr
 
   const relativeTime = useMemo(() => formatRelativeTime(stats.lastActivityAt), [stats.lastActivityAt]);
 
-  const highestFanoutBlocker = useMemo(() => {
-    const fanoutMap = computeBlockerFanoutMap(tasks);
-    const candidates = tasks
-      .filter((task) => task.column === "in-progress" || task.column === "in-review")
-      .map((task) => {
-        const fanout = fanoutMap.get(task.id);
-        if (!fanout || !fanout.isHighFanout) return null;
-        return {
-          id: task.id,
-          activeTodoCount: fanout.activeTodoCount,
-          totalCount: fanout.totalCount,
-          staleCount: fanout.staleBlockedByDependentIds.length,
-        };
-      })
-      .filter((entry): entry is { id: string; activeTodoCount: number; totalCount: number; staleCount: number } => Boolean(entry))
+  const highestEscalatedBlocker = useMemo(() => {
+    const fanoutMap = computeBlockerFanoutMap(tasks, {
+      staleHighFanoutAgeThresholdMs:
+        staleHighFanoutBlockerAgeThresholdMs ?? STALE_HIGH_FANOUT_BLOCKER_AGE_THRESHOLD_MS,
+    });
+    const candidates = Array.from(fanoutMap.values())
+      .map((entry) => entry.escalation)
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
       .sort((a, b) => {
         if (b.activeTodoCount !== a.activeTodoCount) return b.activeTodoCount - a.activeTodoCount;
-        if (b.totalCount !== a.totalCount) return b.totalCount - a.totalCount;
-        return a.id.localeCompare(b.id, "en", { numeric: true, sensitivity: "base" });
+        if (b.totalActiveCount !== a.totalActiveCount) return b.totalActiveCount - a.totalActiveCount;
+        if (b.blockingAgeMs !== a.blockingAgeMs) return b.blockingAgeMs - a.blockingAgeMs;
+        return a.blockerId.localeCompare(b.blockerId, "en", { numeric: true, sensitivity: "base" });
       });
 
     return candidates[0] ?? null;
-  }, [tasks]);
+  }, [tasks, staleHighFanoutBlockerAgeThresholdMs]);
 
   const StateIcon = stateDisplay.icon;
 
@@ -212,18 +212,17 @@ export function ExecutorStatusBar({ tasks, projectId, taskStuckTimeoutMs, backgr
         <span className="executor-status-bar__count">{stats.inReviewCount}</span>
       </div>
 
-      {highestFanoutBlocker && (
+      {highestEscalatedBlocker && (
         <>
           <span className="executor-status-bar__divider" aria-hidden="true" />
           <div className="executor-status-bar__segment executor-status-bar__segment--fanout">
             <span className="executor-status-bar__indicator executor-status-bar__indicator--fanout executor-status-bar__indicator--active" aria-hidden="true" />
-            <span className="executor-status-bar__label">High Fan-out</span>
+            <span className="executor-status-bar__label">Escalated</span>
             <span
               className="executor-status-bar__fanout-summary"
-              title={`Top blocker ${highestFanoutBlocker.id}: ${highestFanoutBlocker.activeTodoCount} todo waiting (threshold ${HIGH_FANOUT_BLOCKER_TODO_THRESHOLD}), ${highestFanoutBlocker.totalCount} active total`}
+              title={`Escalated blocker ${highestEscalatedBlocker.blockerId}: ${highestEscalatedBlocker.activeTodoCount} todo waiting (threshold ${HIGH_FANOUT_BLOCKER_TODO_THRESHOLD}), ${highestEscalatedBlocker.totalActiveCount} active total`}
             >
-              {highestFanoutBlocker.id} · {highestFanoutBlocker.activeTodoCount} todo
-              {highestFanoutBlocker.staleCount > 0 ? ` · ${highestFanoutBlocker.staleCount} stale` : ""}
+              {highestEscalatedBlocker.blockerId} · {highestEscalatedBlocker.activeTodoCount} todo
             </span>
           </div>
         </>

@@ -1416,6 +1416,19 @@ describe("SettingsModal", () => {
       expect(input.value).toBe("");
     });
 
+    it("allows configuring stale high fan-out escalation threshold in hours", async () => {
+      renderModal();
+      await waitFor(() => expect(mockFetchSettings).toHaveBeenCalled());
+
+      fireEvent.click(screen.getByText("Scheduling"));
+
+      const input = screen.getByLabelText("Stale High Fan-out Escalation (hours)") as HTMLInputElement;
+      expect(input).toBeDefined();
+      await userEvent.clear(input);
+      await userEvent.type(input, "3");
+      expect(input.value).toBe("3");
+    });
+
     it("allows clearing maxWorktrees without leaving a stuck zero", async () => {
       renderModal();
       await waitFor(() => expect(mockFetchSettings).toHaveBeenCalled());

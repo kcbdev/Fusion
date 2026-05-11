@@ -42,6 +42,7 @@ describe("computeBlockerFanoutMap", () => {
       dependentIds: ["FN-2"],
       staleBlockedByDependentIds: [],
       isHighFanout: false,
+      escalation: undefined,
     });
   });
 
@@ -58,6 +59,7 @@ describe("computeBlockerFanoutMap", () => {
       dependentIds: ["FN-2", "FN-3"],
       staleBlockedByDependentIds: [],
       isHighFanout: false,
+      escalation: undefined,
     });
   });
 
@@ -75,6 +77,7 @@ describe("computeBlockerFanoutMap", () => {
       dependentIds: ["FN-2", "FN-3", "FN-4"],
       staleBlockedByDependentIds: [],
       isHighFanout: false,
+      escalation: undefined,
     });
   });
 
@@ -90,6 +93,7 @@ describe("computeBlockerFanoutMap", () => {
       dependentIds: ["FN-2", "FN-3"],
       staleBlockedByDependentIds: ["FN-3"],
       isHighFanout: false,
+      escalation: undefined,
     });
   });
 
@@ -131,6 +135,7 @@ describe("computeBlockerFanoutMap", () => {
       dependentIds: ["D1", "D2", "D3", "D4"],
       staleBlockedByDependentIds: [],
       isHighFanout: false,
+      escalation: undefined,
     });
   });
 
@@ -151,6 +156,7 @@ describe("computeBlockerFanoutMap", () => {
       dependentIds: ["D1", "D2", "D3", "D4", "D5", "DONE"],
       staleBlockedByDependentIds: [],
       isHighFanout: true,
+      escalation: undefined,
     });
   });
 
@@ -170,7 +176,46 @@ describe("computeBlockerFanoutMap", () => {
       dependentIds: ["D1", "D2", "D3", "D4", "ARCH"],
       staleBlockedByDependentIds: [],
       isHighFanout: false,
+      escalation: undefined,
     });
+  });
+
+  it("escalates aged high fan-out blockers only when old enough", () => {
+    const tasks = [
+      createTask("B", "in-progress", { columnMovedAt: "2026-01-01T00:00:00.000Z" }),
+      createTask("D1", "todo", { dependencies: ["B"] }),
+      createTask("D2", "todo", { dependencies: ["B"] }),
+      createTask("D3", "todo", { dependencies: ["B"] }),
+      createTask("D4", "todo", { dependencies: ["B"] }),
+      createTask("D5", "todo", { dependencies: ["B"] }),
+    ];
+
+    const entry = computeBlockerFanoutMap(tasks, {
+      staleHighFanoutAgeThresholdMs: 60 * 60 * 1000,
+    }).get("B");
+
+    expect(entry?.isHighFanout).toBe(true);
+    expect(entry?.escalation?.blockerId).toBe("B");
+    expect(entry?.escalation?.activeTodoCount).toBe(5);
+    expect((entry?.escalation?.blockingAgeMs ?? 0) / (60 * 60 * 1000)).toBeGreaterThanOrEqual(1);
+  });
+
+  it("keeps short-lived high fan-out blockers quiet", () => {
+    const tasks = [
+      createTask("B", "in-progress", { columnMovedAt: new Date().toISOString() }),
+      createTask("D1", "todo", { dependencies: ["B"] }),
+      createTask("D2", "todo", { dependencies: ["B"] }),
+      createTask("D3", "todo", { dependencies: ["B"] }),
+      createTask("D4", "todo", { dependencies: ["B"] }),
+      createTask("D5", "todo", { dependencies: ["B"] }),
+    ];
+
+    const entry = computeBlockerFanoutMap(tasks, {
+      staleHighFanoutAgeThresholdMs: 60 * 60 * 1000,
+    }).get("B");
+
+    expect(entry?.isHighFanout).toBe(true);
+    expect(entry?.escalation).toBeUndefined();
   });
 
   it("keeps MAX_AUTO_MERGE_RETRIES aligned with engine self-healing source", () => {

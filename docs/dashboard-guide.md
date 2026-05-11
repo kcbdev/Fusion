@@ -413,14 +413,16 @@ Inspect task definition, logs, review feedback, comments, documents, workflow ou
 Use blocker fan-out signals on task cards and in the footer status bar to spot blockers with high downstream impact:
 
 - `Blocks N` counts active downstream dependents in `triage`, `todo`, `in-progress`, or `in-review`.
-- A card is escalated to **High fan-out** when it has at least **5 active `todo` dependents** (`activeTodoCount >= 5`).
-- Done and archived downstream tasks remain visible for debugging context but do **not** count toward the 5-todo alert threshold.
-- The badge tooltip shows total active dependents plus how many are currently waiting in `todo`.
+- FN-3942 immediate signal: blockers with at least **5 active `todo` dependents** (`activeTodoCount >= 5`) are marked **High fan-out**.
+- FN-3954 escalation signal: a high-fan-out blocker is upgraded to **Escalated** only after it remains in `in-progress`/`in-review` past `staleHighFanoutBlockerAgeThresholdMs` (age source: `columnMovedAt ?? updatedAt`).
+- Escalation payload surfaced in UI includes blocker ID, active todo downstream count, total active downstream count, and computed blocking age.
+- Done and archived downstream tasks remain visible for debugging context but do **not** count toward the todo threshold.
+- The badge tooltip shows active totals and, when escalated, the computed blocking age context.
 - `(stale)` markers mean the dependent is blocked through `blockedBy` and matches stale conditions that `clearStaleBlockedBy` self-healing should clear automatically.
 - Stale `dependencies[]` links are shown for awareness but are not auto-cleared by `clearStaleBlockedBy`.
-- The executor footer shows the current worst high fan-out blocker (in-progress/in-review only), ranked by highest todo fan-out, then highest total fan-out, then stable task ID order.
+- The executor footer summarizes the top escalated blocker (deterministic rank: highest todo fan-out, then highest active total, then oldest age, then stable task ID).
 
-Recommended workflow: ordinary chains stay as `Blocks N` so noise stays low; when a blocker crosses the 5-todo threshold, prioritize unblocking first (reassign, split, or resolve immediately) before lower-impact tasks.
+Recommended workflow: ordinary chains stay as `Blocks N` so noise stays low, high-fan-out blockers stand out immediately, and only long-lived high-impact blockers trigger explicit escalation.
 
 ### Logs → Agent Log view
 

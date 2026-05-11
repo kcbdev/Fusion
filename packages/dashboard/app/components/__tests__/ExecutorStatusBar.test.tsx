@@ -66,13 +66,13 @@ describe("ExecutorStatusBar", () => {
       expect(statusBar).toHaveTextContent("Blocked");
       expect(statusBar).toHaveTextContent("Queued");
       expect(statusBar).toHaveTextContent("In Review");
-      expect(statusBar).not.toHaveTextContent("High Fan-out");
+      expect(statusBar).not.toHaveTextContent("Escalated");
     });
 
-    it("shows highest high fan-out blocker summary with stable tie-break ordering", () => {
+    it("shows highest escalated blocker summary with stable tie-break ordering", () => {
       const tasks = [
-        makeTask("FN-010", "in-progress"),
-        makeTask("FN-002", "in-review"),
+        makeTask("FN-010", "in-progress", { columnMovedAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }),
+        makeTask("FN-002", "in-review", { columnMovedAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }),
         makeTask("FN-101", "todo", { dependencies: ["FN-010"] }),
         makeTask("FN-102", "todo", { dependencies: ["FN-010"] }),
         makeTask("FN-103", "todo", { dependencies: ["FN-010"] }),
@@ -85,14 +85,19 @@ describe("ExecutorStatusBar", () => {
         makeTask("FN-205", "todo", { dependencies: ["FN-002"] }),
       ];
 
-      render(<ExecutorStatusBar tasks={tasks} />);
+      render(
+        <ExecutorStatusBar
+          tasks={tasks}
+          staleHighFanoutBlockerAgeThresholdMs={60 * 60 * 1000}
+        />,
+      );
 
       const statusBar = screen.getByRole("status");
-      expect(statusBar).toHaveTextContent("High Fan-out");
+      expect(statusBar).toHaveTextContent("Escalated");
       expect(statusBar).toHaveTextContent("FN-002 · 5 todo");
     });
 
-    it("does not show high fan-out summary for ordinary chains below threshold", () => {
+    it("does not show escalated summary for ordinary chains below threshold", () => {
       const tasks = [
         makeTask("FN-500", "in-progress"),
         makeTask("FN-501", "todo", { dependencies: ["FN-500"] }),
@@ -103,7 +108,7 @@ describe("ExecutorStatusBar", () => {
 
       render(<ExecutorStatusBar tasks={tasks} />);
 
-      expect(screen.getByRole("status")).not.toHaveTextContent("High Fan-out");
+      expect(screen.getByRole("status")).not.toHaveTextContent("Escalated");
     });
 
     it("displays running task count", () => {

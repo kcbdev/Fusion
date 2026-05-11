@@ -414,6 +414,7 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     previous.fanout?.totalCount === next.fanout?.totalCount &&
     previous.fanout?.activeTodoCount === next.fanout?.activeTodoCount &&
     previous.fanout?.isHighFanout === next.fanout?.isHighFanout &&
+    previous.fanout?.escalation?.blockingAgeMs === next.fanout?.escalation?.blockingAgeMs &&
     areTaskDependenciesEqual(previous.fanout?.dependentIds ?? [], next.fanout?.dependentIds ?? []) &&
     areTaskDependenciesEqual(previous.fanout?.staleBlockedByDependentIds ?? [], next.fanout?.staleBlockedByDependentIds ?? []) &&
     previousTask.id === nextTask.id &&
@@ -1648,12 +1649,12 @@ function TaskCardComponent({
           )}
           {fanout && fanout.totalCount > 0 && (
             <span
-              className={`card-fanout-badge${fanout.staleBlockedByDependentIds.length > 0 ? " card-fanout-badge--stale" : ""}${fanout.isHighFanout ? " card-fanout-badge--high-impact" : ""}`}
-              data-tooltip={`Blocking ${fanout.totalCount} active task(s); ${fanout.activeTodoCount} waiting in todo${fanout.isHighFanout ? ` (high fan-out threshold: ${HIGH_FANOUT_BLOCKER_TODO_THRESHOLD})` : ""}`}
+              className={`card-fanout-badge${fanout.staleBlockedByDependentIds.length > 0 ? " card-fanout-badge--stale" : ""}${fanout.isHighFanout ? " card-fanout-badge--high-impact" : ""}${fanout.escalation ? " card-fanout-badge--escalated" : ""}`}
+              data-tooltip={`Blocking ${fanout.totalCount} active task(s); ${fanout.activeTodoCount} waiting in todo${fanout.isHighFanout ? ` (high fan-out threshold: ${HIGH_FANOUT_BLOCKER_TODO_THRESHOLD})` : ""}${fanout.escalation ? ` · escalated after ${Math.floor(fanout.escalation.blockingAgeMs / 60000)}m in blocking column` : ""}`}
             >
               <GitBranch size={12} style={{ verticalAlign: "middle" }} />
               <span>
-                {fanout.isHighFanout ? "High fan-out" : "Blocks"}{" "}
+                {fanout.escalation ? "Escalated" : fanout.isHighFanout ? "High fan-out" : "Blocks"}{" "}
                 <span className="card-fanout-count">{fanout.totalCount}</span>
                 {fanout.isHighFanout ? ` (${fanout.activeTodoCount} todo)` : ""}
                 {fanout.staleBlockedByDependentIds.length > 0 ? ` (${fanout.staleBlockedByDependentIds.length} stale)` : ""}

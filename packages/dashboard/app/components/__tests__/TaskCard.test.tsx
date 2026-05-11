@@ -238,7 +238,14 @@ describe("TaskCard", () => {
     const { rerender } = render(
       <TaskCard
         task={makeTask({ column: "in-progress" })}
-        fanout={{ totalCount: 8, activeTodoCount: 5, dependentIds: ["FN-003"], staleBlockedByDependentIds: [], isHighFanout: true }}
+        fanout={{
+          totalCount: 8,
+          activeTodoCount: 5,
+          dependentIds: ["FN-003"],
+          staleBlockedByDependentIds: [],
+          isHighFanout: true,
+          escalation: { blockerId: "FN-001", activeTodoCount: 5, totalActiveCount: 8, blockingAgeMs: 3_600_000 },
+        }}
         onOpenDetail={noop}
         addToast={noop}
       />,
@@ -246,7 +253,8 @@ describe("TaskCard", () => {
 
     let badge = document.querySelector(".card-fanout-badge--high-impact") as HTMLElement;
     expect(badge).not.toBeNull();
-    expect(badge.textContent).toContain("High fan-out");
+    expect(badge).toHaveClass("card-fanout-badge--escalated");
+    expect(badge.textContent).toContain("Escalated");
     expect(badge.textContent).toContain("(5 todo)");
 
     rerender(

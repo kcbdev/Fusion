@@ -48,7 +48,7 @@
 }
 
 .executor-status-bar__segment--fanout {
-  color: var(--color-warning);
+  color: var(--color-error);
   min-width: 0;
 }
 
@@ -97,7 +97,7 @@
 }
 
 .executor-status-bar__indicator--fanout {
-  background: var(--color-warning);
+  background: var(--color-error);
 }
 
 /* Numeric count display */

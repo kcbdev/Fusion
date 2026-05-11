@@ -74,6 +74,12 @@ describe("settings key parity", () => {
     expect(DEFAULT_PROJECT_SETTINGS.workflowStepTimeoutMs).toBe(360_000);
   });
 
+  it("defaults stale high fan-out blocker escalation age threshold", () => {
+    expect(DEFAULT_PROJECT_SETTINGS.staleHighFanoutBlockerAgeThresholdMs).toBe(2 * 60 * 60 * 1000);
+    expect(isProjectSettingsKey("staleHighFanoutBlockerAgeThresholdMs")).toBe(true);
+    expect(isGlobalSettingsKey("staleHighFanoutBlockerAgeThresholdMs")).toBe(false);
+  });
+
   it("keeps github tracking keys in expected scopes with documented defaults", () => {
     expect(DEFAULT_PROJECT_SETTINGS.githubTrackingEnabledByDefault).toBe(false);
     expect(DEFAULT_PROJECT_SETTINGS.githubTrackingDefaultRepo).toBeUndefined();

@@ -684,6 +684,7 @@ function AppInner() {
     globalPaused,
     enginePaused,
     taskStuckTimeoutMs,
+    staleHighFanoutBlockerAgeThresholdMs,
     showQuickChatFAB,
     prAuthAvailable,
     settingsLoaded,
@@ -1433,6 +1434,7 @@ function AppInner() {
             onToggleFavorite={handleToggleFavorite}
             onToggleModelFavorite={handleToggleModelFavorite}
             taskStuckTimeoutMs={taskStuckTimeoutMs}
+            staleHighFanoutBlockerAgeThresholdMs={staleHighFanoutBlockerAgeThresholdMs}
             onOpenMission={handleOpenMission}
             lastFetchTimeMs={lastFetchTimeMs}
           />
@@ -1630,6 +1632,7 @@ function AppInner() {
           tasks={isRemote && remoteData.tasks.length > 0 ? remoteData.tasks : tasks}
           projectId={currentProject.id}
           taskStuckTimeoutMs={taskStuckTimeoutMs}
+          staleHighFanoutBlockerAgeThresholdMs={staleHighFanoutBlockerAgeThresholdMs}
           backgroundSessions={bgSessions}
           backgroundGenerating={bgGenerating}
           backgroundNeedsInput={bgNeedsInput}

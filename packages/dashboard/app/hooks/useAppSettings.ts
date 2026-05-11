@@ -12,6 +12,7 @@ export interface UseAppSettingsResult {
   globalPaused: boolean;
   enginePaused: boolean;
   taskStuckTimeoutMs: number | undefined;
+  staleHighFanoutBlockerAgeThresholdMs: number;
   showQuickChatFAB: boolean;
   prAuthAvailable: boolean;
   settingsLoaded: boolean;
@@ -40,6 +41,7 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
   const [globalPaused, setGlobalPaused] = useState(false);
   const [enginePaused, setEnginePaused] = useState(false);
   const [taskStuckTimeoutMs, setTaskStuckTimeoutMs] = useState<number | undefined>(undefined);
+  const [staleHighFanoutBlockerAgeThresholdMs, setStaleHighFanoutBlockerAgeThresholdMs] = useState(2 * 60 * 60 * 1000);
   const [showQuickChatFAB, setShowQuickChatFAB] = useState(false);
   const [prAuthAvailable, setPrAuthAvailable] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -72,6 +74,9 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
       setEnginePaused(Boolean(settings.enginePaused));
       setPrAuthAvailable(Boolean(settings.prAuthAvailable));
       setTaskStuckTimeoutMs(settings.taskStuckTimeoutMs);
+      setStaleHighFanoutBlockerAgeThresholdMs(
+        settings.staleHighFanoutBlockerAgeThresholdMs ?? 2 * 60 * 60 * 1000,
+      );
       setShowQuickChatFAB(settings.showQuickChatFAB === true);
       setExperimentalFeatures(settings.experimentalFeatures ?? {});
       const features = settings.experimentalFeatures ?? {};
@@ -168,6 +173,7 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
     globalPaused,
     enginePaused,
     taskStuckTimeoutMs,
+    staleHighFanoutBlockerAgeThresholdMs,
     showQuickChatFAB,
     prAuthAvailable,
     settingsLoaded,

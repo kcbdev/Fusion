@@ -2959,6 +2959,25 @@ export function SettingsModal({
               <small>Timeout in minutes for detecting stuck tasks. When a task&apos;s agent session shows no activity for longer than this duration, the task is terminated and retried. Leave empty to disable. Suggested: 10.</small>
             </div>
             <div className="form-group">
+              <label htmlFor="staleHighFanoutBlockerAgeThresholdMs">Stale High Fan-out Escalation (hours)</label>
+              <input
+                id="staleHighFanoutBlockerAgeThresholdMs"
+                type="number"
+                min={1}
+                step={1}
+                value={form.staleHighFanoutBlockerAgeThresholdMs ? Math.round(form.staleHighFanoutBlockerAgeThresholdMs / 3600000) : ""}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const num = Number(val);
+                  setForm((f) => ({
+                    ...f,
+                    staleHighFanoutBlockerAgeThresholdMs: val && num > 0 ? num * 3600000 : undefined,
+                  }));
+                }}
+              />
+              <small>Escalate high fan-out blockers only after they remain in in-progress or in-review for this many hours (age source: columnMovedAt, fallback updatedAt). Default: 2 hours.</small>
+            </div>
+            <div className="form-group">
               <label htmlFor="preserveProgressOnStuckRequeue" className="checkbox-label">
                 <input
                   id="preserveProgressOnStuckRequeue"
