@@ -2,8 +2,9 @@ import { mkdtempSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ChatStore, Database } from "@fusion/core";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AgentStore, ChatStore, Database } from "@fusion/core";
+import { ChatManager } from "../chat.js";
 import { request } from "../test-request.js";
 import { RoomReplyGenerationError } from "../chat.js";
 
@@ -309,6 +310,74 @@ describe("Chat Room API Routes", () => {
       { "content-type": "application/json" },
     );
     expect(missingMessage.status).toBe(404);
+  });
+
+  it("resolves project-scoped room services for message replies", async () => {
+    const scopedRoot = mkdtempSync(join(tmpdir(), "fusion-chat-room-scoped-"));
+    const scopedFusionDir = join(scopedRoot, ".fusion");
+    const scopedDb = new Database(scopedFusionDir, { inMemory: true });
+    scopedDb.init();
+    const scopedStore = new MockStore(scopedRoot, scopedDb);
+    const scopedChatStore = new ChatStore(scopedFusionDir, scopedDb);
+
+    const scopedAgentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
+    await scopedAgentStore.init();
+    const scopedAgent = await scopedAgentStore.createAgent({
+      name: "agent room",
+      role: "executor",
+      status: "active",
+    });
+
+    const room = scopedChatStore.createRoom({
+      name: "Scoped Room",
+      projectId: "proj-scope",
+      memberAgentIds: [scopedAgent.id],
+    });
+
+    const defaultChatManager = {
+      sendRoomMessage: async () => {
+        throw new Error("default chat manager should not handle scoped room sends");
+      },
+    };
+
+    const { createServer } = await import("../server.js");
+    const appWithScopedEngine = createServer(store as any, {
+      chatStore,
+      chatManager: defaultChatManager as any,
+      engineManager: {
+        getEngine: (projectId: string) => {
+          if (projectId !== "proj-scope") return undefined;
+          return {
+            getTaskStore: () => scopedStore,
+            getMessageStore: () => undefined,
+          };
+        },
+        ensureEngine: async () => undefined,
+      } as any,
+    });
+
+    const responderSpy = vi.spyOn(ChatManager.prototype as any, "generateRoomResponderReply").mockResolvedValue({
+      content: "scoped reply",
+      thinkingOutput: null,
+      metadata: { roomId: room.id },
+    });
+
+    const postRes = await request(
+      appWithScopedEngine,
+      "POST",
+      `/api/chat/rooms/${room.id}/messages?projectId=proj-scope`,
+      JSON.stringify({ content: "hello scoped room" }),
+      { "content-type": "application/json" },
+    );
+
+    expect(postRes.status).toBe(201);
+    const scopedMessages = scopedChatStore.getRoomMessages(room.id);
+    expect(scopedMessages.some((message) => message.role === "assistant" && message.senderAgentId === scopedAgent.id)).toBe(true);
+    expect(chatStore.getRoomMessages(room.id)).toHaveLength(0);
+
+    responderSpy.mockRestore();
+    scopedDb.close();
+    await rm(scopedRoot, { recursive: true, force: true });
   });
 
   it("rate-limits GET /chat/rooms", async () => {

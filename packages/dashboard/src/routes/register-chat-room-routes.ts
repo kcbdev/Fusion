@@ -1,5 +1,6 @@
-import type { ChatAttachment, ChatRoomCreateInput, ChatRoomStatus, ChatRoomUpdateInput } from "@fusion/core";
-import { RoomReplyGenerationError } from "../chat.js";
+import { AgentStore, ChatStore, type ChatAttachment, type ChatRoomCreateInput, type ChatRoomStatus, type ChatRoomUpdateInput } from "@fusion/core";
+import type { Request } from "express";
+import { ChatManager, RoomReplyGenerationError } from "../chat.js";
 import { ApiError, badRequest, internalError, notFound } from "../api-error.js";
 import { rateLimit, RATE_LIMITS } from "../rate-limit.js";
 import type { ApiRoutesContext } from "./types.js";
@@ -10,7 +11,48 @@ function isSlugCollisionError(err: unknown): boolean {
 }
 
 export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
-  const { router, options, chatLogger, rethrowAsApiError } = ctx;
+  const { router, options, chatLogger, rethrowAsApiError, getProjectContext } = ctx;
+  const scopedRoomManagers = new Map<string, { chatStore: ChatStore; chatManager: ChatManager }>();
+
+  async function resolveRoomScopedServices(req: Request, roomProjectId: string | null | undefined): Promise<{ chatStore: ChatStore; chatManager: ChatManager }> {
+    if (!roomProjectId) {
+      const chatStore = options?.chatStore;
+      const chatManager = options?.chatManager;
+      if (!chatStore || !chatManager) {
+        throw internalError("Chat store or manager not available");
+      }
+      return { chatStore, chatManager };
+    }
+
+    const cached = scopedRoomManagers.get(roomProjectId);
+    if (cached) {
+      return cached;
+    }
+
+    const scopedReq = {
+      ...req,
+      query: { ...(req.query as Record<string, unknown>), projectId: roomProjectId },
+      body: typeof req.body === "object" && req.body !== null
+        ? { ...(req.body as Record<string, unknown>), projectId: roomProjectId }
+        : { projectId: roomProjectId },
+    } as unknown as Request;
+    const { store: scopedStore, engine } = await getProjectContext(scopedReq);
+
+    const scopedChatStore = new ChatStore(scopedStore.getFusionDir(), scopedStore.getDatabase());
+    const scopedAgentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
+    const scopedChatManager = new ChatManager(
+      scopedChatStore,
+      scopedStore.getRootDir(),
+      scopedAgentStore,
+      options?.pluginRunner,
+      () => scopedStore.getSettings(),
+      engine?.getMessageStore(),
+    );
+
+    const resolved = { chatStore: scopedChatStore, chatManager: scopedChatManager };
+    scopedRoomManagers.set(roomProjectId, resolved);
+    return resolved;
+  }
 
   router.get("/chat/rooms", rateLimit(RATE_LIMITS.api), async (req, res) => {
     try {
@@ -237,11 +279,15 @@ export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
 
   router.post("/chat/rooms/:id/messages", rateLimit(RATE_LIMITS.mutation), async (req, res) => {
     try {
-      const chatStore = options?.chatStore;
-      if (!chatStore) throw internalError("Chat store not available");
+      const defaultChatStore = options?.chatStore;
+      if (!defaultChatStore) throw internalError("Chat store not available");
 
       const roomId = String(req.params.id);
-      const room = chatStore.getRoom(roomId);
+      const hintedProjectId = typeof req.query.projectId === "string"
+        ? req.query.projectId
+        : (typeof req.body?.projectId === "string" ? req.body.projectId : undefined);
+      const room = defaultChatStore.getRoom(roomId)
+        ?? (hintedProjectId ? (await resolveRoomScopedServices(req, hintedProjectId)).chatStore.getRoom(roomId) : undefined);
       if (!room) throw notFound(`Chat room ${roomId} not found`);
 
       const { content, senderAgentId, attachments } = req.body as {
@@ -258,9 +304,7 @@ export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
         throw badRequest("senderAgentId is reserved for FN-3810; must be null or omitted");
       }
 
-      const chatManager = options?.chatManager;
-      if (!chatManager) throw internalError("Chat manager not available");
-
+      const { chatManager } = await resolveRoomScopedServices(req, room.projectId);
       const result = await chatManager.sendRoomMessage(roomId, content.trim(), Array.isArray(attachments) ? attachments : undefined);
 
       res.status(201).json({ message: result.userMessage });
