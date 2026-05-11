@@ -3,10 +3,34 @@ import { rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { vi } from "vitest";
-import { TaskStore } from "../store.js";
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...mod,
+    execSync: vi.fn((...args: Parameters<typeof mod.execSync>) => mod.execSync(...args)),
+  };
+});
+
+vi.mock("../run-command.js", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("../run-command.js")>();
+  return {
+    ...mod,
+    runCommandAsync: vi.fn((...args: Parameters<typeof mod.runCommandAsync>) => mod.runCommandAsync(...args)),
+  };
+});
+
+import { execSync } from "node:child_process";
+import { runCommandAsync } from "../run-command.js";
+import { TaskStore, TaskHasDependentsError } from "../store.js";
 import type { Task } from "../types.js";
 
-function makeTmpDir(): string {
+export { TaskStore, TaskHasDependentsError };
+
+export const mockedExecSync = vi.mocked(execSync);
+export const mockedRunCommandAsync = vi.mocked(runCommandAsync);
+
+export function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), "kb-store-test-"));
 }
 
@@ -75,15 +99,22 @@ export function createTaskStoreTestHarness() {
       issueNumber: 2471,
       url: "https://github.com/runfusion/fusion/issues/2471",
     }),
-    insertLogEntryWithTimestamp: (
-      taskId: string,
-      text: string,
-      type: string,
-      timestamp: string,
-      detail?: string,
-      agent?: string,
-    ): void => {
-      (store as any).db.prepare(`
+    insertLogEntryWithTimestamp: (...args: any[]): void => {
+      let targetStore: TaskStore = store;
+      let taskId: string;
+      let text: string;
+      let type: string;
+      let timestamp: string;
+      let detail: string | undefined;
+      let agent: string | undefined;
+
+      if (typeof args[0] === "object") {
+        [targetStore, taskId, text, type, timestamp, detail, agent] = args;
+      } else {
+        [taskId, text, type, timestamp, detail, agent] = args;
+      }
+
+      (targetStore as any).db.prepare(`
       INSERT INTO agentLogEntries (taskId, timestamp, text, type, detail, agent)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(taskId, timestamp, text, type, detail ?? null, agent ?? null);
