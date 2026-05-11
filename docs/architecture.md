@@ -213,13 +213,13 @@ Schema (migration 68 in `db.ts`) adds two tables:
 Store API (`packages/core/src/approval-request-store.ts`):
 
 Dashboard approval endpoints (`packages/dashboard/src/routes/register-approval-routes.ts`):
-- `GET /api/approval-requests`
-- `GET /api/approval-requests/:id`
-- `GET /api/approval-requests/:id/audit`
-- `POST /api/approval-requests/:id/approve`
-- `POST /api/approval-requests/:id/deny`
+- `GET /api/approvals`
+- `GET /api/approvals/:id`
+- `POST /api/approvals/:id/decision`
 
-Runtime flow: engine action gate creates/reuses request → pauses task/agent with `pauseReason="awaiting-approval"` → approver calls approve/deny endpoint → request transitions (`pending→approved|denied`) → route resumes matching paused task/agent best-effort → next tool retry consumes `approved` exactly once (then `completed`) or returns structured denial.
+Runtime flow: engine action gate creates/reuses request → pauses task/agent with `pauseReason="awaiting-approval"` → approver calls decision endpoint (`decision: approve|deny`) → request transitions (`pending→approved|denied`) → route resumes matching paused task/agent best-effort → next tool retry consumes `approved` exactly once (then `completed`) or returns structured denial.
+
+Provisioning note: durable `fn_agent_create` / `fn_agent_delete` approvals use `agent_provisioning` policy handling on this same decision route; `fn_spawn_agent` stays under action-gate `task_agent_mutation` because spawned children are ephemeral runtime workers.
 
 - `create(input: ApprovalRequestCreateInput)` — inserts a `pending` request and appends a `created` audit event
 - `get(id)` — returns one request or `null`

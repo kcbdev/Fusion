@@ -319,7 +319,7 @@ Delete a non-ephemeral direct report. If the target holds a task checkout lease,
 
 Provisioning policy also applies to deletes (`details.outcome`: `deleted`, `pending_approval`, or `denied`). Provisioning emits audit events `agent:create:{requested,approved,denied}` and `agent:delete:{requested,approved,denied}` tied to the originating run/task metadata.
 
-Out of scope in FN-3791: `spawn_agent` (ephemeral child worktree lifecycle). Follow-up task: "Evaluate approval guards for `spawn_agent` (ephemeral worktree children)".
+FN-3973 decision: `spawn_agent` remains under generic action-gate `task_agent_mutation` governance and is intentionally excluded from durable `agentProvisioning` policy. Rationale: spawned children are ephemeral (`metadata.type = "spawned"`), parent-task scoped (`reportsTo=<taskId>`), and auto-terminated with parent teardown.
 
 ### `list_agents` Tool
 

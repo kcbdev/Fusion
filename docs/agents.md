@@ -123,7 +123,7 @@ Resolver decision table (`resolveAgentProvisioningPolicy`):
 | `approval-mode-trusted-only` | `require-approval` | Untrusted fallback in default mode. |
 | `approval-mode-always` | `require-approval` | Approval always required unless privileged/never mode. |
 
-Out of scope in FN-3791: `spawn_agent` (ephemeral child worktree lifecycle). Follow-up task: "Evaluate approval guards for `spawn_agent` (ephemeral worktree children)".
+FN-3973 follow-through: `spawn_agent` evaluation is complete; governance remains in action-gate `task_agent_mutation` (ephemeral runtime lifecycle), not durable `agentProvisioning`.
 
 Default and legacy fallback behavior:
 
@@ -806,6 +806,17 @@ Behavior:
   - `maxSpawnedAgentsPerParent` (default 5)
   - `maxSpawnedAgentsGlobal` (default 20)
 - Child sessions terminate when parent task ends
+
+### Approval-governance relationship (FN-3973)
+
+`spawn_agent` is intentionally treated as an **ephemeral runtime mutation**, not durable provisioning:
+
+- `fn_spawn_agent` stays in action-gate `task_agent_mutation` classification.
+- Spawned children are created with ephemeral metadata (`metadata.type = "spawned"`) and task-scoped ownership (`reportsTo = parentTaskId`).
+- Parent teardown terminates/deletes spawned children; they are not durable hires.
+- Therefore `projectSettings.agentProvisioning` (FN-3791 policy for durable `fn_agent_create` / `fn_agent_delete`) does **not** govern `spawn_agent`.
+
+If a deployment config requires approval for `task_agent_mutation`, `spawn_agent` uses the standard action-gate approval pause/resume path (`awaiting-approval` + `/api/approvals/:id/decision`).
 
 ## Agent Delegation
 
