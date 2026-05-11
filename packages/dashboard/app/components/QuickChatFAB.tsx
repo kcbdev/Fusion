@@ -1673,7 +1673,7 @@ export function QuickChatFAB({
       return;
     }
 
-    if (trimmed === "/clear") {
+    if (trimmed === "/clear" || trimmed === "/new") {
       stopStreaming();
       clearPendingMessage();
       attachmentsToSend.forEach((attachment) => {
@@ -2382,7 +2382,7 @@ export function QuickChatFAB({
                 ))}
                 {helpMessageVisible && (
                   <div className="quick-chat-panel-message quick-chat-panel-message--received" data-testid="quick-chat-help-message">
-                    {renderAssistantMessageContent("Available commands:\n- `/clear` — Clear conversation and start fresh\n- `/skill:{name}` — Use a specific skill\n- `/help` — Show this help")}
+                    {renderAssistantMessageContent("Available commands:\n- `/new` or `/clear` — Clear conversation and start fresh\n- `/skill:{name}` — Use a specific skill\n- `/help` — Show this help")}
                   </div>
                 )}
                 <div
@@ -2436,7 +2436,7 @@ export function QuickChatFAB({
                 ))}
                 {helpMessageVisible && (
                   <div className="quick-chat-panel-message quick-chat-panel-message--received" data-testid="quick-chat-help-message">
-                    {renderAssistantMessageContent("Available commands:\n- `/clear` — Clear conversation and start fresh\n- `/skill:{name}` — Use a specific skill\n- `/help` — Show this help")}
+                    {renderAssistantMessageContent("Available commands:\n- `/new` or `/clear` — Clear conversation and start fresh\n- `/skill:{name}` — Use a specific skill\n- `/help` — Show this help")}
                   </div>
                 )}
               </>

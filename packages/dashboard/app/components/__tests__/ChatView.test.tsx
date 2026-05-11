@@ -1093,6 +1093,51 @@ describe("ChatView", () => {
     expect(clearPendingMessage).toHaveBeenCalledTimes(1);
   });
 
+  it("intercepts exact /new and starts a fresh session instead of sending message", async () => {
+    const sendMessage = vi.fn();
+    const createSession = vi.fn().mockResolvedValue({ id: "session-new", agentId: "agent-001" });
+    const stopStreaming = vi.fn();
+    const clearPendingMessage = vi.fn();
+
+    setupMockChat({
+      activeSession: activeSessionFixture,
+      messages: [],
+      sendMessage,
+      createSession,
+      stopStreaming,
+      clearPendingMessage,
+    });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    const textarea = screen.getByTestId("chat-input");
+    await userEvent.type(textarea, "  /new  {enter}");
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(createSession).toHaveBeenCalledWith({ agentId: "agent-001" });
+    expect(stopStreaming).toHaveBeenCalledTimes(1);
+    expect(clearPendingMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not intercept non-exact /new text", async () => {
+    const sendMessage = vi.fn();
+    const createSession = vi.fn();
+    setupMockChat({
+      activeSession: activeSessionFixture,
+      messages: [],
+      sendMessage,
+      createSession,
+    });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    const textarea = screen.getByTestId("chat-input");
+    await userEvent.type(textarea, "/new now{enter}");
+
+    expect(sendMessage).toHaveBeenCalledWith("/new now", []);
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
   it("does not intercept non-exact /clear text", async () => {
     const sendMessage = vi.fn();
     const createSession = vi.fn();

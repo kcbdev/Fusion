@@ -231,6 +231,44 @@ describe("QuickChatFAB session-first UX", () => {
     expect(mockStreamChatResponse).not.toHaveBeenCalled();
   });
 
+  it("intercepts exact /new and starts a fresh session for the active target", async () => {
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const input = await screen.findByTestId("quick-chat-input");
+    await waitFor(() => expect(input).not.toBeDisabled());
+    fireEvent.change(input, { target: { value: " /new " } });
+    fireEvent.click(screen.getByTestId("quick-chat-send"));
+
+    await waitFor(() => {
+      expect(mockCreateChatSession).toHaveBeenCalledWith(
+        { agentId: "__fn_agent__", modelProvider: "openai", modelId: "gpt-4o" },
+        "proj-1",
+      );
+    });
+    expect(mockStreamChatResponse).not.toHaveBeenCalled();
+  });
+
+  it("does not intercept non-exact /new prompts", async () => {
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const input = await screen.findByTestId("quick-chat-input");
+    await waitFor(() => expect(input).not.toBeDisabled());
+    fireEvent.change(input, { target: { value: "/new now" } });
+    fireEvent.click(screen.getByTestId("quick-chat-send"));
+
+    await waitFor(() => {
+      expect(mockStreamChatResponse).toHaveBeenCalledWith(
+        "session-model",
+        "/new now",
+        expect.any(Object),
+        [],
+        "proj-1",
+      );
+    });
+  });
+
   it("does not intercept non-exact /clear prompts", async () => {
     render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
     fireEvent.click(screen.getByTestId("quick-chat-fab"));
@@ -312,7 +350,10 @@ describe("QuickChatFAB session-first UX", () => {
     fireEvent.change(input, { target: { value: "/help" } });
     fireEvent.click(screen.getByTestId("quick-chat-send"));
 
-    expect(await screen.findByTestId("quick-chat-help-message")).toBeInTheDocument();
+    const helpMessage = await screen.findByTestId("quick-chat-help-message");
+    expect(helpMessage).toBeInTheDocument();
+    expect(helpMessage).toHaveTextContent("/new");
+    expect(helpMessage).toHaveTextContent("/clear");
     expect(mockStreamChatResponse).not.toHaveBeenCalled();
   });
 

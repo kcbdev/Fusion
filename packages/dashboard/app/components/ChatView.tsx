@@ -1244,7 +1244,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     const files = pendingAttachments.map((attachment) => attachment.file);
     if ((!trimmed && files.length === 0) || !activeSession) return;
 
-    if (trimmed === "/clear") {
+    if (trimmed === "/clear" || trimmed === "/new") {
       clearComposerState();
       stopStreaming();
       clearPendingMessage();
