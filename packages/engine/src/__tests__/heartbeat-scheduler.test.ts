@@ -22,6 +22,7 @@ describe("HeartbeatTriggerScheduler", () => {
   let scheduler: import("../agent-heartbeat.js").HeartbeatTriggerScheduler;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     callback = vi.fn().mockResolvedValue(undefined);
     store = {
       getAgent: vi.fn().mockResolvedValue({
@@ -108,7 +109,7 @@ describe("HeartbeatTriggerScheduler", () => {
       expect(scheduler.getRegisteredAgents()).toContain("agent-001");
     });
 
-    it("marks repaired agent metadata as stale when last heartbeat is old", async () => {
+    it("marks repaired agent metadata as stale when last heartbeat exceeds the default 2x threshold", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-01-01T02:00:00.000Z"));
       const agent = {
@@ -129,6 +130,75 @@ describe("HeartbeatTriggerScheduler", () => {
       scheduler.start();
       await vi.advanceTimersByTimeAsync(0);
 
+      expect(store.updateAgent).toHaveBeenCalledWith(
+        "agent-001",
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            heartbeatTimerRepair: expect.objectContaining({ staleAtRepair: true }),
+          }),
+        }),
+      );
+      expect(heartbeatLog.warn).toHaveBeenCalledWith(expect.stringContaining("Timer re-armed stale agent agent-001"));
+    });
+
+    it("marks repaired agent metadata as healthy when heartbeat is within stale threshold", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-01T00:00:10.000Z"));
+      const agent = {
+        id: "agent-001",
+        name: "Agent 001",
+        role: "executor",
+        state: "active",
+        lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
+        runtimeConfig: { enabled: true, heartbeatIntervalMs: 30_000 },
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: {},
+      } as Agent;
+      vi.mocked(store.listAgents).mockResolvedValue([agent]);
+      vi.mocked(store.getActiveHeartbeatRun).mockResolvedValue(null);
+
+      scheduler = new HeartbeatTriggerScheduler(store, callback);
+      scheduler.start();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(store.updateAgent).toHaveBeenCalledWith(
+        "agent-001",
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            heartbeatTimerRepair: expect.objectContaining({ staleAtRepair: false }),
+          }),
+        }),
+      );
+      expect(heartbeatLog.warn).not.toHaveBeenCalledWith(expect.stringContaining("Timer re-armed stale agent"));
+    });
+
+    it("uses project heartbeatRepairStaleMultiplier when configured", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-01T00:00:50.000Z"));
+      const agent = {
+        id: "agent-001",
+        name: "Agent 001",
+        role: "executor",
+        state: "active",
+        lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
+        runtimeConfig: { enabled: true, heartbeatIntervalMs: 30_000 },
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: {},
+      } as Agent;
+      vi.mocked(store.listAgents).mockResolvedValue([agent]);
+      vi.mocked(store.getActiveHeartbeatRun).mockResolvedValue(null);
+
+      const taskStore = {
+        getSettings: vi.fn().mockResolvedValue({ heartbeatRepairStaleMultiplier: 1 }),
+      } as unknown as TaskStore;
+
+      scheduler = new HeartbeatTriggerScheduler(store, callback, taskStore);
+      scheduler.start();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(taskStore.getSettings).toHaveBeenCalled();
       expect(store.updateAgent).toHaveBeenCalledWith(
         "agent-001",
         expect.objectContaining({

@@ -1025,6 +1025,8 @@ Effects:
 - Safety guards: skip ephemeral/task-worker agents, skip disabled agents, skip non-tickable states, and skip agents with an active heartbeat run
 - Existing timer entries are left untouched (no interval reset/jitter churn)
 - Repair metadata: each audit re-arm writes `metadata.heartbeatTimerRepair` with `repairedAt` and a stale-at-repair indicator when the agent had already missed its expected cadence
+- Stale-at-repair threshold: defaults to `2 × heartbeatIntervalMs`; override with project setting `heartbeatRepairStaleMultiplier` (> 0) when you need a different sensitivity
+- Stale repairs emit a WARN log entry and still flow through the existing `agent:updated` refresh path for dashboard surfacing
 
 This covers the untracked timer-loss failure mode where no `agent:updated` event fires after a timer entry disappears. Manual stop/start is no longer required to re-arm the timer in that case.
 

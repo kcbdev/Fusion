@@ -2891,7 +2891,7 @@ export class HeartbeatTriggerScheduler {
   private timerAuditIntervalHandle: ReturnType<typeof setInterval> | null = null;
 
   private static readonly TIMER_AUDIT_INTERVAL_MS = 60_000;
-  private static readonly REPAIR_STALE_GRACE_MULTIPLIER = 1.5;
+  private static readonly DEFAULT_REPAIR_STALE_MULTIPLIER = 2;
 
   constructor(store: AgentStore, callback: TriggerCallback, taskStore?: TaskStore, options?: { isTaskExecuting?: (taskId: string) => boolean }) {
     this.store = store;
@@ -3385,14 +3385,22 @@ export class HeartbeatTriggerScheduler {
     }
   }
 
-  private getRepairStaleThresholdMs(agent: Agent): number {
+  private resolveRepairStaleMultiplier(settings: Settings | null | undefined): number {
+    const value = (settings as Record<string, unknown> | undefined)?.heartbeatRepairStaleMultiplier;
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+      return HeartbeatTriggerScheduler.DEFAULT_REPAIR_STALE_MULTIPLIER;
+    }
+    return value;
+  }
+
+  private getRepairStaleThresholdMs(agent: Agent, staleMultiplier: number): number {
     const config = this.getAgentTimerConfig(agent);
     let rawIntervalMs = config.heartbeatIntervalMs;
     if (!rawIntervalMs || typeof rawIntervalMs !== "number" || !Number.isFinite(rawIntervalMs) || rawIntervalMs <= 0) {
       rawIntervalMs = HeartbeatTriggerScheduler.DEFAULT_HEARTBEAT_INTERVAL_MS;
     }
     const intervalMs = Math.max(1000, Math.round(rawIntervalMs));
-    return Math.round(intervalMs * HeartbeatTriggerScheduler.REPAIR_STALE_GRACE_MULTIPLIER);
+    return Math.round(intervalMs * staleMultiplier);
   }
 
   private async markRepairMetadata(agent: Agent, staleAtRepair: boolean, staleRepairReason?: string): Promise<void> {
@@ -3426,6 +3434,10 @@ export class HeartbeatTriggerScheduler {
     if (!this.running) return;
 
     try {
+      const settings = this.taskStore && typeof this.taskStore.getSettings === "function"
+        ? await this.taskStore.getSettings()
+        : null;
+      const staleMultiplier = this.resolveRepairStaleMultiplier(settings);
       const agents = await this.store.listAgents();
       let rearmedCount = 0;
       for (const agent of agents) {
@@ -3442,7 +3454,7 @@ export class HeartbeatTriggerScheduler {
           lastHeartbeatAt: agent.lastHeartbeatAt,
         });
 
-        const staleThresholdMs = this.getRepairStaleThresholdMs(agent);
+        const staleThresholdMs = this.getRepairStaleThresholdMs(agent, staleMultiplier);
         const lastHeartbeatMs = agent.lastHeartbeatAt ? Date.parse(agent.lastHeartbeatAt) : Number.NaN;
         const elapsedMs = Number.isFinite(lastHeartbeatMs) ? Date.now() - lastHeartbeatMs : Number.NaN;
         const staleAtRepair = Number.isFinite(elapsedMs) && elapsedMs > staleThresholdMs;
@@ -3452,7 +3464,11 @@ export class HeartbeatTriggerScheduler {
         await this.markRepairMetadata(agent, staleAtRepair, staleRepairReason);
 
         rearmedCount++;
-        heartbeatLog.log(`Timer re-armed for ${agent.id} (audit:${reason}${staleAtRepair ? ", stale" : ""})`);
+        if (staleAtRepair) {
+          heartbeatLog.warn(`Timer re-armed stale agent ${agent.id} (audit:${reason}): ${staleRepairReason ?? "heartbeat exceeded stale threshold before repair"}`);
+        } else {
+          heartbeatLog.log(`Timer re-armed for ${agent.id} (audit:${reason})`);
+        }
       }
 
       if (rearmedCount > 0) {
