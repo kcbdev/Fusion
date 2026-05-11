@@ -719,7 +719,7 @@ describe("missed heartbeat detection", () => {
 });
 
 describe("unresponsive agent recovery", () => {
-  it("disposes session and pauses/resumes agent after 2x timeout", async () => {
+  it("recovers only tracked stale sessions via pause/resume restart", async () => {
     const onTerminated = vi.fn();
     const session = createMockSession();
     const localStore = createMockStore({
@@ -746,6 +746,34 @@ describe("unresponsive agent recovery", () => {
     expect(localStore.updateAgentState).toHaveBeenCalledWith("agent-001", "active");
     expect(onTerminated).not.toHaveBeenCalled();
     expect(customMonitor.getTrackedAgents()).toHaveLength(0);
+
+    customMonitor.stop();
+    vi.useRealTimers();
+  });
+
+  it("does not attempt stale recovery for untracked agents", async () => {
+    const localStore = createMockStore({
+      getAgent: vi.fn().mockResolvedValue({
+        id: "agent-001",
+        state: "active",
+        lastHeartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+        runtimeConfig: { enabled: true },
+      }),
+      updateAgentState: vi.fn().mockResolvedValue(undefined),
+      updateAgent: vi.fn().mockResolvedValue(undefined),
+    });
+    const customMonitor = new HeartbeatMonitor({
+      store: localStore,
+      heartbeatTimeoutMs: 5_000,
+      pollIntervalMs: 1_000,
+    });
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    customMonitor.start();
+    await vi.advanceTimersByTimeAsync(12_000);
+
+    expect(localStore.updateAgentState).not.toHaveBeenCalledWith("agent-001", "paused");
+    expect(localStore.updateAgentState).not.toHaveBeenCalledWith("agent-001", "active");
 
     customMonitor.stop();
     vi.useRealTimers();

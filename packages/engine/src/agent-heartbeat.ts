@@ -2856,6 +2856,9 @@ export class HeartbeatTriggerScheduler {
   private configRevisionListener: ((agentId: string, revision: AgentConfigRevision) => void) | null = null;
   private deletedListener: ((agentId: string) => void) | null = null;
   private isTaskExecuting?: (taskId: string) => boolean;
+  private timerAuditIntervalHandle: ReturnType<typeof setInterval> | null = null;
+
+  private static readonly TIMER_AUDIT_INTERVAL_MS = 60_000;
 
   constructor(store: AgentStore, callback: TriggerCallback, taskStore?: TaskStore, options?: { isTaskExecuting?: (taskId: string) => boolean }) {
     this.store = store;
@@ -2873,6 +2876,10 @@ export class HeartbeatTriggerScheduler {
     this.running = true;
     this.watchAssignments();
     this.watchAgentLifecycle();
+    void this.auditTimerRegistrations("start");
+    this.timerAuditIntervalHandle = setInterval(() => {
+      void this.auditTimerRegistrations("interval");
+    }, HeartbeatTriggerScheduler.TIMER_AUDIT_INTERVAL_MS);
     heartbeatLog.log("HeartbeatTriggerScheduler started");
   }
 
@@ -2897,6 +2904,11 @@ export class HeartbeatTriggerScheduler {
       heartbeatLog.log(`Cleared timer for ${agentId}`);
     }
     this.timers.clear();
+
+    if (this.timerAuditIntervalHandle) {
+      clearInterval(this.timerAuditIntervalHandle);
+      this.timerAuditIntervalHandle = null;
+    }
 
     heartbeatLog.log("HeartbeatTriggerScheduler stopped");
   }
@@ -3337,6 +3349,37 @@ export class HeartbeatTriggerScheduler {
     if (this.deletedListener) {
       this.store.off("agent:deleted", this.deletedListener);
       this.deletedListener = null;
+    }
+  }
+
+  async auditTimerRegistrations(reason: "start" | "interval" = "interval"): Promise<void> {
+    if (!this.running) return;
+
+    try {
+      const agents = await this.store.listAgents();
+      let rearmedCount = 0;
+      for (const agent of agents) {
+        if (!this.isTimerEligibleAgent(agent)) continue;
+        if (this.timers.has(agent.id)) continue;
+
+        const activeRun = await this.store.getActiveHeartbeatRun(agent.id);
+        if (activeRun) {
+          heartbeatLog.log(`Timer audit skipped re-arm for ${agent.id} (active run)`);
+          continue;
+        }
+
+        this.registerAgent(agent.id, this.getAgentTimerConfig(agent), {
+          lastHeartbeatAt: agent.lastHeartbeatAt,
+        });
+        rearmedCount++;
+        heartbeatLog.log(`Timer re-armed for ${agent.id} (audit:${reason})`);
+      }
+
+      if (rearmedCount > 0) {
+        heartbeatLog.log(`Timer audit repaired ${rearmedCount} missing registration(s) (${reason})`);
+      }
+    } catch (error) {
+      heartbeatLog.warn(`Timer audit failed (${reason}): ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

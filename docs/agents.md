@@ -970,6 +970,21 @@ Effects:
 - Resume triggers one on-demand heartbeat restart only when `runtimeConfig.enabled !== false`
 - `onTerminated` is a run-level callback for terminated heartbeat runs and is not used by unresponsive recovery
 
+### Timer Reconciliation Self-Healing (FN-3958)
+
+`HeartbeatTriggerScheduler` owns a periodic registration audit that reconciles durable-agent truth in `AgentStore` against the in-memory timer map.
+
+- Audit cadence: once immediately on scheduler start, then every 60 seconds while running
+- Repair target: durable, heartbeat-enabled agents in tickable states (`active`, `running`, `idle`) that are missing a timer entry
+- Safety guards: skip ephemeral/task-worker agents, skip disabled agents, skip non-tickable states, and skip agents with an active heartbeat run
+- Existing timer entries are left untouched (no interval reset/jitter churn)
+
+This covers the untracked timer-loss failure mode where no `agent:updated` event fires after a timer entry disappears. Manual stop/start is no longer required to re-arm the timer in that case.
+
+Separation of responsibilities:
+- **HeartbeatMonitor recovery** handles **tracked stale sessions** (stuck in-memory run/session cleanup + pause/resume restart)
+- **HeartbeatTriggerScheduler audit** handles **untracked missing-timer registration drift** (re-arm scheduling)
+
 ## Dashboard Health Status
 
 The dashboard displays agent health status in AgentsView, AgentListModal, and AgentDetailView using a centralized health evaluation utility (`packages/dashboard/app/utils/agentHealth.ts`).

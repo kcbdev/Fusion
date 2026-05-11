@@ -1779,17 +1779,19 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       const agents = await agentStore.listAgents();
       const missedCatchupTargets: { agentId: string; lastHeartbeatAt: string }[] = [];
       for (const agent of agents) {
-        // State is the source of truth: arm timers only for non-ephemeral
-        // agents that are currently active/running. Transitions into
+        // State is the source of truth: arm timers only for non-ephemeral,
+        // heartbeat-enabled agents in tickable states. Transitions into
         // tickable states while the scheduler is already running are
-        // handled by the scheduler's own agent:updated listener.
+        // handled by the scheduler's own lifecycle listeners.
         if (isEphemeralAgent(agent)) continue;
-        if (agent.state !== "active" && agent.state !== "running") continue;
+        if (agent.runtimeConfig?.enabled === false) continue;
+        if (agent.state !== "active" && agent.state !== "running" && agent.state !== "idle") continue;
         const rc = agent.runtimeConfig;
         const intervalMs = (rc?.heartbeatIntervalMs as number | undefined) ?? DEFAULT_AGENT_HEARTBEAT_INTERVAL_MS;
         triggerScheduler.registerAgent(
           agent.id,
           {
+            enabled: rc?.enabled as boolean | undefined,
             heartbeatIntervalMs: rc?.heartbeatIntervalMs as number | undefined,
             maxConcurrentRuns: rc?.maxConcurrentRuns as number | undefined,
           },

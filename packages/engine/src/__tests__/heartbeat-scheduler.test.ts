@@ -35,6 +35,7 @@ describe("HeartbeatTriggerScheduler", () => {
       }),
       getActiveHeartbeatRun: vi.fn().mockResolvedValue(null),
       getBudgetStatus: vi.fn().mockResolvedValue(createBudgetStatus()),
+      listAgents: vi.fn().mockResolvedValue([]),
       on: vi.fn(),
       off: vi.fn(),
     } as unknown as AgentStore;
@@ -70,6 +71,61 @@ describe("HeartbeatTriggerScheduler", () => {
       scheduler.stop();
       scheduler.stop(); // second call should be no-op
       expect(scheduler.isActive()).toBe(false);
+    });
+  });
+
+  describe("scheduler timer audit", () => {
+    it("re-arms a tickable durable agent when timer entry is missing and no lifecycle event fires", async () => {
+      vi.useFakeTimers();
+      const agent = {
+        id: "agent-001",
+        name: "Agent 001",
+        role: "executor",
+        state: "active",
+        lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
+        runtimeConfig: { enabled: true, heartbeatIntervalMs: 30_000 },
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: {},
+      } as Agent;
+      vi.mocked(store.listAgents).mockResolvedValue([agent]);
+      vi.mocked(store.getActiveHeartbeatRun).mockResolvedValue(null);
+
+      scheduler = new HeartbeatTriggerScheduler(store, callback);
+      scheduler.start();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(scheduler.getRegisteredAgents()).toContain("agent-001");
+      scheduler.unregisterAgent("agent-001");
+      expect(scheduler.getRegisteredAgents()).not.toContain("agent-001");
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(scheduler.getRegisteredAgents()).toContain("agent-001");
+    });
+
+    it("skips audit re-arm when the agent already has an active heartbeat run", async () => {
+      vi.useFakeTimers();
+      const agent = {
+        id: "agent-001",
+        name: "Agent 001",
+        role: "executor",
+        state: "active",
+        runtimeConfig: { enabled: true, heartbeatIntervalMs: 30_000 },
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: {},
+      } as Agent;
+      vi.mocked(store.listAgents).mockResolvedValue([agent]);
+      vi.mocked(store.getActiveHeartbeatRun).mockResolvedValue({ id: "run-1" } as any);
+
+      scheduler = new HeartbeatTriggerScheduler(store, callback);
+      scheduler.start();
+      await vi.advanceTimersByTimeAsync(0);
+      scheduler.unregisterAgent("agent-001");
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(scheduler.getRegisteredAgents()).not.toContain("agent-001");
     });
   });
 

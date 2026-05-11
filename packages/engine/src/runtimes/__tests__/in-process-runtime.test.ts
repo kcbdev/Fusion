@@ -1181,6 +1181,28 @@ describe("InProcessRuntime", () => {
       );
     });
 
+    it("reconciles a missing timer for a tickable durable agent without state changes", async () => {
+      const store = getAgentStore(runtime);
+      const scheduler = runtime.getTriggerScheduler();
+      expect(scheduler).toBeDefined();
+
+      const agent = await store.createAgent({
+        name: "audit-rearm-agent",
+        role: "executor",
+        runtimeConfig: {
+          enabled: true,
+          heartbeatIntervalMs: 1_000,
+        },
+      });
+
+      expect(scheduler!.getRegisteredAgents()).toContain(agent.id);
+      scheduler!.unregisterAgent(agent.id);
+      expect(scheduler!.getRegisteredAgents()).not.toContain(agent.id);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(scheduler!.getRegisteredAgents()).toContain(agent.id);
+    });
+
     it("unregisters an agent when enabled is set to false in update", async () => {
       // Create a new agent with heartbeat enabled
       const store = getAgentStore(runtime);
