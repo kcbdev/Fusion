@@ -70,5 +70,4 @@ export { RoadmapStore } from "./roadmap-store.js";
 export type { RoadmapStoreEvents } from "./roadmap-store.js";
 
 export { ensureRoadmapSchema } from "./roadmap-schema.js";
-export { RoadmapDashboardView } from "./dashboard-view.js";
 export * from "./server/index.js";
