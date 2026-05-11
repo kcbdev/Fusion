@@ -131,4 +131,20 @@ describe("dependency graph interactions", () => {
     expect(screen.getByTestId("graph-task-node-A").className).toContain("graph-task-node--highlighted");
     expect(screen.getByTestId("graph-task-node-D").className).toContain("graph-task-node--dimmed");
   });
+
+  it("keeps far graph content reachable after zoom-in pan", () => {
+    const { result } = renderHook(() => useGraphInteraction());
+
+    act(() => {
+      result.current.setGraphBounds({ minX: 0, minY: 0, maxX: 2600, maxY: 1400 });
+      result.current.onWheelZoom(-120, { x: 400, y: 300 }, 800, 600);
+      result.current.onPointerDown(1, { x: 350, y: 250 });
+      result.current.onPointerMove(1, { x: -1200, y: 250 }, 800, 600);
+      result.current.onPointerUp(1);
+    });
+
+    const minPanX = 800 - 2600 * result.current.zoom;
+    expect(result.current.pan.x).toBeGreaterThanOrEqual(minPanX);
+    expect(result.current.pan.x).toBeLessThanOrEqual(0);
+  });
 });

@@ -20,6 +20,13 @@ interface PinchState {
   midpoint: PointerPoint;
 }
 
+interface GraphBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -41,6 +48,7 @@ export function useGraphInteraction() {
   const dragStateRef = useRef<{ start: PointerPoint; panStart: PointerPoint } | null>(null);
   const pointersRef = useRef<Map<number, PointerPoint>>(new Map());
   const pinchRef = useRef<PinchState | null>(null);
+  const graphBoundsRef = useRef<GraphBounds>({ minX: 0, minY: 0, maxX: 0, maxY: 0 });
 
   useEffect(() => {
     panRef.current = pan;
@@ -79,10 +87,26 @@ export function useGraphInteraction() {
     }, TRANSITION_TIMEOUT_MS);
   }, []);
 
-  const clampPan = useCallback((nextPan: PointerPoint, viewportWidth: number, viewportHeight: number) => ({
-    x: clamp(nextPan.x, -viewportWidth, viewportWidth),
-    y: clamp(nextPan.y, -viewportHeight, viewportHeight),
-  }), []);
+  const clampPan = useCallback((nextPan: PointerPoint, viewportWidth: number, viewportHeight: number, nextZoom = zoomRef.current) => {
+    const bounds = graphBoundsRef.current;
+
+    if (bounds.maxX <= bounds.minX || bounds.maxY <= bounds.minY) {
+      return {
+        x: clamp(nextPan.x, -viewportWidth, viewportWidth),
+        y: clamp(nextPan.y, -viewportHeight, viewportHeight),
+      };
+    }
+
+    const minPanX = viewportWidth - bounds.maxX * nextZoom;
+    const maxPanX = -bounds.minX * nextZoom;
+    const minPanY = viewportHeight - bounds.maxY * nextZoom;
+    const maxPanY = -bounds.minY * nextZoom;
+
+    const clampedX = minPanX > maxPanX ? (minPanX + maxPanX) / 2 : clamp(nextPan.x, minPanX, maxPanX);
+    const clampedY = minPanY > maxPanY ? (minPanY + maxPanY) / 2 : clamp(nextPan.y, minPanY, maxPanY);
+
+    return { x: clampedX, y: clampedY };
+  }, []);
 
   const zoomAtPoint = useCallback((
     nextZoomRaw: number,
@@ -98,7 +122,7 @@ export function useGraphInteraction() {
     const nextPan = clampPan({
       x: anchor.x - (anchor.x - currentPan.x) * scaleRatio,
       y: anchor.y - (anchor.y - currentPan.y) * scaleRatio,
-    }, viewportWidth, viewportHeight);
+    }, viewportWidth, viewportHeight, nextZoom);
 
     setZoom(nextZoom);
     setPan(nextPan);
@@ -164,7 +188,7 @@ export function useGraphInteraction() {
     const panY = (viewportHeight - graphHeight * nextZoom) / 2 - minY * nextZoom;
 
     setZoom(nextZoom);
-    setPan(clampPan({ x: panX, y: panY }, viewportWidth, viewportHeight));
+    setPan(clampPan({ x: panX, y: panY }, viewportWidth, viewportHeight, nextZoom));
   }, [clampPan, setAnimate]);
 
   const onPointerDown = useCallback((pointerId: number, point: PointerPoint) => {
@@ -241,6 +265,10 @@ export function useGraphInteraction() {
     zoomAtPoint(zoomRef.current * factor, point, viewportWidth, viewportHeight);
   }, [setAnimate, zoomAtPoint]);
 
+  const setGraphBounds = useCallback((bounds: GraphBounds) => {
+    graphBoundsRef.current = bounds;
+  }, []);
+
   const handleKeyDown = useCallback((
     event: ReactKeyboardEvent,
     viewportWidth: number,
@@ -299,5 +327,6 @@ export function useGraphInteraction() {
     onPointerUp,
     onWheelZoom,
     handleKeyDown,
+    setGraphBounds,
   };
 }

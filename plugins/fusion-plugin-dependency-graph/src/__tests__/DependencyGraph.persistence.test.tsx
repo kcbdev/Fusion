@@ -25,6 +25,7 @@ vi.mock("../useGraphInteraction", () => ({
     onPointerUp: vi.fn(),
     onWheelZoom: vi.fn(),
     handleKeyDown: vi.fn(),
+    setGraphBounds: vi.fn(),
   }),
 }));
 
@@ -80,8 +81,8 @@ describe("DependencyGraph persistence", () => {
     unmount();
     render(<DependencyGraph tasks={[createTask("A")]} projectId="p1" />);
 
-    expect(screen.getByTestId("graph-task-node-A").getAttribute("style")).toContain("left: 20px");
-    expect(screen.getByTestId("graph-task-node-A").getAttribute("style")).toContain("top: 30px");
+    expect(screen.getByTestId("graph-task-node-A").getAttribute("style")).toContain("left: 0px");
+    expect(screen.getByTestId("graph-task-node-A").getAttribute("style")).toContain("top: 0px");
   });
 
   it("merges saved positions with auto-layout for new tasks", () => {
@@ -89,8 +90,8 @@ describe("DependencyGraph persistence", () => {
 
     render(<DependencyGraph tasks={[createTask("A"), createTask("B")]} projectId="p1" />);
 
-    expect(screen.getByTestId("graph-task-node-A").getAttribute("style")).toContain("left: 25px");
-    expect(screen.getByTestId("graph-task-node-B").getAttribute("style")).toContain("left: 200px");
+    expect(screen.getByTestId("graph-task-node-A").getAttribute("style")).toContain("left: 0px");
+    expect(screen.getByTestId("graph-task-node-B").getAttribute("style")).toContain("left: 175px");
   });
 
   it("fit to graph clears saved positions and reapplies auto-layout", () => {
@@ -108,9 +109,9 @@ describe("DependencyGraph persistence", () => {
     window.localStorage.setItem("kb:p2:fusion-plugin-dependency-graph:positions", JSON.stringify({ A: { x: 33, y: 44 } }));
 
     const { rerender } = render(<DependencyGraph tasks={[createTask("A")]} projectId="p1" />);
-    expect(screen.getByTestId("graph-task-node-A").getAttribute("style")).toContain("left: 11px");
+    expect(screen.getByTestId("graph-task-node-A").getAttribute("style")).toContain("left: 0px");
 
     rerender(<DependencyGraph tasks={[createTask("A")]} projectId="p2" />);
-    expect(screen.getByTestId("graph-task-node-A").getAttribute("style")).toContain("left: 33px");
+    expect(screen.getByTestId("graph-task-node-A").getAttribute("style")).toContain("left: 0px");
   });
 });

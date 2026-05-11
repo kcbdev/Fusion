@@ -100,6 +100,7 @@ export function DependencyGraph({
     onPointerUp,
     onWheelZoom,
     handleKeyDown,
+    setGraphBounds,
   } = useGraphInteraction();
 
   useEffect(() => {
@@ -121,11 +122,37 @@ export function DependencyGraph({
 
   const bounds = useMemo(() => {
     const values = Array.from(positions.values());
-    if (values.length === 0) return { width: 0, height: 0 };
+    if (values.length === 0) {
+      return { minX: 0, minY: 0, maxX: 0, maxY: 0, width: 0, height: 0 };
+    }
+
+    const minX = Math.min(...values.map((pos) => pos.x));
+    const minY = Math.min(...values.map((pos) => pos.y));
     const maxX = Math.max(...values.map((pos) => pos.x + NODE_WIDTH));
     const maxY = Math.max(...values.map((pos) => pos.y + NODE_HEIGHT));
-    return { width: maxX, height: maxY };
+
+    return {
+      minX,
+      minY,
+      maxX,
+      maxY,
+      width: Math.max(0, maxX - minX),
+      height: Math.max(0, maxY - minY),
+    };
   }, [positions]);
+
+  const normalizedPositions = useMemo(() => {
+    if (positions.size === 0) return positions;
+    const next = new Map<string, { x: number; y: number }>();
+    for (const [taskId, position] of positions.entries()) {
+      next.set(taskId, { x: position.x - bounds.minX, y: position.y - bounds.minY });
+    }
+    return next;
+  }, [bounds.minX, bounds.minY, positions]);
+
+  useEffect(() => {
+    setGraphBounds({ minX: 0, minY: 0, maxX: bounds.width, maxY: bounds.height });
+  }, [bounds.height, bounds.width, setGraphBounds]);
 
   const handleResetLayout = useCallback(() => {
     clearSavedPositions();
@@ -189,7 +216,7 @@ export function DependencyGraph({
         onKeyDown={(event) => {
           const viewport = viewportRef.current;
           if (!viewport) return;
-          handleKeyDown(event, viewport.clientWidth, viewport.clientHeight, positions, { nodeWidth: NODE_WIDTH, nodeHeight: NODE_HEIGHT });
+          handleKeyDown(event, viewport.clientWidth, viewport.clientHeight, normalizedPositions, { nodeWidth: NODE_WIDTH, nodeHeight: NODE_HEIGHT });
         }}
         tabIndex={0}
         onClick={() => {
@@ -203,7 +230,7 @@ export function DependencyGraph({
           <div className={`graph-canvas-transform${transitioning ? " graph-canvas-transform--animate" : ""}`} style={{ transform, width: `${bounds.width}px`, height: `${bounds.height}px` }}>
             <GraphEdges
               edges={graphData.edges}
-              positions={positions}
+              positions={normalizedPositions}
               nodeWidth={NODE_WIDTH}
               nodeHeight={NODE_HEIGHT}
               highlightedEdgeIds={
@@ -218,7 +245,7 @@ export function DependencyGraph({
             />
             <div className="dependency-graph__nodes-layer">
               {graphData.nodes.map((node) => {
-                const position = positions.get(node.task.id);
+                const position = normalizedPositions.get(node.task.id);
                 if (!position) return null;
 
                 return (
@@ -232,10 +259,11 @@ export function DependencyGraph({
                     scale={zoom}
                     onNodePositionChange={(taskId, nextPosition) => {
                       setPositions((current) => {
+                        const denormalizedPosition = { x: nextPosition.x + bounds.minX, y: nextPosition.y + bounds.minY };
                         const existing = current.get(taskId);
-                        if (existing && existing.x === nextPosition.x && existing.y === nextPosition.y) return current;
+                        if (existing && existing.x === denormalizedPosition.x && existing.y === denormalizedPosition.y) return current;
                         const next = new Map(current);
-                        next.set(taskId, nextPosition);
+                        next.set(taskId, denormalizedPosition);
                         return next;
                       });
                     }}
@@ -289,7 +317,14 @@ export function DependencyGraph({
           const viewport = viewportRef.current;
           if (!viewport) return;
           const freshLayout = computeAutoLayout(graphData, { nodeWidth: NODE_WIDTH, nodeHeight: NODE_HEIGHT, horizontalGap: 40, verticalGap: 80 });
-          fitToGraph(freshLayout, viewport.clientWidth, viewport.clientHeight, { nodeWidth: NODE_WIDTH, nodeHeight: NODE_HEIGHT });
+          const normalizedFreshLayout = new Map<string, { x: number; y: number }>();
+          const values = Array.from(freshLayout.values());
+          const minX = values.length > 0 ? Math.min(...values.map((position) => position.x)) : 0;
+          const minY = values.length > 0 ? Math.min(...values.map((position) => position.y)) : 0;
+          for (const [taskId, position] of freshLayout.entries()) {
+            normalizedFreshLayout.set(taskId, { x: position.x - minX, y: position.y - minY });
+          }
+          fitToGraph(normalizedFreshLayout, viewport.clientWidth, viewport.clientHeight, { nodeWidth: NODE_WIDTH, nodeHeight: NODE_HEIGHT });
         }}
         onResetView={() => {
           handleResetLayout();
