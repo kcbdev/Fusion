@@ -161,6 +161,8 @@ API endpoints reviewed:
 Additional backend notes:
 - `githubTokenConfigured` is returned by `GET /api/settings` but is **computed server-side**, not persisted.
 - Non-settings config persisted in backend include `nextId`, `workflowSteps`, and `nextWorkflowStepId` (`config` row / config JSON compatibility path).
+- `config.nextId` is a legacy allocation cursor, not an overwrite authority. Creation paths now treat SQLite task rows (live + archived) as the write-once source of truth and skip/reject colliding IDs.
+- Reserved/manual/distributed ID creation must preserve high-water semantics: when an explicit task ID is ahead of `config.nextId`, store logic advances `nextId` so later plain creates cannot reuse lower IDs.
 - **`*Global*` keys are never persisted in project settings** — these belong exclusively to global settings. Conversely, project-only keys (`defaultProviderOverride`, `executionProvider`, `planningProvider`, etc.) are never persisted in global settings. The two scopes are strictly isolated.
 
 ---

@@ -668,7 +668,13 @@ A lease is recoverable only when there is **no active local executor session for
   - Reserve/commit/abort execute under a process-local lock and a single SQLite transaction. Lazy reservation expiry cleanup runs inside those same transactions.
   - Default reservation TTL is `15 * 60 * 1000` ms (15 minutes). Expired/aborted reservations are **burned IDs** and are never reissued.
   - `committedClusterTaskCount` from allocator state is the only authoritative cluster-wide committed-task count. Local task-row counts and ID suffix math are not authoritative.
+  - `ensureStateRow(prefix)` seeds `nextSequence` from the highest observed high-water mark (legacy `config.nextId` when prefix matches plus max numeric suffix across live and archived task rows). This prevents reserve paths from reusing IDs after mixed legacy/distributed creation.
   - Mesh allocator write routes (`/api/mesh/task-ids/reserve|commit|abort`) return `503` when the coordinator node is unreachable; they never fall back to local-only cluster ID issuance.
+- Write-once task ID contract across all creation paths:
+  - `TaskStore.createTask()` allocates from `config.nextId` but probes live + archived rows and skips collisions if counters drift.
+  - `TaskStore.createTaskWithReservedId()` rejects any pre-existing ID (live or archived) and advances `config.nextId` high-water when a reserved/manual ID is ahead of the legacy counter.
+  - Final create-path guards reject a colliding ID before persistence so `upsert` paths cannot overwrite existing in-review/done tasks.
+  - Delegated task creation (`fn_delegate_task`) uses the same `createTask()` path and inherits the same collision-safe guarantees.
 - Cluster task creation now uses a strong-write reserve → create → replicate → commit/abort sequence.
   - `POST /api/tasks` reserves a distributed ID, creates the authoritative local task with that reserved ID, then POSTs authenticated replication payloads to peer nodes.
   - Creation self-heals stale ID overlap state: if a reserved `FN-*` collides with an existing task (`Task ID already exists...` or replicated-create collision), the route aborts that reservation, cleans up partial local state, reserves the next ID, and retries up to a bounded limit.
