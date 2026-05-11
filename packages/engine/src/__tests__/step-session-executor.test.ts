@@ -737,6 +737,32 @@ describe("StepSessionExecutor", () => {
   });
 
   describe("sequential execution", () => {
+    it("forwards taskEnv into step session creation", async () => {
+      const prompt = makeStepPrompt("FN-001", 1);
+      const task = makeTaskDetail({ prompt, steps: [{ name: "Step 0", status: "pending" }] });
+      const settings = makeSettings({ maxParallelSteps: 1 });
+      const session = makeMockSession();
+      mockedCreateFnAgent.mockResolvedValue({ session } as any);
+
+      const executor = new StepSessionExecutor({
+        taskDetail: task,
+        worktreePath: "/project/.worktrees/main",
+        rootDir: "/project",
+        settings,
+        pluginRunner: undefined,
+        taskEnv: { PATH: "/task/bin", TASK_ONLY: "1" },
+      } as any);
+
+      const result = await executor.executeAll();
+      expect(result).toHaveLength(1);
+      expect(result[0]?.success).toBe(true);
+      expect(mockedCreateFnAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          taskEnv: { PATH: "/task/bin", TASK_ONLY: "1" },
+        }),
+      );
+    });
+
     it("happy path: 3-step task, all steps succeed", async () => {
       const prompt = makeStepPrompt("FN-001", 3);
       const task = makeTaskDetail({ prompt, steps: [

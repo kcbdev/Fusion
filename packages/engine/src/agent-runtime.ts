@@ -78,6 +78,8 @@ export interface AgentRuntimeOptions {
   skills?: string[];
   /** Runtime-facing context for non-pi runtimes that cannot consume JS ToolDefinition objects directly. */
   runtimeContext?: AgentRuntimeContext;
+  /** Optional task-scoped environment variables for session-local subprocesses. */
+  taskEnv?: NodeJS.ProcessEnv;
   /**
    * Last-chance abort hook fired by the runtime *immediately before* the
    * underlying LLM session is instantiated — i.e., after all of the runtime's

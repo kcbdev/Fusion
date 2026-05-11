@@ -60,7 +60,7 @@ Generated artifacts are expected under:
 When the plugin contributes `executorRuntimeEnv`, executor-spawned task commands receive extra runtime wiring:
 
 - Generated CLI artifact directories for each service's latest `generated` spec are prepended to task `PATH` (deduped, absolute paths only).
-- Credentials with `kind: "env_var"` are decoded and injected as environment variables for task subprocesses.
+- Credentials with `kind: "env_var"` are decoded and injected as environment variables for task subprocesses, including executor agent-session subprocesses (for example `bash` tool commands run inside `createFnAgent(...)`).
 - Non-env credential kinds (`header`, `query_param`, `basic_auth`, `bearer_token`, `api_key`) are intentionally excluded from env injection and remain request-time concerns.
 
 Security model:

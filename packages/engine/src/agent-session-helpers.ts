@@ -45,13 +45,9 @@ export interface ResolvedSessionOptions extends AgentRuntimeOptions {
   /** Optional runtime hint from task/agent configuration */
   runtimeHint?: string;
   /**
-   * `beforeSpawnSession` is inherited from {@link AgentRuntimeOptions} — see
-   * its definition there for the contract. Callers (e.g. the reviewer's
-   * pause gate) throw from this callback to cancel session creation when
-   * external state changed during the async setup window. Forwarded
-   * verbatim to `runtime.createSession()`; the runtime is responsible for
-   * invoking it at its latest synchronous point before the underlying LLM
-   * session is instantiated.
+   * `beforeSpawnSession` and `taskEnv` are inherited from
+   * {@link AgentRuntimeOptions}. Both are forwarded verbatim to
+   * `runtime.createSession()`.
    */
 }
 

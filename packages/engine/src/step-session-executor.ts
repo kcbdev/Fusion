@@ -1004,6 +1004,7 @@ Follow instructions precisely and avoid unrelated changes.`,
               taskId: taskDetail.id,
               taskTitle: taskDetail.title,
             }),
+            taskEnv: this.options.taskEnv,
           });
           session = createResult.session;
 

@@ -749,6 +749,8 @@ export interface AgentOptions {
    *  (and `skillSelection` is not), auto-constructs a SkillSelectionContext
    *  from the cwd and these names. Ignored when `skillSelection` is set. */
   skills?: string[];
+  /** Optional task-scoped env injected into this session's subprocess tools only. */
+  taskEnv?: NodeJS.ProcessEnv;
   /** Last-chance abort hook fired immediately before `createAgentSession`.
    *  See `AgentRuntimeOptions.beforeSpawnSession`. */
   beforeSpawnSession?: () => Promise<void> | void;
@@ -1598,6 +1600,19 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
   // Grep→grep). When a coding session ran via Claude CLI tried `Glob`, pi
   // returned "Tool find not found" and the agent looped. Compose explicitly
   // so every tool referenced by tool-mapping.ts is registered.
+  const bashToolOptions = options.taskEnv
+    ? {
+        spawnHook: ({ command, cwd, env }: { command: string; cwd: string; env: NodeJS.ProcessEnv }) => ({
+          command,
+          cwd,
+          env: {
+            ...env,
+            ...options.taskEnv,
+          },
+        }),
+      }
+    : undefined;
+
   const tools =
     options.tools === "readonly"
       ? [
@@ -1608,7 +1623,7 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
         ]
       : [
           createReadTool(options.cwd),
-          createBashTool(options.cwd),
+          createBashTool(options.cwd, bashToolOptions),
           createEditTool(options.cwd),
           createWriteTool(options.cwd),
           createGrepTool(options.cwd),

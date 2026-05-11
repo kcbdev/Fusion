@@ -2507,9 +2507,9 @@ export class TaskExecutor {
       });
       const pathPrepend = runtimeEnvContribution?.pathPrepend ?? [];
       const injectedEnv = runtimeEnvContribution?.env ?? {};
-      // We intentionally do NOT mutate process.env globally. Agent session subprocesses
-      // currently inherit the engine process env only; piping taskEnv into AgentRuntimeOptions
-      // is tracked as follow-up work.
+      // We intentionally do NOT mutate process.env globally. This task-scoped env is
+      // passed through AgentRuntimeOptions so executor session subprocesses inherit it
+      // without leaking across concurrent tasks.
       taskEnv = {
         ...process.env,
         ...injectedEnv,
@@ -3013,7 +3013,7 @@ export class TaskExecutor {
         ...(executionMode !== "fast" ? [
           this.createReviewStepTool(task.id, worktreePath, detail.prompt, codeReviewVerdicts, sessionRef, stepCheckpoints, detail, stuckDetector),
         ] : []),
-        this.createSpawnAgentTool(task.id, worktreePath, settings),
+        this.createSpawnAgentTool(task.id, worktreePath, settings, taskEnv),
         this.createTaskDocumentWriteTool(task.id),
         this.createTaskDocumentReadTool(task.id),
         ...(isResearchToolSurfaceEnabled(settings)
@@ -3142,6 +3142,7 @@ export class TaskExecutor {
           fallbackModelId: executorFallbackModelId,
           defaultThinkingLevel: executorThinkingLevel,
           sessionManager,
+          taskEnv,
           // Skill selection: use assigned agent skills if available, otherwise role fallback
           ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
           actionGateContext: this.buildActionGateContext(task.id, assignedAgent),
@@ -3472,6 +3473,7 @@ export class TaskExecutor {
                 fallbackModelId: executorFallbackModelId,
                 defaultThinkingLevel: executorThinkingLevel,
                 sessionManager: SessionManager.create(worktreePath),
+                taskEnv,
                 // Skill selection: use assigned agent skills if available, otherwise role fallback
                 ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
                 actionGateContext: this.buildActionGateContext(task.id, assignedAgent),
@@ -4927,6 +4929,7 @@ Do not refactor, rename broadly, or make opportunistic improvements.
         defaultProvider: executorProvider,
         defaultModelId: executorModelId,
         defaultThinkingLevel: settings.defaultThinkingLevel,
+        taskEnv: extraEnv,
         ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
       });
 
@@ -5369,7 +5372,7 @@ ${failureFeedback}
       try {
         const result: WorkflowStepOutcome = stepMode === "script"
           ? await this.executeScriptWorkflowStep(task, ws, worktreePath, settings, taskEnv)
-          : await this.executeWorkflowStep(task, ws, worktreePath, settings);
+          : await this.executeWorkflowStep(task, ws, worktreePath, settings, taskEnv);
         if (await this.shouldDeferWorkflowStepCompletion(task.id, `workflow step '${ws.name}'`)) {
           return "deferred-paused";
         }
@@ -5532,6 +5535,7 @@ ${failureFeedback}
     workflowStep: WorkflowStep,
     worktreePath: string,
     settings: Settings,
+    taskEnv?: NodeJS.ProcessEnv,
   ): Promise<WorkflowStepOutcome> {
     const toolMode: "coding" | "readonly" = workflowStep.toolMode || "readonly";
 
@@ -5684,6 +5688,7 @@ and show an appropriate message to the user.\`
         fallbackProvider: settings.fallbackProvider,
         fallbackModelId: settings.fallbackModelId,
         defaultThinkingLevel: settings.defaultThinkingLevel,
+        taskEnv,
         // Skill selection: use assigned agent skills if available, otherwise role fallback
         ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
       });
@@ -7152,7 +7157,12 @@ and show an appropriate message to the user.\`
    * Create the fn_spawn_agent tool definition.
    * Allows the parent agent to spawn child agents with delegated tasks.
    */
-  private createSpawnAgentTool(taskId: string, worktreePath: string, settings: Settings): ToolDefinition {
+  private createSpawnAgentTool(
+    taskId: string,
+    worktreePath: string,
+    settings: Settings,
+    taskEnv?: NodeJS.ProcessEnv,
+  ): ToolDefinition {
     return {
       name: "fn_spawn_agent",
       label: "Spawn Agent",
@@ -7264,6 +7274,7 @@ Child agent: ${agent.id} (${name})`;
             defaultModelId: childExecutorModelId,
             fallbackProvider: settings.fallbackProvider,
             fallbackModelId: settings.fallbackModelId,
+            taskEnv,
             // Skill selection: use assigned agent skills if available, otherwise role fallback
             ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
           });

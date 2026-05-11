@@ -1,9 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   extractRuntimeHint,
   resolveHeartbeatSessionModels,
   resolveMergerSessionModel,
 } from "../agent-session-helpers.js";
+
+const { resolveRuntimeMock } = vi.hoisted(() => ({
+  resolveRuntimeMock: vi.fn(),
+}));
+
+vi.mock("../runtime-resolution.js", async () => {
+  const actual = await vi.importActual<typeof import("../runtime-resolution.js")>("../runtime-resolution.js");
+  return {
+    ...actual,
+    resolveRuntime: resolveRuntimeMock,
+  };
+});
 
 describe("extractRuntimeHint", () => {
   it("returns undefined for undefined config", () => {
@@ -71,6 +83,48 @@ describe("resolveHeartbeatSessionModels", () => {
       fallbackProvider: undefined,
       fallbackModelId: undefined,
     });
+  });
+});
+
+describe("createResolvedAgentSession", () => {
+  beforeEach(() => {
+    resolveRuntimeMock.mockReset();
+  });
+
+  it("forwards taskEnv unchanged to runtime session factory", async () => {
+    const mockSession = { prompt: vi.fn() } as any;
+    const createSessionMock = vi.fn().mockResolvedValue({
+      session: mockSession,
+      sessionFile: "session.json",
+    });
+    resolveRuntimeMock.mockResolvedValue({
+      runtime: {
+        id: "pi",
+        name: "Default PI Runtime",
+        createSession: createSessionMock,
+        promptWithFallback: vi.fn(),
+        describeModel: vi.fn(() => "mock/model"),
+      },
+      runtimeId: "pi",
+      wasConfigured: false,
+    });
+
+    const { createResolvedAgentSession } = await import("../agent-session-helpers.js");
+
+    const taskEnv = { PATH: "/tmp/bin", FUSION_TEST_VAR: "value" };
+    await createResolvedAgentSession({
+      sessionPurpose: "executor",
+      pluginRunner: undefined,
+      cwd: "/tmp/project",
+      systemPrompt: "system",
+      taskEnv,
+    });
+
+    expect(createSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskEnv,
+      }),
+    );
   });
 });
 

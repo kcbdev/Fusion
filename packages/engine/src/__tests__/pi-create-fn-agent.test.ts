@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PathLike } from "node:fs";
 
 const createAgentSessionMock = vi.fn();
+const createBashToolMock = vi.fn((cwd: string, options?: any) => ({ name: "bash", cwd, options }));
 const createCodingToolsMock = vi.fn(() => []);
 const createReadOnlyToolsMock = vi.fn(() => []);
 const createExtensionRuntimeMock = vi.fn();
@@ -81,7 +82,7 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
     }),
   },
   createAgentSession: createAgentSessionMock,
-  createBashTool: () => ({ name: "bash" }),
+  createBashTool: createBashToolMock,
   createCodingTools: createCodingToolsMock,
   createEditTool: () => ({ name: "edit" }),
   createExtensionRuntime: createExtensionRuntimeMock,
@@ -810,6 +811,7 @@ describe("createFnAgent", () => {
     readFileSyncMock.mockReturnValue("{}");
     readCustomProvidersMock.mockReturnValue([]);
     findMock.mockImplementation((provider: string, modelId: string) => ({ provider, id: modelId }));
+    createBashToolMock.mockClear();
     createAgentSessionMock.mockResolvedValue({
       session: {
         prompt: vi.fn(),
@@ -818,6 +820,55 @@ describe("createFnAgent", () => {
         setThinkingLevel: vi.fn(),
       },
     });
+  });
+
+  it("passes task-scoped env into bash spawn hook when provided", async () => {
+    const { createFnAgent } = await import("../pi.js");
+
+    await createFnAgent({
+      cwd: "/project",
+      systemPrompt: "test",
+      tools: "coding",
+      taskEnv: { PATH: "/task/bin", TASK_ONLY: "1" },
+    });
+
+    expect(createBashToolMock).toHaveBeenCalledWith(
+      "/project",
+      expect.objectContaining({
+        spawnHook: expect.any(Function),
+      }),
+    );
+
+    const spawnHook = createBashToolMock.mock.calls.at(-1)?.[1]?.spawnHook;
+    const originalEnv = { PATH: "/base/bin", HOME: "/home/user" };
+    const spawned = spawnHook({
+      command: "echo hi",
+      cwd: "/project",
+      env: originalEnv,
+    });
+
+    expect(spawned).toEqual({
+      command: "echo hi",
+      cwd: "/project",
+      env: {
+        PATH: "/task/bin",
+        HOME: "/home/user",
+        TASK_ONLY: "1",
+      },
+    });
+    expect(originalEnv).toEqual({ PATH: "/base/bin", HOME: "/home/user" });
+  });
+
+  it("keeps bash tool default behavior when taskEnv is not provided", async () => {
+    const { createFnAgent } = await import("../pi.js");
+
+    await createFnAgent({
+      cwd: "/project",
+      systemPrompt: "test",
+      tools: "coding",
+    });
+
+    expect(createBashToolMock).toHaveBeenCalledWith("/project", undefined);
   });
 
   it("refuses to start a coding agent in an unregistered worktree", async () => {
