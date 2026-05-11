@@ -107,8 +107,23 @@ Agent provisioning approvals (`agent_provisioning` category):
 - `fn_agent_create` / `fn_agent_delete` can return `pending_approval` under `projectSettings.agentProvisioning` policy (`approvalMode`, trusted roles/IDs, `alwaysApproveDelete`).
 - Approval request is persisted with provisioning context (`tool` + `params`) and visible in mailbox/API approval queues.
 - Dashboard/API decision route `POST /api/approvals/:id/decision` executes deferred provisioning on `approve` via engine dispatcher (`executeApprovedAgentProvisioning`) and never executes on `deny`.
-- Decision handling emits run-audit mutations: `agent:create:approved`, `agent:create:denied`, `agent:delete:approved`, `agent:delete:denied` using original request task/run/requester linkage.
+- Decision handling emits run-audit mutations: `agent:create:{requested,approved,denied}` and `agent:delete:{requested,approved,denied}` using original request task/run/requester linkage.
 - Malformed provisioning context or failed execution returns 500 from the decision route (no silent approval).
+
+Resolver decision table (`resolveAgentProvisioningPolicy`):
+
+| matchedRule | decision | Notes |
+| --- | --- | --- |
+| `missing-caller` | `deny` | Caller context missing. |
+| `privileged-caller` | `allow` | Bypasses trust checks and `alwaysApproveDelete`. |
+| `approval-mode-never` | `allow` | Global short-circuit, including deletes. |
+| `delete-always-approve` | `require-approval` | Default delete behavior when not short-circuited. |
+| `trusted-agent-id` | `allow` | Exact caller ID allowlist match. |
+| `trusted-role` | `allow` | Case-insensitive role allowlist match. |
+| `approval-mode-trusted-only` | `require-approval` | Untrusted fallback in default mode. |
+| `approval-mode-always` | `require-approval` | Approval always required unless privileged/never mode. |
+
+Out of scope in FN-3791: `spawn_agent` (ephemeral child worktree lifecycle). Follow-up task: "Evaluate approval guards for `spawn_agent` (ephemeral worktree children)".
 
 Default and legacy fallback behavior:
 

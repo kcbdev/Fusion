@@ -319,6 +319,21 @@ describe("approval routes", async () => {
     expect(state.runAuditEvents.at(-1)).toMatchObject({ mutationType: "agent:delete:approved", runId: "run-2" });
   });
 
+  it("denies provisioning delete without execution and records denied audit", async () => {
+    const app = createApp();
+    const res = await request(
+      app,
+      "POST",
+      "/api/approvals/apr-4/decision",
+      JSON.stringify({ decision: "deny" }),
+      { "content-type": "application/json" },
+    );
+    expect(res.status).toBe(200);
+    expect(executeApprovedAgentProvisioning).not.toHaveBeenCalled();
+    expect(state.provisionedAgents.has("target-1")).toBe(true);
+    expect(state.runAuditEvents.at(-1)).toMatchObject({ mutationType: "agent:delete:denied", runId: "run-2" });
+  });
+
   it("returns 500 for malformed provisioning request context", async () => {
     const app = createApp();
     const res = await request(
@@ -332,7 +347,8 @@ describe("approval routes", async () => {
     expect(res.body.error).toContain("Malformed agent provisioning request");
   });
 
-  it("returns 409 for invalid transition", async () => {    const app = createApp();
+  it("returns 409 for invalid transition", async () => {
+    const app = createApp();
     const res = await request(
       app,
       "POST",
