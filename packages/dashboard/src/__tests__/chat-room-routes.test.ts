@@ -312,7 +312,7 @@ describe("Chat Room API Routes", () => {
     expect(missingMessage.status).toBe(404);
   });
 
-  it("resolves project-scoped room services for message replies", async () => {
+  it("resolves project-scoped room services for room reads and message replies", async () => {
     const scopedRoot = mkdtempSync(join(tmpdir(), "fusion-chat-room-scoped-"));
     const scopedFusionDir = join(scopedRoot, ".fusion");
     const scopedDb = new Database(scopedFusionDir, { inMemory: true });
@@ -332,6 +332,12 @@ describe("Chat Room API Routes", () => {
       name: "Scoped Room",
       projectId: "proj-scope",
       memberAgentIds: [scopedAgent.id],
+    });
+    const seededMessage = scopedChatStore.addRoomMessage(room.id, {
+      role: "user",
+      content: "seeded scoped message",
+      senderAgentId: null,
+      mentions: [],
     });
 
     const defaultChatManager = {
@@ -361,6 +367,14 @@ describe("Chat Room API Routes", () => {
       thinkingOutput: null,
       metadata: { roomId: room.id },
     });
+
+    const listRes = await request(appWithScopedEngine, "GET", "/api/chat/rooms?projectId=proj-scope");
+    expect(listRes.status).toBe(200);
+    expect((listRes.body as any).rooms.map((entry: any) => entry.id)).toEqual([room.id]);
+
+    const messagesRes = await request(appWithScopedEngine, "GET", `/api/chat/rooms/${room.id}/messages?projectId=proj-scope`);
+    expect(messagesRes.status).toBe(200);
+    expect((messagesRes.body as any).messages.map((entry: any) => entry.id)).toContain(seededMessage.id);
 
     const postRes = await request(
       appWithScopedEngine,

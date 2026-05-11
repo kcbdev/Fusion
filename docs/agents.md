@@ -978,6 +978,35 @@ Heartbeat runs from the Agents panel run on a **separate control-plane lane** th
 | HeartbeatTriggerScheduler | Utility/control plane | **NOT** semaphore-gated |
 | CronRunner | Utility/control plane | **NOT** semaphore-gated |
 
+### Timer Repair Sweep for Missing Registrations (FN-3959)
+
+`HeartbeatTriggerScheduler` now owns a timer-registration repair sweep so durable agents cannot stay unscheduled when in-memory timer entries are lost without a follow-up lifecycle event.
+
+Cadence:
+- **Immediate startup audit**: runs once in `start()` after lifecycle watchers are attached
+- **Periodic audit**: runs every 60s while the scheduler is active
+- **Cleanup**: periodic sweep interval is cleared in `stop()`
+
+Repair eligibility:
+- Durable (non-ephemeral/task-worker) agent
+- `runtimeConfig.enabled !== false`
+- Agent state is tickable: `active`, `running`, or `idle`
+- Agent is missing from the scheduler's in-memory `timers` map
+
+Repair outcomes:
+- **Missing timer, not stale**: timer is re-armed and INFO diagnostics are logged (`agentId`, resolved interval, elapsed time since `lastHeartbeatAt`)
+- **Missing timer, stale**: timer is re-armed, WARN diagnostics are logged, and `agent.metadata.heartbeatTimerRepair` is updated (`repairedAt`, `staleAtRepair`, `elapsedMs`, `staleThresholdMs`)
+
+Stale threshold:
+- Repair staleness defaults to **`2 × heartbeatIntervalMs`**
+- This is intentionally separate from dashboard display staleness (`4×` grace multiplier)
+
+Dashboard surfacing path:
+- The stale-repair metadata write uses the existing `AgentStore.updateAgent(...)` path
+- That emits `agent:updated`, which already flows through SSE (`packages/dashboard/src/sse.ts`)
+- `useAgents` already refreshes on `agent:updated`/`agent:stateChanged` (`packages/dashboard/app/hooks/useAgents.ts`)
+- No new SSE event is introduced; stale durable agents become dashboard-visible as `Unresponsive` through the existing refresh path
+
 ### Timer State Lifecycle (FN-2289)
 
 Heartbeat timers are armed for agents in valid working states and remain armed across state transitions:

@@ -13,6 +13,7 @@ import { createSSE, disconnectSSEClient, markSSEClientAlive } from "./sse.js";
 import { rateLimit, RATE_LIMITS } from "./rate-limit.js";
 import { ApiError, sendErrorResponse } from "./api-error.js";
 import { getOrCreateProjectStore, evictAllProjectStores, setOnProjectFirstCreated } from "./project-store-resolver.js";
+import { getOrCreateScopedChatStore } from "./chat-project-services.js";
 import { getTerminalService, STALE_SESSION_THRESHOLD_MS } from "./terminal-service.js";
 import { WebSocketServer, type WebSocket } from "ws";
 import { terminalSessionManager } from "./terminal.js";
@@ -660,15 +661,18 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
       let agentStore;
       let messageStore: MessageStore | undefined;
       let automationStore: AutomationStore | undefined;
+      let scopedChatStore = chatStore;
       if (engineManager) {
         const engine = engineManager.getEngine(projectId);
         scopedStore = engine?.getTaskStore() ?? await getOrCreateProjectStore(projectId);
+        scopedChatStore = getOrCreateScopedChatStore(scopedStore);
         // Use the engine's stores if available
         agentStore = engine?.getAgentStore();
         messageStore = engine?.getMessageStore();
         automationStore = engine?.getAutomationStore();
       } else {
         scopedStore = await getOrCreateProjectStore(projectId);
+        scopedChatStore = getOrCreateScopedChatStore(scopedStore);
       }
       // Fallback: create AgentStore if engine doesn't have one
       if (!agentStore) {
@@ -689,7 +693,7 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
         },
         agentStore,
         messageStore,
-        chatStore,
+        scopedChatStore,
         automationStore,
       )(req, res);
     } catch (err: unknown) {

@@ -1,6 +1,7 @@
-import { AgentStore, ChatStore, type ChatAttachment, type ChatRoomCreateInput, type ChatRoomStatus, type ChatRoomUpdateInput } from "@fusion/core";
+import type { ChatAttachment, ChatRoomCreateInput, ChatRoomStatus, ChatRoomUpdateInput } from "@fusion/core";
 import type { Request } from "express";
-import { ChatManager, RoomReplyGenerationError } from "../chat.js";
+import { RoomReplyGenerationError } from "../chat.js";
+import { createProjectScopedChatManager, resolveProjectChatContext } from "../chat-project-services.js";
 import { ApiError, badRequest, internalError, notFound } from "../api-error.js";
 import { rateLimit, RATE_LIMITS } from "../rate-limit.js";
 import type { ApiRoutesContext } from "./types.js";
@@ -11,65 +12,54 @@ function isSlugCollisionError(err: unknown): boolean {
 }
 
 export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
-  const { router, options, chatLogger, rethrowAsApiError, getProjectContext } = ctx;
-  const scopedRoomManagers = new Map<string, { chatStore: ChatStore; chatManager: ChatManager }>();
+  const { router, options, chatLogger, rethrowAsApiError } = ctx;
 
-  async function resolveRoomScopedServices(req: Request, roomProjectId: string | null | undefined): Promise<{ chatStore: ChatStore; chatManager: ChatManager }> {
+  function getRequestedProjectId(req: Request): string | undefined {
+    return typeof req.query.projectId === "string"
+      ? req.query.projectId
+      : (typeof req.body?.projectId === "string" ? req.body.projectId : undefined);
+  }
+
+  async function resolveRoomScopedServices(req: Request, roomProjectId: string | null | undefined) {
     if (!roomProjectId) {
       const chatStore = options?.chatStore;
       const chatManager = options?.chatManager;
       if (!chatStore || !chatManager) {
         throw internalError("Chat store or manager not available");
       }
-      return { chatStore, chatManager };
+      return { store: ctx.store, chatStore, chatManager };
     }
 
-    const cached = scopedRoomManagers.get(roomProjectId);
-    if (cached) {
-      return cached;
+    const { store: scopedStore, chatStore } = await resolveProjectChatContext({
+      projectId: roomProjectId,
+      defaultStore: ctx.store,
+      defaultChatStore: options?.chatStore,
+      engineManager: options?.engineManager,
+    });
+
+    if (scopedStore === ctx.store && options?.chatStore && options?.chatManager) {
+      return { store: ctx.store, chatStore: options.chatStore, chatManager: options.chatManager };
     }
 
-    const scopedReq = {
-      ...req,
-      query: { ...(req.query as Record<string, unknown>), projectId: roomProjectId },
-      body: typeof req.body === "object" && req.body !== null
-        ? { ...(req.body as Record<string, unknown>), projectId: roomProjectId }
-        : { projectId: roomProjectId },
-    } as unknown as Request;
-    const { store: scopedStore, engine } = await getProjectContext(scopedReq);
-
-    const scopedChatStore = new ChatStore(scopedStore.getFusionDir(), scopedStore.getDatabase());
-    const scopedAgentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
-    const scopedChatManager = new ChatManager(
-      scopedChatStore,
-      scopedStore.getRootDir(),
-      scopedAgentStore,
-      options?.pluginRunner,
-      () => scopedStore.getSettings(),
-      engine?.getMessageStore(),
-    );
-
-    const resolved = { chatStore: scopedChatStore, chatManager: scopedChatManager };
-    scopedRoomManagers.set(roomProjectId, resolved);
-    return resolved;
+    const engine = options?.engineManager?.getEngine(roomProjectId);
+    const chatManager = await createProjectScopedChatManager({
+      store: scopedStore,
+      chatStore,
+      pluginRunner: options?.pluginRunner,
+      messageStore: engine?.getMessageStore(),
+    });
+    return { store: scopedStore, chatStore, chatManager };
   }
 
   router.get("/chat/rooms", rateLimit(RATE_LIMITS.api), async (req, res) => {
     try {
-      const chatStore = options?.chatStore;
-      if (!chatStore) throw internalError("Chat store not available");
-
-      const { projectId, status, agentId } = req.query as {
-        projectId?: string;
-        status?: string;
-        agentId?: string;
-      };
-
+      const projectId = getRequestedProjectId(req);
+      const { chatStore } = await resolveRoomScopedServices(req, projectId);
+      const { status, agentId } = req.query as { status?: string; agentId?: string };
       const statusFilter = status as ChatRoomStatus | undefined;
       const rooms = agentId
         ? chatStore.listRoomsForAgent(agentId, { projectId, status: statusFilter })
         : chatStore.listRooms({ projectId, status: statusFilter });
-
       res.json({ rooms });
     } catch (err: unknown) {
       if (err instanceof ApiError) throw err;
@@ -79,9 +69,6 @@ export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
 
   router.post("/chat/rooms", rateLimit(RATE_LIMITS.mutation), async (req, res) => {
     try {
-      const chatStore = options?.chatStore;
-      if (!chatStore) throw internalError("Chat store not available");
-
       const { name, description, projectId, createdBy, memberAgentIds } = req.body as {
         name?: string;
         description?: string | null;
@@ -89,11 +76,11 @@ export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
         createdBy?: string | null;
         memberAgentIds?: string[];
       };
-
       if (!name || typeof name !== "string" || !name.trim()) {
         throw badRequest("name is required and must be a non-empty string");
       }
 
+      const { chatStore } = await resolveRoomScopedServices(req, projectId);
       const roomInput: ChatRoomCreateInput & { memberAgentIds?: string[] } = {
         name: name.trim(),
         ...(description !== undefined ? { description } : {}),
@@ -122,13 +109,10 @@ export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
 
   router.get("/chat/rooms/:id", rateLimit(RATE_LIMITS.api), async (req, res) => {
     try {
-      const chatStore = options?.chatStore;
-      if (!chatStore) throw internalError("Chat store not available");
-
+      const { chatStore } = await resolveRoomScopedServices(req, getRequestedProjectId(req));
       const roomId = String(req.params.id);
       const room = chatStore.getRoom(roomId);
       if (!room) throw notFound(`Chat room ${roomId} not found`);
-
       const members = chatStore.listRoomMembers(roomId);
       res.json({ room, members });
     } catch (err: unknown) {
@@ -139,16 +123,13 @@ export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
 
   router.patch("/chat/rooms/:id", rateLimit(RATE_LIMITS.mutation), async (req, res) => {
     try {
-      const chatStore = options?.chatStore;
-      if (!chatStore) throw internalError("Chat store not available");
-
-      const roomId = String(req.params.id);
       const { name, description, status } = req.body as { name?: string; description?: string | null; status?: ChatRoomStatus };
-
       if (name === undefined && description === undefined && status === undefined) {
         throw badRequest("at least one of name, description, or status is required");
       }
 
+      const { chatStore } = await resolveRoomScopedServices(req, getRequestedProjectId(req));
+      const roomId = String(req.params.id);
       const input: ChatRoomUpdateInput = {
         ...(name !== undefined ? { name: name.trim() } : {}),
         ...(description !== undefined ? { description } : {}),
@@ -175,13 +156,10 @@ export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
 
   router.delete("/chat/rooms/:id", rateLimit(RATE_LIMITS.mutation), async (req, res) => {
     try {
-      const chatStore = options?.chatStore;
-      if (!chatStore) throw internalError("Chat store not available");
-
+      const { chatStore } = await resolveRoomScopedServices(req, getRequestedProjectId(req));
       const roomId = String(req.params.id);
       const room = chatStore.getRoom(roomId);
       if (!room) throw notFound(`Chat room ${roomId} not found`);
-
       chatStore.deleteRoom(roomId);
       res.json({ success: true });
     } catch (err: unknown) {
@@ -192,13 +170,10 @@ export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
 
   router.get("/chat/rooms/:id/members", rateLimit(RATE_LIMITS.api), async (req, res) => {
     try {
-      const chatStore = options?.chatStore;
-      if (!chatStore) throw internalError("Chat store not available");
-
+      const { chatStore } = await resolveRoomScopedServices(req, getRequestedProjectId(req));
       const roomId = String(req.params.id);
       const room = chatStore.getRoom(roomId);
       if (!room) throw notFound(`Chat room ${roomId} not found`);
-
       const members = chatStore.listRoomMembers(roomId);
       res.json({ members });
     } catch (err: unknown) {
@@ -209,9 +184,7 @@ export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
 
   router.post("/chat/rooms/:id/members", rateLimit(RATE_LIMITS.mutation), async (req, res) => {
     try {
-      const chatStore = options?.chatStore;
-      if (!chatStore) throw internalError("Chat store not available");
-
+      const { chatStore } = await resolveRoomScopedServices(req, getRequestedProjectId(req));
       const roomId = String(req.params.id);
       const room = chatStore.getRoom(roomId);
       if (!room) throw notFound(`Chat room ${roomId} not found`);
@@ -234,14 +207,11 @@ export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
 
   router.delete("/chat/rooms/:id/members/:agentId", rateLimit(RATE_LIMITS.mutation), async (req, res) => {
     try {
-      const chatStore = options?.chatStore;
-      if (!chatStore) throw internalError("Chat store not available");
-
+      const { chatStore } = await resolveRoomScopedServices(req, getRequestedProjectId(req));
       const roomId = String(req.params.id);
       const agentId = String(req.params.agentId);
       const removed = chatStore.removeRoomMember(roomId, agentId);
       if (!removed) throw notFound(`Room member ${agentId} not found in room ${roomId}`);
-
       res.json({ success: true });
     } catch (err: unknown) {
       if (err instanceof ApiError) throw err;
@@ -251,9 +221,7 @@ export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
 
   router.get("/chat/rooms/:id/messages", rateLimit(RATE_LIMITS.api), async (req, res) => {
     try {
-      const chatStore = options?.chatStore;
-      if (!chatStore) throw internalError("Chat store not available");
-
+      const { chatStore } = await resolveRoomScopedServices(req, getRequestedProjectId(req));
       const roomId = String(req.params.id);
       const room = chatStore.getRoom(roomId);
       if (!room) throw notFound(`Chat room ${roomId} not found`);
@@ -269,7 +237,6 @@ export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
         offset,
         ...(before ? { before } : {}),
       });
-
       res.json({ messages });
     } catch (err: unknown) {
       if (err instanceof ApiError) throw err;
@@ -279,24 +246,17 @@ export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
 
   router.post("/chat/rooms/:id/messages", rateLimit(RATE_LIMITS.mutation), async (req, res) => {
     try {
-      const defaultChatStore = options?.chatStore;
-      if (!defaultChatStore) throw internalError("Chat store not available");
-
       const roomId = String(req.params.id);
-      const hintedProjectId = typeof req.query.projectId === "string"
-        ? req.query.projectId
-        : (typeof req.body?.projectId === "string" ? req.body.projectId : undefined);
-      const room = defaultChatStore.getRoom(roomId)
-        ?? (hintedProjectId ? (await resolveRoomScopedServices(req, hintedProjectId)).chatStore.getRoom(roomId) : undefined);
+      const requestedProjectId = getRequestedProjectId(req);
+      const { chatStore } = await resolveRoomScopedServices(req, requestedProjectId);
+      const room = chatStore.getRoom(roomId);
       if (!room) throw notFound(`Chat room ${roomId} not found`);
 
       const { content, senderAgentId, attachments } = req.body as {
         content?: string;
         senderAgentId?: string | null;
-        mentions?: string[];
         attachments?: ChatAttachment[];
       };
-
       if (!content || typeof content !== "string" || !content.trim()) {
         throw badRequest("content is required and must be a non-empty string");
       }
@@ -306,7 +266,6 @@ export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
 
       const { chatManager } = await resolveRoomScopedServices(req, room.projectId);
       const result = await chatManager.sendRoomMessage(roomId, content.trim(), Array.isArray(attachments) ? attachments : undefined);
-
       res.status(201).json({ message: result.userMessage });
     } catch (err: unknown) {
       if (err instanceof ApiError) throw err;
@@ -319,19 +278,15 @@ export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
 
   router.delete("/chat/rooms/:id/messages/:messageId", rateLimit(RATE_LIMITS.mutation), async (req, res) => {
     try {
-      const chatStore = options?.chatStore;
-      if (!chatStore) throw internalError("Chat store not available");
-
+      const { chatStore } = await resolveRoomScopedServices(req, getRequestedProjectId(req));
       const roomId = String(req.params.id);
       const messageId = String(req.params.messageId);
       const room = chatStore.getRoom(roomId);
       if (!room) throw notFound(`Chat room ${roomId} not found`);
-
       const message = chatStore.getRoomMessage(messageId);
       if (!message || message.roomId !== roomId) {
         throw notFound(`Message ${messageId} not found`);
       }
-
       chatStore.deleteRoomMessage(messageId);
       res.json({ success: true });
     } catch (err: unknown) {
@@ -342,14 +297,11 @@ export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
 
   router.post("/chat/rooms/:id/messages/:messageId/attachments", rateLimit(RATE_LIMITS.mutation), async (req, res) => {
     try {
-      const chatStore = options?.chatStore;
-      if (!chatStore) throw internalError("Chat store not available");
-
+      const { chatStore } = await resolveRoomScopedServices(req, getRequestedProjectId(req));
       const roomId = String(req.params.id);
       const messageId = String(req.params.messageId);
       const room = chatStore.getRoom(roomId);
       if (!room) throw notFound(`Chat room ${roomId} not found`);
-
       const message = chatStore.getRoomMessage(messageId);
       if (!message || message.roomId !== roomId) {
         throw notFound(`Message ${messageId} not found`);
@@ -369,20 +321,21 @@ export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
   });
 
   if (process.env.FUSION_DEBUG_CHAT_ROUTES === "1") {
-    const chatRoomRoutes = [
-      "GET /chat/rooms",
-      "POST /chat/rooms",
-      "GET /chat/rooms/:id",
-      "PATCH /chat/rooms/:id",
-      "DELETE /chat/rooms/:id",
-      "GET /chat/rooms/:id/members",
-      "POST /chat/rooms/:id/members",
-      "DELETE /chat/rooms/:id/members/:agentId",
-      "GET /chat/rooms/:id/messages",
-      "POST /chat/rooms/:id/messages",
-      "DELETE /chat/rooms/:id/messages/:messageId",
-      "POST /chat/rooms/:id/messages/:messageId/attachments",
-    ];
-    chatLogger.info("room routes registered", { chatRoomRoutes });
+    chatLogger.info("room routes registered", {
+      chatRoomRoutes: [
+        "GET /chat/rooms",
+        "POST /chat/rooms",
+        "GET /chat/rooms/:id",
+        "PATCH /chat/rooms/:id",
+        "DELETE /chat/rooms/:id",
+        "GET /chat/rooms/:id/members",
+        "POST /chat/rooms/:id/members",
+        "DELETE /chat/rooms/:id/members/:agentId",
+        "GET /chat/rooms/:id/messages",
+        "POST /chat/rooms/:id/messages",
+        "DELETE /chat/rooms/:id/messages/:messageId",
+        "POST /chat/rooms/:id/messages/:messageId/attachments",
+      ],
+    });
   }
 }

@@ -209,6 +209,25 @@ describe("useChatRooms", () => {
     expect(result.current.messages.map((message) => message.id)).toEqual(["msg-user", "msg-assistant"]);
   });
 
+  it("refreshes persisted room messages even when room reply generation fails", async () => {
+    const active = room("room-1", "one", "2026-05-09T01:00:00.000Z");
+    mockFetchChatRooms.mockResolvedValueOnce({ rooms: [active] });
+    const { result } = renderHook(() => useChatRooms("proj-1"));
+    await waitFor(() => expect(result.current.rooms.length).toBe(1));
+
+    mockFetchChatRoomMembers.mockResolvedValueOnce({ members: [] });
+    mockFetchChatRoomMessages.mockResolvedValueOnce({ messages: [] });
+    act(() => result.current.selectRoom("room-1"));
+    await waitFor(() => expect(result.current.activeRoom?.id).toBe("room-1"));
+
+    const persistedUserMessage = roomMessage("msg-user", "room-1", "hello");
+    mockPostChatRoomMessage.mockRejectedValueOnce(new Error("No active room responders available for room room-1"));
+    mockFetchChatRoomMessages.mockResolvedValueOnce({ messages: [persistedUserMessage] });
+
+    await expect(result.current.sendRoomMessage("hello")).rejects.toThrow("No active room responders available for room room-1");
+    expect(result.current.messages.map((message) => message.id)).toEqual(["msg-user"]);
+  });
+
   it("tears down sse subscription on unmount", async () => {
     const { unmount } = renderHook(() => useChatRooms("proj-1"));
     unmount();
