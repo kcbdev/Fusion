@@ -49,6 +49,8 @@ The **Browser Verification** template uses browser automation style checks and i
 
 The **Frontend UX Design** template verifies visual polish and consistency with existing UI patterns and design tokens, including visual hierarchy, spacing/typography consistency, color/token consistency, component reuse, responsive behavior, and fit with existing design language.
 
+> **FN-3906 auto-skip behavior:** The pre-merge orchestrator now auto-skips the built-in `frontend-ux-design` step before pause/defer checks when the task diff scope has no frontend/UI files. Scope relevance includes extensions (`.tsx`, `.jsx`, `.vue`, `.svelte`, `.astro`, `.html`, `.css`, `.scss`, `.sass`, `.less`, `.styl`), common UI path segments (`/components/`, `/app/components/`, `/dashboard/`, `/frontend/`, `/ui/`, `/styles/`, `/themes/`, `/design-system/`, `/design-tokens/`), and token/theme filenames (`tokens.(ts|js|json|css)`, `theme.(ts|js|json|css)`). If scope capture is uncertain (error/empty list), the step falls back to normal execution and relies on the agent-side FAST-BAIL rule.
+
 ## Plugin-Contributed Steps
 
 Installed plugins can also provide **workflow step templates** that you enable from **Settings → Workflow Steps**, just like Fusion’s built-in quality gates.

@@ -157,7 +157,14 @@ export function createFusionAuthStorage(): AuthStorage {
       if (!shouldHydrateStoredCredential(current, credential)) {
         continue;
       }
-      if (credential.type === "oauth" || credential.type === "api_key") {
+      if (credential.type === "oauth") {
+        if (typeof credential.expires !== "number" || Date.now() >= credential.expires) {
+          continue;
+        }
+        primary.set(provider, credential as AuthCredential);
+        continue;
+      }
+      if (credential.type === "api_key") {
         primary.set(provider, credential as AuthCredential);
       }
     }

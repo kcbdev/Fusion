@@ -815,6 +815,212 @@ describe("Workflow Steps Execution", () => {
     );
   });
 
+  it("auto-skips built-in Frontend UX Design when diff scope has no frontend files", async () => {
+    const store = createMockStore();
+    const task = {
+      id: "FN-001",
+      title: "Test",
+      description: "Test task",
+      column: "in-progress" as const,
+      dependencies: [],
+      steps: [{ name: "Preflight", status: "done" as const }],
+      currentStep: 0,
+      log: [],
+      enabledWorkflowSteps: ["frontend-ux-design"],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    store.getTask.mockResolvedValue(task as any);
+    store.getWorkflowStep.mockResolvedValue({
+      id: "frontend-ux-design",
+      name: "Frontend UX Design",
+      description: "UI review",
+      prompt: "Review UI",
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    mockedExecSync.mockImplementation((cmd: string | string[]) => {
+      if (typeof cmd === "string" && cmd.includes("git merge-base HEAD origin/main")) {
+        return Buffer.from("abc123\n");
+      }
+      if (typeof cmd === "string" && cmd.includes("git diff --name-only abc123..HEAD")) {
+        return Buffer.from("packages/engine/src/foo.ts\n");
+      }
+      return Buffer.from("");
+    });
+
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+    const executeStepSpy = vi.spyOn(executor as any, "executeWorkflowStep").mockResolvedValue({ success: true, output: "ok" });
+
+    const result = await (executor as any).runWorkflowSteps(task, "/tmp/test", {});
+
+    expect(result).toEqual({ allPassed: true });
+    expect(executeStepSpy).not.toHaveBeenCalled();
+    expect(store.updateTask).toHaveBeenCalledWith(
+      "FN-001",
+      expect.objectContaining({
+        workflowStepResults: expect.arrayContaining([
+          expect.objectContaining({
+            workflowStepId: "frontend-ux-design",
+            status: "skipped",
+            output: expect.stringContaining("No frontend/UI files in diff scope"),
+          }),
+        ]),
+      }),
+    );
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-001",
+      "[pre-merge] Auto-skipped Frontend UX Design — no frontend/UI files in diff scope",
+    );
+    const logged = store.logEntry.mock.calls.map((call: any[]) => String(call[1] ?? ""));
+    expect(logged.some((line: string) => line.includes("Completion handoff deferred"))).toBe(false);
+  });
+
+  it("runs built-in Frontend UX Design normally when UI files are in scope", async () => {
+    const store = createMockStore();
+    const task = {
+      id: "FN-001",
+      title: "Test",
+      description: "Test task",
+      column: "in-progress" as const,
+      dependencies: [],
+      steps: [{ name: "Preflight", status: "done" as const }],
+      currentStep: 0,
+      log: [],
+      enabledWorkflowSteps: ["frontend-ux-design"],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    store.getTask.mockResolvedValue(task as any);
+    store.getWorkflowStep.mockResolvedValue({
+      id: "frontend-ux-design",
+      name: "Frontend UX Design",
+      description: "UI review",
+      prompt: "Review UI",
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    mockedExecSync.mockImplementation((cmd: string | string[]) => {
+      if (typeof cmd === "string" && cmd.includes("git merge-base HEAD origin/main")) {
+        return Buffer.from("abc123\n");
+      }
+      if (typeof cmd === "string" && cmd.includes("git diff --name-only abc123..HEAD")) {
+        return Buffer.from("packages/dashboard/app/components/Foo.tsx\n");
+      }
+      return Buffer.from("");
+    });
+
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+    const executeStepSpy = vi.spyOn(executor as any, "executeWorkflowStep").mockResolvedValue({ success: true, output: "approved" });
+
+    const result = await (executor as any).runWorkflowSteps(task, "/tmp/test", {});
+
+    expect(result).toEqual({ allPassed: true });
+    expect(executeStepSpy).toHaveBeenCalledTimes(1);
+    expect(store.updateTask).toHaveBeenCalledWith(
+      "FN-001",
+      expect.objectContaining({
+        workflowStepResults: expect.arrayContaining([
+          expect.objectContaining({ workflowStepId: "frontend-ux-design", status: "passed" }),
+        ]),
+      }),
+    );
+    const logged = store.logEntry.mock.calls.map((call: any[]) => String(call[1] ?? ""));
+    expect(logged.some((line: string) => line.includes("Auto-skipped Frontend UX Design"))).toBe(false);
+  });
+
+  it("avoids paused defer for built-in Frontend UX Design when no UI files are in scope", async () => {
+    const store = createMockStore();
+    const pausedTask = {
+      id: "FN-001",
+      title: "Test",
+      description: "Test task",
+      column: "in-progress" as const,
+      dependencies: [],
+      steps: [{ name: "Preflight", status: "done" as const }],
+      currentStep: 0,
+      paused: true,
+      log: [],
+      enabledWorkflowSteps: ["frontend-ux-design"],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    store.getTask.mockResolvedValue(pausedTask as any);
+    store.getWorkflowStep.mockResolvedValue({
+      id: "frontend-ux-design",
+      name: "Frontend UX Design",
+      description: "UI review",
+      prompt: "Review UI",
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    mockedExecSync.mockImplementation((cmd: string | string[]) => {
+      if (typeof cmd === "string" && cmd.includes("git merge-base HEAD origin/main")) {
+        return Buffer.from("abc123\n");
+      }
+      if (typeof cmd === "string" && cmd.includes("git diff --name-only abc123..HEAD")) {
+        return Buffer.from("packages/engine/src/foo.ts\n");
+      }
+      return Buffer.from("");
+    });
+
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+    const executeStepSpy = vi.spyOn(executor as any, "executeWorkflowStep").mockResolvedValue({ success: true, output: "ok" });
+
+    const result = await (executor as any).runWorkflowSteps(pausedTask, "/tmp/test", {});
+
+    expect(result).toEqual({ allPassed: true });
+    expect(executeStepSpy).not.toHaveBeenCalled();
+    const logged = store.logEntry.mock.calls.map((call: any[]) => String(call[1] ?? ""));
+    expect(logged.some((line: string) => line.includes("Auto-skipped Frontend UX Design — no frontend/UI files in diff scope"))).toBe(true);
+    expect(logged.some((line: string) => line.includes("Completion handoff deferred — task paused (before workflow step 'Frontend UX Design')"))).toBe(false);
+  });
+
+  it("does not auto-skip custom step id even when named Frontend UX Design", async () => {
+    const store = createMockStore();
+    const task = {
+      id: "FN-001",
+      title: "Test",
+      description: "Test task",
+      column: "in-progress" as const,
+      dependencies: [],
+      steps: [{ name: "Preflight", status: "done" as const }],
+      currentStep: 0,
+      log: [],
+      enabledWorkflowSteps: ["ws-custom-1"],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    store.getTask.mockResolvedValue(task as any);
+    store.getWorkflowStep.mockResolvedValue({
+      id: "ws-custom-1",
+      name: "Frontend UX Design",
+      description: "Custom UI review",
+      prompt: "Review UI",
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+    const executeStepSpy = vi.spyOn(executor as any, "executeWorkflowStep").mockResolvedValue({ success: true, output: "ok" });
+
+    const result = await (executor as any).runWorkflowSteps(task, "/tmp/test", {});
+
+    expect(result).toEqual({ allPassed: true });
+    expect(executeStepSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("executes script-mode workflow step successfully", async () => {
     const store = createMockStore();
     process.env.FN3968_SCRIPT_ENV = "workflow-script-env";

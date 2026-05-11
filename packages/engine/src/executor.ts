@@ -5434,6 +5434,26 @@ ${failureFeedback}
         continue;
       }
 
+      if (this.isFrontendUxStep(ws)) {
+        try {
+          const scopedFiles = await this.captureModifiedFiles(worktreePath, currentTask.baseCommitSha);
+          if (scopedFiles.length > 0 && !this.hasFrontendFilesInScope(scopedFiles)) {
+            results.push({
+              workflowStepId: ws.id,
+              workflowStepName: ws.name,
+              phase: stepPhase,
+              status: "skipped",
+              output: "No frontend/UI files in diff scope — auto-skipped (FN-3906)",
+            });
+            await this.store.updateTask(task.id, { workflowStepResults: results });
+            await this.store.logEntry(task.id, "[pre-merge] Auto-skipped Frontend UX Design — no frontend/UI files in diff scope");
+            continue;
+          }
+        } catch {
+          // best-effort scope detection only; fall through to regular execution/defer flow
+        }
+      }
+
       if (await this.shouldDeferWorkflowStepCompletion(task.id, `before workflow step '${ws.name}'`)) {
         return "deferred-paused";
       }
@@ -5613,6 +5633,42 @@ ${failureFeedback}
       const errorOutput = parts.join("\n");
       return { success: false, error: errorOutput };
     }
+  }
+
+  /**
+   * FN-3906: Only the built-in Frontend UX Design step gets orchestrator-level
+   * diff-scope auto-skip. Match by canonical template id only.
+   */
+  private isFrontendUxStep(workflowStep: WorkflowStep): boolean {
+    return workflowStep.id === "frontend-ux-design";
+  }
+
+  /**
+   * FN-3906: Detect whether the task diff scope contains frontend/UI-related
+   * files so Frontend UX Design can be safely skipped when irrelevant.
+   */
+  private hasFrontendFilesInScope(files: string[]): boolean {
+    const frontendExtensionPattern = /\.(tsx|jsx|vue|svelte|astro|html|css|scss|sass|less|styl)$/i;
+    const frontendPathMarkers = [
+      "/components/",
+      "/app/components/",
+      "/dashboard/",
+      "/frontend/",
+      "/ui/",
+      "/styles/",
+      "/themes/",
+      "/design-system/",
+      "/design-tokens/",
+    ];
+    const frontendTokenFilenamePattern = /(^|\/)(tokens|theme)\.(ts|js|json|css)$/i;
+
+    return files.some((file) => {
+      const normalized = file.replace(/\\/g, "/");
+      const lowered = normalized.toLowerCase();
+      return frontendExtensionPattern.test(normalized)
+        || frontendPathMarkers.some((marker) => lowered.includes(marker))
+        || frontendTokenFilenamePattern.test(lowered);
+    });
   }
 
   /**
