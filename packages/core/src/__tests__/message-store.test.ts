@@ -703,6 +703,72 @@ describe("MessageStore", () => {
     });
   });
 
+  describe("getAllAgentToAgentMessages() / getUnreadAgentToAgentCount()", () => {
+    it("returns newest-first agent-to-agent messages only", () => {
+      store.sendMessage({
+        fromId: "agent-1",
+        fromType: "agent",
+        toId: "agent-2",
+        toType: "agent",
+        content: "first",
+        type: "agent-to-agent",
+      });
+      const second = store.sendMessage({
+        fromId: "agent-2",
+        fromType: "agent",
+        toId: "agent-1",
+        toType: "agent",
+        content: "second",
+        type: "agent-to-agent",
+      });
+      store.sendMessage({
+        fromId: "agent-1",
+        fromType: "agent",
+        toId: "dashboard",
+        toType: "user",
+        content: "not included",
+        type: "agent-to-user",
+      });
+
+      const messages = store.getAllAgentToAgentMessages();
+      expect(messages).toHaveLength(2);
+      expect(messages[0].id).toBe(second.id);
+      expect(messages.every((message) => message.type === "agent-to-agent")).toBe(true);
+    });
+
+    it("counts unread agent-to-agent messages only", () => {
+      const unread = store.sendMessage({
+        fromId: "agent-1",
+        fromType: "agent",
+        toId: "agent-2",
+        toType: "agent",
+        content: "unread",
+        type: "agent-to-agent",
+      });
+      const read = store.sendMessage({
+        fromId: "agent-2",
+        fromType: "agent",
+        toId: "agent-1",
+        toType: "agent",
+        content: "read",
+        type: "agent-to-agent",
+      });
+      store.sendMessage({
+        fromId: "agent-1",
+        fromType: "agent",
+        toId: "dashboard",
+        toType: "user",
+        content: "non-agent",
+        type: "agent-to-user",
+      });
+
+      store.markAsRead(read.id);
+
+      expect(store.getUnreadAgentToAgentCount()).toBe(1);
+      expect(store.getAllAgentToAgentMessages().map((message) => message.id)).toContain(unread.id);
+    });
+  });
+
   describe("events", () => {
     it("emits message:sent event on send", () => {
       const events: Message[] = [];

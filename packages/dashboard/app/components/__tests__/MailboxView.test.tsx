@@ -15,6 +15,7 @@ vi.mock("../../api", () => ({
   fetchOutbox: vi.fn(),
   fetchUnreadCount: vi.fn(),
   fetchAgentMailbox: vi.fn(),
+  fetchAllAgentMailbox: vi.fn(),
   markMessageRead: vi.fn(),
   markAllMessagesRead: vi.fn(),
   deleteMessage: vi.fn(),
@@ -65,6 +66,7 @@ const mockFetchInbox = vi.mocked(apiModule.fetchInbox);
 const mockFetchOutbox = vi.mocked(apiModule.fetchOutbox);
 const mockFetchUnreadCount = vi.mocked(apiModule.fetchUnreadCount);
 const mockFetchAgentMailbox = vi.mocked(apiModule.fetchAgentMailbox);
+const mockFetchAllAgentMailbox = vi.mocked(apiModule.fetchAllAgentMailbox);
 const mockFetchAgents = vi.mocked(apiModule.fetchAgents);
 const mockMarkMessageRead = vi.mocked(apiModule.markMessageRead);
 const mockMarkAllMessagesRead = vi.mocked(apiModule.markAllMessagesRead);
@@ -1218,6 +1220,80 @@ describe("MailboxView", () => {
   });
 
   describe("agent mailbox sub-tabs", () => {
+    it("shows All agents option and renders aggregate stream without subtabs", async () => {
+      const aggregateMessage: Message = {
+        ...mockAgentToAgentMessage,
+        id: "msg-all-agents",
+        fromId: "agent-001",
+        toId: "agent-002",
+        type: "agent-to-agent",
+      };
+
+      mockFetchInbox.mockResolvedValue({ messages: [], unreadCount: 0, total: 0 });
+      mockFetchAllAgentMailbox.mockResolvedValue({
+        messages: [aggregateMessage],
+        total: 1,
+        unreadCount: 1,
+      });
+      mockFetchConversation.mockResolvedValue([aggregateMessage]);
+
+      render(<MailboxView {...defaultProps} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("mailbox-tab-agents"));
+      });
+
+      fireEvent.change(screen.getByTestId("mailbox-agent-select"), { target: { value: "__all_agents__" } });
+
+      await waitFor(() => {
+        expect(mockFetchAllAgentMailbox).toHaveBeenCalledWith(undefined);
+        expect(screen.queryByTestId("mailbox-agent-subtabs")).toBeNull();
+        expect(screen.getByTestId("mailbox-item-participants-msg-all-agents")).toHaveTextContent("From: Agent: Test Agent 1 (agent-001)");
+        expect(screen.getByTestId("mailbox-item-participants-msg-all-agents")).toHaveTextContent("To: Agent: Test Agent 2 (agent-002)");
+      });
+    });
+
+    it("does not preselect a recipient when composing from All agents", async () => {
+      mockFetchInbox.mockResolvedValue({ messages: [], unreadCount: 0, total: 0 });
+      mockFetchAllAgentMailbox.mockResolvedValue({ messages: [], total: 0, unreadCount: 0 });
+
+      render(<MailboxView {...defaultProps} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("mailbox-tab-agents"));
+      });
+      fireEvent.change(screen.getByTestId("mailbox-agent-select"), { target: { value: "__all_agents__" } });
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("mailbox-compose-btn"));
+      });
+
+      await waitFor(() => {
+        const recipientSelect = screen.getByTestId("message-composer-recipient") as HTMLSelectElement;
+        expect(recipientSelect.value).toBe("");
+      });
+    });
+
+    it("refreshes all-agents mailbox on message SSE events", async () => {
+      mockFetchInbox.mockResolvedValue({ messages: [], unreadCount: 0, total: 0 });
+      mockFetchAllAgentMailbox.mockResolvedValue({ messages: [], total: 0, unreadCount: 0 });
+
+      render(<MailboxView {...defaultProps} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("mailbox-tab-agents"));
+      });
+      fireEvent.change(screen.getByTestId("mailbox-agent-select"), { target: { value: "__all_agents__" } });
+
+      const latest = sseSubscriptions.at(-1);
+      await act(async () => {
+        latest?.["message:sent"]?.();
+      });
+
+      await waitFor(() => {
+        expect(mockFetchAllAgentMailbox).toHaveBeenCalled();
+      });
+    });
     it("shows inbox and outbox sub-tabs when agent is selected", async () => {
       mockFetchInbox.mockResolvedValue({
         messages: [],

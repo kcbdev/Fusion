@@ -18,6 +18,7 @@ import {
   fetchOutbox,
   fetchUnreadCount,
   fetchAgentMailbox,
+  fetchAllAgentMailbox,
   markMessageRead,
   markAllMessagesRead,
   deleteMessage,
@@ -29,6 +30,7 @@ import {
   type InboxResponse,
   type OutboxResponse,
   type AgentMailboxResponse,
+  type AllAgentsMailboxResponse,
   type Agent,
   type ApprovalRequestSummary,
   type ApprovalRequestDetail,
@@ -50,6 +52,8 @@ interface MailboxViewProps {
   /** Callback when unread count changes (for header badge updates) */
   onUnreadCountChange?: (count: number) => void;
 }
+
+const ALL_AGENTS_MAILBOX_ID = "__all_agents__";
 
 const MAILBOX_SIDEBAR_MIN_WIDTH = 280;
 const MAILBOX_SIDEBAR_MAX_RATIO = 0.65;
@@ -201,6 +205,7 @@ export function MailboxView({
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [agentSubTab, setAgentSubTab] = useState<"inbox" | "outbox">("inbox");
   const [agentMailbox, setAgentMailbox] = useState<AgentMailboxResponse | null>(null);
+  const [allAgentsMailbox, setAllAgentsMailbox] = useState<AllAgentsMailboxResponse | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [approvalSubTab, setApprovalSubTab] = useState<"pending" | "history">("pending");
   const [approvals, setApprovals] = useState<ApprovalRequestSummary[]>([]);
@@ -344,6 +349,18 @@ export function MailboxView({
     }
   }, [projectId]);
 
+  const loadAllAgentsMailbox = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const data = await fetchAllAgentMailbox(projectId);
+      setAllAgentsMailbox(data);
+    } catch {
+      // Silently fail
+    } finally {
+      setIsLoading(false);
+    }
+  }, [projectId]);
+
   const loadAgents = useCallback(async () => {
     try {
       const data = await fetchAgents(undefined, projectId);
@@ -398,8 +415,12 @@ export function MailboxView({
   // Load agent mailbox when selected
   useEffect(() => {
     if (!selectedAgentId) return;
-    loadAgentMailbox(selectedAgentId);
-  }, [selectedAgentId, loadAgentMailbox]);
+    if (selectedAgentId === ALL_AGENTS_MAILBOX_ID) {
+      void loadAllAgentsMailbox();
+      return;
+    }
+    void loadAgentMailbox(selectedAgentId);
+  }, [selectedAgentId, loadAgentMailbox, loadAllAgentsMailbox]);
 
   // Load unread count on mount
   useEffect(() => {
@@ -429,7 +450,9 @@ export function MailboxView({
         void loadApprovals(approvalSubTab);
       }
 
-      if (selectedAgentId) {
+      if (selectedAgentId === ALL_AGENTS_MAILBOX_ID) {
+        void loadAllAgentsMailbox();
+      } else if (selectedAgentId) {
         void loadAgentMailbox(selectedAgentId);
       }
     };
@@ -445,7 +468,7 @@ export function MailboxView({
         "approval:decided": onMailboxUpdate,
       },
     });
-  }, [projectId, activeTab, selectedAgentId, refreshUnreadCount, loadInbox, loadOutbox, loadAgentMailbox, loadApprovals, approvalSubTab]);
+  }, [projectId, activeTab, selectedAgentId, refreshUnreadCount, loadInbox, loadOutbox, loadAgentMailbox, loadAllAgentsMailbox, loadApprovals, approvalSubTab]);
 
   // ── Actions ───────────────────────────────────────────────────────────
 
@@ -497,6 +520,7 @@ export function MailboxView({
       ...(outbox?.messages ?? []),
       ...(agentMailbox?.inbox ?? []),
       ...(agentMailbox?.outbox ?? []),
+      ...(allAgentsMailbox?.messages ?? []),
       ...conversationMessages,
     ].find((candidate) => candidate.id === deepLinkedMessageId);
 
@@ -505,8 +529,7 @@ export function MailboxView({
     }
 
     void handleOpenMessage(message);
-  }, [inbox, outbox, agentMailbox, conversationMessages, handleOpenMessage]);
-
+  }, [inbox, outbox, agentMailbox, allAgentsMailbox, conversationMessages, handleOpenMessage]);
   useEffect(() => {
     const deepLinkedMessageId = getDeepLinkedMessageId();
     if (!deepLinkedMessageId) {
@@ -562,12 +585,13 @@ export function MailboxView({
       // Refresh current tab
       if (activeTab === "inbox") loadInbox();
       else if (activeTab === "outbox") loadOutbox();
+      else if (selectedAgentId === ALL_AGENTS_MAILBOX_ID) loadAllAgentsMailbox();
       else if (selectedAgentId) loadAgentMailbox(selectedAgentId);
       addToast?.("Message deleted", "success");
     } catch {
       addToast?.("Failed to delete message", "error");
     }
-  }, [projectId, activeTab, selectedAgentId, loadInbox, loadOutbox, loadAgentMailbox, addToast]);
+  }, [projectId, activeTab, selectedAgentId, loadInbox, loadOutbox, loadAgentMailbox, loadAllAgentsMailbox, addToast]);
 
   const handleReply = useCallback((message: Message) => {
     setComposeRecipient({ id: message.fromId, type: message.fromType });
@@ -585,13 +609,14 @@ export function MailboxView({
     addToast?.("Message sent", "success");
     // Refresh current tab
     if (activeTab === "outbox") loadOutbox();
+    else if (activeTab === "agents" && selectedAgentId === ALL_AGENTS_MAILBOX_ID) loadAllAgentsMailbox();
     else if (activeTab === "agents" && selectedAgentId) loadAgentMailbox(selectedAgentId);
     refreshUnreadCount();
-  }, [activeTab, loadOutbox, selectedAgentId, loadAgentMailbox, addToast, refreshUnreadCount]);
+  }, [activeTab, loadOutbox, selectedAgentId, loadAgentMailbox, loadAllAgentsMailbox, addToast, refreshUnreadCount]);
 
   const handleOpenCompose = useCallback(() => {
     // Pre-fill recipient from selected agent if available
-    if (activeTab === "agents" && selectedAgentId) {
+    if (activeTab === "agents" && selectedAgentId && selectedAgentId !== ALL_AGENTS_MAILBOX_ID) {
       setComposeRecipient({ id: selectedAgentId, type: "agent" });
     } else {
       setComposeRecipient(null);
@@ -880,6 +905,7 @@ export function MailboxView({
                     data-testid="mailbox-agent-select"
                   >
                     <option value="">Select an agent…</option>
+                    <option value={ALL_AGENTS_MAILBOX_ID}>All agents</option>
                     {agents.map((agent) => (
                       <option key={agent.id} value={agent.id}>
                         {agent.name || agent.id}
@@ -897,7 +923,7 @@ export function MailboxView({
                 </button>
               </div>
 
-              {selectedAgentId && (
+              {selectedAgentId && selectedAgentId !== ALL_AGENTS_MAILBOX_ID && (
                 <div className="mailbox-agent-subtabs" data-testid="mailbox-agent-subtabs">
                   <button
                     className={`btn btn-sm btn-secondary mailbox-agent-subtab ${agentSubTab === "inbox" ? "active" : ""}`}
@@ -927,20 +953,51 @@ export function MailboxView({
                     <p>Select an agent to view their mailbox</p>
                   </div>
                 )}
-                {selectedAgentId && isLoading && !agentMailbox && <MailboxSkeleton />}
-                {selectedAgentId && agentMailbox && agentSubTab === "inbox" && agentMailbox.inbox.length === 0 && (
+                {selectedAgentId === ALL_AGENTS_MAILBOX_ID && isLoading && !allAgentsMailbox && <MailboxSkeleton />}
+                {selectedAgentId === ALL_AGENTS_MAILBOX_ID && allAgentsMailbox && allAgentsMailbox.messages.length === 0 && (
+                  <div className="mailbox-empty">
+                    <InboxIcon size={32} />
+                    <p>No agent-to-agent messages</p>
+                  </div>
+                )}
+                {selectedAgentId === ALL_AGENTS_MAILBOX_ID && allAgentsMailbox && allAgentsMailbox.messages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    id={listMessageAnchorId(msg.id)}
+                    className={`mailbox-item ${!msg.read ? "unread" : ""}`}
+                    onClick={() => handleOpenMessage(msg)}
+                    data-testid={`mailbox-item-${msg.id}`}
+                  >
+                    <div className="mailbox-item-avatar">
+                      {msg.fromType === "agent" ? <Bot size={16} /> : <User size={16} />}
+                    </div>
+                    <div className="mailbox-item-content">
+                      <div className="mailbox-item-header">
+                        <span className="mailbox-item-from">{getParticipantLabel(msg.fromId, msg.fromType)}</span>
+                        <span className="mailbox-item-time">{formatTimestamp(msg.createdAt)}</span>
+                      </div>
+                      <div className="mailbox-item-participants" data-testid={`mailbox-item-participants-${msg.id}`}>
+                        <span>From: {getParticipantLabel(msg.fromId, msg.fromType)}</span>
+                        <span>To: {getParticipantLabel(msg.toId, msg.toType)}</span>
+                      </div>
+                      <div className="mailbox-item-preview">{msg.content.slice(0, 80)}{msg.content.length > 80 ? "…" : ""}</div>
+                    </div>
+                  </div>
+                ))}
+                {selectedAgentId && selectedAgentId !== ALL_AGENTS_MAILBOX_ID && isLoading && !agentMailbox && <MailboxSkeleton />}
+                {selectedAgentId && selectedAgentId !== ALL_AGENTS_MAILBOX_ID && agentMailbox && agentSubTab === "inbox" && agentMailbox.inbox.length === 0 && (
                   <div className="mailbox-empty">
                     <InboxIcon size={32} />
                     <p>No received messages for this agent</p>
                   </div>
                 )}
-                {selectedAgentId && agentMailbox && agentSubTab === "outbox" && agentMailbox.outbox.length === 0 && (
+                {selectedAgentId && selectedAgentId !== ALL_AGENTS_MAILBOX_ID && agentMailbox && agentSubTab === "outbox" && agentMailbox.outbox.length === 0 && (
                   <div className="mailbox-empty">
                     <Send size={32} />
                     <p>No sent messages for this agent</p>
                   </div>
                 )}
-                {selectedAgentId && agentMailbox && agentSubTab === "inbox" && agentMailbox.inbox.map((msg) => (
+                {selectedAgentId && selectedAgentId !== ALL_AGENTS_MAILBOX_ID && agentMailbox && agentSubTab === "inbox" && agentMailbox.inbox.map((msg) => (
                   <div
                     key={msg.id}
                     id={listMessageAnchorId(msg.id)}
@@ -962,7 +1019,7 @@ export function MailboxView({
                     </div>
                   </div>
                 ))}
-                {selectedAgentId && agentMailbox && agentSubTab === "outbox" && agentMailbox.outbox.map((msg) => (
+                {selectedAgentId && selectedAgentId !== ALL_AGENTS_MAILBOX_ID && agentMailbox && agentSubTab === "outbox" && agentMailbox.outbox.map((msg) => (
                   <div
                     key={msg.id}
                     id={listMessageAnchorId(msg.id)}
@@ -1111,6 +1168,7 @@ export function MailboxView({
               if (activeTab === "inbox") loadInbox();
               else if (activeTab === "outbox") loadOutbox();
               else if (activeTab === "approvals") loadApprovals(approvalSubTab);
+              else if (selectedAgentId === ALL_AGENTS_MAILBOX_ID) loadAllAgentsMailbox();
               else if (selectedAgentId) loadAgentMailbox(selectedAgentId);
             }}
             disabled={isLoading}

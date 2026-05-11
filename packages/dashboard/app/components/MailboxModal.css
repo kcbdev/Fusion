@@ -183,6 +183,15 @@
   text-overflow: ellipsis;
 }
 
+.mailbox-item-participants {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  font-size: var(--font-size-2xs, 0.75rem);
+  color: var(--text-muted);
+  margin-bottom: var(--space-xs);
+}
+
 .mailbox-item-unread-dot {
   width: 0.5rem;
   height: 0.5rem;

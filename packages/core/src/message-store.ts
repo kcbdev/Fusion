@@ -418,6 +418,32 @@ export class MessageStore extends EventEmitter<MessageStoreEvents> {
   }
 
   /**
+   * Get all agent-to-agent messages across all agents.
+   * @returns Array of messages (newest first)
+   */
+  getAllAgentToAgentMessages(): Message[] {
+    const rows = this.db.prepare(`
+      SELECT * FROM messages
+      WHERE type = ?
+      ORDER BY createdAt DESC, rowid DESC
+    `).all("agent-to-agent");
+
+    return (rows as unknown as MessageRow[]).map((row) => this.rowToMessage(row));
+  }
+
+  /**
+   * Get unread count across all agent-to-agent messages.
+   */
+  getUnreadAgentToAgentCount(): number {
+    const row = this.db.prepare(`
+      SELECT COUNT(*) as count FROM messages
+      WHERE type = ? AND read = 0
+    `).get("agent-to-agent") as { count: number } | undefined;
+
+    return row?.count ?? 0;
+  }
+
+  /**
    * Set or update the hook used when messages are sent to agents.
    */
   setMessageToAgentHook(hook: (message: Message) => void): void {

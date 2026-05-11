@@ -440,6 +440,20 @@ export function registerMessagingScriptRoutes(ctx: ApiRoutesContext): void {
     }
   });
 
+  router.get("/agents/mailbox/all", async (req, res) => {
+    try {
+      const msgStore = await getMessageStore(req);
+      const messages = await msgStore.getAllAgentToAgentMessages();
+      const unreadCount = await msgStore.getUnreadAgentToAgentCount();
+      res.json({ messages, total: messages.length, unreadCount });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
   router.get("/agents/:id/mailbox", async (req, res) => {
     try {
       const msgStore = await getMessageStore(req);

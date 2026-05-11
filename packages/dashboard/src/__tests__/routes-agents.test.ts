@@ -3769,6 +3769,44 @@ describe("Messaging Routes", () => {
     expect(ids).toHaveLength(2);
   });
 
+  it("GET /api/agents/mailbox/all returns aggregate agent-to-agent mailbox data", async () => {
+    const first = messageStore.sendMessage({
+      fromId: "agent-1",
+      fromType: "agent",
+      toId: "agent-2",
+      toType: "agent",
+      content: "first",
+      type: "agent-to-agent",
+    });
+    const second = messageStore.sendMessage({
+      fromId: "agent-2",
+      fromType: "agent",
+      toId: "agent-1",
+      toType: "agent",
+      content: "second",
+      type: "agent-to-agent",
+    });
+    messageStore.sendMessage({
+      fromId: "agent-1",
+      fromType: "agent",
+      toId: "dashboard",
+      toType: "user",
+      content: "ignore",
+      type: "agent-to-user",
+    });
+
+    messageStore.markAsRead(first.id);
+
+    const res = await GET(app, "/api/agents/mailbox/all");
+
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(2);
+    expect(res.body.unreadCount).toBe(1);
+    expect(res.body.messages).toHaveLength(2);
+    expect(res.body.messages[0].id).toBe(second.id);
+    expect(res.body.messages.every((m: { type: string }) => m.type === "agent-to-agent")).toBe(true);
+  });
+
   it("GET /api/agents/:id/mailbox returns mailbox summary and inbox messages", async () => {
     const agentId = "agent-mailbox";
     const msg = messageStore.sendMessage({

@@ -7657,6 +7657,13 @@ export interface AgentMailboxResponse {
   outbox: Message[];
 }
 
+/** Response shape for GET /agents/mailbox/all */
+export interface AllAgentsMailboxResponse {
+  messages: Message[];
+  total: number;
+  unreadCount: number;
+}
+
 /** Input for sending a message via the dashboard */
 export interface SendMessageInput {
   toId: string;
@@ -7797,6 +7804,11 @@ export function fetchConversation(
 /** Fetch an agent's mailbox (admin read-only view). */
 export function fetchAgentMailbox(agentId: string, projectId?: string): Promise<AgentMailboxResponse> {
   return api<AgentMailboxResponse>(withProjectId(`/agents/${encodeURIComponent(agentId)}/mailbox`, projectId));
+}
+
+/** Fetch aggregate mailbox across all agent-to-agent messages (admin read-only view). */
+export function fetchAllAgentMailbox(projectId?: string): Promise<AllAgentsMailboxResponse> {
+  return api<AllAgentsMailboxResponse>(withProjectId("/agents/mailbox/all", projectId));
 }
 
 export function fetchApprovals(
