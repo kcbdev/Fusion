@@ -170,6 +170,27 @@ export function classifyError(errorMessage: string): "transient" | "usage-limit"
   return "permanent";
 }
 
+const STALE_WORKTREE_MODULE_RESOLUTION_PATTERN = /Cannot find module\s+['"][^'"]*node_modules[^'"]*['"][\s\S]*imported from\s+/i;
+const STALE_WORKTREE_MODULE_PATH_PATTERN = /Cannot find module\s+['"]([^'"]*node_modules[^'"]*)['"]/i;
+
+export function isStaleWorktreeModuleResolutionError(errorMessage: string): boolean {
+  if (!errorMessage || typeof errorMessage !== "string") {
+    return false;
+  }
+  return STALE_WORKTREE_MODULE_RESOLUTION_PATTERN.test(errorMessage);
+}
+
+export function extractMissingModulePath(errorMessage: string): string | null {
+  if (!errorMessage || typeof errorMessage !== "string") {
+    return null;
+  }
+  const match = errorMessage.match(STALE_WORKTREE_MODULE_PATH_PATTERN);
+  if (!match?.[1]) {
+    return null;
+  }
+  return match[1];
+}
+
 const OPERATOR_ACTIONABLE_AGENT_ERROR_PATTERNS: RegExp[] = [
   /invalid api key/i,
   /authentication failed/i,

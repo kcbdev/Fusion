@@ -3,7 +3,9 @@ import {
   isTransientError,
   classifyError,
   isSilentTransientError,
+  extractMissingModulePath,
   isOperatorActionableAgentError,
+  isStaleWorktreeModuleResolutionError,
   TRANSIENT_ERROR_PATTERNS,
 } from "../transient-error-detector.js";
 import { isUsageLimitError } from "../usage-limit-detector.js";
@@ -236,6 +238,34 @@ describe("Transient Error Detector", () => {
       TRANSIENT_ERROR_PATTERNS.forEach((pattern) => {
         expect(pattern.flags).toContain("i");
       });
+    });
+  });
+
+  describe("isStaleWorktreeModuleResolutionError", () => {
+    it("returns true for cannot-find-module node_modules imported-from stale worktree signature", () => {
+      const message =
+        "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/Users/me/Projects/kb/.worktrees/deleted/node_modules/@runfusion/fusion/dist/bin.js' imported from /Users/me/Projects/kb/.worktrees/deleted/packages/engine/src/pi.ts";
+      expect(isStaleWorktreeModuleResolutionError(message)).toBe(true);
+    });
+
+    it("returns false for other missing-module errors without stale-path signature", () => {
+      expect(isStaleWorktreeModuleResolutionError("Cannot find module 'vitest'")).toBe(false);
+      expect(isStaleWorktreeModuleResolutionError("socket hang up")).toBe(false);
+    });
+  });
+
+  describe("extractMissingModulePath", () => {
+    it("extracts the missing node_modules path from stale signature", () => {
+      const message =
+        "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/Users/me/Projects/kb/.worktrees/deleted/node_modules/@runfusion/fusion/dist/bin.js' imported from /Users/me/Projects/kb/.worktrees/deleted/packages/engine/src/pi.ts";
+      expect(extractMissingModulePath(message)).toBe(
+        "/Users/me/Projects/kb/.worktrees/deleted/node_modules/@runfusion/fusion/dist/bin.js",
+      );
+    });
+
+    it("returns null when no stale module path is present", () => {
+      expect(extractMissingModulePath("Cannot find module 'vitest'")).toBeNull();
+      expect(extractMissingModulePath("socket hang up")).toBeNull();
     });
   });
 

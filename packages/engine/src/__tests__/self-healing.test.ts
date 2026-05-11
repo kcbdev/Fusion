@@ -599,6 +599,127 @@ describe("SelfHealingManager", () => {
       managerWithAgents.stop();
     });
 
+    it("suppresses stale worktree missing-module durable errors from transient auto-restart", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const warn = getSelfHealingLogger().warn;
+      warn.mockClear();
+      const now = Date.now();
+      const missingPath = "/Users/me/Projects/kb/.worktrees/deleted/node_modules/@runfusion/fusion/dist/bin.js";
+      const agentStore = createMockAgentStore([
+        {
+          id: "agent-stale-path",
+          state: "error",
+          lastError:
+            `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '${missingPath}' imported from /Users/me/Projects/kb/.worktrees/deleted/packages/engine/src/pi.ts`,
+          updatedAt: new Date(now - 120_000).toISOString(),
+        } as Agent,
+      ]);
+      const managerWithAgents = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(0);
+      expect(agentStore.updateAgentState).not.toHaveBeenCalled();
+      expect(agentStore.updateAgent).toHaveBeenCalledWith(
+        "agent-stale-path",
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            durableErrorRecovery: expect.objectContaining({
+              lastReason: "stale-path-module-resolution",
+              lastMissingModulePath: missingPath,
+              consecutiveMissingModulePathCount: 1,
+            }),
+          }),
+        }),
+      );
+      expect(getSelfHealingLogger().warn).toHaveBeenCalledWith(
+        expect.stringContaining("Suppressed durable-agent auto-restart for agent-stale-path: stale module-resolution"),
+      );
+      managerWithAgents.stop();
+    });
+
+    it("emits stronger stale-process hint when same missing-module path repeats 3 times", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const warn = getSelfHealingLogger().warn;
+      warn.mockClear();
+      const now = Date.now();
+      const missingPath = "/Users/me/Projects/kb/.worktrees/deleted/node_modules/@runfusion/fusion/dist/bin.js";
+      const agentStore = createMockAgentStore([
+        {
+          id: "agent-stale-repeat",
+          state: "error",
+          lastError:
+            `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '${missingPath}' imported from /Users/me/Projects/kb/.worktrees/deleted/packages/engine/src/pi.ts`,
+          updatedAt: new Date(now - 120_000).toISOString(),
+          metadata: {
+            durableErrorRecovery: {
+              lastMissingModulePath: missingPath,
+              consecutiveMissingModulePathCount: 2,
+            },
+          },
+        } as unknown as Agent,
+      ]);
+      const managerWithAgents = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(0);
+      expect(agentStore.updateAgent).toHaveBeenCalledWith(
+        "agent-stale-repeat",
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            durableErrorRecovery: expect.objectContaining({
+              lastMissingModulePath: missingPath,
+              consecutiveMissingModulePathCount: 3,
+            }),
+          }),
+        }),
+      );
+      expect(getSelfHealingLogger().warn).toHaveBeenCalledWith(
+        expect.stringContaining("FN-4013 tracks systemic prevention"),
+      );
+      managerWithAgents.stop();
+    });
+
+    it("resets stale missing-module consecutive count when a different path appears", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const oldPath = "/Users/me/Projects/kb/.worktrees/deleted-a/node_modules/@runfusion/fusion/dist/bin.js";
+      const newPath = "/Users/me/Projects/kb/.worktrees/deleted-b/node_modules/@runfusion/fusion/dist/bin.js";
+      const agentStore = createMockAgentStore([
+        {
+          id: "agent-stale-reset",
+          state: "error",
+          lastError:
+            `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '${newPath}' imported from /Users/me/Projects/kb/.worktrees/deleted-b/packages/engine/src/pi.ts`,
+          updatedAt: new Date(now - 120_000).toISOString(),
+          metadata: {
+            durableErrorRecovery: {
+              lastMissingModulePath: oldPath,
+              consecutiveMissingModulePathCount: 2,
+            },
+          },
+        } as unknown as Agent,
+      ]);
+      const managerWithAgents = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(0);
+      expect(agentStore.updateAgent).toHaveBeenCalledWith(
+        "agent-stale-reset",
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            durableErrorRecovery: expect.objectContaining({
+              lastMissingModulePath: newPath,
+              consecutiveMissingModulePathCount: 1,
+            }),
+          }),
+        }),
+      );
+      managerWithAgents.stop();
+    });
+
     it("suppresses transient recovery while cooldown is active", async () => {
       vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
       const now = Date.now();

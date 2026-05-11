@@ -22,7 +22,7 @@ import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { createLogger } from "./logger.js";
 import { getRegisteredWorktreePaths, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
 import { isRecoverableMissingWorktreeReviewFailure } from "./restart-recovery-coordinator.js";
-import { classifyError, isOperatorActionableAgentError } from "./transient-error-detector.js";
+import { classifyError, extractMissingModulePath, isOperatorActionableAgentError, isStaleWorktreeModuleResolutionError } from "./transient-error-detector.js";
 
 const log = createLogger("self-healing");
 const execAsync = promisify(exec);
@@ -2192,20 +2192,28 @@ export class SelfHealingManager {
     attempts: number;
     nextRetryAt?: string;
     exhausted?: boolean;
+    lastMissingModulePath?: string;
+    consecutiveMissingModulePathCount: number;
   } {
     const metadata = agent.metadata ?? {};
     const raw = metadata.durableErrorRecovery;
     if (!raw || typeof raw !== "object") {
-      return { attempts: 0 };
+      return { attempts: 0, consecutiveMissingModulePathCount: 0 };
     }
     const record = raw as Record<string, unknown>;
     const attempts = typeof record.attempts === "number" && Number.isFinite(record.attempts)
       ? Math.max(0, Math.floor(record.attempts))
       : 0;
+    const consecutiveMissingModulePathCount =
+      typeof record.consecutiveMissingModulePathCount === "number" && Number.isFinite(record.consecutiveMissingModulePathCount)
+        ? Math.max(0, Math.floor(record.consecutiveMissingModulePathCount))
+        : 0;
     return {
       attempts,
       nextRetryAt: typeof record.nextRetryAt === "string" ? record.nextRetryAt : undefined,
       exhausted: record.exhausted === true,
+      lastMissingModulePath: typeof record.lastMissingModulePath === "string" ? record.lastMissingModulePath : undefined,
+      consecutiveMissingModulePathCount,
     };
   }
 
@@ -2257,7 +2265,7 @@ export class SelfHealingManager {
           if (this.options.hasActiveAgentExecution?.(agent.id) === true) {
             return false;
           }
-          if (classifyError(agent.lastError ?? "") !== "transient") {
+          if (classifyError(agent.lastError ?? "") !== "transient" && !isStaleWorktreeModuleResolutionError(agent.lastError ?? "")) {
             return false;
           }
           if (isOperatorActionableAgentError(agent.lastError ?? "")) {
@@ -2291,6 +2299,35 @@ export class SelfHealingManager {
         try {
           if (agent.state === "error") {
             const recoveryState = this.getDurableAgentRecoveryState(agent);
+            const isStaleMissingModule = isStaleWorktreeModuleResolutionError(agent.lastError ?? "");
+            if (isStaleMissingModule) {
+              const missingModulePath = extractMissingModulePath(agent.lastError ?? "");
+              const repeatedPath =
+                missingModulePath && recoveryState.lastMissingModulePath === missingModulePath
+                  ? recoveryState.consecutiveMissingModulePathCount + 1
+                  : 1;
+              await agentStore.updateAgent(agent.id, {
+                metadata: {
+                  ...(agent.metadata ?? {}),
+                  durableErrorRecovery: {
+                    attempts: recoveryState.attempts,
+                    nextRetryAt: recoveryState.nextRetryAt,
+                    exhausted: recoveryState.exhausted,
+                    lastReason: "stale-path-module-resolution",
+                    lastMissingModulePath: missingModulePath ?? recoveryState.lastMissingModulePath,
+                    consecutiveMissingModulePathCount: repeatedPath,
+                    lastObservedAt: new Date().toISOString(),
+                  },
+                },
+              });
+              log.warn(`Suppressed durable-agent auto-restart for ${agent.id}: stale module-resolution failure indicates stale host process/worktree path`);
+              if (missingModulePath && repeatedPath >= 3) {
+                log.warn(
+                  `Durable agent ${agent.id} repeated missing-module path ${repeatedPath} times (${missingModulePath}). Hosting dashboard/engine process is likely stale (for example, zombie process from a deleted worktree); clean up stale process/worktree. FN-4013 tracks systemic prevention.`,
+                );
+              }
+              continue;
+            }
             const nextAttempts = recoveryState.attempts + 1;
             const exhausted = nextAttempts >= DURABLE_ERROR_RECOVERY_MAX_RETRIES;
             const nextRetryAt = new Date(Date.now() + this.computeDurableAgentRecoveryCooldownMs(nextAttempts)).toISOString();
@@ -2303,6 +2340,8 @@ export class SelfHealingManager {
                   nextRetryAt,
                   exhausted,
                   lastReason: exhausted ? "retry-budget-exhausted" : "transient-error",
+                  lastMissingModulePath: undefined,
+                  consecutiveMissingModulePathCount: 0,
                 },
               },
             });

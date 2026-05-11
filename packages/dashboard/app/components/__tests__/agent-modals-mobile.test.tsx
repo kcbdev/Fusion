@@ -394,14 +394,15 @@ describe("agent modal mobile CSS structure", () => {
   });
 
   describe("AgentErrorDetailsModal", () => {
-    it("mobile rules constrain modal to viewport height", () => {
+    it("mobile rules let modal fill the fullscreen container without double viewport clipping", () => {
       const styles = readStyles();
-      const modalRuleMatch = styles.match(/@media \(max-width: 768px\)[\s\S]*?\.agent-error-modal\s*\{[^}]+\}/);
+      const modalRuleMatch = styles.match(/@media\s*\(max-width:\s*768px\)\s*\{\s*\.agent-error-modal\s*\{[^}]+\}/);
       expect(modalRuleMatch).toBeTruthy();
       const modalRule = modalRuleMatch![0];
 
-      expect(modalRule).toContain("height: 100dvh");
-      expect(modalRule).toContain("max-height: 100dvh");
+      expect(modalRule).toContain("height: 100%");
+      expect(modalRule).toContain("max-height: 100%");
+      expect(modalRule).toContain("min-height: 0");
       expect(modalRule).toContain("width: 100%");
       expect(modalRule).toContain("max-width: 100%");
     });
@@ -414,6 +415,7 @@ describe("agent modal mobile CSS structure", () => {
 
       expect(styles).toMatch(/@media \(max-width: 768px\)[\s\S]*?\.agent-error-modal__error\s*\{[^}]*max-height:\s*none;[^}]*\}/);
       expect(styles).toMatch(/@media \(max-width: 768px\)[\s\S]*?\.agent-error-modal__error\s*\{[^}]*-webkit-overflow-scrolling:\s*touch;[^}]*\}/);
+      expect(styles).toMatch(/@media \(max-width: 768px\)[\s\S]*?\.agent-error-modal__error\s*\{[^}]*overscroll-behavior:\s*contain;[^}]*\}/);
     });
   });
 

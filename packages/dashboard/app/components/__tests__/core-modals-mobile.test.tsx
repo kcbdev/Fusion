@@ -298,22 +298,26 @@ describe("core modals mobile css coverage", () => {
     expect(fullscreenBlockMatch![0]).toContain("max-height: unset");
   });
 
-  it("AgentErrorDetailsModal: mobile uses viewport-sized modal with inner scrolling log region", () => {
+  it("AgentErrorDetailsModal: mobile fills fullscreen container and keeps inner scrolling log region", () => {
     const css = loadAllAppCss();
     const mobileBlock = getMainMobileBlock(css);
 
     const modalRuleMatch = mobileBlock.match(/\.agent-error-modal\s*\{[^}]+\}/s);
     expect(modalRuleMatch).not.toBeNull();
-    expect(modalRuleMatch![0]).toContain("height: 100dvh");
-    expect(modalRuleMatch![0]).toContain("max-height: 100dvh");
+    expect(modalRuleMatch![0]).toContain("height: 100%");
+    expect(modalRuleMatch![0]).toContain("max-height: 100%");
+    expect(modalRuleMatch![0]).toContain("min-height: 0");
 
     const contentRuleMatch = css.match(/\.agent-error-modal__content\s*\{[^}]+\}/s);
     expect(contentRuleMatch).not.toBeNull();
     expect(contentRuleMatch![0]).toContain("overflow: hidden");
+    expect(contentRuleMatch![0]).toContain("display: flex");
 
     const errorRuleMatch = mobileBlock.match(/\.agent-error-modal__error\s*\{[^}]+\}/s);
     expect(errorRuleMatch).not.toBeNull();
+    expect(errorRuleMatch![0]).toContain("max-height: none");
     expect(errorRuleMatch![0]).toContain("-webkit-overflow-scrolling: touch");
+    expect(errorRuleMatch![0]).toContain("overscroll-behavior: contain");
   });
 
   it("NewTaskModal: quick fields buttons meet 36px touch target on mobile", () => {
