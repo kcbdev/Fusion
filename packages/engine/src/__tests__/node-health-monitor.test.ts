@@ -117,6 +117,23 @@ describe("NodeHealthMonitor", () => {
     expect(monitor.getNodeHealth("node-remote")).toBe("online");
   });
 
+  it("invokes recovery hook once per non-online to online transition", async () => {
+    const onNodeRecovered = vi.fn();
+    monitor = new NodeHealthMonitor(mockCentralCore, { checkIntervalMs: 1_000, onNodeRecovered });
+    checkNodeHealthMock
+      .mockResolvedValueOnce("offline")
+      .mockResolvedValueOnce("online")
+      .mockResolvedValueOnce("online");
+
+    await monitor.start();
+    await monitor.checkAllNodes();
+    await monitor.checkAllNodes();
+    await monitor.checkAllNodes();
+
+    expect(onNodeRecovered).toHaveBeenCalledTimes(1);
+    expect(onNodeRecovered).toHaveBeenCalledWith("node-remote", "offline");
+  });
+
   it("is a no-op when no remote nodes are registered", async () => {
     listNodesMock.mockResolvedValue([
       createNode({ id: "node-local-only", name: "Local Only", type: "local", status: "online" }),

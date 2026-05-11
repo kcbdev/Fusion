@@ -165,6 +165,11 @@ Rules:
 
 API behavior must never hide fallback mode: degraded reads are explicit so clients can distinguish stale last-known state from fresh cluster state.
 
+Concrete exported/runtime surfaces:
+- Core types are exported from `@fusion/core`: `MeshSnapshotQuery`, `MeshSnapshotRecord`, `MeshSnapshotRecordInput`, `MeshWriteQueueStatus`, `MeshWriteQueueEntry`, `MeshWriteQueueInput`, `MeshWriteQueueFilter`, `MeshWriteApplyResult`, `MeshWriteFailureResult`, `MeshWriteReplaySummary`, and `MeshDegradedReadState`.
+- `CentralCore` persistence/assertion methods: `recordMeshSnapshot`, `getLatestMeshSnapshot`, `enqueueMeshWrite`, `listPendingMeshWrites`, `markMeshWriteReplayStarted`, `markMeshWriteApplied`, `markMeshWriteFailed`, and `getMeshDegradedReadState`.
+- Runtime replay/assertion methods: `PeerExchangeService.replayPendingWritesForNode(targetNodeId)` and `NodeHealthMonitor` recovery callback `onNodeRecovered(nodeId, previousStatus)`.
+
 ## 13. End-to-end v1 write path
 
 1. **Intent creation**: Node creates write intent + envelope.

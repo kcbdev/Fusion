@@ -23,7 +23,7 @@ export { toJson, toJsonNullable, fromJson };
 
 // ── Schema Definition ───────────────────────────────────────────────────
 
-const CENTRAL_SCHEMA_VERSION = 9;
+const CENTRAL_SCHEMA_VERSION = 10;
 
 const CENTRAL_SCHEMA_SQL = `
 -- Projects table (project registry)
@@ -210,6 +210,44 @@ CREATE TABLE IF NOT EXISTS project_plugin_states (
 CREATE INDEX IF NOT EXISTS idxProjectPluginStatesProjectPath ON project_plugin_states(projectPath);
 CREATE INDEX IF NOT EXISTS idxProjectPluginStatesPluginId ON project_plugin_states(pluginId);
 
+-- Durable mesh shared-state snapshots
+CREATE TABLE IF NOT EXISTS meshSharedSnapshots (
+  nodeId TEXT NOT NULL,
+  projectId TEXT,
+  scope TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  snapshotVersion TEXT NOT NULL,
+  capturedAt TEXT NOT NULL,
+  sourceNodeId TEXT,
+  sourceRunId TEXT,
+  staleAfter TEXT,
+  updatedAt TEXT NOT NULL,
+  PRIMARY KEY (nodeId, projectId, scope)
+);
+CREATE INDEX IF NOT EXISTS idxMeshSharedSnapshotsLookup ON meshSharedSnapshots(nodeId, projectId, scope);
+
+-- Durable offline write queue + history
+CREATE TABLE IF NOT EXISTS meshWriteQueue (
+  id TEXT PRIMARY KEY,
+  originNodeId TEXT NOT NULL,
+  targetNodeId TEXT NOT NULL,
+  projectId TEXT,
+  scope TEXT NOT NULL,
+  entityType TEXT NOT NULL,
+  entityId TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  intentVersion TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'replaying', 'applied', 'failed')),
+  attemptCount INTEGER NOT NULL DEFAULT 0,
+  lastAttemptAt TEXT,
+  lastError TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  appliedAt TEXT
+);
+CREATE INDEX IF NOT EXISTS idxMeshWriteQueueReplay ON meshWriteQueue(targetNodeId, status, createdAt, id);
+
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS __meta (
   key TEXT PRIMARY KEY,
@@ -351,6 +389,44 @@ CREATE INDEX IF NOT EXISTS idxProjectPluginStatesProjectPath ON project_plugin_s
 CREATE INDEX IF NOT EXISTS idxProjectPluginStatesPluginId ON project_plugin_states(pluginId);
 `;
 
+const CENTRAL_SCHEMA_V10_MIGRATION_SQL = `
+CREATE TABLE IF NOT EXISTS meshSharedSnapshots (
+  nodeId TEXT NOT NULL,
+  projectId TEXT,
+  scope TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  snapshotVersion TEXT NOT NULL,
+  capturedAt TEXT NOT NULL,
+  sourceNodeId TEXT,
+  sourceRunId TEXT,
+  staleAfter TEXT,
+  updatedAt TEXT NOT NULL,
+  PRIMARY KEY (nodeId, projectId, scope)
+);
+CREATE INDEX IF NOT EXISTS idxMeshSharedSnapshotsLookup ON meshSharedSnapshots(nodeId, projectId, scope);
+
+CREATE TABLE IF NOT EXISTS meshWriteQueue (
+  id TEXT PRIMARY KEY,
+  originNodeId TEXT NOT NULL,
+  targetNodeId TEXT NOT NULL,
+  projectId TEXT,
+  scope TEXT NOT NULL,
+  entityType TEXT NOT NULL,
+  entityId TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  intentVersion TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'replaying', 'applied', 'failed')),
+  attemptCount INTEGER NOT NULL DEFAULT 0,
+  lastAttemptAt TEXT,
+  lastError TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  appliedAt TEXT
+);
+CREATE INDEX IF NOT EXISTS idxMeshWriteQueueReplay ON meshWriteQueue(targetNodeId, status, createdAt, id);
+`;
+
 // ── Central Database Class ────────────────────────────────────────────────
 
 export class CentralDatabase {
@@ -475,6 +551,11 @@ export class CentralDatabase {
 
     if (currentVersion < 9) {
       this.db.exec(CENTRAL_SCHEMA_V9_MIGRATION_SQL);
+      migrated = true;
+    }
+
+    if (currentVersion < 10) {
+      this.db.exec(CENTRAL_SCHEMA_V10_MIGRATION_SQL);
       migrated = true;
     }
 

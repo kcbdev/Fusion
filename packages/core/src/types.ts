@@ -2860,6 +2860,85 @@ export interface SnapshotBase {
   checksum: string;
 }
 
+export type MeshWriteQueueStatus = "pending" | "replaying" | "applied" | "failed";
+
+export interface MeshSnapshotQuery {
+  nodeId: string;
+  projectId?: string | null;
+  scope: string;
+}
+
+export interface MeshSnapshotRecordInput {
+  nodeId: string;
+  projectId?: string | null;
+  scope: string;
+  payload: Record<string, unknown>;
+  snapshotVersion: string;
+  capturedAt: string;
+  sourceNodeId?: string | null;
+  sourceRunId?: string | null;
+  staleAfter?: string | null;
+}
+
+export interface MeshSnapshotRecord extends MeshSnapshotRecordInput {
+  updatedAt: string;
+}
+
+export interface MeshWriteQueueInput {
+  originNodeId: string;
+  targetNodeId: string;
+  projectId?: string | null;
+  scope: string;
+  entityType: string;
+  entityId: string;
+  operation: string;
+  payload: Record<string, unknown>;
+  intentVersion: string;
+}
+
+export interface MeshWriteQueueFilter {
+  originNodeId?: string;
+  targetNodeId?: string;
+  status?: MeshWriteQueueStatus;
+}
+
+export interface MeshWriteQueueEntry extends MeshWriteQueueInput {
+  id: string;
+  status: MeshWriteQueueStatus;
+  attemptCount: number;
+  lastAttemptAt?: string | null;
+  lastError?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  appliedAt?: string | null;
+}
+
+export interface MeshWriteApplyResult {
+  appliedAt?: string;
+}
+
+export interface MeshWriteFailureResult {
+  lastError: string;
+}
+
+export interface MeshWriteReplaySummary {
+  replayed: number;
+  applied: number;
+  failed: number;
+  queuedWriteIds: string[];
+}
+
+export interface MeshDegradedReadState {
+  mode: "fresh" | "degraded";
+  asOf: string;
+  sourceNodeId: string | null;
+  snapshotVersion: string | null;
+  stalenessMs: number;
+  queueDepth: number;
+  pendingWriteCount: number;
+  failedWriteCount: number;
+}
+
 export interface SharedMeshStatePayload {
   taskMetadata?: SnapshotBase & { payload: { tasks: Task[] } };
   missionHierarchy?: SnapshotBase & {
