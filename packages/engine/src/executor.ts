@@ -48,6 +48,7 @@ import type { StuckTaskDetector, StuckTaskEvent } from "./stuck-task-detector.js
 import type { PluginRunner } from "./plugin-runner.js";
 import { isContextLimitError } from "./context-limit-detector.js";
 import { StepSessionExecutor } from "./step-session-executor.js";
+import { hydrateWorktreeDb } from "./worktree-db-hydrate.js";
 import {
   resolveAgentInstructions,
   buildSystemPromptWithInstructions,
@@ -2371,6 +2372,35 @@ export class TaskExecutor {
               } else {
                 await this.store.logEntry(task.id, `Acquired worktree from pool: ${worktreePath}`, undefined, this.currentRunContext);
               }
+
+              if (this.rootDir !== worktreePath) {
+                try {
+                  const hydration = await hydrateWorktreeDb({
+                    rootDir: this.rootDir,
+                    worktreePath,
+                    taskId: task.id,
+                    store: this.store,
+                    logger: executorLog,
+                  });
+                if (hydration.degraded) {
+                  await this.store.logEntry(
+                    task.id,
+                    `Worktree DB hydration degraded: ${hydration.reason ?? "unknown"}`,
+                    undefined,
+                    this.currentRunContext,
+                  );
+                } else {
+                  await this.store.logEntry(
+                    task.id,
+                    `Hydrated worktree DB: ${hydration.tasksCopied} tasks, ${hydration.documentsCopied} task_documents`,
+                    undefined,
+                    this.currentRunContext,
+                  );
+                }
+                } catch (error) {
+                  executorLog.warn(`${task.id}: worktree DB hydration failed: ${formatError(error)}`);
+                }
+              }
             } catch (poolErr: unknown) {
               // Pool preparation failed — release the worktree back and fall through
               // to fresh worktree creation
@@ -2462,9 +2492,68 @@ export class TaskExecutor {
             }
           }
         }
+
+        if (!acquiredFromPool) {
+          if (this.rootDir !== worktreePath) {
+            try {
+              const hydration = await hydrateWorktreeDb({
+                rootDir: this.rootDir,
+                worktreePath,
+                taskId: task.id,
+                store: this.store,
+                logger: executorLog,
+              });
+            if (hydration.degraded) {
+              await this.store.logEntry(
+                task.id,
+                `Worktree DB hydration degraded: ${hydration.reason ?? "unknown"}`,
+                undefined,
+                this.currentRunContext,
+              );
+            } else {
+              await this.store.logEntry(
+                task.id,
+                `Hydrated worktree DB: ${hydration.tasksCopied} tasks, ${hydration.documentsCopied} task_documents`,
+                undefined,
+                this.currentRunContext,
+              );
+            }
+            } catch (error) {
+              executorLog.warn(`${task.id}: worktree DB hydration failed: ${formatError(error)}`);
+            }
+          }
+        }
       } else if (task.worktree) {
         // Task already had a worktree assigned and it exists on disk — reuse it
         executorLog.log(`Reusing existing worktree: ${worktreePath}`);
+        if (this.rootDir !== worktreePath) {
+          try {
+            const hydration = await hydrateWorktreeDb({
+              rootDir: this.rootDir,
+              worktreePath,
+              taskId: task.id,
+              store: this.store,
+              logger: executorLog,
+            });
+          if (hydration.degraded) {
+            await this.store.logEntry(
+              task.id,
+              `Worktree DB hydration degraded: ${hydration.reason ?? "unknown"}`,
+              undefined,
+              this.currentRunContext,
+            );
+          } else {
+            await this.store.logEntry(
+              task.id,
+              `Hydrated worktree DB: ${hydration.tasksCopied} tasks, ${hydration.documentsCopied} task_documents`,
+              undefined,
+              this.currentRunContext,
+            );
+          }
+          } catch (error) {
+            executorLog.warn(`${task.id}: worktree DB hydration failed: ${formatError(error)}`);
+          }
+        }
       } else {
         // Directory exists at generated path but task has no worktree — create via normal flow
         const created = await this.createWorktree(branchName, worktreePath, task.id);

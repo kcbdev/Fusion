@@ -3560,6 +3560,21 @@ export function SettingsModal({
               </details>
             </div>
             <div className="form-group">
+              <label htmlFor="verificationFixRetries">Verification fix retries</label>
+              <input
+                id="verificationFixRetries"
+                type="number"
+                min={0}
+                max={3}
+                value={form.verificationFixRetries ?? ""}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setForm((f) => ({ ...f, verificationFixRetries: val === "" ? undefined : Number(val) } as SettingsFormState));
+                }}
+              />
+              <small>Number of automatic fix attempts after failed merge verification (0–3)</small>
+            </div>
+            <div className="form-group">
               <label htmlFor="mergeStrategy">Auto-completion mode</label>
               <select
                 id="mergeStrategy"

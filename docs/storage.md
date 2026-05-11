@@ -348,3 +348,34 @@ Invariant: after init, every declared column for covered tables exists regardles
 - [x] Backend settings + API route inventory included
 - [x] SQLite table inventory included
 - [x] Known in-progress FN-1201 called out
+
+## Per-Worktree DB Hydration
+
+Each git worktree has its own gitignored `.fusion/` directory, so `.fusion/fusion.db` is local scratch state per worktree. That isolation created a cross-task lookup gap: executor prompts that query sibling/dependency rows directly from the worktree DB could see empty results. FN-3840 documented the manual `ATTACH`/`INSERT OR REPLACE` recovery, and FN-3832 was the breaking case that surfaced this in production.
+
+Fusion now auto-hydrates the worktree DB during executor startup at three points:
+- after fresh worktree creation (including init/setup commands),
+- after pooled worktree acquire/reassignment,
+- when reusing an existing on-disk worktree for resume.
+
+Hydration copies only:
+- current task row,
+- transitive dependency task rows (BFS, depth cap 5, max 50 unique task IDs),
+- `task_documents` rows for that same task-id set.
+
+Implementation uses in-process SQLite streaming (`DatabaseSync`), source-side `SELECT`, destination-side `INSERT OR REPLACE` inside a destination transaction. Column lists are built from source/destination schema intersection (`PRAGMA table_info`), so schema drift degrades gracefully (dropped columns are logged once, and defaults apply on destination-only columns).
+
+Example shape of the destination write:
+
+```sql
+INSERT OR REPLACE INTO tasks (<shared-columns...>) VALUES (<placeholders...>);
+INSERT OR REPLACE INTO task_documents (<shared-columns...>) VALUES (<placeholders...>);
+```
+
+Expected executor log entry on success:
+
+```text
+Hydrated worktree DB: 4 tasks, 12 task_documents
+```
+
+Failure policy is strict non-blocking: hydration warnings are logged, but worktree creation/execution continues. Canonical task data remains the root project TaskStore DB; if an agent needs non-hydrated rows immediately, `fn_task_show` remains the canonical fallback path.

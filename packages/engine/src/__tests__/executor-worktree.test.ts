@@ -27,6 +27,7 @@ import {
   mockedWithRateLimitRetry,
   mockedExecSync,
   mockedExistsSync,
+  mockedHydrateWorktreeDb,
   mockExecuteAll,
   mockTerminateAllSessions,
   mockCleanup,
@@ -2094,3 +2095,71 @@ function createMockTaskDetail(overrides: Partial<TaskDetail> = {}): TaskDetail {
   };
 }
 
+
+describe("worktree DB hydration", () => {
+  const makeTask = (overrides: Partial<Task> = {}): Task => ({
+    id: "FN-HYD",
+    title: "Hydrate",
+    description: "Hydrate",
+    column: "in-progress",
+    dependencies: [],
+    steps: [],
+    currentStep: 0,
+    log: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  });
+
+  beforeEach(() => {
+    resetExecutorMocks();
+    mockedHydrateWorktreeDb.mockReset();
+    mockedHydrateWorktreeDb.mockResolvedValue({
+      tasksCopied: 1,
+      documentsCopied: 2,
+      degraded: false,
+    });
+    mockedCreateFnAgent.mockResolvedValue({
+      session: { prompt: vi.fn().mockResolvedValue(undefined), dispose: vi.fn() },
+    } as any);
+  });
+
+  it("runs once for fresh worktree", async () => {
+    mockedExistsSync.mockReturnValue(false);
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+    await executor.execute(makeTask());
+    expect(mockedHydrateWorktreeDb).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs once for pool acquire", async () => {
+    mockedExistsSync.mockReturnValue(false);
+    const store = createMockStore();
+    const pool = {
+      acquire: vi.fn(() => "/tmp/test/.worktrees/pooled"),
+      prepareForTask: vi.fn(async () => "fusion/fn-hyd"),
+      release: vi.fn(),
+    } as any;
+    store.getSettings.mockResolvedValue({ ...(await store.getSettings()), recycleWorktrees: true });
+    const executor = new TaskExecutor(store, "/tmp/test", { pool });
+    await executor.execute(makeTask());
+    expect(mockedHydrateWorktreeDb).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs hydration path when executor reassigns unusable root worktree", async () => {
+    mockedExistsSync.mockReturnValue(true);
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+    await executor.execute(makeTask({ worktree: "/tmp/test" }));
+    expect(mockedHydrateWorktreeDb).toHaveBeenCalledTimes(1);
+  });
+
+  it("hydration failure does not abort execute", async () => {
+    mockedHydrateWorktreeDb.mockRejectedValueOnce(new Error("boom"));
+    mockedExistsSync.mockReturnValue(false);
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+    await executor.execute(makeTask());
+    expect(mockedCreateFnAgent).toHaveBeenCalled();
+  });
+});

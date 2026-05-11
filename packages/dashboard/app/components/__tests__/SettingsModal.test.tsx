@@ -174,6 +174,7 @@ const defaultSettings = {
   mergeStrategy: "direct",
   pushAfterMerge: false,
   pushRemote: "origin",
+  verificationFixRetries: 2,
   recycleWorktrees: false,
   worktreeNaming: "random",
   includeTaskIdInCommit: true,
@@ -1893,6 +1894,25 @@ describe("SettingsModal", () => {
       const payload = mockUpdateSettings.mock.calls[0][0];
       expect(payload.pushAfterMerge).toBe(true);
       expect(payload.pushRemote).toBe("upstream main");
+    });
+
+    it("renders and saves verification fix retries", async () => {
+      renderModal({ initialSection: "merge" });
+      await waitForSettingsModalReady();
+
+      const retriesInput = screen.getByLabelText("Verification fix retries") as HTMLInputElement;
+      expect(retriesInput.value).toBe("2");
+
+      await userEvent.clear(retriesInput);
+      await userEvent.type(retriesInput, "1");
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(mockUpdateSettings).toHaveBeenCalled();
+      });
+
+      const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
+      expect(payload.verificationFixRetries).toBe(1);
     });
 
     it("renders and saves github issue tracking controls", async () => {

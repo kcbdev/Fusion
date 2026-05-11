@@ -187,6 +187,13 @@ vi.mock("../step-session-executor.js", () => ({
 vi.mock("../rate-limit-retry.js", () => ({
   withRateLimitRetry: vi.fn((fn: () => Promise<unknown>) => fn()),
 }));
+vi.mock("../worktree-db-hydrate.js", () => ({
+  hydrateWorktreeDb: vi.fn().mockResolvedValue({
+    tasksCopied: 0,
+    documentsCopied: 0,
+    degraded: false,
+  }),
+}));
 vi.mock("../verification-utils.js", async () => {
   const actual = await vi.importActual<typeof import("../verification-utils.js")>("../verification-utils.js");
   return {
@@ -221,6 +228,7 @@ import { StepSessionExecutor } from "../step-session-executor.js";
 import { withRateLimitRetry } from "../rate-limit-retry.js";
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { hydrateWorktreeDb } from "../worktree-db-hydrate.js";
 
 export const mockedCreateFnAgent = vi.mocked(createFnAgent);
 export const mockedSessionManager = vi.mocked(SessionManager);
@@ -230,6 +238,7 @@ export const mockedStepSessionExecutor = vi.mocked(StepSessionExecutor);
 export const mockedWithRateLimitRetry = vi.mocked(withRateLimitRetry);
 export const mockedExecSync = vi.mocked(execSync);
 export const mockedExistsSync = vi.mocked(existsSync);
+export const mockedHydrateWorktreeDb = vi.mocked(hydrateWorktreeDb);
 
 export type EventListener = (...args: unknown[]) => void;
 
