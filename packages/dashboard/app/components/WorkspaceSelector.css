@@ -89,7 +89,7 @@
 }
 
 .workspace-selector-option.active {
-  background: rgba(88, 166, 255, 0.12);
+  background: color-mix(in srgb, var(--todo) 12%, transparent);
 }
 
 .workspace-selector-option-main {

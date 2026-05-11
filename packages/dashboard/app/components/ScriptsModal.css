@@ -3940,16 +3940,16 @@
 .changes-diff-patch .diff-add,
 .gm-diff-patch [data-prefix="+"],
 .changes-diff-patch [data-prefix="+"] {
-  color: #3fb950;
-  background-color: rgba(63, 185, 80, 0.12);
+  color: var(--color-success);
+  background-color: color-mix(in srgb, var(--color-success) 12%, transparent);
 }
 
 .gm-diff-patch .diff-del,
 .changes-diff-patch .diff-del,
 .gm-diff-patch [data-prefix="-"],
 .changes-diff-patch [data-prefix="-"] {
-  color: #f85149;
-  background-color: rgba(248, 81, 73, 0.12);
+  color: var(--color-error);
+  background-color: color-mix(in srgb, var(--color-error) 12%, transparent);
 }
 
 .gm-diff-patch .diff-hunk,
@@ -3976,16 +3976,16 @@
 [data-theme="light"] .changes-diff-patch .diff-add,
 [data-theme="light"] .gm-diff-patch [data-prefix="+"],
 [data-theme="light"] .changes-diff-patch [data-prefix="+"] {
-  color: #1a7f37;
-  background-color: rgba(26, 127, 55, 0.1);
+  color: var(--color-success);
+  background-color: color-mix(in srgb, var(--color-success) 10%, transparent);
 }
 
 [data-theme="light"] .gm-diff-patch .diff-del,
 [data-theme="light"] .changes-diff-patch .diff-del,
 [data-theme="light"] .gm-diff-patch [data-prefix="-"],
 [data-theme="light"] .changes-diff-patch [data-prefix="-"] {
-  color: #cf222e;
-  background-color: rgba(207, 34, 46, 0.1);
+  color: var(--color-error);
+  background-color: color-mix(in srgb, var(--color-error) 10%, transparent);
 }
 
 [data-theme="light"] .gm-diff-patch .diff-hunk,

@@ -10,6 +10,8 @@ import {
 } from "../../api";
 import type { Task } from "@fusion/core";
 import type { GitRemote } from "../../api";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 // Mock the API module
 vi.mock("../../api", async (importOriginal) => {
@@ -67,6 +69,14 @@ const mockPulls = [
 describe("GitHubImportModal", () => {
   const onClose = vi.fn();
   const onImport = vi.fn();
+
+  it("uses color-mix tokens for focus and selection surfaces", () => {
+    const source = readFileSync(resolve(__dirname, "../GitHubImportModal.css"), "utf8");
+    expect(source).not.toContain("rgba(var(--color-primary-rgb)");
+    expect(source).not.toContain("rgba(var(--in-progress-rgb)");
+    expect(source).toContain("color-mix(in srgb, var(--in-progress) 12%, transparent)");
+    expect(source).toContain("Some hardcoded colors below");
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();

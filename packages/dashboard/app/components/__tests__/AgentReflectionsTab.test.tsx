@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { AgentReflectionsTab } from "../AgentReflectionsTab";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   addAgentRating,
   deleteAgentRating,
@@ -280,5 +282,11 @@ describe("AgentReflectionsTab", () => {
     await waitFor(() => {
       expect(screen.queryByText("Insights")).not.toBeInTheDocument();
     });
+  });
+
+  it("keeps budget warning banner tokenized", () => {
+    const source = readFileSync(resolve(__dirname, "../AgentReflectionsTab.css"), "utf8");
+    expect(source).toMatch(/\.budget-warning-banner\s*\{[^}]*var\(--state-error-bg, color-mix\(in srgb, var\(--color-error\) 15%, transparent\)\)/);
+    expect(source).not.toMatch(/\.budget-warning-banner\s*\{[^}]*rgba\(/);
   });
 });

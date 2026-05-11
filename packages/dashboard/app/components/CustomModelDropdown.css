@@ -153,12 +153,12 @@
 }
 
 .model-combobox-option--selected {
-  background: rgba(88, 166, 255, 0.15);
+  background: color-mix(in srgb, var(--todo) 15%, transparent);
 }
 
 .model-combobox-option--selected:hover,
 .model-combobox-option--selected.model-combobox-option--highlighted {
-  background: rgba(88, 166, 255, 0.25);
+  background: color-mix(in srgb, var(--todo) 25%, transparent);
 }
 
 .model-combobox-option-main {
@@ -380,22 +380,22 @@ html .column.drag-over * {
   --status-color-unknown: #6e7781;
 
   /* Shadow for light mode */
-  --shadow-sm: 0 1px 2px rgba(31, 35, 40, 0.08);
-  --shadow-md: 0 4px 6px rgba(31, 35, 40, 0.12);
-  --shadow-lg: 0 4px 24px rgba(31, 35, 40, 0.15);
-  --shadow-glow: 0 0 8px rgba(9, 105, 218, 0.18);
-  --glow-success: 0 0 8px rgba(26, 127, 55, 0.3);
-  --glow-warning: 0 0 8px rgba(154, 103, 0, 0.3);
-  --glow-danger: 0 0 8px rgba(207, 34, 46, 0.3);
-  --focus-ring: 0 0 0 2px rgba(9, 105, 218, 0.12);
-  --focus-ring-strong: 0 0 0 2px rgba(9, 105, 218, 0.24);
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
+  --shadow-md: 0 4px 6px color-mix(in srgb, var(--text) 12%, transparent);
+  --shadow-lg: 0 4px 24px color-mix(in srgb, var(--text) 15%, transparent);
+  --shadow-glow: 0 0 8px color-mix(in srgb, var(--todo) 18%, transparent);
+  --glow-success: 0 0 8px color-mix(in srgb, var(--color-success) 30%, transparent);
+  --glow-warning: 0 0 8px color-mix(in srgb, var(--color-warning) 30%, transparent);
+  --glow-danger: 0 0 8px color-mix(in srgb, var(--color-error) 30%, transparent);
+  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--todo) 12%, transparent);
+  --focus-ring-strong: 0 0 0 2px color-mix(in srgb, var(--todo) 24%, transparent);
   /* CTA tokens for light mode */
   --cta-bg: #1a7f37;
   --cta-border: #1f883d;
   --cta-text: #fff;
   --cta-bg-hover: #1f883d;
   --cta-border-hover: #2ea043;
-  --cta-glow: 0 0 8px rgba(26, 127, 55, 0.3);
+  --cta-glow: 0 0 8px color-mix(in srgb, var(--color-success) 30%, transparent);
 
   /* Info color for light mode */
   --color-info: #0969da;
@@ -435,7 +435,7 @@ html .column.drag-over * {
 
   /* Mission autopilot — darker for light backgrounds */
   --autopilot-icon: #ca8a04;
-  --autopilot-shadow: rgba(34, 197, 94, 0.4);
+  --autopilot-shadow: color-mix(in srgb, var(--color-success) 40%, transparent);
 
   /* Terminal background */
   --terminal-bg: #f6f8fa;
@@ -443,8 +443,8 @@ html .column.drag-over * {
   /* Card mission badge — darker purple for light bg */
   --badge-mission-text: #7c3aed;
   --badge-mission-text-hover: #8b5cf6;
-  --badge-mission-bg: rgba(124, 58, 237, 0.12);
-  --badge-mission-bg-hover: rgba(124, 58, 237, 0.22);
+  --badge-mission-bg: color-mix(in srgb, var(--badge-mission-text) 12%, transparent);
+  --badge-mission-bg-hover: color-mix(in srgb, var(--badge-mission-text-hover) 22%, transparent);
 
   /* Mission event type colors — darker/more saturated for light readability */
   --event-error-text: #dc2626;
@@ -452,15 +452,15 @@ html .column.drag-over * {
   --event-task-text: #059669;
   --event-slice-text: #d97706;
   --event-autopilot-text: #9333ea;
-  --event-error-bg: rgba(220, 38, 38, 0.12);
-  --event-state-bg: rgba(37, 99, 235, 0.12);
-  --event-task-bg: rgba(5, 150, 105, 0.12);
-  --event-slice-bg: rgba(217, 119, 6, 0.12);
-  --event-autopilot-bg: rgba(147, 51, 234, 0.12);
+  --event-error-bg: color-mix(in srgb, var(--event-error-text) 12%, transparent);
+  --event-state-bg: color-mix(in srgb, var(--event-state-text) 12%, transparent);
+  --event-task-bg: color-mix(in srgb, var(--event-task-text) 12%, transparent);
+  --event-slice-bg: color-mix(in srgb, var(--event-slice-text) 12%, transparent);
+  --event-autopilot-bg: color-mix(in srgb, var(--event-autopilot-text) 12%, transparent);
 
   /* Mission toggle & badge backgrounds */
-  --toggle-checked-bg: rgba(34, 197, 94, 0.15);
-  --meta-badge-bg: rgba(63, 185, 80, 0.08);
+  --toggle-checked-bg: color-mix(in srgb, var(--color-success) 15%, transparent);
+  --meta-badge-bg: color-mix(in srgb, var(--color-success) 8%, transparent);
 
   /* Star favorites */
   --star-idle: #9ca3af;
@@ -472,19 +472,19 @@ html .column.drag-over * {
 [data-theme="light"] .agent-detail-overlay,
 [data-theme="light"] .agent-dialog-overlay,
 [data-theme="light"] .chat-new-dialog-backdrop {
-  background: rgba(31, 35, 40, 0.5);
+  background: color-mix(in srgb, var(--text) 50%, transparent);
 }
 
 [data-theme="light"] .modal-header {
-  background: rgba(246, 248, 250, 0.8);
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
 }
 
 [data-theme="light"] .modal-actions {
-  background: rgba(246, 248, 250, 0.6);
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
 }
 
 [data-theme="light"] .settings-sidebar {
-  background: rgba(246, 248, 250, 0.6);
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
 }
 
 [data-theme="light"] .toast-success {
@@ -1062,7 +1062,7 @@ html .column.drag-over * {
 
 .theme-swatch-glass {
   --swatch-sample-1: #13111f;
-  --swatch-sample-2: rgba(34, 27, 52, 0.78);
+  --swatch-sample-2: color-mix(in srgb, #221b34 78%, transparent);
   --swatch-sample-3: #c86bff;
   --swatch-sample-4: #ff7aa8;
 }
@@ -1273,7 +1273,7 @@ html .column.drag-over * {
 
 [data-theme="light"] .theme-swatch-glass {
   --swatch-sample-1: #eceaf5;
-  --swatch-sample-2: rgba(255, 255, 255, 0.75);
+  --swatch-sample-2: color-mix(in srgb, #ffffff 75%, transparent);
   --swatch-sample-3: #9d40cf;
   --swatch-sample-4: #c74b7a;
 }

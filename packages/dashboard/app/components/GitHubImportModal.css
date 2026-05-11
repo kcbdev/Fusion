@@ -40,7 +40,7 @@
 
 .github-import-toolbar__zone--filter input:focus {
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb), 0.2);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 20%, transparent);
   outline: none;
 }
 
@@ -106,7 +106,7 @@
 .github-import-remote-select select:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb), 0.2);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 20%, transparent);
 }
 
 /* Load button */
@@ -540,8 +540,8 @@
 }
 
 .issue-item.selected {
-  background: rgba(var(--in-progress-rgb), 0.12);
-  box-shadow: inset 0 0 0 1px rgba(var(--in-progress-rgb), 0.35);
+  background: color-mix(in srgb, var(--in-progress) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--in-progress) 35%, transparent);
 }
 
 .issue-item.imported {
@@ -653,7 +653,7 @@
 [data-theme="light"] .github-import-tab.active {
   background: var(--card);
   border-color: var(--border);
-  box-shadow: 0 1px 3px rgba(31, 35, 40, 0.06);
+  box-shadow: var(--shadow-sm);
 }
 
 [data-theme="light"] .github-import-toolbar {
@@ -668,7 +668,7 @@
 
 [data-theme="light"] .github-import-toolbar__zone--filter input:focus {
   border-color: var(--color-primary, var(--todo));
-  box-shadow: 0 0 0 2px rgba(var(--in-progress-rgb), 0.15);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--in-progress) 15%, transparent);
 }
 
 [data-theme="light"] .issues-list {
@@ -681,8 +681,8 @@
 }
 
 [data-theme="light"] .issue-item.selected {
-  background: rgba(var(--in-progress-rgb), 0.08);
-  box-shadow: inset 0 0 0 1px rgba(var(--in-progress-rgb), 0.3);
+  background: color-mix(in srgb, var(--in-progress) 8%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--in-progress) 30%, transparent);
 }
 
 [data-theme="light"] .issue-item.imported input[type="radio"] {

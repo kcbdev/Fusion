@@ -4,6 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { WorkspaceSelector } from "../WorkspaceSelector";
 import type { WorkspaceInfo } from "../../hooks/useWorkspaces";
 import { loadAllAppCss } from "../../test/cssFixture";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const workspaces: WorkspaceInfo[] = [
   {
@@ -95,5 +97,11 @@ describe("WorkspaceSelector", () => {
     const css = loadAllAppCss();
 
     expect(css).toMatch(/\.workspace-selector-menu\s*\{[^}]*left:\s*auto;[^}]*right:\s*0;/);
+  });
+
+  it("uses tokenized active-option background styling", () => {
+    const source = readFileSync(resolve(__dirname, "../WorkspaceSelector.css"), "utf8");
+    expect(source).toMatch(/\.workspace-selector-option\.active\s*\{[^}]*color-mix\(in srgb, var\(--todo\) 12%, transparent\)/);
+    expect(source).not.toMatch(/\.workspace-selector-option\.active\s*\{[^}]*rgba\(/);
   });
 });
