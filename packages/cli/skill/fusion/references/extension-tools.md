@@ -270,7 +270,7 @@ Create a new non-ephemeral agent.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `name` | string | ✓ | Agent name |
-| `role` | string | ✓ | Agent role/capability |
+| `role` | union | ✓ | Agent role/capability |
 | `soul` | string | — | Agent personality/identity text |
 | `instructions_text` | string | — | Inline custom instructions |
 | `instructions_path` | string | — | Path to instructions markdown |
@@ -286,7 +286,7 @@ Delete a non-ephemeral agent.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `id` | string | ✓ | Agent ID to delete |
+| `agent_id` | string | ✓ | Agent ID to delete |
 | `force` | boolean | — | Force delete when holding checkout |
 | `reassign_to` | string | — | Optional replacement agent for assigned tasks |
 

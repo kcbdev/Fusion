@@ -311,13 +311,15 @@ Six tools enable inter-agent coordination — discovering agents, provisioning/d
 
 Create a non-ephemeral agent that reports to the caller (or, for CEO-level callers, any `reportsTo` target).
 
-Provisioning can be policy-gated (`projectSettings.agentProvisioning`). Tool responses include `details.outcome` of `created`, `pending_approval`, or `denied`. Pending requests are resolved via dashboard/API approval decision route (`POST /api/approvals/:id/decision`), which executes deferred creation on approve.
+Provisioning is policy-gated via `projectSettings.agentProvisioning` (`approvalMode`, `trustedRoles`, `trustedAgentIds`, `alwaysApproveDelete`). Tool responses use `details.outcome` values `created`, `deleted`, `pending_approval`, or `denied`. Pending requests are resolved via dashboard/API approval decision route (`POST /api/approvals/:id/decision`), which executes deferred provisioning on approve.
 
 ### `agent_delete` Tool
 
 Delete a non-ephemeral direct report. If the target holds a task checkout lease, deletion is blocked unless `force: true`. Assigned tasks can be reassigned via `reassign_to` or released/unassigned.
 
-Provisioning policy also applies to deletes (`details.outcome`: `deleted`, `pending_approval`, or `denied`). Approval decisions emit provisioning audit events (`agent:create:approved|denied`, `agent:delete:approved|denied`) tied to the original run/task metadata.
+Provisioning policy also applies to deletes (`details.outcome`: `deleted`, `pending_approval`, or `denied`). Provisioning emits audit events `agent:create:{requested,approved,denied}` and `agent:delete:{requested,approved,denied}` tied to the originating run/task metadata.
+
+Out of scope in FN-3791: `spawn_agent` (ephemeral child worktree lifecycle). Follow-up task: "Evaluate approval guards for `spawn_agent` (ephemeral worktree children)".
 
 ### `list_agents` Tool
 

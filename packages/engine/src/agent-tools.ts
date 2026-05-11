@@ -22,6 +22,7 @@ import type { AgentReflectionService } from "./agent-reflection.js";
 import { createLogger } from "./logger.js";
 import { fetchWebContent, WebFetchError } from "./web-fetch.js";
 import type { RunAuditor } from "./run-audit.js";
+import { computeApprovalDedupeKey } from "./agent-action-gate.js";
 
 // ── Tool parameter schemas (canonical definitions) ────────────────────────
 
@@ -1514,6 +1515,15 @@ export function createAgentCreateTool(
           };
         }
 
+        const approvalDedupeKey = computeApprovalDedupeKey({
+          agentId: callingAgentId,
+          toolName: "fn_agent_create",
+          category: "agent_provisioning",
+          resourceType: "agent",
+          resourceId: reportsTo,
+          operation: `create:${params.name}:${params.role}:${reportsTo}`,
+        });
+
         const request = options.approvalRequestStore.create({
           requester: { actorId: callingAgentId, actorType: "agent", actorName: caller?.name ?? callingAgentId },
           targetAction: {
@@ -1522,7 +1532,7 @@ export function createAgentCreateTool(
             summary: `Create agent ${params.name} (${params.role})`,
             resourceType: "agent",
             resourceId: "",
-            context: { tool: "fn_agent_create", params },
+            context: { tool: "fn_agent_create", params, approvalDedupeKey },
           },
         });
 
@@ -1625,6 +1635,15 @@ export function createAgentDeleteTool(
           };
         }
 
+        const approvalDedupeKey = computeApprovalDedupeKey({
+          agentId: callingAgentId,
+          toolName: "fn_agent_delete",
+          category: "agent_provisioning",
+          resourceType: "agent",
+          resourceId: target.id,
+          operation: `delete:${target.id}:${params.force === true ? "force" : "normal"}:${params.reassign_to ?? ""}`,
+        });
+
         const request = options.approvalRequestStore.create({
           requester: { actorId: callingAgentId, actorType: "agent", actorName: caller?.name ?? callingAgentId },
           targetAction: {
@@ -1633,7 +1652,7 @@ export function createAgentDeleteTool(
             summary: `Delete agent ${target.name} (${target.id})`,
             resourceType: "agent",
             resourceId: target.id,
-            context: { tool: "fn_agent_delete", params },
+            context: { tool: "fn_agent_delete", params, approvalDedupeKey },
           },
         });
 

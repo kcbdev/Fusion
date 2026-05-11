@@ -2530,7 +2530,14 @@ export default function kbExtension(pi: ExtensionAPI) {
     description: "Create a new non-ephemeral agent.",
     parameters: Type.Object({
       name: Type.String({ description: "Agent name" }),
-      role: Type.String({ description: "Agent role/capability" }),
+      role: Type.Union([
+        Type.Literal("triage"),
+        Type.Literal("executor"),
+        Type.Literal("reviewer"),
+        Type.Literal("merger"),
+        Type.Literal("engineer"),
+        Type.Literal("custom"),
+      ], { description: "Agent role/capability" }),
       soul: Type.Optional(Type.String({ description: "Agent personality/identity text" })),
       instructions_text: Type.Optional(Type.String({ description: "Inline custom instructions" })),
       instructions_path: Type.Optional(Type.String({ description: "Path to instructions markdown" })),
@@ -2545,14 +2552,22 @@ export default function kbExtension(pi: ExtensionAPI) {
       const agentStore = new AgentStore({ rootDir: getFusionDir(ctx.cwd) });
       await agentStore.init();
       const store = await getStore(ctx.cwd);
+      const caller = { id: "user", role: "user", isPrivileged: true } as const;
       const policy = resolveAgentProvisioningPolicy({
         tool: "fn_agent_create",
-        caller: { id: "user", role: "user", isPrivileged: true },
+        caller,
         settings: await store.getSettings(),
       });
 
+      if (!caller.isPrivileged && params.reportsTo !== undefined && params.reportsTo !== caller.id) {
+        return {
+          content: [{ type: "text" as const, text: "ERROR: You can only create agents that report to you" }],
+          details: { outcome: "denied", matchedRule: "privileged-caller", effectiveMode: policy.effectiveMode },
+        };
+      }
+
       if (policy.decision === "require-approval") {
-        const approvalStore = new ApprovalRequestStore((store as unknown as { db: unknown }).db as never);
+        const approvalStore = new ApprovalRequestStore(store.getDatabase());
         const request = approvalStore.create({
           requester: { actorId: "user", actorType: "user", actorName: "CLI User" },
           targetAction: { category: "agent_provisioning", action: "create", summary: `Create agent ${params.name} (${params.role})`, resourceType: "agent", resourceId: "", context: { tool: "fn_agent_create", params } },
@@ -2590,7 +2605,7 @@ export default function kbExtension(pi: ExtensionAPI) {
     label: "fn: Delete Agent",
     description: "Delete a non-ephemeral agent.",
     parameters: Type.Object({
-      id: Type.String({ description: "Agent ID to delete" }),
+      agent_id: Type.String({ description: "Agent ID to delete" }),
       force: Type.Optional(Type.Boolean({ description: "Force delete when holding checkout" })),
       reassign_to: Type.Optional(Type.String({ description: "Optional replacement agent for assigned tasks" })),
     }),
@@ -2599,25 +2614,33 @@ export default function kbExtension(pi: ExtensionAPI) {
       const agentStore = new AgentStore({ rootDir: getFusionDir(ctx.cwd) });
       await agentStore.init();
       const store = await getStore(ctx.cwd);
+      const caller = { id: "user", role: "user", isPrivileged: true } as const;
       const policy = resolveAgentProvisioningPolicy({
         tool: "fn_agent_delete",
-        caller: { id: "user", role: "user", isPrivileged: true },
+        caller,
         settings: await store.getSettings(),
       });
 
       if (policy.decision === "require-approval") {
-        const approvalStore = new ApprovalRequestStore((store as unknown as { db: unknown }).db as never);
+        const approvalStore = new ApprovalRequestStore(store.getDatabase());
         const request = approvalStore.create({
           requester: { actorId: "user", actorType: "user", actorName: "CLI User" },
-          targetAction: { category: "agent_provisioning", action: "delete", summary: `Delete agent ${params.id}`, resourceType: "agent", resourceId: params.id, context: { tool: "fn_agent_delete", params } },
+          targetAction: { category: "agent_provisioning", action: "delete", summary: `Delete agent ${params.agent_id}`, resourceType: "agent", resourceId: params.agent_id, context: { tool: "fn_agent_delete", params } },
         });
-        return { content: [{ type: "text" as const, text: `Approval required. Request ${request.id} created.` }], details: { outcome: "pending_approval", approvalRequestId: request.id, matchedRule: policy.matchedRule, effectiveMode: policy.effectiveMode, agentId: params.id } };
+        return { content: [{ type: "text" as const, text: `Approval required. Request ${request.id} created.` }], details: { outcome: "pending_approval", approvalRequestId: request.id, matchedRule: policy.matchedRule, effectiveMode: policy.effectiveMode, agentId: params.agent_id } };
       }
 
-      await agentStore.deleteAgent(params.id, { force: params.force === true, reassignTo: params.reassign_to });
+      if (policy.decision === "deny") {
+        return {
+          content: [{ type: "text" as const, text: `DENIED: agent delete blocked by policy (${policy.matchedRule})` }],
+          details: { outcome: "denied", matchedRule: policy.matchedRule, effectiveMode: policy.effectiveMode, agentId: params.agent_id },
+        };
+      }
+
+      await agentStore.deleteAgent(params.agent_id, { force: params.force === true, reassignTo: params.reassign_to });
       return {
-        content: [{ type: "text" as const, text: `Deleted ${params.id}` }],
-        details: { outcome: "deleted", matchedRule: policy.matchedRule, effectiveMode: policy.effectiveMode, agentId: params.id },
+        content: [{ type: "text" as const, text: `Deleted ${params.agent_id}` }],
+        details: { outcome: "deleted", matchedRule: policy.matchedRule, effectiveMode: policy.effectiveMode, agentId: params.agent_id },
       };
     },
   });
