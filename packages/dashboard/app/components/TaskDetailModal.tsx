@@ -837,6 +837,24 @@ export function TaskDetailContent({
     }
   }, [addToast, canEditGithubTracking, githubRepoOverrideTrimmed, isSavingGithubTracking, onTaskUpdated, projectId, task.id]);
 
+  const handleRetryGithubTrackingIssueCreate = useCallback(async () => {
+    if (!githubTrackingEnabled || githubTrackedIssue || isSavingGithubTracking) return;
+    setIsSavingGithubTracking(true);
+    try {
+      const updatedTask = await updateTask(task.id, {
+        githubTracking: {
+          enabled: true,
+        },
+      }, projectId);
+      onTaskUpdated?.(updatedTask);
+      addToast("Requested GitHub tracking issue creation", "info");
+    } catch (err) {
+      addToast(`Failed to update ${task.id}: ${getErrorMessage(err)}`, "error");
+    } finally {
+      if (mountedRef.current) setIsSavingGithubTracking(false);
+    }
+  }, [addToast, githubTrackedIssue, githubTrackingEnabled, isSavingGithubTracking, onTaskUpdated, projectId, task.id]);
+
   const enterEditMode = useCallback(() => {
     if (!canEdit) return;
     setIsEditing(true);
@@ -2399,40 +2417,47 @@ export function TaskDetailContent({
                       </div>
                     </dl>
                   )}
-                  {canEditGithubTracking && (
-                    <div className="detail-github-tracking-controls">
-                      <label className="checkbox-label" htmlFor="detail-github-tracking-toggle">
-                        <input
-                          id="detail-github-tracking-toggle"
-                          type="checkbox"
-                          checked={githubTrackingEnabled}
-                          disabled={isSavingGithubTracking}
-                          onChange={() => void handleToggleGithubTracking()}
-                        />
-                        Enable GitHub tracking
-                      </label>
-                      <div className="detail-github-tracking-repo-row">
-                        <input
-                          className="input"
-                          value={githubRepoOverrideDraft}
-                          onChange={(event) => {
-                            setGithubRepoOverrideDraft(event.target.value);
-                            setGithubRepoOverrideError(null);
-                          }}
-                          placeholder={effectiveGithubRepoDefault || "owner/repo"}
-                        />
-                        <button className="btn btn-sm" onClick={() => void handleSaveGithubRepoOverride()} disabled={isSavingGithubTracking}>
-                          Save
-                        </button>
-                      </div>
-                      {githubRepoOverrideError && <small className="detail-github-tracking-error">{githubRepoOverrideError}</small>}
-                      {githubTrackedIssue && (
-                        <button className="btn btn-sm touch-target" onClick={() => void handleUnlinkGithubIssue()} disabled={isSavingGithubTracking}>
-                          Unlink GitHub issue
-                        </button>
-                      )}
-                    </div>
-                  )}
+                  <div className="detail-github-tracking-controls">
+                    {!githubTrackedIssue && githubTrackingEnabled && (
+                      <button className="btn btn-sm touch-target" onClick={() => void handleRetryGithubTrackingIssueCreate()} disabled={isSavingGithubTracking}>
+                        Create tracking issue
+                      </button>
+                    )}
+                    {canEditGithubTracking && (
+                      <>
+                        <label className="checkbox-label" htmlFor="detail-github-tracking-toggle">
+                          <input
+                            id="detail-github-tracking-toggle"
+                            type="checkbox"
+                            checked={githubTrackingEnabled}
+                            disabled={isSavingGithubTracking}
+                            onChange={() => void handleToggleGithubTracking()}
+                          />
+                          Enable GitHub tracking
+                        </label>
+                        <div className="detail-github-tracking-repo-row">
+                          <input
+                            className="input"
+                            value={githubRepoOverrideDraft}
+                            onChange={(event) => {
+                              setGithubRepoOverrideDraft(event.target.value);
+                              setGithubRepoOverrideError(null);
+                            }}
+                            placeholder={effectiveGithubRepoDefault || "owner/repo"}
+                          />
+                          <button className="btn btn-sm" onClick={() => void handleSaveGithubRepoOverride()} disabled={isSavingGithubTracking}>
+                            Save
+                          </button>
+                        </div>
+                        {githubRepoOverrideError && <small className="detail-github-tracking-error">{githubRepoOverrideError}</small>}
+                        {githubTrackedIssue && (
+                          <button className="btn btn-sm touch-target" onClick={() => void handleUnlinkGithubIssue()} disabled={isSavingGithubTracking}>
+                            Unlink GitHub issue
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

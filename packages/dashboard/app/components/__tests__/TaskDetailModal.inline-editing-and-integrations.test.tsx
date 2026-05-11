@@ -2222,6 +2222,32 @@ describe("TaskDetailModal", () => {
       expect(screen.queryByText("GitHub tracking")).toBeNull();
     });
 
+    it("shows create tracking issue action for enabled but unlinked tasks outside editable columns", async () => {
+      const { updateTask } = await import("../../api");
+      const mockUpdate = vi.mocked(updateTask);
+      mockUpdate.mockResolvedValueOnce({ id: "FN-001" } as Task);
+
+      render(
+        <TaskDetailModal
+          task={makeTask({ id: "FN-001", column: "done", githubTracking: { enabled: true } })}
+          onClose={noop}
+          onOpenDetail={noopOpenDetail}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          addToast={noop}
+        />,
+      );
+
+      expandGithubTracking();
+      fireEvent.click(screen.getByRole("button", { name: "Create tracking issue" }));
+
+      await waitFor(() => {
+        expect(mockUpdate).toHaveBeenCalledWith("FN-001", { githubTracking: { enabled: true } }, undefined);
+      });
+      expect(screen.queryByLabelText("Enable GitHub tracking")).toBeNull();
+    });
+
     it("sends githubTracking disabled→enabled toggle payload", async () => {
       const { updateTask } = await import("../../api");
       const mockUpdate = vi.mocked(updateTask);

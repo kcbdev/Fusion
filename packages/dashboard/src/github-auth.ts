@@ -17,18 +17,31 @@ export type GithubTrackingAuthResolution =
 
 export interface ResolveGithubTrackingAuthDeps {
   projectSettings: Pick<ProjectSettings, "githubAuthMode" | "githubAuthToken">;
-  globalSettings: Pick<GlobalSettings, never>;
+  globalSettings?: Partial<GlobalSettings> | Record<string, unknown>;
   env?: NodeJS.ProcessEnv;
+}
+
+function pickString(source: Record<string, unknown> | undefined, key: string): string | undefined {
+  const value = source?.[key];
+  return typeof value === "string" ? value : undefined;
 }
 
 export function resolveGithubTrackingAuth(
   deps: ResolveGithubTrackingAuthDeps,
 ): GithubTrackingAuthResolution {
-  const requestedMode = deps.projectSettings.githubAuthMode ?? "gh-cli";
+  const global = (deps.globalSettings ?? {}) as Record<string, unknown>;
+  const requestedMode = deps.projectSettings.githubAuthMode
+    ?? pickString(global, "githubAuthMode")
+    ?? pickString(global, "projectGithubAuthMode")
+    ?? "gh-cli";
   const env = deps.env ?? process.env;
 
   if (requestedMode === "token") {
-    const token = deps.projectSettings.githubAuthToken?.trim() || env.GITHUB_TOKEN?.trim() || "";
+    const token = deps.projectSettings.githubAuthToken?.trim()
+      || pickString(global, "githubAuthToken")?.trim()
+      || pickString(global, "projectGithubAuthToken")?.trim()
+      || env.GITHUB_TOKEN?.trim()
+      || "";
     if (!token) {
       return {
         ok: false,

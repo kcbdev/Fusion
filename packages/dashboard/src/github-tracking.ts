@@ -124,7 +124,7 @@ export async function maybeCreateTrackingIssue(
 
   const resolution = resolveGithubTrackingAuth({
     projectSettings: deps.projectSettings,
-    globalSettings: {},
+    globalSettings: deps.globalSettings,
   });
 
   if (!resolution.ok) {

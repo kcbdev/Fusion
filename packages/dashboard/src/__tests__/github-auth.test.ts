@@ -85,6 +85,24 @@ describe("resolveGithubTrackingAuth", () => {
     expect(result).toEqual({ ok: true, auth: { mode: "gh-cli" } });
   });
 
+  it("uses global githubAuthMode/githubAuthToken fallback when present", () => {
+    const result = resolveGithubTrackingAuth({
+      projectSettings: {},
+      globalSettings: { githubAuthMode: "token", githubAuthToken: "global-token" },
+      env: {},
+    });
+    expect(result).toEqual({ ok: true, auth: { mode: "token", token: "global-token" } });
+  });
+
+  it("uses defensive projectGithubAuthMode/projectGithubAuthToken fallback keys", () => {
+    const result = resolveGithubTrackingAuth({
+      projectSettings: {},
+      globalSettings: { projectGithubAuthMode: "token", projectGithubAuthToken: "project-global-token" },
+      env: {},
+    });
+    expect(result).toEqual({ ok: true, auth: { mode: "token", token: "project-global-token" } });
+  });
+
   it("returns invalid_mode for unsupported mode values", () => {
     const result = resolveGithubTrackingAuth({
       projectSettings: { githubAuthMode: "weird" as "gh-cli" },

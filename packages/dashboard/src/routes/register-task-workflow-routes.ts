@@ -1829,8 +1829,12 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         validatedGithubTracking !== null &&
         typeof validatedGithubTracking === "object" &&
         validatedGithubTracking.issue === null;
+      const shouldAttemptTrackingIssueCreate =
+        !manualUnlinkRequested &&
+        task.githubTracking?.enabled === true &&
+        !task.githubTracking?.issue;
 
-      if (hasBodyField("githubTracking") && !manualUnlinkRequested) {
+      if (shouldAttemptTrackingIssueCreate) {
         await maybeCreateTaskTrackingIssue(scopedStore, task, options?.githubToken);
         const refreshedTask = await scopedStore.getTask(req.params.id, {
           activityLogLimit: TASK_DETAIL_ACTIVITY_LOG_LIMIT,

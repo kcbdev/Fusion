@@ -1871,6 +1871,42 @@ describe("PATCH /tasks/:id", () => {
     createIssueSpy.mockRestore();
   });
 
+  it("retries tracking issue creation on non-tracking patch when task is enabled but unlinked", async () => {
+    const createIssueSpy = vi.spyOn(GitHubClient.prototype, "createIssue").mockResolvedValue({
+      owner: "runfusion",
+      repo: "fusion",
+      number: 101,
+      htmlUrl: "https://github.com/runfusion/fusion/issues/101",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ githubAuthMode: "token", githubAuthToken: "tok" });
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...FAKE_TASK_DETAIL,
+      id: "KB-001",
+      title: "Retitled",
+      githubTracking: { enabled: true, repoOverride: "runfusion/fusion" },
+    });
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...FAKE_TASK_DETAIL,
+      id: "KB-001",
+      title: "Retitled",
+      githubTracking: {
+        enabled: true,
+        repoOverride: "runfusion/fusion",
+        issue: { owner: "runfusion", repo: "fusion", number: 101, url: "https://github.com/runfusion/fusion/issues/101", createdAt: "2026-01-01T00:00:00.000Z" },
+      },
+    });
+
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({ title: "Retitled" }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(createIssueSpy).toHaveBeenCalledWith(expect.objectContaining({ owner: "runfusion", repo: "fusion" }));
+    expect(store.linkGithubIssue).toHaveBeenCalledWith("KB-001", expect.objectContaining({ number: 101 }));
+    createIssueSpy.mockRestore();
+  });
+
   it("returns 400 for invalid githubTracking repo override format", async () => {
     const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({
       githubTracking: {

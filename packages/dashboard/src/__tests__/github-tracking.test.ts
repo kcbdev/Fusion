@@ -211,4 +211,16 @@ describe("maybeCreateTrackingIssue", () => {
     }));
     expect(createIssueMock).not.toHaveBeenCalled();
   });
+
+  it("passes global settings through to auth resolution", async () => {
+    const globalSettings = { githubTrackingDefaultRepo: "o/r", githubAuthMode: "token" } as any;
+    await maybeCreateTrackingIssue(buildTask({ githubTracking: { enabled: true } }), {
+      taskStore: { linkGithubIssue: vi.fn(), recordActivity: vi.fn() } as any,
+      projectSettings: {},
+      globalSettings,
+      logger: { warn: vi.fn(), info: vi.fn() },
+    });
+
+    expect(resolveAuthMock).toHaveBeenCalledWith(expect.objectContaining({ globalSettings }));
+  });
 });
