@@ -1172,6 +1172,38 @@ Behavior summary:
 
 `TaskStore.updateTask()` applies this guard before persisting `nodeId` changes.
 
+### Task commit-association API (`GET /api/tasks/:id/commit-associations`)
+
+Dashboard session-diff route registration (`packages/dashboard/src/routes/register-session-diff-routes.ts`) now exposes lineage commit associations for task detail views:
+
+- **Route:** `GET /api/tasks/:id/commit-associations`
+- **Project scoping:** uses `getProjectContext(req)` so reads are project-aware like adjacent task diff endpoints.
+- **404 behavior:** returns `{ error: "Task not found" }` for unknown task ids.
+- **Response contract:**
+
+```json
+{
+  "taskId": "FN-1234",
+  "lineageId": "uuid-or-null",
+  "associations": [
+    {
+      "commitSha": "abc123...",
+      "commitSubject": "feat(FN-1234): ...",
+      "authoredAt": "2026-05-11T02:00:00.000Z",
+      "matchedBy": "canonical-lineage-trailer | legacy-task-id-trailer | legacy-subject | manual-reconciliation",
+      "confidence": "canonical | legacy | ambiguous",
+      "taskIdSnapshot": "FN-1234",
+      "note": "optional reconciliation note"
+    }
+  ]
+}
+```
+
+`confidence` is a consumer-facing interpretation aid:
+- `canonical` = immutable lineage trailer match (highest confidence)
+- `legacy` = recovered via legacy task-id/subject matching
+- `ambiguous` = manual reconciliation where historical task-id attribution could be misleading
+
 ### Task branch field plumbing (`branch` + `baseBranch`)
 
 Task create/update now preserves both branch fields end-to-end:

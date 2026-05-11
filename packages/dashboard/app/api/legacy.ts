@@ -6267,6 +6267,27 @@ export function fetchTaskDiff(taskId: string, worktree?: string, projectId?: str
   return api<TaskDiff>(`/tasks/${encodeURIComponent(taskId)}/diff${query}`);
 }
 
+export interface TaskCommitAssociationRow {
+  commitSha: string;
+  commitSubject: string;
+  authoredAt: string;
+  matchedBy: "canonical-lineage-trailer" | "legacy-task-id-trailer" | "legacy-subject" | "manual-reconciliation";
+  confidence: "canonical" | "legacy" | "ambiguous";
+  taskIdSnapshot: string;
+  note?: string;
+}
+
+export interface TaskCommitAssociationsResponse {
+  taskId: string;
+  lineageId: string | null;
+  associations: TaskCommitAssociationRow[];
+}
+
+/** Fetch lineage commit associations for a task */
+export function fetchTaskCommitAssociations(taskId: string, projectId?: string): Promise<TaskCommitAssociationsResponse> {
+  return api<TaskCommitAssociationsResponse>(withProjectId(`/tasks/${encodeURIComponent(taskId)}/commit-associations`, projectId));
+}
+
 /** Individual file diff */
 export interface TaskFileDiff {
   path: string;

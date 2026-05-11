@@ -2,7 +2,12 @@ import { useState, useEffect, useCallback } from "react";
 import { FileCode, ChevronDown, ChevronRight, ChevronLeft, AlertCircle, GitCommit, WrapText, Maximize2 } from "lucide-react";
 import type { MergeDetails, Column } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
-import { fetchTaskDiff, type TaskDiff } from "../api";
+import {
+  fetchTaskDiff,
+  fetchTaskCommitAssociations,
+  type TaskDiff,
+  type TaskCommitAssociationRow,
+} from "../api";
 import { highlightDiff } from "../utils/highlightDiff";
 import { ChangesDiffModal } from "./ChangesDiffModal";
 import "./TaskDiffShared.css";
@@ -118,6 +123,8 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
   const [stats, setStats] = useState<{ filesChanged: number; additions: number; deletions: number }>({ filesChanged: 0, additions: 0, deletions: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [commitAssociations, setCommitAssociations] = useState<TaskCommitAssociationRow[]>([]);
+  const [lineageId, setLineageId] = useState<string | null>(null);
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
   const [currentFileIndex, setCurrentFileIndex] = useState<number | null>(null);
   const [wordWrap, setWordWrap] = useState(true);
@@ -131,7 +138,7 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
   const canLoad = (column === "in-progress" || column === "in-review") || isDoneWithCommit;
 
   const loadDiff = useCallback(async () => {
-    if (!canLoad) {
+    if (!canLoad && !isDone) {
       setLoading(false);
       return;
     }
@@ -139,6 +146,16 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
     try {
       setLoading(true);
       setError(null);
+      const associationsData = await fetchTaskCommitAssociations(taskId, projectId);
+      setLineageId(associationsData.lineageId);
+      setCommitAssociations(associationsData.associations);
+
+      if (!canLoad) {
+        setFiles([]);
+        setStats({ filesChanged: 0, additions: 0, deletions: 0 });
+        return;
+      }
+
       const data: TaskDiff = await fetchTaskDiff(taskId, undefined, projectId);
       const normalized: NormalizedFile[] = data.files.map((f) => ({
         path: f.path,
@@ -154,11 +171,11 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
         setCurrentFileIndex(0);
       }
     } catch (err) {
-      setError(getErrorMessage(err) || "Failed to load diff");
+      setError(getErrorMessage(err) || "Failed to load task changes");
     } finally {
       setLoading(false);
     }
-  }, [taskId, projectId, canLoad]);
+  }, [taskId, projectId, canLoad, isDone]);
 
   useEffect(() => {
     loadDiff();
@@ -261,13 +278,55 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
     );
   }
 
+  const renderCommitAssociations = () => (
+    <section className="task-lineage-associations" aria-label="Task commit associations">
+      <div className="task-lineage-associations-header">
+        <h4>
+          <GitCommit size={16} />
+          Lineage commit associations
+        </h4>
+        {lineageId && (
+          <code className="task-lineage-id">{lineageId}</code>
+        )}
+      </div>
+      {commitAssociations.length === 0 ? (
+        <p className="task-lineage-associations-empty">No associated commits recorded yet.</p>
+      ) : (
+        <div className="task-lineage-associations-list">
+          {commitAssociations.map((association) => {
+            const matchedLabel = association.matchedBy.replace(/-/g, " ");
+            return (
+              <article
+                key={`${association.commitSha}-${association.matchedBy}`}
+                className={`task-lineage-association task-lineage-association--${association.confidence}`}
+              >
+                <div className="task-lineage-association-main">
+                  <code className="task-lineage-sha">{association.commitSha.slice(0, 7)}</code>
+                  <span className="task-lineage-subject">{association.commitSubject}</span>
+                </div>
+                <div className="task-lineage-association-meta">
+                  <span>{new Date(association.authoredAt).toLocaleString()}</span>
+                  <span>Confidence: {association.confidence}</span>
+                  <span>Match: {matchedLabel}</span>
+                  <span>Task snapshot: {association.taskIdSnapshot}</span>
+                </div>
+                {association.note && <p className="task-lineage-note">{association.note}</p>}
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+
   if (files.length === 0) {
     if (modifiedFiles && modifiedFiles.length > 0) {
       return renderModifiedFilesFallback(modifiedFiles, isDone, mergeDetails);
     }
 
     return (
-      <div className="detail-section">
+      <div className="detail-section task-changes-tab">
+        {renderCommitAssociations()}
         <div className="task-changes-state task-changes-state--empty">
           <FileCode size={24} />
           <p>No files modified.</p>
@@ -283,6 +342,7 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
 
   return (
     <div className="detail-section task-changes-tab">
+      {renderCommitAssociations()}
       {/* Commit metadata for done tasks */}
       {isDone && mergeDetails && (
         <div className="commit-diff-meta">

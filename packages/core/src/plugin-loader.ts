@@ -10,7 +10,7 @@
  */
 
 import { basename, dirname, extname, isAbsolute, resolve } from "node:path";
-import { copyFile, rm } from "node:fs/promises";
+import { copyFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { EventEmitter } from "node:events";
 import type { TaskStore } from "./store.js";
@@ -324,11 +324,7 @@ export class PluginLoader extends EventEmitter<{
       const baseName = basename(path, ext);
       const reloadedPath = resolve(dirname(path), `.${baseName}.reload-${moduleImportVersion}${ext}`);
       await copyFile(path, reloadedPath);
-      try {
-        mod = await import(pathToFileURL(reloadedPath).href);
-      } finally {
-        await rm(reloadedPath, { force: true }).catch(() => undefined);
-      }
+      mod = await import(pathToFileURL(reloadedPath).href);
     } else {
       mod = await import(moduleUrl);
     }

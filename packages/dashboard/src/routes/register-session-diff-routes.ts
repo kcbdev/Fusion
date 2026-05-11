@@ -46,6 +46,7 @@ const fileDiffsCache = new Map<
  * - GET /tasks/:id/session-files
  * - GET /tasks/:id/diff
  * - GET /tasks/:id/file-diffs
+ * - GET /tasks/:id/commit-associations
  */
 export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRouteDeps): void {
   const { getProjectContext } = deps;
@@ -508,6 +509,49 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
       });
 
       res.json(files);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        throw notFound(`Task ${req.params.id} not found`);
+      }
+      rethrowAsApiError(err, "Internal server error");
+    }
+  });
+
+  router.get("/tasks/:id/commit-associations", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const task = await scopedStore.getTask(req.params.id);
+      if (!task) {
+        res.status(404).json({ error: "Task not found" });
+        return;
+      }
+
+      if (!task.lineageId) {
+        res.json({
+          taskId: task.id,
+          lineageId: null,
+          associations: [],
+        });
+        return;
+      }
+
+      const associations = await scopedStore.getTaskCommitAssociationsByLineageId(task.lineageId);
+      res.json({
+        taskId: task.id,
+        lineageId: task.lineageId,
+        associations: associations.map((association) => ({
+          commitSha: association.commitSha,
+          commitSubject: association.commitSubject,
+          authoredAt: association.authoredAt,
+          matchedBy: association.matchedBy,
+          confidence: association.confidence,
+          taskIdSnapshot: association.taskIdSnapshot,
+          note: association.note,
+        })),
+      });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;

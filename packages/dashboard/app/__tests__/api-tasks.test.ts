@@ -83,6 +83,7 @@ import {
   type ExecutorStats,
   type ExecutorState,
   triggerInsightRun,
+  fetchTaskCommitAssociations,
 } from "../api";
 import type { Task, TaskDetail, BatchStatusResponse, MergeResult } from "@fusion/core";
 import { clearAuthToken } from "../auth";
@@ -219,6 +220,43 @@ describe("fetchTaskDetail", () => {
 
     await expect(fetchTaskDetail("FN-001")).rejects.toThrow("Server error");
     expect(globalThis.fetch).toHaveBeenCalledTimes(2); // initial + 1 retry
+  });
+});
+
+describe("fetchTaskCommitAssociations", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("requests the commit-associations endpoint", async () => {
+    globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, {
+      taskId: "FN-001",
+      lineageId: "lineage-1",
+      associations: [],
+    }));
+
+    await fetchTaskCommitAssociations("FN-001");
+
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001/commit-associations", {
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+
+  it("adds projectId query when provided", async () => {
+    globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, {
+      taskId: "FN-001",
+      lineageId: "lineage-1",
+      associations: [],
+    }));
+
+    await fetchTaskCommitAssociations("FN-001", "project-abc");
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/tasks/FN-001/commit-associations?projectId=project-abc",
+      { headers: { "Content-Type": "application/json" } },
+    );
   });
 });
 

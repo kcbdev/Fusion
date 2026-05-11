@@ -5,9 +5,11 @@ import { TaskChangesTab } from "../TaskChangesTab";
 import type { MergeDetails, Column } from "@fusion/core";
 
 const mockFetchTaskDiff = vi.fn();
+const mockFetchTaskCommitAssociations = vi.fn();
 
 vi.mock("../../api", () => ({
   fetchTaskDiff: (...args: any[]) => mockFetchTaskDiff(...args),
+  fetchTaskCommitAssociations: (...args: any[]) => mockFetchTaskCommitAssociations(...args),
 }));
 
 vi.mock("lucide-react", () => ({
@@ -49,6 +51,52 @@ const MERGE_DETAILS: MergeDetails = {
 
 beforeEach(() => {
   mockFetchTaskDiff.mockReset();
+  mockFetchTaskCommitAssociations.mockReset();
+  mockFetchTaskCommitAssociations.mockResolvedValue({
+    taskId: "FN-001",
+    lineageId: "lineage-1",
+    associations: [],
+  });
+});
+
+describe("TaskChangesTab — commit associations", () => {
+  it("renders empty-state copy when no commit associations exist", async () => {
+    mockFetchTaskDiff.mockResolvedValue({ files: [], stats: { filesChanged: 0, additions: 0, deletions: 0 } });
+
+    render(<TaskChangesTab taskId="FN-001" worktree="/path/to/worktree" column="in-progress" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("No associated commits recorded yet.")).toBeTruthy();
+    });
+  });
+
+  it("renders populated commit association rows with confidence metadata", async () => {
+    mockFetchTaskDiff.mockResolvedValue({ files: [], stats: { filesChanged: 0, additions: 0, deletions: 0 } });
+    mockFetchTaskCommitAssociations.mockResolvedValue({
+      taskId: "FN-001",
+      lineageId: "lineage-1",
+      associations: [
+        {
+          commitSha: "abc1234567",
+          commitSubject: "feat: lineage",
+          authoredAt: "2026-05-11T00:00:00.000Z",
+          matchedBy: "manual-reconciliation",
+          confidence: "ambiguous",
+          taskIdSnapshot: "FN-3953",
+          note: "legacy mismatch",
+        },
+      ],
+    });
+
+    const { container } = render(<TaskChangesTab taskId="FN-001" worktree="/path/to/worktree" column="in-progress" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("feat: lineage")).toBeTruthy();
+    });
+    expect(screen.getByText("Confidence: ambiguous")).toBeTruthy();
+    expect(screen.getByText("Match: manual reconciliation")).toBeTruthy();
+    expect(container.querySelector(".task-lineage-association--ambiguous")).toBeTruthy();
+  });
 });
 
 describe("TaskChangesTab — worktree-backed (non-done tasks)", () => {
