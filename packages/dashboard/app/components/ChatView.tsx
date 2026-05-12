@@ -897,7 +897,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mobileSessionMenuRef = useRef<HTMLDivElement>(null);
   const isUserScrollingRef = useRef(false);
-  const lastAnchoredSessionStateRef = useRef<{ sessionId: string; loaded: boolean; hasMessages: boolean } | null>(null);
+  const lastAnchoredThreadStateRef = useRef<{ threadId: string; loaded: boolean; hasMessages: boolean } | null>(null);
   const hideSkillMenuTimeoutRef = useRef<number | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -1077,25 +1077,24 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   }, [anchorToBottom]);
 
   useLayoutEffect(() => {
-    const sessionId = activeSession?.id ?? null;
-    if (!sessionId) {
-      lastAnchoredSessionStateRef.current = null;
+    const threadId = roomThreadActive ? (rooms.activeRoom?.id ?? null) : (activeSession?.id ?? null);
+    if (!threadId) {
+      lastAnchoredThreadStateRef.current = null;
       return;
     }
 
     const nextState = {
-      sessionId,
-      loaded: !messagesLoading,
-      hasMessages: messages.length > 0,
+      threadId,
+      loaded: roomThreadActive ? !rooms.messagesLoading : !messagesLoading,
+      hasMessages: roomThreadActive ? rooms.messages.length > 0 : messages.length > 0,
     };
-    const previousState = lastAnchoredSessionStateRef.current;
-    const isSessionChanged = previousState?.sessionId !== sessionId;
-    const finishedLoading =
-      previousState?.sessionId === sessionId && !previousState.loaded && nextState.loaded;
+    const previousState = lastAnchoredThreadStateRef.current;
+    const isThreadChanged = previousState?.threadId !== threadId;
+    const finishedLoading = previousState?.threadId === threadId && !previousState.loaded && nextState.loaded;
     const firstMessagesArrived =
-      previousState?.sessionId === sessionId && !previousState.hasMessages && nextState.hasMessages;
+      previousState?.threadId === threadId && !previousState.hasMessages && nextState.hasMessages;
 
-    const shouldAnchor = previousState === null || isSessionChanged || finishedLoading || firstMessagesArrived;
+    const shouldAnchor = previousState === null || isThreadChanged || finishedLoading || firstMessagesArrived;
     if (!shouldAnchor) {
       return;
     }
@@ -1106,8 +1105,19 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     }
 
     anchorToBottom(messagesContainer);
-    lastAnchoredSessionStateRef.current = nextState;
-  }, [activeSession?.id, messages.length, messagesLoading, anchorToBottom]);
+    lastAnchoredThreadStateRef.current = nextState;
+  }, [
+    roomThreadActive,
+    rooms.activeRoom?.id,
+    rooms.messages.length,
+    rooms.messagesLoading,
+    activeSession?.id,
+    messages.length,
+    messagesLoading,
+    anchorToBottom,
+  ]);
+
+  const activeThreadMessages = roomThreadActive ? rooms.messages : messages;
 
   // Scroll thread container to bottom on new messages or streaming when user is near live tail.
   // Avoid Element.scrollIntoView() here because on mobile Safari it can
@@ -1116,7 +1126,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     if (!isUserScrollingRef.current) {
       scrollToBottom();
     }
-  }, [messages, streamingText, streamingThinking, isStreaming, scrollToBottom]);
+  }, [activeThreadMessages, streamingText, streamingThinking, isStreaming, scrollToBottom]);
 
   useEffect(() => {
     if (keyboardOverlap <= 0) {
@@ -1194,7 +1204,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   }, [isMobile, activeSession]);
 
   useEffect(() => {
-    if (!isMobile || !activeSession) {
+    if (!isMobile || (!activeSession && !roomThreadActive)) {
       return;
     }
 
@@ -1220,7 +1230,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("pageshow", reAnchorToLatest);
     };
-  }, [isMobile, activeSession, anchorToBottom]);
+  }, [isMobile, activeSession, roomThreadActive, anchorToBottom]);
 
   // Fetch agents on mount for name resolution (project-scoped with stale-request protection)
   useEffect(() => {

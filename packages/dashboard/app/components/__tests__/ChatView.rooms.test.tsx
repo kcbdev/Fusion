@@ -131,6 +131,78 @@ function mockMobileVisualViewport({ innerHeight, vvHeight }: { innerHeight: numb
   return { mockVV, listeners: { resize: resizeListeners, scroll: scrollListeners } };
 }
 
+function mockDesktopViewport() {
+  if (!window.matchMedia) {
+    Object.defineProperty(window, "matchMedia", { value: vi.fn(), configurable: true, writable: true });
+  }
+  Object.defineProperty(window, "innerWidth", { value: 1280, configurable: true });
+  return vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+}
+
+function mockMessagesContainerMetrics({
+  scrollHeight,
+  clientHeight = 200,
+  initialScrollTop = 0,
+}: {
+  scrollHeight: number;
+  clientHeight?: number;
+  initialScrollTop?: number;
+}) {
+  const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLDivElement.prototype, "scrollHeight");
+  const clientHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLDivElement.prototype, "clientHeight");
+  const scrollTopDescriptor = Object.getOwnPropertyDescriptor(HTMLDivElement.prototype, "scrollTop");
+  let scrollTopValue = initialScrollTop;
+
+  Object.defineProperty(HTMLDivElement.prototype, "scrollHeight", {
+    configurable: true,
+    get: () => scrollHeight,
+  });
+  Object.defineProperty(HTMLDivElement.prototype, "clientHeight", {
+    configurable: true,
+    get: () => clientHeight,
+  });
+  Object.defineProperty(HTMLDivElement.prototype, "scrollTop", {
+    configurable: true,
+    get: () => scrollTopValue,
+    set: (value: number) => {
+      scrollTopValue = value;
+    },
+  });
+
+  return {
+    getScrollTop: () => scrollTopValue,
+    setScrollTop: (value: number) => {
+      scrollTopValue = value;
+    },
+    restore: () => {
+      if (scrollHeightDescriptor) {
+        Object.defineProperty(HTMLDivElement.prototype, "scrollHeight", scrollHeightDescriptor);
+      } else {
+        delete (HTMLDivElement.prototype as Partial<HTMLDivElement>).scrollHeight;
+      }
+      if (clientHeightDescriptor) {
+        Object.defineProperty(HTMLDivElement.prototype, "clientHeight", clientHeightDescriptor);
+      } else {
+        delete (HTMLDivElement.prototype as Partial<HTMLDivElement>).clientHeight;
+      }
+      if (scrollTopDescriptor) {
+        Object.defineProperty(HTMLDivElement.prototype, "scrollTop", scrollTopDescriptor);
+      } else {
+        delete (HTMLDivElement.prototype as Partial<HTMLDivElement>).scrollTop;
+      }
+    },
+  };
+}
+
 describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
   beforeEach(() => {
     _resetInitialViewportHeight();
@@ -346,6 +418,158 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
       Object.defineProperty(window, "visualViewport", { value: originalVisualViewport, configurable: true, writable: true });
       Object.defineProperty(window, "innerHeight", { value: originalInnerHeight, configurable: true, writable: true });
       mediaSpy.mockRestore();
+    }
+  });
+
+  it("FN-4118: anchors an already-loaded active room to the live tail on mount and remount", async () => {
+    const restoreMatchMedia = mockDesktopViewport();
+    const metrics = mockMessagesContainerMetrics({ scrollHeight: 960, clientHeight: 240 });
+
+    try {
+      setup({}, {
+        activeRoom: roomA,
+        messagesLoading: false,
+        messages: [
+          { id: "rmsg-1", roomId: roomA.id, role: "user", content: "Room hello", createdAt: "2026-04-08T00:00:00.000Z", senderAgentId: null, mentions: [] },
+          { id: "rmsg-2", roomId: roomA.id, role: "assistant", content: "Latest room reply", createdAt: "2026-04-08T00:00:10.000Z", senderAgentId: "agent-1", mentions: [] },
+        ],
+      });
+
+      const { unmount } = render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+      await waitFor(() => {
+        expect(metrics.getScrollTop()).toBe(960);
+      });
+
+      metrics.setScrollTop(0);
+      unmount();
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+      await waitFor(() => {
+        expect(metrics.getScrollTop()).toBe(960);
+      });
+    } finally {
+      metrics.restore();
+      restoreMatchMedia.mockRestore();
+    }
+  });
+
+  it("FN-4118: anchors to the live tail when a new room message arrives", async () => {
+    const restoreMatchMedia = mockDesktopViewport();
+    const metrics = mockMessagesContainerMetrics({ scrollHeight: 980, clientHeight: 240 });
+
+    try {
+      setup({}, {
+        activeRoom: roomA,
+        messages: [{ id: "rmsg-1", roomId: roomA.id, role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z", senderAgentId: "agent-1", mentions: [] }],
+      });
+      const { rerender } = render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+      const messagesContainer = document.querySelector(".chat-messages") as HTMLDivElement;
+      metrics.setScrollTop(980);
+      fireEvent.scroll(messagesContainer);
+      setup({}, {
+        activeRoom: roomA,
+        messages: [
+          { id: "rmsg-1", roomId: roomA.id, role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z", senderAgentId: "agent-1", mentions: [] },
+          { id: "rmsg-2", roomId: roomA.id, role: "assistant", content: "Two", createdAt: "2026-04-08T00:00:10.000Z", senderAgentId: "agent-1", mentions: [] },
+        ],
+      });
+      rerender(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+      await waitFor(() => {
+        expect(metrics.getScrollTop()).toBe(980);
+      });
+    } finally {
+      metrics.restore();
+      restoreMatchMedia.mockRestore();
+    }
+  });
+
+  it("FN-4118: does not yank room scrollback readers when new messages arrive", async () => {
+    const restoreMatchMedia = mockDesktopViewport();
+    const metrics = mockMessagesContainerMetrics({ scrollHeight: 1200, clientHeight: 240, initialScrollTop: 720 });
+
+    try {
+      setup({}, {
+        activeRoom: roomA,
+        messages: [{ id: "rmsg-1", roomId: roomA.id, role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z", senderAgentId: "agent-1", mentions: [] }],
+      });
+      const { rerender } = render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+      const messagesContainer = document.querySelector(".chat-messages") as HTMLDivElement;
+      metrics.setScrollTop(720);
+      fireEvent.scroll(messagesContainer);
+
+      setup({}, {
+        activeRoom: roomA,
+        messages: [
+          { id: "rmsg-1", roomId: roomA.id, role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z", senderAgentId: "agent-1", mentions: [] },
+          { id: "rmsg-2", roomId: roomA.id, role: "assistant", content: "Two", createdAt: "2026-04-08T00:00:10.000Z", senderAgentId: "agent-1", mentions: [] },
+        ],
+      });
+      rerender(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+      await waitFor(() => {
+        expect(metrics.getScrollTop()).toBe(720);
+      });
+    } finally {
+      metrics.restore();
+      restoreMatchMedia.mockRestore();
+    }
+  });
+
+  it("FN-4118: mobile visibility restore re-anchors an active room thread", async () => {
+    const restoreMatchMedia = mockMobileViewport();
+    const metrics = mockMessagesContainerMetrics({ scrollHeight: 1180, clientHeight: 240, initialScrollTop: 250 });
+
+    try {
+      setup({}, {
+        activeRoom: roomA,
+        messages: [{ id: "rmsg-1", roomId: roomA.id, role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z", senderAgentId: "agent-1", mentions: [] }],
+      });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+      fireEvent(document, new Event("visibilitychange"));
+      metrics.setScrollTop(300);
+
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      fireEvent(document, new Event("visibilitychange"));
+
+      await waitFor(() => {
+        expect(metrics.getScrollTop()).toBe(1180);
+      });
+    } finally {
+      metrics.restore();
+      restoreMatchMedia.mockRestore();
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    }
+  });
+
+  it("FN-4118: mobile pageshow restore re-anchors an active room thread", async () => {
+    const restoreMatchMedia = mockMobileViewport();
+    const metrics = mockMessagesContainerMetrics({ scrollHeight: 1180, clientHeight: 240, initialScrollTop: 250 });
+
+    try {
+      setup({}, {
+        activeRoom: roomA,
+        messages: [{ id: "rmsg-1", roomId: roomA.id, role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z", senderAgentId: "agent-1", mentions: [] }],
+      });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+      metrics.setScrollTop(300);
+      fireEvent(window, new Event("pageshow"));
+
+      await waitFor(() => {
+        expect(metrics.getScrollTop()).toBe(1180);
+      });
+    } finally {
+      metrics.restore();
+      restoreMatchMedia.mockRestore();
     }
   });
 
