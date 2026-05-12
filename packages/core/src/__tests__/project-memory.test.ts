@@ -536,6 +536,9 @@ describe("project-memory", () => {
       const instructions = buildTriageMemoryInstructions(testDir, settings);
       expect(instructions).toContain(".fusion/memory/MEMORY.md");
       expect(instructions).toContain("## Project Memory");
+      expect(instructions).toContain("fn_memory_append");
+      expect(instructions).toContain("Do **not** write");
+      expect(instructions).toContain("or any other memory files directly");
     });
 
     it("includes read-only wording for readonly backend without write directives", () => {
@@ -558,6 +561,8 @@ describe("project-memory", () => {
       expect(instructions).not.toContain(".fusion/memory/MEMORY.md");
       expect(instructions).toContain("memory_search");
       expect(instructions).toContain("memory_get");
+      expect(instructions).toContain("fn_memory_append");
+      expect(instructions).toContain("Do **not** write memory files directly");
     });
 
     it("QMD triage instructions completeness - contains consult guidance", () => {

@@ -52,7 +52,9 @@ export function createTaskStoreTestHarness() {
     afterEach: async () => {
       vi.useRealTimers();
       store.stopWatching();
-      await new Promise<void>((resolve) => process.nextTick(resolve));
+      // Yield one microtask tick without relying on process.nextTick,
+      // which can be faked in timer-heavy suites and hang teardown.
+      await Promise.resolve();
       store.close();
       await rm(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
       await rm(globalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });

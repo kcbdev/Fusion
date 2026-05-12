@@ -374,6 +374,10 @@ This project has OpenClaw-style memory files:
 2. Use \`fn_memory_get\` only for specific memory files/line ranges returned by search
 3. Incorporate relevant learnings into your specification — reference actual patterns, constraints, and conventions documented there
 
+**Memory write contract for planning agents:**
+- If you need to save durable planning context, use \`fn_memory_append\` (choose scope/layer intentionally)
+- Do **not** write \`.fusion/memory/MEMORY.md\`, \`.fusion/memory/YYYY-MM-DD.md\`, or any other memory files directly when \`fn_memory_append\` is available
+
 Do not read all memory directly by default. If memory is irrelevant, skip it.
 `;
   }
@@ -388,6 +392,10 @@ This project has a memory system that stores durable project learnings.
 1. Use \`fn_memory_search\` first for task-relevant context
 2. Use \`fn_memory_get\` only for specific memory files/line ranges returned by search
 3. Incorporate useful learnings into your specification
+
+**Memory write contract for planning agents:**
+- If you need to save durable planning context, use \`fn_memory_append\` (choose scope/layer intentionally)
+- Do **not** write memory files directly when \`fn_memory_append\` is available
 
 **If the memory contains useful context for this task, reference it in the specification.**
 `;

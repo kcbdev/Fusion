@@ -418,6 +418,9 @@ describe("buildSpecificationPrompt", () => {
       );
       expect(prompt).toContain("## Project Memory");
       expect(prompt).toContain(".fusion/memory/");
+      expect(prompt).toContain("fn_memory_append");
+      expect(prompt).toContain("Do **not** write");
+      expect(prompt).toContain("or any other memory files directly");
     });
 
     it("includes read-only wording for readonly backend without write directives", () => {
@@ -462,6 +465,8 @@ describe("buildSpecificationPrompt", () => {
       expect(prompt).not.toContain(".fusion/memory/");
       expect(prompt).toContain("fn_memory_search");
       expect(prompt).toContain("fn_memory_get");
+      expect(prompt).toContain("fn_memory_append");
+      expect(prompt).toContain("Do **not** write memory files directly");
     });
 
     it("QMD prompt has actionable memory instructions", () => {
