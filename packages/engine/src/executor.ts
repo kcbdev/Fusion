@@ -4549,9 +4549,22 @@ export class TaskExecutor {
             await store.updateStep(taskId, i, "done");
           }
         }
-        // Save summary if provided
-        if (params.summary) {
-          await store.updateTask(taskId, { summary: params.summary });
+        // FN-4106: preserve the original completion summary on workflow-step reruns.
+        const newSummary = params.summary?.trim();
+        if (newSummary) {
+          const currentTask = await store.getTask(taskId);
+          const existingSummary = currentTask.summary?.trim();
+          const hasRunWorkflowSteps = (currentTask.workflowStepResults?.length ?? 0) > 0;
+          const rerunSuffix = `---\nRerun after workflow step revision:\n${newSummary}`;
+
+          if (existingSummary && hasRunWorkflowSteps && !existingSummary.endsWith(rerunSuffix)) {
+            await store.updateTask(taskId, {
+              summary: `${currentTask.summary}\n\n${rerunSuffix}`,
+            });
+            await store.logEntry(taskId, "fn_task_done summary appended to existing summary (workflow-step rerun)");
+          } else if (!existingSummary || !hasRunWorkflowSteps) {
+            await store.updateTask(taskId, { summary: params.summary });
+          }
         }
         const settings = await store.getSettings();
         const hardPauseActive = Boolean(task.paused || settings.globalPause);
