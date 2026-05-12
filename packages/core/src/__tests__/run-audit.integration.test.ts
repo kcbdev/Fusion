@@ -16,12 +16,85 @@ import { mkdtempSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { once } from "node:events";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { Database } from "../db.js";
 import { TaskStore } from "../store.js";
 import type { RunAuditEventInput, RunAuditEvent } from "../types.js";
 
 function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), "fn-run-audit-integration-test-"));
+}
+
+async function holdWriteLock(
+  dbPath: string,
+  options?: { holdMs?: number; releaseMode?: "manual" | "timer" },
+): Promise<{
+  child: ChildProcessWithoutNullStreams;
+  release: () => Promise<void>;
+}> {
+  const releaseMode = options?.releaseMode ?? "manual";
+  const holdMs = options?.holdMs ?? 0;
+  const script = `
+    const { DatabaseSync } = require("node:sqlite");
+    const db = new DatabaseSync(${JSON.stringify(dbPath)});
+    db.exec("PRAGMA journal_mode = WAL");
+    db.exec("PRAGMA busy_timeout = 0");
+    db.exec("BEGIN IMMEDIATE");
+    process.stdout.write("LOCKED\\n");
+    const release = () => {
+      try { db.exec("COMMIT"); } catch {}
+      try { db.close(); } catch {}
+      process.exit(0);
+    };
+    if (${JSON.stringify(releaseMode)} === "timer") {
+      setTimeout(release, ${holdMs});
+    } else {
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data", (chunk) => {
+        if (chunk.includes("RELEASE")) release();
+      });
+    }
+  `;
+
+  const child = spawn(process.execPath, ["-e", script], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+
+  const ready = new Promise<void>((resolve, reject) => {
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.stdout.on("data", (chunk) => {
+      if (chunk.toString().includes("LOCKED")) {
+        resolve();
+      }
+    });
+    child.once("exit", (code) => {
+      if (code !== 0) {
+        reject(new Error(`Lock helper exited early (${code}): ${stderr || "no stderr"}`));
+      }
+    });
+    child.once("error", reject);
+  });
+
+  await ready;
+
+  return {
+    child,
+    release: async () => {
+      if (child.exitCode !== null || child.killed) {
+        return;
+      }
+      if (releaseMode === "timer") {
+        await once(child, "exit");
+        return;
+      }
+      child.stdin.write("RELEASE\n");
+      await once(child, "exit");
+    },
+  };
 }
 
 describe("Run Audit Integration", () => {
@@ -250,6 +323,29 @@ describe("Run Audit Integration", () => {
 
       const events = store.getRunAuditEvents({ runId: "run-complex-meta" });
       expect(events[0].metadata).toEqual(complexMetadata);
+    });
+  });
+
+  describe("disk-backed lock recovery integration", () => {
+    it("keeps task and audit writes atomic under transient multi-connection writer contention", async () => {
+      const task = await store.createTask({ description: "Integration lock recovery task" });
+      const storeDb = (store as any).db as Database;
+      storeDb.exec("PRAGMA busy_timeout = 0");
+      const lock = await holdWriteLock(storeDb.getPath(), { releaseMode: "timer", holdMs: 150 });
+      const runContext = { runId: "run-integration-lock", agentId: "agent-integration-lock" };
+
+      try {
+        await store.updateTask(task.id, { title: "Recovered title" }, runContext);
+      } finally {
+        await lock.release();
+      }
+
+      const events = store.getRunAuditEvents({ runId: "run-integration-lock" });
+      expect(events).toHaveLength(1);
+      expect(events[0].mutationType).toBe("task:update");
+
+      const updatedTask = await store.getTask(task.id);
+      expect(updatedTask.title).toBe("Recovered title");
     });
   });
 

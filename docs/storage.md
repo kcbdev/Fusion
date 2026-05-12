@@ -7,6 +7,15 @@
 - `config.nextId` is retained only as a legacy compatibility field and optional seed source; runtime task creation no longer mutates it as allocator truth.
 - Startup allocator reconciliation bumps each active prefix sequence to `max(current nextSequence, max(existing task suffix)+1)` across live + archived tasks to self-heal stale allocator drift.
 
+## SQLite write-path lock recovery (FN-4042)
+
+- Project and central SQLite connections run in WAL mode with a configured `busy_timeout`, but executor-style writes now add a second bounded recovery layer around outermost write transactions.
+- `Database.transaction()` and `CentralDatabase.transaction()` acquire outermost transactions with `BEGIN IMMEDIATE`, so writer-lock contention is detected before the callback executes. This allows retrying lock acquisition without re-running user code.
+- Recovery is intentionally bounded: transient `SQLITE_BUSY` / `SQLITE_LOCKED` failures on outermost `BEGIN IMMEDIATE` and `COMMIT` are retried for a short additional window with small synchronous backoff sleeps. If the lock does not clear, the original write still fails loudly.
+- Nested transactions still use SQLite `SAVEPOINT` / `ROLLBACK TO` / `RELEASE`, so inner rollback semantics are unchanged: an inner failure can roll back independently and the outer transaction can continue.
+- Task writes that use `atomicWriteTaskJsonWithAudit()` still keep the task-row upsert and matching `runAuditEvents` insert in one SQLite transaction. They either commit together or roll back together; the compatibility `task.json` write still happens only after the SQLite transaction succeeds.
+- Direct `recordRunAuditEvent()` writes now also execute inside the shared transaction helper so they benefit from the same lock recovery and do not duplicate rows during transient contention.
+
 ## 1) Summary
 
 - **localStorage keys in runtime dashboard code:** **20**

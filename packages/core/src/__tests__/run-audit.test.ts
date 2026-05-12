@@ -3,12 +3,85 @@ import { mkdtempSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { once } from "node:events";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { Database } from "../db.js";
 import { TaskStore } from "../store.js";
 import type { RunAuditEventInput, RunAuditEventFilter } from "../types.js";
 
 function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), "fn-run-audit-test-"));
+}
+
+async function holdWriteLock(
+  dbPath: string,
+  options?: { holdMs?: number; releaseMode?: "manual" | "timer" },
+): Promise<{
+  child: ChildProcessWithoutNullStreams;
+  release: () => Promise<void>;
+}> {
+  const releaseMode = options?.releaseMode ?? "manual";
+  const holdMs = options?.holdMs ?? 0;
+  const script = `
+    const { DatabaseSync } = require("node:sqlite");
+    const db = new DatabaseSync(${JSON.stringify(dbPath)});
+    db.exec("PRAGMA journal_mode = WAL");
+    db.exec("PRAGMA busy_timeout = 0");
+    db.exec("BEGIN IMMEDIATE");
+    process.stdout.write("LOCKED\\n");
+    const release = () => {
+      try { db.exec("COMMIT"); } catch {}
+      try { db.close(); } catch {}
+      process.exit(0);
+    };
+    if (${JSON.stringify(releaseMode)} === "timer") {
+      setTimeout(release, ${holdMs});
+    } else {
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data", (chunk) => {
+        if (chunk.includes("RELEASE")) release();
+      });
+    }
+  `;
+
+  const child = spawn(process.execPath, ["-e", script], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+
+  const ready = new Promise<void>((resolve, reject) => {
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.stdout.on("data", (chunk) => {
+      if (chunk.toString().includes("LOCKED")) {
+        resolve();
+      }
+    });
+    child.once("exit", (code) => {
+      if (code !== 0) {
+        reject(new Error(`Lock helper exited early (${code}): ${stderr || "no stderr"}`));
+      }
+    });
+    child.once("error", reject);
+  });
+
+  await ready;
+
+  return {
+    child,
+    release: async () => {
+      if (child.exitCode !== null || child.killed) {
+        return;
+      }
+      if (releaseMode === "timer") {
+        await once(child, "exit");
+        return;
+      }
+      child.stdin.write("RELEASE\n");
+      await once(child, "exit");
+    },
+  };
 }
 
 describe("Run Audit", () => {
@@ -124,6 +197,30 @@ describe("Run Audit", () => {
       expect(events).toHaveLength(1);
       expect(events[0].id).toBe(event.id);
       expect(events[0].runId).toBe("run-002");
+    });
+
+    it("retries a direct audit insert after transient disk-backed writer contention without duplicating events", async () => {
+      const storeDb = (store as any).db as Database;
+      storeDb.exec("PRAGMA busy_timeout = 0");
+      const lock = await holdWriteLock(storeDb.getPath(), { releaseMode: "timer", holdMs: 150 });
+
+      try {
+        const event = store.recordRunAuditEvent({
+          taskId: "FN-LOCK-AUDIT",
+          agentId: "agent-lock-audit",
+          runId: "run-lock-audit",
+          domain: "database",
+          mutationType: "task:update",
+          target: "FN-LOCK-AUDIT",
+          metadata: { source: "lock-test" },
+        });
+
+        const events = store.getRunAuditEvents({ runId: "run-lock-audit" });
+        expect(events).toHaveLength(1);
+        expect(events[0]).toMatchObject(event);
+      } finally {
+        await lock.release();
+      }
     });
   });
 
@@ -313,6 +410,28 @@ describe("Run Audit", () => {
         // Verify the title was updated
         const updatedTask = await store.getTask(task.id);
         expect(updatedTask.title).toBe("Updated title");
+      });
+
+      it("logEntry() with runContext commits exactly one task mutation and one audit row after transient writer contention", async () => {
+        const task = await store.createTask({ description: "Test task for lock recovery" });
+        const storeDb = (store as any).db as Database;
+        storeDb.exec("PRAGMA busy_timeout = 0");
+        const lock = await holdWriteLock(storeDb.getPath(), { releaseMode: "timer", holdMs: 150 });
+        const runContext = { runId: "run-atomic-lock", agentId: "agent-atomic" };
+
+        try {
+          await store.logEntry(task.id, "Recovered under contention", undefined, runContext);
+        } finally {
+          await lock.release();
+        }
+
+        const events = store.getRunAuditEvents({ runId: "run-atomic-lock" });
+        expect(events).toHaveLength(1);
+        expect(events[0].mutationType).toBe("task:log");
+
+        const updatedTask = await store.getTask(task.id);
+        const matchingEntries = updatedTask.log.filter((entry) => entry.action === "Recovered under contention");
+        expect(matchingEntries).toHaveLength(1);
       });
 
       it("methods without runContext do not record audit events (backward compat)", async () => {

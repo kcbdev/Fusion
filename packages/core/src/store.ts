@@ -4137,21 +4137,23 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       metadata: input.metadata,
     };
 
-    this.db.prepare(`
-      INSERT INTO runAuditEvents (
-        id, timestamp, taskId, agentId, runId, domain, mutationType, target, metadata
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      event.id,
-      event.timestamp,
-      event.taskId ?? null,
-      event.agentId,
-      event.runId,
-      event.domain,
-      event.mutationType,
-      event.target,
-      toJsonNullable(event.metadata),
-    );
+    this.db.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO runAuditEvents (
+          id, timestamp, taskId, agentId, runId, domain, mutationType, target, metadata
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        event.id,
+        event.timestamp,
+        event.taskId ?? null,
+        event.agentId,
+        event.runId,
+        event.domain,
+        event.mutationType,
+        event.target,
+        toJsonNullable(event.metadata),
+      );
+    });
 
     return event;
   }

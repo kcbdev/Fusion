@@ -18,7 +18,13 @@ import { resolveGlobalDir } from "./global-settings.js";
 
 // ── JSON Helpers (reused from db.ts) ─────────────────────────────────────
 
-import { toJson, toJsonNullable, fromJson } from "./db.js";
+import {
+  toJson,
+  toJsonNullable,
+  fromJson,
+  isSqliteLockError,
+  sleepSync,
+} from "./db.js";
 export { toJson, toJsonNullable, fromJson };
 
 // ── Schema Definition ───────────────────────────────────────────────────
@@ -435,10 +441,19 @@ export class CentralDatabase {
   private readonly globalDir: string;
   /** Tracks transaction nesting depth for savepoint-based nested transactions. */
   private transactionDepth = 0;
+  private readonly busyTimeoutMs: number;
+  private readonly lockRecoveryWindowMs: number;
+  private readonly lockRecoveryDelayMs: number;
 
-  constructor(globalDir?: string) {
+  constructor(
+    globalDir?: string,
+    options?: { busyTimeoutMs?: number; lockRecoveryWindowMs?: number; lockRecoveryDelayMs?: number },
+  ) {
     this.globalDir = resolveGlobalDir(globalDir);
     this.dbPath = join(this.globalDir, "fusion-central.db");
+    this.busyTimeoutMs = Math.max(0, options?.busyTimeoutMs ?? 5_000);
+    this.lockRecoveryWindowMs = Math.max(0, options?.lockRecoveryWindowMs ?? 1_000);
+    this.lockRecoveryDelayMs = Math.max(1, options?.lockRecoveryDelayMs ?? 50);
 
     // Ensure directory exists
     if (!existsSync(this.globalDir)) {
@@ -454,8 +469,8 @@ export class CentralDatabase {
 
     // Enable WAL mode for concurrent reader/writer access
     this.db.exec("PRAGMA journal_mode = WAL");
-    // Wait up to 5s for locks to clear before returning SQLITE_BUSY
-    this.db.exec("PRAGMA busy_timeout = 5000");
+    // Wait up to the configured timeout for locks to clear before returning SQLITE_BUSY.
+    this.db.exec(`PRAGMA busy_timeout = ${this.busyTimeoutMs}`);
     // Enable foreign key enforcement
     this.db.exec("PRAGMA foreign_keys = ON");
   }
@@ -587,6 +602,31 @@ export class CentralDatabase {
     this.db.close();
   }
 
+  private runWithLockRecovery(action: string, fn: () => void): void {
+    const deadline = Date.now() + this.lockRecoveryWindowMs;
+    let attempt = 0;
+
+    while (true) {
+      try {
+        fn();
+        return;
+      } catch (error) {
+        if (!isSqliteLockError(error)) {
+          throw error;
+        }
+        if (Date.now() >= deadline) {
+          throw new Error(
+            `SQLite ${action} failed after ${attempt + 1} attempt${attempt === 0 ? "" : "s"}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        const remainingMs = Math.max(0, deadline - Date.now());
+        const delayMs = Math.min(this.lockRecoveryDelayMs * Math.max(1, attempt + 1), remainingMs);
+        sleepSync(delayMs);
+        attempt += 1;
+      }
+    }
+  }
+
   /**
    * Execute a function inside a SQLite transaction.
    * Supports nested calls via SAVEPOINTs.
@@ -598,16 +638,25 @@ export class CentralDatabase {
     const isOutermost = depth === 0;
     const savepointName = `sp_${depth}`;
 
-    if (isOutermost) {
-      this.db.exec("BEGIN");
-    } else {
-      this.db.exec(`SAVEPOINT ${savepointName}`);
+    try {
+      if (isOutermost) {
+        this.runWithLockRecovery("BEGIN IMMEDIATE", () => {
+          this.db.exec("BEGIN IMMEDIATE");
+        });
+      } else {
+        this.db.exec(`SAVEPOINT ${savepointName}`);
+      }
+    } catch (error) {
+      this.transactionDepth--;
+      throw error;
     }
 
     try {
       const result = fn();
       if (isOutermost) {
-        this.db.exec("COMMIT");
+        this.runWithLockRecovery("COMMIT", () => {
+          this.db.exec("COMMIT");
+        });
       } else {
         this.db.exec(`RELEASE ${savepointName}`);
       }
