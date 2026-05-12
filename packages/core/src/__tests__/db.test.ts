@@ -16,6 +16,8 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { rm } from "node:fs/promises";
+import { once } from "node:events";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { ensureRoadmapSchema } from "../../../../plugins/fusion-plugin-roadmap/src/roadmap-schema.js";
 
 const createdTmpDirs = new Set<string>();
@@ -52,6 +54,77 @@ function cleanupTmpDirsSync(): void {
 afterAll(() => {
   cleanupTmpDirsSync();
 });
+
+async function holdWriteLock(
+  dbPath: string,
+  options?: { holdMs?: number; releaseMode?: "manual" | "timer" },
+): Promise<{
+  child: ChildProcessWithoutNullStreams;
+  release: () => Promise<void>;
+}> {
+  const releaseMode = options?.releaseMode ?? "manual";
+  const holdMs = options?.holdMs ?? 0;
+  const script = `
+    const { DatabaseSync } = require("node:sqlite");
+    const db = new DatabaseSync(${JSON.stringify(dbPath)});
+    db.exec("PRAGMA journal_mode = WAL");
+    db.exec("PRAGMA busy_timeout = 0");
+    db.exec("BEGIN IMMEDIATE");
+    process.stdout.write("LOCKED\\n");
+    const release = () => {
+      try { db.exec("COMMIT"); } catch {}
+      try { db.close(); } catch {}
+      process.exit(0);
+    };
+    if (${JSON.stringify(releaseMode)} === "timer") {
+      setTimeout(release, ${holdMs});
+    } else {
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data", (chunk) => {
+        if (chunk.includes("RELEASE")) release();
+      });
+    }
+  `;
+
+  const child = spawn(process.execPath, ["-e", script], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+
+  const ready = new Promise<void>((resolve, reject) => {
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.stdout.on("data", (chunk) => {
+      if (chunk.toString().includes("LOCKED")) {
+        resolve();
+      }
+    });
+    child.once("exit", (code) => {
+      if (code !== 0) {
+        reject(new Error(`Lock helper exited early (${code}): ${stderr || "no stderr"}`));
+      }
+    });
+    child.once("error", reject);
+  });
+
+  await ready;
+
+  return {
+    child,
+    release: async () => {
+      if (child.exitCode !== null || child.killed) {
+        return;
+      }
+      if (releaseMode === "timer") {
+        await once(child, "exit");
+        return;
+      }
+      child.stdin.write("RELEASE\n");
+      await once(child, "exit");
+    },
+  };
+}
 
 describe("Database", () => {
   let tmpDir: string;
@@ -661,6 +734,96 @@ describe("Database", () => {
       const rowB = db.prepare("SELECT * FROM tasks WHERE id = 'KB-B'").get();
       expect(rowA).toBeUndefined();
       expect(rowB).toBeUndefined();
+    });
+
+    it("recovers outermost disk-backed transactions after a transient writer lock", async () => {
+      const dbPath = db.getPath();
+      db.exec("PRAGMA busy_timeout = 0");
+      const lock = await holdWriteLock(dbPath, { releaseMode: "timer", holdMs: 150 });
+      let callbackCalls = 0;
+
+      try {
+        db.transaction(() => {
+          callbackCalls += 1;
+          db.prepare(
+            "INSERT INTO tasks (id, description, \"column\", createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)"
+          ).run("FN-LOCK-RECOVER", "Recovered after lock", "todo", "2025-01-01", "2025-01-01");
+        });
+      } finally {
+        await lock.release();
+      }
+
+      const row = db.prepare("SELECT id, description FROM tasks WHERE id = ?").get("FN-LOCK-RECOVER") as
+        | { id: string; description: string }
+        | undefined;
+      expect(callbackCalls).toBe(1);
+      expect(row).toEqual({ id: "FN-LOCK-RECOVER", description: "Recovered after lock" });
+    });
+
+    it("preserves nested savepoint rollback semantics after recovering the outer writer lock", async () => {
+      const dbPath = db.getPath();
+      db.exec("PRAGMA busy_timeout = 0");
+      const lock = await holdWriteLock(dbPath, { releaseMode: "timer", holdMs: 150 });
+      let callbackCalls = 0;
+
+      try {
+        db.transaction(() => {
+          callbackCalls += 1;
+          db.prepare(
+            "INSERT INTO tasks (id, description, \"column\", createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)"
+          ).run("FN-LOCK-OUTER", "Outer task", "todo", "2025-01-01", "2025-01-01");
+
+          try {
+            db.transaction(() => {
+              db.prepare(
+                "INSERT INTO tasks (id, description, \"column\", createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)"
+              ).run("FN-LOCK-INNER", "Inner task", "todo", "2025-01-01", "2025-01-01");
+              throw new Error("inner rollback");
+            });
+          } catch (error) {
+            expect((error as Error).message).toBe("inner rollback");
+          }
+
+          db.prepare(
+            "INSERT INTO tasks (id, description, \"column\", createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)"
+          ).run("FN-LOCK-POST", "After inner rollback", "todo", "2025-01-01", "2025-01-01");
+        });
+      } finally {
+        await lock.release();
+      }
+
+      expect(callbackCalls).toBe(1);
+      expect(db.prepare("SELECT id FROM tasks WHERE id = ?").get("FN-LOCK-OUTER")).toBeDefined();
+      expect(db.prepare("SELECT id FROM tasks WHERE id = ?").get("FN-LOCK-INNER")).toBeUndefined();
+      expect(db.prepare("SELECT id FROM tasks WHERE id = ?").get("FN-LOCK-POST")).toBeDefined();
+    });
+
+    it("fails without invoking the callback when the lock outlives the recovery window", async () => {
+      const retryDb = new Database(fusionDir, {
+        busyTimeoutMs: 0,
+        lockRecoveryWindowMs: 100,
+        lockRecoveryDelayMs: 25,
+      });
+      retryDb.init();
+      const lock = await holdWriteLock(retryDb.getPath(), { releaseMode: "manual" });
+      let callbackCalls = 0;
+
+      try {
+        expect(() => {
+          retryDb.transaction(() => {
+            callbackCalls += 1;
+            retryDb.prepare(
+              "INSERT INTO tasks (id, description, \"column\", createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)"
+            ).run("FN-LOCK-TIMEOUT", "Should not write", "todo", "2025-01-01", "2025-01-01");
+          });
+        }).toThrow(/BEGIN IMMEDIATE failed/);
+      } finally {
+        await lock.release();
+        retryDb.close();
+      }
+
+      expect(callbackCalls).toBe(0);
+      expect(db.prepare("SELECT id FROM tasks WHERE id = ?").get("FN-LOCK-TIMEOUT")).toBeUndefined();
     });
   });
 

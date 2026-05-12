@@ -29,6 +29,10 @@ export interface VacuumResult {
   durationMs: number;
 }
 
+const DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 5_000;
+const DEFAULT_SQLITE_LOCK_RECOVERY_WINDOW_MS = 1_000;
+const DEFAULT_SQLITE_LOCK_RECOVERY_DELAY_MS = 50;
+
 // ── JSON Helpers ─────────────────────────────────────────────────────
 
 /**
@@ -65,6 +69,17 @@ export function fromJson<T>(json: string | null | undefined): T | undefined {
   } catch {
     return undefined;
   }
+}
+
+export function isSqliteLockError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /SQLITE_(?:BUSY|LOCKED)|database is locked|database table is locked/i.test(message);
+}
+
+export function sleepSync(ms: number): void {
+  if (ms <= 0) return;
+  const signal = new Int32Array(new SharedArrayBuffer(4));
+  Atomics.wait(signal, 0, 0, ms);
 }
 
 // ── Runtime capability probes ────────────────────────────────────────
@@ -1103,9 +1118,14 @@ export class Database {
   private readonly _fts5Available: boolean;
   private integrityCheckScheduled = false;
   private closed = false;
+  private readonly busyTimeoutMs: number;
+  private readonly lockRecoveryWindowMs: number;
+  private readonly lockRecoveryDelayMs: number;
 
-
-  constructor(fusionDir: string, options?: { inMemory?: boolean }) {
+  constructor(
+    fusionDir: string,
+    options?: { inMemory?: boolean; busyTimeoutMs?: number; lockRecoveryWindowMs?: number; lockRecoveryDelayMs?: number },
+  ) {
     // In-memory mode is a test-only fast path that swaps the on-disk
     // SQLite file for SQLite's `:memory:` connection. Schema + data live
     // entirely in process RAM, eliminating per-test disk open/sync cost
@@ -1115,6 +1135,9 @@ export class Database {
     const inMemory = options?.inMemory === true;
     this.inMemory = inMemory;
     this.dbPath = inMemory ? ":memory:" : join(fusionDir, "fusion.db");
+    this.busyTimeoutMs = Math.max(0, options?.busyTimeoutMs ?? DEFAULT_SQLITE_BUSY_TIMEOUT_MS);
+    this.lockRecoveryWindowMs = Math.max(0, options?.lockRecoveryWindowMs ?? DEFAULT_SQLITE_LOCK_RECOVERY_WINDOW_MS);
+    this.lockRecoveryDelayMs = Math.max(1, options?.lockRecoveryDelayMs ?? DEFAULT_SQLITE_LOCK_RECOVERY_DELAY_MS);
 
     if (!inMemory && !isAbsolute(fusionDir)) {
       throw new Error(`[fusion] Database constructor requires an absolute fusionDir path, got: ${fusionDir}`);
@@ -1151,9 +1174,9 @@ export class Database {
     // and there's no other writer to coordinate with — so we skip WAL-only
     // tuning there.
     if (!inMemory) {
-      // Wait up to 5s for locks to clear before returning SQLITE_BUSY.
-      // Set this before other PRAGMAs so they also benefit from lock waiting.
-      this.db.exec("PRAGMA busy_timeout = 5000");
+      // Wait up to the configured timeout for locks to clear before returning
+      // SQLITE_BUSY. Set this before other PRAGMAs so they also benefit.
+      this.db.exec(`PRAGMA busy_timeout = ${this.busyTimeoutMs}`);
       // Enable WAL mode for concurrent reader/writer access
       this.db.exec("PRAGMA journal_mode = WAL");
       // In WAL mode NORMAL is nearly as durable as FULL with much lower fsync cost.
@@ -1165,8 +1188,8 @@ export class Database {
       // Bound WAL growth between checkpoints/maintenance cycles.
       this.db.exec("PRAGMA journal_size_limit = 4194304");
     } else {
-      // Wait up to 5s for locks to clear before returning SQLITE_BUSY
-      this.db.exec("PRAGMA busy_timeout = 5000");
+      // Wait up to the configured timeout for locks to clear before returning SQLITE_BUSY.
+      this.db.exec(`PRAGMA busy_timeout = ${this.busyTimeoutMs}`);
     }
     // Enable foreign key enforcement
     this.db.exec("PRAGMA foreign_keys = ON");
@@ -3225,27 +3248,65 @@ export class Database {
     this.db.close();
   }
 
+  private runWithLockRecovery(action: string, fn: () => void): void {
+    const deadline = Date.now() + this.lockRecoveryWindowMs;
+    let attempt = 0;
+
+    while (true) {
+      try {
+        fn();
+        return;
+      } catch (error) {
+        if (!isSqliteLockError(error)) {
+          throw error;
+        }
+        if (Date.now() >= deadline) {
+          throw new Error(
+            `SQLite ${action} failed after ${attempt + 1} attempt${attempt === 0 ? "" : "s"}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        const remainingMs = Math.max(0, deadline - Date.now());
+        const delayMs = Math.min(this.lockRecoveryDelayMs * Math.max(1, attempt + 1), remainingMs);
+        sleepSync(delayMs);
+        attempt += 1;
+      }
+    }
+  }
+
   /**
    * Execute a function inside a SQLite transaction.
    * Supports nested calls via SAVEPOINTs.
    * If the function throws, the transaction/savepoint is rolled back.
    * If the function returns normally, the transaction/savepoint is committed.
+   *
+   * Outermost transactions acquire `BEGIN IMMEDIATE` so transient writer-lock
+   * contention is detected before user code runs, allowing bounded retry
+   * without re-executing the callback. Nested transactions remain savepoint-based.
    */
   transaction<T>(fn: () => T): T {
     const depth = this.transactionDepth++;
     const isOutermost = depth === 0;
     const savepointName = `sp_${depth}`;
 
-    if (isOutermost) {
-      this.db.exec("BEGIN");
-    } else {
-      this.db.exec(`SAVEPOINT ${savepointName}`);
+    try {
+      if (isOutermost) {
+        this.runWithLockRecovery("BEGIN IMMEDIATE", () => {
+          this.db.exec("BEGIN IMMEDIATE");
+        });
+      } else {
+        this.db.exec(`SAVEPOINT ${savepointName}`);
+      }
+    } catch (error) {
+      this.transactionDepth--;
+      throw error;
     }
 
     try {
       const result = fn();
       if (isOutermost) {
-        this.db.exec("COMMIT");
+        this.runWithLockRecovery("COMMIT", () => {
+          this.db.exec("COMMIT");
+        });
       } else {
         this.db.exec(`RELEASE ${savepointName}`);
       }
