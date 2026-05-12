@@ -44,6 +44,10 @@ function stashList(dir: string): string {
   return git(dir, 'git stash list --format="%H %gd %s"');
 }
 
+function testTempParent(): string {
+  return process.env.FUSION_TEST_WORKER_ROOT ?? tmpdir();
+}
+
 function assertIsolatedWorkspace(dir: string): void {
   const repoRoot = process.env.FUSION_TEST_REAL_ROOT;
   if (!repoRoot) return;
@@ -75,7 +79,7 @@ describe("sweepStaleAutostashes", () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-autostash-stale-"));
+    dir = mkdtempSync(join(testTempParent(), "fusion-test-merger-autostash-stale-"));
     assertIsolatedWorkspace(dir);
     initRepo(dir);
   });
@@ -152,7 +156,7 @@ describe("sweepAutostashOrphans", () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-autostash-"));
+    dir = mkdtempSync(join(testTempParent(), "fusion-test-merger-autostash-"));
     assertIsolatedWorkspace(dir);
     initRepo(dir);
   });

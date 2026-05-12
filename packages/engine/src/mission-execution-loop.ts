@@ -244,7 +244,7 @@ export class MissionExecutionLoop extends EventEmitter {
       if (assertions.length === 0) {
         loopLog.log(`Feature ${feature.id} has no linked assertions; marking as passed`);
         // No assertions = automatically pass
-        await this.handleValidationPass(feature.id, undefined, "No assertions linked", undefined);
+        await this.handleValidationPass(feature.id, undefined, "No assertions linked");
         return;
       }
 
@@ -252,9 +252,9 @@ export class MissionExecutionLoop extends EventEmitter {
       this.activeValidations.add(feature.id);
 
       try {
-        loopLog.log(`Running internal validation for feature ${feature.id} — no board task created (policy: docs/task-authoring-standards.md §5)`);
+        loopLog.log(`Running internal validation for feature ${feature.id} — no board task created (policy: docs/missions.md)`);
 
-        // Start the validator run (no board task per docs/task-authoring-standards.md §5)
+        // Start the validator run (no board task per docs/missions.md)
         const run = this.missionStore.startValidatorRun(feature.id, "task_completion");
         loopLog.log(`Started validator run ${run.id} for feature ${feature.id}`);
 
@@ -263,13 +263,13 @@ export class MissionExecutionLoop extends EventEmitter {
 
         // Handle the result
         if (result.status === "pass") {
-          await this.handleValidationPass(feature.id, run.id, result.summary, undefined);
+          await this.handleValidationPass(feature.id, run.id, result.summary);
         } else if (result.status === "fail") {
-          await this.handleValidationFail(feature.id, run.id, result, undefined);
+          await this.handleValidationFail(feature.id, run.id, result);
         } else if (result.status === "blocked") {
-          await this.handleValidationBlocked(feature.id, run.id, result.blockedReason, undefined);
+          await this.handleValidationBlocked(feature.id, run.id, result.blockedReason);
         } else if (result.status === "error") {
-          await this.handleValidationError(feature.id, run.id, result.summary, undefined);
+          await this.handleValidationError(feature.id, run.id, result.summary);
         }
       } finally {
         this.activeValidations.delete(feature.id);
@@ -740,22 +740,12 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
     featureId: string,
     runId: string | undefined,
     summary: string,
-    validationTaskId: string | undefined,
   ): Promise<void> {
     try {
       if (runId) {
         this.missionStore.completeValidatorRun(runId, "passed", summary);
       }
       loopLog.log(`Feature ${featureId} passed validation`);
-
-      // Move the validation board task to done if it exists
-      if (validationTaskId) {
-        await this.taskStore.updateTask(validationTaskId, {
-          summary: summary || "Validation passed",
-        });
-        await this.taskStore.moveTask(validationTaskId, "done");
-        loopLog.log(`Moved validation task ${validationTaskId} to done`);
-      }
 
       // Notify autopilot if configured
       if (this.missionAutopilot?.notifyValidationComplete) {
@@ -775,7 +765,6 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
     featureId: string,
     runId: string | undefined,
     result: ValidationResult,
-    validationTaskId: string | undefined,
   ): Promise<void> {
     try {
       // Record the failures
@@ -798,16 +787,6 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
       }
 
       loopLog.log(`Feature ${featureId} failed validation with ${failures.length} failures`);
-
-      // Move the validation board task to in-review if it exists
-      if (validationTaskId) {
-        await this.taskStore.updateTask(validationTaskId, {
-          error: result.summary,
-          summary: `Failed: ${failures.length} assertion(s) failed`,
-        });
-        await this.taskStore.moveTask(validationTaskId, "in-review");
-        loopLog.log(`Moved validation task ${validationTaskId} to in-review`);
-      }
 
       // Create fix feature
       try {
@@ -861,23 +840,12 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
     featureId: string,
     runId: string | undefined,
     blockedReason: string | undefined,
-    validationTaskId: string | undefined,
   ): Promise<void> {
     try {
       if (runId) {
         this.missionStore.completeValidatorRun(runId, "blocked", blockedReason);
       }
       loopLog.log(`Feature ${featureId} blocked: ${blockedReason}`);
-
-      // Move the validation board task to in-review if it exists
-      if (validationTaskId) {
-        await this.taskStore.updateTask(validationTaskId, {
-          error: blockedReason,
-          summary: `Blocked: ${blockedReason}`,
-        });
-        await this.taskStore.moveTask(validationTaskId, "in-review");
-        loopLog.log(`Moved validation task ${validationTaskId} to in-review`);
-      }
 
       // Notify autopilot if configured
       if (this.missionAutopilot?.notifyValidationComplete) {
@@ -897,23 +865,12 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
     featureId: string,
     runId: string | undefined,
     error: string,
-    validationTaskId: string | undefined,
   ): Promise<void> {
     try {
       if (runId) {
         this.missionStore.completeValidatorRun(runId, "error", error);
       }
       loopLog.error(`Feature ${featureId} validation error: ${error}`);
-
-      // Move the validation board task to in-review if it exists
-      if (validationTaskId) {
-        await this.taskStore.updateTask(validationTaskId, {
-          error,
-          summary: "Validation error",
-        });
-        await this.taskStore.moveTask(validationTaskId, "in-review");
-        loopLog.log(`Moved validation task ${validationTaskId} to in-review`);
-      }
 
       // Notify autopilot if configured
       if (this.missionAutopilot?.notifyValidationComplete) {
