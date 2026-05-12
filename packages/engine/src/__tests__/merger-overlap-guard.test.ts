@@ -374,7 +374,11 @@ describe("aiMergeTask overlap-aware fallback integration", () => {
 
     git(dir, "git checkout main");
     commitFile(dir, "store.ts", "export const mode = 'main fallback';\n", "feat: main follow-up");
-    commitSeries(dir, "filler", 31);
+    // 40 filler commits pushes the conflicting main edit well beyond the
+    // default 30-commit lookback window, avoiding a tight boundary condition
+    // that caused intermittent failures when initRepo/setup commits shifted
+    // the effective position of the "main follow-up" commit.
+    commitSeries(dir, "filler", 40);
 
     const { result } = await runOverlapMerge(dir, "FN-051");
 
