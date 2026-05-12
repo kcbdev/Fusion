@@ -5180,7 +5180,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     // Populate cache with current state. The watcher only needs metadata to
     // detect created/updated/moved/deleted events; full task logs stay on the
     // detail path.
-    const tasks = await this.listTasks({ slim: true, startupMemo: true });
+    const tasks = await this.listTasks({ slim: true, startupMemo: false });
     this.taskCache.clear();
     for (const task of tasks) {
       this.taskCache.set(task.id, { ...task });

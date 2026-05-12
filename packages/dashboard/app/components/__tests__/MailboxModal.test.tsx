@@ -13,6 +13,7 @@ vi.mock("../../api", () => ({
   fetchOutbox: vi.fn(),
   fetchUnreadCount: vi.fn(),
   fetchAgentMailbox: vi.fn(),
+  fetchAllAgentMailbox: vi.fn(),
   markMessageRead: vi.fn(),
   markAllMessagesRead: vi.fn(),
   deleteMessage: vi.fn(),
@@ -54,6 +55,7 @@ const mockFetchInbox = vi.mocked(apiModule.fetchInbox);
 const mockFetchOutbox = vi.mocked(apiModule.fetchOutbox);
 const mockFetchUnreadCount = vi.mocked(apiModule.fetchUnreadCount);
 const mockFetchAgentMailbox = vi.mocked(apiModule.fetchAgentMailbox);
+const mockFetchAllAgentMailbox = vi.mocked(apiModule.fetchAllAgentMailbox);
 const mockMarkMessageRead = vi.mocked(apiModule.markMessageRead);
 const mockMarkAllMessagesRead = vi.mocked(apiModule.markAllMessagesRead);
 const mockDeleteMessage = vi.mocked(apiModule.deleteMessage);
@@ -136,6 +138,7 @@ describe("MailboxModal", () => {
     mockFetchInbox.mockResolvedValue({ messages: [mockMessage, mockReadMessage], total: 2, unreadCount: 1 });
     mockFetchOutbox.mockResolvedValue({ messages: [], total: 0 });
     mockFetchUnreadCount.mockResolvedValue({ unreadCount: 1 });
+    mockFetchAllAgentMailbox.mockResolvedValue({ messages: [], total: 0, unreadCount: 0 });
     mockFetchConversation.mockResolvedValue([mockMessage]);
     mockFetchMessage.mockResolvedValue(mockMessage);
     mockMarkMessageRead.mockResolvedValue({ ...mockMessage, read: true });
@@ -289,22 +292,62 @@ describe("MailboxModal", () => {
     await waitFor(() => {
       expect(screen.getByTestId("mailbox-agent-select")).toBeDefined();
     });
-    // Should have placeholder plus two agent options
     const select = screen.getByTestId("mailbox-agent-select") as HTMLSelectElement;
-    expect(select.options.length).toBe(3); // placeholder + 2 agents
-    expect(select.options[0].textContent).toBe("Select an agent…");
+    expect(select.options.length).toBe(3);
+    expect(select.options[0].value).toBe("__all_agents__");
+    expect(select.options[0].textContent).toBe("All agents");
     expect(select.options[1].textContent).toBe("Test Agent 1");
     expect(select.options[2].textContent).toBe("Test Agent 2");
   });
 
-  it("shows Select an agent… placeholder in dropdown", async () => {
+  it("defaults the agent dropdown to All agents with no empty placeholder", async () => {
     render(<MailboxModal {...defaultProps} />);
     fireEvent.click(screen.getByTestId("mailbox-tab-agents"));
     await waitFor(() => {
       const select = screen.getByTestId("mailbox-agent-select") as HTMLSelectElement;
-      expect(select.value).toBe("");
-      expect(select.options[0].textContent).toBe("Select an agent…");
+      expect(select.value).toBe("__all_agents__");
+      expect(select.options[0].value).toBe("__all_agents__");
+      expect(select.options[0].textContent).toBe("All agents");
+      expect(Array.from(select.options).some((option) => option.value === "")).toBe(false);
     });
+  });
+
+  it("FN-4109 defaults the Agents tab to All agents and loads the aggregate mailbox", async () => {
+    mockFetchAllAgentMailbox.mockResolvedValue({
+      messages: [
+        {
+          id: "msg-agent-thread",
+          fromId: "agent-001",
+          fromType: "agent",
+          toId: "agent-002",
+          toType: "agent",
+          content: "Coordinator handoff update for the mailbox modal.",
+          type: "agent-to-agent",
+          read: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+      total: 1,
+      unreadCount: 1,
+    });
+
+    render(<MailboxModal {...defaultProps} />);
+    fireEvent.click(screen.getByTestId("mailbox-tab-agents"));
+
+    await waitFor(() => {
+      const select = screen.getByTestId("mailbox-agent-select") as HTMLSelectElement;
+      expect(select.value).toBe("__all_agents__");
+      expect(select.options[0].value).toBe("__all_agents__");
+      expect(select.options[0].textContent).toBe("All agents");
+      expect(mockFetchAllAgentMailbox).toHaveBeenCalledWith(undefined);
+      expect(screen.getByTestId("mailbox-item-msg-agent-thread")).toBeDefined();
+    });
+
+    expect(screen.getByTestId("mailbox-item-participants-msg-agent-thread").textContent).toContain("From: Agent: Test Agent 1");
+    expect(screen.getByTestId("mailbox-item-participants-msg-agent-thread").textContent).toContain("To: Agent: Test Agent 2");
+    expect(screen.queryByText("No agent-to-agent messages")).toBeNull();
+    expect(screen.queryByTestId("mailbox-agent-subtabs")).toBeNull();
   });
 
   it("loads agent mailbox when selecting an agent from dropdown", async () => {
@@ -742,7 +785,7 @@ describe("MailboxModal", () => {
     expect(agentsComposeButton).toHaveClass("btn", "btn-sm", "btn-secondary", "mailbox-compose-btn");
   });
 
-  it("compose opened from Agents tab without selected agent shows recipient select", async () => {
+  it("compose opened from Agents tab with All agents selected shows recipient select", async () => {
     render(<MailboxModal {...defaultProps} />);
     fireEvent.click(screen.getByTestId("mailbox-tab-agents"));
     await waitFor(() => {
@@ -1217,8 +1260,8 @@ describe("MailboxModal", () => {
     });
 
     it("light theme overrides new tokens", () => {
-      // Find the base [data-theme="light"] block (not combined with other selectors)
-      const lightBlockMatch = css.match(/^\[data-theme="light"\]\s*\{[\s\S]*?^\}\s*$/m);
+      // Match the root-scoped light theme token block used by the app stylesheet.
+      const lightBlockMatch = css.match(/^:root\[data-theme="light"\]\s*\{[\s\S]*?^\}\s*$/m);
       expect(lightBlockMatch).toBeTruthy();
       const lightContent = lightBlockMatch![0];
       expect(lightContent).toContain("--terminal-bg");
