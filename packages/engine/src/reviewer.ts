@@ -351,6 +351,7 @@ export async function reviewStep(
           ? (_id, delta) => options.onText!(delta)
           : undefined,
         persistAgentToolOutput: liveSettings?.persistAgentToolOutput,
+        persistAgentThinkingLog: liveSettings?.persistAgentThinkingLog,
       })
     : null;
 

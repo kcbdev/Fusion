@@ -913,6 +913,7 @@ export class TriageProcessor {
           taskId: task.id,
           agent: "triage",
           persistAgentToolOutput: settings.persistAgentToolOutput,
+          persistAgentThinkingLog: settings.persistAgentThinkingLog,
           onAgentText: (id, delta) => {
             stuckDetector?.recordActivity(task.id);
             this.options.onAgentText?.(id, delta);

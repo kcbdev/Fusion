@@ -269,7 +269,7 @@ describe("AgentLogger", () => {
 
   // ── Thinking buffer/flush ────────────────────────────────────────
 
-  it("buffers thinking deltas and flushes on timer", async () => {
+  it("skips thinking entries by default", async () => {
     const store = createMockStore();
     const logger = new AgentLogger({
       store,
@@ -281,10 +281,28 @@ describe("AgentLogger", () => {
 
     logger.onThinking("thought 1 ");
     logger.onThinking("thought 2");
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(store.appendAgentLog).not.toHaveBeenCalled();
+  });
+
+  it("buffers thinking deltas and flushes on timer when enabled", async () => {
+    const store = createMockStore();
+    const logger = new AgentLogger({
+      store,
+      taskId: "FN-011A",
+      agent: "executor",
+      persistAgentThinkingLog: true,
+      flushSizeBytes: 1024,
+      flushIntervalMs: 500,
+    });
+
+    logger.onThinking("thought 1 ");
+    logger.onThinking("thought 2");
     expect(store.appendAgentLog).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(500);
-    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-011", "thought 1 thought 2", "thinking", undefined, "executor");
+    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-011A", "thought 1 thought 2", "thinking", undefined, "executor");
   });
 
   it("flushes thinking on size threshold", async () => {
@@ -293,6 +311,7 @@ describe("AgentLogger", () => {
       store,
       taskId: "FN-012",
       agent: "triage",
+      persistAgentThinkingLog: true,
       flushSizeBytes: 10,
     });
 
@@ -310,6 +329,7 @@ describe("AgentLogger", () => {
       store,
       taskId: "FN-013",
       agent: "reviewer",
+      persistAgentThinkingLog: true,
       flushSizeBytes: 1024,
     });
 
@@ -324,6 +344,7 @@ describe("AgentLogger", () => {
       store,
       taskId: "FN-014",
       agent: "executor",
+      persistAgentThinkingLog: true,
       flushSizeBytes: 1024,
     });
 
@@ -463,6 +484,7 @@ describe("AgentLogger", () => {
       const logger = new AgentLogger({
         store,
         taskId: "FN-2090-THINKING",
+        persistAgentThinkingLog: true,
         flushSizeBytes: 1,
       });
 

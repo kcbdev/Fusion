@@ -85,6 +85,7 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   vitestKillThresholdPct: 90,
   // Agent log persistence controls
   persistAgentToolOutput: true,
+  persistAgentThinkingLog: false,
   researchGlobalDefaults: {
     searchProvider: undefined,
     synthesisProvider: undefined,

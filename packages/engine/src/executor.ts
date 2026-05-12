@@ -3152,6 +3152,7 @@ export class TaskExecutor {
         taskId: task.id,
         agent: "executor",
         persistAgentToolOutput: settings.persistAgentToolOutput,
+        persistAgentThinkingLog: settings.persistAgentThinkingLog,
         onAgentText: (taskId, delta) => {
           lastAssistantText += delta;
           stuckDetector?.recordActivity(taskId);
@@ -4960,6 +4961,7 @@ ${feedback}
         taskId: task.id,
         agent: "executor",
         persistAgentToolOutput: settings.persistAgentToolOutput,
+        persistAgentThinkingLog: settings.persistAgentThinkingLog,
         onAgentText: this.options.onAgentText,
         onAgentTool: this.options.onAgentTool,
       });
@@ -5769,6 +5771,7 @@ and show an appropriate message to the user.\`
       taskId: task.id,
       agent: "reviewer",
       persistAgentToolOutput: settings.persistAgentToolOutput,
+      persistAgentThinkingLog: settings.persistAgentThinkingLog,
       onAgentText: (taskId, delta) => {
         this.options.onAgentText?.(taskId, delta);
       },

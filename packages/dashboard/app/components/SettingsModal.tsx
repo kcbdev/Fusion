@@ -2028,6 +2028,23 @@ export function SettingsModal({
               </div>
             </div>
             <div className="form-group">
+              <label htmlFor="persistAgentThinkingLog" className="checkbox-label">
+                <input
+                  id="persistAgentThinkingLog"
+                  type="checkbox"
+                  checked={form.persistAgentThinkingLog === true}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, persistAgentThinkingLog: e.target.checked }))
+                  }
+                />
+                Save AI thinking/reasoning in agent logs
+              </label>
+              <div className="settings-field-help">
+                When disabled (default), internal thinking deltas are not persisted as log rows.
+                Assistant text output and tool timeline entries are unchanged.
+              </div>
+            </div>
+            <div className="form-group">
               <label htmlFor="fnBinaryCheckEnabled" className="checkbox-label">
                 <input
                   id="fnBinaryCheckEnabled"

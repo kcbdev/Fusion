@@ -1136,6 +1136,23 @@ describe("PUT /settings/global", () => {
     expect(res.body.persistAgentToolOutput).toBe(false);
   });
 
+  it("accepts persistAgentThinkingLog in global updates", async () => {
+    const updatedMerged = { persistAgentThinkingLog: true };
+    (store.updateGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue(updatedMerged);
+
+    const res = await REQUEST(
+      buildApp(),
+      "PUT",
+      "/api/settings/global",
+      JSON.stringify({ persistAgentThinkingLog: true }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(store.updateGlobalSettings).toHaveBeenCalledWith({ persistAgentThinkingLog: true });
+    expect(res.body.persistAgentThinkingLog).toBe(true);
+  });
+
   it("returns 500 on update error", async () => {
     (store.updateGlobalSettings as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("Write failed"));
 
@@ -1270,7 +1287,12 @@ describe("GET /settings/scopes", () => {
 
   it("returns settings separated by scope", async () => {
     (store.getSettingsByScope as ReturnType<typeof vi.fn>).mockResolvedValue({
-      global: { themeMode: "dark", defaultProvider: "anthropic", persistAgentToolOutput: true },
+      global: {
+        themeMode: "dark",
+        defaultProvider: "anthropic",
+        persistAgentToolOutput: true,
+        persistAgentThinkingLog: false,
+      },
       project: { maxConcurrent: 4, autoMerge: false },
     });
 
@@ -1280,9 +1302,11 @@ describe("GET /settings/scopes", () => {
     expect(res.body.global.themeMode).toBe("dark");
     expect(res.body.global.defaultProvider).toBe("anthropic");
     expect(res.body.global.persistAgentToolOutput).toBe(true);
+    expect(res.body.global.persistAgentThinkingLog).toBe(false);
     expect(res.body.project.maxConcurrent).toBe(4);
     expect(res.body.project.autoMerge).toBe(false);
     expect(res.body.project.persistAgentToolOutput).toBeUndefined();
+    expect(res.body.project.persistAgentThinkingLog).toBeUndefined();
   });
 
   it("returns exact response envelope shape with only global and project keys", async () => {

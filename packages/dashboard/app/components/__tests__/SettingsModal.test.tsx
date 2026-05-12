@@ -513,6 +513,29 @@ describe("SettingsModal", () => {
       expect(screen.getByRole("checkbox", { name: "Save tool output in agent logs" })).not.toBeChecked();
     });
 
+    it("defaults persistAgentThinkingLog checkbox to unchecked", async () => {
+      renderModal({ initialSection: "global-general" });
+      await waitForSettingsModalReady();
+
+      expect(screen.getByRole("checkbox", { name: "Save AI thinking/reasoning in agent logs" })).not.toBeChecked();
+    });
+
+    it("reflects persisted checked thinking-log value from global settings", async () => {
+      mockFetchSettings.mockResolvedValue({
+        ...defaultSettings,
+        persistAgentThinkingLog: true,
+      });
+      mockFetchSettingsByScope.mockResolvedValue({
+        global: { ...defaultSettings, persistAgentThinkingLog: true },
+        project: {},
+      });
+
+      renderModal({ initialSection: "global-general" });
+      await waitForSettingsModalReady();
+
+      expect(screen.getByRole("checkbox", { name: "Save AI thinking/reasoning in agent logs" })).toBeChecked();
+    });
+
     it("saves persistAgentToolOutput only via global settings payload", async () => {
       renderModal({ initialSection: "global-general" });
       await waitForSettingsModalReady();
@@ -529,6 +552,25 @@ describe("SettingsModal", () => {
       if (mockUpdateSettings.mock.calls.length > 0) {
         const projectPayload = mockUpdateSettings.mock.calls[0]?.[0] as Record<string, unknown>;
         expect(projectPayload.persistAgentToolOutput).toBeUndefined();
+      }
+    });
+
+    it("saves persistAgentThinkingLog only via global settings payload", async () => {
+      renderModal({ initialSection: "global-general" });
+      await waitForSettingsModalReady();
+
+      await userEvent.click(screen.getByRole("checkbox", { name: "Save AI thinking/reasoning in agent logs" }));
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(mockUpdateGlobalSettings).toHaveBeenCalled();
+      });
+
+      const globalPayload = mockUpdateGlobalSettings.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(globalPayload.persistAgentThinkingLog).toBe(true);
+      if (mockUpdateSettings.mock.calls.length > 0) {
+        const projectPayload = mockUpdateSettings.mock.calls[0]?.[0] as Record<string, unknown>;
+        expect(projectPayload.persistAgentThinkingLog).toBeUndefined();
       }
     });
 

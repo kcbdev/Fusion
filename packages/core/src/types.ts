@@ -1811,8 +1811,13 @@ export interface GlobalSettings {
    *  logs for `tool`, `tool_result`, and `tool_error` entries. Very large tool
    *  payloads may still be clipped server-side to keep dashboard log reads
    *  responsive. When false, tool timeline rows are still stored, but their
-   *  verbose `detail` payload is omitted to reduce log size/noise. */
+   *  verbose `detail` payload is omitted to reduce log size/noise. Distinct
+   *  from `persistAgentThinkingLog`, which controls `thinking` rows. */
   persistAgentToolOutput?: boolean;
+  /** When true, persist `thinking` log entries from agent reasoning deltas.
+   *  Default: false (suppressed). This only affects persisted `thinking` rows
+   *  and does not change normal assistant text/tool output behavior. */
+  persistAgentThinkingLog?: boolean;
   /** Research defaults shared across all projects.
    * Project settings may override these via `researchSettings`. */
   researchGlobalDefaults?: ResearchGlobalDefaults;

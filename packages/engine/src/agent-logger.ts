@@ -46,6 +46,8 @@ export function summarizeToolArgs(name: string, args?: Record<string, unknown>):
 export interface AgentLoggerOptions {
   /** When false, omit `detail` payloads for tool entries while preserving the rows. */
   persistAgentToolOutput?: boolean;
+  /** When true, persist `thinking` rows. Default: false (skip thinking persistence). */
+  persistAgentThinkingLog?: boolean;
   /** The task store used to persist agent log entries (task-store mode). */
   store?: TaskStore;
   /** The task ID this logger is associated with (task-store mode). */
@@ -110,6 +112,7 @@ export class AgentLogger {
   private readonly externalToolCb?: (taskId: string, toolName: string) => void;
   private readonly log = createLogger("agent-logger");
   private readonly persistAgentToolOutput: boolean;
+  private readonly persistAgentThinkingLog: boolean;
 
   constructor(options: AgentLoggerOptions) {
     this.store = options.store;
@@ -121,6 +124,7 @@ export class AgentLogger {
     this.flushSizeBytes = options.flushSizeBytes ?? FLUSH_SIZE_BYTES;
     this.flushIntervalMs = options.flushIntervalMs ?? FLUSH_INTERVAL_MS;
     this.persistAgentToolOutput = options.persistAgentToolOutput !== false;
+    this.persistAgentThinkingLog = options.persistAgentThinkingLog === true;
 
     // Bind callbacks so they can be passed directly as function references
     this.onText = this.onText.bind(this);
@@ -149,6 +153,9 @@ export class AgentLogger {
    * as `type: "thinking"` entries, using the same size/timer pattern as `onText`.
    */
   onThinking(delta: string): void {
+    if (!this.persistAgentThinkingLog) {
+      return;
+    }
     this.thinkingBuffer += delta;
     if (this.thinkingBuffer.length >= this.flushSizeBytes) {
       if (this.thinkingFlushTimer) { clearTimeout(this.thinkingFlushTimer); this.thinkingFlushTimer = null; }
@@ -258,6 +265,9 @@ export class AgentLogger {
     if (this.thinkingBuffer.length === 0) return Promise.resolve();
     const chunk = this.thinkingBuffer;
     this.thinkingBuffer = "";
+    if (!this.persistAgentThinkingLog) {
+      return Promise.resolve();
+    }
     this.writeEntry(chunk, "thinking", undefined, `Failed to flush thinking buffer for ${this.taskId}`, true);
     return this.flushPendingEntries();
   }

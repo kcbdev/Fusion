@@ -1890,6 +1890,7 @@ export class HeartbeatMonitor {
             appendLog: (entry) => this.store.appendRunLog(agentId, run.id, entry),
             agent: agent.role as AgentRole,
             persistAgentToolOutput: memorySettings?.persistAgentToolOutput,
+            persistAgentThinkingLog: memorySettings?.persistAgentThinkingLog,
           });
         } else if (taskId) {
           agentLogger = new AgentLogger({
@@ -1898,6 +1899,7 @@ export class HeartbeatMonitor {
             agent: agent.role as AgentRole,
             appendLog: (entry) => this.store.appendRunLog(agentId, run.id, entry),
             persistAgentToolOutput: memorySettings?.persistAgentToolOutput,
+            persistAgentThinkingLog: memorySettings?.persistAgentThinkingLog,
           });
         }
 

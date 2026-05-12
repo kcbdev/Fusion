@@ -59,7 +59,14 @@ describe("settings key parity", () => {
     expect(isGlobalSettingsKey("remoteAccess")).toBe(true);
     expect(isGlobalSettingsKey("persistAgentToolOutput")).toBe(true);
     expect(isProjectSettingsKey("persistAgentToolOutput")).toBe(false);
+    expect(isGlobalSettingsKey("persistAgentThinkingLog")).toBe(true);
+    expect(isProjectSettingsKey("persistAgentThinkingLog")).toBe(false);
+    expect(isGlobalOnlySettingsKey("persistAgentThinkingLog")).toBe(true);
     expect(isGlobalSettingsKey("researchSettings")).toBe(false);
+  });
+
+  it("defaults persisted thinking logs to disabled", () => {
+    expect(DEFAULT_GLOBAL_SETTINGS.persistAgentThinkingLog).toBe(false);
   });
 
   it("includes heartbeatMultiplier in project defaults", () => {
