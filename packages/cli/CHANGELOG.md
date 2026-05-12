@@ -1,5 +1,29 @@
 # @runfusion/fusion
 
+## 0.27.1
+
+### Patch Changes
+
+- c1035d8: Include database integrity health details on `/api/health` with `database.healthy`, `database.lastCheckedAt`, and `database.isRunning`.
+- ee46b5a: Fix stale in-review session/worktree recovery so retries discard mismatched persisted session metadata, recover missing-worktree review failures into runnable state, and unblock downstream todo tasks stalled by stale review blockers.
+- 4d47cb4: Improve SQLite write reliability under transient multi-connection lock contention by adding bounded recovery for outer write transactions, keeping task mutations and run-audit inserts atomic during executor-driven writes.
+- 7b5ec3d: Surface task ID collision errors for task creation and delegation tools.
+- fc863f6: Block auto-resolved squash merge completion when the post-squash audit flags duplicate-subject or touched-file overlap risks, while keeping the audit script available for manual follow-up.
+- 1a1f60c: Fork workflow revision feedback that escapes a task's declared File Scope into dependent follow-up tasks instead of always appending it to the original task prompt.
+- e390478: Add `priority` support to `fn_task_create` across runtime and published extension tool surfaces, with updated Fusion skill docs and references.
+- 7ca8d5a: Add optional ntfy access-token settings support so authenticated ntfy topics receive `Authorization: Bearer <token>` on runtime and test notification publishes.
+- 9c80988: Task Detail: keep Created/Updated timestamps on a single row on mobile too.
+- f3a3975: FN-4082: retry oversized code reviews with a compacted request after provider context-limit errors like Kimi's `exceeded model token limit` failure.
+- 06feb61: Improve SQLite write reliability under concurrent executor activity by enforcing WAL/busy-timeout setup on every disk-backed connection, using explicit immediate transactions for task+audit writes, and adding disk-backed concurrent-write regression coverage.
+- 5804b86: Fix merger starvation where eligible in-review tasks looped in auto-recovery
+  without ever merging. Leaked in-memory merge-queue entries are now reconciled
+  automatically, and tasks whose re-enqueue is repeatedly dropped escalate to a
+  clear `status=failed` with an `Auto-merge starvation:` error instead of
+  looping indefinitely.
+- 5bdf92b: Optimize Database.init() schema-compatibility passes: cache per-table PRAGMA results within init and short-circuit unchanged-schema opens via a `schemaCompatFingerprint` in `__meta`. Reduces repeated `db.init()` wall time substantially without weakening the FN-3879/FN-3887/FN-3898 invariant that every declared column exists after init.
+- 3ac619d: Fix blank space at the bottom of the New Agent dialog on mobile by removing the inner preset-grid scroll cap so the dialog body scrolls naturally.
+- bec0b34: Harden task creation so stale allocator state or colliding reservations fail safely instead of overwriting an existing task row or task directory.
+
 ## 0.27.0
 
 ### Minor Changes
