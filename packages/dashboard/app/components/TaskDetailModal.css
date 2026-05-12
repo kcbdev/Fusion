@@ -397,7 +397,7 @@
 
 .detail-source-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-xs);
 }
@@ -438,7 +438,7 @@
 
 .detail-github-tracking-enable {
   margin-left: auto;
-  align-self: center;
+  align-self: flex-start;
   padding-block: calc(var(--space-xs) / 2);
   padding-inline: var(--space-sm);
   line-height: 1.2;
@@ -1588,7 +1588,6 @@
   }
 
   .detail-source-header {
-    align-items: flex-start;
     flex-wrap: wrap;
   }
 
