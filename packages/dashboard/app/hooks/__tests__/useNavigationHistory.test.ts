@@ -1,6 +1,12 @@
+import { createElement, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, renderHook } from "@testing-library/react";
-import { useNavigationHistory } from "../useNavigationHistory";
+import {
+  NavigationHistoryProvider,
+  useNavigationHistory,
+  useNavigationHistoryContext,
+  type UseNavigationHistoryResult,
+} from "../useNavigationHistory";
 
 describe("useNavigationHistory", () => {
   const originalPushState = window.history.pushState;
@@ -313,5 +319,25 @@ describe("useNavigationHistory", () => {
     dispatchPopState({ navIndex: 0 });
 
     expect(revert).toHaveBeenCalledTimes(1);
+  });
+
+  it("useNavigationHistoryContext returns the provided value", () => {
+    const value: UseNavigationHistoryResult = {
+      pushNav: vi.fn(),
+      replaceCurrent: vi.fn(),
+    };
+
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(NavigationHistoryProvider, { value }, children);
+
+    const { result } = renderHook(() => useNavigationHistoryContext(), { wrapper });
+
+    expect(result.current).toBe(value);
+  });
+
+  it("useNavigationHistoryContext throws outside the provider", () => {
+    expect(() => renderHook(() => useNavigationHistoryContext())).toThrow(
+      "useNavigationHistoryContext must be used within a NavigationHistoryProvider",
+    );
   });
 });

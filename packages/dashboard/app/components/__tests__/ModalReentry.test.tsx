@@ -24,6 +24,14 @@ const {
   mockClearMissionGoal: vi.fn<(projectId?: string) => void>(),
 }));
 
+vi.mock("../../hooks/useNavigationHistory", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../hooks/useNavigationHistory")>();
+  return {
+    ...actual,
+    useNavigationHistoryContext: () => ({ pushNav: vi.fn(), replaceCurrent: vi.fn() }),
+  };
+});
+
 vi.mock("../../hooks/modalPersistence", () => ({
   savePlanningDescription: (description: string, projectId?: string) => mockSavePlanningDescription(description, projectId),
   getPlanningDescription: (projectId?: string) => mockGetPlanningDescription(projectId),

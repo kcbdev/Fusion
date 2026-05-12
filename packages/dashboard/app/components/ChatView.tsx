@@ -41,6 +41,7 @@ import { useFileMention } from "../hooks/useFileMention";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { matchesAgentMentionFilter } from "./mentionMatching";
+import { useNavigationHistoryContext } from "../hooks/useNavigationHistory";
 
 export interface ChatViewProps {
   projectId?: string;
@@ -910,6 +911,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   const [isUserScrolling, setIsUserScrolling] = useState(false);
   const [copyFeedbackByMessageId, setCopyFeedbackByMessageId] = useState<Record<string, CopyFeedbackState>>({});
   const [mobileSessionMenuOpen, setMobileSessionMenuOpen] = useState(false);
+  const { pushNav } = useNavigationHistoryContext();
 
   // File mention state and hook
   const [, setFileMentionPopupVisible] = useState(false);
@@ -1903,6 +1905,12 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     setMobileSessionMenuOpen(false);
   }, [selectSession]);
 
+  const handleRoomBack = useCallback(() => {
+    rooms.selectRoom(null);
+    setSidebarVisible(true);
+    setMobileSessionMenuOpen(false);
+  }, [rooms]);
+
   // Render empty state (no active session)
   const renderEmptyState = () => {
     return (
@@ -1920,6 +1928,28 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   const activeModelTag = formatModelTag(activeSession?.modelProvider, activeSession?.modelId);
   const activeModelProvider = activeSession?.modelProvider ?? null;
   const hasThreadInView = Boolean(activeSession || isStreaming || messages.length > 0);
+  const hasMobileDetailSelection = chatScope === "rooms" ? roomThreadActive : Boolean(activeSession);
+  const previousHasMobileDetailSelectionRef = useRef(hasMobileDetailSelection);
+
+  useEffect(() => {
+    const previousHasMobileDetailSelection = previousHasMobileDetailSelectionRef.current;
+    previousHasMobileDetailSelectionRef.current = hasMobileDetailSelection;
+
+    if (!isMobile) {
+      return;
+    }
+
+    if (previousHasMobileDetailSelection || !hasMobileDetailSelection) {
+      return;
+    }
+
+    // Mobile list/detail surfaces must stack a view entry on top of the
+    // shared browser-history nav entry so swipe-back returns to the list.
+    pushNav({
+      type: "view",
+      revert: chatScope === "rooms" ? handleRoomBack : handleBack,
+    });
+  }, [chatScope, handleBack, handleRoomBack, hasMobileDetailSelection, isMobile, pushNav]);
 
   const threadHeaderTitle = activeSession?.agentId === FN_AGENT_ID
     ? (activeModelTag ?? "Fusion")
@@ -2330,10 +2360,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
             <>
               <div className="chat-room-thread-header">
                 {isMobile && (
-                  <button className="btn-icon" onClick={() => {
-                    rooms.selectRoom(null);
-                    setSidebarVisible(true);
-                  }} data-testid="chat-back-btn">
+                  <button className="btn-icon" onClick={handleRoomBack} data-testid="chat-back-btn">
                     <ChevronLeft size={16} />
                   </button>
                 )}

@@ -10,6 +10,13 @@ import { _resetInitialViewportHeight } from "../../hooks/useMobileKeyboard";
 
 vi.mock("../../hooks/useChat");
 vi.mock("../../hooks/useChatRooms");
+vi.mock("../../hooks/useNavigationHistory", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../hooks/useNavigationHistory")>();
+  return {
+    ...actual,
+    useNavigationHistoryContext: () => ({ pushNav: vi.fn(), replaceCurrent: vi.fn() }),
+  };
+});
 vi.mock("../../api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../api")>();
   return {

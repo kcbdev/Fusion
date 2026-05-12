@@ -46,6 +46,7 @@ import { useSessionLock } from "../hooks/useSessionLock";
 import { useAiSessionSync } from "../hooks/useAiSessionSync";
 import { useViewportMode } from "../hooks/useViewportMode";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
+import { useNavigationHistoryContext } from "../hooks/useNavigationHistory";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { getSessionTabId } from "../utils/getSessionTabId";
 
@@ -238,6 +239,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
 
   useModalResizePersist(modalRef, isOpen, "fusion:planning-modal-size");
   const viewportMode = useViewportMode();
+  const { pushNav } = useNavigationHistoryContext();
 
   const { keyboardOverlap, viewportHeight, viewportOffsetTop, keyboardOpen } =
     useMobileKeyboard({ enabled: viewportMode === "mobile" });
@@ -973,6 +975,42 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const handleBackToList = useCallback(() => {
     setMobileShowDetail(false);
   }, []);
+
+  const handleClearSelectedSession = useCallback(() => {
+    setSelectedSessionId(null);
+    setMobileShowDetail(false);
+  }, []);
+
+  const previousSelectedSessionIdRef = useRef<string | null>(selectedSessionId);
+  const previousMobileShowDetailRef = useRef(mobileShowDetail);
+
+  useEffect(() => {
+    const previousSelectedSessionId = previousSelectedSessionIdRef.current;
+    previousSelectedSessionIdRef.current = selectedSessionId;
+
+    if (viewportMode !== "mobile" || !selectedSessionId || previousSelectedSessionId !== null) {
+      return;
+    }
+
+    pushNav({
+      type: "view",
+      revert: handleClearSelectedSession,
+    });
+  }, [handleClearSelectedSession, pushNav, selectedSessionId, viewportMode]);
+
+  useEffect(() => {
+    const previousMobileShowDetail = previousMobileShowDetailRef.current;
+    previousMobileShowDetailRef.current = mobileShowDetail;
+
+    if (viewportMode !== "mobile" || !mobileShowDetail || previousMobileShowDetail || selectedSessionId !== null) {
+      return;
+    }
+
+    pushNav({
+      type: "view",
+      revert: handleBackToList,
+    });
+  }, [handleBackToList, mobileShowDetail, pushNav, selectedSessionId, viewportMode]);
 
   const syncPlanningDraft = useCallback(
     async (sessionId: string, planText: string) => {

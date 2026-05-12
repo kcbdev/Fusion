@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef } from "react";
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  type PropsWithChildren,
+} from "react";
 
 /**
  * A navigation entry on the back-navigation stack.
@@ -25,6 +33,23 @@ export interface UseNavigationHistoryResult {
   pushNav: (entry: NavEntry) => void;
   /** Replace the top-of-stack entry and call history.replaceState. */
   replaceCurrent: (entry: NavEntry) => void;
+}
+
+export const NavigationHistoryContext = createContext<UseNavigationHistoryResult | null>(null);
+
+export function NavigationHistoryProvider({
+  value,
+  children,
+}: PropsWithChildren<{ value: UseNavigationHistoryResult }>) {
+  return createElement(NavigationHistoryContext.Provider, { value }, children);
+}
+
+export function useNavigationHistoryContext(): UseNavigationHistoryResult {
+  const context = useContext(NavigationHistoryContext);
+  if (!context) {
+    throw new Error("useNavigationHistoryContext must be used within a NavigationHistoryProvider");
+  }
+  return context;
 }
 
 /**

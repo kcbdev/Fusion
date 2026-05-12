@@ -3,6 +3,14 @@ import { act, render, renderHook, screen, fireEvent, waitFor, within } from "@te
 import * as api from "../../api";
 import { PlanningModeModal } from "../PlanningModeModal";
 import { TaskDetailModal } from "../TaskDetailModal";
+
+vi.mock("../../hooks/useNavigationHistory", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../hooks/useNavigationHistory")>();
+  return {
+    ...actual,
+    useNavigationHistoryContext: () => ({ pushNav: vi.fn(), replaceCurrent: vi.fn() }),
+  };
+});
 import { useSessionLock } from "../../hooks/useSessionLock";
 import { getSessionTabId } from "../../utils/getSessionTabId";
 import type { MergeResult } from "@fusion/core";

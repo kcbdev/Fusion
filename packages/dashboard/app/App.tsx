@@ -47,7 +47,7 @@ import { useMobileScrollLock } from "./hooks/useMobileScrollLock";
 import { useSetupReadiness } from "./hooks/useSetupReadiness";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 import { useViewState, type TaskView } from "./hooks/useViewState";
-import { useNavigationHistory } from "./hooks/useNavigationHistory";
+import { NavigationHistoryProvider, useNavigationHistory } from "./hooks/useNavigationHistory";
 import { usePluginDashboardViews } from "./hooks/usePluginDashboardViews";
 import { PluginDashboardViewHost } from "./plugins/PluginDashboardViewHost";
 import { isPluginViewId, isPluginViewRegistered } from "./plugins/pluginViewRegistry";
@@ -1492,7 +1492,8 @@ function AppInner() {
     !isPostOnboardingDismissed();
 
   return (
-    <>
+    <NavigationHistoryProvider value={{ pushNav, replaceCurrent }}>
+      <>
       <Header
         shellHost={shellHost.host}
         onOpenSettings={openSettingsWithNav}
@@ -1749,7 +1750,8 @@ function AppInner() {
           />
         </>
       )}
-    </>
+      </>
+    </NavigationHistoryProvider>
   );
 }
 

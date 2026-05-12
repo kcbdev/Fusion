@@ -22,6 +22,14 @@ const mockSkipMilestoneInterview = vi.fn();
 const mockSkipSliceInterview = vi.fn();
 const mockTriageFeature = vi.fn();
 
+vi.mock("../../hooks/useNavigationHistory", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../hooks/useNavigationHistory")>();
+  return {
+    ...actual,
+    useNavigationHistoryContext: () => ({ pushNav: vi.fn(), replaceCurrent: vi.fn() }),
+  };
+});
+
 vi.mock("../../api", async () => {
   const actual = await vi.importActual<typeof import("../../api")>("../../api");
   return {
