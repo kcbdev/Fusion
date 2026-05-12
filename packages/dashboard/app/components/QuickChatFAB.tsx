@@ -882,7 +882,7 @@ export function QuickChatFAB({
   // directly on the panel DOM in a layout effect below — going through
   // React state introduces a per-event reconciliation lag that the human
   // eye reads as jank while the iOS keyboard is animating in.
-  useMobileKeyboard({ enabled: isOpen });
+  const { keyboardOpen } = useMobileKeyboard({ enabled: isOpen });
   const viewportMode = useViewportMode();
   const isMobile = viewportMode === "mobile";
 
@@ -2161,7 +2161,7 @@ export function QuickChatFAB({
 
       {isOpen && (
         <div
-          className="quick-chat-panel"
+          className={`quick-chat-panel${isMobile && keyboardOpen ? " quick-chat-panel--keyboard-open" : ""}`}
           ref={panelRef}
           data-testid="quick-chat-panel"
           style={{

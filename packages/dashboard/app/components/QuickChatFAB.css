@@ -795,6 +795,11 @@
     padding-bottom: calc(var(--space-sm) + var(--space-xs) + env(safe-area-inset-bottom, 0px));
   }
 
+  .quick-chat-panel.quick-chat-panel--keyboard-open .quick-chat-panel-input {
+    /* When keyboard is open, do not add home-indicator inset gap above it. */
+    padding-bottom: calc(var(--space-sm) + var(--space-xs));
+  }
+
   .quick-chat-attachment-previews {
     padding: var(--space-sm) max(var(--space-md), env(safe-area-inset-left, 0px));
   }

@@ -5,6 +5,7 @@ import type { ChatSession } from "@fusion/core";
 import * as apiModule from "../../api";
 import { useAgents } from "../../hooks/useAgents";
 import { useViewportMode } from "../../hooks/useViewportMode";
+import { useMobileKeyboard } from "../../hooks/useMobileKeyboard";
 import { QuickChatFAB } from "../QuickChatFAB";
 
 vi.mock("../../api", () => ({
@@ -21,6 +22,7 @@ vi.mock("../../api", () => ({
 
 vi.mock("../../hooks/useAgents", () => ({ useAgents: vi.fn() }));
 vi.mock("../../hooks/useViewportMode", () => ({ useViewportMode: vi.fn() }));
+vi.mock("../../hooks/useMobileKeyboard", () => ({ useMobileKeyboard: vi.fn() }));
 
 const mockFetchResumeChatSession = vi.mocked(apiModule.fetchResumeChatSession);
 const mockFetchChatSessions = vi.mocked(apiModule.fetchChatSessions);
@@ -32,6 +34,7 @@ const mockStreamChatResponse = vi.mocked(apiModule.streamChatResponse);
 const mockCancelChatResponse = vi.mocked(apiModule.cancelChatResponse);
 const mockUseAgents = vi.mocked(useAgents);
 const mockUseViewportMode = vi.mocked(useViewportMode);
+const mockUseMobileKeyboard = vi.mocked(useMobileKeyboard);
 
 const agents: Agent[] = [
   { id: "agent-001", name: "Agent One", role: "executor", state: "active", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), metadata: {} },
@@ -80,6 +83,12 @@ describe("QuickChatFAB session-first UX", () => {
     localStorage.clear();
     mockUseAgents.mockReturnValue({ agents, activeAgents: agents, stats: null, isLoading: false, loadAgents: vi.fn(), loadStats: vi.fn() });
     mockUseViewportMode.mockReturnValue("desktop");
+    mockUseMobileKeyboard.mockReturnValue({
+      keyboardOverlap: 0,
+      viewportHeight: null,
+      viewportOffsetTop: 0,
+      keyboardOpen: false,
+    });
     mockFetchResumeChatSession.mockResolvedValue({ session: modelSession });
     mockFetchChatMessages.mockResolvedValue({ messages: [] });
     mockFetchChatSessions.mockResolvedValue({ sessions: [modelSession, agentSession] });
@@ -669,6 +678,24 @@ describe("QuickChatFAB session-first UX", () => {
     await waitFor(() => {
       expect(scrollTopValue).toBe(1080);
     });
+  });
+
+  it("applies keyboard-open panel class on mobile to remove composer safe-area gap", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    window.dispatchEvent(new Event("resize"));
+    mockUseViewportMode.mockReturnValue("mobile");
+    mockUseMobileKeyboard.mockReturnValue({
+      keyboardOverlap: 160,
+      viewportHeight: 500,
+      viewportOffsetTop: 0,
+      keyboardOpen: true,
+    });
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const panel = await screen.findByTestId("quick-chat-panel");
+    expect(panel).toHaveClass("quick-chat-panel--keyboard-open");
   });
 
   it("FN-4040: mobile visibility restore re-anchors quick chat to latest", async () => {
