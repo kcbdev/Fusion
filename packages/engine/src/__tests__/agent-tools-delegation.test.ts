@@ -256,6 +256,22 @@ describe("createDelegateTaskTool", () => {
     expect(taskStore.createTask).not.toHaveBeenCalled();
   });
 
+  it("returns explicit collision error when delegated createTask hits existing id", async () => {
+    const agent = createAgent({ id: "agent-001", name: "Bob" });
+    vi.mocked(agentStore.getAgent).mockResolvedValue(agent);
+    vi.mocked(taskStore.createTask).mockRejectedValue(new Error("Task ID already exists: FN-050"));
+
+    const tool = createDelegateTaskTool(agentStore, taskStore);
+    const result = await tool.execute("session-1", {
+      agent_id: "agent-001",
+      description: "Write tests",
+    }, undefined as any, undefined as any, undefined as any);
+
+    expect((result as { isError?: boolean }).isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toBe("ERROR: Task ID already exists: FN-050");
+    expect(result.details).toEqual({});
+  });
+
   it("allows durable engineer target without override", async () => {
     const engineer = createAgent({ id: "agent-009", name: "Eli", role: "engineer" });
     vi.mocked(agentStore.getAgent).mockResolvedValue(engineer);

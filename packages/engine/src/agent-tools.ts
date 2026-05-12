@@ -623,24 +623,35 @@ export function createTaskCreateTool(
       "or the current task should wait for the new one).",
     parameters: taskCreateParams,
     execute: async (_id: string, params: Static<typeof taskCreateParams>) => {
-      const task = await createAgentTask(store, {
-        description: params.description,
-        dependencies: params.dependencies,
-        column: "triage",
-        source: provenance ? {
-          sourceType: provenance.sourceType,
-          sourceAgentId: provenance.sourceAgentId,
-          sourceRunId: provenance.sourceRunId,
-        } : undefined,
-      }, options);
-      const deps = task.dependencies.length ? ` (depends on: ${task.dependencies.join(", ")})` : "";
-      return {
-        content: [{
-          type: "text" as const,
-          text: `Created ${task.id}: ${params.description}${deps}`,
-        }],
-        details: { taskId: task.id },
-      };
+      try {
+        const task = await createAgentTask(store, {
+          description: params.description,
+          dependencies: params.dependencies,
+          column: "triage",
+          source: provenance ? {
+            sourceType: provenance.sourceType,
+            sourceAgentId: provenance.sourceAgentId,
+            sourceRunId: provenance.sourceRunId,
+          } : undefined,
+        }, options);
+        const deps = task.dependencies.length ? ` (depends on: ${task.dependencies.join(", ")})` : "";
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Created ${task.id}: ${params.description}${deps}`,
+          }],
+          details: { taskId: task.id },
+        };
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith("Task ID already exists:")) {
+          return {
+            content: [{ type: "text" as const, text: `ERROR: ${err.message}` }],
+            details: {},
+            isError: true,
+          };
+        }
+        throw err;
+      }
     },
   };
 }
@@ -1761,27 +1772,38 @@ export function createDelegateTaskTool(
         };
       }
 
-      // Create task assigned to the target agent
-      const task = await createAgentTask(taskStore, {
-        description: params.description,
-        dependencies: params.dependencies,
-        column: "todo",
-        assignedAgentId: params.agent_id,
-        source: {
-          sourceType: "api",
-          ...(override ? { sourceMetadata: { executorRoleOverride: true } } : {}),
-        },
-      }, options);
+      try {
+        // Create task assigned to the target agent
+        const task = await createAgentTask(taskStore, {
+          description: params.description,
+          dependencies: params.dependencies,
+          column: "todo",
+          assignedAgentId: params.agent_id,
+          source: {
+            sourceType: "api",
+            ...(override ? { sourceMetadata: { executorRoleOverride: true } } : {}),
+          },
+        }, options);
 
-      const deps = task.dependencies.length ? ` (depends on: ${task.dependencies.join(", ")})` : "";
-      return {
-        content: [{
-          type: "text" as const,
-          text: `Delegated to ${agent.name} (${agent.id}): Created ${task.id}${deps}. ` +
-            `The task will be picked up by ${agent.name} on their next heartbeat cycle.`,
-        }],
-        details: { taskId: task.id, agentId: agent.id, agentName: agent.name },
-      };
+        const deps = task.dependencies.length ? ` (depends on: ${task.dependencies.join(", ")})` : "";
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Delegated to ${agent.name} (${agent.id}): Created ${task.id}${deps}. ` +
+              `The task will be picked up by ${agent.name} on their next heartbeat cycle.`,
+          }],
+          details: { taskId: task.id, agentId: agent.id, agentName: agent.name },
+        };
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith("Task ID already exists:")) {
+          return {
+            content: [{ type: "text" as const, text: `ERROR: ${err.message}` }],
+            details: {},
+            isError: true,
+          };
+        }
+        throw err;
+      }
     },
   };
 }

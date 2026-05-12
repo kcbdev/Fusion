@@ -245,4 +245,23 @@ describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)("built fn pi extension integr
     expect(rejected.isError).toBe(true);
     expect(rejected.content[0].text).toContain("ephemeral/runtime agent");
   });
+
+  it("returns explicit error when fn_delegate_task hits task-id collision", async () => {
+    const agent = await seedAgent(tmpDir, { name: "release-agent" });
+    const delegateTool = api.tools.get("fn_delegate_task")!;
+    const createSpy = vi.spyOn(TaskStore.prototype, "createTask").mockRejectedValueOnce(new Error("Task ID already exists: FN-001"));
+
+    const result = await delegateTool.execute(
+      "delegate-collision",
+      { agent_id: agent.id, description: "collision task" },
+      undefined,
+      undefined,
+      makeCtx(tmpDir),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Task ID already exists: FN-001");
+    expect(result.details.error).toContain("Task ID already exists: FN-001");
+    createSpy.mockRestore();
+  });
 });

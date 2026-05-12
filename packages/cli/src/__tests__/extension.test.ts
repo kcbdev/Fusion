@@ -1474,6 +1474,24 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
     expect(result.content[0].text).toContain(ephemeralId);
   });
 
+  it("returns explicit collision error when fn_task_create hits an existing task id", async () => {
+    const createSpy = vi.spyOn(TaskStore.prototype, "createTask").mockRejectedValueOnce(new Error("Task ID already exists: FN-001"));
+    const createTool = api.tools.get("fn_task_create")!;
+
+    const result = await createTool.execute(
+      "create-collision",
+      { description: "collision task" },
+      undefined,
+      undefined,
+      makeCtx(tmpDir),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Task ID already exists: FN-001");
+    expect(result.details.error).toContain("Task ID already exists: FN-001");
+    createSpy.mockRestore();
+  });
+
   it("fn_task_create allows durable engineer assignment for implementation tasks", async () => {
     const agentStore = new AgentStore({ rootDir: join(tmpDir, ".fusion") });
     await agentStore.init();

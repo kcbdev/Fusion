@@ -884,6 +884,7 @@ Create a new task and assign it to a specific agent for execution. The task goes
 - `"ERROR: Agent {agent_id} not found"`
 - `"ERROR: Cannot delegate to ephemeral/runtime agent {agent_id}"`
 - `"ERROR: Agent {agent_id} has role \"...\"; implementation task <new> requires an \"executor\"-role agent by default, with durable \"engineer\" supported only for explicit routing. Pass override=true to bypass."`
+- `"ERROR: Task ID already exists: {id}"` (allocator collision; request fails without mutating the existing task)
 
 ### `agent_create`
 

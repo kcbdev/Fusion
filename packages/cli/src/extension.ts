@@ -425,41 +425,52 @@ export default function kbExtension(pi: ExtensionAPI) {
         }
       }
 
-      const task = await store.createTask({
-        description: params.description.trim(),
-        dependencies: params.depends,
-        assignedAgentId: normalizedAgentId === null ? undefined : normalizedAgentId,
-        source: { sourceType: "api" },
-      });
+      try {
+        const task = await store.createTask({
+          description: params.description.trim(),
+          dependencies: params.depends,
+          assignedAgentId: normalizedAgentId === null ? undefined : normalizedAgentId,
+          source: { sourceType: "api" },
+        });
 
-      const label =
-        task.description.length > 80
-          ? task.description.slice(0, 80) + "…"
-          : task.description;
+        const label =
+          task.description.length > 80
+            ? task.description.slice(0, 80) + "…"
+            : task.description;
 
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              `Created ${task.id}: ${label}\n` +
-              `Column: triage\n` +
-              (task.dependencies.length
-                ? `Dependencies: ${task.dependencies.join(", ")}\n`
-                : "") +
-              (task.assignedAgentId
-                ? `Assigned to: ${task.assignedAgentId}\n`
-                : "") +
-              `Path: .fusion/tasks/${task.id}/`,
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `Created ${task.id}: ${label}\n` +
+                `Column: triage\n` +
+                (task.dependencies.length
+                  ? `Dependencies: ${task.dependencies.join(", ")}\n`
+                  : "") +
+                (task.assignedAgentId
+                  ? `Assigned to: ${task.assignedAgentId}\n`
+                  : "") +
+                `Path: .fusion/tasks/${task.id}/`,
+            },
+          ],
+          details: {
+            taskId: task.id,
+            column: task.column,
+            dependencies: task.dependencies,
+            assignedAgentId: task.assignedAgentId,
           },
-        ],
-        details: {
-          taskId: task.id,
-          column: task.column,
-          dependencies: task.dependencies,
-          assignedAgentId: task.assignedAgentId,
-        },
-      };
+        };
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith("Task ID already exists:")) {
+          return {
+            content: [{ type: "text", text: `ERROR: ${error.message}` }],
+            isError: true,
+            details: { error: error.message },
+          };
+        }
+        throw error;
+      }
     },
   });
 
@@ -2763,28 +2774,39 @@ export default function kbExtension(pi: ExtensionAPI) {
       await agentStore.init();
       const agent = await agentStore.getAgent(params.agent_id);
 
-      // Create task assigned to the target agent
-      const store = await getStore(ctx.cwd);
-      const task = await store.createTask({
-        description: params.description,
-        dependencies: params.dependencies,
-        column: "todo",
-        assignedAgentId: params.agent_id,
-        source: {
-          sourceType: "api",
-          ...(params.override === true ? { sourceMetadata: { executorRoleOverride: true } } : {}),
-        },
-      });
+      try {
+        // Create task assigned to the target agent
+        const store = await getStore(ctx.cwd);
+        const task = await store.createTask({
+          description: params.description,
+          dependencies: params.dependencies,
+          column: "todo",
+          assignedAgentId: params.agent_id,
+          source: {
+            sourceType: "api",
+            ...(params.override === true ? { sourceMetadata: { executorRoleOverride: true } } : {}),
+          },
+        });
 
-      const deps = task.dependencies.length ? ` (depends on: ${task.dependencies.join(", ")})` : "";
-      return {
-        content: [{
-          type: "text" as const,
-          text: `Delegated to ${agent!.name} (${agent!.id}): Created ${task.id}${deps}. ` +
-            `The task will be picked up by ${agent!.name} on their next heartbeat cycle.`,
-        }],
-        details: { taskId: task.id, agentId: agent!.id, agentName: agent!.name },
-      };
+        const deps = task.dependencies.length ? ` (depends on: ${task.dependencies.join(", ")})` : "";
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Delegated to ${agent!.name} (${agent!.id}): Created ${task.id}${deps}. ` +
+              `The task will be picked up by ${agent!.name} on their next heartbeat cycle.`,
+          }],
+          details: { taskId: task.id, agentId: agent!.id, agentName: agent!.name },
+        };
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith("Task ID already exists:")) {
+          return {
+            content: [{ type: "text", text: `ERROR: ${error.message}` }],
+            isError: true,
+            details: { error: error.message },
+          };
+        }
+        throw error;
+      }
     },
   });
 
