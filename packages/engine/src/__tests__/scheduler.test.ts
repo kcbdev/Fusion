@@ -1080,7 +1080,81 @@ describe("Scheduler", () => {
       expect(updateTask).not.toHaveBeenCalledWith("FN-002", { status: "queued", blockedBy: "FN-001" });
     });
 
-    it("blocks todo when overlapping in-review task is not paused", async () => {
+    it("excludes permanently-failed in-review tasks from active scopes", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
+
+      const tasks = [
+        createMockTask({ id: "FN-001", column: "in-review", status: "failed", worktree: "/test/project/.worktrees/fn-001" }),
+        createMockTask({ id: "FN-002", column: "todo" }),
+      ];
+
+      const parseScopeMock = vi.fn(async (taskId: string): Promise<string[]> => {
+        if (taskId === "FN-001") return ["src/foo.ts"];
+        if (taskId === "FN-002") return ["src/foo.ts"];
+        return [];
+      });
+
+      const updateTask = vi.fn().mockResolvedValue(undefined);
+      const moveTask = vi.fn().mockResolvedValue(undefined);
+      const store = createMockStore({
+        listTasks: vi.fn().mockResolvedValue(tasks),
+        getSettings: vi.fn().mockResolvedValue({
+          maxConcurrent: 2,
+          maxWorktrees: 4,
+          groupOverlappingFiles: true,
+        }),
+        parseFileScopeFromPrompt: parseScopeMock,
+        updateTask,
+        moveTask,
+      });
+
+      const scheduler = new Scheduler(store);
+      (scheduler as any).running = true;
+      await scheduler.schedule();
+
+      expect(moveTask).toHaveBeenCalledWith("FN-002", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
+      expect(updateTask).not.toHaveBeenCalledWith("FN-002", { status: "queued", blockedBy: "FN-001" });
+    });
+
+    it("clears stale blockedBy when prior overlap blocker is now permanently failed", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
+
+      const tasks = [
+        createMockTask({ id: "FN-FAIL", column: "in-review", status: "failed", worktree: "/test/project/.worktrees/fn-fail" }),
+        createMockTask({ id: "FN-002", column: "todo", status: "queued", blockedBy: "FN-FAIL" }),
+      ];
+
+      const parseScopeMock = vi.fn(async (taskId: string): Promise<string[]> => {
+        if (taskId === "FN-FAIL") return ["src/foo.ts"];
+        if (taskId === "FN-002") return ["src/foo.ts"];
+        return [];
+      });
+
+      const updateTask = vi.fn().mockResolvedValue(undefined);
+      const moveTask = vi.fn().mockResolvedValue(undefined);
+      const store = createMockStore({
+        listTasks: vi.fn().mockResolvedValue(tasks),
+        getSettings: vi.fn().mockResolvedValue({
+          maxConcurrent: 2,
+          maxWorktrees: 4,
+          groupOverlappingFiles: true,
+        }),
+        parseFileScopeFromPrompt: parseScopeMock,
+        updateTask,
+        moveTask,
+      });
+
+      const scheduler = new Scheduler(store);
+      (scheduler as any).running = true;
+      await scheduler.schedule();
+
+      expect(moveTask).toHaveBeenCalledWith("FN-002", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
+      expect(updateTask).not.toHaveBeenCalledWith("FN-002", { status: "queued", blockedBy: "FN-FAIL" });
+    });
+
+    it("still blocks todo when overlapping in-review task is not paused and not failed", async () => {
       vi.mocked(existsSync).mockReturnValue(true);
       vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
 

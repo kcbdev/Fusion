@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { ListView } from "../ListView";
 import type { Task, TaskDetail } from "@fusion/core";
 import { scopedKey } from "../../utils/projectStorage";
+import { loadAllAppCss } from "../../test/cssFixture";
 
 // Mock the API
 vi.mock("../../api", () => ({
@@ -18,6 +19,7 @@ vi.mock("../../api", () => ({
     groupOverlappingFiles: true,
     autoMerge: true,
   }),
+  fetchGlobalSettings: vi.fn().mockResolvedValue({}),
   fetchTaskDetail: vi.fn(),
   batchUpdateTaskModels: vi.fn(),
   fetchNodes: vi.fn().mockResolvedValue([]),
@@ -642,6 +644,16 @@ describe("ListView", () => {
 
     const statusBadge = screen.getByText("failed");
     expect(statusBadge.className).toContain("failed");
+  });
+
+  it("keeps failed list badges on error tokens even for in-review tasks", () => {
+    const css = loadAllAppCss();
+    const failedRule = css.match(/\.list-status-badge\.failed\s*\{([^}]*)\}/);
+    const inReviewRuleIndex = css.indexOf(".list-status-badge--in-review");
+    const failedRuleIndex = css.indexOf(".list-status-badge.failed");
+
+    expect(failedRule?.[1]).toContain("background: var(--status-error-bg)");
+    expect(failedRuleIndex).toBeGreaterThan(inReviewRuleIndex);
   });
 
   it("renders paused tasks with dimmed styling", () => {

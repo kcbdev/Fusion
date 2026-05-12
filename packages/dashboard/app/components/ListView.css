@@ -598,10 +598,6 @@
   color: var(--text-muted);
 }
 
-.list-status-badge.failed {
-  background: color-mix(in srgb, var(--color-error-dark) 15%, transparent);
-  color: var(--color-error-dark);
-}
 
 .list-status-badge.stuck {
   background: color-mix(in srgb, var(--triage) 20%, transparent);
@@ -636,6 +632,11 @@
 .list-status-badge--archived {
   background: var(--status-archived-bg);
   color: var(--text-muted);
+}
+
+.list-status-badge.failed {
+  background: var(--status-error-bg);
+  color: var(--color-error-dark);
 }
 
 .list-column-badge {

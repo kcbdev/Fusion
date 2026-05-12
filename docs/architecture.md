@@ -562,6 +562,7 @@ See [Memory Plugin Contract](./memory-plugin-contract.md) for the full plan.
 
 #### BlockedBy stamping invariants
 - Scheduler writes overlap-based `blockedBy` only when overlap gating is active and there is a live overlapping active scope; otherwise overlap logic does not stamp blockers.
+- Active overlap scopes exclude permanently-failed `in-review` tasks (`status === "failed"`, typically produced by `checkStuckBudget()` after `stuckKillCount > maxStuckKills`) so superseding re-implementation tasks are not indefinitely queued behind work that will never merge. (FN-4200)
 - Stamping is sticky when valid (FN-3899): if a todo task is already `queued` behind a blocker that is still active and still overlaps, the scheduler preserves that blocker and skips rewrites.
 - When the blocker must change, selection is deterministic: active overlap candidates are ordered by task ID and the first overlapping task is chosen, removing tick-order churn.
 - Writes are idempotent: scheduler updates `status/blockedBy` only when values change, reducing per-tick churn and audit noise.

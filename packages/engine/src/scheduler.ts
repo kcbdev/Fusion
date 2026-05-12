@@ -733,12 +733,17 @@ export class Scheduler {
           const filteredScope = filterPathsByIgnoreList(scope, overlapIgnorePaths);
           if (filteredScope.length > 0) activeScopes.set(t.id, filteredScope);
         }
+        // Only live in-review tasks with a worktree belong in activeScopes.
         // Paused in-review tasks (e.g., failed-merge tasks awaiting human triage) cannot
-        // make progress, so they must not contribute to activeScopes. Including them
+        // make progress, so they must not contribute to overlap blockers; including them
         // caused a deadlock pattern where a paused task indefinitely re-stamped
         // `blockedBy` on overlapping todo tasks every scheduler tick. (FN-3867 / FN-3857)
+        // Permanently-failed in-review tasks from SelfHealingManager.checkStuckBudget()
+        // also keep their worktree, but after the stuck-kill budget is exhausted they
+        // will never merge, so superseding re-implementation tasks (for example FN-4177
+        // replaced by FN-4198) must not stay queued behind them. (FN-4200)
         const inReviewWithWorktree = tasks.filter(
-          (t) => t.column === "in-review" && t.worktree && !t.paused,
+          (t) => t.column === "in-review" && Boolean(t.worktree) && !t.paused && t.status !== "failed",
         );
         for (const t of inReviewWithWorktree) {
           const scope = await this.store.parseFileScopeFromPrompt(t.id);
