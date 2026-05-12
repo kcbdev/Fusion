@@ -28,15 +28,17 @@ describe("TaskDetailModal", () => {
       expect(css).not.toMatch(/@media \(max-width: 640px\)\s*\{[^}]*\.detail-meta-inline-controls\s*\{[^}]*flex-direction:\s*column;/);
     });
 
-    it("uses grouped timestamp metadata on desktop with mobile stacked overrides", () => {
+    it("keeps grouped timestamp metadata inline on desktop and mobile", () => {
       const css = readDashboardStylesSource();
 
       expectBaseRule(css, ".detail-timestamps", "display: inline-flex;");
       expectBaseRule(css, ".detail-timestamps", "flex-wrap: nowrap;");
       expectBaseRule(css, ".detail-timestamp-item", "display: inline-flex;");
+      expectBaseRule(css, ".detail-timestamp-separator", "color: var(--text-dim);");
 
-      expect(css).toMatch(/@media \(max-width: 768px\)\s*\{\s*\.detail-provenance\s*\{[^}]*\}\s*\.detail-timestamps\s*\{[^}]*flex-direction:\s*column;/);
-      expect(css).toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.detail-timestamp-separator\s*\{[^}]*display:\s*none;/);
+      expect(css).toMatch(/@media \(max-width: 768px\)\s*\{\s*\.detail-provenance\s*\{[^}]*\}\s*\.detail-timestamps\s*\{[^}]*align-items:\s*center;[^}]*flex-wrap:\s*nowrap;/);
+      expect(css).not.toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.detail-timestamps\s*\{[^}]*flex-direction:\s*column;/);
+      expect(css).not.toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.detail-timestamp-separator\s*\{[^}]*display:\s*none;/);
     });
     it("renders responsive structural classes (modal-lg, overlay, spacer, tabs, detail-body)", () => {
       const { container } = render(

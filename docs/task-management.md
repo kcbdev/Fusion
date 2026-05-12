@@ -238,7 +238,7 @@ The task detail modal exposes multiple tabs.
 
 In read mode, task metadata includes lightweight inline controls: priority can be changed from the priority chip, and execution mode can be toggled with a one-click lightning-bolt fast-mode button (Fast ↔ Standard) without opening full edit mode. These controls are intentionally aligned as a paired row (matched control height, baseline alignment, and mobile-safe wrapping) so frequent priority/mode changes stay quick and visually consistent.
 
-Task metadata also shows compact `Created` / `Updated` timestamps: recent values render as relative time (`just now`, `Xm`, `Xh`, `Xd`) and older values switch to short month/day dates; desktop keeps both timestamps on one row, with a mobile-stacked layout for readability.
+Task metadata also shows compact `Created` / `Updated` timestamps: recent values render as relative time (`just now`, `Xm`, `Xh`, `Xd`) and older values switch to short month/day dates; both timestamps stay on one row across desktop and mobile widths for a compact metadata presentation.
 
 Task settings edited from the modal now auto-save as you edit (change/blur with debounce for text-like fields). This includes title, description, dependencies, working/base branch (`branch`/`baseBranch`), workflow-step selection, model overrides in the edit form, and source issue metadata. In shared create/edit task forms, the GitHub Tracking controls are placed at the bottom of **More options** after **Workflow Steps**. The footer Save button remains available, but normal field edits no longer depend on a manual save click.
 

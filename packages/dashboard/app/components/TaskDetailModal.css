@@ -186,17 +186,13 @@
 
   .detail-timestamps {
     display: flex;
-    align-items: flex-start;
-    flex-direction: column;
+    align-items: center;
+    flex-wrap: nowrap;
   }
 
   .detail-timestamp-item {
-    align-items: flex-start;
-    flex-wrap: wrap;
-  }
-
-  .detail-timestamp-separator {
-    display: none;
+    align-items: baseline;
+    flex-wrap: nowrap;
   }
 }
 
