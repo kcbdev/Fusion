@@ -104,7 +104,7 @@ export {
 export type { DistributedTaskIdAllocator } from "./distributed-task-id.js";
 export { Database, createDatabase, toJson, toJsonNullable, fromJson } from "./db.js";
 export { DatabaseSync } from "./sqlite-adapter.js";
-export type { Statement } from "./db.js";
+export type { Statement, VacuumResult } from "./db.js";
 export { ArchiveDatabase } from "./archive-db.js";
 export { detectLegacyData, migrateFromLegacy, getMigrationStatus } from "./db-migrate.js";
 export { GlobalSettingsStore, resolveGlobalDir } from "./global-settings.js";
