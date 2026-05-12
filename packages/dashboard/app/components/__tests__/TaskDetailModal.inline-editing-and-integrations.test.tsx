@@ -16,9 +16,55 @@ import {
   readDashboardStylesSource,
   setupTaskDetailModalHooks,
 } from "./TaskDetailModal.test-helpers";
+import { loadAllAppCss } from "../../test/cssFixture";
 import { TaskDetailModal, TaskDetailContent } from "../TaskDetailModal";
 
 setupTaskDetailModalHooks();
+
+function getMediaBlocks(css: string, mediaQuery: string): string[] {
+  const blocks: string[] = [];
+  let searchFrom = 0;
+
+  while (searchFrom < css.length) {
+    const mediaStart = css.indexOf(mediaQuery, searchFrom);
+    if (mediaStart === -1) {
+      break;
+    }
+
+    const blockStart = css.indexOf("{", mediaStart);
+    if (blockStart === -1) {
+      break;
+    }
+
+    let depth = 1;
+    let index = blockStart + 1;
+
+    while (index < css.length && depth > 0) {
+      const char = css[index];
+      if (char === "{") {
+        depth += 1;
+      } else if (char === "}") {
+        depth -= 1;
+      }
+      index += 1;
+    }
+
+    if (depth === 0) {
+      blocks.push(css.slice(blockStart + 1, index - 1));
+      searchFrom = index;
+    } else {
+      break;
+    }
+  }
+
+  return blocks;
+}
+
+function getRuleBlock(css: string, selector: string): string {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const ruleMatch = css.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`));
+  return ruleMatch?.[1] ?? "";
+}
 
 describe("TaskDetailModal", () => {
   describe("source issue metadata", () => {
@@ -2380,6 +2426,20 @@ describe("TaskDetailModal", () => {
 
       expect(screen.queryByRole("button", { name: "Enable GitHub tracking" })).toBeNull();
       expect(screen.getByRole("button", { name: "Expand GitHub tracking details" })).toBeInTheDocument();
+    });
+
+    it("mobile layout keeps the enable button in source order without width forcing at the 768px breakpoint", () => {
+      const css = loadAllAppCss();
+      const mobileCss = getMediaBlocks(css, "@media (max-width: 768px)").join("\n");
+      const enableRule = getRuleBlock(mobileCss, ".detail-github-tracking-enable");
+      const headerRule = getRuleBlock(mobileCss, ".detail-source-header");
+
+      expect(mobileCss).toBeTruthy();
+      expect(enableRule).toBeTruthy();
+      expect(headerRule).toBeTruthy();
+      expect(enableRule).not.toMatch(/\border\s*:/);
+      expect(enableRule).not.toMatch(/\bwidth\s*:\s*100%/);
+      expect(headerRule).toMatch(/\bflex-wrap\s*:\s*wrap/);
     });
 
     it("hides section when tracking is disabled and task is not in an eligible column", () => {
