@@ -16,29 +16,42 @@ describe("ChatStore", () => {
   let db: Database;
   let store: ChatStore;
 
+  const resetChatTablesSql = `
+    DELETE FROM chat_room_messages;
+    DELETE FROM chat_room_members;
+    DELETE FROM chat_rooms;
+    DELETE FROM chat_messages;
+    DELETE FROM chat_sessions;
+  `;
+
   beforeAll(() => {
     tmpDir = makeTmpDir();
     fusionDir = join(tmpDir, ".fusion");
-  });
 
-  beforeEach(() => {
-    // In-memory SQLite for test speed; see store.test.ts beforeEach.
+    // Reuse a single initialized in-memory DB + ChatStore for the file.
+    // ChatStore does not cache per-test state or prepared statements; each method prepares on demand.
     db = new Database(fusionDir, { inMemory: true });
     db.init();
     store = new ChatStore(fusionDir, db);
   });
 
+  beforeEach(() => {
+    db.exec(resetChatTablesSql);
+    store.removeAllListeners();
+  });
+
   afterEach(() => {
     vi.useRealTimers();
+    store.removeAllListeners();
+  });
 
+  afterAll(async () => {
     try {
       db.close();
     } catch {
       // already closed
     }
-  });
 
-  afterAll(async () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 
@@ -1077,6 +1090,12 @@ describe("ChatStore", () => {
       expect(memberAddedHandler).toHaveBeenCalledTimes(1);
       expect(messageAddedHandler).toHaveBeenCalledTimes(1);
       expect(roomDeletedHandler).toHaveBeenCalledWith(room.id);
+    });
+  });
+
+  describe("Test isolation", () => {
+    it("starts with no leaked sessions from prior tests", () => {
+      expect(store.listSessions()).toEqual([]);
     });
   });
 });
