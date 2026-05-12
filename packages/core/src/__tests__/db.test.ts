@@ -11,7 +11,7 @@ import {
 } from "../db.js";
 import { DEFAULT_PROJECT_SETTINGS } from "../types.js";
 import { TaskStore } from "../store.js";
-import { mkdtempSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -464,6 +464,64 @@ describe("Database", () => {
       expect(result).toHaveProperty("busy");
       expect(result).toHaveProperty("log");
       expect(result).toHaveProperty("checkpointed");
+    });
+  });
+
+  describe("vacuum", () => {
+    it("returns a no-op result for in-memory databases", () => {
+      const memDb = new Database(fusionDir, { inMemory: true });
+      memDb.init();
+
+      expect(memDb.vacuum()).toEqual({
+        beforeBytes: 0,
+        afterBytes: 0,
+        durationMs: 0,
+      });
+
+      memDb.close();
+    });
+
+    it("runs disk-backed compaction and preserves stored rows", () => {
+      const now = new Date().toISOString();
+      db.prepare(
+        "INSERT INTO tasks (id, description, \"column\", createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)",
+      ).run("FN-VACUUM", "vacuum task", "todo", now, now);
+
+      for (let i = 0; i < 100; i += 1) {
+        db.prepare(
+          "INSERT INTO activityLog (id, timestamp, type, taskId, taskTitle, details, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ).run(`vac-${i}`, now, "task:updated", "FN-VACUUM", "vacuum task", `entry-${i}`, null);
+      }
+
+      const dbFile = join(fusionDir, "fusion.db");
+      const expectedBeforeBytes = existsSync(dbFile) ? statSync(dbFile).size : 0;
+      const result = db.vacuum();
+
+      expect(result.beforeBytes).toBe(expectedBeforeBytes);
+      expect(typeof result.beforeBytes).toBe("number");
+      expect(typeof result.afterBytes).toBe("number");
+      expect(typeof result.durationMs).toBe("number");
+      expect(result.durationMs).toBeGreaterThanOrEqual(0);
+
+      const stored = db.prepare("SELECT id FROM tasks WHERE id = ?").get("FN-VACUUM") as
+        | { id: string }
+        | undefined;
+      expect(stored?.id).toBe("FN-VACUUM");
+      const expectedAfterBytes = existsSync(dbFile) ? statSync(dbFile).size : 0;
+      expect(result.afterBytes).toBe(expectedAfterBytes);
+    });
+
+    it("throws a descriptive error when checkpointing fails", () => {
+      const checkpointSpy = vi
+        .spyOn(db, "walCheckpoint")
+        .mockImplementation(() => {
+          throw new Error("checkpoint exploded");
+        });
+
+      expect(() => db.vacuum()).toThrow(
+        /Database vacuum maintenance failed during WAL checkpoint.*checkpoint exploded/,
+      );
+      checkpointSpy.mockRestore();
     });
   });
 

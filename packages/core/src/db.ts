@@ -10,7 +10,7 @@
 
 import { DatabaseSync } from "./sqlite-adapter.js";
 import { isAbsolute, join } from "node:path";
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync, existsSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { DEFAULT_PROJECT_SETTINGS } from "./types.js";
@@ -21,6 +21,13 @@ import type { SteeringComment, TaskComment } from "./types.js";
 
 /** A prepared SQL statement wrapping the node:sqlite StatementSync type. */
 export type Statement = ReturnType<DatabaseSync["prepare"]>;
+
+/** Result payload for explicit database compaction via `VACUUM`. */
+export interface VacuumResult {
+  beforeBytes: number;
+  afterBytes: number;
+  durationMs: number;
+}
 
 // ── JSON Helpers ─────────────────────────────────────────────────────
 
@@ -1296,6 +1303,50 @@ export class Database {
     });
 
     return rebuilt.status === 0;
+  }
+
+  /**
+   * Run WAL truncation + VACUUM and report compaction stats.
+   *
+   * In-memory databases no-op and return zeroed stats. Disk-backed databases
+   * sample file size before/after compaction, run `wal_checkpoint(TRUNCATE)`,
+   * and then run `VACUUM` while the connection is in EXCLUSIVE locking mode to
+   * prevent concurrent writes from other connections during maintenance.
+   */
+  vacuum(): VacuumResult {
+    if (this.inMemory) {
+      return { beforeBytes: 0, afterBytes: 0, durationMs: 0 };
+    }
+
+    const beforeBytes = existsSync(this.dbPath) ? statSync(this.dbPath).size : 0;
+    const startedAt = Date.now();
+
+    this.db.exec("PRAGMA locking_mode=EXCLUSIVE");
+
+    try {
+      try {
+        this.walCheckpoint("TRUNCATE");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Database vacuum maintenance failed during WAL checkpoint (dbPath=${this.dbPath}): ${message}`);
+      }
+
+      try {
+        this.db.exec("VACUUM");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Database vacuum maintenance failed during VACUUM (dbPath=${this.dbPath}): ${message}`);
+      }
+
+      const afterBytes = existsSync(this.dbPath) ? statSync(this.dbPath).size : 0;
+      return {
+        beforeBytes,
+        afterBytes,
+        durationMs: Date.now() - startedAt,
+      };
+    } finally {
+      this.db.exec("PRAGMA locking_mode=NORMAL");
+    }
   }
 
   /**
