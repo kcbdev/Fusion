@@ -985,6 +985,7 @@ describe("Migration: pre-33 DB upgrade", () => {
       `);
       db1.exec("DROP TABLE project_insight_runs");
       db1.exec("ALTER TABLE project_insight_runs_legacy RENAME TO project_insight_runs");
+      db1.exec("DELETE FROM __meta WHERE key = 'schemaCompatFingerprint'");
 
       // Verify lifecycle column is gone
       const colsBefore = db1.prepare("PRAGMA table_info(project_insight_runs)").all() as Array<{ name: string }>;

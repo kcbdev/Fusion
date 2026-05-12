@@ -11,8 +11,8 @@ function readDbSource(): string {
 describe("architecture schema compatibility", () => {
   it("invokes ensureSchemaCompatibility() from init()", () => {
     const source = readDbSource();
-    expect(source).toMatch(/private ensureSchemaCompatibility\(\): void/);
-    expect(source).toMatch(/this\.migrate\(\);\s*[\s\S]*?this\.ensureSchemaCompatibility\(\);/);
+    expect(source).toMatch(/private ensureSchemaCompatibility\(options: SchemaCompatibilityOptions = \{\}\): void/);
+    expect(source).toMatch(/this\.migrate\(\);\s*[\s\S]*?this\.ensureSchemaCompatibility\([^)]*\);\s*[\s\S]*?this\.ensureRoutinesSchemaCompatibility\([^)]*\);\s*[\s\S]*?this\.ensureInsightRunsSchemaCompatibility\([^)]*\);\s*[\s\S]*?this\.ensureEvalTaskResultsSchemaCompatibility\([^)]*\);/);
   });
 
   it("restores missing declared columns for SCHEMA_SQL tables", () => {

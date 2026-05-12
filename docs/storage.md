@@ -248,9 +248,12 @@ The `tasks.githubTracking` JSON column stores per-task GitHub tracking state (`e
 
 ### Schema self-heal on init
 
-`Database.init()` now runs an unconditional schema-compatibility reconciliation pass after versioned migrations. The pass unions table definitions from `SCHEMA_SQL` plus `MIGRATION_ONLY_TABLE_SCHEMAS`, then backfills missing columns with `addColumnIfMissing()` for tables that already exist.
+`Database.init()` runs versioned migrations first, then checks `__meta.schemaCompatFingerprint` against a process-local fingerprint derived from `SCHEMA_VERSION` plus the canonicalized table declarations from `SCHEMA_SQL` and `MIGRATION_ONLY_TABLE_SCHEMAS`.
 
-Invariant: after init, every declared column for covered tables exists regardless of `__meta.schemaVersion`, preventing legacy drift from causing `no such column` regressions on newly added fields.
+- **Fingerprint match:** skip the expensive column-reconciliation walk, but still run the cheap idempotent side effects that must always happen on open (for example `CREATE INDEX IF NOT EXISTS ...` and routines NULL backfills).
+- **Fingerprint absent or mismatched:** run the full schema-compatibility reconciliation pass, unioning table definitions from `SCHEMA_SQL` plus `MIGRATION_ONLY_TABLE_SCHEMAS` and backfilling missing columns on tables that already exist, then persist the new fingerprint.
+
+Invariant: after init, every declared column for covered tables exists regardless of `__meta.schemaVersion` whenever the fingerprint is stale or missing, preventing legacy drift from causing `no such column` regressions on newly added fields while keeping unchanged-schema opens fast.
 
 ---
 
