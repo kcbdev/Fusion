@@ -117,6 +117,14 @@ fn task archive FN-001
 fn task unarchive FN-001
 ```
 
+### Lifecycle invariants
+
+**Paused-state normalization on reopen:** When a task is moved from `in-progress`, `in-review`, or `done` back to `todo` or `triage` (retry/requeue), Fusion clears `task.paused` and `task.pausedByAgentId` to prevent contradictory `todo + paused` or `in-progress + paused` states. A paused task in `todo` is excluded from scheduler dispatch.
+
+**Paused-state normalization on explicit completion:** When an agent calls `fn_task_done` on a paused task, Fusion clears `task.paused` and `task.pausedByAgentId` regardless of the task's column (`in-progress` or `todo`). `task.paused` prevents new work from starting, but does not block an agent from completing in-flight work and transitioning the task to `done`. The scheduler respects `globalPause` independently.
+
+**Global pause vs task pause:** `settings.globalPause` gates new scheduler dispatches and is checked by the `fn_task_done` handoff logic. Task-level `task.paused` is a per-task gate that blocks execution start. They are independent — a task can be paused individually even when `globalPause` is `false`, and clearing `task.paused` does not affect `globalPause`.
+
 ### Branch metadata semantics
 
 Task cards on the board only surface branch metadata when it is non-default/user-meaningful: they hide the conventional auto-generated working branch (`fusion/<task-id>` and suffixed variants) and hide the default merge target (`main`), while still showing custom working branches and non-default merge targets.
