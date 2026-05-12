@@ -3277,6 +3277,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         task.status = undefined;
         task.error = undefined;
         task.blockedBy = undefined;
+        task.paused = undefined;
+        task.pausedByAgentId = undefined;
 
         const hasNonPendingStepProgress = task.steps.some((step) => step.status !== "pending");
         const preserveStepProgress =

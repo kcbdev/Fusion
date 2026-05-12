@@ -811,4 +811,29 @@ describe("QuickChatFAB session-first UX", () => {
       expect(scrollTopValue).toBe(scrollHeightValue);
     });
   });
+
+  it("FN-4095: snaps to bottom on uncontrolled initial open (FAB click) with preloaded messages", async () => {
+    mockFetchChatMessages.mockResolvedValueOnce({
+      messages: [{ id: "msg-open", sessionId: "session-model", role: "assistant", content: "Loaded", createdAt: new Date().toISOString() }],
+    });
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const messages = await screen.findByTestId("quick-chat-messages");
+    let scrollTopValue = 0;
+    const scrollHeightValue = 1400;
+    Object.defineProperty(messages, "scrollHeight", { configurable: true, get: () => scrollHeightValue });
+    Object.defineProperty(messages, "scrollTop", {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    await waitFor(() => {
+      expect(scrollTopValue).toBe(scrollHeightValue);
+    });
+  });
 });
