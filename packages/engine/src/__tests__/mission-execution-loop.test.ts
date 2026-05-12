@@ -318,6 +318,11 @@ function makeAssertions(count: number): MissionContractAssertion[] {
   }));
 }
 
+function expectNoValidationBoardTaskMutation(taskStore: ReturnType<typeof createMockTaskStore>) {
+  expect(taskStore.updateTask).not.toHaveBeenCalled();
+  expect(taskStore.moveTask).not.toHaveBeenCalled();
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe("MissionExecutionLoop", () => {
@@ -470,6 +475,7 @@ describe("MissionExecutionLoop", () => {
         "validation:passed",
         expect.objectContaining({ featureId: "F-001" }),
       );
+      expectNoValidationBoardTaskMutation(taskStore);
     });
 
     it("does NOT create a board task for single-feature validation", async () => {
@@ -724,6 +730,7 @@ describe("MissionExecutionLoop", () => {
         "passed",
         expect.any(String),
       );
+      expectNoValidationBoardTaskMutation(taskStore);
     });
 
     it("should parse fail result from JSON in markdown code block", async () => {
@@ -777,6 +784,7 @@ describe("MissionExecutionLoop", () => {
 
       // createGeneratedFixFeature should be called
       expect(missionStore.createGeneratedFixFeature).toHaveBeenCalled();
+      expectNoValidationBoardTaskMutation(taskStore);
     });
 
     it("should handle malformed JSON gracefully", async () => {
@@ -1094,6 +1102,53 @@ describe("MissionExecutionLoop", () => {
           reason: expect.stringContaining("External API not available"),
         }),
       );
+      expectNoValidationBoardTaskMutation(taskStore);
+    });
+  });
+
+  // ── handleValidationError ───────────────────────────────────────────────
+
+  describe("handleValidationError", () => {
+    it("emits validation:error without mutating any board task", async () => {
+      const assertions = makeAssertions(1);
+      const feature = createMockFeature({
+        loopState: "implementing",
+        taskId: "FN-001",
+        id: "F-001",
+      });
+      missionStore._setFeature(feature);
+      missionStore.getFeatureByTaskId = vi.fn().mockReturnValue(feature);
+      missionStore.listAssertionsForFeature = vi.fn().mockReturnValue(assertions);
+      taskStore._setTask({ id: "FN-001", title: "Test", description: "Implementation", log: [] });
+
+      mockSessionHolder.session.state.messages = [
+        { role: "user", content: "Validate this" },
+        { role: "assistant", content: JSON.stringify({ status: "unknown", summary: "validator crashed" }) },
+      ];
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+      const emitSpy = vi.spyOn(loop, "emit");
+      loop.start();
+
+      await loop.processTaskOutcome("FN-001");
+
+      expect(missionStore.completeValidatorRun).toHaveBeenCalledWith(
+        expect.any(String),
+        "error",
+        "Invalid status in validation response",
+      );
+      expect(emitSpy).toHaveBeenCalledWith(
+        "validation:error",
+        expect.objectContaining({
+          featureId: "F-001",
+          error: "Invalid status in validation response",
+        }),
+      );
+      expectNoValidationBoardTaskMutation(taskStore);
     });
   });
 
