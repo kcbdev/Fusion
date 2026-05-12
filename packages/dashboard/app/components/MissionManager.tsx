@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import type { ToastType } from "../hooks/useToast";
 import { useViewportMode } from "../hooks/useViewportMode";
+import { useNavigationHistoryContext } from "../hooks/useNavigationHistory";
 import { subscribeSse } from "../sse-bus";
 import { MissionInterviewModal } from "./MissionInterviewModal";
 import { MilestoneSliceInterviewModal } from "./MilestoneSliceInterviewModal";
@@ -465,6 +466,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const isMobile = useViewportMode() === "mobile";
+  const { pushNav } = useNavigationHistoryContext();
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     if (typeof window === "undefined") return MISSION_SIDEBAR_DEFAULT_WIDTH;
     const stored = window.localStorage.getItem(MISSION_SIDEBAR_STORAGE_KEY);
@@ -2030,6 +2032,23 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
     autopilotState,
     selectedMission?.lastAutopilotActivityAt,
   );
+
+  const previousSelectedMissionIdRef = useRef<string | null>(selectedMission?.id ?? null);
+
+  useEffect(() => {
+    const previousSelectedMissionId = previousSelectedMissionIdRef.current;
+    const currentSelectedMissionId = selectedMission?.id ?? null;
+    previousSelectedMissionIdRef.current = currentSelectedMissionId;
+
+    if (!isActive || !isMobile || !currentSelectedMissionId || previousSelectedMissionId === currentSelectedMissionId) {
+      return;
+    }
+
+    // MissionManager may already sit behind an App-level modal nav entry.
+    // On mobile, selecting a mission stacks a view entry on top so back goes
+    // detail → list → modal close instead of skipping the in-modal list.
+    pushNav({ type: "view", revert: handleBackToList });
+  }, [handleBackToList, isActive, isMobile, pushNav, selectedMission?.id]);
 
   const selectedMilestoneTelemetry = useMemo(() => {
     if (!validationTelemetry || !selectedMilestoneId || !isMilestoneValidationTelemetry(validationTelemetry)) {

@@ -22,6 +22,13 @@ import type { UseChatRoomsResult } from "../../hooks/useChatRooms";
 // Mock the hooks
 vi.mock("../../hooks/useChat");
 vi.mock("../../hooks/useChatRooms");
+vi.mock("../../hooks/useNavigationHistory", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../hooks/useNavigationHistory")>();
+  return {
+    ...actual,
+    useNavigationHistoryContext: () => ({ pushNav: vi.fn(), replaceCurrent: vi.fn() }),
+  };
+});
 
 const mockUseChat = vi.mocked(useChatModule.useChat);
 const mockUseChatRooms = vi.mocked(useChatRoomsModule.useChatRooms);
