@@ -20,12 +20,12 @@ setupTaskDetailModalHooks();
 
 describe("TaskDetailModal", () => {
   describe("mobile responsive structure", () => {
-    it("keeps inline metadata controls in a row by default with a narrow-screen column fallback", () => {
+    it("keeps inline metadata controls in a single row without a narrow-screen column fallback", () => {
       const css = readDashboardStylesSource();
 
       expectBaseRule(css, ".detail-meta-inline-controls", "display: flex;");
       expectBaseRule(css, ".detail-meta-inline-controls", "flex-wrap: nowrap;");
-      expect(css).toMatch(/@media \(max-width: 640px\)\s*\{[\s\S]*?\.detail-meta-inline-controls\s*\{[\s\S]*?flex-direction: column;/);
+      expect(css).not.toMatch(/@media \(max-width: 640px\)\s*\{[^}]*\.detail-meta-inline-controls\s*\{[^}]*flex-direction:\s*column;/);
     });
     it("renders responsive structural classes (modal-lg, overlay, spacer, tabs, detail-body)", () => {
       const { container } = render(

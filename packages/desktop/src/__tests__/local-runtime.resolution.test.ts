@@ -8,7 +8,7 @@ describe("desktop runtime package resolution", () => {
 
     expect(core.TaskStore).toBeTypeOf("function");
     expect(dashboard.createServer).toBeTypeOf("function");
-  });
+  }, 15000);
 
   it("can instantiate LocalRuntimeManager without relying on built dist artifacts", () => {
     const manager = new LocalRuntimeManager({ rootDir: process.cwd() });

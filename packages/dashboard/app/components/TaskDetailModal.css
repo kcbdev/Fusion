@@ -1654,9 +1654,3 @@
 
 }
 
-@media (max-width: 640px) {
-  .detail-meta-inline-controls {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-}
