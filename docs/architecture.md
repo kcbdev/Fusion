@@ -674,12 +674,15 @@ A lease is recoverable only when there is **no active local executor session for
   - Reserve/commit/abort execute under a process-local lock and a single SQLite transaction. Lazy reservation expiry cleanup runs inside those same transactions.
   - Default reservation TTL is `15 * 60 * 1000` ms (15 minutes). Expired/aborted reservations are **burned IDs** and are never reissued.
   - `committedClusterTaskCount` from allocator state is the only authoritative cluster-wide committed-task count. Local task-row counts and ID suffix math are not authoritative.
+  - Store open reconciles every known prefix in `distributed_task_id_state` to `max(current nextSequence, max(tasks suffix)+1, max(archivedTasks suffix)+1, max(reservation sequence)+1)`. This self-heals stale counters before ordinary task creation resumes.
   - Mesh allocator write routes (`/api/mesh/task-ids/reserve|commit|abort`) return `503` when the coordinator node is unreachable; they never fall back to local-only cluster ID issuance.
 - Cluster task creation now uses a strong-write reserve → create → replicate → commit/abort sequence.
   - Ordinary local task creation (`TaskStore.createTask()`, duplicate, and refine flows) now allocates IDs through the same distributed reserve/commit/abort lifecycle owned by `TaskStore`.
   - `POST /api/tasks` uses the store-owned allocator path for local creates rather than maintaining a separate route-local allocator implementation.
   - `POST /api/tasks` reserves a distributed ID, creates the authoritative local task with that reserved ID, then POSTs authenticated replication payloads to peer nodes.
-  - Creation self-heals stale ID overlap state: if a reserved `FN-*` collides with an existing task (`Task ID already exists...` or replicated-create collision), the route aborts that reservation, cleans up partial local state, reserves the next ID, and retries up to a bounded limit.
+  - All create-class writes now use conflict-raising inserts, not SQLite `ON CONFLICT ... DO UPDATE`. Existing task rows and `.fusion/tasks/{id}` contents always win over stale counters or colliding reservations.
+  - Local create paths perform a final active+archived existence check immediately before insert. If a reserved `FN-*` still collides, the reservation is aborted/burned and the create fails loudly instead of rewriting the existing task.
+  - Creation self-heals stale overlap state at the route layer: if a reserved `FN-*` collides with an existing task (`Task ID already exists...` or replicated-create collision), the route aborts that reservation, cleans up partial local state, reserves the next ID, and retries up to a bounded limit.
   - Replica apply uses `TaskStore.applyReplicatedTaskCreate(...)`, which is idempotent by task ID: replaying the same payload returns the existing task without creating duplicates.
   - If an incoming replicated payload conflicts with a different existing task record for the same ID, the apply path returns a deterministic collision error instead of overwriting data.
   - Any replication/coordinator failure aborts the reservation and returns write failure (`503`), so this path does not report success for local-only partial writes.

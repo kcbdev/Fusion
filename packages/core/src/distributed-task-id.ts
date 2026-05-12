@@ -12,6 +12,7 @@ import type {
 } from "./types.js";
 
 const DEFAULT_RESERVATION_TTL_MS = 15 * 60 * 1000;
+const TASK_ID_PATTERN = /^([A-Z][A-Z0-9]*)-(\d+)$/;
 
 export interface DistributedTaskIdAllocator {
   formatDistributedTaskId(prefix: string, sequence: number): string;
@@ -55,6 +56,164 @@ type ReservationRow = {
   committedAt: string | null;
   abortedAt: string | null;
 };
+
+function parseTaskId(taskId: string): { prefix: string; sequence: number } | null {
+  const match = taskId.trim().toUpperCase().match(TASK_ID_PATTERN);
+  if (!match) {
+    return null;
+  }
+
+  const sequence = Number.parseInt(match[2], 10);
+  if (!Number.isFinite(sequence)) {
+    return null;
+  }
+
+  return { prefix: match[1], sequence };
+}
+
+function getConfiguredPrefixAndLegacyNextId(db: Database): { prefix: string; nextId: number | null } {
+  try {
+    const row = db
+      .prepare("SELECT nextId, settings FROM config WHERE id = 1")
+      .get() as { nextId: number | null; settings: string | null } | undefined;
+    if (!row) {
+      return { prefix: "KB", nextId: null };
+    }
+
+    const settings = row.settings ? (JSON.parse(row.settings) as { taskPrefix?: string }) : null;
+    return {
+      prefix: (settings?.taskPrefix ?? "KB").trim().toUpperCase(),
+      nextId: typeof row.nextId === "number" ? row.nextId : null,
+    };
+  } catch {
+    return { prefix: "KB", nextId: null };
+  }
+}
+
+function getKnownPrefixes(db: Database): Set<string> {
+  const prefixes = new Set<string>();
+  const configured = getConfiguredPrefixAndLegacyNextId(db).prefix;
+  if (configured) {
+    prefixes.add(configured);
+  }
+
+  const addFromQuery = (sql: string, mapper: (row: Record<string, unknown>) => string | undefined): void => {
+    try {
+      const rows = db.prepare(sql).all() as Array<Record<string, unknown>>;
+      for (const row of rows) {
+        const prefix = mapper(row)?.trim().toUpperCase();
+        if (prefix) {
+          prefixes.add(prefix);
+        }
+      }
+    } catch {
+      // Best-effort for tests / partial schemas.
+    }
+  };
+
+  addFromQuery("SELECT prefix FROM distributed_task_id_state", (row) => row.prefix as string | undefined);
+  addFromQuery("SELECT prefix FROM distributed_task_id_reservations", (row) => row.prefix as string | undefined);
+  addFromQuery("SELECT id FROM tasks", (row) => parseTaskId(String(row.id ?? ""))?.prefix);
+  addFromQuery("SELECT id FROM archivedTasks", (row) => parseTaskId(String(row.id ?? ""))?.prefix);
+
+  return prefixes;
+}
+
+function getMaxTaskSequenceFromTable(db: Database, table: string, prefix: string): number {
+  try {
+    const rows = db.prepare(`SELECT id FROM ${table} WHERE id LIKE ?`).all(`${prefix}-%`) as Array<{ id: string }>;
+    let maxSequence = 0;
+    for (const row of rows) {
+      const parsed = parseTaskId(row.id);
+      if (parsed?.prefix === prefix && parsed.sequence > maxSequence) {
+        maxSequence = parsed.sequence;
+      }
+    }
+    return maxSequence;
+  } catch {
+    return 0;
+  }
+}
+
+function getMaxReservationSequence(db: Database, prefix: string): number {
+  try {
+    const row = db
+      .prepare("SELECT MAX(sequence) AS maxSeq FROM distributed_task_id_reservations WHERE prefix = ?")
+      .get(prefix) as { maxSeq: number | null } | undefined;
+    return typeof row?.maxSeq === "number" ? row.maxSeq : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function getNextSequenceFloor(db: Database, prefix: string): number {
+  const configured = getConfiguredPrefixAndLegacyNextId(db);
+  let nextSequence = 1;
+
+  if (configured.prefix === prefix && configured.nextId && configured.nextId > nextSequence) {
+    nextSequence = configured.nextId;
+  }
+
+  const taskHighWaterMark = getMaxTaskSequenceFromTable(db, "tasks", prefix) + 1;
+  const archivedHighWaterMark = getMaxTaskSequenceFromTable(db, "archivedTasks", prefix) + 1;
+  const reservationHighWaterMark = getMaxReservationSequence(db, prefix) + 1;
+
+  nextSequence = Math.max(nextSequence, taskHighWaterMark, archivedHighWaterMark, reservationHighWaterMark);
+  return nextSequence;
+}
+
+function ensureStateRow(db: Database, prefix: string): void {
+  const nowIso = new Date().toISOString();
+  const nextSequence = getNextSequenceFloor(db, prefix);
+  db.prepare(
+    `INSERT OR IGNORE INTO distributed_task_id_state (
+      prefix, nextSequence, committedClusterTaskCount, lastCommittedTaskId, updatedAt
+    ) VALUES (?, ?, 0, NULL, ?)`,
+  ).run(prefix, nextSequence, nowIso);
+  db.prepare(
+    `UPDATE distributed_task_id_state
+     SET nextSequence = MAX(nextSequence, ?),
+         updatedAt = ?
+     WHERE prefix = ?`,
+  ).run(nextSequence, nowIso, prefix);
+}
+
+export function reconcileTaskIdState(db: Database): string[] {
+  const nowIso = new Date().toISOString();
+  return db.transaction(() => {
+    const reconciled: string[] = [];
+    for (const prefix of getKnownPrefixes(db)) {
+      const nextSequence = getNextSequenceFloor(db, prefix);
+      db.prepare(
+        `INSERT OR IGNORE INTO distributed_task_id_state (
+          prefix, nextSequence, committedClusterTaskCount, lastCommittedTaskId, updatedAt
+        ) VALUES (?, ?, 0, NULL, ?)`,
+      ).run(prefix, nextSequence, nowIso);
+
+      const before = db
+        .prepare("SELECT nextSequence FROM distributed_task_id_state WHERE prefix = ?")
+        .get(prefix) as { nextSequence: number } | undefined;
+      db.prepare(
+        `UPDATE distributed_task_id_state
+         SET nextSequence = MAX(nextSequence, ?),
+             updatedAt = ?
+         WHERE prefix = ?`,
+      ).run(nextSequence, nowIso, prefix);
+      const after = db
+        .prepare("SELECT nextSequence FROM distributed_task_id_state WHERE prefix = ?")
+        .get(prefix) as { nextSequence: number } | undefined;
+
+      if (!before || !after || after.nextSequence !== before.nextSequence) {
+        reconciled.push(prefix);
+      }
+    }
+
+    if (reconciled.length > 0) {
+      db.bumpLastModified();
+    }
+    return reconciled;
+  });
+}
 
 export function formatDistributedTaskId(prefix: string, sequence: number): string {
   const normalizedPrefix = prefix.trim().toUpperCase();
@@ -105,70 +264,6 @@ export function createDistributedTaskIdAllocator(db: Database): DistributedTaskI
     return existsInTable("tasks") || existsInTable("archivedTasks");
   };
 
-  const ensureStateRow = (prefix: string): void => {
-    // Seed nextSequence past any pre-existing task ID for this prefix. Without
-    // this, projects whose tasks were originally allocated through
-    // TaskStore.allocateId() (config.nextId) would have mesh-routed task
-    // creates restart at 1 and collide with historical FN-001 / FN-002 / …
-    // IDs (regression introduced when the dashboard task-create route was
-    // wired to reserveDistributedTaskId in FN-3450).
-    //
-    // We take the max of:
-    //   - 1 (historical default)
-    //   - the legacy config.nextId counter, when the configured taskPrefix
-    //     matches `prefix`
-    //   - one past the highest numeric suffix on any existing task for this
-    //     prefix (live tasks + archived), to handle DBs where config.nextId
-    //     ever drifted below the real high-water mark
-    let seedSequence = 1;
-    try {
-      const configRow = db
-        .prepare("SELECT nextId, settings FROM config WHERE id = 1")
-        .get() as { nextId: number | null; settings: string | null } | undefined;
-      if (configRow) {
-        const settings = configRow.settings ? (JSON.parse(configRow.settings) as { taskPrefix?: string }) : null;
-        const configuredPrefix = (settings?.taskPrefix ?? "KB").trim().toUpperCase();
-        if (configuredPrefix === prefix && typeof configRow.nextId === "number" && configRow.nextId > seedSequence) {
-          seedSequence = configRow.nextId;
-        }
-      }
-    } catch {
-      // Best-effort: if the config row/column is missing (fresh test DB) we
-      // fall back to the historical default of 1.
-    }
-    const idPattern = `${prefix}-%`;
-    const probeTable = (table: string): void => {
-      try {
-        const row = db
-          .prepare(
-            `SELECT MAX(CAST(substr(id, ${prefix.length + 2}) AS INTEGER)) AS maxSeq
-             FROM ${table}
-             WHERE id LIKE ? AND substr(id, ${prefix.length + 2}) GLOB '[0-9]*'`,
-          )
-          .get(idPattern) as { maxSeq: number | null } | undefined;
-        if (row && typeof row.maxSeq === "number" && row.maxSeq + 1 > seedSequence) {
-          seedSequence = row.maxSeq + 1;
-        }
-      } catch {
-        // Table may not exist (tests, isolated DBs); ignore.
-      }
-    };
-    probeTable("tasks");
-    probeTable("archivedTasks");
-    const nowIso = new Date().toISOString();
-    db.prepare(
-      `INSERT OR IGNORE INTO distributed_task_id_state (
-        prefix, nextSequence, committedClusterTaskCount, lastCommittedTaskId, updatedAt
-      ) VALUES (?, ?, 0, NULL, ?)`
-    ).run(prefix, seedSequence, nowIso);
-    db.prepare(
-      `UPDATE distributed_task_id_state
-       SET nextSequence = MAX(nextSequence, ?),
-           updatedAt = ?
-       WHERE prefix = ?`
-    ).run(seedSequence, nowIso, prefix);
-  };
-
   return {
     formatDistributedTaskId,
     reserveDistributedTaskId: async (input) =>
@@ -184,7 +279,7 @@ export function createDistributedTaskIdAllocator(db: Database): DistributedTaskI
           if (!prefix) {
             throw new DistributedTaskIdError("prefix is required", "invalid_prefix");
           }
-          ensureStateRow(prefix);
+          ensureStateRow(db, prefix);
 
           const state = db
             .prepare(
@@ -203,7 +298,7 @@ export function createDistributedTaskIdAllocator(db: Database): DistributedTaskI
           db.prepare(
             `INSERT INTO distributed_task_id_reservations (
               reservationId, prefix, nodeId, sequence, taskId, status, reason, expiresAt, createdAt, updatedAt
-            ) VALUES (?, ?, ?, ?, ?, 'reserved', NULL, ?, ?, ?)`
+            ) VALUES (?, ?, ?, ?, ?, 'reserved', NULL, ?, ?, ?)`,
           ).run(reservationId, prefix, input.nodeId, sequence, taskId, expiresAt, nowIso, nowIso);
 
           db.prepare(
@@ -252,7 +347,7 @@ export function createDistributedTaskIdAllocator(db: Database): DistributedTaskI
              WHERE reservationId = ?`,
           ).run(nowIso, nowIso, row.reservationId);
 
-          ensureStateRow(row.prefix);
+          ensureStateRow(db, row.prefix);
           db.prepare(
             `UPDATE distributed_task_id_state
              SET committedClusterTaskCount = committedClusterTaskCount + 1,
@@ -308,7 +403,7 @@ export function createDistributedTaskIdAllocator(db: Database): DistributedTaskI
             ).run(input.reason, nowIso, nowIso, row.reservationId);
           }
 
-          ensureStateRow(row.prefix);
+          ensureStateRow(db, row.prefix);
           const state = db
             .prepare(
               "SELECT committedClusterTaskCount FROM distributed_task_id_state WHERE prefix = ?",
@@ -334,7 +429,7 @@ export function createDistributedTaskIdAllocator(db: Database): DistributedTaskI
           if (!prefix) {
             throw new DistributedTaskIdError("prefix is required", "invalid_prefix");
           }
-          ensureStateRow(prefix);
+          ensureStateRow(db, prefix);
           const row = db
             .prepare(
               `SELECT nextSequence, committedClusterTaskCount, lastCommittedTaskId

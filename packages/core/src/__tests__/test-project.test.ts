@@ -42,7 +42,7 @@ describe("test-project fixture", () => {
 
     const configRaw = await readFile(join(fixture.rootDir, ".fusion", "config.json"), "utf-8");
     const config = JSON.parse(configRaw);
-    expect(config.nextId).toBe(1);
+    expect(config.nextId).toBeUndefined();
     expect(config.settings.taskPrefix).toBe("FN");
 
     const tasks = await fixture.store.listTasks();

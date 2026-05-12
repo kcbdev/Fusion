@@ -4,8 +4,9 @@
 
 - `distributed_task_id_state` is the authoritative local task-ID allocator state. `nextSequence` is the active high-water mark used for local ID reservations.
 - `distributed_task_id_reservations` tracks reserve/commit/abort lifecycle entries. Aborted/expired reservations are burned and never reissued.
-- `config.nextId` is retained only as a legacy compatibility field and optional seed source; runtime task creation no longer mutates it as allocator truth.
-- Startup allocator reconciliation bumps each active prefix sequence to `max(current nextSequence, max(existing task suffix)+1)` across live + archived tasks to self-heal stale allocator drift.
+- `config.nextId` is retained only as a deprecated legacy compatibility field and optional one-time seed source. Fusion still reads it during reconciliation, but runtime task creation and settings writes no longer mutate it.
+- Startup/store-open allocator reconciliation bumps each active prefix sequence to `max(current nextSequence, max(tasks suffix)+1, max(archivedTasks suffix)+1, max(reservation sequence)+1)` so stale allocator rows self-heal before local task creation resumes.
+- Create-class task persistence is intentionally non-destructive: new tasks use plain `INSERT` semantics, while `ON CONFLICT(id) DO UPDATE` remains update-only. If counters drift and a reserved ID still collides, the create fails and the existing SQLite row / task directory stays intact.
 
 ## SQLite write-path lock recovery (FN-4042 / FN-4083)
 

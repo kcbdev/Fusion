@@ -369,6 +369,26 @@ Archive entries preserve key metadata needed for restoration, including:
 - Moves task to `done`
 - Logs “Task restored from archive” when recovering from compact archive entry
 
+### Task-ID collision safety and operator recovery
+
+- Ordinary task creation, duplicate, and refine flows now fail safely if the chosen task ID already exists in active storage or archive storage. Existing task rows/files always win; the new create attempt must retry with a fresh reservation instead of overwriting data.
+- A failed create may burn a distributed reservation. Gaps in `FN-*` numbering are expected and are safer than reissuing a possibly-colliding ID.
+- `config.nextId` is legacy/read-only. The live allocator state is `distributed_task_id_state.nextSequence`, reconciled on store open against live tasks, archived task snapshots, and reservation history.
+
+If you suspect **historical overwrites from pre-FN-4044 builds**, inspect surviving evidence in this order:
+
+1. `archive.db` / archived task snapshots for the missing ID
+2. `.fusion/tasks/<id>/task.json.bak`, `PROMPT.md`, attachments, and any surviving worktree branch named for the task
+3. agent run logs / task documents / activity log entries that still mention the original ID
+4. git commits whose subject/body references the original task ID but no longer matches the current task metadata
+
+Recovery/backfill guidance:
+
+- If the original task row still exists in archive storage, unarchive or manually recreate the task from that snapshot.
+- If only prompt/worktree/git evidence survives, create a replacement task with a new ID and copy over the recovered description, prompt, documents, and attachments manually.
+- If both the active row and archive snapshot were overwritten, Fusion cannot reconstruct lost attachments/comments automatically; recreate them from git history, branch/worktree contents, screenshots, or external issue trackers.
+- Record the incident in the replacement task so future audits understand why the task ID and commit history diverge.
+
 ## GitHub Issue Import and PR Creation
 
 Import issues:

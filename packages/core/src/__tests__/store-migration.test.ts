@@ -109,35 +109,35 @@ describe("TaskStore", () => {
     });
   });
 
-  describe("FTS5 corruption recovery during upsert", () => {
-    it("rebuilds FTS5 and retries once when upsert fails with an FTS corruption error", async () => {
+  describe("FTS5 corruption recovery during create inserts", () => {
+    it("rebuilds FTS5 and retries once when an insert fails with an FTS corruption error", async () => {
       const db = harness.store().getDatabase();
       const rebuildSpy = vi.spyOn(db, "rebuildFts5Index").mockReturnValue(true);
 
-      const upsertSpy = vi.spyOn(harness.store() as any, "upsertTask");
-      const originalUpsert = upsertSpy.getMockImplementation();
-      upsertSpy
+      const insertSpy = vi.spyOn(harness.store() as any, "insertTask");
+      const originalInsert = insertSpy.getMockImplementation();
+      insertSpy
         .mockImplementationOnce(() => {
           throw new Error("SQLITE_CORRUPT: corruption found reading blob in fts5");
         })
         .mockImplementation((task: any) => {
-          if (originalUpsert) {
-            return originalUpsert(task);
+          if (originalInsert) {
+            return originalInsert(task);
           }
-          return (Object.getPrototypeOf(harness.store()) as any).upsertTask.call(harness.store(), task);
+          return (Object.getPrototypeOf(harness.store()) as any).insertTask.call(harness.store(), task);
         });
 
       const created = await harness.store().createTask({ description: "Recover from FTS corruption" });
 
       expect(created.id).toBeDefined();
       expect(rebuildSpy).toHaveBeenCalledTimes(1);
-      expect(upsertSpy).toHaveBeenCalledTimes(2);
+      expect(insertSpy).toHaveBeenCalledTimes(2);
     });
 
     it("propagates non-FTS errors without rebuild", async () => {
       const db = harness.store().getDatabase();
       const rebuildSpy = vi.spyOn(db, "rebuildFts5Index").mockReturnValue(true);
-      vi.spyOn(harness.store() as any, "upsertTask").mockImplementationOnce(() => {
+      vi.spyOn(harness.store() as any, "insertTask").mockImplementationOnce(() => {
         throw new Error("constraint failed");
       });
 

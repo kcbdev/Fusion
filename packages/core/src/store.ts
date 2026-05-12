@@ -28,7 +28,7 @@ import { validateNodeOverrideChange } from "./node-override-guard.js";
 import { sanitizeTitle } from "./ai-summarize.js";
 import { assertProjectRootDir } from "./project-root-guard.js";
 import { generateTaskLineageId, normalizeTaskCommitAssociation } from "./task-lineage.js";
-import { createDistributedTaskIdAllocator, resolveLocalNodeId, type DistributedTaskIdAllocator } from "./distributed-task-id.js";
+import { createDistributedTaskIdAllocator, reconcileTaskIdState, resolveLocalNodeId, type DistributedTaskIdAllocator } from "./distributed-task-id.js";
 import {
   buildBootstrapPrompt,
   replicationCollisionError,
@@ -585,6 +585,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private worktreeAllocationLock: Promise<void> = Promise.resolve();
   /** Promise chain for serializing config.json read-modify-write cycles */
   private configLock: Promise<void> = Promise.resolve();
+  /** Startup/open guard for distributed_task_id_state reconciliation. */
+  private taskIdStateReconciled = false;
   /** Cached workflow steps — invalidated on create/update/delete */
   private workflowStepsCache: import("./types.js").WorkflowStep[] | null = null;
   /** Plugin-contributed workflow step templates injected by engine runtime. */
@@ -680,6 +682,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         throw error;
       }
       this._db = db;
+      this.reconcileDistributedTaskIdStateOnOpen();
       // Auto-migrate legacy data if needed
       if (detectLegacyData(this.fusionDir)) {
         // Note: migrateFromLegacy is async but we need sync access.
@@ -705,6 +708,14 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     return this._archiveDb;
   }
 
+  private reconcileDistributedTaskIdStateOnOpen(): void {
+    if (this.taskIdStateReconciled) {
+      return;
+    }
+    reconcileTaskIdState(this.db);
+    this.taskIdStateReconciled = true;
+  }
+
   async init(): Promise<void> {
     await mkdir(this.tasksDir, { recursive: true });
     
@@ -719,6 +730,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       }
       this._db = db;
     }
+
+    this.reconcileDistributedTaskIdStateOnOpen();
     
     // Auto-migrate from legacy file-based storage
     if (detectLegacyData(this.fusionDir)) {
@@ -726,12 +739,14 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     }
     await this.migrateActiveArchivedTasksToArchiveDb();
     await this.importLegacyAgentLogsOnce();
+    this.taskIdStateReconciled = false;
+    this.reconcileDistributedTaskIdStateOnOpen();
 
     // Write config.json for backward compatibility if it doesn't exist
     if (!existsSync(this.configPath)) {
       const config = await this.readConfig();
       try {
-        await writeFile(this.configPath, JSON.stringify(config, null, 2));
+        await writeFile(this.configPath, this.serializeConfigForDisk(config));
       } catch (err) {
         storeLog.warn("Backward-compat config.json sync failed during init", {
           phase: "init:config-sync",
@@ -1215,8 +1230,129 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     return [...columns, limitedLog].join(", ");
   }
 
+  private getTaskPersistValues(task: Task): unknown[] {
+    return [
+      task.id,
+      task.lineageId ?? generateTaskLineageId(),
+      task.title ?? null,
+      task.description,
+      normalizeTaskPriority(task.priority),
+      task.column,
+      task.status ?? null,
+      task.size ?? null,
+      task.reviewLevel ?? null,
+      task.currentStep || 0,
+      task.worktree ?? null,
+      task.blockedBy ?? null,
+      task.paused ? 1 : 0,
+      task.baseBranch ?? null,
+      task.branch ?? null,
+      task.executionStartBranch ?? null,
+      task.baseCommitSha ?? null,
+      task.modelPresetId ?? null,
+      task.modelProvider ?? null,
+      task.modelId ?? null,
+      task.validatorModelProvider ?? null,
+      task.validatorModelId ?? null,
+      task.planningModelProvider ?? null,
+      task.planningModelId ?? null,
+      task.mergeRetries ?? null,
+      task.workflowStepRetries ?? null,
+      task.stuckKillCount ?? 0,
+      task.postReviewFixCount ?? 0,
+      task.recoveryRetryCount ?? null,
+      task.taskDoneRetryCount ?? 0,
+      task.verificationFailureCount ?? 0,
+      task.mergeConflictBounceCount ?? 0,
+      task.nextRecoveryAt ?? null,
+      task.error ?? null,
+      task.summary ?? null,
+      task.thinkingLevel ?? null,
+      task.executionMode ?? null,
+      task.tokenUsage?.inputTokens ?? null,
+      task.tokenUsage?.outputTokens ?? null,
+      task.tokenUsage?.cachedTokens ?? null,
+      task.tokenUsage?.totalTokens ?? null,
+      task.tokenUsage?.firstUsedAt ?? null,
+      task.tokenUsage?.lastUsedAt ?? null,
+      task.createdAt,
+      task.updatedAt,
+      task.columnMovedAt ?? null,
+      task.executionStartedAt ?? null,
+      task.executionCompletedAt ?? null,
+      toJson(task.dependencies || []),
+      toJson(task.steps || []),
+      toJson(task.log || []),
+      toJson(task.attachments || []),
+      toJson(task.steeringComments || []),
+      toJson(task.comments || []),
+      toJsonNullable(task.review),
+      toJsonNullable(task.reviewState),
+      toJson(task.workflowStepResults || []),
+      toJsonNullable(task.prInfo),
+      toJsonNullable(task.issueInfo),
+      toJsonNullable(task.githubTracking),
+      task.sourceIssue?.provider ?? null,
+      task.sourceIssue?.repository ?? null,
+      task.sourceIssue?.externalIssueId ?? null,
+      task.sourceIssue?.issueNumber ?? null,
+      task.sourceIssue?.url ?? null,
+      toJsonNullable(task.mergeDetails),
+      task.breakIntoSubtasks ? 1 : 0,
+      toJson(task.enabledWorkflowSteps || []),
+      toJson(task.modifiedFiles || []),
+      task.missionId ?? null,
+      task.sliceId ?? null,
+      task.assignedAgentId ?? null,
+      task.pausedByAgentId ?? null,
+      task.assigneeUserId ?? null,
+      task.nodeId ?? null,
+      task.effectiveNodeId ?? null,
+      task.effectiveNodeSource ?? null,
+      task.sourceType ?? null,
+      task.sourceAgentId ?? null,
+      task.sourceRunId ?? null,
+      task.sourceSessionId ?? null,
+      task.sourceMessageId ?? null,
+      task.sourceParentTaskId ?? null,
+      toJsonNullable(task.sourceMetadata),
+      task.checkedOutBy ?? null,
+      task.checkedOutAt ?? null,
+      task.checkoutNodeId ?? null,
+      task.checkoutRunId ?? null,
+      task.checkoutLeaseRenewedAt ?? null,
+      task.checkoutLeaseEpoch ?? 0,
+    ];
+  }
+
   /**
-   * Upsert a task to the database. Used by create and update operations.
+   * Insert a brand-new task row. Create paths must use this so SQLite raises on
+   * duplicate IDs instead of silently rewriting the existing row.
+   */
+  private insertTask(task: Task): void {
+    this.db.prepare(`
+      INSERT INTO tasks (
+        id, lineageId, title, description, priority, "column", status, size, reviewLevel, currentStep,
+        worktree, blockedBy, paused, baseBranch, branch, executionStartBranch, baseCommitSha, modelPresetId, modelProvider,
+        modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, mergeRetries,
+        workflowStepRetries, stuckKillCount, postReviewFixCount, recoveryRetryCount, taskDoneRetryCount, verificationFailureCount, mergeConflictBounceCount, nextRecoveryAt, error,
+        summary, thinkingLevel, executionMode, tokenUsageInputTokens, tokenUsageOutputTokens, tokenUsageCachedTokens,
+        tokenUsageTotalTokens, tokenUsageFirstUsedAt, tokenUsageLastUsedAt, createdAt, updatedAt, columnMovedAt,
+        executionStartedAt, executionCompletedAt,
+        dependencies, steps, log, attachments, steeringComments,
+        comments, review, reviewState, workflowStepResults, prInfo, issueInfo, githubTracking,
+        sourceIssueProvider, sourceIssueRepository, sourceIssueExternalIssueId, sourceIssueNumber, sourceIssueUrl,
+        mergeDetails, breakIntoSubtasks, enabledWorkflowSteps, modifiedFiles, missionId, sliceId, assignedAgentId, pausedByAgentId, assigneeUserId, nodeId, effectiveNodeId, effectiveNodeSource, sourceType, sourceAgentId, sourceRunId, sourceSessionId, sourceMessageId, sourceParentTaskId, sourceMetadata, checkedOutBy, checkedOutAt, checkoutNodeId, checkoutRunId, checkoutLeaseRenewedAt, checkoutLeaseEpoch
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      )
+    `).run(...this.getTaskPersistValues(task));
+    this.db.bumpLastModified();
+  }
+
+  /**
+   * Upsert a task to the database. Update paths intentionally retain ON CONFLICT
+   * semantics; create paths must use insertTask() instead.
    */
   private upsertTask(task: Task): void {
     this.db.prepare(`
@@ -1325,99 +1461,62 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         checkoutRunId = excluded.checkoutRunId,
         checkoutLeaseRenewedAt = excluded.checkoutLeaseRenewedAt,
         checkoutLeaseEpoch = excluded.checkoutLeaseEpoch
-    `).run(
-      task.id,
-      task.lineageId ?? generateTaskLineageId(),
-      task.title ?? null,
-      task.description,
-      normalizeTaskPriority(task.priority),
-      task.column,
-      task.status ?? null,
-      task.size ?? null,
-      task.reviewLevel ?? null,
-      task.currentStep || 0,
-      task.worktree ?? null,
-      task.blockedBy ?? null,
-      task.paused ? 1 : 0,
-      task.baseBranch ?? null,
-      task.branch ?? null,
-      task.executionStartBranch ?? null,
-      task.baseCommitSha ?? null,
-      task.modelPresetId ?? null,
-      task.modelProvider ?? null,
-      task.modelId ?? null,
-      task.validatorModelProvider ?? null,
-      task.validatorModelId ?? null,
-      task.planningModelProvider ?? null,
-      task.planningModelId ?? null,
-      task.mergeRetries ?? null,
-      task.workflowStepRetries ?? null,
-      task.stuckKillCount ?? 0,
-      task.postReviewFixCount ?? 0,
-      task.recoveryRetryCount ?? null,
-      task.taskDoneRetryCount ?? 0,
-      task.verificationFailureCount ?? 0,
-      task.mergeConflictBounceCount ?? 0,
-      task.nextRecoveryAt ?? null,
-      task.error ?? null,
-      task.summary ?? null,
-      task.thinkingLevel ?? null,
-      task.executionMode ?? null,
-      task.tokenUsage?.inputTokens ?? null,
-      task.tokenUsage?.outputTokens ?? null,
-      task.tokenUsage?.cachedTokens ?? null,
-      task.tokenUsage?.totalTokens ?? null,
-      task.tokenUsage?.firstUsedAt ?? null,
-      task.tokenUsage?.lastUsedAt ?? null,
-      task.createdAt,
-      task.updatedAt,
-      task.columnMovedAt ?? null,
-      task.executionStartedAt ?? null,
-      task.executionCompletedAt ?? null,
-      toJson(task.dependencies || []),
-      toJson(task.steps || []),
-      toJson(task.log || []),
-      toJson(task.attachments || []),
-      toJson(task.steeringComments || []),
-      toJson(task.comments || []),
-      toJsonNullable(task.review),
-      toJsonNullable(task.reviewState),
-      toJson(task.workflowStepResults || []),
-      toJsonNullable(task.prInfo),
-      toJsonNullable(task.issueInfo),
-      toJsonNullable(task.githubTracking),
-      task.sourceIssue?.provider ?? null,
-      task.sourceIssue?.repository ?? null,
-      task.sourceIssue?.externalIssueId ?? null,
-      task.sourceIssue?.issueNumber ?? null,
-      task.sourceIssue?.url ?? null,
-      toJsonNullable(task.mergeDetails),
-      task.breakIntoSubtasks ? 1 : 0,
-      toJson(task.enabledWorkflowSteps || []),
-      toJson(task.modifiedFiles || []),
-      task.missionId ?? null,
-      task.sliceId ?? null,
-      task.assignedAgentId ?? null,
-      task.pausedByAgentId ?? null,
-      task.assigneeUserId ?? null,
-      task.nodeId ?? null,
-      task.effectiveNodeId ?? null,
-      task.effectiveNodeSource ?? null,
-      task.sourceType ?? null,
-      task.sourceAgentId ?? null,
-      task.sourceRunId ?? null,
-      task.sourceSessionId ?? null,
-      task.sourceMessageId ?? null,
-      task.sourceParentTaskId ?? null,
-      toJsonNullable(task.sourceMetadata),
-      task.checkedOutBy ?? null,
-      task.checkedOutAt ?? null,
-      task.checkoutNodeId ?? null,
-      task.checkoutRunId ?? null,
-      task.checkoutLeaseRenewedAt ?? null,
-      task.checkoutLeaseEpoch ?? 0,
-    );
+    `).run(...this.getTaskPersistValues(task));
     this.db.bumpLastModified();
+  }
+
+  private isTaskIdConflictError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return /SQLITE_CONSTRAINT|UNIQUE constraint failed: tasks\.id|PRIMARY KEY constraint failed: tasks\.id/i.test(message);
+  }
+
+  private logTaskCreateConflict(task: Task, operation: string, error: unknown): void {
+    storeLog.error("Refused colliding task create", {
+      phase: "task-create:id-conflict",
+      operation,
+      taskId: task.id,
+      column: task.column,
+      sourceType: task.sourceType,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  private insertTaskWithFtsRecovery(task: Task, operation: string): void {
+    const normalizeConflict = (error: unknown): never => {
+      this.logTaskCreateConflict(task, operation, error);
+      throw new Error(`Task ID already exists: ${task.id}`);
+    };
+
+    try {
+      this.insertTask(task);
+      return;
+    } catch (error) {
+      if (this.isTaskIdConflictError(error)) {
+        normalizeConflict(error);
+      }
+      if (!this.db.isFts5CorruptionError(error)) {
+        throw error;
+      }
+
+      console.warn(`[fusion:store] FTS5 corruption detected during insert for task ${task.id}; rebuilding index and retrying once`);
+
+      try {
+        this.db.rebuildFts5Index();
+      } catch (rebuildError) {
+        console.warn("[fusion:store] FTS5 rebuild failed; propagating original insert error", rebuildError);
+        throw error;
+      }
+
+      try {
+        this.insertTask(task);
+      } catch (retryError) {
+        if (this.isTaskIdConflictError(retryError)) {
+          normalizeConflict(retryError);
+        }
+        console.warn("[fusion:store] Insert retry after FTS5 rebuild failed; propagating original insert error", retryError);
+        throw error;
+      }
+    }
   }
 
   private upsertTaskWithFtsRecovery(task: Task): void {
@@ -1457,6 +1556,31 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const row = this.db.prepare(`SELECT ${selectClause} FROM tasks WHERE id = ?`).get(id) as unknown as TaskRow | undefined;
     if (!row) return undefined;
     return this.rowToTask(row);
+  }
+
+  private isTaskIdPresentInArchivedTasksTable(id: string): boolean {
+    try {
+      const row = this.db.prepare("SELECT 1 as found FROM archivedTasks WHERE id = ? LIMIT 1").get(id) as { found?: number } | undefined;
+      return row?.found === 1;
+    } catch {
+      return false;
+    }
+  }
+
+  private taskIdExistsAnywhere(id: string): boolean {
+    if (this.readTaskFromDb(id)) {
+      return true;
+    }
+    if (this.isTaskIdPresentInArchivedTasksTable(id)) {
+      return true;
+    }
+    return this.archiveDb.get(id) !== undefined;
+  }
+
+  private assertTaskIdAvailable(id: string): void {
+    if (this.taskIdExistsAnywhere(id)) {
+      throw new Error(`Task ID already exists: ${id}`);
+    }
   }
 
   private isTaskArchived(id: string): boolean {
@@ -1718,7 +1842,17 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   /**
-   * Write a task to SQLite (primary store) and also write task.json to disk
+   * Write a brand-new task to SQLite (primary store) and also write task.json to disk
+   * for backward compatibility and debugging. Create paths must call this variant
+   * so duplicate IDs fail safely instead of overwriting existing rows.
+   */
+  private async atomicCreateTaskJson(dir: string, task: Task, operation: string): Promise<void> {
+    this.insertTaskWithFtsRecovery(task, operation);
+    await this.writeTaskJsonFile(dir, task);
+  }
+
+  /**
+   * Write an existing task to SQLite (primary store) and also write task.json to disk
    * for backward compatibility and debugging.
    */
   private async atomicWriteTaskJson(dir: string, task: Task): Promise<void> {
@@ -2104,6 +2238,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     };
   }
 
+  private serializeConfigForDisk(config: BoardConfig): string {
+    const { nextId: _deprecatedNextId, ...configForDisk } = config as BoardConfig & { nextId?: number };
+    return JSON.stringify(configForDisk, null, 2);
+  }
+
   private async writeConfig(
     config: BoardConfig,
     options?: { nextWorkflowStepId?: number },
@@ -2119,12 +2258,18 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       ? JSON.stringify(legacyWorkflowSteps)
       : "[]";
 
-    // Use INSERT OR REPLACE to ensure the config row exists (handles edge case where row is missing)
+    // `config.nextId` is deprecated legacy state. Preserve the existing column
+    // value for one release, but stop writing new values so distributed_task_id_state
+    // remains the sole active allocator counter.
     this.db.prepare(
-      `INSERT OR REPLACE INTO config (id, nextId, nextWorkflowStepId, settings, workflowSteps, updatedAt) 
-       VALUES (1, ?, ?, ?, ?, ?)`,
+      `INSERT INTO config (id, nextWorkflowStepId, settings, workflowSteps, updatedAt)
+       VALUES (1, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         nextWorkflowStepId = excluded.nextWorkflowStepId,
+         settings = excluded.settings,
+         workflowSteps = excluded.workflowSteps,
+         updatedAt = excluded.updatedAt`,
     ).run(
-      config.nextId || 1,
       nextWorkflowStepId,
       JSON.stringify(config.settings || {}),
       workflowStepsJson,
@@ -2134,7 +2279,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     // Also write config.json to disk for backward compatibility
     try {
       const tmpPath = this.configPath + ".tmp";
-      await writeFile(tmpPath, JSON.stringify(config, null, 2));
+      await writeFile(tmpPath, this.serializeConfigForDisk(config));
       await rename(tmpPath, this.configPath);
     } catch (err) {
       // Best-effort: SQLite is the primary store
@@ -2469,9 +2614,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       throw new Error(`Task ${id} cannot depend on itself`);
     }
 
-    if (this.readTaskFromDb(id)) {
-      throw new Error(`Task ID already exists: ${id}`);
-    }
+    this.assertTaskIdAvailable(id);
 
     const title = input.title?.trim() || undefined;
     let resolvedWorkflowSteps: string[] | undefined = input.enabledWorkflowSteps?.length
@@ -2589,9 +2732,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       updatedAt: options?.updatedAt ?? now,
     };
 
+    this.assertTaskIdAvailable(id);
+
     const dir = this.taskDir(id);
-    await mkdir(dir, { recursive: true });
-    await this.atomicWriteTaskJson(dir, task);
+    await this.atomicCreateTaskJson(dir, task, "createTask");
 
     // Update cache if watcher is active
     if (this.isWatching) this.taskCache.set(id, { ...task });
@@ -2638,9 +2782,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           baseBranch: sourceTask.baseBranch,
         };
 
+        this.assertTaskIdAvailable(newId);
+
         const newDir = this.taskDir(newId);
-        await mkdir(newDir, { recursive: true });
-        await this.atomicWriteTaskJson(newDir, newTask);
+        await this.atomicCreateTaskJson(newDir, newTask, "duplicateTask");
         await mkdir(newDir, { recursive: true });
         await writeFile(join(newDir, "PROMPT.md"), sourceTask.prompt);
 
@@ -2702,9 +2847,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           attachments: sourceTask.attachments ? [...sourceTask.attachments] : undefined,
         };
 
+        this.assertTaskIdAvailable(newId);
+
         const newDir = this.taskDir(newId);
-        await mkdir(newDir, { recursive: true });
-        await this.atomicWriteTaskJson(newDir, newTask);
+        await this.atomicCreateTaskJson(newDir, newTask, "refineTask");
         const prompt = `# ${newTask.title}\n\n${newTask.description}\n`;
         await mkdir(newDir, { recursive: true });
         await writeFile(join(newDir, "PROMPT.md"), prompt);
@@ -6943,6 +7089,7 @@ ${stepsSection}`;
     if (this._db) {
       this._db.close();
       this._db = null;
+      this.taskIdStateReconciled = false;
     }
     if (this._archiveDb) {
       this._archiveDb.close();

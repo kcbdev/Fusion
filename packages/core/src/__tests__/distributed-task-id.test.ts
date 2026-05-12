@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Database } from "../db.js";
-import { createDistributedTaskIdAllocator, DistributedTaskIdError } from "../distributed-task-id.js";
+import { createDistributedTaskIdAllocator, DistributedTaskIdError, reconcileTaskIdState } from "../distributed-task-id.js";
 
 describe("distributed-task-id allocator", () => {
   const createAllocator = () => {
@@ -84,6 +84,33 @@ describe("distributed-task-id allocator", () => {
     expect(state.nextSequence).toBe(3702);
   });
 
+  it("reconciles stale state rows past live tasks, archived tasks, and reservations", () => {
+    const db = new Database("/tmp/fusion-test", { inMemory: true });
+    db.init();
+    const now = new Date().toISOString();
+
+    db.prepare(
+      "INSERT INTO tasks (id, description, \"column\", createdAt, updatedAt) VALUES (?, '', 'todo', ?, ?)",
+    ).run("FN-003", now, now);
+    db.prepare(
+      "INSERT INTO archivedTasks (id, data, archivedAt) VALUES (?, ?, ?)",
+    ).run("FN-005", JSON.stringify({ id: "FN-005" }), now);
+    db.prepare(
+      "INSERT INTO distributed_task_id_state (prefix, nextSequence, committedClusterTaskCount, lastCommittedTaskId, updatedAt) VALUES (?, ?, ?, ?, ?)",
+    ).run("FN", 2, 1, "FN-001", now);
+    db.prepare(
+      `INSERT INTO distributed_task_id_reservations (
+        reservationId, prefix, nodeId, sequence, taskId, status, reason, expiresAt, createdAt, updatedAt
+      ) VALUES (?, ?, ?, ?, ?, 'reserved', NULL, ?, ?, ?)`,
+    ).run("res-7", "FN", "node-a", 7, "FN-007", new Date(Date.now() + 60_000).toISOString(), now, now);
+
+    const reconciled = reconcileTaskIdState(db);
+    expect(reconciled).toContain("FN");
+
+    const state = db.prepare("SELECT nextSequence FROM distributed_task_id_state WHERE prefix = ?").get("FN") as { nextSequence: number };
+    expect(state.nextSequence).toBe(8);
+  });
+
   it("skips stale overlapping nextSequence values and reserves the next free id", async () => {
     const db = new Database("/tmp/fusion-test", { inMemory: true });
     db.init();
@@ -104,6 +131,26 @@ describe("distributed-task-id allocator", () => {
     const state = await allocator.getDistributedTaskIdState({ prefix: "FN" });
     expect(state.nextSequence).toBe(4);
     expect(state.committedClusterTaskCount).toBe(1);
+  });
+
+  it("reconciles stale reservation sequences before allocating a new reservation", async () => {
+    const db = new Database("/tmp/fusion-test", { inMemory: true });
+    db.init();
+    const now = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO distributed_task_id_state (prefix, nextSequence, committedClusterTaskCount, lastCommittedTaskId, updatedAt) VALUES (?, ?, ?, ?, ?)",
+    ).run("FN", 2, 1, "FN-001", now);
+    db.prepare(
+      `INSERT INTO distributed_task_id_reservations (
+        reservationId, prefix, nodeId, sequence, taskId, status, reason, expiresAt, createdAt, updatedAt
+      ) VALUES (?, ?, ?, ?, ?, 'reserved', NULL, ?, ?, ?)`,
+    ).run("res-2", "FN", "node-a", 2, "FN-002", new Date(Date.now() + 60_000).toISOString(), now, now);
+
+    const allocator = createDistributedTaskIdAllocator(db);
+    const reservation = await allocator.reserveDistributedTaskId({ prefix: "FN", nodeId: "node-b" });
+
+    expect(reservation.taskId).toBe("FN-003");
+    expect(reservation.sequence).toBe(3);
   });
 
   it("state reports committed count independently from nextSequence", async () => {

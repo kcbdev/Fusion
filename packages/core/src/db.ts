@@ -263,6 +263,9 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 
 -- Config table (single row with project settings)
+-- nextId is a deprecated legacy allocator counter retained read-only for one
+-- release so older databases/config consumers can still load it during the
+-- distributed_task_id_state transition.
 CREATE TABLE IF NOT EXISTS config (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   nextId INTEGER DEFAULT 1,
