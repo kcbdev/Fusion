@@ -173,6 +173,10 @@ function cleanupTempDir(dir?: string): void {
 
     sleepSync(attempt * 25);
   }
+
+  if (existsSync(dir)) {
+    throw new Error(`failed to clean temp dir: ${dir}`);
+  }
 }
 
 afterAll(() => {

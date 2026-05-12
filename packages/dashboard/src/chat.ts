@@ -19,6 +19,7 @@ import type {
   ChatAttachment,
   ChatInFlightGenerationState,
   ChatStore,
+  ChatRoomMessage,
   ChatSession,
   ChatSessionCreateInput,
   MessageStore,
@@ -137,10 +138,125 @@ const MAX_MESSAGES_PER_IP_PER_MINUTE = 30;
 /** Maximum file size for # mentions (50KB). Files larger than this are skipped. */
 const MAX_REFERENCED_FILE_SIZE = 50 * 1024;
 const ROOM_AMBIENT_MAX_RESPONDERS = 5;
-const ROOM_THREAD_CONTEXT_MAX_MESSAGES = 16;
+const ROOM_THREAD_RECENT_VERBATIM_MESSAGES = 12;
+const ROOM_THREAD_COMPACTION_FETCH_LIMIT = 80;
 const ROOM_THREAD_CONTEXT_MAX_CHARS = 8_000;
 const ROOM_THREAD_MESSAGE_CONTENT_MAX_CHARS = 1_200;
+const ROOM_THREAD_SUMMARY_MAX_CHARS = 1_500;
 const IN_FLIGHT_PERSIST_DEBOUNCE_MS = 200;
+
+type RoomTranscriptMessage = Pick<ChatRoomMessage, "id" | "role" | "content" | "createdAt" | "senderAgentId">;
+
+function getRoomSenderLabel(message: Pick<RoomTranscriptMessage, "role" | "senderAgentId">): string {
+  return message.role === "user"
+    ? "User"
+    : message.role === "system"
+      ? "System"
+      : (message.senderAgentId ? `Agent ${message.senderAgentId}` : "Assistant");
+}
+
+function truncateWithEllipsis(content: string, maxChars: number): string {
+  return content.length > maxChars
+    ? `${content.slice(0, maxChars - 1)}…`
+    : content;
+}
+
+function formatRoomThreadLine(message: RoomTranscriptMessage, latestUserMessageId: string): string {
+  const marker = message.id === latestUserMessageId ? " [LATEST USER MESSAGE — ANSWER THIS]" : "";
+  return `- [${message.createdAt}] (${message.role}) ${getRoomSenderLabel(message)}: ${truncateWithEllipsis(message.content, ROOM_THREAD_MESSAGE_CONTENT_MAX_CHARS)}${marker}`;
+}
+
+function formatRoomThreadContext(messages: RoomTranscriptMessage[], latestUserMessageId: string): string {
+  return messages.map((message) => formatRoomThreadLine(message, latestUserMessageId)).join("\n");
+}
+
+function buildRoomSummaryBlock(olderMessages: RoomTranscriptMessage[]): string {
+  if (olderMessages.length === 0) {
+    return "";
+  }
+
+  const participants = Array.from(new Set(olderMessages.map((message) => getRoomSenderLabel(message))));
+  const rankedHighlights = olderMessages
+    .map((message, index) => ({
+      message,
+      index,
+      score: (message.role === "user" ? 2 : message.role === "assistant" ? 1 : 0) * 1000 + message.content.length,
+    }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .slice(0, 5)
+    .sort((left, right) => left.index - right.index)
+    .map(({ message }) => `  - [${message.createdAt}] ${getRoomSenderLabel(message)}: ${truncateWithEllipsis(message.content, 240)}`);
+
+  const summaryLines = [
+    "## Earlier room context (compacted)",
+    `- Span: ${olderMessages.length} messages from ${olderMessages[0]?.createdAt ?? ""} to ${olderMessages.at(-1)?.createdAt ?? ""}`,
+    `- Participants: ${participants.join(", ")}`,
+    "- Highlights:",
+  ];
+
+  const baseSummary = summaryLines.join("\n");
+  if (rankedHighlights.length === 0) {
+    return baseSummary;
+  }
+
+  const highlights = [...rankedHighlights];
+  while (`${baseSummary}\n${highlights.join("\n")}`.length > ROOM_THREAD_SUMMARY_MAX_CHARS && highlights.length > 0) {
+    highlights.pop();
+  }
+
+  return highlights.length > 0
+    ? `${baseSummary}\n${highlights.join("\n")}`
+    : baseSummary;
+}
+
+export function buildCompactedRoomTranscript(
+  messages: RoomTranscriptMessage[],
+  latestUserMessageId: string,
+): string {
+  if (messages.length === 0) {
+    return "";
+  }
+
+  const messageIndexes = new Map(messages.map((message, index) => [message.id, index]));
+  const latestUserMessage = messages.find((message) => message.id === latestUserMessageId);
+  const splitIndex = Math.max(0, messages.length - ROOM_THREAD_RECENT_VERBATIM_MESSAGES);
+  let olderMessages = messages.slice(0, splitIndex);
+  let recentMessages = messages.slice(splitIndex);
+
+  if (latestUserMessage && !recentMessages.some((message) => message.id === latestUserMessageId)) {
+    olderMessages = olderMessages.filter((message) => message.id !== latestUserMessageId);
+    recentMessages = [...recentMessages, latestUserMessage]
+      .sort((left, right) => (messageIndexes.get(left.id) ?? 0) - (messageIndexes.get(right.id) ?? 0));
+  }
+
+  const summaryLines = buildRoomSummaryBlock(olderMessages).split("\n").filter((line) => line.length > 0);
+
+  const renderTranscript = () => {
+    const summary = summaryLines.length > 0 ? summaryLines.join("\n") : "";
+    const recent = formatRoomThreadContext(recentMessages, latestUserMessageId);
+    if (summary && recent) {
+      return `${summary}\n\n${recent}`;
+    }
+    return summary || recent;
+  };
+
+  let transcript = renderTranscript();
+  while (transcript.length > ROOM_THREAD_CONTEXT_MAX_CHARS && summaryLines.at(-1)?.startsWith("  - ")) {
+    summaryLines.pop();
+    transcript = renderTranscript();
+  }
+
+  while (transcript.length > ROOM_THREAD_CONTEXT_MAX_CHARS && recentMessages.length > 1) {
+    const removableIndex = recentMessages.findIndex((message) => message.id !== latestUserMessageId);
+    if (removableIndex === -1) {
+      break;
+    }
+    recentMessages.splice(removableIndex, 1);
+    transcript = renderTranscript();
+  }
+
+  return transcript;
+}
 
 function formatAttachmentSize(size: number): string {
   if (size < 1024) return `${size}B`;
@@ -1072,12 +1188,12 @@ export class ChatManager {
     }
     systemPrompt = `${systemPrompt}\n\n${CHAT_AGENT_MESSAGE_ROUTING_GUIDANCE}`;
 
-    const roomMessages = this.chatStore.getRoomMessages(input.roomId, { limit: ROOM_THREAD_CONTEXT_MAX_MESSAGES });
+    const roomMessages = this.chatStore.getRoomMessages(input.roomId, { limit: ROOM_THREAD_COMPACTION_FETCH_LIMIT });
     const roomPrompt = [
       `You are replying as ${input.responder.name} in room #${input.roomName}.`,
       "Reply to the latest user room message in the context of this shared room thread.",
       "Room transcript (oldest to newest, bounded):",
-      this.formatRoomThreadContext(roomMessages, input.latestUserMessageId),
+      this.compactRoomThreadContext(roomMessages, input.latestUserMessageId),
       "Latest user message to answer:",
       input.content,
     ].join("\n\n");
@@ -1147,35 +1263,15 @@ export class ChatManager {
     }
   }
 
-  private formatRoomThreadContext(
-    messages: Array<{ id: string; role: "user" | "assistant" | "system"; content: string; createdAt: string; senderAgentId?: string | null }>,
+  /**
+   * Preserve the newest room turns verbatim while compacting older history into
+   * a deterministic summary block so long-running rooms keep continuity.
+   */
+  private compactRoomThreadContext(
+    messages: RoomTranscriptMessage[],
     latestUserMessageId: string,
   ): string {
-    const trimmedFromTail: string[] = [];
-    let totalChars = 0;
-
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index];
-      const senderLabel = message.role === "user"
-        ? "User"
-        : message.role === "system"
-          ? "System"
-          : (message.senderAgentId ? `Agent ${message.senderAgentId}` : "Assistant");
-      const content = message.content.length > ROOM_THREAD_MESSAGE_CONTENT_MAX_CHARS
-        ? `${message.content.slice(0, ROOM_THREAD_MESSAGE_CONTENT_MAX_CHARS - 1)}…`
-        : message.content;
-      const marker = message.id === latestUserMessageId ? " [LATEST USER MESSAGE — ANSWER THIS]" : "";
-      const line = `- [${message.createdAt}] (${message.role}) ${senderLabel}: ${content}${marker}`;
-
-      if (trimmedFromTail.length > 0 && totalChars + line.length > ROOM_THREAD_CONTEXT_MAX_CHARS) {
-        break;
-      }
-
-      trimmedFromTail.push(line);
-      totalChars += line.length;
-    }
-
-    return trimmedFromTail.reverse().join("\n");
+    return buildCompactedRoomTranscript(messages, latestUserMessageId);
   }
 
   /**

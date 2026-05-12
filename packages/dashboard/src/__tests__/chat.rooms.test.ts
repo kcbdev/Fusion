@@ -205,7 +205,7 @@ describe("Chat orchestration — rooms (FN-3805..FN-3811 contract)", () => {
       expect(mockChatStore.getRoomMessages).toHaveBeenCalledWith("room-1", { limit: expect.any(Number) });
     });
 
-    it("trims older room context entries from the prompt window", async () => {
+    it("compacts older room context entries in the responder prompt", async () => {
       mockChatStore.listRoomMembers.mockReturnValue([
         { roomId: "room-1", agentId: "agent-a", role: "member", addedAt: "2026-01-01" },
       ]);
@@ -213,6 +213,11 @@ describe("Chat orchestration — rooms (FN-3805..FN-3811 contract)", () => {
       mockAgentStore.getAgent.mockResolvedValue({ id: "agent-a", name: "Alpha", role: "executor" });
 
       const promptSpy = vi.fn().mockResolvedValue(undefined);
+      mockChatStore.addRoomMessage.mockImplementationOnce((_roomId: string, input: any) => ({
+        id: "history-latest",
+        roomId: "room-1",
+        ...input,
+      }));
       __setCreateResolvedAgentSession(async () => ({
         session: {
           prompt: promptSpy,
@@ -232,7 +237,7 @@ describe("Chat orchestration — rooms (FN-3805..FN-3811 contract)", () => {
       }));
       history[history.length - 1] = {
         ...history[history.length - 1],
-        id: "msg-1",
+        id: "history-latest",
         role: "user",
         senderAgentId: null,
         content: "hello @Alpha",
@@ -246,8 +251,13 @@ describe("Chat orchestration — rooms (FN-3805..FN-3811 contract)", () => {
       await manager.sendRoomMessage("room-1", "hello @Alpha");
 
       const prompt = promptSpy.mock.calls[0]?.[0] as string;
+      expect(prompt).toContain("## Earlier room context (compacted)");
+      expect(prompt).toContain("- Span: 18 messages from 2026-01-01T00:00:00.000Z to 2026-01-01T00:00:17.000Z");
       expect(prompt).toContain("history-item-28");
-      expect(prompt).not.toContain("history-item-0");
+      expect(prompt).toContain("  - [2026-01-01T00:00:00.000Z] User: history-item-0");
+      expect(prompt).not.toContain("- [2026-01-01T00:00:00.000Z] (user) User: history-item-0");
+      expect(prompt).toContain("- [2026-01-01T00:00:29.000Z] (user) User: hello @Alpha [LATEST USER MESSAGE — ANSWER THIS]");
+      expect(prompt.match(/\[LATEST USER MESSAGE — ANSWER THIS\]/g)).toHaveLength(1);
     });
 
     it("throws surfaced error when room has members but no resolvable responders", async () => {
