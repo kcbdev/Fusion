@@ -70,6 +70,7 @@ import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { createRunAuditor, generateSyntheticRunId, type EngineRunContext } from "./run-audit.js";
 import { createWebFetchTool } from "./agent-tools.js";
+import { auditSquashMerge, type SquashAuditFindings } from "./merger-squash-audit.js";
 
 /** Conflict type classification for merge conflict resolution */
 export type ConflictType =
@@ -472,6 +473,17 @@ export class MergeAbortedError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "MergeAbortedError";
+  }
+}
+
+export class SquashAuditError extends Error {
+  constructor(
+    taskId: string,
+    public readonly squashSha: string,
+    public readonly findings: SquashAuditFindings,
+  ) {
+    super(buildSquashAuditBlockingMessage(taskId, squashSha, findings));
+    this.name = "SquashAuditError";
   }
 }
 
@@ -4143,6 +4155,46 @@ function quoteArg(value: string): string {
   return `"${value.replace(/(["\\$`])/g, "\\$1")}"`;
 }
 
+function shouldRunPostSquashAudit(result: MergeResult, mergeWasEmpty: boolean, isEmptyCommit: boolean, commitSha?: string): boolean {
+  if (mergeWasEmpty || isEmptyCommit || !commitSha) {
+    return false;
+  }
+  return (result.autoResolvedCount ?? 0) > 0 || result.attemptsMade === 3;
+}
+
+function buildSquashAuditBlockingMessage(taskId: string, squashSha: string, findings: SquashAuditFindings): string {
+  const riskParts: string[] = [];
+  if (findings.duplicateSubjects.length > 0) {
+    riskParts.push(`${findings.duplicateSubjects.length} duplicate-subject risk${findings.duplicateSubjects.length === 1 ? "" : "s"}`);
+  }
+  if (findings.touchedFileOverlaps.length > 0) {
+    riskParts.push(`${findings.touchedFileOverlaps.length} touched-file overlap risk${findings.touchedFileOverlaps.length === 1 ? "" : "s"}`);
+  }
+  const summary = riskParts.length > 0 ? riskParts.join(", ") : `${findings.issueCount} audit finding(s)`;
+  return `${taskId}: post-squash audit blocked auto-completion for ${squashSha.slice(0, 8)} (${summary})`;
+}
+
+function formatSquashAuditAgentLog(findings: SquashAuditFindings): string {
+  const lines: string[] = [];
+  if (findings.duplicateSubjects.length > 0) {
+    lines.push("Duplicate-subject risks:");
+    for (const duplicate of findings.duplicateSubjects) {
+      lines.push(`- ${duplicate.subject}`);
+    }
+  }
+  if (findings.touchedFileOverlaps.length > 0) {
+    if (lines.length > 0) lines.push("");
+    lines.push("Touched-file overlap risks:");
+    for (const overlap of findings.touchedFileOverlaps) {
+      lines.push(`- ${overlap.file}`);
+      for (const commit of overlap.recentMainCommits) {
+        lines.push(`  - ${commit.sha} ${commit.subject}`);
+      }
+    }
+  }
+  return lines.join("\n");
+}
+
 /**
  * Resolve a non-empty commit body for fallback merge commits. Used by sites
  * that would otherwise emit `-m ""` when the branch's commit log is empty
@@ -6065,6 +6117,27 @@ export async function aiMergeTask(
     // attemptWithSideStrategy return true without committing when nothing
     // was staged. The recorded HEAD then has nothing to do with this task.
     const recordedSha = (isEmptyCommit || mergeWasEmpty) ? undefined : commitSha;
+
+    const auditSha = recordedSha;
+    if (auditSha && shouldRunPostSquashAudit(result, mergeWasEmpty, isEmptyCommit, auditSha)) {
+      const auditFindings = await auditSquashMerge({
+        rootDir,
+        squashSha: auditSha,
+      });
+      if (!auditFindings.clean) {
+        const auditError = new SquashAuditError(taskId, auditSha, auditFindings);
+        await store.appendAgentLog(
+          taskId,
+          auditError.message,
+          "tool_error",
+          formatSquashAuditAgentLog(auditFindings),
+          "merger",
+        );
+        await store.updateTask(taskId, { status: null });
+        throw auditError;
+      }
+      await store.appendAgentLog(taskId, "post-squash audit clean", "text", undefined, "merger");
+    }
     if (isEmptyCommit) {
       mergerLog.warn(
         `${taskId}: local squash produced an empty commit (${commitSha?.slice(0, 8)}) — branch likely contained dupes of main. Skipping commitSha; recovery will backfill when real commit lands.`,
@@ -6138,6 +6211,9 @@ export async function aiMergeTask(
       "merger",
     );
   } catch (err: any) {
+    if (err instanceof SquashAuditError || err?.name === "SquashAuditError") {
+      throw err;
+    }
     mergerLog.warn(`${taskId}: failed to collect/store merge details: ${err.message}`);
   }
 

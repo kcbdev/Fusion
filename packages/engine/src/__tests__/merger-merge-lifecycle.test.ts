@@ -121,6 +121,23 @@ vi.mock("../context-limit-detector.js", () => ({
   isContextLimitError: vi.fn(),
 }));
 
+vi.mock("../merger-squash-audit.js", () => ({
+  auditSquashMerge: vi.fn(async () => ({
+    squashSha: "mergedcommit123",
+    parentSha: "parent123",
+    squashSubject: "feat: squash merge",
+    lookback: 30,
+    branchSubjects: [],
+    recentMainSubjects: [],
+    duplicateSubjects: [],
+    touchedFiles: [],
+    touchedFileOverlaps: [],
+    findings: [],
+    issueCount: 0,
+    clean: true,
+  })),
+}));
+
 import {
   aiMergeTask,
   pushToRemoteAfterMerge,
@@ -149,11 +166,13 @@ import {
 } from "../merger.js";
 import { mergerLog } from "../logger.js";
 import { createFnAgent } from "../pi.js";
+import { auditSquashMerge } from "../merger-squash-audit.js";
 import { execSync, exec } from "node:child_process";
 import * as core from "@fusion/core";
 import { type TaskStore, type Task, type MergeResult, DEFAULT_SETTINGS } from "@fusion/core";
 
 const mockedCreateFnAgent = vi.mocked(createFnAgent);
+const mockedAuditSquashMerge = vi.mocked(auditSquashMerge);
 const mockedExecSync = vi.mocked(execSync);
 const mockedExec = vi.mocked(exec);
 const { existsSync: mockedExistsSyncRaw, readFileSync: mockedReadFileSyncRaw } = await import("node:fs");
@@ -2115,5 +2134,168 @@ describe("aiMergeTask — reset cleanup failure diagnostics", () => {
 });
 
 // ── New Smart Conflict Resolution API Tests ────────────────────────────
+
+describe("aiMergeTask post-squash audit gate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedExistsSync.mockReturnValue(true);
+    mockedCreateFnAgent.mockResolvedValue({
+      session: {
+        prompt: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn(),
+      },
+    } as any);
+    mockedAuditSquashMerge.mockResolvedValue({
+      squashSha: "mergedcommit123",
+      parentSha: "parent123",
+      squashSubject: "feat: squash merge",
+      lookback: 30,
+      branchSubjects: [],
+      recentMainSubjects: [],
+      duplicateSubjects: [],
+      touchedFiles: [],
+      touchedFileOverlaps: [],
+      findings: [],
+      issueCount: 0,
+      clean: true,
+    });
+  });
+
+  function setupAutoResolvedMergeExecSync() {
+    let squashCalls = 0;
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.includes("symbolic-ref --short HEAD")) return "main" as any;
+      if (cmdStr.includes("rev-parse --verify")) return Buffer.from("abc123");
+      if (cmdStr === "git rev-parse HEAD" || cmdStr.startsWith("git rev-parse HEAD ")) return "mergedcommit123" as any;
+      if (cmdStr.includes("git log")) return "- feat: something" as any;
+      if (cmdStr.includes("merge-base")) return Buffer.from("abc123");
+      if (cmdStr.includes("rev-list --count")) return "1\n" as any;
+      if (cmdStr.includes("git diff") && cmdStr.includes("--stat")) return "1 file changed" as any;
+      if (cmdStr.includes("merge --squash") && !cmdStr.includes("-X")) {
+        squashCalls += 1;
+        if (squashCalls === 2) {
+          const error = new Error("merge conflict");
+          (error as Error & { stdout?: string; stderr?: string }).stdout = "";
+          (error as Error & { stdout?: string; stderr?: string }).stderr = "CONFLICT";
+          throw error;
+        }
+        return Buffer.from("");
+      }
+      if (cmdStr.includes("diff --name-only --diff-filter=U")) return "pnpm-lock.yaml\n" as any;
+      if (cmdStr.includes("checkout --ours --") || cmdStr.includes("git add -- pnpm-lock.yaml")) return Buffer.from("");
+      if (cmdStr.includes("diff --cached --quiet")) return "1" as any;
+      if (cmdStr.includes("git commit ")) return Buffer.from("");
+      if (cmdStr.includes("show --shortstat")) return "3 files changed, 10 insertions(+), 2 deletions(-)" as any;
+      if (cmdStr.includes("branch -d") || cmdStr.includes("branch -D")) return Buffer.from("");
+      if (cmdStr.includes("worktree remove")) return Buffer.from("");
+      return Buffer.from("");
+    });
+  }
+
+  function createAuditStore() {
+    const store = createMockStore(
+      { id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050" },
+      [{ id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050", column: "in-review" } as Task],
+    );
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      testCommand: "pnpm test",
+      mergeConflictStrategy: "ai-only",
+      worktreeRebaseBeforeMerge: false,
+      worktreeRebaseLocalBase: false,
+    });
+    return store;
+  }
+
+  it("moves the task to done when the post-squash audit is clean", async () => {
+    setupAutoResolvedMergeExecSync();
+    const store = createAuditStore();
+
+    const result = await aiMergeTask(store, "/tmp/root", "FN-050");
+
+    expect(result.merged).toBe(true);
+    expect(mockedAuditSquashMerge).toHaveBeenCalledWith({
+      rootDir: "/tmp/root",
+      squashSha: "mergedcommit123",
+    });
+    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-050", "post-squash audit clean", "text", undefined, "merger");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-050", "done");
+  });
+
+  it("blocks completion and logs duplicate-subject findings", async () => {
+    setupAutoResolvedMergeExecSync();
+    mockedAuditSquashMerge.mockResolvedValue({
+      squashSha: "mergedcommit123",
+      parentSha: "parent123",
+      squashSubject: "feat: squash merge",
+      lookback: 30,
+      branchSubjects: ["feat: duplicate subject"],
+      recentMainSubjects: ["feat: duplicate subject"],
+      duplicateSubjects: [{ type: "duplicate-subject", subject: "feat: duplicate subject" }],
+      touchedFiles: ["src/example.ts"],
+      touchedFileOverlaps: [],
+      findings: [{ type: "duplicate-subject", subject: "feat: duplicate subject" }],
+      issueCount: 1,
+      clean: false,
+    });
+    const store = createAuditStore();
+
+    await expect(aiMergeTask(store, "/tmp/root", "FN-050")).rejects.toThrow(
+      "FN-050: post-squash audit blocked auto-completion for mergedco",
+    );
+
+    expect(store.moveTask).not.toHaveBeenCalled();
+    expect(store.appendAgentLog).toHaveBeenCalledWith(
+      "FN-050",
+      expect.stringContaining("post-squash audit blocked auto-completion"),
+      "tool_error",
+      expect.stringContaining("Duplicate-subject risks:\n- feat: duplicate subject"),
+      "merger",
+    );
+    expect(store.updateTask).toHaveBeenCalledWith("FN-050", { status: null });
+  });
+
+  it("blocks completion and logs touched-file-overlap findings", async () => {
+    setupAutoResolvedMergeExecSync();
+    mockedAuditSquashMerge.mockResolvedValue({
+      squashSha: "mergedcommit123",
+      parentSha: "parent123",
+      squashSubject: "feat: squash merge",
+      lookback: 30,
+      branchSubjects: ["feat: branch change"],
+      recentMainSubjects: [],
+      duplicateSubjects: [],
+      touchedFiles: ["src/shared.ts"],
+      touchedFileOverlaps: [{
+        type: "touched-file-overlap",
+        file: "src/shared.ts",
+        recentMainCommits: [{ sha: "abc1234", subject: "fix: recent main change" }],
+      }],
+      findings: [{
+        type: "touched-file-overlap",
+        file: "src/shared.ts",
+        recentMainCommits: [{ sha: "abc1234", subject: "fix: recent main change" }],
+      }],
+      issueCount: 1,
+      clean: false,
+    });
+    const store = createAuditStore();
+
+    await expect(aiMergeTask(store, "/tmp/root", "FN-050")).rejects.toThrow(
+      "FN-050: post-squash audit blocked auto-completion for mergedco",
+    );
+
+    expect(store.moveTask).not.toHaveBeenCalled();
+    expect(store.appendAgentLog).toHaveBeenCalledWith(
+      "FN-050",
+      expect.stringContaining("post-squash audit blocked auto-completion"),
+      "tool_error",
+      expect.stringContaining("Touched-file overlap risks:\n- src/shared.ts\n  - abc1234 fix: recent main change"),
+      "merger",
+    );
+    expect(store.updateTask).toHaveBeenCalledWith("FN-050", { status: null });
+  });
+});
 
 

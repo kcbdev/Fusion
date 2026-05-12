@@ -663,6 +663,67 @@ describe("TaskStore", () => {
       expect(respec.recoveryRetryCount).toBeUndefined();
       expect(respec.nextRecoveryAt).toBeUndefined();
     });
+
+    // FN-3964 regression: reopen transitions must clear paused state
+    it("clears paused and pausedByAgentId when reopening in-progress+paused task to todo", async () => {
+      const task = await store.createTask({ description: "test reopen clears paused" });
+      await store.moveTask(task.id, "todo");
+      await store.moveTask(task.id, "in-progress");
+
+      // Simulate a paused task (e.g., from a stuck/retry flow)
+      await store.updateTask(task.id, {
+        paused: true,
+        pausedByAgentId: "agent-test-001",
+        status: "failed",
+        error: "Something went wrong",
+      });
+
+      const moved = await store.moveTask(task.id, "todo");
+      expect(moved.column).toBe("todo");
+      expect(moved.paused).toBeUndefined();
+      expect(moved.pausedByAgentId).toBeUndefined();
+      expect(moved.status).toBeUndefined();
+      expect(moved.error).toBeUndefined();
+    });
+
+    it("clears paused and pausedByAgentId when reopening done+paused task to triage", async () => {
+      const task = await store.createTask({ description: "test reopen done to triage clears paused" });
+      await store.moveTask(task.id, "todo");
+      await store.moveTask(task.id, "in-progress");
+      await store.moveTask(task.id, "in-review");
+      await store.moveTask(task.id, "done");
+
+      // Simulate stale paused state on a done task
+      await store.updateTask(task.id, {
+        paused: true,
+        pausedByAgentId: "agent-test-002",
+      });
+
+      const reopened = await store.moveTask(task.id, "triage");
+      expect(reopened.column).toBe("triage");
+      expect(reopened.paused).toBeUndefined();
+      expect(reopened.pausedByAgentId).toBeUndefined();
+    });
+
+    it("clears paused when reopening in-review task to todo", async () => {
+      const task = await store.createTask({ description: "test reopen in-review to todo clears paused" });
+      await store.moveTask(task.id, "todo");
+      await store.moveTask(task.id, "in-progress");
+      await store.moveTask(task.id, "in-review");
+
+      // Simulate paused state during review
+      await store.updateTask(task.id, {
+        paused: true,
+        pausedByAgentId: "agent-test-003",
+        status: "failed",
+        error: "Review failed",
+      });
+
+      const retried = await store.moveTask(task.id, "todo");
+      expect(retried.column).toBe("todo");
+      expect(retried.paused).toBeUndefined();
+      expect(retried.pausedByAgentId).toBeUndefined();
+    });
   });
 
 

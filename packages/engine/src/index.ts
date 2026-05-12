@@ -31,6 +31,15 @@ export {
   type MergerOptions,
   type AutostashOrphanRecord,
 } from "./merger.js";
+export {
+  auditSquashMerge,
+  formatSquashAuditReport,
+  type SquashAuditFindings,
+  type SquashAuditFinding,
+  type SquashAuditDuplicateSubjectFinding,
+  type SquashAuditTouchedFileOverlapFinding,
+  type SquashAuditRecentMainCommit,
+} from "./merger-squash-audit.js";
 export { reviewStep, type ReviewType, type ReviewVerdict, type ReviewResult, type ReviewOptions } from "./reviewer.js";
 export { createFnAgent, promptWithFallback, describeModel, setHostExtensionPaths, getHostExtensionPaths, type AgentOptions, type AgentResult } from "./pi.js";
 
