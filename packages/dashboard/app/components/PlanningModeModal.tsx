@@ -26,6 +26,7 @@ import {
   updateGlobalSettings,
   type PlanningSession,
   type SubtaskItem,
+  type PlanningSubtaskDraft,
   type ModelInfo,
   type ConversationHistoryEntry,
   type AiSessionSummary,
@@ -69,7 +70,7 @@ type ViewState =
   | { type: "question"; session: PlanningSession }
   | { type: "summary"; session: PlanningSession; summary: PlanningSummary }
   | { type: "error"; session: PlanningSession; errorMessage: string }
-  | { type: "breakdown"; sessionId: string; subtasks: SubtaskItem[]; dirty: boolean }
+  | { type: "breakdown"; sessionId: string; originalSubtasks: SubtaskItem[]; subtasks: SubtaskItem[]; dirty: boolean }
   | { type: "loading" }
   | { type: "creating" };
 
@@ -92,6 +93,41 @@ function normalizePlanningSummary(summary: PlanningSummary): PlanningSummary {
     ...summary,
     priority: normalizeTaskPriority(summary.priority),
   };
+}
+
+function areStringArraysEqual(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function buildCompactPlanningSubtaskDrafts(
+  originalSubtasks: SubtaskItem[],
+  editedSubtasks: SubtaskItem[],
+): PlanningSubtaskDraft[] {
+  const originalById = new Map(originalSubtasks.map((subtask) => [subtask.id, subtask]));
+
+  return editedSubtasks.map((subtask) => {
+    const original = originalById.get(subtask.id);
+    const normalizedPriority = normalizeTaskPriority(subtask.priority);
+    const draft: PlanningSubtaskDraft = { id: subtask.id };
+
+    if (!original || subtask.title !== original.title) {
+      draft.title = subtask.title;
+    }
+    if (!original || subtask.description !== original.description) {
+      draft.description = subtask.description;
+    }
+    if (!original || subtask.suggestedSize !== original.suggestedSize) {
+      draft.suggestedSize = subtask.suggestedSize;
+    }
+    if (!original || normalizedPriority !== normalizeTaskPriority(original.priority)) {
+      draft.priority = normalizedPriority;
+    }
+    if (!original || !areStringArraysEqual(subtask.dependsOn, original.dependsOn)) {
+      draft.dependsOn = subtask.dependsOn;
+    }
+
+    return draft;
+  });
 }
 
 function getModelSelectionValue(provider?: string, modelId?: string): string {
@@ -1505,14 +1541,17 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
 
     try {
       const result = await startPlanningBreakdown(view.session.sessionId, editedSummary ?? undefined, projectId);
+      const normalizedSubtasks = result.subtasks.map((subtask) => ({
+        ...subtask,
+        priority: normalizeTaskPriority(subtask.priority),
+        dependsOn: [...subtask.dependsOn],
+      }));
       setLockSessionId(result.sessionId);
       setView({
         type: "breakdown",
         sessionId: result.sessionId,
-        subtasks: result.subtasks.map((subtask) => ({
-          ...subtask,
-          priority: normalizeTaskPriority(subtask.priority),
-        })),
+        originalSubtasks: normalizedSubtasks.map((subtask) => ({ ...subtask, dependsOn: [...subtask.dependsOn] })),
+        subtasks: normalizedSubtasks.map((subtask) => ({ ...subtask, dependsOn: [...subtask.dependsOn] })),
         dirty: false,
       });
     } catch (err) {
@@ -1531,10 +1570,13 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       const completedSessionId = view.sessionId;
       const result = await createTasksFromPlanning(
         completedSessionId,
-        view.subtasks.map((subtask) => ({
-          ...subtask,
-          priority: normalizeTaskPriority(subtask.priority),
-        })),
+        buildCompactPlanningSubtaskDrafts(
+          view.originalSubtasks,
+          view.subtasks.map((subtask) => ({
+            ...subtask,
+            priority: normalizeTaskPriority(subtask.priority),
+          })),
+        ),
         projectId,
       );
       onTasksCreated(result.tasks);
@@ -1564,7 +1606,13 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       handleClose();
     } catch (err) {
       setError(getErrorMessage(err) || "Failed to create tasks");
-      setView({ type: "breakdown", sessionId: view.sessionId, subtasks: view.subtasks, dirty: view.dirty });
+      setView({
+        type: "breakdown",
+        sessionId: view.sessionId,
+        originalSubtasks: view.originalSubtasks,
+        subtasks: view.subtasks,
+        dirty: view.dirty,
+      });
     }
   }, [broadcastCompleted, handleClose, view, onTasksCreated, projectId]);
 
@@ -1995,7 +2043,6 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           {view.type === "breakdown" && (
             <BreakdownView
               subtasks={view.subtasks}
-              dirty={view.dirty}
               isLoading={false}
               onUpdateSubtasks={(newSubtasks) =>
                 setView({ ...view, subtasks: newSubtasks, dirty: true })
@@ -2485,7 +2532,6 @@ function createEmptySubtask(index: number): SubtaskItem {
 
 interface BreakdownViewProps {
   subtasks: SubtaskItem[];
-  dirty: boolean;
   isLoading: boolean;
   onUpdateSubtasks: (subtasks: SubtaskItem[]) => void;
   onCreateTasks: () => void;
@@ -2494,7 +2540,6 @@ interface BreakdownViewProps {
 
 function BreakdownView({
   subtasks,
-  dirty: _dirty,
   isLoading,
   onUpdateSubtasks,
   onCreateTasks,

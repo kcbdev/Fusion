@@ -935,7 +935,262 @@ describe("PlanningModeModal", () => {
       await waitFor(() => {
         expect(mockCreateTasksFromPlanning).toHaveBeenCalledWith(
           "session-breakdown-priority",
-          [expect.objectContaining({ id: "subtask-1", priority: "urgent" })],
+          [{ id: "subtask-1", priority: "urgent" }],
+          undefined,
+        );
+      });
+    });
+
+    it("sends only edited breakdown fields when creating tasks", async () => {
+      const resumedSummary: PlanningSummary = {
+        title: "Resume-to-breakdown-compact",
+        description: "Recovered summary for compact breakdown",
+        suggestedSize: "M",
+        suggestedDependencies: [],
+        keyDeliverables: ["Implement", "Verify"],
+      };
+
+      mockFetchAiSession.mockResolvedValueOnce({
+        id: "session-breakdown-compact",
+        type: "planning",
+        status: "complete",
+        title: "Resume-to-breakdown-compact",
+        inputPayload: JSON.stringify({ initialPlan: "Recover and break down compactly" }),
+        conversationHistory: "[]",
+        currentQuestion: null,
+        result: JSON.stringify(resumedSummary),
+        thinkingOutput: "",
+        error: null,
+        projectId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      mockStartPlanningBreakdown.mockResolvedValueOnce({
+        sessionId: "session-breakdown-compact",
+        subtasks: [
+          {
+            id: "subtask-1",
+            title: "First subtask",
+            description: "First description",
+            suggestedSize: "M",
+            dependsOn: [],
+          },
+          {
+            id: "subtask-2",
+            title: "Second subtask",
+            description: "Second description",
+            suggestedSize: "S",
+            dependsOn: ["subtask-1"],
+          },
+        ],
+      });
+      mockCreateTasksFromPlanning.mockResolvedValueOnce({ tasks: [] });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          resumeSessionId="session-breakdown-compact"
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Break into Tasks" })).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Break into Tasks" }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Create Tasks" })).toBeDefined();
+      });
+
+      const firstSubtask = screen.getByTestId("subtask-item-0");
+      fireEvent.change(within(firstSubtask).getAllByRole("textbox")[0]!, {
+        target: { value: "Edited first subtask" },
+      });
+      const secondSubtask = screen.getByTestId("subtask-item-1");
+      fireEvent.change(within(secondSubtask).getAllByRole("textbox")[1]!, {
+        target: { value: "Edited second description" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Create Tasks" }));
+
+      await waitFor(() => {
+        expect(mockCreateTasksFromPlanning).toHaveBeenCalledWith(
+          "session-breakdown-compact",
+          [
+            { id: "subtask-1", title: "Edited first subtask" },
+            { id: "subtask-2", description: "Edited second description" },
+          ],
+          undefined,
+        );
+      });
+    });
+
+    it("includes client-added subtasks in the compact create-tasks payload", async () => {
+      const resumedSummary: PlanningSummary = {
+        title: "Resume-to-breakdown-add-subtask",
+        description: "Recovered summary for added subtask",
+        suggestedSize: "M",
+        suggestedDependencies: [],
+        keyDeliverables: ["Implement"],
+      };
+
+      mockFetchAiSession.mockResolvedValueOnce({
+        id: "session-breakdown-add-subtask",
+        type: "planning",
+        status: "complete",
+        title: "Resume-to-breakdown-add-subtask",
+        inputPayload: JSON.stringify({ initialPlan: "Recover and add a subtask" }),
+        conversationHistory: "[]",
+        currentQuestion: null,
+        result: JSON.stringify(resumedSummary),
+        thinkingOutput: "",
+        error: null,
+        projectId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      mockStartPlanningBreakdown.mockResolvedValueOnce({
+        sessionId: "session-breakdown-add-subtask",
+        subtasks: [
+          {
+            id: "subtask-1",
+            title: "Existing subtask",
+            description: "Existing description",
+            suggestedSize: "M",
+            dependsOn: [],
+          },
+        ],
+      });
+      mockCreateTasksFromPlanning.mockResolvedValueOnce({ tasks: [] });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          resumeSessionId="session-breakdown-add-subtask"
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Break into Tasks" })).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Break into Tasks" }));
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Add subtask" })).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Add subtask" }));
+      const addedSubtask = screen.getByTestId("subtask-item-1");
+      const addedTextboxes = within(addedSubtask).getAllByRole("textbox");
+      fireEvent.change(addedTextboxes[0]!, { target: { value: "Rollout follow-up" } });
+      fireEvent.change(addedTextboxes[1]!, { target: { value: "Prepare rollout notes" } });
+      fireEvent.change(within(addedSubtask).getByLabelText("Size"), { target: { value: "S" } });
+      fireEvent.change(within(addedSubtask).getByLabelText("Priority"), { target: { value: "high" } });
+      fireEvent.click(screen.getByRole("button", { name: "Create Tasks" }));
+
+      await waitFor(() => {
+        expect(mockCreateTasksFromPlanning).toHaveBeenCalledWith(
+          "session-breakdown-add-subtask",
+          [
+            { id: "subtask-1" },
+            {
+              id: "subtask-2",
+              title: "Rollout follow-up",
+              description: "Prepare rollout notes",
+              suggestedSize: "S",
+              priority: "high",
+              dependsOn: [],
+            },
+          ],
+          undefined,
+        );
+      });
+    });
+
+    it("omits removed generated subtasks from the compact create-tasks payload", async () => {
+      const resumedSummary: PlanningSummary = {
+        title: "Resume-to-breakdown-remove-subtask",
+        description: "Recovered summary for removed subtask",
+        suggestedSize: "M",
+        suggestedDependencies: [],
+        keyDeliverables: ["Implement", "Verify"],
+      };
+
+      mockFetchAiSession.mockResolvedValueOnce({
+        id: "session-breakdown-remove-subtask",
+        type: "planning",
+        status: "complete",
+        title: "Resume-to-breakdown-remove-subtask",
+        inputPayload: JSON.stringify({ initialPlan: "Recover and remove a subtask" }),
+        conversationHistory: "[]",
+        currentQuestion: null,
+        result: JSON.stringify(resumedSummary),
+        thinkingOutput: "",
+        error: null,
+        projectId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      mockStartPlanningBreakdown.mockResolvedValueOnce({
+        sessionId: "session-breakdown-remove-subtask",
+        subtasks: [
+          {
+            id: "subtask-1",
+            title: "Existing subtask",
+            description: "Existing description",
+            suggestedSize: "M",
+            dependsOn: [],
+          },
+          {
+            id: "subtask-2",
+            title: "Generated follow-up",
+            description: "Generated follow-up description",
+            suggestedSize: "S",
+            dependsOn: ["subtask-1"],
+          },
+        ],
+      });
+      mockCreateTasksFromPlanning.mockResolvedValueOnce({ tasks: [] });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          resumeSessionId="session-breakdown-remove-subtask"
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Break into Tasks" })).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Break into Tasks" }));
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Create Tasks" })).toBeDefined();
+      });
+
+      const secondSubtask = screen.getByTestId("subtask-item-1");
+      fireEvent.click(within(secondSubtask).getByRole("button", { name: "Remove" }));
+      fireEvent.click(screen.getByRole("button", { name: "Create Tasks" }));
+
+      await waitFor(() => {
+        expect(mockCreateTasksFromPlanning).toHaveBeenCalledWith(
+          "session-breakdown-remove-subtask",
+          [{ id: "subtask-1" }],
           undefined,
         );
       });

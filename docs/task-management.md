@@ -25,6 +25,7 @@ Use the 💡 button to open planning mode:
 - Summary view includes a **Priority** selector (`low`, `normal`, `high`, `urgent`) so single-task creation can set priority before task creation
 - Break-into-tasks mode includes per-subtask **Priority** selectors (`low`, `normal`, `high`, `urgent`) so each generated task can be prioritized before creation
 - Break-into-tasks descriptions are structured with subtask-specific guidance first, then a separate larger-plan context section (plus `## Planning Interview Context` when interview history exists)
+- Final multi-task creation now uses a compact request payload: unchanged generated subtask descriptions stay server-side, while any edits to title, description, size, priority, and dependencies are preserved when tasks are created
 - Sessions persist when the modal is closed — resume from the sidebar list at any time; reasoning context is restored automatically
 - Back navigation rewinds the server-side planning session to the previous answered question so you can revise earlier answers and continue from the corrected turn
 - On the summary screen, **Refine Further** continues through the backend planning session (including resumed completed sessions) and waits for a real follow-up question or updated summary; it does not switch to an empty question view

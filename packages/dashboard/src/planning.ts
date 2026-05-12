@@ -16,6 +16,7 @@ import type {
   PlanningQuestion,
   PlanningSummary,
   PlanningResponse,
+  TaskPriority,
   TaskStore,
   NtfyNotificationEvent,
 } from "@fusion/core";
@@ -2234,6 +2235,15 @@ function buildPlanningSubtaskDescription(input: {
   return `${input.taskGuidance}\n\n${contextSections.join("\n\n")}`;
 }
 
+export interface PlanningSubtaskDraft {
+  id: string;
+  title?: string;
+  description?: string;
+  suggestedSize?: "S" | "M" | "L";
+  priority?: TaskPriority;
+  dependsOn?: string[];
+}
+
 export function generateSubtasksFromPlanning(sessionId: string): SubtaskItem[] {
   const session = sessions.get(sessionId);
   if (!session) return [];
@@ -2301,6 +2311,51 @@ export function generateSubtasksFromPlanning(sessionId: string): SubtaskItem[] {
       dependsOn: ["subtask-2"],
     },
   ];
+}
+
+export function mergePlanningSubtaskDrafts(
+  sessionId: string,
+  drafts: PlanningSubtaskDraft[],
+): SubtaskItem[] {
+  const generatedSubtasks = generateSubtasksFromPlanning(sessionId);
+  const generatedById = new Map(generatedSubtasks.map((subtask) => [subtask.id, subtask]));
+
+  return drafts.map((draft) => {
+    const generated = generatedById.get(draft.id);
+    const normalizedDependsOn = Array.isArray(draft.dependsOn)
+      ? draft.dependsOn.filter((dependency): dependency is string => typeof dependency === "string")
+      : undefined;
+
+    if (!generated) {
+      const title = typeof draft.title === "string" ? draft.title.trim() : "";
+      if (!title) {
+        throw new Error(`Client-added subtask must have a title: ${draft.id}`);
+      }
+
+      const description = typeof draft.description === "string" ? draft.description : title;
+      return {
+        id: draft.id,
+        title,
+        description,
+        suggestedSize: draft.suggestedSize === "S" || draft.suggestedSize === "M" || draft.suggestedSize === "L"
+          ? draft.suggestedSize
+          : "M",
+        priority: draft.priority ?? DEFAULT_TASK_PRIORITY,
+        dependsOn: normalizedDependsOn ?? [],
+      };
+    }
+
+    return {
+      id: generated.id,
+      title: typeof draft.title === "string" ? draft.title : generated.title,
+      description: typeof draft.description === "string" ? draft.description : generated.description,
+      suggestedSize: draft.suggestedSize === "S" || draft.suggestedSize === "M" || draft.suggestedSize === "L"
+        ? draft.suggestedSize
+        : generated.suggestedSize,
+      priority: draft.priority ?? generated.priority ?? DEFAULT_TASK_PRIORITY,
+      dependsOn: normalizedDependsOn ?? generated.dependsOn,
+    };
+  });
 }
 
 /**

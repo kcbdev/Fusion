@@ -35,6 +35,7 @@ import {
   parseAgentResponse,
   buildDepthPromptSuffix,
   generateSubtasksFromPlanning,
+  mergePlanningSubtaskDrafts,
   formatInterviewQA,
   SESSION_TTL_MS,
   GENERATION_TIMEOUT_MS,
@@ -2241,6 +2242,76 @@ describe("planning module", () => {
       for (let i = 1; i < result.length; i++) {
         expect(result[i]?.dependsOn).toEqual([`subtask-${i}`]);
       }
+    });
+
+    it("merges compact subtask drafts onto generated planning subtasks", async () => {
+      const mockIp = getUniqueIp();
+      const sessionId = await createCompletedSession(mockIp, "Compact draft merge test");
+
+      const generated = generateSubtasksFromPlanning(sessionId);
+      const merged = mergePlanningSubtaskDrafts(sessionId, [
+        { id: generated[0]!.id },
+        {
+          id: generated[1]!.id,
+          title: "Edited tests deliverable",
+          description: "Edited description",
+          suggestedSize: "L",
+          priority: "urgent",
+          dependsOn: [generated[0]!.id],
+        },
+        {
+          id: generated[2]!.id,
+          dependsOn: [generated[0]!.id, generated[1]!.id],
+        },
+      ]);
+
+      expect(merged[0]).toEqual(generated[0]);
+      expect(merged[1]).toEqual({
+        ...generated[1],
+        title: "Edited tests deliverable",
+        description: "Edited description",
+        suggestedSize: "L",
+        priority: "urgent",
+      });
+      expect(merged[2]).toEqual({
+        ...generated[2],
+        dependsOn: [generated[0]!.id, generated[1]!.id],
+      });
+    });
+
+    it("preserves client-added subtasks when merging compact drafts", async () => {
+      const mockIp = getUniqueIp();
+      const sessionId = await createCompletedSession(mockIp, "Client-added compact draft test");
+
+      const merged = mergePlanningSubtaskDrafts(sessionId, [
+        { id: "subtask-1" },
+        {
+          id: "subtask-99",
+          title: "New client-added subtask",
+          description: "Create docs and rollout notes",
+          suggestedSize: "S",
+          priority: "high",
+          dependsOn: ["subtask-1"],
+        },
+      ]);
+
+      expect(merged[1]).toEqual({
+        id: "subtask-99",
+        title: "New client-added subtask",
+        description: "Create docs and rollout notes",
+        suggestedSize: "S",
+        priority: "high",
+        dependsOn: ["subtask-1"],
+      });
+    });
+
+    it("throws when a client-added compact subtask draft omits its title", async () => {
+      const mockIp = getUniqueIp();
+      const sessionId = await createCompletedSession(mockIp, "Unknown compact draft test");
+
+      expect(() => mergePlanningSubtaskDrafts(sessionId, [{ id: "subtask-999" }])).toThrow(
+        "Client-added subtask must have a title: subtask-999",
+      );
     });
   });
 });

@@ -457,7 +457,7 @@ describe("AgentsView", () => {
       });
     });
 
-    it("keeps New Agent directly accessible while controls live in popup", async () => {
+    it("keeps New Agent directly accessible on desktop while controls live in popup", async () => {
       render(<AgentsView addToast={mockAddToast} />);
 
       expect(screen.getByRole("button", { name: "New Agent" })).toBeTruthy();
@@ -466,9 +466,21 @@ describe("AgentsView", () => {
       await openControlsPanel();
       expect(screen.getByLabelText("Filter agents by state")).toBeTruthy();
       expect(screen.getByLabelText("Show system agents")).toBeTruthy();
-      expect(screen.getByRole("button", { name: "Import" })).toBeTruthy();
+      expect(screen.getAllByRole("button", { name: "Import" }).length).toBeGreaterThan(0);
       expect(screen.getByRole("slider", { name: "Heartbeat Speed" })).toBeTruthy();
       expect(screen.getByLabelText("Heartbeat speed preset")).toBeTruthy();
+    });
+
+    it("moves import and new-agent actions into the controls popup on mobile", async () => {
+      mockViewportMode.mockReturnValue("mobile");
+      render(<AgentsView addToast={mockAddToast} />);
+
+      expect(screen.queryByRole("button", { name: "Import" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "New Agent" })).toBeNull();
+
+      await openControlsPanel();
+      expect(screen.getByRole("button", { name: "Import" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "New Agent" })).toBeTruthy();
     });
 
     it("closes controls popup on Escape and outside click", async () => {
@@ -1395,6 +1407,18 @@ describe("AgentsView", () => {
       expect(css).toContain("left: var(--org-chart-first-child-center-offset)");
       expect(css).toContain("right: var(--org-chart-last-child-center-offset)");
       expect(css).toContain(".org-chart-children > .org-chart-node::before");
+    });
+
+    it("keeps a compact mobile Agents label visible, anchors the controls popup to the action row, and expands view toggles to 36px touch targets", () => {
+      const css = loadAllAppCss();
+      expect(css).toContain(".agents-view-primary-actions {\n  position: relative;");
+      expect(css).toContain(".agent-controls-panel {\n  position: absolute;\n  top: calc(100% + var(--space-sm));\n  right: 0;");
+      expect(css).toContain(".agents-view-title h2 {\n    display: block;\n    font-size: var(--space-md);");
+      expect(css).toContain(".agent-controls-mobile-actions {");
+      expect(css).toContain(".agent-controls-mobile-actions .btn {");
+      expect(css).toContain(".agents-view-controls .view-toggle .view-toggle-btn {");
+      expect(css).toContain("min-width: calc(var(--space-lg) * 2 + var(--space-xs));");
+      expect(css).toContain("min-height: calc(var(--space-lg) * 2 + var(--space-xs));");
     });
 
     it("switches org chart to vertical layout mode when estimated width exceeds viewport", async () => {

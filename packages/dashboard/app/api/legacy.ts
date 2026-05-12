@@ -2712,6 +2712,15 @@ export interface SubtaskItem {
   dependsOn: string[];
 }
 
+export interface PlanningSubtaskDraft {
+  id: string;
+  title?: string;
+  description?: string;
+  suggestedSize?: "S" | "M" | "L";
+  priority?: TaskPriority;
+  dependsOn?: string[];
+}
+
 /** SSE event types for planning session streaming */
 export type PlanningStreamEvent =
   | { type: "thinking"; data: string }
@@ -2975,14 +2984,7 @@ export function startPlanningBreakdown(
 /** Create multiple tasks from a completed planning session */
 export function createTasksFromPlanning(
   planningSessionId: string,
-  subtasks: Array<{
-    id: string;
-    title: string;
-    description: string;
-    suggestedSize: "S" | "M" | "L";
-    priority?: TaskPriority;
-    dependsOn: string[];
-  }>,
+  subtasks: PlanningSubtaskDraft[],
   projectId?: string,
 ): Promise<{ tasks: Task[] }> {
   return api<{ tasks: Task[] }>(withProjectId("/planning/create-tasks", projectId), {

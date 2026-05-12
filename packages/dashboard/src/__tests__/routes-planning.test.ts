@@ -1526,7 +1526,7 @@ describe("Planning Mode Routes", () => {
         );
       });
 
-      it("creates multiple planning tasks with per-subtask priorities and defaults", async () => {
+      it("creates multiple planning tasks from compact subtask drafts while preserving edited fields", async () => {
         (store.createTask as ReturnType<typeof vi.fn>)
           .mockResolvedValueOnce({
             id: "FN-201",
@@ -1539,6 +1539,14 @@ describe("Planning Mode Routes", () => {
           .mockResolvedValueOnce({
             id: "FN-202",
             description: "Second",
+            column: "triage",
+            dependencies: [],
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          })
+          .mockResolvedValueOnce({
+            id: "FN-203",
+            description: "Third",
             column: "triage",
             dependencies: [],
             createdAt: "2026-01-01T00:00:00.000Z",
@@ -1560,6 +1568,24 @@ describe("Planning Mode Routes", () => {
         await REQUEST(buildApp(), "POST", "/api/planning/respond", JSON.stringify({ sessionId: planningSessionId, responses: { requirements: "Must have login" } }), { "Content-Type": "application/json" });
         await REQUEST(buildApp(), "POST", "/api/planning/respond", JSON.stringify({ sessionId: planningSessionId, responses: { confirm: true } }), { "Content-Type": "application/json" });
 
+        const breakdownRes = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start-breakdown",
+          JSON.stringify({ sessionId: planningSessionId }),
+          { "Content-Type": "application/json" }
+        );
+        expect(breakdownRes.status).toBe(200);
+
+        const generatedSubtasks = breakdownRes.body.subtasks as Array<{
+          id: string;
+          title: string;
+          description: string;
+          suggestedSize: "S" | "M" | "L";
+          priority?: string;
+          dependsOn: string[];
+        }>;
+
         const res = await REQUEST(
           buildApp(),
           "POST",
@@ -1568,19 +1594,19 @@ describe("Planning Mode Routes", () => {
             planningSessionId,
             subtasks: [
               {
-                id: "subtask-1",
+                id: generatedSubtasks[0]!.id,
                 title: "Auth backend",
                 description: "Implement backend",
-                suggestedSize: "M",
+                suggestedSize: "L",
                 priority: "urgent",
                 dependsOn: [],
               },
               {
-                id: "subtask-2",
-                title: "Auth UI",
-                description: "Implement UI",
-                suggestedSize: "S",
-                dependsOn: ["subtask-1"],
+                id: generatedSubtasks[1]!.id,
+              },
+              {
+                id: generatedSubtasks[2]!.id,
+                dependsOn: [generatedSubtasks[0]!.id, generatedSubtasks[1]!.id],
               },
             ],
           }),
@@ -1590,12 +1616,211 @@ describe("Planning Mode Routes", () => {
         expect(res.status).toBe(201);
         expect(store.createTask).toHaveBeenNthCalledWith(
           1,
-          expect.objectContaining({ title: "Auth backend", priority: "urgent" }),
+          expect.objectContaining({ title: "Auth backend", description: "Implement backend", priority: "urgent" }),
         );
         expect(store.createTask).toHaveBeenNthCalledWith(
           2,
-          expect.objectContaining({ title: "Auth UI", priority: "normal" }),
+          expect.objectContaining({
+            title: generatedSubtasks[1]!.title,
+            description: generatedSubtasks[1]!.description,
+            priority: "normal",
+          }),
         );
+        expect(store.createTask).toHaveBeenNthCalledWith(
+          3,
+          expect.objectContaining({
+            title: generatedSubtasks[2]!.title,
+            description: generatedSubtasks[2]!.description,
+            priority: "normal",
+          }),
+        );
+        expect(store.updateTask).toHaveBeenCalledWith("FN-201", { size: "L" });
+        expect(store.updateTask).toHaveBeenCalledWith("FN-203", { dependencies: ["FN-201", "FN-202"] });
+      });
+
+      it("supports client-added subtasks and omitted generated subtasks in compact breakdown payloads", async () => {
+        (store.createTask as ReturnType<typeof vi.fn>)
+          .mockResolvedValueOnce({
+            id: "FN-210",
+            description: "Generated task",
+            column: "triage",
+            dependencies: [],
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          })
+          .mockResolvedValueOnce({
+            id: "FN-211",
+            description: "Client-added task",
+            column: "triage",
+            dependencies: [],
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          });
+        (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({});
+        (store.logEntry as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+        const startRes = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start",
+          JSON.stringify({ initialPlan: "Build a user auth system" }),
+          { "Content-Type": "application/json" }
+        );
+        const planningSessionId = startRes.body.sessionId;
+
+        await REQUEST(buildApp(), "POST", "/api/planning/respond", JSON.stringify({ sessionId: planningSessionId, responses: { scope: "medium" } }), { "Content-Type": "application/json" });
+        await REQUEST(buildApp(), "POST", "/api/planning/respond", JSON.stringify({ sessionId: planningSessionId, responses: { requirements: "Must have login" } }), { "Content-Type": "application/json" });
+        await REQUEST(buildApp(), "POST", "/api/planning/respond", JSON.stringify({ sessionId: planningSessionId, responses: { confirm: true } }), { "Content-Type": "application/json" });
+
+        const breakdownRes = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start-breakdown",
+          JSON.stringify({ sessionId: planningSessionId }),
+          { "Content-Type": "application/json" }
+        );
+        expect(breakdownRes.status).toBe(200);
+        const generatedSubtasks = breakdownRes.body.subtasks as Array<{
+          id: string;
+          title: string;
+          description: string;
+          suggestedSize: "S" | "M" | "L";
+          priority?: string;
+          dependsOn: string[];
+        }>;
+
+        const res = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/create-tasks",
+          JSON.stringify({
+            planningSessionId,
+            subtasks: [
+              { id: generatedSubtasks[0]!.id },
+              {
+                id: "subtask-99",
+                title: "Rollout follow-up",
+                description: "Prepare rollout notes",
+                suggestedSize: "S",
+                priority: "high",
+                dependsOn: [generatedSubtasks[0]!.id],
+              },
+            ],
+          }),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(201);
+        expect(store.createTask).toHaveBeenCalledTimes(2);
+        expect(store.createTask).toHaveBeenNthCalledWith(
+          1,
+          expect.objectContaining({
+            title: generatedSubtasks[0]!.title,
+            description: generatedSubtasks[0]!.description,
+          }),
+        );
+        expect(store.createTask).toHaveBeenNthCalledWith(
+          2,
+          expect.objectContaining({
+            title: "Rollout follow-up",
+            description: "Prepare rollout notes",
+            priority: "high",
+          }),
+        );
+        expect(store.updateTask).toHaveBeenCalledWith("FN-211", { size: "S" });
+        expect(store.updateTask).toHaveBeenCalledWith("FN-211", { dependencies: ["FN-210"] });
+      });
+
+      it("accepts compact breakdown payloads that avoid oversized planning create-tasks requests", async () => {
+        const createdTaskBase = {
+          column: "triage",
+          dependencies: [],
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        };
+        for (let index = 0; index < 15; index += 1) {
+          (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+            ...createdTaskBase,
+            id: `FN-${300 + index}`,
+            description: `Task ${index + 1}`,
+          });
+        }
+        (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({});
+        (store.logEntry as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+        const startRes = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start",
+          JSON.stringify({ initialPlan: "Break a large platform plan into many tasks" }),
+          { "Content-Type": "application/json" }
+        );
+        const planningSessionId = startRes.body.sessionId;
+
+        await REQUEST(buildApp(), "POST", "/api/planning/respond", JSON.stringify({ sessionId: planningSessionId, responses: { scope: "large" } }), { "Content-Type": "application/json" });
+        await REQUEST(buildApp(), "POST", "/api/planning/respond", JSON.stringify({ sessionId: planningSessionId, responses: { requirements: "Must support auth, settings, dashboards, workflows, imports, sync, audits, search, mobile, docs, QA, releases, telemetry, reliability, and security." } }), { "Content-Type": "application/json" });
+        await REQUEST(buildApp(), "POST", "/api/planning/respond", JSON.stringify({ sessionId: planningSessionId, responses: { confirm: true } }), { "Content-Type": "application/json" });
+
+        const summaryOverride = {
+          title: "Large planning summary",
+          description: `${"Large planning context. ".repeat(400)}${"Detailed implementation note. ".repeat(400)}`,
+          suggestedSize: "L",
+          suggestedDependencies: [],
+          keyDeliverables: Array.from({ length: 15 }, (_, index) => `Deliverable ${index + 1}`),
+        };
+
+        const breakdownRes = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start-breakdown",
+          JSON.stringify({ sessionId: planningSessionId, summary: summaryOverride }),
+          { "Content-Type": "application/json" }
+        );
+        expect(breakdownRes.status).toBe(200);
+
+        const generatedSubtasks = breakdownRes.body.subtasks as Array<{
+          id: string;
+          title: string;
+          description: string;
+          suggestedSize: "S" | "M" | "L";
+          priority?: string;
+          dependsOn: string[];
+        }>;
+        expect(generatedSubtasks).toHaveLength(15);
+
+        const oversizedLegacyPayload = JSON.stringify({ planningSessionId, subtasks: generatedSubtasks });
+        const compactPayload = JSON.stringify({
+          planningSessionId,
+          subtasks: generatedSubtasks.map((subtask) => ({ id: subtask.id })),
+        });
+        expect(Buffer.byteLength(oversizedLegacyPayload)).toBeGreaterThan(100 * 1024);
+        expect(Buffer.byteLength(compactPayload)).toBeLessThan(8 * 1024);
+
+        const res = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/create-tasks",
+          compactPayload,
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(201);
+        expect(store.createTask).toHaveBeenCalledTimes(15);
+        expect(store.createTask).toHaveBeenNthCalledWith(
+          1,
+          expect.objectContaining({
+            title: generatedSubtasks[0]!.title,
+            description: generatedSubtasks[0]!.description,
+          }),
+        );
+        expect(store.createTask).toHaveBeenNthCalledWith(
+          15,
+          expect.objectContaining({
+            title: generatedSubtasks[14]!.title,
+            description: generatedSubtasks[14]!.description,
+          }),
+        );
+        expect(store.logEntry).toHaveBeenCalledTimes(15);
       });
 
       it("applies branchSelection when creating a planning task", async () => {

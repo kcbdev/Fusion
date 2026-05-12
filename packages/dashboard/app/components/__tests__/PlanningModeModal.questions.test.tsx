@@ -1141,6 +1141,19 @@ describe("PlanningModeModal", () => {
 
       fireEvent.change(sizeSelect, { target: { value: "L" } });
       expect(sizeSelect.value).toBe("L");
+
+      fireEvent.click(screen.getByText("Create Tasks"));
+
+      await waitFor(() => {
+        expect(mockCreateTasksFromPlanning).toHaveBeenCalledWith(
+          "session-123",
+          [
+            { id: "subtask-1", suggestedSize: "L" },
+            { id: "subtask-2" },
+          ],
+          undefined,
+        );
+      });
     });
   });
 

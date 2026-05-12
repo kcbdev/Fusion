@@ -84,6 +84,7 @@
 }
 
 .agents-view-primary-actions {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-sm);
@@ -100,9 +101,10 @@
 
 .agent-controls-panel {
   position: absolute;
-  top: calc(var(--header-height) + var(--space-sm));
-  right: var(--space-lg);
-  width: min(calc(var(--space-2xl) * 16), calc(100% - var(--space-2xl)));
+  top: calc(100% + var(--space-sm));
+  right: 0;
+  width: min(calc(var(--space-2xl) * 16), calc(100vw - var(--space-2xl)));
+  max-width: calc(100vw - var(--space-2xl));
   padding: var(--space-md);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -131,6 +133,17 @@
 .agent-controls-panel .agent-global-controls {
   margin-bottom: 0;
   padding: var(--space-md);
+}
+
+.agent-controls-mobile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.agent-controls-mobile-actions .btn {
+  flex: 1 1 calc(var(--space-2xl) * 4);
+  justify-content: center;
 }
 
 .agents-org-full-view {
@@ -1263,9 +1276,9 @@
 
 /* === AgentsView mobile header (cleaner stacked layout) ==================== */
 @media (max-width: 768px) {
-  /* Single-row header: hide the redundant "Agents" title (the icon + page
-     context already make it obvious), and pack view-toggle + Controls + New
-     Agent + Refresh into one no-wrap row. */
+  /* Single-row header: keep a compact textual title visible while lower-
+     priority actions move into the Controls popup so narrow phones keep a
+     stable single-row layout. */
   .agents-view-header {
     flex-direction: row;
     align-items: center;
@@ -1284,11 +1297,12 @@
   }
 
   .agents-view-title h2 {
-    font-size: var(--space-lg);
-    white-space: nowrap;
+    display: block;
+    font-size: var(--space-md);
+    line-height: 1;
   }
 
-  /* Layout: title (Bot) on the left, view-toggle right after it, then the
+  /* Layout: compact title on the left, view-toggle right after it, then the
      primary-actions group pinned to the far right of the row. The flex
      container grows to fill remaining space, and `space-between` separates
      the toggle (left side) from primary-actions (right side). */
@@ -1302,13 +1316,21 @@
     min-width: 0;
   }
 
-  /* View toggle (List/Board/Tree/Org) — keep the 32px pill chrome from the
-     base styles. Inner buttons stay at the base 28×28 (centered in the 2px
-     pill padding). All surrounding header icons below are sized to match
-     that 28×28 inner footprint so every icon lines up with the view-toggle
-     buttons. */
+  /* View toggle (List/Board/Tree/Org) — expand the pill and inner buttons to
+     the shared 36px mobile touch-target while preserving the compact grouped
+     chrome used elsewhere in the dashboard header. */
   .agents-view-controls .view-toggle {
     flex: 0 0 auto;
+    height: calc(var(--space-lg) * 2 + var(--space-sm));
+    padding: calc(var(--space-xs) / 2);
+    gap: calc(var(--space-xs) / 2);
+  }
+
+  .agents-view-controls .view-toggle .view-toggle-btn {
+    width: calc(var(--space-lg) * 2 + var(--space-xs));
+    height: calc(var(--space-lg) * 2 + var(--space-xs));
+    min-width: calc(var(--space-lg) * 2 + var(--space-xs));
+    min-height: calc(var(--space-lg) * 2 + var(--space-xs));
   }
 
   .agents-view-primary-actions {
@@ -1332,23 +1354,6 @@
     justify-content: center;
   }
 
-  /* Import + New Agent: icon-only on mobile, sized to match view-toggle
-     buttons so the no-wrap action row never overflows (FN-3895 follow-up). */
-  .agents-view-primary-actions .agent-import-trigger,
-  .agents-view-primary-actions .btn-task-create {
-    width: calc(var(--space-lg) * 2 + var(--space-xs));
-    height: calc(var(--space-lg) * 2 + var(--space-xs));
-    min-width: calc(var(--space-lg) * 2 + var(--space-xs));
-    min-height: calc(var(--space-lg) * 2 + var(--space-xs));
-    padding: 0;
-    font-size: 0;
-    gap: 0;
-    white-space: nowrap;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
   .agents-view-primary-actions .btn-icon {
     width: calc(var(--space-lg) * 2 + var(--space-xs));
     height: calc(var(--space-lg) * 2 + var(--space-xs));
@@ -1356,11 +1361,14 @@
     min-height: calc(var(--space-lg) * 2 + var(--space-xs));
   }
 
-  /* Title row: keep Bot icon + "Agents" text on a single line so the
-     view-toggle and primary actions get pushed to the right edge. */
+  /* Title row: keep the Bot icon aligned with the compact control row. */
   .agents-view-title {
     height: calc(var(--space-lg) * 2);
     align-items: center;
+  }
+
+  .agent-controls-mobile-actions .btn {
+    min-height: calc(var(--space-lg) * 2 + var(--space-xs));
   }
 
   .agents-org-full-view {

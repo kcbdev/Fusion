@@ -1172,7 +1172,7 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
   /**
    * POST /api/planning/create-tasks
    * Create multiple tasks from a completed planning session (after optional editing).
-   * Body: { planningSessionId: string, subtasks: Array<{id, title, description, suggestedSize, dependsOn}> }
+   * Body: { planningSessionId: string, subtasks: Array<{ id, title?, description?, suggestedSize?, priority?, dependsOn? }> }
    * Returns: { tasks: Task[] }
    */
   router.post("/planning/create-tasks", async (req, res) => {
@@ -1181,11 +1181,11 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
         planningSessionId?: string;
         subtasks?: Array<{
           id: string;
-          title: string;
-          description: string;
-          suggestedSize: "S" | "M" | "L";
+          title?: string;
+          description?: string;
+          suggestedSize?: "S" | "M" | "L";
           priority?: TaskPriority;
-          dependsOn: string[];
+          dependsOn?: string[];
         }>;
         branch?: unknown;
         baseBranch?: unknown;
@@ -1202,7 +1202,7 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
       }
 
       const { store: scopedStore } = await getProjectContext(req);
-      const { getSession, cleanupSession, formatInterviewQA } = await import("../planning.js");
+      const { getSession, cleanupSession, formatInterviewQA, mergePlanningSubtaskDrafts } = await import("../planning.js");
 
       const session = getSession(planningSessionId);
       if (!session) {
@@ -1218,14 +1218,44 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
         ? `Source: ${session.initialPlan.slice(0, 200)}\n\n${qaSection}`
         : `Source: ${session.initialPlan.slice(0, 200)}`;
 
-      // Validate each subtask
       for (const item of subtasks) {
-        if (!item || typeof item.id !== "string" || typeof item.title !== "string" || !item.title.trim()) {
-          throw badRequest("Each subtask must include id and title");
+        if (!item || typeof item.id !== "string" || !item.id.trim()) {
+          throw badRequest("Each subtask must include id");
+        }
+        if (item.title !== undefined && (typeof item.title !== "string" || !item.title.trim())) {
+          throw badRequest("Each edited subtask title must be a non-empty string");
+        }
+        if (item.description !== undefined && typeof item.description !== "string") {
+          throw badRequest("Each edited subtask description must be a string");
+        }
+        if (
+          item.suggestedSize !== undefined
+          && item.suggestedSize !== "S"
+          && item.suggestedSize !== "M"
+          && item.suggestedSize !== "L"
+        ) {
+          throw badRequest("Each edited subtask suggestedSize must be S, M, or L");
         }
         if (item.priority !== undefined && !isTaskPriority(item.priority)) {
           throw badRequest("Each subtask priority must be one of low, normal, high, urgent");
         }
+        if (
+          item.dependsOn !== undefined
+          && (!Array.isArray(item.dependsOn) || item.dependsOn.some((dependency) => typeof dependency !== "string"))
+        ) {
+          throw badRequest("Each edited subtask dependsOn value must be an array of ids");
+        }
+      }
+
+      let mergedSubtasks;
+      try {
+        mergedSubtasks = mergePlanningSubtaskDrafts(planningSessionId, subtasks);
+      } catch (error) {
+        throw badRequest(error instanceof Error ? error.message : "Invalid planning subtask edits");
+      }
+
+      if (mergedSubtasks.length !== subtasks.length) {
+        throw badRequest("Could not resolve planning subtasks for task creation");
       }
 
       const { branch: resolvedBranch, baseBranch: resolvedBaseBranch } =
@@ -1241,8 +1271,7 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
       const createdTasks = [] as Awaited<ReturnType<TaskStore["createTask"]>>[];
       const tempIdToTaskId = new Map<string, string>();
 
-      // Create tasks
-      for (const item of subtasks) {
+      for (const item of mergedSubtasks) {
         const taskBranch = branchMode === "per-task-derived"
           ? derivePerTaskBranch(resolvedBranch, item.title || item.id)
           : resolvedBranch;
@@ -1268,9 +1297,8 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
         }
       }
 
-      // Resolve dependencies
-      for (let index = 0; index < subtasks.length; index++) {
-        const item = subtasks[index]!;
+      for (let index = 0; index < mergedSubtasks.length; index++) {
+        const item = mergedSubtasks[index]!;
         const created = createdTasks[index]!;
         const resolvedDependencies = Array.isArray(item.dependsOn)
           ? item.dependsOn.map((dep) => tempIdToTaskId.get(dep)).filter((dep): dep is string => Boolean(dep))
@@ -1284,7 +1312,6 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
         await scopedStore.logEntry(created.id, "Created via Planning Mode (multi-task)", logDetails);
       }
 
-      // Cleanup the planning session
       cleanupSession(planningSessionId);
 
       res.status(201).json({ tasks: createdTasks });

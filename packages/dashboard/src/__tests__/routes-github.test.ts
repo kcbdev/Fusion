@@ -1255,8 +1255,8 @@ describe("projectId store scoping regressions", () => {
         planningSessionId: "plan-session-2",
         projectId,
         subtasks: [
-          { id: "sub-1", title: "First scoped task", description: "First", suggestedSize: "S", dependsOn: [] },
-          { id: "sub-2", title: "Second scoped task", description: "Second", suggestedSize: "M", dependsOn: ["sub-1"] },
+          { id: "subtask-1", title: "First scoped task", description: "First", suggestedSize: "S", dependsOn: [] },
+          { id: "subtask-2", title: "Second scoped task", description: "Second", suggestedSize: "M", dependsOn: ["subtask-1"] },
         ],
       }),
       { "Content-Type": "application/json" },
