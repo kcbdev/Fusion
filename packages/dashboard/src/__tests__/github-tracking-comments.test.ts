@@ -80,18 +80,127 @@ describe("formatTrackingComment", () => {
     expect(comment).toContain("Line 1 Line 2");
   });
 
-  it("truncates long titles and caps total length", () => {
-    const comment = formatTrackingComment({ id: "FN-1", title: "A".repeat(1000) }, "done");
+  it("keeps in-progress comments capped at 500 characters", () => {
+    const comment = formatTrackingComment({ id: "FN-1", title: "A".repeat(1000) }, "in-progress");
     expect(comment.length).toBeLessThanOrEqual(500);
     expect(comment).toContain("…");
   });
 
-  it("never includes urls or markdown links", () => {
-    const comment = formatTrackingComment({ id: "FN-1", title: "hello" }, "done");
+  it("keeps urls and markdown links out of in-progress comments", () => {
+    const comment = formatTrackingComment({ id: "FN-1", title: "hello" }, "in-progress");
     expect(comment).not.toContain("localhost");
     expect(comment).not.toContain("http://");
     expect(comment).not.toContain("https://");
     expect(comment).not.toContain("](");
+  });
+
+  it("keeps the legacy done comment when merge details are absent", () => {
+    expect(formatTrackingComment({ id: "FN-1", title: "Build thing" }, "done")).toBe(
+      "Fusion task: FN-1\n\n✅ Done — “Build thing” is complete.",
+    );
+  });
+
+  it("formats a done comment with merge details and links", () => {
+    const comment = formatTrackingComment(
+      {
+        id: "FN-1",
+        title: "Build thing",
+        branch: "fusion/fn-1",
+        mergeDetails: {
+          commitSha: "abcdef1234567890",
+          mergeCommitMessage: "feat(FN-1): ship thing\n\nbody",
+          prNumber: 7,
+          mergeTargetBranch: "main",
+          mergedAt: "2026-05-12T10:00:00.000Z",
+          filesChanged: 3,
+          insertions: 42,
+          deletions: 5,
+        },
+      },
+      "done",
+      { owner: "owner", repo: "repo" },
+    );
+
+    expect(comment).toContain("abcdef1");
+    expect(comment).toContain("featFN-1: ship thing");
+    expect(comment).not.toContain("body");
+    expect(comment).toContain("Branch: fusion/fn-1");
+    expect(comment).toContain("PR: [owner/repo#7](https://github.com/owner/repo/pull/7)");
+    expect(comment).toContain("https://github.com/owner/repo/commit/abcdef1234567890");
+    expect(comment).toContain("Files: 3 changed (+42 / -5)");
+    expect(comment).toContain("Merged: 2026-05-12T10:00:00.000Z");
+  });
+
+  it("omits empty merge placeholders when only commit details are present", () => {
+    const comment = formatTrackingComment(
+      {
+        id: "FN-1",
+        title: "Build thing",
+        mergeDetails: {
+          commitSha: "abcdef1234567890",
+          mergeCommitMessage: "feat(FN-1): ship thing\n\nbody",
+        },
+      },
+      "done",
+    );
+
+    expect(comment).toContain("Commit: abcdef1 featFN-1: ship thing");
+    expect(comment).not.toContain("Branch:");
+    expect(comment).not.toContain("PR:");
+    expect(comment).not.toContain("Files:");
+    expect(comment).not.toContain("Merged:");
+    expect(comment).not.toContain("undefined");
+    expect(comment).not.toContain(": \n");
+  });
+
+  it("keeps done comments plaintext when link context is missing", () => {
+    const comment = formatTrackingComment(
+      {
+        id: "FN-1",
+        title: "Build thing",
+        mergeDetails: {
+          commitSha: "abcdef1234567890",
+          mergeCommitMessage: "feat(FN-1): ship thing",
+          prNumber: 7,
+        },
+      },
+      "done",
+    );
+
+    expect(comment).toContain("Commit: abcdef1 featFN-1: ship thing");
+    expect(comment).toContain("PR: #7");
+    expect(comment).not.toContain("](");
+    expect(comment).not.toContain("https://");
+  });
+
+  it("caps enriched done comments at 2000 characters and drops the commit subject before required lines", () => {
+    const comment = formatTrackingComment(
+      {
+        id: "FN-1",
+        title: "Title ".repeat(300),
+        branch: "fusion/fn-1",
+        mergeDetails: {
+          commitSha: "abcdef1234567890",
+          mergeCommitMessage: `feat(FN-1): ${"subject ".repeat(220)}\n\nbody`,
+          prNumber: 7,
+          mergedAt: "2026-05-12T10:00:00.000Z",
+          filesChanged: 3,
+          insertions: 42,
+          deletions: 5,
+        },
+      },
+      "done",
+      { owner: "owner", repo: "repo" },
+    );
+
+    expect(comment.length).toBeLessThanOrEqual(2000);
+    expect(comment).toContain("Fusion task: FN-1");
+    expect(comment).toContain("✅ Done —");
+    expect(comment).toContain("Branch: fusion/fn-1");
+    expect(comment).toContain("PR: [owner/repo#7](https://github.com/owner/repo/pull/7)");
+    expect(comment).toContain("Merged: 2026-05-12T10:00:00.000Z");
+    expect(comment).toContain("Commit: [abcdef1](https://github.com/owner/repo/commit/abcdef1234567890)");
+    expect(comment).not.toContain("subject subject subject");
   });
 });
 
@@ -137,7 +246,17 @@ describe("GitHubTrackingCommentService", () => {
     service.start();
 
     store.emit("task:moved", { task: createTask(), from: "todo", to: "in-progress" });
-    store.emit("task:moved", { task: createTask(), from: "in-progress", to: "done" });
+    store.emit("task:moved", {
+      task: createTask({
+        branch: "fusion/fn-1",
+        mergeDetails: {
+          commitSha: "abcdef1234567890",
+          mergeCommitMessage: "feat(FN-1): ship thing",
+        },
+      }),
+      from: "in-progress",
+      to: "done",
+    });
     await flushAsync();
 
     expect(mockCommentOnIssue).toHaveBeenCalledTimes(2);
@@ -155,6 +274,8 @@ describe("GitHubTrackingCommentService", () => {
       42,
       expect.stringContaining("✅ Done"),
     );
+    expect(mockCommentOnIssue.mock.calls[1]?.[3]).toContain("abcdef1");
+    expect(mockCommentOnIssue.mock.calls[1]?.[3]).toContain("Branch: fusion/fn-1");
   });
 
   it("writes success logs", async () => {

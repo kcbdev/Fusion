@@ -445,6 +445,8 @@ When Fusion creates a tracking issue, it uses:
 - Body prefix: `Fusion task: FN-XXXX`
 - Body content: bounded plain-text task summary snippet (not full prompt content)
 
+When tracked tasks later move to `in-progress` or `done`, Fusion also posts a short lifecycle comment on the linked tracking issue. The `in-progress` comment stays plain-text and capped, while the `done` comment can include the merge commit SHA/subject, task branch, PR link, file-change stats, and merge timestamp when those fields are available.
+
 GitHub authentication/settings are configured in [Settings Reference](./settings-reference.md) via `githubAuthMode` (`gh-cli` or `token`) and `githubAuthToken`.
 
 ## Completion Modes (`mergeStrategy`)
