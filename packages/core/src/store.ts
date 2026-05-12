@@ -1834,11 +1834,25 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   private async writeTaskJsonFile(dir: string, task: Task): Promise<void> {
     const taskJsonPath = join(dir, "task.json");
-    const tmpPath = join(dir, "task.json.tmp");
+    // Use a unique tmp filename per write so concurrent writers to the same task
+    // don't race on a shared `task.json.tmp` (one rename consumes it, the other
+    // ENOENTs). See FN-4122/FN-4123/FN-4148 for the reproducer.
+    const tmpPath = join(dir, `task.json.${process.pid}.${randomUUID()}.tmp`);
     this.suppressWatcher(taskJsonPath);
     await mkdir(dir, { recursive: true });
     await writeFile(tmpPath, JSON.stringify(task));
-    await rename(tmpPath, taskJsonPath);
+    try {
+      await rename(tmpPath, taskJsonPath);
+    } catch (err) {
+      // Best-effort cleanup of our tmp on rename failure so we don't leave
+      // orphaned `task.json.*.tmp` files behind.
+      try {
+        await unlink(tmpPath);
+      } catch {
+        // ignore — tmp may already be gone
+      }
+      throw err;
+    }
   }
 
   /**

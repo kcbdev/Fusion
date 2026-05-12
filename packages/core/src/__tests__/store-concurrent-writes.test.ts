@@ -222,6 +222,29 @@ describe("TaskStore concurrent writes", () => {
     });
   });
 
+  it("FN-4122/FN-4123/FN-4148: concurrent same-task writes across store instances don't ENOENT on task.json.tmp", async () => {
+    // Reproducer for the in-review failure mode where two TaskStore instances
+    // (e.g. engine + dashboard server) wrote to the same task simultaneously.
+    // Both writers used a shared `task.json.tmp` filename: one rename consumed
+    // the tmp, the other ENOENTed because it was no longer there. Fix uses a
+    // unique tmp filename per write.
+    const task = await primary.createTask({ description: "Cross-instance same-task race" });
+
+    const writes = Array.from({ length: 40 }, (_, index) =>
+      stores[index % stores.length].updateTask(task.id, {
+        title: `Race title ${index}`,
+      }),
+    );
+
+    // None should reject with ENOENT on task.json.tmp.
+    const results = await Promise.allSettled(writes);
+    const rejections = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    expect(rejections.map((r) => (r.reason as Error).message)).toEqual([]);
+
+    const reloaded = await primary.getTask(task.id);
+    expect(reloaded.title).toMatch(/^Race title \d+$/);
+  });
+
   it("moves different tasks concurrently without SQLITE_BUSY failures", async () => {
     const tasks: Task[] = await Promise.all(
       Array.from({ length: 10 }, (_, index) => primary.createTask({ description: `Move task ${index}` })),
