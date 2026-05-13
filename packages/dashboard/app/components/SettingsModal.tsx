@@ -4061,8 +4061,9 @@ export function SettingsModal({
               </small>
             </div>
             <div className="form-group">
-              <label htmlFor="postMergeAuditMode">Post-Merge Audit Mode</label>
+              <label htmlFor="postMergeAuditMode">Post-merge audit mode</label>
               <select
+                className="select"
                 id="postMergeAuditMode"
                 value={form.postMergeAuditMode ?? "block"}
                 onChange={(e) =>
@@ -4072,12 +4073,12 @@ export function SettingsModal({
                   }))
                 }
               >
-                <option value="block">Block — refuse to auto-complete merges with duplicate-subject or touched-file overlap risks (default)</option>
-                <option value="warn">Warn — log audit findings but auto-complete the merge</option>
-                <option value="off">Off — skip the post-merge audit entirely</option>
+                <option value="block">Block (default)</option>
+                <option value="warn">Warn (log findings, continue)</option>
+                <option value="off">Off (skip audit)</option>
               </select>
               <small>
-                Controls how the post-squash / post-rebase audit reacts to risk findings. Regardless of mode, the audit short-circuits overlap-only findings on rebase merges when deterministic verification has already proven the tree — those cannot have produced silent drops. Switch to Warn or Off only if you trust your branches don&apos;t silently drop edits.
+                Controls the post-merge audit gate. <strong>Block</strong> refuses to auto-complete merges that show duplicate-subject or touched-file overlap risks (most conservative). <strong>Warn</strong> logs findings but auto-completes the merge. <strong>Off</strong> skips the audit entirely. Default: Block. Switching to Warn or Off is recommended only if you trust your branches don&apos;t silently drop edits.
               </small>
             </div>
             <div className="form-group">
