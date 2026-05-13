@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { TaskReviewTab } from "../TaskReviewTab";
 import { makeTask } from "./TaskDetailModal.test-helpers";
+import { loadAllAppCss } from "../../test/cssFixture";
 
 const REVIEW_MARKDOWN_TOGGLE_STORAGE_KEY = "fn-task-review-markdown";
 
@@ -145,7 +146,41 @@ describe("TaskReviewTab", () => {
     expect(screen.getByText("failed").className).toContain("task-review-tab__status--failed");
   });
 
-  it("FN-4137 keeps markdown body clicks from toggling the review-item checkbox", async () => {
+  it("keeps review body outside the checkbox label and preserves selection on body clicks", async () => {
+    const task = makeTask({
+      reviewState: {
+        source: "reviewer-agent",
+        summary: { verdict: "REVISE", reviewType: "code", summary: "Needs fixes" },
+        items: [
+          {
+            id: "reviewer-plain-click-1",
+            body: "plain review body",
+            author: { login: "reviewer-agent" },
+            createdAt: new Date().toISOString(),
+            summary: "Plain body click target",
+          },
+        ],
+        addressing: [],
+      },
+    });
+
+    window.localStorage.setItem(REVIEW_MARKDOWN_TOGGLE_STORAGE_KEY, "false");
+    apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
+
+    const { container } = render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+
+    const checkbox = await screen.findByRole("checkbox");
+    expect(checkbox).not.toBeChecked();
+
+    const body = container.querySelector(".task-review-tab__body");
+    expect(body).not.toBeNull();
+    expect(body?.closest("label")).toBeNull();
+
+    fireEvent.click(body as HTMLElement);
+    expect(checkbox).not.toBeChecked();
+  });
+
+  it("renders markdown mode body outside label and clicking links does not toggle selection", async () => {
     const task = makeTask({
       reviewState: {
         source: "reviewer-agent",
@@ -153,7 +188,7 @@ describe("TaskReviewTab", () => {
         items: [
           {
             id: "reviewer-markdown-click-1",
-            body: "**bold**\n\n[details](https://example.test/review)",
+            body: "[example](https://example.com)",
             author: { login: "reviewer-agent" },
             createdAt: new Date().toISOString(),
             summary: "Markdown body click target",
@@ -163,16 +198,47 @@ describe("TaskReviewTab", () => {
       },
     });
 
+    window.localStorage.setItem(REVIEW_MARKDOWN_TOGGLE_STORAGE_KEY, "true");
     apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
 
-    render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+    const { container } = render(<TaskReviewTab task={task} addToast={vi.fn()} />);
 
     const checkbox = await screen.findByRole("checkbox");
-    expect(checkbox).not.toBeChecked();
+    const link = await screen.findByRole("link", { name: "example" });
+    expect(container.querySelector(".task-review-tab__body")?.closest("label")).toBeNull();
+    expect(link.closest("label")).toBeNull();
 
-    fireEvent.click(screen.getByText("bold"));
-
+    fireEvent.click(link);
     expect(checkbox).not.toBeChecked();
+  });
+
+  it("renders plain mode body outside label when markdown rendering is disabled", async () => {
+    const task = makeTask({
+      reviewState: {
+        source: "reviewer-agent",
+        summary: { verdict: "REVISE", reviewType: "code", summary: "Needs fixes" },
+        items: [
+          {
+            id: "reviewer-plain-click-2",
+            body: "[example](https://example.com)",
+            author: { login: "reviewer-agent" },
+            createdAt: new Date().toISOString(),
+            summary: "Plain mode item",
+          },
+        ],
+        addressing: [],
+      },
+    });
+
+    window.localStorage.setItem(REVIEW_MARKDOWN_TOGGLE_STORAGE_KEY, "false");
+    apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
+
+    const { container } = render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+
+    await screen.findByText("Plain mode item");
+    const body = container.querySelector("pre.task-review-tab__body");
+    expect(body).not.toBeNull();
+    expect(body?.closest("label")).toBeNull();
   });
 
   it("renders markdown by default and persists plain-text toggle preference", async () => {
@@ -415,6 +481,16 @@ describe("TaskReviewTab", () => {
     render(<TaskReviewTab task={task} addToast={vi.fn()} />);
     expect(await screen.findByText("Fix edge case")).toBeInTheDocument();
     expect(screen.getByText(/Error: Patch failed/)).toBeInTheDocument();
+  });
+
+  it("keeps mobile actions wrapping contract and removes equal-width flex buttons", async () => {
+    const css = await loadAllAppCss();
+    const mobileMediaStart = css.indexOf("@media (max-width: 768px)");
+    expect(mobileMediaStart).toBeGreaterThanOrEqual(0);
+    const mobileCss = css.slice(mobileMediaStart);
+
+    expect(mobileCss).toMatch(/\.task-review-tab__actions\s*\{[^}]*flex-wrap\s*:\s*wrap\s*;[^}]*\}/);
+    expect(mobileCss).not.toMatch(/\.task-review-tab__actions\s+\.btn\s*\{[^}]*flex\s*:\s*1\s*;[^}]*\}/);
   });
 
   it("submits reviewer-agent selections through same revision action", async () => {
