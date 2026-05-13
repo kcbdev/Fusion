@@ -22,7 +22,7 @@ describe("TaskStore stalledReview hydration", () => {
     await rm(rootDir, { recursive: true, force: true });
   });
 
-  it("populates stalledReview on slim listings when reenqueue churn threshold is met", async () => {
+  async function seedStalledInReviewTask() {
     const task = await store.createTask({
       description: "stalled review candidate",
       column: "in-review",
@@ -32,10 +32,28 @@ describe("TaskStore stalledReview hydration", () => {
       await store.logEntry(task.id, "Auto-recovered: eligible in-review task re-enqueued for merge");
     }
 
+    return task;
+  }
+
+  it("populates stalledReview on slim listings when reenqueue churn threshold is met", async () => {
+    const task = await seedStalledInReviewTask();
+
     const slimTasks = await store.listTasks({ slim: true, column: "in-review" });
     const hydrated = slimTasks.find((entry) => entry.id === task.id);
 
     expect(hydrated?.stalledReview?.heuristic).toBe("reenqueue-churn");
     expect(hydrated?.stalledReview?.matchCount).toBe(3);
+  });
+
+  it("populates stalledReview on full listings and detail fetches", async () => {
+    const task = await seedStalledInReviewTask();
+
+    const fullTasks = await store.listTasks({ slim: false, column: "in-review" });
+    const hydrated = fullTasks.find((entry) => entry.id === task.id);
+    expect(hydrated?.stalledReview?.heuristic).toBe("reenqueue-churn");
+
+    const detail = await store.getTask(task.id);
+    expect(detail.stalledReview?.heuristic).toBe("reenqueue-churn");
+    expect(detail.stalledReview?.matchCount).toBe(3);
   });
 });

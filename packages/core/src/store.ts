@@ -2996,6 +2996,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         };
       }
 
+      task.stalledReview = detectStalledReview(task, { now: Date.now() });
+
       // Sync steps from PROMPT.md if task.steps is empty
       if (task.steps.length === 0) {
         task.steps = await this.parseStepsFromPrompt(id);
@@ -3085,9 +3087,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       // the board card has no way to display the same total-execution
       // figure that the task detail panel shows.
       if (slim) {
-        const now = Date.now();
         task.timedExecutionMs = this.computeTimedExecutionMs(task.log);
-        task.stalledReview = detectStalledReview(task, { now });
         task.log = [];
         task.githubTracking = undefined;
       }
@@ -3281,9 +3281,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       // Slim path mirrors `listTasks`: aggregate timed execution server-side
       // before stripping the heavy log payload from the wire response.
       if (slim) {
-        const now = Date.now();
         task.timedExecutionMs = this.computeTimedExecutionMs(task.log);
-        task.stalledReview = detectStalledReview(task, { now });
         task.log = [];
         task.githubTracking = undefined;
       }
