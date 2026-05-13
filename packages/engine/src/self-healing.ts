@@ -132,6 +132,7 @@ const DEFAULT_STALE_MERGING_STATUS_MIN_AGE_MS = 5 * 60_000;
 const DURABLE_ERROR_RECOVERY_MAX_RETRIES = 5;
 const DURABLE_ERROR_RECOVERY_BASE_COOLDOWN_MS = 30_000;
 const DURABLE_ERROR_RECOVERY_MAX_COOLDOWN_MS = 15 * 60_000;
+const RUNNING_ON_INACTIVE_TASK_STALE_RUN_MS = 5 * 60_000;
 
 interface LandedTaskCommit {
   sha: string;
@@ -316,6 +317,7 @@ export class SelfHealingManager {
       { name: "orphaned-planning", fn: () => this.recoverOrphanedPlanningTasks().then(() => undefined) },
       { name: "recover-orphaned-agents", fn: () => this.recoverOrphanedAgents().then(() => undefined) },
       { name: "recover-stale-heartbeat-runs", fn: () => this.recoverStaleHeartbeatRuns().then(() => undefined) },
+      { name: "recover-running-on-inactive-tasks", fn: () => this.recoverAgentsRunningOnInactiveTasks().then(() => undefined) },
       { name: "clear-stale-blocked-by", fn: () => this.clearStaleBlockedBy().then(() => undefined) },
     ];
 
@@ -958,6 +960,7 @@ export class SelfHealingManager {
           { name: "recover-ghost-review", fn: () => this.recoverGhostReviewTasks() },
           { name: "recover-orphaned-agents", fn: () => this.recoverOrphanedAgents() },
           { name: "recover-stale-heartbeat-runs", fn: () => this.recoverStaleHeartbeatRuns() },
+          { name: "recover-running-on-inactive-tasks", fn: () => this.recoverAgentsRunningOnInactiveTasks() },
           { name: "clear-stale-blocked-by", fn: () => this.clearStaleBlockedBy() },
         ];
         for (const fn of batch2Fns) {
@@ -2352,6 +2355,43 @@ export class SelfHealingManager {
     const clampedAttempts = Math.max(1, attempts);
     const exponential = DURABLE_ERROR_RECOVERY_BASE_COOLDOWN_MS * Math.pow(2, clampedAttempts - 1);
     return Math.min(exponential, DURABLE_ERROR_RECOVERY_MAX_COOLDOWN_MS);
+  }
+
+  async recoverAgentsRunningOnInactiveTasks(): Promise<number> {
+    const agentStore = this.options.agentStore;
+    if (!agentStore) {
+      return 0;
+    }
+
+    const now = Date.now();
+    const recoveredAgentIds = new Set<string>();
+    const runningAgents = await agentStore.listAgents({ state: "running", includeEphemeral: true });
+
+    for (const agent of runningAgents) {
+      if (isEphemeralAgent(agent) || !agent.executionTaskId) {
+        continue;
+      }
+
+      const linkedTask = await this.store.getTask(agent.executionTaskId);
+      if (linkedTask && (linkedTask.column === "in-progress" || linkedTask.column === "in-review" || linkedTask.column === "done" || linkedTask.column === "archived")) {
+        continue;
+      }
+
+      const activeRun = await agentStore.getActiveHeartbeatRun(agent.id);
+      const runStartedAt = activeRun?.startedAt;
+      const runAgeMs = runStartedAt ? now - Date.parse(runStartedAt) : Number.POSITIVE_INFINITY;
+      const hasFreshRun = Boolean(activeRun) && Number.isFinite(runAgeMs) && runAgeMs <= RUNNING_ON_INACTIVE_TASK_STALE_RUN_MS;
+      if (hasFreshRun || this.options.hasActiveAgentExecution?.(agent.id) === true) {
+        continue;
+      }
+
+      await agentStore.updateAgentState(agent.id, "active");
+      await agentStore.syncExecutionTaskLink(agent.id, undefined);
+      recoveredAgentIds.add(agent.id);
+      log.log(`Recovered running durable agent ${agent.id} on inactive task ${agent.executionTaskId}`);
+    }
+
+    return recoveredAgentIds.size;
   }
 
   async recoverOrphanedAgents(): Promise<number> {

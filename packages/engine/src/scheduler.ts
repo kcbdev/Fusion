@@ -497,7 +497,7 @@ export class Scheduler {
 
     for (const agent of linkedAgents) {
       await agentStore.updateAgentState(agent.id, "active");
-      await agentStore.syncExecutionTaskLink(agent.id, null);
+      await agentStore.syncExecutionTaskLink(agent.id, undefined);
       schedulerLog.log(`Rolled back running agent ${agent.id} after overlap requeue of ${taskId}`);
     }
   }

@@ -863,6 +863,10 @@ export class HeartbeatMonitor {
    * Called on monitor start AND periodically from the polling loop to keep
    * the system self-healing across versions. Best-effort — failures are
    * logged but do not block the caller.
+   *
+   * Complements SelfHealingManager.recoverAgentsRunningOnInactiveTasks():
+   * heartbeat reconciliation handles stale/no-run conditions, while self-healing
+   * handles task-column mismatches (for example running agents linked to todo tasks).
    */
   private async reconcileOrphanedRunningAgents(): Promise<void> {
     try {

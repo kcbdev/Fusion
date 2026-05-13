@@ -87,6 +87,7 @@ function createAgentStore(agents: MutableAgent[]): AgentStore {
     updateAgentState: vi.fn(async (id: string, state: Agent["state"]) => {
       const existing = byId.get(id);
       if (!existing) return;
+      if (existing.state === state) return;
       existing.state = state;
     }),
     syncExecutionTaskLink: vi.fn(async (id: string, taskId?: string | null) => {

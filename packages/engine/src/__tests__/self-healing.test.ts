@@ -440,6 +440,7 @@ describe("SelfHealingManager", () => {
       const recoverOrphanedExecutions = vi.spyOn(manager, "recoverOrphanedExecutions").mockResolvedValue(1);
       const recoverApprovedTriageTasks = vi.spyOn(manager, "recoverApprovedTriageTasks").mockResolvedValue(1);
       const recoverOrphanedAgents = vi.spyOn(manager, "recoverOrphanedAgents").mockResolvedValue(1);
+      const recoverAgentsRunningOnInactiveTasks = vi.spyOn(manager, "recoverAgentsRunningOnInactiveTasks").mockResolvedValue(1);
       const clearStaleBlockedBy = vi.spyOn(manager, "clearStaleBlockedBy").mockResolvedValue(1);
 
       await manager.runStartupRecovery();
@@ -452,6 +453,7 @@ describe("SelfHealingManager", () => {
       expect(recoverOrphanedExecutions).toHaveBeenCalledTimes(1);
       expect(recoverApprovedTriageTasks).toHaveBeenCalledTimes(1);
       expect(recoverOrphanedAgents).toHaveBeenCalledTimes(1);
+      expect(recoverAgentsRunningOnInactiveTasks).toHaveBeenCalledTimes(1);
       expect(clearStaleBlockedBy).toHaveBeenCalledTimes(1);
     });
 
@@ -864,6 +866,58 @@ describe("SelfHealingManager", () => {
       await manager.runStartupRecovery();
 
       expect(recoverOrphanedAgents).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("recoverAgentsRunningOnInactiveTasks", () => {
+    it("recovers durable running agents linked to todo tasks", async () => {
+      const now = Date.now();
+      const agents: Agent[] = [
+        {
+          id: "agent-recover",
+          state: "running",
+          executionTaskId: "FN-TODO",
+          updatedAt: new Date(now - 120_000).toISOString(),
+        } as Agent,
+        {
+          id: "agent-keep",
+          state: "running",
+          executionTaskId: "FN-IP",
+          updatedAt: new Date(now - 120_000).toISOString(),
+        } as Agent,
+      ];
+
+      const getTask = vi.fn(async (taskId: string) => {
+        if (taskId === "FN-TODO") return { id: "FN-TODO", column: "todo" } as Task;
+        if (taskId === "FN-IP") return { id: "FN-IP", column: "in-progress" } as Task;
+        return null;
+      });
+
+      const agentStore = {
+        listAgents: vi.fn(async () => agents),
+        getActiveHeartbeatRun: vi.fn(async () => null),
+        updateAgentState: vi.fn(async (agentId: string, state: Agent["state"]) => {
+          const agent = agents.find((candidate) => candidate.id === agentId);
+          if (agent) agent.state = state;
+        }),
+        syncExecutionTaskLink: vi.fn(async (agentId: string, taskId?: string) => {
+          const agent = agents.find((candidate) => candidate.id === agentId);
+          if (agent) agent.executionTaskId = taskId;
+        }),
+      } as unknown as AgentStore;
+
+      const managerWithAgents = new SelfHealingManager(
+        createMockStore({ getTask }),
+        { rootDir: "/tmp/test-project", agentStore },
+      );
+
+      const recovered = await managerWithAgents.recoverAgentsRunningOnInactiveTasks();
+
+      expect(recovered).toBe(1);
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("agent-recover", "active");
+      expect(agentStore.syncExecutionTaskLink).toHaveBeenCalledWith("agent-recover", undefined);
+      expect(agentStore.updateAgentState).not.toHaveBeenCalledWith("agent-keep", "active");
+      managerWithAgents.stop();
     });
   });
 
