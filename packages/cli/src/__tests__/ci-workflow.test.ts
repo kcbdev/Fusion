@@ -354,11 +354,29 @@ describe("Binary release workflow (.github/workflows/release.yml)", () => {
 
   it("uses frozen-lockfile install in every matrix job", () => {
     const steps = workflow.jobs["build-binaries"].steps ?? [];
-    const compositeStep = findCompositeSetupStep(steps);
-    expect(compositeStep).toBeDefined();
-    expect(compositeStep.with?.["install-args"] ?? "--frozen-lockfile").toBe("--frozen-lockfile");
-    expect(content).not.toContain("run: pnpm install\n");
+    const setupSteps = steps.filter((step: any) => step.uses === "./.github/actions/setup-node-pnpm");
+
+    const hasValidCompositeSetup = setupSteps.some((step: any) => {
+      const installArgs = step.with?.["install-args"];
+      return installArgs === undefined || String(installArgs).trim() === "--frozen-lockfile";
+    });
+
+    const hasInlineFrozenInstall = steps.some((step: any) =>
+      typeof step.run === "string" && /\bpnpm install --frozen-lockfile\b/.test(step.run),
+    );
+
+    expect(hasValidCompositeSetup || hasInlineFrozenInstall).toBe(true);
+
+    for (const step of setupSteps) {
+      const installArgs = step.with?.["install-args"];
+      if (installArgs !== undefined) {
+        expect(String(installArgs).trim()).toBe("--frozen-lockfile");
+      }
+    }
+
+    expect(content).not.toMatch(/run:\s*pnpm install\s*(?:\r?\n)/);
     expect(content).not.toContain("--no-frozen-lockfile");
+    expect(content).not.toMatch(/install-args:\s*["']?\s*["']?\s*(?:\r?\n)/);
   });
 
   it("references signing scripts", () => {
