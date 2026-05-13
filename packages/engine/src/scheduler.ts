@@ -7,6 +7,7 @@ import {
   type MissionStore,
   type MissionFeature,
   type PrInfo,
+  type AgentStore,
 } from "@fusion/core";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -108,6 +109,8 @@ export interface SchedulerOptions {
    * agents that also hold slots).
    */
   semaphore?: AgentSemaphore;
+  /** Optional AgentStore for durable-agent state rollback during overlap requeue. */
+  agentStore?: AgentStore;
   /** Called when scheduler starts a task */
   onSchedule?: (task: Task) => void;
   /** Called when a task is blocked by deps */
@@ -485,6 +488,20 @@ export class Scheduler {
     await this.store.logEntry(taskId, reason);
   }
 
+  private async rollbackRunningAgentsForQueuedTodoTask(taskId: string): Promise<void> {
+    const agentStore = this.options.agentStore;
+    if (!agentStore) return;
+
+    const runningAgents = await agentStore.listAgents({ state: "running", includeEphemeral: true });
+    const linkedAgents = runningAgents.filter((agent) => agent.executionTaskId === taskId);
+
+    for (const agent of linkedAgents) {
+      await agentStore.updateAgentState(agent.id, "active");
+      await agentStore.syncExecutionTaskLink(agent.id, null);
+      schedulerLog.log(`Rolled back running agent ${agent.id} after overlap requeue of ${taskId}`);
+    }
+  }
+
   /**
    * If `newIntervalMs` differs from the currently active timer, restart
    * the `setInterval` so the new cadence takes effect immediately.
@@ -847,6 +864,7 @@ export class Scheduler {
               if (task.status !== "queued" || task.blockedBy !== targetBlockedBy) {
                 await this.store.updateTask(task.id, { status: "queued", blockedBy: targetBlockedBy });
               }
+              await this.rollbackRunningAgentsForQueuedTodoTask(task.id);
               await this.logDispatchQueuedReason(task.id, `queued — file scope overlap with ${overlappingTaskId}`);
               continue;
             }
