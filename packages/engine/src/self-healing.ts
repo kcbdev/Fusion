@@ -2322,6 +2322,7 @@ export class SelfHealingManager {
       const tasks = await this.store.listTasks({ column: "in-review", slim: true });
       const candidates = tasks.filter((task) =>
         task.column === "in-review" &&
+        !task.paused &&
         task.status === "failed" &&
         task.scopeOverride !== true &&
         task.mergeDetails?.mergeConfirmed !== true &&
@@ -2333,9 +2334,8 @@ export class SelfHealingManager {
       let recovered = 0;
       for (const task of candidates) {
         try {
-          const getAgentLogs = (this.store as { getAgentLogs?: (taskId: string, options?: { limit?: number; offset?: number }) => Promise<Array<{ type: string; detail?: string }>> }).getAgentLogs;
-          const recentLogs = typeof getAgentLogs === "function"
-            ? await getAgentLogs.call(this.store, task.id, { limit: 50 })
+          const recentLogs = "getAgentLogs" in this.store && typeof this.store.getAgentLogs === "function"
+            ? await this.store.getAgentLogs(task.id, { limit: 50 })
             : [];
           const scopeViolationLog = recentLogs.find((entry) =>
             entry.type === "tool_error" &&
