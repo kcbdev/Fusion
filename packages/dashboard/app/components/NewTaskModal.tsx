@@ -23,11 +23,9 @@ interface NewTaskModalProps {
   tasks: Task[]; // for dependency selection
   onCreateTask: (input: TaskCreateInput) => Promise<Task>;
   addToast: (message: string, type?: ToastType) => void;
-  onPlanningMode?: (initialPlan: string) => void;
-  onSubtaskBreakdown?: (description: string) => void;
 }
 
-export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, addToast, onPlanningMode, onSubtaskBreakdown }: NewTaskModalProps) {
+export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, addToast }: NewTaskModalProps) {
   const { confirm } = useConfirm();
   const viewportMode = useViewportMode();
   useMobileScrollLock(isOpen);
@@ -500,8 +498,6 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
             disabled={isSubmitting}
             addToast={addToast}
             isActive={isOpen}
-            onPlanningMode={onPlanningMode}
-            onSubtaskBreakdown={onSubtaskBreakdown}
             onClose={handleClose}
             planningModel={planningModel}
             onPlanningModelChange={setPlanningModel}
