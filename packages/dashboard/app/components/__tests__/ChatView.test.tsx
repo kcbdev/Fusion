@@ -4631,10 +4631,10 @@ describe("ChatView mobile CSS contract", () => {
     expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.chat-thread-header-render-toggle\s*\{[^}]*flex-shrink:\s*0/);
   });
 
-  it("mobile keeps response copy action visible and touch-friendly", () => {
+  it("FN-4352: response copy action stays compact on mobile", () => {
     expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.chat-message-copy-action\s*\{[^}]*opacity:\s*1/);
-    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.chat-message-copy-action\s*\{[^}]*min-width:\s*calc\(var\(--space-lg\)\s*\*\s*2\.25\)/);
-    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.chat-message-copy-action\s*\{[^}]*min-height:\s*calc\(var\(--space-lg\)\s*\*\s*2\.25\)/);
+    expect(css).not.toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.chat-message-copy-action\s*\{[^}]*min-width:\s*calc\(var\(--space-lg\)\s*\*\s*2\.25\)/);
+    expect(css).not.toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.chat-message-copy-action\s*\{[^}]*min-height:\s*calc\(var\(--space-lg\)\s*\*\s*2\.25\)/);
   });
 });
 
