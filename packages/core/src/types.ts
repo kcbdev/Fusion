@@ -1162,6 +1162,10 @@ export interface Task {
   baseCommitSha?: string;
   /** List of files modified by this task (populated during execution) */
   modifiedFiles?: string[];
+  /** Opt out of the squash file-scope invariant for this task. */
+  scopeOverride?: boolean;
+  /** Optional justification for bypassing the squash file-scope invariant. */
+  scopeOverrideReason?: string;
   /** Mission ID this task is linked to (for mission hierarchy) */
   missionId?: string;
   /** Slice ID this task is linked to (for mission hierarchy) */
@@ -1415,6 +1419,10 @@ export interface TaskCreateInput {
   nodeId?: string;
   /** Optional explicit user assignment for this task (used during review handoff) */
   assigneeUserId?: string;
+  /** Opt out of the squash file-scope invariant for this task. */
+  scopeOverride?: boolean;
+  /** Optional justification for bypassing the squash file-scope invariant. */
+  scopeOverrideReason?: string;
   /** Per-task GitHub issue tracking overrides for Fusion-created linked issues. */
   githubTracking?: Pick<TaskGithubTracking, "enabled" | "repoOverride">;
   /** Review level for task execution — controls review rigor: 0=None, 1=Plan Only, 2=Plan and Code, 3=Full */

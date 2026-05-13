@@ -3415,6 +3415,15 @@ export async function commitOrAmendMergeWithFixes(
       // This is the phantom-merge fix: previously the code blindly amended
       // HEAD (the previous task's commit), silently dropping the current
       // task's branch and inheriting the prior task's stats.
+      if (store) {
+        await enforceSquashFileScopeInvariant({
+          store,
+          taskId,
+          rootDir,
+          task: await store.getTask(taskId),
+          resetLabel: "file-scope invariant violation",
+        });
+      }
       await runDiffVolumeGate({
         rootDir,
         branch,
@@ -3448,6 +3457,15 @@ export async function commitOrAmendMergeWithFixes(
     // HEAD moved — AI agent committed already. Amend with deterministic
     // message + any new staged fixes folded in. `--amend -m` replaces both
     // the message and includes any newly-staged content.
+    if (store) {
+      await enforceSquashFileScopeInvariant({
+        store,
+        taskId,
+        rootDir,
+        task: await store.getTask(taskId),
+        resetLabel: "file-scope invariant violation",
+      });
+    }
     await runDiffVolumeGate({
       rootDir,
       branch,
@@ -3477,7 +3495,7 @@ export async function commitOrAmendMergeWithFixes(
     mergerLog.log(`${taskId}: amended merge commit with verification fixes (deterministic message)`);
     return { ok: true, reason: "completed" };
   } catch (err: unknown) {
-    if (err instanceof DiffVolumeRegressionError) {
+    if (err instanceof DiffVolumeRegressionError || err instanceof FileScopeViolationError) {
       throw err;
     }
     const errorMessage = err instanceof Error ? err.message : String(err);
@@ -3582,6 +3600,104 @@ function matchesScope(filePath: string, scopePatterns: string[]): boolean {
  * When `strict` is true, throws an error on scope violations instead of
  * just returning warnings (hard guardrail that blocks merge).
  */
+
+export class FileScopeViolationError extends Error {
+  taskId: string;
+  stagedFiles: string[];
+  declaredScope: string[];
+
+  constructor(taskId: string, stagedFiles: string[], declaredScope: string[]) {
+    const stagedList = stagedFiles.length > 0 ? stagedFiles.join(", ") : "<none outside .changeset/>";
+    const scopeList = declaredScope.join(", ");
+    super(
+      `File-scope invariant violation for ${taskId}: staged files [${stagedList}] have zero overlap with declared File Scope [${scopeList}]. Refile genuinely out-of-scope work as a follow-up task via fn_task_create before retrying this merge.`,
+    );
+    this.name = "FileScopeViolationError";
+    this.taskId = taskId;
+    this.stagedFiles = stagedFiles;
+    this.declaredScope = declaredScope;
+  }
+}
+
+export async function assertSquashOverlapsFileScope(params: {
+  store: TaskStore;
+  taskId: string;
+  rootDir: string;
+  task: Task;
+}): Promise<void> {
+  const { store, taskId, rootDir, task } = params;
+
+  if (task.scopeOverride === true) {
+    const reasonSuffix = task.scopeOverrideReason?.trim()
+      ? ` — reason: ${task.scopeOverrideReason.trim()}`
+      : "";
+    await store.appendAgentLog(
+      taskId,
+      `file-scope invariant bypassed via scopeOverride${reasonSuffix}`,
+      "text",
+      undefined,
+      "merger",
+    );
+    return;
+  }
+
+  if (typeof (store as Partial<TaskStore>).parseFileScopeFromPrompt !== "function") {
+    return;
+  }
+
+  const declaredScope = await store.parseFileScopeFromPrompt(taskId);
+  if (declaredScope.length === 0) {
+    return;
+  }
+
+  const { stdout } = await execAsync("git diff --cached --name-only", {
+    cwd: rootDir,
+    encoding: "utf-8",
+  });
+  const stagedFiles = stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+  const scopedStagedFiles = stagedFiles.filter((file) => !file.startsWith(".changeset/"));
+  const hasOverlap = scopedStagedFiles.some((file) => matchesScope(file, declaredScope));
+  if (!hasOverlap) {
+    throw new FileScopeViolationError(taskId, stagedFiles, declaredScope);
+  }
+}
+
+function formatFileScopeViolationAgentLog(error: FileScopeViolationError): string {
+  const stagedFiles = error.stagedFiles.length > 0 ? error.stagedFiles.join("\n") : "<none>";
+  return [
+    `taskId: ${error.taskId}`,
+    "declaredScope:",
+    ...error.declaredScope.map((entry) => `- ${entry}`),
+    "stagedFiles:",
+    ...stagedFiles.split("\n").map((entry) => `- ${entry}`),
+  ].join("\n");
+}
+
+async function enforceSquashFileScopeInvariant(params: {
+  store: TaskStore;
+  taskId: string;
+  rootDir: string;
+  task: Task;
+  resetLabel: string;
+}): Promise<void> {
+  try {
+    await assertSquashOverlapsFileScope(params);
+  } catch (error: unknown) {
+    if (!(error instanceof FileScopeViolationError)) {
+      throw error;
+    }
+    await params.store.appendAgentLog(
+      params.taskId,
+      error.message,
+      "tool_error",
+      formatFileScopeViolationAgentLog(error),
+      "merger",
+    );
+    resetMergeWithWarn(params.rootDir, params.taskId, params.resetLabel);
+    throw error;
+  }
+}
+
 export async function validateDiffScope(
   store: TaskStore,
   taskId: string,
@@ -6106,7 +6222,11 @@ export async function aiMergeTask(
         throw error;
       }
 
-      if (error instanceof DiffVolumeRegressionError || error?.name === "DiffVolumeRegressionError") {
+      if (
+        error instanceof DiffVolumeRegressionError
+        || error?.name === "DiffVolumeRegressionError"
+        || error?.name === "FileScopeViolationError"
+      ) {
         throw error;
       }
 
@@ -7187,6 +7307,13 @@ export async function executeMergeAttempt(
               aiSummary: safeBody,
               aiSubject,
             });
+            await enforceSquashFileScopeInvariant({
+              store,
+              taskId,
+              rootDir,
+              task: await store.getTask(taskId),
+              resetLabel: "file-scope invariant violation",
+            });
             await runDiffVolumeGate({
               rootDir,
               branch,
@@ -7317,6 +7444,13 @@ export async function executeMergeAttempt(
     // Spawn AI agent
     throwIfAborted(options.signal, taskId);
     aiTracker.aiWasInvoked = true; // Track that AI was invoked
+    await enforceSquashFileScopeInvariant({
+      store,
+      taskId,
+      rootDir,
+      task: await store.getTask(taskId),
+      resetLabel: "file-scope invariant violation",
+    });
     const agentResult = await runAiAgentForCommit({
       store,
       rootDir,
@@ -7444,7 +7578,11 @@ export async function executeMergeAttempt(
     // and trip the phantom-merge guard even though the task's content is
     // already on HEAD. Retrying with auto-conflict-resolution can't help a
     // verification failure anyway — there are no conflicts to resolve.
-    if (error?.name === "VerificationError" || error?.name === "DiffVolumeRegressionError") {
+    if (
+      error?.name === "VerificationError"
+      || error?.name === "DiffVolumeRegressionError"
+      || error?.name === "FileScopeViolationError"
+    ) {
       throw error;
     }
 
@@ -7492,7 +7630,7 @@ export async function attemptWithSideStrategy(
 
     return finalizeSideStrategyAttempt(params, side, aiTracker);
   } catch (error) {
-    if (error instanceof Error && (error.name === "MergeAbortedError" || error.name === "DiffVolumeRegressionError")) {
+    if (error instanceof Error && (error.name === "MergeAbortedError" || error.name === "DiffVolumeRegressionError" || error.name === "FileScopeViolationError")) {
       throw error;
     }
     mergerLog.error(`${taskId}: -X ${side} merge failed: ${error}`);
@@ -7533,7 +7671,7 @@ async function attemptWithMixedSideStrategy(
 
     return finalizeSideStrategyAttempt(params, strategy.defaultSide, aiTracker);
   } catch (error) {
-    if (error instanceof Error && (error.name === "MergeAbortedError" || error.name === "DiffVolumeRegressionError")) {
+    if (error instanceof Error && (error.name === "MergeAbortedError" || error.name === "DiffVolumeRegressionError" || error.name === "FileScopeViolationError")) {
       throw error;
     }
     mergerLog.error(`${taskId}: overlap-aware merge failed: ${error}`);
@@ -7592,6 +7730,13 @@ async function finalizeSideStrategyAttempt(
     includeTaskId,
     aiSummary: aiSummary?.trim().length ? aiSummary : safeBody,
     aiSubject,
+  });
+  await enforceSquashFileScopeInvariant({
+    store,
+    taskId,
+    rootDir,
+    task: await store.getTask(taskId),
+    resetLabel: "file-scope invariant violation",
   });
   await runDiffVolumeGate({
     rootDir,

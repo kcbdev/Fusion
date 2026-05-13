@@ -199,6 +199,24 @@ describe("TaskStore", () => {
   });
 
 
+  describe("updateTask — scope override", () => {
+    it("persists scopeOverride and scopeOverrideReason via updateTask", async () => {
+      const task = await store.createTask({ title: "Scope override task", description: "A task" });
+
+      const updated = await store.updateTask(task.id, {
+        scopeOverride: true,
+        scopeOverrideReason: "hotfix",
+      });
+
+      expect(updated.scopeOverride).toBe(true);
+      expect(updated.scopeOverrideReason).toBe("hotfix");
+
+      const fetched = await store.getTask(task.id);
+      expect(fetched.scopeOverride).toBe(true);
+      expect(fetched.scopeOverrideReason).toBe("hotfix");
+    });
+  });
+
   describe("updateTask — assigneeUserId", () => {
     it("sets assigneeUserId via updateTask", async () => {
       const task = await store.createTask({ title: "User task", description: "A task" });

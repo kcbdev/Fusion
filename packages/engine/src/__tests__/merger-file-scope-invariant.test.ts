@@ -1,0 +1,357 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { DEFAULT_SETTINGS, type MergeResult, type Task } from "@fusion/core";
+import { createMockStore, mockedExecSync } from "./merger-test-helpers.js";
+import {
+  assertSquashOverlapsFileScope,
+  attemptWithSideStrategy,
+  commitOrAmendMergeWithFixes,
+  executeMergeAttempt,
+  FileScopeViolationError,
+} from "../merger.js";
+
+function createInvariantStore(scope: string[], taskOverrides: Record<string, unknown> = {}) {
+  const store = createMockStore(taskOverrides) as unknown as {
+    parseFileScopeFromPrompt: ReturnType<typeof vi.fn>;
+    appendAgentLog: ReturnType<typeof vi.fn>;
+    moveTask: ReturnType<typeof vi.fn>;
+    updateTask: ReturnType<typeof vi.fn>;
+    logEntry: ReturnType<typeof vi.fn>;
+  };
+  store.parseFileScopeFromPrompt = vi.fn().mockResolvedValue(scope);
+  store.appendAgentLog = vi.fn().mockResolvedValue(undefined);
+  store.moveTask = vi.fn().mockResolvedValue(undefined);
+  store.updateTask = vi.fn().mockResolvedValue(undefined);
+  store.logEntry = vi.fn().mockResolvedValue(undefined);
+  return store;
+}
+
+function createMergeResult(): MergeResult {
+  const task: Task = {
+    id: "FN-4073",
+    description: "Test task",
+    column: "in-review",
+    dependencies: [],
+    steps: [],
+    currentStep: 0,
+    log: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  return {
+    task,
+    branch: "fn/fn-4073",
+    merged: false,
+    worktreeRemoved: false,
+    branchDeleted: false,
+  };
+}
+
+describe("assertSquashOverlapsFileScope", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function mockStagedFiles(files: string[]) {
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      if (cmdStr === "git diff --cached --name-only") {
+        return files.join("\n");
+      }
+      return "";
+    });
+  }
+
+  it("passes without logging when no declared scope exists", async () => {
+    const store = createInvariantStore([]);
+    mockStagedFiles(["packages/engine/src/merger.ts"]);
+
+    await expect(assertSquashOverlapsFileScope({
+      store: store as never,
+      taskId: "FN-4073",
+      rootDir: "/tmp/root",
+      task: await (store as any).getTask("FN-4073"),
+    })).resolves.toBeUndefined();
+
+    expect(store.appendAgentLog).not.toHaveBeenCalled();
+  });
+
+  it("passes without logging when staged files fully overlap scope", async () => {
+    const store = createInvariantStore(["packages/engine/src/merger.ts"]);
+    mockStagedFiles(["packages/engine/src/merger.ts"]);
+
+    await expect(assertSquashOverlapsFileScope({
+      store: store as never,
+      taskId: "FN-4073",
+      rootDir: "/tmp/root",
+      task: await (store as any).getTask("FN-4073"),
+    })).resolves.toBeUndefined();
+
+    expect(store.appendAgentLog).not.toHaveBeenCalled();
+  });
+
+  it("passes when staged files partially overlap scope", async () => {
+    const store = createInvariantStore(["packages/engine/src/merger.ts"]);
+    mockStagedFiles([
+      "packages/engine/src/merger.ts",
+      "packages/core/src/store.ts",
+    ]);
+
+    await expect(assertSquashOverlapsFileScope({
+      store: store as never,
+      taskId: "FN-4073",
+      rootDir: "/tmp/root",
+      task: await (store as any).getTask("FN-4073"),
+    })).resolves.toBeUndefined();
+  });
+
+  it("throws when staged files have zero overlap with scope", async () => {
+    const store = createInvariantStore(["packages/engine/src/merger.ts"]);
+    mockStagedFiles(["packages/core/src/store.ts"]);
+
+    await expect(assertSquashOverlapsFileScope({
+      store: store as never,
+      taskId: "FN-4073",
+      rootDir: "/tmp/root",
+      task: await (store as any).getTask("FN-4073"),
+    })).rejects.toMatchObject({
+      name: "FileScopeViolationError",
+      taskId: "FN-4073",
+      stagedFiles: ["packages/core/src/store.ts"],
+      declaredScope: ["packages/engine/src/merger.ts"],
+    } satisfies Partial<FileScopeViolationError>);
+  });
+
+  it("matches nested files against glob entries", async () => {
+    const store = createInvariantStore(["packages/foo/**"]);
+    mockStagedFiles(["packages/foo/src/bar/baz.ts"]);
+
+    await expect(assertSquashOverlapsFileScope({
+      store: store as never,
+      taskId: "FN-4073",
+      rootDir: "/tmp/root",
+      task: await (store as any).getTask("FN-4073"),
+    })).resolves.toBeUndefined();
+  });
+
+  it("ignores .changeset files for overlap and still throws without real overlap", async () => {
+    const store = createInvariantStore(["packages/engine/src/merger.ts"]);
+    mockStagedFiles([".changeset/foo.md"]);
+
+    await expect(assertSquashOverlapsFileScope({
+      store: store as never,
+      taskId: "FN-4073",
+      rootDir: "/tmp/root",
+      task: await (store as any).getTask("FN-4073"),
+    })).rejects.toMatchObject({
+      name: "FileScopeViolationError",
+      stagedFiles: [".changeset/foo.md"],
+    } satisfies Partial<FileScopeViolationError>);
+  });
+
+  it("bypasses enforcement and logs once when scopeOverride is true", async () => {
+    const store = createInvariantStore(["packages/engine/src/merger.ts"], { scopeOverride: true });
+    mockStagedFiles(["packages/core/src/store.ts"]);
+
+    await expect(assertSquashOverlapsFileScope({
+      store: store as never,
+      taskId: "FN-4073",
+      rootDir: "/tmp/root",
+      task: await (store as any).getTask("FN-4073"),
+    })).resolves.toBeUndefined();
+
+    expect(store.appendAgentLog).toHaveBeenCalledTimes(1);
+    expect(store.appendAgentLog).toHaveBeenCalledWith(
+      "FN-4073",
+      "file-scope invariant bypassed via scopeOverride",
+      "text",
+      undefined,
+      "merger",
+    );
+  });
+
+  it("includes the override reason in the bypass log", async () => {
+    const store = createInvariantStore(["packages/engine/src/merger.ts"], {
+      scopeOverride: true,
+      scopeOverrideReason: "hotfix",
+    });
+    mockStagedFiles(["packages/core/src/store.ts"]);
+
+    await expect(assertSquashOverlapsFileScope({
+      store: store as never,
+      taskId: "FN-4073",
+      rootDir: "/tmp/root",
+      task: await (store as any).getTask("FN-4073"),
+    })).resolves.toBeUndefined();
+
+    expect(store.appendAgentLog).toHaveBeenCalledWith(
+      "FN-4073",
+      "file-scope invariant bypassed via scopeOverride — reason: hotfix",
+      "text",
+      undefined,
+      "merger",
+    );
+  });
+});
+
+describe("file-scope invariant wiring", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("blocks the standard merge AI path before the commit when staged files are out of scope", async () => {
+    const store = createInvariantStore(["packages/engine/src/merger.ts"]);
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.includes("git diff --cached --quiet")) return "1";
+      if (cmdStr === "git diff --cached --name-only") return "packages/core/src/store.ts";
+      return "";
+    });
+
+    const result = createMergeResult();
+    await expect(executeMergeAttempt({
+      store: store as never,
+      rootDir: "/tmp/root",
+      taskId: "FN-4073",
+      branch: "fn/fn-4073",
+      commitLog: "feat: branch work",
+      diffStat: "1 file changed",
+      includeTaskId: true,
+      smartConflictResolution: true,
+      mergeConflictStrategy: "smart-prefer-branch",
+      attemptNum: 1,
+      options: {},
+      result,
+      settings: { ...DEFAULT_SETTINGS },
+    }, { aiWasInvoked: false })).rejects.toBeInstanceOf(FileScopeViolationError);
+
+    expect(store.appendAgentLog).toHaveBeenCalledWith(
+      "FN-4073",
+      expect.stringContaining("File-scope invariant violation"),
+      "tool_error",
+      expect.stringContaining("declaredScope:"),
+      "merger",
+    );
+    expect(mockedExecSync).toHaveBeenCalledWith("git reset --merge", expect.objectContaining({ cwd: "/tmp/root" }));
+    expect(store.moveTask).not.toHaveBeenCalled();
+  });
+
+  it("allows the -X fallback commit when staged files partially overlap scope", async () => {
+    const store = createInvariantStore(["packages/engine/src/merger.ts"]);
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.includes("git merge -X ours --squash")) return "";
+      if (cmdStr.includes("git diff --name-only --diff-filter=U")) return "";
+      if (cmdStr.includes("git diff --cached --quiet")) return "1";
+      if (cmdStr === "git diff --cached --name-only") return "packages/engine/src/merger.ts\npackages/core/src/store.ts";
+      if (cmdStr.includes("git commit ")) return "";
+      return "";
+    });
+
+    await expect(attemptWithSideStrategy({
+      store: store as never,
+      rootDir: "/tmp/root",
+      taskId: "FN-4073",
+      branch: "fn/fn-4073",
+      commitLog: "feat: branch work",
+      diffStat: "1 file changed",
+      includeTaskId: true,
+      sourceIssueRef: undefined,
+      smartConflictResolution: true,
+      mergeConflictStrategy: "smart-prefer-main",
+      attemptNum: 3,
+      options: {},
+      result: createMergeResult(),
+      settings: { ...DEFAULT_SETTINGS },
+    }, "ours")).resolves.toBe(true);
+
+    expect(store.appendAgentLog).not.toHaveBeenCalledWith(
+      "FN-4073",
+      expect.stringContaining("File-scope invariant violation"),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("bypasses the -X fallback invariant when scopeOverride is true and logs the reason", async () => {
+    const store = createInvariantStore(["packages/engine/src/merger.ts"], {
+      scopeOverride: true,
+      scopeOverrideReason: "hotfix",
+    });
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.includes("git merge -X ours --squash")) return "";
+      if (cmdStr.includes("git diff --name-only --diff-filter=U")) return "";
+      if (cmdStr.includes("git diff --cached --quiet")) return "1";
+      if (cmdStr.includes("git commit ")) return "";
+      return "";
+    });
+
+    await expect(attemptWithSideStrategy({
+      store: store as never,
+      rootDir: "/tmp/root",
+      taskId: "FN-4073",
+      branch: "fn/fn-4073",
+      commitLog: "feat: branch work",
+      diffStat: "1 file changed",
+      includeTaskId: true,
+      sourceIssueRef: undefined,
+      smartConflictResolution: true,
+      mergeConflictStrategy: "smart-prefer-main",
+      attemptNum: 3,
+      options: {},
+      result: createMergeResult(),
+      settings: { ...DEFAULT_SETTINGS },
+    }, "ours")).resolves.toBe(true);
+
+    expect(store.appendAgentLog).toHaveBeenCalledWith(
+      "FN-4073",
+      "file-scope invariant bypassed via scopeOverride — reason: hotfix",
+      "text",
+      undefined,
+      "merger",
+    );
+  });
+
+  it("blocks verification-fix finalization when staged files are out of scope", async () => {
+    const store = createInvariantStore(["packages/engine/src/merger.ts"]);
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      if (cmdStr === "git diff --cached --name-only") return "packages/core/src/store.ts";
+      if (cmdStr === "git diff --name-only") return "";
+      if (cmdStr === "git status -z --porcelain") return "";
+      if (cmdStr === "git diff --cached --raw") return "";
+      if (cmdStr === "git rev-parse HEAD") return "head-before";
+      if (cmdStr.includes("git commit ")) return "";
+      return "";
+    });
+
+    await expect(commitOrAmendMergeWithFixes(
+      "/tmp/root",
+      "FN-4073",
+      "fn/fn-4073",
+      "feat: branch work",
+      true,
+      "head-before",
+      "",
+      "1 file changed",
+      { ...DEFAULT_SETTINGS },
+      undefined,
+      undefined,
+      undefined,
+      new Set(),
+      store as never,
+    )).rejects.toBeInstanceOf(FileScopeViolationError);
+
+    expect(store.appendAgentLog).toHaveBeenCalledWith(
+      "FN-4073",
+      expect.stringContaining("File-scope invariant violation"),
+      "tool_error",
+      expect.stringContaining("stagedFiles:"),
+      "merger",
+    );
+    expect(mockedExecSync).toHaveBeenCalledWith("git reset --merge", expect.objectContaining({ cwd: "/tmp/root" }));
+  });
+});

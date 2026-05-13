@@ -250,6 +250,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   modifiedFiles TEXT DEFAULT '[]',
   missionId TEXT,
   sliceId TEXT,
+  scopeOverride INTEGER,
+  scopeOverrideReason TEXT,
   assignedAgentId TEXT,
   pausedByAgentId TEXT,
   assigneeUserId TEXT,
