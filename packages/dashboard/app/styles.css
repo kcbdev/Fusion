@@ -646,8 +646,8 @@ html .column.drag-over * {
 
 .runtime-card__logo {
   flex: 0 0 auto;
-  width: 44px; /* matches mobile touch-target convention from AGENTS.md (no --touch-target token defined) */
-  height: 44px; /* matches mobile touch-target convention from AGENTS.md (no --touch-target token defined) */
+  width: calc(var(--space-xl) + var(--space-xl) - var(--space-xs));
+  height: calc(var(--space-xl) + var(--space-xl) - var(--space-xs));
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -717,7 +717,7 @@ html .column.drag-over * {
   appearance: none;
   background: transparent;
   border: none;
-  border-bottom: 2px solid transparent;
+  border-bottom: calc(var(--space-xs) / 2) solid transparent;
   padding: var(--space-sm) var(--space-md);
   cursor: pointer;
   color: var(--text-muted);
