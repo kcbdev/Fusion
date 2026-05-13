@@ -1971,6 +1971,21 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
   });
 
   describe("research tools", () => {
+    it.each([
+      "fn_research_run",
+      "fn_research_list",
+      "fn_research_get",
+      "fn_research_cancel",
+      "fn_research_retry",
+    ])("%s uses disambiguated cited-research wording", (toolName) => {
+      const tool = api.tools.get(toolName)!;
+      expect(tool.description).toMatch(/cited-research pipeline/i);
+      expect(tool.description).not.toMatch(/\bautonomous experiment loop\b/i);
+      if (/experiment loop/i.test(tool.description)) {
+        expect(tool.description).toMatch(/not\s+an?\s+.*experiment loop/i);
+      }
+    });
+
     it("fn_research_run treats builtin as configured when no provider is explicitly set", async () => {
       const store = new TaskStore(tmpDir);
       await store.init();

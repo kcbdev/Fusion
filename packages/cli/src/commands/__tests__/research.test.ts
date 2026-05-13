@@ -79,7 +79,7 @@ describe("research commands", () => {
   it("creates a run", async () => {
     await runResearchCreate({ query: "hello" });
     expect(orchestratorMock.createRun).toHaveBeenCalled();
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Created research run"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Created cited-research run"));
   });
 
   it("creates a run when provider is unset by defaulting to builtin", async () => {
@@ -116,7 +116,7 @@ describe("research commands", () => {
   it("fails show on missing run", async () => {
     researchStoreMock.getRun.mockReturnValue(undefined);
     await expect(runResearchShow("RR-404")).rejects.toThrow("process.exit:1");
-    expect(errorSpy).toHaveBeenCalledWith("Error: Research run not found: RR-404");
+    expect(errorSpy).toHaveBeenCalledWith("Error: Cited-research run not found: RR-404");
   });
 
   it("exports with explicit output path", async () => {
