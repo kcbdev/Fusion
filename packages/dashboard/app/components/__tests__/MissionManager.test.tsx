@@ -2254,6 +2254,27 @@ describe("MissionManager", () => {
     });
   });
 
+  it("FN-4247: renders Drafts group above standard missions", async () => {
+    mockFetchMissionInterviewDrafts.mockResolvedValueOnce([
+      {
+        id: "draft-priority",
+        title: "Draft priority mission",
+        status: "awaiting_input",
+        projectId: null,
+        createdAt: "2026-05-12T00:00:00.000Z",
+        updatedAt: "2026-05-12T00:05:00.000Z",
+        hasConversation: true,
+      },
+    ]);
+    globalThis.fetch = createFetchMock();
+
+    render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+    const draftsHeader = await screen.findByText("Drafts");
+    const standardMission = await screen.findByText("Build Auth System");
+    expect(draftsHeader.compareDocumentPosition(standardMission) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("resumes a mission interview draft from the explicit resume action", async () => {
     mockFetchAiSession.mockResolvedValue({
       id: "draft-awaiting",
