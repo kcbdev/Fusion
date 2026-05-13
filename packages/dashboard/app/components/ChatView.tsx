@@ -2229,7 +2229,6 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
               <div className="chat-session-list chat-sidebar-list">
                 {rooms.rooms.map((room) => {
                   const isActive = rooms.activeRoom?.id === room.id;
-                  const memberCount = isActive ? rooms.activeRoomMembers.length : null;
                   return (
                     <div
                       key={room.id}
@@ -2255,8 +2254,10 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                     >
                       <span className="chat-room-item-details">
                         <span className="chat-room-item-name">#{room.name}</span>
-                        {memberCount !== null ? (
-                          <span className="chat-room-item-meta">{memberCount} {memberCount === 1 ? "member" : "members"}</span>
+                        {isActive ? (
+                          <span className="chat-room-item-meta">
+                            {rooms.activeRoomMembers.length} {rooms.activeRoomMembers.length === 1 ? "member" : "members"}
+                          </span>
                         ) : null}
                       </span>
                       <button
