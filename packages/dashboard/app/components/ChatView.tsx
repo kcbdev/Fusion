@@ -959,6 +959,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   const mobileSessionMenuRef = useRef<HTMLDivElement>(null);
   const isUserScrollingRef = useRef(false);
   const lastAnchoredThreadStateRef = useRef<{ threadId: string; loaded: boolean; hasMessages: boolean } | null>(null);
+  const previousChatScopeRef = useRef<"direct" | "rooms" | null>(null);
   const hideSkillMenuTimeoutRef = useRef<number | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -1294,6 +1295,28 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       window.removeEventListener("pageshow", resync);
     };
   }, [isMobile, activeSession]);
+
+  useEffect(() => {
+    const previousScope = previousChatScopeRef.current;
+    previousChatScopeRef.current = chatScope;
+
+    if (chatScope !== "direct") {
+      return;
+    }
+
+    if (previousScope !== null && previousScope !== "rooms") {
+      return;
+    }
+
+    const messagesContainer = messagesContainerRef.current;
+    if (!messagesContainer) {
+      return;
+    }
+
+    anchorToBottom(messagesContainer);
+    isUserScrollingRef.current = false;
+    setIsUserScrolling(false);
+  }, [chatScope, anchorToBottom]);
 
   useEffect(() => {
     if (!activeSession && !roomThreadActive) {
