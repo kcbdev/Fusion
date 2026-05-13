@@ -2368,11 +2368,11 @@ export class SelfHealingManager {
     const runningAgents = await agentStore.listAgents({ state: "running", includeEphemeral: true });
 
     for (const agent of runningAgents) {
-      if (isEphemeralAgent(agent) || !agent.executionTaskId) {
+      if (isEphemeralAgent(agent) || !agent.taskId) {
         continue;
       }
 
-      const linkedTask = await this.store.getTask(agent.executionTaskId);
+      const linkedTask = await this.store.getTask(agent.taskId);
       if (linkedTask && (linkedTask.column === "in-progress" || linkedTask.column === "in-review" || linkedTask.column === "done" || linkedTask.column === "archived")) {
         continue;
       }
@@ -2388,7 +2388,7 @@ export class SelfHealingManager {
       await agentStore.updateAgentState(agent.id, "active");
       await agentStore.syncExecutionTaskLink(agent.id, undefined);
       recoveredAgentIds.add(agent.id);
-      log.log(`Recovered running durable agent ${agent.id} on inactive task ${agent.executionTaskId}`);
+      log.log(`Recovered running durable agent ${agent.id} on inactive task ${agent.taskId}`);
     }
 
     return recoveredAgentIds.size;

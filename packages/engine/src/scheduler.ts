@@ -493,7 +493,7 @@ export class Scheduler {
     if (!agentStore) return;
 
     const runningAgents = await agentStore.listAgents({ state: "running", includeEphemeral: true });
-    const linkedAgents = runningAgents.filter((agent) => agent.executionTaskId === taskId);
+    const linkedAgents = runningAgents.filter((agent) => agent.taskId === taskId);
 
     for (const agent of linkedAgents) {
       await agentStore.updateAgentState(agent.id, "active");

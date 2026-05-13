@@ -876,13 +876,13 @@ describe("SelfHealingManager", () => {
         {
           id: "agent-recover",
           state: "running",
-          executionTaskId: "FN-TODO",
+          taskId: "FN-TODO",
           updatedAt: new Date(now - 120_000).toISOString(),
         } as Agent,
         {
           id: "agent-keep",
           state: "running",
-          executionTaskId: "FN-IP",
+          taskId: "FN-IP",
           updatedAt: new Date(now - 120_000).toISOString(),
         } as Agent,
       ];
@@ -902,7 +902,7 @@ describe("SelfHealingManager", () => {
         }),
         syncExecutionTaskLink: vi.fn(async (agentId: string, taskId?: string) => {
           const agent = agents.find((candidate) => candidate.id === agentId);
-          if (agent) agent.executionTaskId = taskId;
+          if (agent) agent.taskId = taskId;
         }),
       } as unknown as AgentStore;
 

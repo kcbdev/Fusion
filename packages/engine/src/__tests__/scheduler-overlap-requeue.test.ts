@@ -29,7 +29,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
-type MutableAgent = Agent & { executionTaskId?: string | null };
+type MutableAgent = Agent;
 
 function createMockTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -90,10 +90,10 @@ function createAgentStore(agents: MutableAgent[]): AgentStore {
       if (existing.state === state) return;
       existing.state = state;
     }),
-    syncExecutionTaskLink: vi.fn(async (id: string, taskId?: string | null) => {
+    syncExecutionTaskLink: vi.fn(async (id: string, taskId?: string) => {
       const existing = byId.get(id);
       if (!existing) return;
-      existing.executionTaskId = taskId ?? null;
+      existing.taskId = taskId;
     }),
   } as unknown as AgentStore;
 }
@@ -134,7 +134,7 @@ describe("scheduler overlap requeue agent-state invariant (FN-4249)", () => {
     await workerManager.onTaskStart(queuedCandidate);
 
     const scheduler = new Scheduler(taskStore, { agentStore });
-    (scheduler as { running: boolean }).running = true;
+    (scheduler as any).running = true;
     await scheduler.schedule();
     await scheduler.schedule();
 
@@ -144,7 +144,7 @@ describe("scheduler overlap requeue agent-state invariant (FN-4249)", () => {
     expect(task?.column).toBe("todo");
     expect(task?.status).toBe("queued");
     expect(agent.state).toBe("active");
-    expect(agent.executionTaskId ?? null).toBeNull();
+    expect(agent.taskId).toBeUndefined();
     expect(agentStore.updateAgentState).toHaveBeenCalledWith("agent-assigned", "active");
     expect(agentStore.updateAgentState).toHaveBeenCalledWith("agent-assigned", "running");
     expect(agentStore.updateAgentState).toHaveBeenCalledTimes(2);
