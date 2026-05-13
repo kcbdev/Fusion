@@ -4,6 +4,7 @@
 
 ### Patch Changes
 
+- Prevented squash finalization from committing gitignored artifacts by stripping staged ignored paths (for example `.fusion/`, `node_modules/`, and other `git check-ignore` matches) before merge commit creation, including the verification-fix squash-restore path.
 - Updated dependencies [681770f]
   - @fusion/core@0.28.1
   - @fusion/pi-claude-cli@0.28.1

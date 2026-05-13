@@ -229,6 +229,12 @@ After any squash that auto-resolved conflicts, the merger runs the post-squash a
 
 Before those auto-resolved squash commits are written, the merger also runs a per-file diff-volume gate: it compares each file's staged squash delta against the branch's net delta vs its merge-base, and blocks the merge in `in-review` when a non-allowlisted file loses too much branch volume. This is the pre-commit guard against FN-3936-style silent drops where fallback resolution kept a branch's commit message but discarded the branch's main file edits.
 
+### Gitignored-path guard on squash merges
+
+The merger now strips gitignored paths from the staged squash set before writing the merge commit (including verification-fix rebuild paths). Any staged path that matches `.gitignore` (for example `.fusion/`, `.worktrees/`, `.pi/`, `.factory/`, `node_modules/`, `dist/`) is explicitly unstaged and logged.
+
+Agents must **never** bypass `.gitignore` with `git add -f .fusion/...` (or force-add any ignored scratch artifact). Findings, diagnosis, and test-plan notes belong in task documents via `fn_task_document_write`, not committed files.
+
 ### File-Scope invariant on squash merges
 
 Every squash commit path now enforces a file-scope invariant immediately before writing the commit: the staged file set must overlap the task's declared `## File Scope` from `PROMPT.md`. The invariant runs on the standard squash path, the Attempt 3 `-X ours/theirs` fallback, and the verification-fix rebuild/finalize path. When the staged files have zero overlap with a non-empty declared scope, the merger throws a structured `FileScopeViolationError`, logs the declared scope + staged files to the merger agent log, resets the pre-squash state, and leaves the task in `in-review` for inspection instead of landing the commit.

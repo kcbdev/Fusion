@@ -3071,6 +3071,91 @@ async function persistFinalizeResetLeftovers(rootDir: string, taskId: string, st
   }
 }
 
+const NUL = "\0";
+
+function splitNulDelimited(output: string | Buffer): string[] {
+  const text = typeof output === "string" ? output : output.toString("utf-8");
+  return text.split(NUL).filter((entry) => entry.length > 0);
+}
+
+async function countStagedPaths(rootDir: string): Promise<number> {
+  const { stdout } = await execFileAsync("git", ["diff", "--cached", "--name-only", "-z"], {
+    cwd: rootDir,
+    encoding: "buffer",
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  return splitNulDelimited(stdout).length;
+}
+
+export async function filterStagedGitignoredPaths(
+  rootDir: string,
+  taskId: string,
+): Promise<{ unstaged: string[]; remainingStaged: number }> {
+  try {
+    const { stdout: stagedOut } = await execFileAsync("git", ["diff", "--cached", "--name-only", "-z"], {
+      cwd: rootDir,
+      encoding: "buffer",
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    const stagedPaths = splitNulDelimited(stagedOut);
+    if (stagedPaths.length === 0) {
+      return { unstaged: [], remainingStaged: 0 };
+    }
+
+    const ignoredPaths: string[] = [];
+    const batchSize = 200;
+    for (let i = 0; i < stagedPaths.length; i += batchSize) {
+      const batch = stagedPaths.slice(i, i + batchSize);
+      try {
+        const { stdout } = await execFileAsync("git", ["check-ignore", "--no-index", "--", ...batch], {
+          cwd: rootDir,
+          encoding: "utf-8",
+          maxBuffer: 10 * 1024 * 1024,
+        });
+        ignoredPaths.push(
+          ...stdout
+            .split("\n")
+            .map((entry) => entry.trim())
+            .filter((entry) => entry.length > 0),
+        );
+      } catch (err: unknown) {
+        const code = typeof err === "object" && err !== null && "code" in err ? (err as { code?: number }).code : undefined;
+        if (code === 1) {
+          continue;
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        mergerLog.warn(`${taskId}: failed to detect gitignored staged paths in batch: ${msg}`);
+      }
+    }
+
+    const unstaged: string[] = [];
+    for (const path of ignoredPaths) {
+      mergerLog.warn(
+        `${taskId}: refusing to stage gitignored path "${path}" — unstaging (agents must not bypass .gitignore via \`git add -f\`)`,
+      );
+      try {
+        await execFileAsync("git", ["reset", "HEAD", "--", path], {
+          cwd: rootDir,
+          encoding: "utf-8",
+          maxBuffer: 10 * 1024 * 1024,
+        });
+        unstaged.push(path);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        mergerLog.warn(`${taskId}: failed to unstage gitignored path "${path}": ${msg}`);
+      }
+    }
+
+    const remainingStaged = await countStagedPaths(rootDir).catch(() => stagedPaths.length - unstaged.length);
+    return { unstaged, remainingStaged };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    mergerLog.warn(`${taskId}: gitignored-path staging guard failed: ${msg}`);
+    const remainingStaged = await countStagedPaths(rootDir).catch(() => 0);
+    return { unstaged: [], remainingStaged };
+  }
+}
+
 export async function commitOrAmendMergeWithFixes(
   rootDir: string,
   taskId: string,
@@ -3175,6 +3260,8 @@ export async function commitOrAmendMergeWithFixes(
         mergerLog.warn(`${taskId}: failed to unstage gitlink "${path}": ${msg}`);
       }
     }
+
+    await filterStagedGitignoredPaths(rootDir, taskId);
 
     const { stdout: finalStaged } = await execAsync("git diff --cached --name-only", {
       cwd: rootDir,
@@ -3366,6 +3453,8 @@ export async function commitOrAmendMergeWithFixes(
         }
         mergerLog.warn(`${taskId}: failed to restore squash state before finalize: ${msg}; stderr=${stderr.trim() || "<empty>"}`);
       }
+
+      await filterStagedGitignoredPaths(rootDir, taskId);
 
       const { stdout: restoredStagedOut } = await execAsync("git diff --cached --name-only", {
         cwd: rootDir,
