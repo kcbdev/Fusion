@@ -491,7 +491,9 @@ export async function reviewStep(
     };
   };
 
-  const createReviewerSession = async (): Promise<import("@mariozechner/pi-coding-agent").AgentSession> => {
+  const createReviewerSession = async (
+    overrides?: { forceProvider?: string; forceModelId?: string },
+  ): Promise<import("@mariozechner/pi-coding-agent").AgentSession> => {
     const { session } = await createResolvedAgentSession({
       sessionPurpose: "reviewer",
       runtimeHint: extractRuntimeHint(memoryAgent?.runtimeConfig),
@@ -505,8 +507,8 @@ export async function reviewStep(
       onThinking: agentLogger?.onThinking,
       onToolStart: agentLogger?.onToolStart,
       onToolEnd: agentLogger?.onToolEnd,
-      defaultProvider: validatorProvider,
-      defaultModelId: validatorModelId,
+      defaultProvider: overrides?.forceProvider ?? validatorProvider,
+      defaultModelId: overrides?.forceModelId ?? validatorModelId,
       fallbackProvider: validatorFallbackProvider,
       fallbackModelId: validatorFallbackModelId,
       defaultThinkingLevel: options.defaultThinkingLevel,
@@ -562,69 +564,126 @@ export async function reviewStep(
     checkSessionError(session);
   };
 
-  let session: import("@mariozechner/pi-coding-agent").AgentSession;
-  try {
-    session = await createReviewerSession();
-  } catch (err) {
-    if (err instanceof ReviewerPauseAbortError) {
-      return buildPauseUnavailableResult(err.reason);
-    }
-    throw err;
-  }
-
-  try {
+  const runAttempt = async (
+    attemptRequest: string,
+    sessionOptions?: { forceProvider?: string; forceModelId?: string },
+  ): Promise<{ verdict: ReviewVerdict; summary: string; review: string }> => {
+    reviewText = "";
+    let session: import("@mariozechner/pi-coding-agent").AgentSession;
     try {
-      await runReviewPrompt(session, request);
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      if (!isContextLimitError(errorMessage)) {
+      session = await createReviewerSession(sessionOptions);
+    } catch (err) {
+      if (err instanceof ReviewerPauseAbortError) {
+        return buildPauseUnavailableResult(err.reason);
+      }
+      throw err;
+    }
+
+    try {
+      try {
+        await runReviewPrompt(session, attemptRequest);
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        if (!isContextLimitError(errorMessage)) {
+          throw err;
+        }
+
+        const retryLogMessage = reviewType === "code"
+          ? "code review hit context limit — retrying with compacted request"
+          : `${reviewType} review hit context limit — retrying with compacted request`;
+        reviewerLog.warn(`${taskId}: ${retryLogMessage}`);
+        if (options.store && options.taskId) {
+          await options.store.logEntry(options.taskId, retryLogMessage).catch(() => undefined);
+        }
+
+        reviewText = "";
+        const reducedRequest = buildReducedReviewRequest(
+          taskId, stepNumber, stepName, reviewType, promptContent, cwd, baseline,
+        );
+
+        try {
+          await runReviewPrompt(session, reducedRequest);
+        } catch (retryErr: unknown) {
+          if (!isReviewerSessionReuseError(retryErr)) {
+            throw retryErr;
+          }
+
+          endSession(session);
+          try {
+            session = await createReviewerSession(sessionOptions);
+          } catch (recreateErr) {
+            if (recreateErr instanceof ReviewerPauseAbortError) {
+              return buildPauseUnavailableResult(recreateErr.reason);
+            }
+            throw recreateErr;
+          }
+          await runReviewPrompt(session, reducedRequest);
+        }
+      }
+    } finally {
+      if (agentLogger) {
+        await agentLogger.flush();
+      }
+      for (const activeSession of [...activeSessions]) {
+        endSession(activeSession);
+      }
+    }
+
+    const verdict = extractVerdict(reviewText);
+    const summary = extractSummary(reviewText);
+    return { verdict, review: reviewText, summary };
+  };
+
+  const fallbackReviewRequest = `${request}\n\nIMPORTANT: Respond with exactly one of: APPROVE | REVISE | RETHINK on a line starting with \"Verdict:\".`;
+
+  const logFallbackRetry = async (reason: string, mode: string): Promise<void> => {
+    const message = `${reviewType} review retry with fallback model after ${reason} (${mode})`;
+    reviewerLog.warn(`${taskId}: ${message}`);
+    if (options.store && options.taskId) {
+      await options.store.logEntry(options.taskId, message).catch(() => undefined);
+    }
+  };
+
+  const hasConfiguredFallback = Boolean(validatorFallbackProvider && validatorFallbackModelId);
+
+  let firstAttempt: { verdict: ReviewVerdict; summary: string; review: string };
+  try {
+    firstAttempt = await runAttempt(request);
+  } catch (err) {
+    if (hasConfiguredFallback) {
+      await logFallbackRetry("reviewer error", `${validatorFallbackProvider}/${validatorFallbackModelId}`);
+      try {
+        return await runAttempt(request, {
+          forceProvider: validatorFallbackProvider,
+          forceModelId: validatorFallbackModelId,
+        });
+      } catch {
         throw err;
       }
-
-      const retryLogMessage = reviewType === "code"
-        ? "code review hit context limit — retrying with compacted request"
-        : `${reviewType} review hit context limit — retrying with compacted request`;
-      reviewerLog.warn(`${taskId}: ${retryLogMessage}`);
-      if (options.store && options.taskId) {
-        await options.store.logEntry(options.taskId, retryLogMessage).catch(() => undefined);
-      }
-
-      reviewText = "";
-      const reducedRequest = buildReducedReviewRequest(
-        taskId, stepNumber, stepName, reviewType, promptContent, cwd, baseline,
-      );
-
-      try {
-        await runReviewPrompt(session, reducedRequest);
-      } catch (retryErr: unknown) {
-        if (!isReviewerSessionReuseError(retryErr)) {
-          throw retryErr;
-        }
-
-        endSession(session);
-        try {
-          session = await createReviewerSession();
-        } catch (recreateErr) {
-          if (recreateErr instanceof ReviewerPauseAbortError) {
-            return buildPauseUnavailableResult(recreateErr.reason);
-          }
-          throw recreateErr;
-        }
-        await runReviewPrompt(session, reducedRequest);
-      }
     }
-  } finally {
-    if (agentLogger) {
-      await agentLogger.flush();
-    }
-    for (const activeSession of [...activeSessions]) {
-      endSession(activeSession);
+
+    await logFallbackRetry("reviewer error", "same-model strict prompt");
+    try {
+      return await runAttempt(fallbackReviewRequest);
+    } catch {
+      throw err;
     }
   }
 
-  const verdict = extractVerdict(reviewText);
-  const summary = extractSummary(reviewText);
-  return { verdict, review: reviewText, summary };
+  if (firstAttempt.verdict !== "UNAVAILABLE") {
+    return firstAttempt;
+  }
+
+  if (hasConfiguredFallback) {
+    await logFallbackRetry("UNAVAILABLE verdict", `${validatorFallbackProvider}/${validatorFallbackModelId}`);
+    return runAttempt(request, {
+      forceProvider: validatorFallbackProvider,
+      forceModelId: validatorFallbackModelId,
+    });
+  }
+
+  await logFallbackRetry("UNAVAILABLE verdict", "same-model strict prompt");
+  return runAttempt(fallbackReviewRequest);
 }
 
 function isReviewerSessionReuseError(error: unknown): boolean {

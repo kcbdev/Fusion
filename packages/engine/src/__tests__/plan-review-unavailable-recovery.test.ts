@@ -38,8 +38,10 @@ describe("FN-4068 baseline — plan review UNAVAILABLE", () => {
     vi.clearAllMocks();
   });
 
-  it("returns UNAVAILABLE without recovery log when verdict is not parseable", async () => {
-    mockedCreateResolvedAgentSession.mockResolvedValue(buildSession("Reviewer output without verdict heading."));
+  it("retries once then returns terminal UNAVAILABLE when verdict is not parseable", async () => {
+    mockedCreateResolvedAgentSession
+      .mockResolvedValueOnce(buildSession("Reviewer output without verdict heading."))
+      .mockResolvedValueOnce(buildSession("Still no verdict heading."));
 
     const store = {
       getSettings: vi.fn().mockResolvedValue({}),
@@ -59,11 +61,11 @@ describe("FN-4068 baseline — plan review UNAVAILABLE", () => {
     );
 
     expect(result.verdict).toBe("UNAVAILABLE");
-    expect(result.review).toContain("without verdict");
-    expect(mockedCreateResolvedAgentSession).toHaveBeenCalledTimes(1);
-    expect(store.logEntry).not.toHaveBeenCalledWith(
+    expect(result.review).toContain("Still no verdict heading");
+    expect(mockedCreateResolvedAgentSession).toHaveBeenCalledTimes(2);
+    expect(store.logEntry).toHaveBeenCalledWith(
       "FN-4092",
-      expect.stringContaining("retry with fallback model"),
+      expect.stringContaining("review retry with fallback model after UNAVAILABLE verdict"),
     );
   });
 });

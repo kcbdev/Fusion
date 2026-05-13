@@ -387,7 +387,100 @@ describe("reviewStep — context-limit retry", () => {
     };
 
     await expect(runReview()).resolves.toEqual({ verdict: "UNAVAILABLE" });
-    expect(mockedPromptWithFallback).toHaveBeenCalledTimes(2);
+    expect(mockedPromptWithFallback).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("reviewStep — fallback retry for terminal unavailable", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("retries once on fallback model when first verdict is UNAVAILABLE", async () => {
+    mockedCreateFnAgent
+      .mockResolvedValueOnce(createMockSession("No parseable verdict here."))
+      .mockResolvedValueOnce(createMockSession("### Verdict: APPROVE\n### Summary\nRecovered on fallback."));
+
+    const store = {
+      getSettings: vi.fn().mockResolvedValue({}),
+      logEntry: vi.fn().mockResolvedValue(undefined),
+      appendAgentLog: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await reviewStep(
+      "/tmp/worktree", "FN-4092", 2, "Retry", "plan", "# prompt", undefined,
+      {
+        store: store as any,
+        taskId: "FN-4092",
+        projectValidatorFallbackProvider: "openai",
+        projectValidatorFallbackModelId: "gpt-5-mini",
+      },
+    );
+
+    expect(result.verdict).toBe("APPROVE");
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-4092",
+      expect.stringContaining("review retry with fallback model after UNAVAILABLE verdict"),
+    );
+  });
+
+  it("retries once after non-context reviewer error", async () => {
+    mockedCreateFnAgent
+      .mockResolvedValueOnce(createMockSession("### Verdict: APPROVE\n### Summary\nunused"))
+      .mockResolvedValueOnce(createMockSession("### Verdict: REVISE\n### Summary\nRetry recovered."));
+
+    mockedPromptWithFallback
+      .mockRejectedValueOnce(new Error("transient reviewer failure"))
+      .mockImplementation(async (session, prompt, options) => {
+        if (options == null) await session.prompt(prompt);
+        else await session.prompt(prompt, options);
+      });
+
+    const result = await reviewStep(
+      "/tmp/worktree", "FN-4092", 2, "Retry", "code", "# prompt", "abc123",
+      {
+        projectValidatorFallbackProvider: "openai",
+        projectValidatorFallbackModelId: "gpt-5-mini",
+      },
+    );
+
+    expect(result.verdict).toBe("REVISE");
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns terminal UNAVAILABLE when fallback attempt is also UNAVAILABLE", async () => {
+    mockedCreateFnAgent
+      .mockResolvedValueOnce(createMockSession("No parseable verdict #1"))
+      .mockResolvedValueOnce(createMockSession("No parseable verdict #2"));
+
+    const result = await reviewStep(
+      "/tmp/worktree", "FN-4092", 2, "Retry", "spec", "# prompt", undefined,
+      {
+        projectValidatorFallbackProvider: "openai",
+        projectValidatorFallbackModelId: "gpt-5-mini",
+      },
+    );
+
+    expect(result.verdict).toBe("UNAVAILABLE");
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry pause-driven UNAVAILABLE", async () => {
+    mockedCreateFnAgent.mockResolvedValue(createMockSession("### Verdict: APPROVE\n### Summary\nunused"));
+    const store = {
+      getSettings: vi.fn().mockResolvedValue({ globalPause: true }),
+      logEntry: vi.fn().mockResolvedValue(undefined),
+      appendAgentLog: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await reviewStep(
+      "/tmp/worktree", "FN-4092", 2, "Retry", "plan", "# prompt", undefined,
+      { store: store as any, taskId: "FN-4092" },
+    );
+
+    expect(result.verdict).toBe("UNAVAILABLE");
+    expect(mockedCreateFnAgent).not.toHaveBeenCalled();
   });
 });
 
@@ -1112,7 +1205,7 @@ describe("reviewStep — subagent lifecycle hooks", () => {
     const mockSession = createMockSession("");
     mockedCreateFnAgent.mockResolvedValue(mockSession);
     const { promptWithFallback } = await import("../pi.js");
-    vi.mocked(promptWithFallback).mockRejectedValueOnce(new Error("boom"));
+    vi.mocked(promptWithFallback).mockRejectedValue(new Error("boom"));
 
     const onSessionCreated = vi.fn();
     const onSessionEnded = vi.fn();
@@ -1125,7 +1218,7 @@ describe("reviewStep — subagent lifecycle hooks", () => {
       ),
     ).rejects.toThrow("boom");
 
-    expect(onSessionCreated).toHaveBeenCalledTimes(1);
-    expect(onSessionEnded).toHaveBeenCalledTimes(1);
+    expect(onSessionCreated).toHaveBeenCalledTimes(2);
+    expect(onSessionEnded).toHaveBeenCalledTimes(2);
   });
 });
