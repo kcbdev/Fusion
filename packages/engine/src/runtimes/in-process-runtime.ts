@@ -262,6 +262,18 @@ export class InProcessRuntime
         }
       }
 
+      // 5a. Initialize AgentStore (required for scheduler assignment, reflection service, and heartbeat monitoring)
+      let agentStoreForReflection: import("@fusion/core").AgentStore | undefined;
+      try {
+        const { AgentStore: AgentStoreClass } = await import("@fusion/core");
+        agentStoreForReflection = new AgentStoreClass({ rootDir: this.taskStore.getFusionDir(), taskStore: this.taskStore });
+        await agentStoreForReflection.init();
+        runtimeLog.log("AgentStore initialized for reflection service");
+      } catch (agentErr) {
+        runtimeLog.warn(`AgentStore initialization failed (reflection service will be unavailable):`, agentErr instanceof Error ? agentErr.message : agentErr);
+      }
+      this.agentStore = agentStoreForReflection;
+
       // 5. Initialize Scheduler
       const missionStore = this.taskStore.getMissionStore();
       this.missionAutopilot = missionStore
@@ -336,18 +348,6 @@ export class InProcessRuntime
           );
         },
       });
-
-      // 5a. Initialize AgentStore (required for reflection service and heartbeat monitoring)
-      let agentStoreForReflection: import("@fusion/core").AgentStore | undefined;
-      try {
-        const { AgentStore: AgentStoreClass } = await import("@fusion/core");
-        agentStoreForReflection = new AgentStoreClass({ rootDir: this.taskStore.getFusionDir(), taskStore: this.taskStore });
-        await agentStoreForReflection.init();
-        runtimeLog.log("AgentStore initialized for reflection service");
-      } catch (agentErr) {
-        runtimeLog.warn(`AgentStore initialization failed (reflection service will be unavailable):`, agentErr instanceof Error ? agentErr.message : agentErr);
-      }
-      this.agentStore = agentStoreForReflection;
 
       // 5b. Initialize ReflectionStore for agent reflections
       let reflectionStoreForService: import("@fusion/core").ReflectionStore | undefined;

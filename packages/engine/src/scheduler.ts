@@ -22,6 +22,7 @@ import { resolveEffectiveNode } from "./effective-node.js";
 import { applyUnavailableNodePolicy } from "./node-routing-policy.js";
 import type { NodeDispatchValidationResult } from "./node-dispatch-validation.js";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
+import { selectPermanentAgentForTask } from "./agent-assignment.js";
 
 /**
  * Check whether two sets of file scope paths overlap.
@@ -179,6 +180,8 @@ export class Scheduler {
   private wasNodeBlocked = new Set<string>();
   /** Tracks tasks blocked by missing project-node mapping to deduplicate block log entries. */
   private wasNodeDispatchValidationBlocked = new Set<string>();
+  /** Tracks tasks queued due to missing permanent executors when ephemeral workers are disabled. */
+  private wasPermanentAgentUnavailable = new Set<string>();
   /** Tracks dispatch-queued reason signatures to avoid per-tick log spam. */
   private wasDispatchQueuedReasonLogged = new Set<string>();
 
@@ -465,6 +468,7 @@ export class Scheduler {
     this.failedTaskIds.clear();
     this.wasNodeBlocked.clear();
     this.wasNodeDispatchValidationBlocked.clear();
+    this.wasPermanentAgentUnavailable.clear();
     this.wasDispatchQueuedReasonLogged.clear();
     schedulerLog.log("Stopped");
   }
@@ -772,6 +776,7 @@ export class Scheduler {
       // Resolve dependency order among todo tasks
       const ordered = resolveDependencyOrder(todo);
       let started = 0;
+      let loggedMissingAgentStoreThisPass = false;
 
       for (const taskId of ordered) {
         const task = tasks.find((t) => t.id === taskId)!;
@@ -954,6 +959,42 @@ export class Scheduler {
           }
         }
 
+        if (latestSettings.ephemeralAgentsEnabled === false && !freshTask.assignedAgentId) {
+          if (!this.options.agentStore) {
+            if (!loggedMissingAgentStoreThisPass) {
+              loggedMissingAgentStoreThisPass = true;
+              schedulerLog.warn("ephemeralAgentsEnabled=false but scheduler has no agentStore; falling back to legacy dispatch behavior");
+            }
+          } else {
+            const selectedAgent = await selectPermanentAgentForTask({
+              task: freshTask,
+              agentStore: this.options.agentStore,
+              taskStore: this.store,
+            });
+
+            if (!selectedAgent) {
+              await this.store.updateTask(task.id, { status: "queued" });
+              if (!this.wasPermanentAgentUnavailable.has(task.id)) {
+                await this.logDispatchQueuedReason(
+                  task.id,
+                  "queued — no permanent executor available (ephemeral agents disabled)",
+                );
+                this.wasPermanentAgentUnavailable.add(task.id);
+              }
+              continue;
+            }
+
+            await this.store.updateTask(task.id, { assignedAgentId: selectedAgent.id });
+            await this.store.logEntry(
+              task.id,
+              `Auto-assigned to permanent agent ${selectedAgent.id} (ephemeral agents disabled)`,
+            );
+            this.wasPermanentAgentUnavailable.delete(task.id);
+          }
+        } else {
+          this.wasPermanentAgentUnavailable.delete(task.id);
+        }
+
         // Clear status, reserve worktree path, and then move to in-progress.
         // Reset mergeRetries so a fresh execution gets a fresh merge budget —
         // otherwise a task whose previous run exhausted its 3 retries (e.g.
@@ -976,6 +1017,7 @@ export class Scheduler {
         });
         this.wasNodeBlocked.delete(task.id);
         this.wasNodeDispatchValidationBlocked.delete(task.id);
+        this.wasPermanentAgentUnavailable.delete(task.id);
         this.clearDispatchQueuedReasonMemo(task.id);
         await this.store.logEntry(task.id, `Node routing resolved: ${effectiveNode.nodeId ?? "local"} (source: ${effectiveNode.source})`);
         this.options.onSchedule?.(task);
