@@ -438,8 +438,10 @@
 
 .detail-github-tracking-enable {
   margin-left: auto;
-  align-self: flex-start;
+  align-self: center;
   flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
   padding-block: calc(var(--space-xs) / 2);
   padding-inline: var(--space-sm);
   line-height: 1.2;
@@ -1639,6 +1641,8 @@
 
   .detail-github-tracking-section .detail-github-tracking-enable {
     margin-left: auto;
+    min-width: 44px; /* Match the global .touch-target minimum on mobile. */
+    min-height: 44px; /* Match the global .touch-target minimum on mobile. */
     justify-content: center;
   }
 
