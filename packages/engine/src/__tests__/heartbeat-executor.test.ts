@@ -213,12 +213,113 @@ describe("executeHeartbeat", () => {
       const now = Date.now();
       const store = createStoreWithAgentForExec();
       vi.mocked(store.getAgentsByReportsTo).mockResolvedValue([
-        { id: "agent-003", name: "agent-3", state: "active", taskId: "FN-101", lastHeartbeatAt: new Date(now - 3 * 60 * 60 * 1000).toISOString(), updatedAt: new Date(now - 3 * 60 * 60 * 1000).toISOString() } as Agent,
+        { id: "agent-003", name: "agent-3", state: "active", taskId: "FN-101", lastHeartbeatAt: new Date(now - 5 * 60 * 60 * 1000).toISOString(), updatedAt: new Date(now - 5 * 60 * 60 * 1000).toISOString() } as Agent,
       ]);
       const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp", heartbeatTimeoutMs: 60_000 });
 
       const section = await (monitor as any).buildReportsHealthSection("agent-001", store);
       expect(section).toContain("**stale**");
+    });
+
+    it("buildReportsHealthSection keeps 60m-interval reports healthy within the grace window", async () => {
+      const now = Date.now();
+      const store = createStoreWithAgentForExec();
+      vi.mocked(store.getCachedAgent).mockImplementation((id: string) => ({
+        id,
+        runtimeConfig: { heartbeatIntervalMs: 60 * 60_000 },
+      }) as Agent);
+      vi.mocked(store.getAgentsByReportsTo).mockResolvedValue([
+        { id: "agent-frontend", name: "Frontend Engineer", state: "active", taskId: "FN-201", lastHeartbeatAt: new Date(now - 53 * 60_000).toISOString(), updatedAt: new Date(now - 53 * 60_000).toISOString() } as Agent,
+        { id: "agent-writer", name: "Technical Writer", state: "active", taskId: "FN-202", lastHeartbeatAt: new Date(now - 51 * 60_000).toISOString(), updatedAt: new Date(now - 51 * 60_000).toISOString() } as Agent,
+        { id: "agent-qa", name: "QA Engineer", state: "active", taskId: "FN-203", lastHeartbeatAt: new Date(now - 35 * 60_000).toISOString(), updatedAt: new Date(now - 35 * 60_000).toISOString() } as Agent,
+        { id: "agent-ci", name: "CI Engineer", state: "active", taskId: "FN-204", lastHeartbeatAt: new Date(now - 39 * 60_000).toISOString(), updatedAt: new Date(now - 39 * 60_000).toISOString() } as Agent,
+      ]);
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      const section = await (monitor as any).buildReportsHealthSection("agent-001", store);
+      expect(section).not.toContain("**stale**");
+      expect(section).toContain("Frontend Engineer");
+      expect(section).toContain("Technical Writer");
+      expect(section).toContain("QA Engineer");
+      expect(section).toContain("CI Engineer");
+    });
+
+    it("buildReportsHealthSection marks overdue 60m-interval reports as stale", async () => {
+      const now = Date.now();
+      const store = createStoreWithAgentForExec();
+      vi.mocked(store.getCachedAgent).mockImplementation((id: string) => ({
+        id,
+        runtimeConfig: { heartbeatIntervalMs: 60 * 60_000 },
+      }) as Agent);
+      vi.mocked(store.getAgentsByReportsTo).mockResolvedValue([
+        {
+          id: "agent-overdue-a",
+          name: "Overdue A",
+          state: "active",
+          taskId: "FN-205",
+          lastHeartbeatAt: new Date(now - ((1 * 60 + 47) * 60_000 + 4 * 60 * 60_000)).toISOString(),
+          updatedAt: new Date(now - ((1 * 60 + 47) * 60_000 + 4 * 60 * 60_000)).toISOString(),
+        } as Agent,
+        {
+          id: "agent-overdue-b",
+          name: "Overdue B",
+          state: "active",
+          taskId: "FN-206",
+          lastHeartbeatAt: new Date(now - 5 * 60 * 60_000).toISOString(),
+          updatedAt: new Date(now - 5 * 60 * 60_000).toISOString(),
+        } as Agent,
+      ]);
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      const section = await (monitor as any).buildReportsHealthSection("agent-001", store);
+      expect(section).toContain("Overdue A");
+      expect(section).toContain("Overdue B");
+      expect(section).toContain("**stale**");
+    });
+
+    it("buildReportsHealthSection applies interval-specific stale thresholds in mixed report tables", async () => {
+      const now = Date.now();
+      const store = createStoreWithAgentForExec();
+      vi.mocked(store.getCachedAgent).mockImplementation((id: string) => {
+        if (id === "agent-short") {
+          return { id, runtimeConfig: { heartbeatIntervalMs: 5 * 60_000 } } as Agent;
+        }
+        if (id === "agent-medium") {
+          return { id, runtimeConfig: { heartbeatIntervalMs: 60 * 60_000 } } as Agent;
+        }
+        if (id === "agent-long") {
+          return { id, runtimeConfig: { heartbeatIntervalMs: 4 * 60 * 60_000 } } as Agent;
+        }
+        return null;
+      });
+      vi.mocked(store.getAgentsByReportsTo).mockResolvedValue([
+        { id: "agent-short", name: "Short Interval", state: "active", taskId: "FN-207", lastHeartbeatAt: new Date(now - 30 * 60_000).toISOString(), updatedAt: new Date(now - 30 * 60_000).toISOString() } as Agent,
+        { id: "agent-medium", name: "Medium Interval", state: "active", taskId: "FN-208", lastHeartbeatAt: new Date(now - 30 * 60_000).toISOString(), updatedAt: new Date(now - 30 * 60_000).toISOString() } as Agent,
+        { id: "agent-long", name: "Long Interval", state: "active", taskId: "FN-209", lastHeartbeatAt: new Date(now - 30 * 60_000).toISOString(), updatedAt: new Date(now - 30 * 60_000).toISOString() } as Agent,
+      ]);
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      const section = await (monitor as any).buildReportsHealthSection("agent-001", store);
+      expect(section).toMatch(/\| Short Interval \| active \| FN-207 \| .* \| \*\*stale\*\* \|/);
+      expect(section).toMatch(/\| Medium Interval \| active \| FN-208 \| .* \| healthy \|/);
+      expect(section).toMatch(/\| Long Interval \| active \| FN-209 \| .* \| healthy \|/);
+    });
+
+    it("buildReportsHealthSection enforces a 5-minute minimum staleness floor", async () => {
+      const now = Date.now();
+      const store = createStoreWithAgentForExec();
+      vi.mocked(store.getCachedAgent).mockImplementation((id: string) => ({
+        id,
+        runtimeConfig: { heartbeatIntervalMs: 1_000 },
+      }) as Agent);
+      vi.mocked(store.getAgentsByReportsTo).mockResolvedValue([
+        { id: "agent-fast", name: "Fast Poller", state: "active", taskId: "FN-210", lastHeartbeatAt: new Date(now - 2 * 60_000).toISOString(), updatedAt: new Date(now - 2 * 60_000).toISOString() } as Agent,
+      ]);
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      const section = await (monitor as any).buildReportsHealthSection("agent-001", store);
+      expect(section).toContain("Fast Poller");
+      expect(section).not.toContain("**stale**");
     });
 
     it("buildReportsHealthSection preserves AgentStore method binding for direct-report lookups", async () => {
