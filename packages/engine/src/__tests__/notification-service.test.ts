@@ -12,10 +12,12 @@ type Listener = (...args: any[]) => void | Promise<void>;
 
 function createStore(settings: Partial<Settings> = {}) {
   const listeners = new Map<string, Set<Listener>>();
+  const tasks = new Map<string, Task>();
   const getBucket = (event: string) => listeners.get(event) ?? new Set<Listener>();
 
   return {
     getSettings: vi.fn(async () => ({ ntfyEnabled: false, ...settings }) as Settings),
+    getTask: vi.fn(async (id: string) => tasks.get(id)),
     on: vi.fn((event: string, listener: Listener) => {
       const bucket = getBucket(event);
       bucket.add(listener);
@@ -28,6 +30,9 @@ function createStore(settings: Partial<Settings> = {}) {
       for (const listener of getBucket(event)) {
         void listener(payload);
       }
+    },
+    setTask(task: Task) {
+      tasks.set(task.id, task);
     },
   };
 }
@@ -578,5 +583,43 @@ describe("NotificationService", () => {
 
     await first.stop();
     await second.stop();
+  });
+
+  it("suppresses transient failed notification after Auto-recovered status clear", async () => {
+    vi.useFakeTimers();
+    const store = createStore({ ntfyEnabled: true, ntfyTopic: "topic", failureNotificationMode: "sticky-only", failureNotificationDelayMs: 50 });
+    const sendNotification = vi.fn(async () => ({ success: true, providerId: "mock" }));
+    const service = new NotificationService(store as any);
+    service.registerProvider({ getProviderId: () => "mock", isEventSupported: () => true, sendNotification });
+    await service.start();
+
+    store.setTask(task({ id: "FN-1", status: "failed", column: "in-review" }));
+    store.emit("task:updated", task({ id: "FN-1", status: "failed", column: "in-review" }));
+    store.setTask(task({ id: "FN-1", status: "in-review", column: "in-review", log: [{ timestamp: new Date().toISOString(), action: "Auto-recovered: merge deadlock resolved" }] }));
+    store.emit("task:updated", task({ id: "FN-1", status: "in-review" }));
+
+    await vi.advanceTimersByTimeAsync(60);
+    expect(sendNotification).not.toHaveBeenCalledWith("failed", expect.anything());
+    await service.stop();
+    vi.useRealTimers();
+  });
+
+  it("dispatches failed once when failure persists beyond grace window", async () => {
+    vi.useFakeTimers();
+    const store = createStore({ ntfyEnabled: true, ntfyTopic: "topic", failureNotificationMode: "sticky-only", failureNotificationDelayMs: 50 });
+    const sendNotification = vi.fn(async () => ({ success: true, providerId: "mock" }));
+    const service = new NotificationService(store as any);
+    service.registerProvider({ getProviderId: () => "mock", isEventSupported: () => true, sendNotification });
+    await service.start();
+
+    const failed = task({ id: "FN-1", status: "failed" });
+    store.setTask(failed);
+    store.emit("task:updated", failed);
+
+    await vi.advanceTimersByTimeAsync(60);
+    expect(sendNotification).toHaveBeenCalledTimes(1);
+    expect(sendNotification).toHaveBeenCalledWith("failed", expect.objectContaining({ taskId: "FN-1" }));
+    await service.stop();
+    vi.useRealTimers();
   });
 });
