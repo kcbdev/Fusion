@@ -60,6 +60,7 @@ class BadgeWebSocketStore {
   private ws: WebSocket | null = null;
   private listeners = new Set<() => void>();
   private badgeUpdates = new Map<string, BadgeSnapshot>();
+  private retainedBadgeUpdates = new Map<string, BadgeSnapshot>();
   private subscriptionsByTask = new Map<string, Set<string>>();
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelayMs = 1_000;
@@ -76,6 +77,7 @@ class BadgeWebSocketStore {
   private previousProjectIdRef: string | null = null;
   private projectContextVersionRef = 0;
   private contextVersionAtStart = 0;
+  private static readonly RETAINED_BADGE_CAP = 200;
 
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
@@ -127,6 +129,13 @@ class BadgeWebSocketStore {
 
   subscribeTask(hookId: string, taskId: string): void {
     const scopedKey = toScopedKey(this.projectId, taskId);
+    const retainedSnapshot = this.retainedBadgeUpdates.get(scopedKey);
+    if (retainedSnapshot && !this.badgeUpdates.has(scopedKey)) {
+      this.badgeUpdates.set(scopedKey, retainedSnapshot);
+      this.retainedBadgeUpdates.delete(scopedKey);
+      this.emit();
+    }
+
     const subscribers = this.subscriptionsByTask.get(scopedKey) ?? new Set<string>();
     const isNewSubscription = !subscribers.has(hookId);
     subscribers.add(hookId);
@@ -150,6 +159,18 @@ class BadgeWebSocketStore {
     subscribers.delete(hookId);
     if (subscribers.size === 0) {
       this.subscriptionsByTask.delete(scopedKey);
+      const snapshot = this.badgeUpdates.get(scopedKey);
+      if (snapshot) {
+        // Keep a bounded cache of last-known snapshots so cards can restore badge state
+        // immediately after transient viewport unsubscriptions. Cap prevents unbounded growth.
+        this.retainedBadgeUpdates.delete(scopedKey);
+        this.retainedBadgeUpdates.set(scopedKey, snapshot);
+        while (this.retainedBadgeUpdates.size > BadgeWebSocketStore.RETAINED_BADGE_CAP) {
+          const oldestKey = this.retainedBadgeUpdates.keys().next().value;
+          if (!oldestKey) break;
+          this.retainedBadgeUpdates.delete(oldestKey);
+        }
+      }
       this.badgeUpdates.delete(scopedKey);
       this.send({ type: "unsubscribe", taskId, projectId: this.projectId });
       this.emit();
@@ -172,6 +193,7 @@ class BadgeWebSocketStore {
   reset(): void {
     this.disconnect();
     this.badgeUpdates.clear();
+    this.retainedBadgeUpdates.clear();
     this.subscriptionsByTask.clear();
     this.shouldReconnect = false;
     this.emit();

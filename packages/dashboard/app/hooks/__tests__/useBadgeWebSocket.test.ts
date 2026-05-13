@@ -207,7 +207,7 @@ describe("useBadgeWebSocket", () => {
     expect(subscribeMsg).toBeDefined();
   });
 
-  it("sends unsubscribe, retains cached state, and closes the socket when the final subscription is removed", () => {
+  it("sends unsubscribe, moves cached state to retention, and closes the socket when the final subscription is removed", () => {
     const { result } = renderHook(() => useBadgeWebSocket());
 
     act(() => {
@@ -240,7 +240,76 @@ describe("useBadgeWebSocket", () => {
     });
     expect(unsubscribeMsg).toBeDefined();
     expect(MockWebSocket.instances[0].close).toHaveBeenCalled();
-    expect(result.current.badgeUpdates.has("default:FN-063")).toBe(true);
+    expect(result.current.badgeUpdates.has("default:FN-063")).toBe(false);
+  });
+
+  it("restores retained snapshot immediately after re-subscribing", () => {
+    const { result } = renderHook(() => useBadgeWebSocket());
+
+    act(() => {
+      result.current.subscribeToBadge("FN-063");
+      MockWebSocket.instances[0].emitOpen();
+      MockWebSocket.instances[0].emitMessage({
+        type: "badge:updated",
+        taskId: "FN-063",
+        prInfo: {
+          url: "https://github.com/owner/repo/pull/1",
+          number: 1,
+          status: "open",
+          title: "Tracked PR",
+          headBranch: "feature/test",
+          baseBranch: "main",
+          commentCount: 0,
+        },
+        timestamp: "2026-03-30T12:00:00.000Z",
+      });
+      result.current.unsubscribeFromBadge("FN-063");
+    });
+
+    expect(result.current.badgeUpdates.has("default:FN-063")).toBe(false);
+
+    act(() => {
+      result.current.subscribeToBadge("FN-063");
+    });
+
+    expect(result.current.badgeUpdates.get("default:FN-063")?.prInfo?.number).toBe(1);
+  });
+
+  it("evicts oldest retained snapshot when retention cap is exceeded", () => {
+    const { result } = renderHook(() => useBadgeWebSocket());
+
+    act(() => {
+      MockWebSocket.instances[0]?.emitOpen();
+      for (let i = 1; i <= 201; i++) {
+        const taskId = `FN-${String(i).padStart(3, "0")}`;
+        result.current.subscribeToBadge(taskId);
+        MockWebSocket.instances[0].emitMessage({
+          type: "badge:updated",
+          taskId,
+          prInfo: {
+            url: `https://github.com/owner/repo/pull/${i}`,
+            number: i,
+            status: "open",
+            title: `Tracked PR ${i}`,
+            headBranch: "feature/test",
+            baseBranch: "main",
+            commentCount: 0,
+          },
+          timestamp: "2026-03-30T12:00:00.000Z",
+        });
+        result.current.unsubscribeFromBadge(taskId);
+      }
+    });
+
+    act(() => {
+      result.current.subscribeToBadge("FN-001");
+    });
+    expect(result.current.badgeUpdates.get("default:FN-001")).toBeUndefined();
+
+    act(() => {
+      result.current.subscribeToBadge("FN-201");
+    });
+    expect(result.current.badgeUpdates.get("default:FN-201")?.prInfo?.number).toBe(201);
   });
 
   it("shares a single websocket and ref-counted subscription across hook instances", () => {
@@ -300,6 +369,41 @@ describe("useBadgeWebSocket", () => {
       return parsed.type === "unsubscribe" && parsed.taskId === "FN-063";
     });
     expect(unsubscribeMsg).toBeDefined();
+  });
+
+  it("reset clears retained snapshots", () => {
+    const { result, unmount } = renderHook(() => useBadgeWebSocket());
+
+    act(() => {
+      result.current.subscribeToBadge("FN-063");
+      MockWebSocket.instances[0].emitOpen();
+      MockWebSocket.instances[0].emitMessage({
+        type: "badge:updated",
+        taskId: "FN-063",
+        prInfo: {
+          url: "https://github.com/owner/repo/pull/1",
+          number: 1,
+          status: "open",
+          title: "Tracked PR",
+          headBranch: "feature/test",
+          baseBranch: "main",
+          commentCount: 0,
+        },
+        timestamp: "2026-03-30T12:00:00.000Z",
+      });
+      result.current.unsubscribeFromBadge("FN-063");
+    });
+
+    unmount();
+    __resetBadgeWebSocketStoreForTests();
+
+    const next = renderHook(() => useBadgeWebSocket());
+    act(() => {
+      next.result.current.subscribeToBadge("FN-063");
+    });
+
+    expect(next.result.current.badgeUpdates.get("default:FN-063")).toBeUndefined();
+    next.unmount();
   });
 
   describe("projectId support", () => {
@@ -393,6 +497,32 @@ describe("useBadgeWebSocket", () => {
       ).length;
 
       expect(newSubscribe).toBeGreaterThanOrEqual(1);
+    });
+
+    it("invalidates retained snapshots on project change", () => {
+      const { result, rerender } = renderHook(
+        ({ projectId }: { projectId?: string }) => useBadgeWebSocket(projectId),
+        { initialProps: { projectId: "proj-A" } },
+      );
+
+      act(() => {
+        result.current.subscribeToBadge("FN-063");
+        MockWebSocket.instances[0].emitOpen();
+        MockWebSocket.instances[0].emitMessage({
+          type: "badge:updated",
+          taskId: "FN-063",
+          prInfo: { url: "https://github.com/owner/repo/pull/1", number: 1, status: "open", title: "Test PR", headBranch: "feat", baseBranch: "main", commentCount: 0 },
+          timestamp: "2026-03-30T12:00:00.000Z",
+        });
+        result.current.unsubscribeFromBadge("FN-063");
+      });
+
+      rerender({ projectId: "proj-B" });
+      act(() => {
+        result.current.subscribeToBadge("FN-063");
+      });
+
+      expect(result.current.badgeUpdates.get("proj-B:FN-063")).toBeUndefined();
     });
 
     it("clears badge updates on project change", async () => {
