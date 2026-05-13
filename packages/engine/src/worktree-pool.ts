@@ -1,12 +1,20 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, rmSync, realpathSync } from "node:fs";
 import { join, relative, resolve, isAbsolute } from "node:path";
 import type { Column, TaskStore } from "@fusion/core";
 import { inspectBranchConflict } from "./branch-conflicts.js";
 import { worktreePoolLog } from "./logger.js";
 
 const execAsync = promisify(exec);
+
+function canonicalizePath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
 
 function getExecStdout(result: unknown): string {
   if (typeof result === "string") return result;
@@ -42,7 +50,7 @@ export async function getRegisteredWorktreePaths(rootDir: string): Promise<Set<s
     const paths = new Set<string>();
     for (const line of stdout.split("\n")) {
       if (line.startsWith("worktree ")) {
-        paths.add(resolve(line.slice("worktree ".length)));
+        paths.add(canonicalizePath(line.slice("worktree ".length)));
       }
     }
     return paths;
@@ -54,7 +62,7 @@ export async function getRegisteredWorktreePaths(rootDir: string): Promise<Set<s
 }
 
 export async function isRegisteredGitWorktree(rootDir: string, worktreePath: string): Promise<boolean> {
-  return (await getRegisteredWorktreePaths(rootDir)).has(resolve(worktreePath));
+  return (await getRegisteredWorktreePaths(rootDir)).has(canonicalizePath(worktreePath));
 }
 
 export function hasRequiredWorktreeFiles(worktreePath: string): boolean {
@@ -68,8 +76,8 @@ export async function isUsableTaskWorktree(rootDir: string, worktreePath: string
 }
 
 export function isInsideWorktreesDir(rootDir: string, worktreePath: string): boolean {
-  const worktreesDir = resolve(rootDir, ".worktrees");
-  const target = resolve(worktreePath);
+  const worktreesDir = canonicalizePath(join(rootDir, ".worktrees"));
+  const target = canonicalizePath(worktreePath);
   const rel = relative(worktreesDir, target);
   return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }

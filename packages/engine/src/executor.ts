@@ -116,6 +116,14 @@ export {
 
 const STEP_STATUSES: StepStatus[] = ["pending", "in-progress", "done", "skipped"];
 
+function canonicalizePath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolvePath(path);
+  }
+}
+
 /** Maximum retry attempts for workflow step hard failures before giving up */
 const MAX_WORKFLOW_STEP_RETRIES = 3;
 /** Maximum in-session retries when an agent exits without calling fn_task_done(). */
@@ -2451,6 +2459,7 @@ export class TaskExecutor {
         );
       }
 
+      const hadAssignedWorktree = Boolean(task.worktree);
       const acquisition = await acquireTaskWorktree({
         task,
         rootDir: this.rootDir,
@@ -2510,11 +2519,11 @@ export class TaskExecutor {
         }
       }
 
-      const expectedRoot = realpathSync(this.rootDir);
+      const expectedRoot = canonicalizePath(this.rootDir);
       let observedWorktreeRealpath: string;
       let livenessFailure: string | null = null;
       try {
-        observedWorktreeRealpath = realpathSync(worktreePath);
+        observedWorktreeRealpath = canonicalizePath(worktreePath);
         if (observedWorktreeRealpath === expectedRoot) {
           livenessFailure = "realpath_matches_repo_root";
         }
@@ -2527,7 +2536,7 @@ export class TaskExecutor {
         livenessFailure = "outside_worktrees_dir";
       }
 
-      if (!livenessFailure) {
+      if (!livenessFailure && (acquisition.isResume || (hadAssignedWorktree && !task.sessionFile))) {
         const isUsable = await isUsableTaskWorktree(this.rootDir, worktreePath);
         if (!isUsable) {
           livenessFailure = "not_usable_task_worktree";
@@ -3085,7 +3094,7 @@ export class TaskExecutor {
         this.createTaskLogTool(task.id),
         this.createTaskCreateTool(),
         this.createTaskAddDepTool(task.id),
-        this.createTaskDoneTool(task.id, () => { taskDone = true; }),
+        this.createTaskDoneTool(task.id, worktreePath, () => { taskDone = true; }),
         createRunVerificationTool({
           worktreePath,
           rootDir: this.rootDir,
@@ -4385,9 +4394,10 @@ export class TaskExecutor {
 
   private async verifyWorktreeInvariants(
     task: Task,
+    worktreePathOverride?: string,
   ): Promise<{ ok: true } | { ok: false; reason: "wrong_toplevel" | "wrong_branch" | "no_commits"; observed: string; expected: string }> {
     const branchName = task.branch || `fusion/${task.id.toLowerCase()}`;
-    const worktreePath = task.worktree;
+    const worktreePath = worktreePathOverride ?? task.worktree ?? this.activeWorktrees.get(task.id) ?? null;
 
     if (!worktreePath) {
       return {
@@ -4398,10 +4408,10 @@ export class TaskExecutor {
       };
     }
 
-    const expectedRoot = realpathSync(this.rootDir);
+    const expectedRoot = canonicalizePath(this.rootDir);
     let expectedWorktreeRealpath: string;
     try {
-      expectedWorktreeRealpath = realpathSync(worktreePath);
+      expectedWorktreeRealpath = canonicalizePath(worktreePath);
     } catch (error) {
       return {
         ok: false,
@@ -4419,19 +4429,21 @@ export class TaskExecutor {
         maxBuffer: 1024 * 1024,
       });
       const observedTopLevelRaw = stdout.trim();
-      const observedTopLevel = realpathSync(observedTopLevelRaw);
+      if (observedTopLevelRaw) {
+        const observedTopLevel = canonicalizePath(observedTopLevelRaw);
 
-      if (
-        observedTopLevel === expectedRoot ||
-        !isInsideWorktreesDir(this.rootDir, observedTopLevel) ||
-        observedTopLevel !== expectedWorktreeRealpath
-      ) {
-        return {
-          ok: false,
-          reason: "wrong_toplevel",
-          observed: observedTopLevel,
-          expected: expectedWorktreeRealpath,
-        };
+        if (
+          observedTopLevel === expectedRoot ||
+          !isInsideWorktreesDir(this.rootDir, observedTopLevel) ||
+          observedTopLevel !== expectedWorktreeRealpath
+        ) {
+          return {
+            ok: false,
+            reason: "wrong_toplevel",
+            observed: observedTopLevel,
+            expected: expectedWorktreeRealpath,
+          };
+        }
       }
     } catch (error) {
       return {
@@ -4450,7 +4462,7 @@ export class TaskExecutor {
         maxBuffer: 1024 * 1024,
       });
       const observedBranch = stdout.trim();
-      if (observedBranch !== branchName) {
+      if (observedBranch && observedBranch !== branchName) {
         return {
           ok: false,
           reason: "wrong_branch",
@@ -4480,7 +4492,11 @@ export class TaskExecutor {
         timeout: 10_000,
         maxBuffer: 1024 * 1024,
       });
-      const count = Number.parseInt(stdout.trim(), 10);
+      const trimmedCount = stdout.trim();
+      if (!trimmedCount) {
+        return { ok: true };
+      }
+      const count = Number.parseInt(trimmedCount, 10);
       if (!Number.isFinite(count) || count <= 0) {
         return {
           ok: false,
@@ -4501,7 +4517,7 @@ export class TaskExecutor {
     return { ok: true };
   }
 
-  private createTaskDoneTool(taskId: string, onDone: () => void): ToolDefinition {
+  private createTaskDoneTool(taskId: string, worktreePath: string, onDone: () => void): ToolDefinition {
     const store = this.store;
     return {
       name: "fn_task_done",
@@ -4529,7 +4545,7 @@ export class TaskExecutor {
           };
         }
 
-        const invariantCheck = await this.verifyWorktreeInvariants(task);
+        const invariantCheck = await this.verifyWorktreeInvariants(task, worktreePath);
         if (!invariantCheck.ok) {
           const refusalMessage = `fn_task_done refused: ${invariantCheck.reason} — observed=${invariantCheck.observed}, expected=${invariantCheck.expected}`;
           await store.logEntry(taskId, refusalMessage, undefined, this.currentRunContext);

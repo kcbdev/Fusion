@@ -147,7 +147,7 @@ describe("WorkflowResultsTab", () => {
     expect(pendingBadge).toHaveClass("workflow-result-badge--pending");
   });
 
-  it("shows the waiting placeholder when pending-step logs have not started yet", () => {
+  it("FN-4214: shows waiting placeholder when pending-step entries are all stale", () => {
     const historicalEntries: AgentLogEntry[] = [
       {
         timestamp: "2026-03-31T10:03:00Z",
@@ -170,8 +170,37 @@ describe("WorkflowResultsTab", () => {
       <WorkflowResultsTab taskId="FN-001" results={mockResults} isTaskInProgress />,
     );
 
-    expect(screen.getByText("Waiting for agent output…")).toBeInTheDocument();
+    const liveLogPanel = screen.getByTestId("workflow-live-log-WS-004");
+    expect(within(liveLogPanel).getByText("Waiting for agent output…")).toBeInTheDocument();
     expect(screen.queryByText("Earlier workflow output")).not.toBeInTheDocument();
+  });
+
+  it("FN-4214: hides waiting placeholder when current-step log entries exist", () => {
+    const currentStepEntries: AgentLogEntry[] = [
+      {
+        timestamp: "2026-03-31T10:03:25Z",
+        taskId: "FN-001",
+        text: "Current workflow output",
+        type: "text",
+      },
+    ];
+    mockedUseAgentLogs.mockReturnValue({
+      entries: currentStepEntries,
+      loading: false,
+      clear: vi.fn(),
+      loadMore: vi.fn(),
+      hasMore: false,
+      total: currentStepEntries.length,
+      loadingMore: false,
+    });
+
+    render(
+      <WorkflowResultsTab taskId="FN-001" results={mockResults} isTaskInProgress />,
+    );
+
+    const liveLogPanel = screen.getByTestId("workflow-live-log-WS-004");
+    expect(within(liveLogPanel).queryByText("Waiting for agent output…")).not.toBeInTheDocument();
+    expect(within(liveLogPanel).getByText("Current workflow output")).toBeInTheDocument();
   });
 
   it("shows output content when toggle is clicked to expand", () => {
