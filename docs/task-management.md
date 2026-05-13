@@ -150,6 +150,8 @@ fn task unarchive FN-001
 
 **Global pause vs task pause:** `settings.globalPause` gates new scheduler dispatches and is checked by the `fn_task_done` handoff logic. Task-level `task.paused` is a per-task gate that blocks execution start. They are independent — a task can be paused individually even when `globalPause` is `false`, and clearing `task.paused` does not affect `globalPause`.
 
+**Branch-conflict tripwire:** Executor tracks branch-conflict failures per task in-memory. After more than 5 `BranchConflictError` events for the same task in one executor lifetime, Fusion short-circuits recovery, marks the task `status: "failed"`, sets `paused: true`, and sets `pausedReason: "branch-conflict-tripwire"` to stop further automatic retries and suppress additional "Branch conflict recovery required" emissions for that task.
+
 ### Stranded-worktree recovery
 
 When Fusion detects uncommitted task-attributable changes in a task worktree during a requeue/release path, it will **not** silently move the task back to `todo`/`triage`. Instead, it parks the task in `status: "failed"` so operators can recover the stranded workspace state.
