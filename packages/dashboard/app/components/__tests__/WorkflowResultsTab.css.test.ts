@@ -16,4 +16,10 @@ describe("WorkflowResultsTab CSS contract", () => {
     expect(allCss).toContain("@media (max-width: 768px)");
     expect(allCss).toMatch(/\.workflow-result-output-header\s*\{[^}]*align-items\s*:\s*flex-start\s*;/);
   });
+
+  it("FN-4352: workflow expand toggle avoids mobile min-size inflation", async () => {
+    const allCss = await loadAllAppCss();
+    expect(allCss).not.toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.workflow-result-expand-toggle\s*\{[^}]*min-height\s*:/);
+    expect(allCss).not.toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.workflow-result-expand-toggle\s*\{[^}]*min-width\s*:/);
+  });
 });
