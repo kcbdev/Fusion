@@ -11,6 +11,7 @@ import { execSync } from "node:child_process";
 import { findWorktreeUser, aiMergeTask } from "../merger.js";
 import { WorktreePool } from "../worktree-pool.js";
 import { BranchConflictError } from "../branch-conflicts.js";
+import * as branchConflictModule from "../branch-conflicts.js";
 import { generateWorktreeName, slugify } from "../worktree-names.js";
 import type { Task, TaskDetail } from "@fusion/core";
 import { SessionManager } from "@mariozechner/pi-coding-agent";
@@ -827,6 +828,38 @@ describe("TaskExecutor worktree recovery", () => {
       "executor",
     );
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-050" }), expect.any(BranchConflictError));
+  });
+
+  it("FN-4397 reproduces repeated branch-conflict recovery-required emissions for the same task", async () => {
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+    const conflictError = new BranchConflictError({
+      branchName: "fusion/fn-050",
+      conflictingWorktreePath: "/tmp/test/.worktrees/green-sage",
+      existingTipSha: "abc123def456",
+      strandedCommits: [],
+      startPoint: "HEAD",
+      recommendedAction: "Reclaim the existing task branch/worktree or explicitly discard prior work before retrying.",
+    });
+
+    vi.spyOn(branchConflictModule, "inspectBranchConflict").mockResolvedValue({
+      kind: "live",
+      error: conflictError,
+    });
+
+    await (executor as any).handleBranchConflict(makeTask(), conflictError);
+    await (executor as any).handleBranchConflict(makeTask(), conflictError);
+    await (executor as any).handleBranchConflict(makeTask(), conflictError);
+
+    expect(store.appendAgentLog).toHaveBeenCalledTimes(3);
+    expect(store.appendAgentLog).toHaveBeenNthCalledWith(
+      1,
+      "FN-050",
+      "Branch conflict recovery required",
+      "tool_error",
+      expect.any(String),
+      "executor",
+    );
   });
 
   it("falls back to default base and clears task.executionStartBranch when the configured base ref is missing (FN-2165)", async () => {
