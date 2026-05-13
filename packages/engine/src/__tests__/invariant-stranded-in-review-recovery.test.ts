@@ -47,11 +47,13 @@ function createStore(tasks: Task[]): TaskStore & EventEmitter {
   }) as unknown as TaskStore & EventEmitter;
 }
 
+const opts = { rootDir: "/repo", getExecutingTaskIds: () => new Set<string>() };
+
 describe("FN-4115 stranded in-review recovery", () => {
   it("FN-4115: already-merged retry-exhausted in-review task auto-finalizes to done", async () => {
     const task = makeTask("FN-4115-A", { column: "in-review", status: "failed", mergeRetries: 3, branch: "fusion/fn-4115-a" });
     const store = createStore([task]);
-    const mgr = new SelfHealingManager(store as any, "/repo");
+    const mgr = new SelfHealingManager(store as any, opts);
     vi.spyOn(mgr as any, "findAlreadyMergedTaskCommit").mockResolvedValue({ sha: "abc12345", strategy: "task-id-trailer" });
     const recovered = await mgr.recoverAlreadyMergedReviewTasks();
     expect(recovered).toBe(1);
@@ -64,7 +66,7 @@ describe("FN-4115 stranded in-review recovery", () => {
     const active = makeTask("FN-4115-ACTIVE", { column: "in-progress" });
     const blockedActive = makeTask("FN-4115-DOWN2", { column: "todo", blockedBy: "FN-4115-ACTIVE" });
     const store = createStore([done, blocked, active, blockedActive]);
-    const mgr = new SelfHealingManager(store as any, "/repo");
+    const mgr = new SelfHealingManager(store as any, opts);
     await mgr.clearStaleBlockedBy();
     expect((await store.getTask("FN-4115-DOWN"))?.blockedBy).toBeNull();
     expect((await store.getTask("FN-4115-DOWN2"))?.blockedBy).toBe("FN-4115-ACTIVE");
@@ -84,9 +86,10 @@ describe("FN-4115 stranded in-review recovery", () => {
     const merged = makeTask("FN-4115-MERGED", { column: "in-review", status: "failed", mergeRetries: 3, branch: "fusion/fn-4115-m" });
     const downstream = makeTask("FN-4115-DOWNSTREAM", { column: "todo", blockedBy: "FN-4115-MERGED" });
     const store = createStore([merged, downstream]);
-    const mgr = new SelfHealingManager(store as any, "/repo");
+    const mgr = new SelfHealingManager(store as any, opts);
     vi.spyOn(mgr as any, "findAlreadyMergedTaskCommit").mockResolvedValue({ sha: "abc12345", strategy: "task-id-trailer" });
-    await mgr.runMaintenance();
+    await mgr.recoverAlreadyMergedReviewTasks();
+    await mgr.clearStaleBlockedBy();
     expect((await store.getTask("FN-4115-MERGED"))?.column).toBe("done");
     expect((await store.getTask("FN-4115-DOWNSTREAM"))?.blockedBy).toBeNull();
   });
