@@ -2806,6 +2806,69 @@ describe("aiMergeTask post-squash audit gate", () => {
     expect(store.updateTask).toHaveBeenCalledWith("FN-050", { status: null });
   });
 
+  it("skips the post-merge audit entirely when postMergeAuditMode=off (FN-4333)", async () => {
+    setupAutoResolvedMergeExecSync();
+    mockedAuditSquashMerge.mockResolvedValue({
+      strategy: "squash",
+      squashSha: "mergedcommit123",
+      parentSha: "parent123",
+      auditTargetLabel: "mergedcommit123",
+      squashSubject: "feat: squash merge",
+      lookback: 30,
+      branchSubjects: ["feat: duplicate subject"],
+      recentMainSubjects: ["feat: duplicate subject"],
+      duplicateSubjects: [{ type: "duplicate-subject", subject: "feat: duplicate subject" }],
+      touchedFiles: [],
+      touchedFileOverlaps: [],
+      findings: [{ type: "duplicate-subject", subject: "feat: duplicate subject" }],
+      issueCount: 1,
+      clean: false,
+    });
+    const store = createAuditStore({ postMergeAuditMode: "off" });
+
+    const result = await aiMergeTask(store, "/tmp/root", "FN-050");
+
+    expect(result.merged).toBe(true);
+    expect(mockedAuditSquashMerge).not.toHaveBeenCalled();
+    expect(
+      vi.mocked(store.appendAgentLog).mock.calls.some(([, message]) => String(message).includes("audit blocked auto-completion")),
+    ).toBe(false);
+  });
+
+  it("continues when postMergeAuditMode=warn even with dirty audit findings (FN-4333)", async () => {
+    setupAutoResolvedMergeExecSync();
+    mockedAuditSquashMerge.mockResolvedValue({
+      strategy: "squash",
+      squashSha: "mergedcommit123",
+      parentSha: "parent123",
+      auditTargetLabel: "mergedcommit123",
+      squashSubject: "feat: squash merge",
+      lookback: 30,
+      branchSubjects: ["feat: duplicate subject"],
+      recentMainSubjects: ["feat: duplicate subject"],
+      duplicateSubjects: [{ type: "duplicate-subject", subject: "feat: duplicate subject" }],
+      touchedFiles: [],
+      touchedFileOverlaps: [],
+      findings: [{ type: "duplicate-subject", subject: "feat: duplicate subject" }],
+      issueCount: 1,
+      clean: false,
+    });
+    const store = createAuditStore({ postMergeAuditMode: "warn" });
+
+    const result = await aiMergeTask(store, "/tmp/root", "FN-050");
+
+    expect(result.merged).toBe(true);
+    expect(store.moveTask).toHaveBeenCalledWith("FN-050", "done");
+    expect(
+      vi.mocked(store.appendAgentLog).mock.calls.some(([, message, type]) => type === "tool_error" && String(message).includes("audit blocked auto-completion")),
+    ).toBe(false);
+    expect(
+      vi.mocked(store.appendAgentLog).mock.calls.some(
+        ([, message]) => String(message).includes("post-squash audit found 1 risk(s) — continuing"),
+      ),
+    ).toBe(true);
+  });
+
   it("skips the post-squash audit when the squash merge is empty", async () => {
     setupEmptySquashMergeExecSync();
     const store = createAuditStore();
