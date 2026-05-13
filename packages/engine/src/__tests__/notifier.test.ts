@@ -39,6 +39,8 @@ class MockTaskStore extends EventEmitter<MockTaskStoreEvents> {
     autoMerge: true,
     ntfyEnabled: false,
     ntfyTopic: undefined,
+    failureNotificationMode: "all",
+    failureNotificationDelayMs: 0,
   };
 
   getSettings(): Settings {
