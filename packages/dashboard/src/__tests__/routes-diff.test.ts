@@ -1,7 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
-import type { Task } from "@fusion/core";
+import type { Task, TaskCommitAssociation } from "@fusion/core";
 import * as fs from "node:fs";
+
+const runGitCommandMock = vi.fn<(...args: any[]) => Promise<string>>();
+
+vi.mock("../routes/resolve-diff-base.js", () => ({
+  resolveDiffBase: vi.fn(async () => "origin/main"),
+  runGitCommand: (...args: any[]) => runGitCommandMock(...args),
+}));
+
 import { createServer } from "../server.js";
 
 vi.mock("node:fs", async () => {
@@ -16,6 +24,7 @@ const mockExistsSync = vi.mocked(fs.existsSync);
 
 class MockStore extends EventEmitter {
   private tasks = new Map<string, Task>();
+  private associations = new Map<string, TaskCommitAssociation[]>();
 
   getRootDir(): string {
     return "/tmp/fn-679";
@@ -59,6 +68,14 @@ class MockStore extends EventEmitter {
   addTask(task: Task): void {
     this.tasks.set(task.id, task);
   }
+
+  setAssociations(lineageId: string, associations: TaskCommitAssociation[]): void {
+    this.associations.set(lineageId, associations);
+  }
+
+  async getTaskCommitAssociationsByLineageId(lineageId: string): Promise<TaskCommitAssociation[]> {
+    return this.associations.get(lineageId) ?? [];
+  }
 }
 
 function createTask(overrides: Partial<Task> = {}): Task {
@@ -80,13 +97,40 @@ function createTask(overrides: Partial<Task> = {}): Task {
   };
 }
 
-async function requestDiff(app: Parameters<typeof import("../test-request.js").get>[0], taskId = "FN-679", worktree?: string): Promise<{ status: number; body: any }> {
+async function requestDiff(app: Parameters<typeof import("../test-request.js").get>[0], taskId = "FN-679"): Promise<{ status: number; body: any }> {
   const { get } = await import("../test-request.js");
-  const url = `/api/tasks/${taskId}/diff${worktree ? `?worktree=${encodeURIComponent(worktree)}` : ""}`;
-  return get(app, url);
+  return get(app, `/api/tasks/${taskId}/diff`);
 }
 
-describe("GET /api/tasks/:id/diff", () => {
+async function requestFileDiffs(app: Parameters<typeof import("../test-request.js").get>[0], taskId = "FN-679"): Promise<{ status: number; body: any }> {
+  const { get } = await import("../test-request.js");
+  return get(app, `/api/tasks/${taskId}/file-diffs`);
+}
+
+function gitResponses(entries: Record<string, string>) {
+  runGitCommandMock.mockImplementation(async (args: string[]) => {
+    const key = args.join(" ");
+    if (key in entries) return entries[key] ?? "";
+    throw new Error(`Unexpected git command: ${key}`);
+  });
+}
+
+function makeAssociation(sha: string, authoredAt: string): TaskCommitAssociation {
+  return {
+    lineageId: "lin-1",
+    commitSha: sha,
+    commitSubject: sha,
+    authoredAt,
+    matchedBy: "manual",
+    confidence: 1,
+    taskIdSnapshot: "FN-679",
+    note: null,
+    createdAt: authoredAt,
+    updatedAt: authoredAt,
+  };
+}
+
+describe("FN-4308 multi-commit done task aggregation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockExistsSync.mockReturnValue(true);
@@ -96,173 +140,118 @@ describe("GET /api/tasks/:id/diff", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns 404 when task not found", async () => {
+  it("aggregates union of files for /diff and /file-diffs", async () => {
     const store = new MockStore();
+    store.addTask(createTask({ column: "done", lineageId: "lin-1", mergeDetails: { commitSha: "c3" } }));
+    store.setAssociations("lin-1", [makeAssociation("c1", "2026-04-01T00:00:00.000Z"), makeAssociation("c2", "2026-04-01T00:01:00.000Z"), makeAssociation("c3", "2026-04-01T00:02:00.000Z")]);
+
+    gitResponses({
+      "merge-base --is-ancestor c1 HEAD": "",
+      "merge-base --is-ancestor c2 HEAD": "",
+      "merge-base --is-ancestor c3 HEAD": "",
+      "rev-parse c1^": "p1",
+      "diff --name-status p1..c1": "A\ta.txt\nM\tb.txt",
+      "diff p1..c1 -- a.txt": "+a\n",
+      "diff p1..c1 -- b.txt": "+b\n",
+      "rev-parse c2^": "p2",
+      "diff --name-status p2..c2": "M\tb.txt\nA\tc.txt",
+      "diff p2..c2 -- b.txt": "+bb\n-b\n",
+      "diff p2..c2 -- c.txt": "+c\n",
+      "rev-parse c3^": "p3",
+      "diff --name-status p3..c3": "A\td.txt",
+      "diff p3..c3 -- d.txt": "+d\n",
+    });
 
     const app = createServer(store as any);
-    const response = await requestDiff(app, "NONEXISTENT");
+    const diffResponse = await requestDiff(app);
+    expect(diffResponse.status).toBe(200);
+    expect(diffResponse.body.stats.filesChanged).toBe(4);
+    expect(diffResponse.body.files.map((f: any) => f.path).sort()).toEqual(["a.txt", "b.txt", "c.txt", "d.txt"]);
 
-    expect(response.status).toBe(404);
-  }, 15_000);
+    const fileDiffsResponse = await requestFileDiffs(app);
+    expect(fileDiffsResponse.status).toBe(200);
+    expect(fileDiffsResponse.body.map((f: any) => f.path).sort()).toEqual(["a.txt", "b.txt", "c.txt", "d.txt"]);
+  });
 
-  it("handler can be created with valid task", async () => {
+  it("single-commit lineage matches existing behavior", async () => {
     const store = new MockStore();
-    store.addTask(createTask({ baseBranch: "develop" }));
+    store.addTask(createTask({ column: "done", lineageId: "lin-1", mergeDetails: { commitSha: "c1" } }));
+    store.setAssociations("lin-1", [makeAssociation("c1", "2026-04-01T00:00:00.000Z")]);
+
+    gitResponses({
+      "merge-base --is-ancestor c1 HEAD": "",
+      "rev-parse c1^": "p1",
+      "diff --name-status p1..c1": "A\tone.txt",
+      "diff p1..c1 -- one.txt": "+one\n",
+    });
 
     const app = createServer(store as any);
     const response = await requestDiff(app);
-
-    // Should return 200 or 500 depending on git command results
-    expect([200, 500]).toContain(response.status);
-  });
-});
-
-describe("GET /api/tasks/:id/diff — done tasks", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockExistsSync.mockReturnValue(true);
+    expect(response.status).toBe(200);
+    expect(response.body.stats.filesChanged).toBe(1);
+    expect(response.body.files).toHaveLength(1);
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("returns empty result when rev-parse sha^ fails", async () => {
+  it("falls back to merge commit range when lineage associations are empty", async () => {
     const store = new MockStore();
-    store.addTask(createTask({
-      column: "done",
-      mergeDetails: { commitSha: "broken_sha" },
-    }));
+    store.addTask(createTask({ column: "done", lineageId: "lin-1", mergeDetails: { commitSha: "m1" } }));
+    store.setAssociations("lin-1", []);
+
+    gitResponses({
+      "merge-base --is-ancestor m1 HEAD": "",
+      "rev-parse m1^": "pm1",
+      "diff pm1..m1": "+x\n-y\n",
+      "diff --name-only pm1..m1": "x.txt\n",
+    });
 
     const app = createServer(store as any);
     const response = await requestDiff(app);
-
     expect(response.status).toBe(200);
     expect(response.body.files).toEqual([]);
+    expect(response.body.stats.filesChanged).toBe(1);
   });
 
-  it("returns empty result for done task without commitSha", async () => {
+  it("skips unreachable lineage SHAs and still aggregates reachable commits", async () => {
     const store = new MockStore();
-    store.addTask(createTask({
-      column: "done",
-      mergeDetails: undefined,
-    }));
+    store.addTask(createTask({ column: "done", lineageId: "lin-1", mergeDetails: { commitSha: "good" } }));
+    store.setAssociations("lin-1", [makeAssociation("bad", "2026-04-01T00:00:00.000Z"), makeAssociation("good", "2026-04-01T00:01:00.000Z")]);
 
-    const app = createServer(store as any);
-    const response = await requestDiff(app);
-
-    expect(response.status).toBe(200);
-    expect(response.body.files).toEqual([]);
-  });
-});
-
-describe("GET /api/tasks/:id/diff — in-progress tasks without valid worktree", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockExistsSync.mockReturnValue(true);
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("returns empty diff when task.worktree is null and no worktree query param", async () => {
-    const store = new MockStore();
-    store.addTask(createTask({
-      column: "in-progress",
-      worktree: null as any,
-    }));
-
-    const app = createServer(store as any);
-    const response = await requestDiff(app);
-
-    expect(response.status).toBe(200);
-    expect(response.body).toEqual({
-      files: [],
-      stats: { filesChanged: 0, additions: 0, deletions: 0 },
-    });
-  });
-
-  it("returns empty diff when task.worktree is undefined", async () => {
-    const store = new MockStore();
-    store.addTask(createTask({
-      column: "in-progress",
-      worktree: undefined,
-    }));
-
-    const app = createServer(store as any);
-    const response = await requestDiff(app);
-
-    expect(response.status).toBe(200);
-    expect(response.body).toEqual({
-      files: [],
-      stats: { filesChanged: 0, additions: 0, deletions: 0 },
-    });
-  });
-
-  it("returns empty diff when worktree path does not exist on disk", async () => {
-    const store = new MockStore();
-    store.addTask(createTask({
-      column: "in-progress",
-      worktree: "/tmp/nonexistent-worktree",
-    }));
-
-    // Mock existsSync to return false for the worktree path
-    mockExistsSync.mockImplementation((path: unknown) => {
-      if (typeof path === "string" && path === "/tmp/nonexistent-worktree") {
-        return false;
-      }
-      return true;
+    runGitCommandMock.mockImplementation(async (args: string[]) => {
+      const key = args.join(" ");
+      if (key === "merge-base --is-ancestor bad HEAD") throw new Error("unreachable");
+      if (key === "merge-base --is-ancestor good HEAD") return "";
+      if (key === "rev-parse good^") return "p";
+      if (key === "diff --name-status p..good") return "A\treachable.txt";
+      if (key === "diff p..good -- reachable.txt") return "+ok\n";
+      throw new Error(`Unexpected git command: ${key}`);
     });
 
     const app = createServer(store as any);
     const response = await requestDiff(app);
-
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({
-      files: [],
-      stats: { filesChanged: 0, additions: 0, deletions: 0 },
-    });
+    expect(response.body.stats.filesChanged).toBe(1);
+    expect(response.body.files[0].path).toBe("reachable.txt");
   });
 
-  it("returns diff when worktree path exists (regression guard)", async () => {
+  it("includes mergeDetails.commitSha even when missing from associations", async () => {
     const store = new MockStore();
-    store.addTask(createTask({
-      column: "in-progress",
-      worktree: "/tmp/fn-679",
-    }));
+    store.addTask(createTask({ column: "done", lineageId: "lin-1", mergeDetails: { commitSha: "merge-only" } }));
+    store.setAssociations("lin-1", [makeAssociation("assoc-1", "2026-04-01T00:00:00.000Z")]);
 
-    mockExistsSync.mockReturnValue(true);
+    runGitCommandMock.mockImplementation(async (args: string[]) => {
+      const key = args.join(" ");
+      if (key === "merge-base --is-ancestor assoc-1 HEAD") throw new Error("unreachable");
+      if (key === "merge-base --is-ancestor merge-only HEAD") return "";
+      if (key === "rev-parse merge-only^") return "p";
+      if (key === "diff --name-status p..merge-only") return "A\tmerged.txt";
+      if (key === "diff p..merge-only -- merged.txt") return "+ok\n";
+      throw new Error(`Unexpected git command: ${key}`);
+    });
 
     const app = createServer(store as any);
     const response = await requestDiff(app);
-
-    // Should return 200 or 500 depending on git command results (happy path)
-    expect([200, 500]).toContain(response.status);
-  });
-
-  it("returns empty diff when worktree query param path does not exist", async () => {
-    const store = new MockStore();
-    store.addTask(createTask({
-      column: "in-progress",
-      worktree: "/tmp/fn-679",
-    }));
-
-    // Mock existsSync to return false for the query param worktree
-    mockExistsSync.mockImplementation((path: unknown) => {
-      if (typeof path === "string" && path === "/tmp/query-worktree-does-not-exist") {
-        return false;
-      }
-      return true;
-    });
-
-    const app = createServer(store as any);
-    const response = await requestDiff(app, "FN-679", "/tmp/query-worktree-does-not-exist");
-
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({
-      files: [],
-      stats: { filesChanged: 0, additions: 0, deletions: 0 },
-    });
+    expect(response.body.stats.filesChanged).toBe(1);
+    expect(response.body.files[0].path).toBe("merged.txt");
   });
 });
