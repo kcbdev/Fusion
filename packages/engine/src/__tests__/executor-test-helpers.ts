@@ -234,7 +234,7 @@ import { generateWorktreeName } from "../worktree-names.js";
 import { findWorktreeUser } from "../merger.js";
 import { StepSessionExecutor } from "../step-session-executor.js";
 import { withRateLimitRetry } from "../rate-limit-retry.js";
-import { execSync } from "node:child_process";
+import { exec, execSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { hydrateWorktreeDb } from "../worktree-db-hydrate.js";
 import { isUsableTaskWorktree } from "../worktree-pool.js";
@@ -245,6 +245,7 @@ export const mockedGenerateWorktreeName = vi.mocked(generateWorktreeName);
 export const mockedFindWorktreeUser = vi.mocked(findWorktreeUser);
 export const mockedStepSessionExecutor = vi.mocked(StepSessionExecutor);
 export const mockedWithRateLimitRetry = vi.mocked(withRateLimitRetry);
+export const mockedExec = vi.mocked(exec);
 export const mockedExecSync = vi.mocked(execSync);
 export const mockedExistsSync = vi.mocked(existsSync);
 export const mockedRealpathSync = vi.mocked(realpathSync);
@@ -320,6 +321,8 @@ export function createMockStore() {
 
 export function resetExecutorMocks() {
   vi.clearAllMocks();
+  mockedExec.mockReset();
+  mockedExecSync.mockReset();
   mockedIsUsableTaskWorktree.mockResolvedValue(true);
   mockExecuteAll.mockResolvedValue([]);
   mockTerminateAllSessions.mockResolvedValue(undefined);
