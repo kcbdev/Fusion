@@ -140,9 +140,11 @@ describe("core modals mobile css coverage", () => {
     expect(mobileBlock).toContain(".settings-modal .modal-header {");
     expect(mobileBlock).toContain("flex-wrap: wrap;");
     expect(mobileBlock).toContain(".settings-header-actions {");
+    expect(mobileBlock).toContain("order: 3;");
     expect(mobileBlock).toContain("flex: 1 1 100%;");
     expect(mobileBlock).toContain("margin-left: 0;");
     expect(mobileBlock).toContain(".settings-modal .modal-close {");
+    expect(mobileBlock).toContain("order: 2;");
     expect(mobileBlock).toContain("min-width: calc(var(--space-md) * 3);");
     expect(mobileBlock).toContain("min-height: calc(var(--space-md) * 3);");
   });

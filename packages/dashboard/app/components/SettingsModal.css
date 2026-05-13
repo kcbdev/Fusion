@@ -36,8 +36,9 @@
   }
 
   .settings-modal-heading {
-    flex: 1 1 auto;
+    flex: 1 1 0;
     min-width: 0;
+    order: 1;
   }
 
   .settings-update-check {
@@ -54,6 +55,7 @@
   }
 
   .settings-modal .modal-close {
+    order: 2;
     flex: 0 0 auto;
     align-self: flex-start;
     margin-left: auto;
