@@ -73,7 +73,17 @@ async function isReachableFromHead(sha: string, rootDir: string): Promise<boolea
   }
 }
 
-async function collectDoneTaskFiles(task: any, scopedStore: ProjectContext["store"]): Promise<{
+type DoneTaskAggregationTask = {
+  lineageId?: string | null;
+  mergeDetails?: { commitSha?: string } | null;
+};
+
+type DoneTaskAggregationStore = {
+  getRootDir: () => string;
+  getTaskCommitAssociationsByLineageId: (lineageId: string) => Promise<Array<{ commitSha: string; authoredAt?: string | null }>>;
+};
+
+async function collectDoneTaskFiles(task: DoneTaskAggregationTask, scopedStore: DoneTaskAggregationStore): Promise<{
   files: AggregatedDoneTaskFile[];
   stats: { filesChanged: number; additions: number; deletions: number };
   usedAggregation: boolean;
