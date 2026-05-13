@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { TaskStore } from "@fusion/core";
 import { decideIssueAction, GitHubTrackingStateService } from "../github-tracking-state.js";
 
-const { mockSetIssueState } = vi.hoisted(() => ({
+const { mockSetIssueState, mockDeleteIssue } = vi.hoisted(() => ({
   mockSetIssueState: vi.fn(),
+  mockDeleteIssue: vi.fn(),
 }));
 
 const { mockResolveGithubTrackingAuth } = vi.hoisted(() => ({
@@ -14,6 +15,7 @@ const { mockResolveGithubTrackingAuth } = vi.hoisted(() => ({
 vi.mock("../github.js", () => ({
   GitHubClient: vi.fn().mockImplementation(() => ({
     setIssueState: (...args: unknown[]) => mockSetIssueState(...args),
+    deleteIssue: (...args: unknown[]) => mockDeleteIssue(...args),
   })),
 }));
 
@@ -266,14 +268,44 @@ describe("GitHubTrackingStateService", () => {
   });
 
   describe("on task:deleted", () => {
-    it("closes the linked issue with not_planned and does not log to the store", async () => {
+    it.each([undefined, "auto", "close"] as const)("closes the linked issue with not_planned when action is %s", async (action) => {
       service.start();
 
-      store.emit("task:deleted", createTask());
+      if (action === undefined) {
+        store.emit("task:deleted", createTask());
+      } else {
+        store.emit("task:deleted", createTask(), { githubIssueAction: action });
+      }
       await flushAsync();
 
       expect(mockSetIssueState).toHaveBeenCalledWith("owner", "repo", 42, "closed", "not_planned");
-      expect(store.logEntry).not.toHaveBeenCalled();
+      expect(mockDeleteIssue).not.toHaveBeenCalled();
+    });
+
+    it("deletes linked issue when githubIssueAction is delete", async () => {
+      service.start();
+
+      store.emit("task:deleted", createTask(), { githubIssueAction: "delete" });
+      await flushAsync();
+
+      expect(mockDeleteIssue).toHaveBeenCalledWith("owner", "repo", 42);
+      expect(mockSetIssueState).not.toHaveBeenCalled();
+      expect(store.logEntry).toHaveBeenCalledWith("FN-1", "Deleted linked GitHub tracking issue", "owner/repo#42");
+    });
+
+    it("leaves linked issue untouched when githubIssueAction is leave", async () => {
+      service.start();
+
+      store.emit("task:deleted", createTask(), { githubIssueAction: "leave" });
+      await flushAsync();
+
+      expect(mockDeleteIssue).not.toHaveBeenCalled();
+      expect(mockSetIssueState).not.toHaveBeenCalled();
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-1",
+        "Left linked GitHub tracking issue unchanged on task delete",
+        "owner/repo#42",
+      );
     });
 
     it.each([
@@ -304,24 +336,32 @@ describe("GitHubTrackingStateService", () => {
       await flushAsync();
 
       expect(mockSetIssueState).not.toHaveBeenCalled();
+      expect(mockDeleteIssue).not.toHaveBeenCalled();
       expect(store.logEntry).not.toHaveBeenCalled();
     });
 
-    it("swallows network failures without throwing and does not log to the store", async () => {
+    it("logs close failures without throwing", async () => {
       service.start();
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       mockSetIssueState.mockRejectedValueOnce(new Error("delete close failed"));
 
       expect(() => {
-        store.emit("task:deleted", createTask());
+        store.emit("task:deleted", createTask(), { githubIssueAction: "close" });
       }).not.toThrow();
       await flushAsync();
 
-      expect(warnSpy).toHaveBeenCalledWith(
-        "[github-tracking-state] Failed to close linked GitHub tracking issue for deleted task FN-1: delete close failed",
-      );
-      expect(store.logEntry).not.toHaveBeenCalled();
-      warnSpy.mockRestore();
+      expect(store.logEntry).toHaveBeenCalledWith("FN-1", "Failed to close linked GitHub tracking issue", "delete close failed");
+    });
+
+    it("logs delete failures without throwing", async () => {
+      service.start();
+      mockDeleteIssue.mockRejectedValueOnce(new Error("delete failed"));
+
+      expect(() => {
+        store.emit("task:deleted", createTask(), { githubIssueAction: "delete" });
+      }).not.toThrow();
+      await flushAsync();
+
+      expect(store.logEntry).toHaveBeenCalledWith("FN-1", "Failed to delete linked GitHub tracking issue", "delete failed");
     });
   });
 });

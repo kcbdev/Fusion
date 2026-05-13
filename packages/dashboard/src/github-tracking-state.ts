@@ -1,4 +1,4 @@
-import type { GlobalSettings, ProjectSettings, Task, TaskStore } from "@fusion/core";
+import type { GithubIssueAction, GlobalSettings, ProjectSettings, Task, TaskStore } from "@fusion/core";
 import { GitHubClient } from "./github.js";
 import { resolveGithubTrackingAuth } from "./github-auth.js";
 
@@ -43,8 +43,8 @@ export class GitHubTrackingStateService {
   private readonly onTaskMoved = (event: TaskMovedEvent): void => {
     void this.handleTaskMoved(event);
   };
-  private readonly onTaskDeleted = (task: Task): void => {
-    void this.handleTaskDeleted(task);
+  private readonly onTaskDeleted = (task: Task, meta?: { githubIssueAction?: GithubIssueAction }): void => {
+    void this.handleTaskDeleted(task, meta);
   };
   private started = false;
 
@@ -129,7 +129,7 @@ export class GitHubTrackingStateService {
     }
   }
 
-  private async handleTaskDeleted(task: Task): Promise<void> {
+  private async handleTaskDeleted(task: Task, meta?: { githubIssueAction?: GithubIssueAction }): Promise<void> {
     if (task.githubTracking?.enabled !== true) {
       return;
     }
@@ -144,6 +144,12 @@ export class GitHubTrackingStateService {
       return;
     }
 
+    const githubIssueAction = meta?.githubIssueAction ?? "auto";
+    if (githubIssueAction === "leave") {
+      await this.store.logEntry(task.id, "Left linked GitHub tracking issue unchanged on task delete", `${owner}/${repo}#${number}`);
+      return;
+    }
+
     const projectSettings = await this.store.getSettings() as Pick<ProjectSettings, "githubAuthMode" | "githubAuthToken">;
     const globalSettings = (await this.store.getGlobalSettingsStore?.()?.getSettings?.() ?? {}) as Pick<GlobalSettings, never>;
     const resolution = resolveGithubTrackingAuth({ projectSettings, globalSettings });
@@ -155,12 +161,20 @@ export class GitHubTrackingStateService {
       ? new GitHubClient({ token: resolution.auth.token, forceMode: "token" })
       : new GitHubClient({ forceMode: "gh-cli" });
 
+    if (githubIssueAction === "delete") {
+      try {
+        await client.deleteIssue(owner, repo, number);
+        await this.store.logEntry(task.id, "Deleted linked GitHub tracking issue", `${owner}/${repo}#${number}`);
+      } catch (err) {
+        await this.store.logEntry(task.id, "Failed to delete linked GitHub tracking issue", err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+
     try {
       await client.setIssueState(owner, repo, number, "closed", "not_planned");
     } catch (err) {
-      console.warn(
-        `[github-tracking-state] Failed to close linked GitHub tracking issue for deleted task ${task.id}: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      await this.store.logEntry(task.id, "Failed to close linked GitHub tracking issue", err instanceof Error ? err.message : String(err));
     }
   }
 }
