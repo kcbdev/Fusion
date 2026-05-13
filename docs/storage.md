@@ -62,6 +62,20 @@ The script is intentionally narrow and idempotent:
 
 Use this path for the confirmed FN-3909 mismatch (canonical UI-fix prompt/merge history, stale heartbeat-scope title/description). Do **not** use it for allocator-collision or overwrite incidents that may involve multiple tasks or conflicting survivors; run `scripts/audit-task-id-collisions.mjs` first and treat those cases as recovery/postmortem work instead of automatic metadata repair.
 
+### Forensic / historical-task reconciliation: where to read from
+
+For any audit/forensic/reconciliation task that targets another task ID (for example FN-4194 reconciling FN-3909), source-of-truth locations are always at the project root:
+
+- On-disk task artifacts: `<rootDir>/.fusion/tasks/{ID}/` (`task.json`, `PROMPT.md`, `attachments/`, agent logs)
+- Task database row: `<rootDir>/.fusion/fusion.db` (SQLite in WAL mode)
+
+Important execution nuance:
+
+- `.fusion/` is gitignored, so worktrees branched from `main` do not contain other tasks' artifact directories or the live DB file.
+- The running worktree's own `.fusion/` (when present) is scratch/session state for the running task only; do not treat it as authoritative evidence for historical tasks.
+- Triage spec writers inject this guidance via `TRIAGE_SYSTEM_PROMPT` and `FAST_TRIAGE_SYSTEM_PROMPT` in `packages/engine/src/triage.ts`.
+- Executor-side path normalization remains consistent with this rule through `scopePromptToWorktree` in `packages/engine/src/step-session-executor.ts`, which rewrites accidental worktree-local `.fusion` references back to project-root `.fusion` paths.
+
 ## SQLite write-path lock recovery (FN-4042 / FN-4083)
 
 - Every disk-backed SQLite connection that Fusion opens for project storage (`fusion.db`), the central registry (`fusion-central.db`), archives (`archive.db`), and worktree hydration explicitly sets `PRAGMA busy_timeout = 5000` and `PRAGMA journal_mode = WAL` at connection open time before write work begins.
