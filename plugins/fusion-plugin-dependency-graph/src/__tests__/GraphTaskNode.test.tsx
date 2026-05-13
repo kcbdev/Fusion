@@ -42,6 +42,7 @@ function createProps(task: Task) {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
 });
 
@@ -228,6 +229,72 @@ describe("GraphTaskNode", () => {
     fireEvent.doubleClick(node);
     expect(props.onOpenDetail).toHaveBeenCalledTimes(1);
     expect(props.onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-TEST" }));
+  });
+
+  it("touch double-tap opens task detail exactly once", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    const props = createProps(createTask());
+    render(<GraphTaskNode {...props} />);
+
+    const node = screen.getByTestId("graph-task-node-FN-TEST");
+    fireEvent.pointerDown(node, { isPrimary: true, pointerId: 1, pointerType: "touch", clientX: 20, clientY: 30 });
+    fireEvent.pointerUp(node, { isPrimary: true, pointerId: 1, pointerType: "touch", clientX: 20, clientY: 30 });
+    vi.advanceTimersByTime(120);
+    fireEvent.pointerDown(node, { isPrimary: true, pointerId: 2, pointerType: "touch", clientX: 24, clientY: 32 });
+    fireEvent.pointerUp(node, { isPrimary: true, pointerId: 2, pointerType: "touch", clientX: 24, clientY: 32 });
+
+    expect(props.onOpenDetail).toHaveBeenCalledTimes(1);
+    expect(props.onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-TEST" }));
+  });
+
+  it("touch taps outside the double-tap window do not open task detail", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    const props = createProps(createTask());
+    render(<GraphTaskNode {...props} />);
+
+    const node = screen.getByTestId("graph-task-node-FN-TEST");
+    fireEvent.pointerDown(node, { isPrimary: true, pointerId: 1, pointerType: "touch", clientX: 20, clientY: 30 });
+    fireEvent.pointerUp(node, { isPrimary: true, pointerId: 1, pointerType: "touch", clientX: 20, clientY: 30 });
+    vi.advanceTimersByTime(320);
+    fireEvent.pointerDown(node, { isPrimary: true, pointerId: 2, pointerType: "touch", clientX: 20, clientY: 30 });
+    fireEvent.pointerUp(node, { isPrimary: true, pointerId: 2, pointerType: "touch", clientX: 20, clientY: 30 });
+
+    expect(props.onOpenDetail).not.toHaveBeenCalled();
+  });
+
+  it("touch drag gestures do not open task detail on pointer up", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    const props = createProps(createTask());
+    render(<GraphTaskNode {...props} isSelected={true} />);
+
+    const node = screen.getByTestId("graph-task-node-FN-TEST");
+    fireEvent.pointerDown(node, { isPrimary: true, pointerId: 1, pointerType: "touch", clientX: 20, clientY: 30 });
+    fireEvent.pointerUp(node, { isPrimary: true, pointerId: 1, pointerType: "touch", clientX: 20, clientY: 30 });
+    vi.advanceTimersByTime(120);
+    fireEvent.pointerDown(node, { isPrimary: true, pointerId: 2, pointerType: "touch", clientX: 20, clientY: 30 });
+    fireEvent.pointerMove(node, { isPrimary: true, pointerId: 2, pointerType: "touch", clientX: 28, clientY: 30 });
+    fireEvent.pointerUp(node, { isPrimary: true, pointerId: 2, pointerType: "touch", clientX: 28, clientY: 30 });
+
+    expect(props.onOpenDetail).not.toHaveBeenCalled();
+  });
+
+  it("mouse pointer taps do not trigger the touch double-tap path", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    const props = createProps(createTask());
+    render(<GraphTaskNode {...props} />);
+
+    const node = screen.getByTestId("graph-task-node-FN-TEST");
+    fireEvent.pointerDown(node, { isPrimary: true, pointerId: 1, pointerType: "mouse", clientX: 20, clientY: 30 });
+    fireEvent.pointerUp(node, { isPrimary: true, pointerId: 1, pointerType: "mouse", clientX: 20, clientY: 30 });
+    vi.advanceTimersByTime(120);
+    fireEvent.pointerDown(node, { isPrimary: true, pointerId: 2, pointerType: "mouse", clientX: 22, clientY: 30 });
+    fireEvent.pointerUp(node, { isPrimary: true, pointerId: 2, pointerType: "mouse", clientX: 22, clientY: 30 });
+
+    expect(props.onOpenDetail).not.toHaveBeenCalled();
   });
 
   it("single click on active indicator surface does not open task detail", () => {

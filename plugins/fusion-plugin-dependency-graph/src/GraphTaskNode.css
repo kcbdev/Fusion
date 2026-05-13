@@ -10,6 +10,7 @@
     border-color var(--transition-fast);
   border: var(--btn-border-width) solid transparent;
   border-radius: var(--radius-sm);
+  touch-action: manipulation;
 }
 
 .graph-task-node:hover {

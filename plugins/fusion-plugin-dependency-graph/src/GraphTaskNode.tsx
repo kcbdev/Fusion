@@ -94,6 +94,7 @@ export function GraphTaskNode({
     onPositionChange: onNodePositionChange,
     onDragStateChange: onNodeDragStateChange,
     onDragEnd: onNodeDragEnd,
+    onDoubleTap: () => onOpenDetail(task),
   });
 
   return (
