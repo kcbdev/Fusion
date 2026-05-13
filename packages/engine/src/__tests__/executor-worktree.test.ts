@@ -26,6 +26,7 @@ import {
   mockedFindWorktreeUser,
   mockedStepSessionExecutor,
   mockedWithRateLimitRetry,
+  mockedExec,
   mockedExecSync,
   mockedExistsSync,
   mockedHydrateWorktreeDb,
@@ -1898,10 +1899,17 @@ describe("TaskExecutor worktree pool integration", () => {
     mockedExistsSync.mockImplementation((p) => p === "/tmp/test/.worktrees/idle-wt");
 
     mockedExecSync.mockImplementation((cmd: any) => {
-      if (String(cmd) === "git rev-parse HEAD") {
-        return "newbase123\n" as any;
+      if (String(cmd).includes("git merge-base --is-ancestor")) {
+        throw new Error("not ancestor");
       }
       return "" as any;
+    });
+    mockedExec.mockImplementation((cmd: any, _opts: any, cb: any) => {
+      if (String(cmd).includes("git merge-base HEAD origin/main")) {
+        cb(null, "newbase123\n", "");
+        return;
+      }
+      cb(null, "", "");
     });
 
     const store = createMockStore();

@@ -5662,7 +5662,7 @@ ${failureFeedback}
         baseCommitSha = stdout.trim() || undefined;
       } catch (err: unknown) {
         const errorMessage = err instanceof Error ? err.message : String(err);
-        executorLog.warn(`${task.id}: merge-base failed for ${task.id}, falling back to HEAD: ${errorMessage}`);
+        executorLog.warn(`${task.id}: merge-base failed, falling back to HEAD: ${errorMessage}`);
       }
 
       if (!baseCommitSha) {
