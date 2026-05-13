@@ -761,7 +761,6 @@ function TaskCardComponent({
   const canEdit = EDITABLE_COLUMNS.has(task.column) && !isAgentActive && !isPaused && !queued && onUpdateTask;
   const githubTrackedIssue = task.githubTracking?.issue;
   const hasGithubTrackingLink = Boolean(githubTrackedIssue);
-  const hasGitHubBadge = Boolean(task.prInfo || task.issueInfo);
   const isGitHubImportedTask = task.sourceType === "github_import";
   const sourceIssueUrl = getIssueUrlFromMetadata(task.sourceMetadata);
   const sourceIssueFromUrl = useMemo(() => parseGithubIssueUrl(sourceIssueUrl), [sourceIssueUrl]);
@@ -923,8 +922,27 @@ function TaskCardComponent({
     };
   }, [task.column, task.status, task.columnMovedAt, task.timedExecutionMs, task.updatedAt, task.workflowStepResults, task.log, task.executionStartedAt, task.executionCompletedAt, timeIndicatorNowMs]);
 
+  const liveBadgeData = badgeUpdates.get(`${projectId ?? "default"}:${task.id}`);
+
+  // Get fresh batch data if available
+  const batchData = useMemo(() => getFreshBatchData(task.id, projectId), [task.id, projectId]);
+
+  const hasEverHadGitHubBadgeSourceRef = useRef(false);
+  const hasCurrentGitHubBadgeSource = Boolean(
+    task.prInfo
+    || task.issueInfo
+    || liveBadgeData?.prInfo
+    || liveBadgeData?.issueInfo
+    || batchData?.result?.prInfo
+    || batchData?.result?.issueInfo,
+  );
+  if (hasCurrentGitHubBadgeSource) {
+    hasEverHadGitHubBadgeSourceRef.current = true;
+  }
+  const hasGitHubBadgeSource = hasCurrentGitHubBadgeSource || hasEverHadGitHubBadgeSourceRef.current;
+
   useEffect(() => {
-    if (!hasGitHubBadge || !isInViewport) {
+    if (!hasGitHubBadgeSource || !isInViewport) {
       unsubscribeFromBadge(task.id);
       return;
     }
@@ -933,9 +951,7 @@ function TaskCardComponent({
     return () => {
       unsubscribeFromBadge(task.id);
     };
-  }, [hasGitHubBadge, isInViewport, subscribeToBadge, task.id, unsubscribeFromBadge]);
-
-  const liveBadgeData = badgeUpdates.get(`${projectId ?? "default"}:${task.id}`);
+  }, [hasGitHubBadgeSource, isInViewport, subscribeToBadge, task.id, unsubscribeFromBadge]);
 
   // Compute step version for diff stats refresh when steps change
   const isActiveColumn = task.column === "in-progress" || task.column === "in-review";
@@ -957,9 +973,6 @@ function TaskCardComponent({
       pollIntervalMs: isActiveColumn ? 30_000 : undefined,
     },
   );
-
-  // Get fresh batch data if available
-  const batchData = useMemo(() => getFreshBatchData(task.id, projectId), [task.id, projectId]);
 
   // Pick the freshest data among WebSocket, batch, and task data
   const livePrInfo = useMemo(() => {
@@ -1444,7 +1457,7 @@ function TaskCardComponent({
             Stalled
           </span>
         )}
-        {hasGitHubBadge && (
+        {(livePrInfo || liveIssueInfo) && (
           <GitHubBadge
             prInfo={livePrInfo}
             issueInfo={liveIssueInfo}

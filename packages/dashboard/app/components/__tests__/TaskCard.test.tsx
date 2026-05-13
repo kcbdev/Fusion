@@ -320,6 +320,7 @@ describe("TaskCard", () => {
       />,
     );
 
+    expect(subscribeToBadgeMock).toHaveBeenCalledWith("FN-001");
     expect(screen.getByRole("link", { name: "#77" })).toBeDefined();
   });
 
