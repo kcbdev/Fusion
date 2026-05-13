@@ -43,7 +43,7 @@ jobs:
       - name: Setup Node and install dependencies
         uses: ./.github/actions/setup-node-pnpm
         with:
-          install-args: ""
+          install-args: "--frozen-lockfile"
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2

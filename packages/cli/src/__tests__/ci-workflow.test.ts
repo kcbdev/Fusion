@@ -352,6 +352,15 @@ describe("Binary release workflow (.github/workflows/release.yml)", () => {
     expect(content).toContain("softprops/action-gh-release");
   });
 
+  it("uses frozen-lockfile install in every matrix job", () => {
+    const steps = workflow.jobs["build-binaries"].steps ?? [];
+    const compositeStep = findCompositeSetupStep(steps);
+    expect(compositeStep).toBeDefined();
+    expect(compositeStep.with?.["install-args"] ?? "--frozen-lockfile").toBe("--frozen-lockfile");
+    expect(content).not.toContain("run: pnpm install\n");
+    expect(content).not.toContain("--no-frozen-lockfile");
+  });
+
   it("references signing scripts", () => {
     expect(content).toContain("scripts/sign-macos.sh");
     expect(content).toContain("scripts/sign-windows.ps1");
