@@ -2448,11 +2448,12 @@ export function TaskDetailContent({
                     </span>
                   )}
                 </div>
-                {showInlineGithubTrackingEnableButton && !isSavingGithubTracking && (
+                {showInlineGithubTrackingEnableButton && (
                   <button
                     type="button"
                     className="btn btn-sm btn-primary detail-github-tracking-enable"
                     aria-label="Enable GitHub tracking"
+                    disabled={isSavingGithubTracking}
                     onClick={() => void handleToggleGithubTracking()}
                   >
                     Enable

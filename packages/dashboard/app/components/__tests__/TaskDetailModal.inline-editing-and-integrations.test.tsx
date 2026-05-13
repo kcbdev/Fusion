@@ -2386,7 +2386,7 @@ describe("TaskDetailModal", () => {
       expect(screen.queryByRole("button", { name: "Collapse GitHub tracking details" })).toBeNull();
     });
 
-    it("FN-4228 shows a spinner instead of the inline enable button while saving", async () => {
+    it("FN-4228 keeps the inline enable button mounted and disabled while saving", async () => {
       const { updateTask } = await import("../../api");
       const mockUpdate = vi.mocked(updateTask);
       let resolveUpdate: ((task: Task) => void) | undefined;
@@ -2417,9 +2417,8 @@ describe("TaskDetailModal", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Enable GitHub tracking" }));
 
-      await waitFor(() => {
-        expect(screen.queryByRole("button", { name: "Enable GitHub tracking" })).toBeNull();
-      });
+      const enableButton = await screen.findByRole("button", { name: "Enable GitHub tracking" });
+      expect(enableButton).toBeDisabled();
       expect(screen.getByRole("status", { name: "Enabling GitHub tracking" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Expand GitHub tracking details" })).toHaveAttribute("aria-expanded", "false");
 
@@ -2437,7 +2436,6 @@ describe("TaskDetailModal", () => {
       } as Task);
 
       await waitFor(() => {
-        expect(screen.queryByRole("button", { name: "Enable GitHub tracking" })).toBeNull();
         expect(screen.queryByRole("status", { name: "Enabling GitHub tracking" })).toBeNull();
       });
     });
