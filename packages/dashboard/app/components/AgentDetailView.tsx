@@ -3171,6 +3171,10 @@ function deriveAllowParallelExecution(runtimeConfig: AgentDetail["runtimeConfig"
   return runtimeConfig?.allowParallelExecution !== false;
 }
 
+function deriveSkipHeartbeatWhenIdle(runtimeConfig: AgentDetail["runtimeConfig"] | undefined): boolean {
+  return runtimeConfig?.skipHeartbeatWhenIdle === true;
+}
+
 function deriveBudgetValues(runtimeConfig: AgentDetail["runtimeConfig"] | undefined): Record<string, string> {
   const bc = (runtimeConfig ?? {}).budgetConfig as Record<string, unknown> | undefined;
   const nextValues: Record<string, string> = {};
@@ -3540,6 +3544,9 @@ function ConfigTab({
   const [allowParallelExecution, setAllowParallelExecution] = useState<boolean>(
     () => deriveAllowParallelExecution(agent.runtimeConfig),
   );
+  const [skipHeartbeatWhenIdle, setSkipHeartbeatWhenIdle] = useState<boolean>(
+    () => deriveSkipHeartbeatWhenIdle(agent.runtimeConfig),
+  );
 
   // Budget config state initialised from agent.runtimeConfig.budgetConfig
   const [budgetValues, setBudgetValues] = useState<Record<string, string>>(
@@ -3826,6 +3833,7 @@ function ConfigTab({
     if (autoClaimRelevantTasksEnabled !== deriveAutoClaimRelevantTasksEnabled(agent.runtimeConfig)) return true;
     if (runMissedHeartbeatOnStartup !== deriveRunMissedHeartbeatOnStartup(agent.runtimeConfig)) return true;
     if (allowParallelExecution !== deriveAllowParallelExecution(agent.runtimeConfig)) return true;
+    if (skipHeartbeatWhenIdle !== deriveSkipHeartbeatWhenIdle(agent.runtimeConfig)) return true;
     for (const key of ["heartbeatIntervalMs", "heartbeatTimeoutMs", "maxConcurrentRuns", "messageResponseMode"] as const) {
       const current = heartbeatValues[key]?.trim() ?? "";
       let persisted = rc[key] !== undefined && rc[key] !== null ? String(rc[key]) : "";
@@ -3902,6 +3910,7 @@ function ConfigTab({
     setAutoClaimRelevantTasksEnabled(deriveAutoClaimRelevantTasksEnabled(agent.runtimeConfig));
     setRunMissedHeartbeatOnStartup(deriveRunMissedHeartbeatOnStartup(agent.runtimeConfig));
     setAllowParallelExecution(deriveAllowParallelExecution(agent.runtimeConfig));
+    setSkipHeartbeatWhenIdle(deriveSkipHeartbeatWhenIdle(agent.runtimeConfig));
     setBudgetValues(deriveBudgetValues(agent.runtimeConfig));
     setModelValue(initialModelValue);
     setSelectedRuntimeId(initialRuntimeHint);
@@ -4050,6 +4059,7 @@ function ConfigTab({
     newRuntimeConfig.autoClaimRelevantTasks = autoClaimRelevantTasksEnabled;
     newRuntimeConfig.runMissedHeartbeatOnStartup = runMissedHeartbeatOnStartup;
     newRuntimeConfig.allowParallelExecution = allowParallelExecution;
+    newRuntimeConfig.skipHeartbeatWhenIdle = skipHeartbeatWhenIdle;
     for (const key of ["heartbeatIntervalMs", "heartbeatTimeoutMs", "maxConcurrentRuns"] as const) {
       const raw = heartbeatValues[key]?.trim();
       if (!raw) {
@@ -4145,7 +4155,7 @@ function ConfigTab({
       runtimeConfig: newRuntimeConfig,
       bundleConfig: newBundleConfig,
     };
-  }, [agent.metadata, agent.runtimeConfig, allowParallelExecution, autoClaimRelevantTasksEnabled, budgetValues, bundleEntryFile, bundleExternalPath, bundleFiles, bundleMode, formValues, heartbeatEnabled, heartbeatValues, iconValue, modelValue, nameValue, reportsToValue, roleValue, runMissedHeartbeatOnStartup, runtimeMode, selectedRuntimeId, selectedSkills, titleValue, validationErrors]);
+  }, [agent.metadata, agent.runtimeConfig, allowParallelExecution, autoClaimRelevantTasksEnabled, budgetValues, bundleEntryFile, bundleExternalPath, bundleFiles, bundleMode, formValues, heartbeatEnabled, heartbeatValues, iconValue, modelValue, nameValue, reportsToValue, roleValue, runMissedHeartbeatOnStartup, runtimeMode, selectedRuntimeId, selectedSkills, skipHeartbeatWhenIdle, titleValue, validationErrors]);
 
   const persistSettings = useCallback(async (showValidationToast: boolean, source: "auto" | "manual") => {
     const payload = buildSavePayload();
@@ -4584,6 +4594,22 @@ function ConfigTab({
               Allow Parallel Execution
             </label>
             <span className="config-hint">When disabled, the heartbeat and task execution paths serialize for this agent (heartbeat will not start while the agent&apos;s task is executing, and vice versa). Permanent agents only.</span>
+          </div>
+
+          <div className="config-field">
+            <label className="checkbox-label" htmlFor="hb-skipHeartbeatWhenIdle">
+              <input
+                id="hb-skipHeartbeatWhenIdle"
+                type="checkbox"
+                checked={skipHeartbeatWhenIdle}
+                onChange={(e) => {
+                  setSkipHeartbeatWhenIdle(e.target.checked);
+                  void scheduleAutoSave();
+                }}
+              />
+              Skip heartbeat when idle
+            </label>
+            <span className="config-hint">When enabled, scheduled (timer) heartbeats are skipped while this agent has no assigned task. The agent still wakes immediately when a task is assigned or you trigger a run manually. Default: off.</span>
           </div>
 
           <div className="config-field">
