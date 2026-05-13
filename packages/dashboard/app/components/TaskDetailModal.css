@@ -582,6 +582,14 @@
   gap: var(--space-sm);
 }
 
+.detail-github-tracking-helper {
+  display: block;
+  color: var(--text-muted);
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .detail-github-tracking-repo-row {
   display: flex;
   gap: var(--space-sm);
