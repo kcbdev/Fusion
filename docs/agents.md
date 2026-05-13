@@ -1271,6 +1271,10 @@ Run records are stored in structured JSON files at `.fusion/agents/{agentId}-run
 
 Heartbeat events are also appended to `.fusion/agents/{agentId}-heartbeats.jsonl` for legacy compatibility. The structured storage is the source of truth; heartbeat events provide a fallback for older run data.
 
+### Thinking/Reasoning Log Persistence
+
+By default, `thinking`/reasoning agent log entries are discarded after each run. The `persistAgentThinkingLogPermanent` and `persistAgentThinkingLogEphemeral` project settings (both `boolean`, default `false`) control whether these entries are persisted for permanent and ephemeral agents respectively. A legacy `persistAgentThinkingLog` fallback is also supported. When disabled, only thinking rows are suppressed; normal assistant text and tool rows are unchanged. See the [settings reference](./settings-reference.md) for full configuration details.
+
 ### Stopping Runs
 
 Use `POST /api/agents/:id/runs/stop` to terminate an active run:
