@@ -808,6 +808,29 @@
   margin-top: var(--space-xs);
 }
 
+.settings-research-provider-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.settings-research-provider-advanced-details {
+  margin-left: var(--space-md);
+}
+
+.settings-research-empty-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+@media (max-width: 768px) {
+  .settings-research-provider-advanced-details {
+    margin-left: 0;
+  }
+}
+
 .settings-option-details > summary {
   cursor: pointer;
   color: var(--text-muted);

@@ -4384,7 +4384,7 @@ export function SettingsModal({
           <>
             {renderScopeBanner()}
             <h4 className="settings-section-heading">Research Defaults</h4>
-            <div className="form-group">
+            <div className="form-group settings-research-provider-group">
               <label htmlFor="research-global-provider-builtin" className="checkbox-label">
                 <input
                   id="research-global-provider-builtin"
@@ -4398,62 +4398,62 @@ export function SettingsModal({
               <small>
                 Searches and fetches use the agent's native WebSearch/WebFetch tools. No API key required.
               </small>
+              <details className="settings-option-details settings-research-provider-advanced-details">
+                <summary>Advanced — external search providers</summary>
+                <div className="form-group">
+                  <label htmlFor="research-global-search-provider-advanced">Search Provider</label>
+                  <select
+                    id="research-global-search-provider-advanced"
+                    className="input"
+                    value={externalProvider ? resolvedProvider : "searxng"}
+                    onChange={(event) =>
+                      setSearchProvider(event.target.value as Settings["researchGlobalWebSearchProvider"])
+                    }
+                  >
+                    <option value="searxng">SearXNG</option>
+                    <option value="brave">Brave</option>
+                    <option value="google">Google Custom Search</option>
+                    <option value="tavily">Tavily</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label htmlFor="research-global-searxng-url">SearXNG URL</label>
+                  <input
+                    id="research-global-searxng-url"
+                    className="input"
+                    value={form.researchGlobalSearxngUrl ?? ""}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        researchGlobalSearxngUrl: event.target.value || undefined,
+                      }))
+                    }
+                    placeholder="https://searx.example.com"
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="research-global-google-cx">Google Search CX</label>
+                  <input
+                    id="research-global-google-cx"
+                    className="input"
+                    value={form.researchGlobalGoogleSearchCx ?? ""}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        researchGlobalGoogleSearchCx: event.target.value || undefined,
+                      }))
+                    }
+                    placeholder="custom-search-engine-id"
+                  />
+                </div>
+                <div className="settings-empty-state settings-research-empty-state" role="note">
+                  Configure Brave, Tavily, and Google API keys in Authentication.
+                  <button type="button" className="btn btn-sm" onClick={() => setActiveSection("authentication")}>
+                    Open Authentication Settings
+                  </button>
+                </div>
+              </details>
             </div>
-            <details className="settings-option-details">
-              <summary>Advanced — external search providers</summary>
-              <div className="form-group">
-                <label htmlFor="research-global-search-provider-advanced">Search Provider</label>
-                <select
-                  id="research-global-search-provider-advanced"
-                  className="input"
-                  value={externalProvider ? resolvedProvider : "searxng"}
-                  onChange={(event) =>
-                    setSearchProvider(event.target.value as Settings["researchGlobalWebSearchProvider"])
-                  }
-                >
-                  <option value="searxng">SearXNG</option>
-                  <option value="brave">Brave</option>
-                  <option value="google">Google Custom Search</option>
-                  <option value="tavily">Tavily</option>
-                </select>
-              </div>
-              <div className="form-group">
-                <label htmlFor="research-global-searxng-url">SearXNG URL</label>
-                <input
-                  id="research-global-searxng-url"
-                  className="input"
-                  value={form.researchGlobalSearxngUrl ?? ""}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      researchGlobalSearxngUrl: event.target.value || undefined,
-                    }))
-                  }
-                  placeholder="https://searx.example.com"
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="research-global-google-cx">Google Search CX</label>
-                <input
-                  id="research-global-google-cx"
-                  className="input"
-                  value={form.researchGlobalGoogleSearchCx ?? ""}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      researchGlobalGoogleSearchCx: event.target.value || undefined,
-                    }))
-                  }
-                  placeholder="custom-search-engine-id"
-                />
-              </div>
-              <div className="settings-empty-state" role="note">
-                Configure Brave, Tavily, and Google API keys in Authentication.
-                <button type="button" className="btn btn-sm" onClick={() => setActiveSection("authentication")}>
-                  Open Authentication Settings
-                </button>
-              </div>
-            </details>
             <div className="form-group">
               <label htmlFor="research-global-max-sources">Default Max Sources Per Run</label>
               <input
