@@ -39,6 +39,151 @@ const fileDiffsCache = new Map<
   }
 >();
 
+type DoneTaskFileStatus = "added" | "modified" | "deleted" | "renamed";
+
+type AggregatedDoneTaskFile = {
+  path: string;
+  status: DoneTaskFileStatus;
+  additions: number;
+  deletions: number;
+  patch: string;
+};
+
+function statusPriority(status: DoneTaskFileStatus): number {
+  switch (status) {
+    case "added":
+      return 4;
+    case "modified":
+      return 3;
+    case "renamed":
+      return 2;
+    case "deleted":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+async function isReachableFromHead(sha: string, rootDir: string): Promise<boolean> {
+  try {
+    await runGitCommand(["merge-base", "--is-ancestor", sha, "HEAD"], rootDir, 5000);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function collectDoneTaskFiles(task: any, scopedStore: ProjectContext["store"]): Promise<{
+  files: AggregatedDoneTaskFile[];
+  stats: { filesChanged: number; additions: number; deletions: number };
+  usedAggregation: boolean;
+}> {
+  const rootDir = scopedStore.getRootDir();
+  const mergeSha = task.mergeDetails?.commitSha;
+  const orderedShas: string[] = [];
+
+  if (task.lineageId) {
+    const associations = await scopedStore.getTaskCommitAssociationsByLineageId(task.lineageId);
+    const sorted = [...associations].sort((a, b) => {
+      const left = a.authoredAt ? Date.parse(a.authoredAt) : Number.POSITIVE_INFINITY;
+      const right = b.authoredAt ? Date.parse(b.authoredAt) : Number.POSITIVE_INFINITY;
+      return left - right;
+    });
+    for (const association of sorted) {
+      if (association.commitSha && !orderedShas.includes(association.commitSha)) {
+        orderedShas.push(association.commitSha);
+      }
+    }
+  }
+
+  if (mergeSha && !orderedShas.includes(mergeSha)) {
+    orderedShas.push(mergeSha);
+  }
+
+  const reachableShas: string[] = [];
+  for (const sha of orderedShas) {
+    if (await isReachableFromHead(sha, rootDir)) {
+      reachableShas.push(sha);
+    }
+  }
+
+  if (reachableShas.length === 0) {
+    return {
+      files: [],
+      stats: {
+        filesChanged: 0,
+        additions: 0,
+        deletions: 0,
+      },
+      usedAggregation: false,
+    };
+  }
+
+  const byPath = new Map<string, AggregatedDoneTaskFile>();
+
+  for (const sha of reachableShas) {
+    let parentSha: string;
+    try {
+      parentSha = (await runGitCommand(["rev-parse", `${sha}^`], rootDir, 5000)).trim();
+    } catch {
+      continue;
+    }
+
+    let nameStatus = "";
+    try {
+      nameStatus = (await runGitCommand(["diff", "--name-status", `${parentSha}..${sha}`], rootDir, 10000)).trim();
+    } catch {
+      continue;
+    }
+
+    for (const line of nameStatus.split("\n").filter(Boolean)) {
+      const parts = line.split("\t");
+      const statusCode = parts[0] ?? "M";
+      const filePath = statusCode.startsWith("R") ? (parts[2] ?? parts[1] ?? "") : (parts[1] ?? "");
+      if (!filePath) continue;
+
+      let status: DoneTaskFileStatus = "modified";
+      if (statusCode.startsWith("A")) status = "added";
+      else if (statusCode.startsWith("D")) status = "deleted";
+      else if (statusCode.startsWith("R")) status = "renamed";
+
+      let patch = "";
+      try {
+        patch = await runGitCommand(["diff", `${parentSha}..${sha}`, "--", filePath], rootDir, 10000);
+      } catch {
+        patch = "";
+      }
+
+      const additions = (patch.match(/^\+[^+]/gm) || []).length;
+      const deletions = (patch.match(/^-[^-]/gm) || []).length;
+      const existing = byPath.get(filePath);
+
+      if (!existing) {
+        byPath.set(filePath, { path: filePath, status, additions, deletions, patch });
+        continue;
+      }
+
+      existing.additions += additions;
+      existing.deletions += deletions;
+      existing.patch = `${existing.patch}${existing.patch && patch ? "\n" : ""}${patch}`;
+      if (statusPriority(status) > statusPriority(existing.status)) {
+        existing.status = status;
+      }
+    }
+  }
+
+  const files = Array.from(byPath.values());
+  return {
+    files,
+    stats: {
+      filesChanged: files.length,
+      additions: files.reduce((sum, file) => sum + file.additions, 0),
+      deletions: files.reduce((sum, file) => sum + file.deletions, 0),
+    },
+    usedAggregation: true,
+  };
+}
+
 /**
  * Registers task session-file and diff routes.
  *
@@ -150,11 +295,23 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
       }
 
       if (task.column === "done" && task.mergeDetails?.commitSha) {
+        const aggregated = await collectDoneTaskFiles(task, scopedStore);
+
+        if (aggregated.usedAggregation && aggregated.files.length > 0) {
+          res.json({
+            files: aggregated.files.map((file) => ({
+              ...file,
+              status: file.status === "renamed" ? "modified" : file.status,
+            })),
+            stats: aggregated.stats,
+          });
+          return;
+        }
+
         const rootDir = scopedStore.getRootDir();
         const sha = task.mergeDetails.commitSha;
 
         let mergeBase: string | undefined;
-
         try {
           mergeBase = (await runGitCommand(["rev-parse", `${sha}^`], rootDir, 5000)).trim();
         } catch {
@@ -162,45 +319,19 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
           return;
         }
 
-        const nameStatus = (await runGitCommand(["diff", "--name-status", `${mergeBase}..${sha}`], rootDir, 10000)).trim();
+        const patch = await runGitCommand(["diff", `${mergeBase}..${sha}`], rootDir, 10000).catch(() => "");
+        const filesChanged = (await runGitCommand(["diff", "--name-only", `${mergeBase}..${sha}`], rootDir, 10000)
+          .then((output) => output.split("\n").filter(Boolean).length)
+          .catch(() => 0));
 
-        const doneFiles: Array<{
-          path: string;
-          status: "added" | "modified" | "deleted";
-          additions: number;
-          deletions: number;
-          patch: string;
-        }> = [];
-
-        for (const line of nameStatus.split("\n").filter(Boolean)) {
-          const parts = line.split("\t");
-          const statusCode = parts[0] ?? "M";
-          const filePath = parts[1] ?? "";
-          if (!filePath) continue;
-
-          let status: "added" | "modified" | "deleted" = "modified";
-          if (statusCode.startsWith("A")) status = "added";
-          else if (statusCode.startsWith("D")) status = "deleted";
-
-          let patch = "";
-          try {
-            patch = await runGitCommand(["diff", `${mergeBase}..${sha}`, "--", filePath], rootDir, 10000);
-          } catch {
-            // ignore
-          }
-
-          const additions = (patch.match(/^\+[^+]/gm) || []).length;
-          const deletions = (patch.match(/^-[^-]/gm) || []).length;
-          doneFiles.push({ path: filePath, status, additions, deletions, patch });
-        }
-
-        const doneStats = {
-          filesChanged: doneFiles.length,
-          additions: doneFiles.reduce((s, f) => s + f.additions, 0),
-          deletions: doneFiles.reduce((s, f) => s + f.deletions, 0),
-        };
-
-        res.json({ files: doneFiles, stats: doneStats });
+        res.json({
+          files: [],
+          stats: {
+            filesChanged,
+            additions: (patch.match(/^\+[^+]/gm) || []).length,
+            deletions: (patch.match(/^-[^-]/gm) || []).length,
+          },
+        });
         return;
       }
 
@@ -342,6 +473,13 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
       }
 
       if (task.column === "done" && task.mergeDetails?.commitSha) {
+        const aggregated = await collectDoneTaskFiles(task, scopedStore);
+
+        if (aggregated.usedAggregation && aggregated.files.length > 0) {
+          res.json(aggregated.files.map((file) => ({ path: file.path, status: file.status, diff: file.patch })));
+          return;
+        }
+
         const rootDir = scopedStore.getRootDir();
         const sha = task.mergeDetails.commitSha;
 
