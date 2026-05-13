@@ -301,6 +301,7 @@ export class InProcessRuntime
         maxConcurrent: this.config.maxConcurrent,
         maxWorktrees: this.config.maxWorktrees,
         semaphore: this.globalSemaphore,
+        agentStore: this.agentStore,
         missionStore,
         missionAutopilot,
         missionExecutionLoop,
