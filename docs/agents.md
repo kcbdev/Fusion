@@ -202,8 +202,9 @@ Invariant: a durable agent must not remain `state="running"` while its linked ta
 
 Layered enforcement:
 - **Scheduler rollback (`packages/engine/src/scheduler.ts`)**: when overlap gating requeues a todo task to `status="queued"`, scheduler immediately rolls back any running agent linked through `executionTaskId` to `state="active"` and clears the execution-task link.
-- **Heartbeat reconciliation (`packages/engine/src/agent-heartbeat.ts`)**: `reconcileOrphanedRunningAgents()` resets rows stuck in `running` when no active heartbeat run exists (or the run is stale).
-- **Self-healing reconciler (`packages/engine/src/self-healing.ts`)**: `recoverAgentsRunningOnInactiveTasks()` periodically clears `running` + `executionTaskId` mismatches when the linked task is not in `in-progress`.
+- **Heartbeat reconciliation (`packages/engine/src/agent-heartbeat.ts`)**: `reconcileOrphanedRunningAgents()` repairs persisted `state="running"` drift when no active run exists, or when a persisted active run is untracked and older than `heartbeatTimeoutMs × 3` (work-budget grace; see inline FN-4278/FN-4255 comment near that check).
+- **Heartbeat scheduler stale-run reap (`packages/engine/src/agent-heartbeat.ts`)**: `HeartbeatTriggerScheduler.maybeReapStaleActiveRun()` repairs stale persisted `status="active"` heartbeat runs using `heartbeatTimeoutMs × heartbeatRepairStaleMultiplier` (default multiplier `2`).
+- **Self-healing reconciler (`packages/engine/src/self-healing.ts`)**: `recoverAgentsRunningOnInactiveTasks()` and `recoverStaleHeartbeatRuns()` use task-column mismatch checks plus PID/young-run/age guards (including the 6h stale active-run max age) rather than a simple timeout multiplier.
 
 Manual recovery for pre-fix stuck rows:
 1. Open the agent in Dashboard → Agent Detail.
@@ -1134,11 +1135,12 @@ Threshold semantics:
 - Default threshold is therefore **`2 × heartbeatTimeoutMs`** (default timeout `60s` → default reap threshold `120s`)
 
 Layering with the existing recovery paths:
-- **`HeartbeatMonitor.reconcileOrphanedRunningAgents()`** still handles monitor-owned stale `running` agents and other tracked-session cleanup
-- **`HeartbeatTriggerScheduler.onTimerTick()`** now reaps a stale active run, logs `reason=tick-proceeded-after-reap`, and proceeds with the scheduled callback in the same tick
-- **`HeartbeatTriggerScheduler.auditTimerRegistrations()`** now reaps the stale active run first, then re-arms the missing timer in the same audit pass and logs `reason=timer-audit-rearmed`
-- Healthy active runs within threshold still keep the old `(active run)` skip behavior
-- Ephemeral/task-worker agents are never reaped by this path
+- **`HeartbeatMonitor.reconcileOrphanedRunningAgents()`** handles orphaned persisted `state="running"` rows and uses `heartbeatTimeoutMs × 3` as a run-budget grace threshold when the active run exists but is untracked.
+- **`HeartbeatTriggerScheduler.onTimerTick()`** reaps stale persisted `status="active"` runs at `heartbeatTimeoutMs × heartbeatRepairStaleMultiplier`, logs `reason=tick-proceeded-after-reap`, and proceeds with the scheduled callback in the same tick.
+- **`HeartbeatTriggerScheduler.auditTimerRegistrations()`** applies the same stale-run threshold, then reaps stale active runs before re-arming missing timers and logs `reason=timer-audit-rearmed`.
+- **`SelfHealingManager.recoverAgentsRunningOnInactiveTasks()` / `recoverStaleHeartbeatRuns()`** are the final backstop using task-state mismatch and PID/max-age guards (not the timeout multiplier formulas above).
+- Healthy active runs within threshold still keep the old `(active run)` skip behavior.
+- Ephemeral/task-worker agents are never reaped by this path.
 
 Separation of responsibilities:
 - **HeartbeatMonitor recovery** handles **tracked stale sessions** (stuck in-memory run/session cleanup + pause/resume restart)

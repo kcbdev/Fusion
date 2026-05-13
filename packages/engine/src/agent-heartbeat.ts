@@ -892,6 +892,13 @@ export class HeartbeatMonitor {
         } else if (!this.trackedAgents.has(agent.id)) {
           const timeoutMs = this.resolveAgentConfig(agent.id).heartbeatTimeoutMs;
           const heartbeatAgeMs = getHeartbeatAgeMs(agent, now);
+          // NOTE(FN-4278): this stale gate intentionally uses a per-run work-budget
+          // multiplier (`heartbeatTimeoutMs × 3`) because this path is only for
+          // untracked persisted `state="running"` rows where an in-memory tracked
+          // session is absent. It is not the direct-report freshness classifier.
+          // Freshness/staleness for active+idle reports is interval-based in
+          // `buildReportsHealthSection()` and dashboard `agentHealth.tsx` via
+          // `max(heartbeatIntervalMs × 4, 5m)` (FN-4255).
           if (!Number.isFinite(heartbeatAgeMs) || heartbeatAgeMs > timeoutMs * 3) {
             try {
               await terminatePersistedHeartbeatRun(
