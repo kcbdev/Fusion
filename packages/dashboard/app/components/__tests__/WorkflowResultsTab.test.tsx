@@ -941,6 +941,16 @@ describe("WorkflowResultsTab", () => {
     });
 
 
+    it("keeps the workflow edit toggle on button primitives instead of fixed icon-button sizing", () => {
+      const baseCss = loadAllAppCssBaseOnly();
+      const editToggleRule = baseCss.match(/\.workflow-results-edit-toggle\s*\{([^}]*)\}/)?.[1] ?? "";
+      const buttonSmallRule = baseCss.match(/\.btn-sm\s*\{([^}]*)\}/)?.[1] ?? "";
+
+      expect(editToggleRule).not.toMatch(/\bwidth\s*:\s*28px\s*;/);
+      expect(editToggleRule).not.toMatch(/\bheight\s*:\s*28px\s*;/);
+      expect(buttonSmallRule).toMatch(/padding\s*:\s*(?!0(?:\s+0){0,3})[^;]+;/);
+    });
+
     it("allows workflow modal controls to wrap on mobile so the close button stays visible", () => {
       const css = loadAllAppCss();
 
