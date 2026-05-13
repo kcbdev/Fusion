@@ -4,7 +4,6 @@ import { selectPermanentAgentForTask } from "../agent-assignment.js";
 
 function makeAgent(overrides: Partial<Agent> & Pick<Agent, "id">): Agent {
   return {
-    id: overrides.id,
     name: overrides.name ?? overrides.id,
     role: overrides.role ?? "executor",
     state: overrides.state ?? "idle",
@@ -17,7 +16,6 @@ function makeAgent(overrides: Partial<Agent> & Pick<Agent, "id">): Agent {
 
 function makeTask(overrides: Partial<Task> & Pick<Task, "id">): Task {
   return {
-    id: overrides.id,
     title: overrides.title ?? overrides.id,
     description: overrides.description ?? "",
     column: overrides.column ?? "todo",

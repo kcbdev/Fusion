@@ -31,7 +31,6 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 
 function makeAgent(overrides: Partial<Agent> & Pick<Agent, "id">): Agent {
   return {
-    id: overrides.id,
     name: overrides.name ?? overrides.id,
     role: overrides.role ?? "executor",
     state: overrides.state ?? "idle",
