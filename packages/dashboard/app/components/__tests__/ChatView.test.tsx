@@ -3017,6 +3017,42 @@ describe("Direct/Rooms scope toggle", () => {
     expect(screen.getByTestId("chat-session-session-001")).toHaveClass("chat-session-item--active");
   });
 
+  it("FN-4327: switching scope from Rooms to Direct re-anchors direct thread", async () => {
+    setupMockChat({
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+      messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z" }],
+      sessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
+      filteredSessions: [{ id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" }],
+    });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+    const messagesContainer = document.querySelector(".chat-messages") as HTMLDivElement;
+    Object.defineProperty(messagesContainer, "scrollHeight", { configurable: true, get: () => 1200 });
+    Object.defineProperty(messagesContainer, "clientHeight", { configurable: true, get: () => 200 });
+    let scrollTopValue = 500;
+    Object.defineProperty(messagesContainer, "scrollTop", {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    fireEvent.scroll(messagesContainer);
+    expect(screen.getByTestId("chat-jump-to-latest")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("chat-sidebar-scope-rooms"));
+    await userEvent.click(screen.getByTestId("chat-sidebar-scope-direct"));
+
+    await waitFor(() => {
+      expect(scrollTopValue).toBe(1200);
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("chat-jump-to-latest")).not.toBeInTheDocument();
+    });
+  });
+
   it("forces direct scope when localStorage persisted rooms but chatRooms is off", () => {
     setupMockChat({ sessions: [], filteredSessions: [] });
     localStorage.setItem("fusion:chat-scope", "rooms");
@@ -4001,6 +4037,93 @@ describe("ChatView mobile behavior", () => {
     } finally {
       restoreMatchMedia.mockRestore();
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    }
+  });
+
+  it("FN-4327: desktop visibility restore re-anchors direct chat and resets jump-to-latest state", async () => {
+    const restoreMatchMedia = mockDesktopViewport();
+    try {
+      setupMockChat({
+        activeSession: activeSessionFixture,
+        messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z" }],
+      });
+
+      const { rerender } = render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const messagesContainer = document.querySelector(".chat-messages") as HTMLDivElement;
+      let scrollTopValue = 600;
+      let scrollHeightValue = 1200;
+      Object.defineProperty(messagesContainer, "scrollHeight", { configurable: true, get: () => scrollHeightValue });
+      Object.defineProperty(messagesContainer, "clientHeight", { configurable: true, get: () => 200 });
+      Object.defineProperty(messagesContainer, "scrollTop", {
+        configurable: true,
+        get: () => scrollTopValue,
+        set: (value: number) => {
+          scrollTopValue = value;
+        },
+      });
+
+      fireEvent.scroll(messagesContainer);
+      expect(screen.getByTestId("chat-jump-to-latest")).toBeInTheDocument();
+
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      fireEvent(document, new Event("visibilitychange"));
+
+      await waitFor(() => {
+        expect(scrollTopValue).toBe(1200);
+      });
+      await waitFor(() => {
+        expect(screen.queryByTestId("chat-jump-to-latest")).not.toBeInTheDocument();
+      });
+
+      setupMockChat({
+        activeSession: activeSessionFixture,
+        messages: [
+          { id: "msg-001", sessionId: "session-001", role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z" },
+          { id: "msg-002", sessionId: "session-001", role: "assistant", content: "Two", createdAt: "2026-04-08T00:00:10.000Z" },
+        ],
+      });
+      scrollTopValue = 700;
+      scrollHeightValue = 1300;
+      rerender(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(scrollTopValue).toBe(1300);
+      });
+    } finally {
+      restoreMatchMedia.mockRestore();
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    }
+  });
+
+  it("FN-4327: desktop pageshow re-anchors direct chat thread", async () => {
+    const restoreMatchMedia = mockDesktopViewport();
+    try {
+      setupMockChat({
+        activeSession: activeSessionFixture,
+        messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z" }],
+      });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const messagesContainer = document.querySelector(".chat-messages") as HTMLDivElement;
+      let scrollTopValue = 420;
+      Object.defineProperty(messagesContainer, "scrollHeight", { configurable: true, get: () => 1280 });
+      Object.defineProperty(messagesContainer, "scrollTop", {
+        configurable: true,
+        get: () => scrollTopValue,
+        set: (value: number) => {
+          scrollTopValue = value;
+        },
+      });
+
+      fireEvent(window, new Event("pageshow"));
+
+      await waitFor(() => {
+        expect(scrollTopValue).toBe(1280);
+      });
+    } finally {
+      restoreMatchMedia.mockRestore();
     }
   });
 

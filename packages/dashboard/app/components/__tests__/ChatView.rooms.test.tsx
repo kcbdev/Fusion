@@ -640,6 +640,32 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     }
   });
 
+  it("FN-4327: desktop visibility restore does not re-anchor active room thread", async () => {
+    const restoreMatchMedia = mockDesktopViewport();
+    const metrics = mockMessagesContainerMetrics({ scrollHeight: 1180, clientHeight: 240, initialScrollTop: 250 });
+
+    try {
+      setup({}, {
+        activeRoom: roomA,
+        messages: [{ id: "rmsg-1", roomId: roomA.id, role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z", senderAgentId: "agent-1", mentions: [] }],
+      });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+      metrics.setScrollTop(300);
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      fireEvent(document, new Event("visibilitychange"));
+
+      await waitFor(() => {
+        expect(metrics.getScrollTop()).toBe(300);
+      });
+    } finally {
+      metrics.restore();
+      restoreMatchMedia.mockRestore();
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    }
+  });
+
   it("keeps direct mode behavior unchanged when rooms are enabled", async () => {
     localStorage.setItem("fusion:chat-scope", "direct");
     const addToast = vi.fn();
