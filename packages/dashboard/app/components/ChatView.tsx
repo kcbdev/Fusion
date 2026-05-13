@@ -961,6 +961,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   const lastAnchoredThreadStateRef = useRef<{ threadId: string; loaded: boolean; hasMessages: boolean } | null>(null);
   const previousChatScopeRef = useRef<"direct" | "rooms" | null>(null);
   const visibilityReanchorTimeoutRef = useRef<number | null>(null);
+  const directThreadDeferredAnchorTimeoutRef = useRef<number | null>(null);
   const hideSkillMenuTimeoutRef = useRef<number | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -1171,6 +1172,11 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   }, [anchorToBottom]);
 
   useLayoutEffect(() => {
+    if (directThreadDeferredAnchorTimeoutRef.current !== null) {
+      window.clearTimeout(directThreadDeferredAnchorTimeoutRef.current);
+      directThreadDeferredAnchorTimeoutRef.current = null;
+    }
+
     const threadId = roomThreadActive ? (rooms.activeRoom?.id ?? null) : (activeSession?.id ?? null);
     if (!threadId) {
       lastAnchoredThreadStateRef.current = null;
@@ -1199,7 +1205,27 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     }
 
     anchorToBottom(messagesContainer);
+    if (!roomThreadActive) {
+      directThreadDeferredAnchorTimeoutRef.current = window.setTimeout(() => {
+        directThreadDeferredAnchorTimeoutRef.current = null;
+        if (isUserScrollingRef.current) {
+          return;
+        }
+        const latestContainer = messagesContainerRef.current;
+        if (!latestContainer) {
+          return;
+        }
+        anchorToBottom(latestContainer);
+      }, 250);
+    }
     lastAnchoredThreadStateRef.current = nextState;
+
+    return () => {
+      if (directThreadDeferredAnchorTimeoutRef.current !== null) {
+        window.clearTimeout(directThreadDeferredAnchorTimeoutRef.current);
+        directThreadDeferredAnchorTimeoutRef.current = null;
+      }
+    };
   }, [
     roomThreadActive,
     rooms.activeRoom?.id,
