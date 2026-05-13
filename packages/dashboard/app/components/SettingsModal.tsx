@@ -2046,6 +2046,12 @@ export function SettingsModal({
               <small>
                 Controls whether newly created tasks have GitHub issue tracking enabled by default. Individual tasks can still override this from the task detail modal.
               </small>
+              <small>
+                Tracking issues use this task&apos;s title. If a task has no title yet, Fusion can summarize its description using the title summarization model configured above.
+                {!form.autoSummarizeTitles && !form.useAiMergeCommitSummary && !form.githubTrackingEnabledByDefault
+                  ? " Enable summarization above to configure that model."
+                  : ""}
+              </small>
             </div>
             <div className="form-group">
               <label htmlFor="projectGithubTrackingDefaultRepoGeneral">Project default tracking repo</label>
@@ -2837,7 +2843,8 @@ export function SettingsModal({
                 When enabled, tasks created without a title but with descriptions over 200 characters
                 will automatically get an AI-generated title (max 60 characters). The same model is
                 also used to generate fallback merge commit message bodies when the branch's commit
-                log is empty (e.g. squash merges with no unique commits).
+                log is empty (e.g. squash merges with no unique commits), and GitHub tracking issue
+                titles when a tracked task has no title yet.
               </small>
             </div>
 
@@ -2856,10 +2863,10 @@ export function SettingsModal({
               </small>
             </div>
 
-            {(form.autoSummarizeTitles || form.useAiMergeCommitSummary || false) && (
+            {(form.autoSummarizeTitles || form.useAiMergeCommitSummary || form.githubTrackingEnabledByDefault || false) && (
               <>
                 <div className="form-group">
-                  <label>Title and commit message summarization model</label>
+                  <label>Title, commit message, and GitHub tracking issue summarization model</label>
                   {modelsLoading ? (
                     <small>Loading available models...</small>
                   ) : availableModels.length === 0 ? (
@@ -2867,7 +2874,7 @@ export function SettingsModal({
                   ) : (
                     <CustomModelDropdown
                       id="titleSummarizerModel"
-                      label="Title and commit message summarization model"
+                      label="Title, commit message, and GitHub tracking issue summarization model"
                       models={availableModels}
                       value={
                         form.titleSummarizerProvider && form.titleSummarizerModelId
@@ -2897,6 +2904,9 @@ export function SettingsModal({
                       onToggleModelFavorite={handleToggleModelFavorite}
                     />
                   )}
+                  <small>
+                    Also used to summarize task descriptions into GitHub tracking issue titles when a task has no title yet.
+                  </small>
                   <small>
                     {form.titleSummarizerProvider && form.titleSummarizerModelId
                       ? "Using explicitly configured model"

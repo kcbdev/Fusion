@@ -573,7 +573,7 @@ For post-merge prompt workflow steps, explicit step-level `modelProvider` + `mod
 
 ### Title summarization model
 
-Used for task title auto-summarization and (when enabled) AI merge commit summaries.
+Used for task title auto-summarization, GitHub tracking issue title summarization when tasks are untitled, and (when enabled) AI merge commit summaries.
 
 1. Project `titleSummarizerProvider` + `titleSummarizerModelId`
 2. Global `titleSummarizerGlobalProvider` + `titleSummarizerGlobalModelId`

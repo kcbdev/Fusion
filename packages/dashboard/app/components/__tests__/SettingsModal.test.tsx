@@ -793,6 +793,38 @@ describe("SettingsModal", () => {
       expect(payload.githubTrackingEnabledByDefault).toBe(false);
       expect(payload.githubTrackingDefaultRepo).toBeUndefined();
     });
+
+    it("hides summarization model picker when summarization and default tracking are disabled", async () => {
+      renderModal({ initialSection: "models" });
+      await waitForSettingsModalReady();
+
+      await userEvent.click(screen.getByRole("button", { name: "Project Models" }));
+
+      expect(screen.queryByText("Title, commit message, and GitHub tracking issue summarization model")).not.toBeInTheDocument();
+    });
+
+    it("shows summarization model picker for GitHub tracking defaults", async () => {
+      mockFetchSettings.mockResolvedValueOnce({
+        ...defaultSettings,
+        githubTrackingEnabledByDefault: true,
+      });
+
+      renderModal({ initialSection: "models" });
+      await waitForSettingsModalReady();
+
+      await userEvent.click(screen.getByRole("button", { name: "Project Models" }));
+
+      expect(screen.getByText("Title, commit message, and GitHub tracking issue summarization model")).toBeInTheDocument();
+    });
+
+    it("always shows GitHub tracking summarization helper copy", async () => {
+      renderModal({ initialSection: "general" });
+      await waitForSettingsModalReady();
+
+      expect(
+        screen.getByText(/Tracking issues use this task's title\. If a task has no title yet, Fusion can summarize its description using the title summarization model configured above\./),
+      ).toBeInTheDocument();
+    });
   });
 
   describe("Appearance", () => {

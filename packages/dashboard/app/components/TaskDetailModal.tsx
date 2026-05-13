@@ -95,6 +95,19 @@ function extractReviewerModelFromLog(entries: AgentLogEntry[]): { provider: stri
   return result;
 }
 
+function hasUsableTrackingTitle(task: { title?: string | null; description?: string | null }): boolean {
+  if ((task.title ?? "").trim().length > 0) {
+    return true;
+  }
+
+  const firstMeaningfulLine = (task.description ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+
+  return Boolean(firstMeaningfulLine);
+}
+
 function extractAssignedRuntimeModel(agent: Agent | null | undefined): ModelSelection {
   const runtimeConfig = (agent?.runtimeConfig ?? undefined) as Record<string, unknown> | undefined;
   const model = typeof runtimeConfig?.model === "string" ? runtimeConfig.model.trim() : "";
@@ -813,6 +826,7 @@ export function TaskDetailContent({
   const githubTrackingEnabled = githubTrackingEnabledDraft ?? (workingTask.githubTracking?.enabled === true);
   const githubTrackedIssue = workingTask.githubTracking?.issue;
   const githubTrackingDetailPending = detailLoading && typeof task.githubTracking === "undefined";
+  const canCreateTrackingIssue = hasUsableTrackingTitle(task);
   const showInlineGithubTrackingEnableButton =
     canEditGithubTracking
     && !githubTrackedIssue
@@ -874,6 +888,10 @@ export function TaskDetailContent({
 
   const handleRetryGithubTrackingIssueCreate = useCallback(async () => {
     if (!githubTrackingEnabled || githubTrackedIssue || isSavingGithubTracking) return;
+    if (!hasUsableTrackingTitle(task)) {
+      addToast("Add a title before creating a tracking issue", "info");
+      return;
+    }
     setIsSavingGithubTracking(true);
     try {
       const updatedTask = await updateTask(task.id, {
@@ -888,7 +906,7 @@ export function TaskDetailContent({
     } finally {
       if (mountedRef.current) setIsSavingGithubTracking(false);
     }
-  }, [addToast, githubTrackedIssue, githubTrackingEnabled, isSavingGithubTracking, onTaskUpdated, projectId, task.id]);
+  }, [addToast, githubTrackedIssue, githubTrackingEnabled, isSavingGithubTracking, onTaskUpdated, projectId, task]);
 
   const enterEditMode = useCallback(() => {
     if (!canEdit) return;
@@ -2494,9 +2512,19 @@ export function TaskDetailContent({
                   )}
                   <div className="detail-github-tracking-controls">
                     {!githubTrackedIssue && githubTrackingEnabled && (
-                      <button className="btn btn-sm touch-target" onClick={() => void handleRetryGithubTrackingIssueCreate()} disabled={isSavingGithubTracking}>
-                        Create tracking issue
-                      </button>
+                      <>
+                        <button
+                          className="btn btn-sm touch-target"
+                          onClick={() => void handleRetryGithubTrackingIssueCreate()}
+                          disabled={isSavingGithubTracking || !canCreateTrackingIssue}
+                          title={!canCreateTrackingIssue ? "Add a title or description so a tracking issue can be created." : undefined}
+                        >
+                          Create tracking issue
+                        </button>
+                        {!canCreateTrackingIssue && (
+                          <small className="detail-source-empty">Tracking issue will be created once this task has a title.</small>
+                        )}
+                      </>
                     )}
                     {canEditGithubTracking && (
                       <>
