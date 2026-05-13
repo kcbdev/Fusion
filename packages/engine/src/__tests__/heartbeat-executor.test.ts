@@ -27,7 +27,13 @@ vi.mock("../pi.js", () => ({
   }),
 }));
 import { createFnAgent } from "../pi.js";
+import { acquireTaskWorktree } from "../worktree-acquisition.js";
 const mockedCreateFnAgent = vi.mocked(createFnAgent);
+const mockedAcquireTaskWorktree = vi.mocked(acquireTaskWorktree);
+
+vi.mock("../worktree-acquisition.js", () => ({
+  acquireTaskWorktree: vi.fn(),
+}));
 
 describe("executeHeartbeat", () => {
   let mockTaskStore: TaskStore;
@@ -57,6 +63,8 @@ describe("executeHeartbeat", () => {
         prompt: "# Test PROMPT.md\nSome content",
         steps: [],
         column: "todo",
+        worktree: "/tmp/worktree-fn-001",
+        branch: "fusion/fn-001",
         dependencies: [],
         log: [],
         attachments: [],
@@ -164,10 +172,17 @@ describe("executeHeartbeat", () => {
   beforeEach(() => {
     mockTaskStore = createMockTaskStore();
     vi.clearAllMocks();
+    mockedAcquireTaskWorktree.mockResolvedValue({
+      worktreePath: "/tmp/worktree-fn-001",
+      branch: "fusion/fn-001",
+      source: "existing",
+      hydrated: false,
+      isResume: true,
+    });
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   describe("reports health check", () => {

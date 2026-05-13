@@ -31,6 +31,7 @@ import {
 } from "./agent-instructions.js";
 import { buildPromptLayers, collapsePromptLayers } from "./prompt-layers.js";
 import { heartbeatLog, formatError } from "./logger.js";
+import { acquireTaskWorktree } from "./worktree-acquisition.js";
 import { createRunAuditor, type EngineRunContext } from "./run-audit.js";
 import { promptWithFallback } from "./pi.js";
 import { createResolvedAgentSession, extractRuntimeHint, resolveHeartbeatSessionModels } from "./agent-session-helpers.js";
@@ -2103,6 +2104,36 @@ export class HeartbeatMonitor {
           heartbeatLog.warn(`Failed to read heartbeat model settings for ${agentId}: ${settingsErr instanceof Error ? settingsErr.message : String(settingsErr)}`);
         }
 
+        let sessionCwd = rootDir;
+        if (!isNoTaskRun && taskDetail && heartbeatModelSettings) {
+          try {
+            const acquisition = await acquireTaskWorktree({
+              task: taskDetail,
+              rootDir,
+              store: taskStore,
+              settings: heartbeatModelSettings,
+              logger: heartbeatLog,
+              audit,
+              runContext,
+              runInitCommand: false,
+            });
+            sessionCwd = acquisition.worktreePath;
+          } catch (worktreeErr) {
+            const detail = worktreeErr instanceof Error ? worktreeErr.message : String(worktreeErr);
+            heartbeatLog.warn(`Heartbeat worktree acquisition failed for ${agentId}: ${detail}`);
+            if (taskDetail.column !== "done" && taskDetail.column !== "archived") {
+              await taskStore.moveTask(taskDetail.id, "todo", { preserveProgress: true });
+            }
+            await this.completeRun(agentId, run.id, {
+              status: "completed",
+              resultJson: { reason: "worktree_acquisition_failed", detail },
+              stderrExcerpt: detail,
+              skipStateTransition: true,
+            });
+            return (await this.store.getRunDetail(agentId, run.id))!;
+          }
+        }
+
         const heartbeatSessionModels = resolveHeartbeatSessionModels(heartbeatModelSettings, agent.runtimeConfig);
 
         // Create agent session
@@ -2110,7 +2141,7 @@ export class HeartbeatMonitor {
           sessionPurpose: "heartbeat",
           runtimeHint: extractRuntimeHint(agent.runtimeConfig),
           pluginRunner: this.pluginRunner,
-          cwd: rootDir,
+          cwd: sessionCwd,
           systemPrompt: systemPromptFinal,
           systemPromptLayers: heartbeatLayers,
           tools: "coding",

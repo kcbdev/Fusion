@@ -23,7 +23,7 @@ import {
   VERIFICATION_LOG_MAX_CHARS,
   type VerificationResult,
 } from "./verification-utils.js";
-import { generateWorktreeName, slugify } from "./worktree-names.js";
+import { generateWorktreeName } from "./worktree-names.js";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import { describeModel, promptWithFallback, compactSessionContext } from "./pi.js";
 import { accumulateSessionTokenUsage } from "./session-token-usage.js";
@@ -36,7 +36,7 @@ import { buildSessionSkillContext } from "./session-skill-context.js";
 import { reviewStep, type ReviewVerdict } from "./reviewer.js";
 import { ModelRegistry, SessionManager, type ToolDefinition, type AgentSession } from "@mariozechner/pi-coding-agent";
 import { PRIORITY_EXECUTE, type AgentSemaphore } from "./concurrency.js";
-import { getRegisteredWorktreePaths, isGitRepository, isRegisteredGitWorktree, isUsableTaskWorktree, type WorktreePool } from "./worktree-pool.js";
+import { getRegisteredWorktreePaths, isGitRepository, isRegisteredGitWorktree, type WorktreePool } from "./worktree-pool.js";
 import { BranchConflictError, isBranchConflictError, inspectBranchConflict } from "./branch-conflicts.js";
 import { AgentLogger } from "./agent-logger.js";
 import { executorLog, reviewerLog, formatError } from "./logger.js";
@@ -49,7 +49,7 @@ import type { StuckTaskDetector, StuckTaskEvent } from "./stuck-task-detector.js
 import type { PluginRunner } from "./plugin-runner.js";
 import { isContextLimitError } from "./context-limit-detector.js";
 import { StepSessionExecutor } from "./step-session-executor.js";
-import { hydrateWorktreeDb } from "./worktree-db-hydrate.js";
+import { acquireTaskWorktree } from "./worktree-acquisition.js";
 import {
   resolveAgentInstructions,
   buildSystemPromptWithInstructions,
@@ -2416,28 +2416,7 @@ export class TaskExecutor {
     }
 
     // Hoist worktreePath so it's accessible in the catch block for dep-abort cleanup
-    // Determine worktree name based on settings
-    let worktreePath: string;
-    if (task.worktree) {
-      worktreePath = task.worktree;
-    } else {
-      const naming = settings.worktreeNaming || "random";
-      let worktreeName: string;
-      
-      switch (naming) {
-        case "task-id":
-          worktreeName = task.id.toLowerCase();
-          break;
-        case "task-title":
-          worktreeName = slugify(task.title || task.description.slice(0, 60));
-          break;
-        case "random":
-        default:
-          worktreeName = generateWorktreeName(this.rootDir);
-          break;
-      }
-      worktreePath = join(this.rootDir, ".worktrees", worktreeName);
-    }
+    let worktreePath = task.worktree ?? "";
 
     // Set by stuck-abort handlers; the actual moveTask("todo") is deferred to
     // the finally block so this.executing is cleared first (prevents re-dispatch race).
@@ -2472,255 +2451,48 @@ export class TaskExecutor {
         );
       }
 
-      // Create or reuse worktree — try pool first when recycling is enabled
-      // Prefer the persisted branch from a prior run so the agent resumes on the
-      // same branch instead of creating a fresh fusion/fn-XXXX-2, -3, etc.
-      const branchName = task.branch || `fusion/${task.id.toLowerCase()}`;
-      // Use generateWorktreeName for human-friendly directory names (adjective-noun pattern)
-      // instead of task.id, so worktrees are named like ".worktrees/swift-falcon"
-      let isResume = existsSync(worktreePath);
-      let acquiredFromPool = false;
+      const acquisition = await acquireTaskWorktree({
+        task,
+        rootDir: this.rootDir,
+        store: this.store,
+        settings,
+        pool: this.options.pool,
+        logger: executorLog,
+        audit,
+        runContext: this.currentRunContext,
+        runInitCommand: true,
+        createWorktree: this.createWorktree.bind(this),
+        runConfiguredCommand,
+        taskEnv,
+      });
+      worktreePath = acquisition.worktreePath;
 
-      // Resolve the base branch — set by the scheduler when a dep is in-review
-      const baseBranch = task.executionStartBranch || null;
-      const allowSiblingBranchRename = settings.executorAllowSiblingBranchRename === true;
-
-      if (task.worktree && isResume && !await isUsableTaskWorktree(this.rootDir, worktreePath)) {
-        const invalidWorktreePath = worktreePath;
-        executorLog.log(`${task.id}: assigned worktree is not usable; creating a fresh worktree instead: ${invalidWorktreePath}`);
-        await this.store.logEntry(
-          task.id,
-          `Assigned worktree is not a registered, usable git worktree; creating a fresh worktree instead`,
-          invalidWorktreePath,
-          this.currentRunContext,
-        );
-        await this.store.updateTask(task.id, { worktree: null, branch: null });
-        worktreePath = join(this.rootDir, ".worktrees", generateWorktreeName(this.rootDir));
-        isResume = existsSync(worktreePath);
-      }
-
-      if (!isResume) {
-
-        // Try acquiring a warm worktree from the pool
-        if (this.options.pool && settings.recycleWorktrees) {
-          const pooled = this.options.pool.acquire();
-          if (pooled) {
-            try {
-              const actualBranch = await this.options.pool.prepareForTask(
-                pooled,
-                branchName,
-                baseBranch ?? undefined,
-                { allowSiblingBranchRename, repoDir: this.rootDir },
-              );
-              worktreePath = pooled;
-              acquiredFromPool = true;
-              executorLog.log(`Acquired worktree from pool: ${pooled}`);
-              await this.store.updateTask(task.id, { worktree: worktreePath, branch: actualBranch });
-              // Audit trail: record worktree reuse (FN-1404)
-              await audit.git({ type: "worktree:reuse", target: worktreePath, metadata: { branch: actualBranch } });
-              if (actualBranch !== branchName) {
-                executorLog.log(`Branch conflict resolved: using ${actualBranch} instead of ${branchName}`);
-                await this.store.logEntry(task.id, `Acquired worktree from pool: ${worktreePath} (branch conflict: using ${actualBranch})`, undefined, this.currentRunContext);
-              } else {
-                await this.store.logEntry(task.id, `Acquired worktree from pool: ${worktreePath}`, undefined, this.currentRunContext);
-              }
-
-              if (this.rootDir !== worktreePath) {
-                try {
-                  const hydration = await hydrateWorktreeDb({
-                    rootDir: this.rootDir,
-                    worktreePath,
-                    taskId: task.id,
-                    store: this.store,
-                    logger: executorLog,
-                  });
-                if (hydration.degraded) {
-                  await this.store.logEntry(
-                    task.id,
-                    `Worktree DB hydration degraded: ${hydration.reason ?? "unknown"}`,
-                    undefined,
-                    this.currentRunContext,
-                  );
-                } else {
-                  await this.store.logEntry(
-                    task.id,
-                    `Hydrated worktree DB: ${hydration.tasksCopied} tasks, ${hydration.documentsCopied} task_documents`,
-                    undefined,
-                    this.currentRunContext,
-                  );
-                }
-                } catch (error) {
-                  executorLog.warn(`${task.id}: worktree DB hydration failed: ${formatError(error)}`);
-                }
-              }
-            } catch (poolErr: unknown) {
-              this.options.pool.release(pooled);
-              if (isBranchConflictError(poolErr)) {
-                throw poolErr;
-              }
-              const poolErrMessage = poolErr instanceof Error ? poolErr.message : String(poolErr);
-              executorLog.log(`Pool prepareForTask failed, falling through to fresh worktree: ${poolErrMessage}`);
-              await this.store.logEntry(
-                task.id,
-                `Pool worktree preparation failed (${poolErrMessage}), creating fresh worktree`,
-                undefined,
-                this.currentRunContext,
-              );
-            }
-          }
-        }
-
-        // Fall through to fresh worktree creation if pool had nothing
-        if (!acquiredFromPool) {
-          const created = await this.createWorktree(branchName, worktreePath, task.id, baseBranch ?? undefined, allowSiblingBranchRename);
-          worktreePath = created.path;
-          await this.store.updateTask(task.id, { worktree: created.path, branch: created.branch });
-          // Audit trail: record worktree creation and branch creation (FN-1404)
-          await audit.git({ type: "worktree:create", target: created.path, metadata: { branch: created.branch } });
-          await audit.git({ type: "branch:create", target: created.branch });
-          if (created.branch !== branchName) {
-            executorLog.log(`Branch conflict resolved: using ${created.branch} instead of ${branchName}`);
-            await this.store.logEntry(task.id, `Worktree created at ${worktreePath} (branch conflict: using ${created.branch})`, undefined, this.currentRunContext);
-          } else if (baseBranch) {
-            await this.store.logEntry(task.id, `Worktree created at ${worktreePath} (based on ${baseBranch})`, undefined, this.currentRunContext);
-          } else {
-            await this.store.logEntry(task.id, `Worktree created at ${worktreePath}`, undefined, this.currentRunContext);
-          }
-
-          // Run worktree init command for fresh worktrees (skip for pooled — caches are warm).
-          // The init command should deterministically install the full dependency
-          // graph required by test/typecheck/build commands (for pnpm workspaces,
-          // prefer `pnpm install --frozen-lockfile`) so transitive modules and
-          // declarations like @vitest/runner, loupe, debug, @types/express, and
-          // node-pty are present after bootstrap.
-          //
-          // NOTE: This is distinct from the separate workspace-export failure
-          // class where internal packages fail to resolve because exports point
-          // to missing dist/* outputs (e.g. "@fusion/core entry not found").
-          // 5-minute timeout accommodates larger dependency installs.
-          if (settings.worktreeInitCommand) {
-            const initStartedAt = Date.now();
-            try {
-              const initResult = await runConfiguredCommand(settings.worktreeInitCommand, worktreePath, 300_000, taskEnv);
-              if (initResult.spawnError || initResult.timedOut || initResult.exitCode !== 0) {
-                throw new Error(configuredCommandErrorMessage(initResult));
-              }
-              await this.store.logEntry(task.id, `[timing] Worktree init command completed in ${Date.now() - initStartedAt}ms`, settings.worktreeInitCommand, this.currentRunContext);
-            } catch (err: unknown) {
-              await this.store.logEntry(task.id, `[timing] Worktree init command failed after ${Date.now() - initStartedAt}ms`, undefined, this.currentRunContext);
-              const execError = err instanceof Error ? err : new Error(String(err));
-              const message = "stderr" in execError && typeof (execError as Record<string, unknown>).stderr === "string"
-                ? String((execError as Record<string, unknown>).stderr)
-                : execError.message;
-              executorLog.error(`${task.id}: worktree init command failed — first test run will likely fail: ${message}`);
-              await this.store.logEntry(
-                task.id,
-                `Worktree init command failed (first test run will likely fail): ${message}`,
-                undefined,
-                this.currentRunContext,
-              );
-            }
-          }
-
-          // Run setup script for fresh worktrees (after worktreeInitCommand)
-          if (settings.setupScript) {
-            const scriptCommand = settings.scripts?.[settings.setupScript];
-            if (scriptCommand) {
-              const setupStartedAt = Date.now();
-              try {
-                const setupResult = await runConfiguredCommand(scriptCommand, worktreePath, 120_000, taskEnv);
-                if (setupResult.spawnError || setupResult.timedOut || setupResult.exitCode !== 0) {
-                  throw new Error(configuredCommandErrorMessage(setupResult));
-                }
-                await this.store.logEntry(task.id, `[timing] Setup script '${settings.setupScript}' completed in ${Date.now() - setupStartedAt}ms`, scriptCommand, this.currentRunContext);
-              } catch (err: unknown) {
-                const execError = err instanceof Error ? err : new Error(String(err));
-                const message = "stderr" in execError && typeof (execError as Record<string, unknown>).stderr === "string"
-                  ? String((execError as Record<string, unknown>).stderr)
-                  : execError.message;
-                await this.store.logEntry(task.id, `Setup script '${settings.setupScript}' failed: ${message}`, undefined, this.currentRunContext);
-              }
-            } else {
-              await this.store.logEntry(task.id, `Setup script '${settings.setupScript}' not found in scripts map — skipping`, undefined, this.currentRunContext);
-            }
-          }
-        }
-
-        if (!acquiredFromPool) {
-          if (this.rootDir !== worktreePath) {
-            try {
-              const hydration = await hydrateWorktreeDb({
-                rootDir: this.rootDir,
-                worktreePath,
-                taskId: task.id,
-                store: this.store,
-                logger: executorLog,
-              });
-            if (hydration.degraded) {
-              await this.store.logEntry(
-                task.id,
-                `Worktree DB hydration degraded: ${hydration.reason ?? "unknown"}`,
-                undefined,
-                this.currentRunContext,
-              );
-            } else {
-              await this.store.logEntry(
-                task.id,
-                `Hydrated worktree DB: ${hydration.tasksCopied} tasks, ${hydration.documentsCopied} task_documents`,
-                undefined,
-                this.currentRunContext,
-              );
-            }
-            } catch (error) {
-              executorLog.warn(`${task.id}: worktree DB hydration failed: ${formatError(error)}`);
-            }
-          }
-        }
-      } else if (task.worktree) {
-        // Task already had a worktree assigned and it exists on disk — reuse it
-        executorLog.log(`Reusing existing worktree: ${worktreePath}`);
-        if (this.rootDir !== worktreePath) {
+      if (!acquisition.isResume && acquisition.source === "fresh" && settings.setupScript) {
+        const scriptCommand = settings.scripts?.[settings.setupScript];
+        if (scriptCommand) {
+          const setupStartedAt = Date.now();
           try {
-            const hydration = await hydrateWorktreeDb({
-              rootDir: this.rootDir,
-              worktreePath,
-              taskId: task.id,
-              store: this.store,
-              logger: executorLog,
-            });
-          if (hydration.degraded) {
-            await this.store.logEntry(
-              task.id,
-              `Worktree DB hydration degraded: ${hydration.reason ?? "unknown"}`,
-              undefined,
-              this.currentRunContext,
-            );
-          } else {
-            await this.store.logEntry(
-              task.id,
-              `Hydrated worktree DB: ${hydration.tasksCopied} tasks, ${hydration.documentsCopied} task_documents`,
-              undefined,
-              this.currentRunContext,
-            );
+            const setupResult = await runConfiguredCommand(scriptCommand, worktreePath, 120_000, taskEnv);
+            if (setupResult.spawnError || setupResult.timedOut || setupResult.exitCode !== 0) {
+              throw new Error(configuredCommandErrorMessage(setupResult));
+            }
+            await this.store.logEntry(task.id, `[timing] Setup script '${settings.setupScript}' completed in ${Date.now() - setupStartedAt}ms`, scriptCommand, this.currentRunContext);
+          } catch (err: unknown) {
+            const execError = err instanceof Error ? err : new Error(String(err));
+            const message = "stderr" in execError && typeof (execError as Record<string, unknown>).stderr === "string"
+              ? String((execError as Record<string, unknown>).stderr)
+              : execError.message;
+            await this.store.logEntry(task.id, `Setup script '${settings.setupScript}' failed: ${message}`, undefined, this.currentRunContext);
           }
-          } catch (error) {
-            executorLog.warn(`${task.id}: worktree DB hydration failed: ${formatError(error)}`);
-          }
+        } else {
+          await this.store.logEntry(task.id, `Setup script '${settings.setupScript}' not found in scripts map — skipping`, undefined, this.currentRunContext);
         }
-      } else {
-        // Directory exists at generated path but task has no worktree — create via normal flow
-        const created = await this.createWorktree(branchName, worktreePath, task.id, undefined, allowSiblingBranchRename);
-        worktreePath = created.path;
-        await this.store.updateTask(task.id, { worktree: created.path, branch: created.branch });
-        // Audit trail: record worktree creation and branch creation (FN-1404)
-        await audit.git({ type: "worktree:create", target: created.path, metadata: { branch: created.branch } });
-        await audit.git({ type: "branch:create", target: created.branch });
       }
 
       // Capture the base commit SHA for diff computation whenever a task
       // starts with a newly assigned worktree. Recycled worktrees must
       // overwrite any prior task baseline instead of inheriting it.
-      if (!isResume) {
+      if (!acquisition.isResume) {
         try {
           const { stdout } = await execAsync("git rev-parse HEAD", {
             cwd: worktreePath,
@@ -2776,7 +2548,7 @@ export class TaskExecutor {
 
       // On resume (task.branch already set from a prior run), reconcile step
       // statuses from git history so the agent doesn't redo already-committed work.
-      if (isResume && task.branch && detail.steps.length > 0) {
+      if (acquisition.isResume && task.branch && detail.steps.length > 0) {
         await this.reconcileStepsFromGitHistory(task.id, detail, worktreePath);
       }
 

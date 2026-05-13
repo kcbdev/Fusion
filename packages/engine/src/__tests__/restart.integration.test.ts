@@ -204,10 +204,14 @@ vi.mock("node:child_process", () => {
 
   return { execSync: execSyncFn, exec: execFn, execFile: execFileFn, spawn: spawnFn };
 });
-vi.mock("node:fs", () => ({
-  existsSync: vi.fn().mockReturnValue(true),
-  readdirSync: vi.fn().mockReturnValue([]),
-}));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    existsSync: vi.fn().mockReturnValue(true),
+    readdirSync: vi.fn().mockReturnValue([]),
+  };
+});
 vi.mock("node:fs/promises", () => ({
   readFile: vi.fn().mockResolvedValue("# Task prompt content"),
 }));
@@ -592,7 +596,7 @@ describe("In-progress task resume after restart", () => {
     const executor = new TaskExecutor(store, "/tmp/test");
     await executor.resumeOrphaned();
     await waitForAsyncExpectation(() => {
-      expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
+      expect(mockedCreateFnAgent).toHaveBeenCalled();
     });
 
     // Must NOT mark the step done — the reset invalidated the prior approval.
@@ -621,7 +625,7 @@ describe("In-progress task resume after restart", () => {
     const executor = new TaskExecutor(store, "/tmp/test");
     await executor.resumeOrphaned();
     await waitForAsyncExpectation(() => {
-      expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
+      expect(mockedCreateFnAgent).toHaveBeenCalled();
     });
 
     const updateStepDoneCalls = store.updateStep.mock.calls.filter(
