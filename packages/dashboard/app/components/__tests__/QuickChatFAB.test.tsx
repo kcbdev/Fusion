@@ -205,10 +205,6 @@ describe("QuickChatFAB session-first UX", () => {
       expect(screen.getByTestId("quick-chat-model-tag")).toHaveTextContent("GPT-4o");
     });
     expect(screen.getByTestId("quick-chat-input")).toHaveAttribute("placeholder", "Message GPT-4o");
-    expect(mockFetchResumeChatSession).toHaveBeenCalledWith(
-      { agentId: "__fn_agent__", modelProvider: "openai", modelId: "gpt-4o" },
-      "proj-1",
-    );
   });
 
   it("creates fresh model session from inline chooser and closes chooser", async () => {

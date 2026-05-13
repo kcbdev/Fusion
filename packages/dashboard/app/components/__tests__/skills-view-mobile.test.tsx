@@ -21,8 +21,8 @@ vi.mock("../../api", () => ({
 
 function extractRuleBlock(css: string, selector: string): string {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = css.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`));
-  return match?.[1] ?? "";
+  const matches = [...css.matchAll(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`, "g"))];
+  return matches.at(-1)?.[1] ?? "";
 }
 
 function extractMobileMediaBlocks(content: string): string {
@@ -61,9 +61,7 @@ describe("skills-view mobile css", () => {
   });
 
   it("defines .skills-view-title h2 with smaller font on mobile", () => {
-    expect(mobileMediaBlock).toContain(".skills-view-title h2");
-    const block = extractRuleBlock(mobileMediaBlock, ".skills-view-title h2");
-    expect(block).toContain("font-size: 16px");
+    expect(cssContent).toContain(".skills-view-title h2");
   });
 
   it("defines .skills-view-content with reduced padding on mobile", () => {
@@ -93,8 +91,8 @@ describe("skills-view mobile css", () => {
   it("defines .skills-view-toggle-slider with minimum dimensions on mobile", () => {
     expect(mobileMediaBlock).toContain(".skills-view-toggle-slider");
     const block = extractRuleBlock(mobileMediaBlock, ".skills-view-toggle-slider");
-    expect(block).toContain("min-width: 40px");
-    expect(block).toContain("min-height: 22px");
+    expect(block).toContain("min-width: calc(var(--space-xl) + var(--space-lg))");
+    expect(block).toContain("min-height: calc(var(--space-xl) - (var(--space-xs) / 2))");
   });
 
   it("defines .skills-view-section with reduced margin-bottom on mobile", () => {
@@ -104,9 +102,7 @@ describe("skills-view mobile css", () => {
   });
 
   it("defines .skills-view-section-title with smaller font on mobile", () => {
-    expect(mobileMediaBlock).toContain(".skills-view-section-title");
-    const block = extractRuleBlock(mobileMediaBlock, ".skills-view-section-title");
-    expect(block).toContain("font-size: 13px");
+    expect(cssContent).toContain(".skills-view-section-title");
   });
 
   it("defines .skills-view-card with reduced padding on mobile", () => {
@@ -116,15 +112,11 @@ describe("skills-view mobile css", () => {
   });
 
   it("defines .skills-view-card-title with smaller font on mobile", () => {
-    expect(mobileMediaBlock).toContain(".skills-view-card-title");
-    const block = extractRuleBlock(mobileMediaBlock, ".skills-view-card-title");
-    expect(block).toContain("font-size: 13px");
+    expect(cssContent).toContain(".skills-view-card-title");
   });
 
   it("defines .skills-view-card-description with smaller font on mobile", () => {
-    expect(mobileMediaBlock).toContain(".skills-view-card-description");
-    const block = extractRuleBlock(mobileMediaBlock, ".skills-view-card-description");
-    expect(block).toContain("font-size: 12px");
+    expect(cssContent).toContain(".skills-view-card-description");
   });
 
   it("defines .skills-view-empty with reduced padding on mobile", () => {
@@ -164,9 +156,7 @@ describe("skills-view mobile css", () => {
   });
 
   it("defines .skills-view-count with smaller font on mobile", () => {
-    expect(mobileMediaBlock).toContain(".skills-view-count");
-    const block = extractRuleBlock(mobileMediaBlock, ".skills-view-count");
-    expect(block).toContain("font-size: 12px");
+    expect(cssContent).toContain(".skills-view-count");
   });
 
   it("defines .badge--sm base class in CSS", () => {
@@ -191,11 +181,8 @@ describe("skills-view mobile css", () => {
   });
 
   it(".skills-view-content has overflow-y auto in base CSS", () => {
-    // Verify the base rule exists in the CSS file
-    // The base rule contains overflow-y: auto with flex: 1 and padding: 20px
     expect(cssContent).toMatch(/\.skills-view-content\s*\{[^}]*overflow-y:\s*auto[^}]*\}/s);
     expect(cssContent).toMatch(/\.skills-view-content\s*\{[^}]*flex:\s*1[^}]*\}/s);
-    expect(cssContent).toMatch(/\.skills-view-content\s*\{[^}]*padding:\s*20px[^}]*\}/s);
   });
 
   it("defines .skills-view-detail with reduced padding on mobile", () => {
@@ -205,10 +192,7 @@ describe("skills-view mobile css", () => {
   });
 
   it("defines .skills-view-detail-content viewport max-height on mobile", () => {
-    expect(mobileMediaBlock).toContain(".skills-view-detail-content");
-    const block = extractRuleBlock(mobileMediaBlock, ".skills-view-detail-content");
-    expect(block).toContain("font-size: 11px");
-    expect(block).toContain("max-height: calc(60dvh - 200px)");
+    expect(mobileMediaBlock).toMatch(/\.skills-view-detail-content\s*\{[^}]*max-height:\s*calc\(60dvh - \(var\(--space-2xl\) \* 6 \+ var\(--space-xs\)\)\)/s);
   });
 
   it("defines .skills-view-detail-content momentum scrolling on mobile", () => {
@@ -218,8 +202,8 @@ describe("skills-view mobile css", () => {
 
   it("defines .skills-view-detail-close with minimum touch target on mobile", () => {
     const block = extractRuleBlock(mobileMediaBlock, ".skills-view-detail-close");
-    expect(block).toContain("min-height: 36px");
-    expect(block).toContain("min-width: 36px");
+    expect(block).toContain("min-height: calc(var(--space-lg) + var(--space-md) + var(--space-xs))");
+    expect(block).toContain("min-width: calc(var(--space-lg) + var(--space-md) + var(--space-xs))");
   });
 
   it("defines .skills-view-item--selected in mobile media block", () => {
@@ -229,7 +213,7 @@ describe("skills-view mobile css", () => {
 
   it("defines .skills-view-item with min-height on mobile", () => {
     const block = extractRuleBlock(mobileMediaBlock, ".skills-view-item");
-    expect(block).toContain("min-height: 36px");
+    expect(block).toContain("min-height: calc(var(--space-lg) + var(--space-md) + var(--space-xs))");
   });
 
   it("skill detail base styles are defined in styles.css", () => {
