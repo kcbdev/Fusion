@@ -535,6 +535,22 @@
   align-self: center;
 }
 
+.detail-github-tracking-spinner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  align-self: center;
+  flex: 0 0 auto;
+  min-width: var(--space-lg);
+  min-height: var(--space-lg);
+  color: var(--text-muted);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
 .detail-github-tracking-content {
   margin-top: var(--space-xs);
   padding-top: var(--space-xs);
@@ -1661,6 +1677,10 @@
     min-height: calc(var(--space-lg) + var(--space-xl) - var(--space-xs));
     padding-block: var(--space-xs);
     justify-content: center;
+  }
+
+  .detail-github-tracking-section .detail-github-tracking-spinner {
+    margin-left: auto;
   }
 
   .detail-github-tracking-section .detail-source-header .detail-source-toggle {
