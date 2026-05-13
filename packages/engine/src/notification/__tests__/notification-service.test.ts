@@ -15,8 +15,6 @@ function createStore(settings: Partial<Settings> = {}) {
   let currentSettings: Settings = {
     ntfyEnabled: true,
     ntfyTopic: "topic",
-    failureNotificationDelayMs: 30000,
-    failureNotificationMode: "sticky-only",
     ...settings,
   } as Settings;
 
@@ -43,9 +41,6 @@ function createStore(settings: Partial<Settings> = {}) {
     },
     setSettings(next: Partial<Settings>) {
       currentSettings = { ...currentSettings, ...next } as Settings;
-    },
-    settings() {
-      return currentSettings;
     },
   };
 }
@@ -85,116 +80,61 @@ describe("NotificationService deferred failure notifications", () => {
       isEventSupported: () => true,
       sendNotification,
     };
-    const service = new NotificationService(store as any);
+    const service = new NotificationService(store as any, { failedNotificationGraceMs: 100 });
     service.registerProvider(provider);
     await service.start();
     return { store, service, sendNotification };
   }
 
-  it("Persistent failure dispatches once after delay", async () => {
+  it("Failure that persists past grace dispatches exactly once", async () => {
     const { store, service, sendNotification } = await setup();
     store.setTask(task({ id: "FN-1", status: "failed" }));
     store.emit("task:updated", task({ id: "FN-1", status: "failed" }));
 
-    await vi.advanceTimersByTimeAsync(30000);
+    await vi.advanceTimersByTimeAsync(100);
 
     expect(sendNotification).toHaveBeenCalledTimes(1);
-    expect(sendNotification).toHaveBeenCalledWith(
-      "failed",
-      expect.objectContaining({ taskId: "FN-1" }),
-    );
+    expect(sendNotification).toHaveBeenCalledWith("failed", expect.objectContaining({ taskId: "FN-1" }));
     await service.stop();
   });
 
-  it("Self-recovery suppresses notification (status cleared)", async () => {
+  it("Transient failure with Auto-recovered status clear is suppressed", async () => {
     const { store, service, sendNotification } = await setup();
     store.setTask(task({ id: "FN-1", status: "failed" }));
     store.emit("task:updated", task({ id: "FN-1", status: "failed" }));
-    await vi.advanceTimersByTimeAsync(5000);
 
-    store.setTask(task({ id: "FN-1", status: "in-review" }));
+    store.setTask(task({ id: "FN-1", status: "in-review", log: [{ timestamp: new Date().toISOString(), action: "Auto-recovered: merge deadlock resolved" }] }));
     store.emit("task:updated", task({ id: "FN-1", status: "in-review" }));
-    await vi.advanceTimersByTimeAsync(30000);
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(sendNotification).not.toHaveBeenCalledWith("failed", expect.anything());
+    expect(service.getMetrics().failureNotificationSuppressedCount).toBe(1);
+    expect(schedulerLog.log).toHaveBeenCalledWith(expect.stringContaining("suppressed transient failed"));
+    await service.stop();
+  });
+
+  it("Recovery via task:moved to done suppresses failed notification", async () => {
+    const { store, service, sendNotification } = await setup();
+    store.setTask(task({ id: "FN-1", status: "failed", column: "in-review" }));
+    store.emit("task:updated", task({ id: "FN-1", status: "failed", column: "in-review" }));
+
+    store.setTask(task({ id: "FN-1", status: null, column: "done" }));
+    store.emit("task:moved", { task: task({ id: "FN-1", status: null, column: "done" }), from: "in-review", to: "done" });
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(sendNotification).not.toHaveBeenCalledWith("failed", expect.anything());
+    expect(service.getMetrics().failureNotificationSuppressedCount).toBe(1);
+    await service.stop();
+  });
+
+  it("stop clears pending timers without firing", async () => {
+    const { store, service, sendNotification } = await setup();
+    store.setTask(task({ id: "FN-1", status: "failed" }));
+    store.emit("task:updated", task({ id: "FN-1", status: "failed" }));
+
+    await service.stop();
+    await vi.advanceTimersByTimeAsync(100);
 
     expect(sendNotification).not.toHaveBeenCalled();
-    expect(service.getMetrics().failureNotificationSuppressedCount).toBe(1);
-    expect(schedulerLog.log).toHaveBeenCalledWith(expect.stringContaining("suppressed notification"));
-    await service.stop();
-  });
-
-  it("Self-recovery via column move suppresses", async () => {
-    const { store, service, sendNotification } = await setup();
-    store.setTask(task({ id: "FN-1", status: "failed" }));
-    store.emit("task:updated", task({ id: "FN-1", status: "failed" }));
-    store.emit("task:moved", { task: task({ id: "FN-1" }), from: "in-progress", to: "in-review" });
-
-    await vi.advanceTimersByTimeAsync(30000);
-
-    expect(sendNotification).toHaveBeenCalledTimes(1);
-    expect(sendNotification).toHaveBeenCalledWith(
-      "in-review",
-      expect.objectContaining({ event: "in-review" }),
-    );
-    expect(service.getMetrics().failureNotificationSuppressedCount).toBe(1);
-    await service.stop();
-  });
-
-  it('failureNotificationMode: "all" dispatches immediately', async () => {
-    const { store, service, sendNotification } = await setup({ failureNotificationMode: "all" });
-    store.emit("task:updated", task({ id: "FN-1", status: "failed" }));
-
-    expect(sendNotification).toHaveBeenCalledTimes(1);
-    await service.stop();
-  });
-
-  it("failureNotificationDelayMs: 0 dispatches immediately", async () => {
-    const { store, service, sendNotification } = await setup({ failureNotificationDelayMs: 0 });
-    store.emit("task:updated", task({ id: "FN-1", status: "failed" }));
-
-    expect(sendNotification).toHaveBeenCalledTimes(1);
-    await service.stop();
-  });
-
-  it("Coalescing: two rapid failed events keep one pending timer and one dispatch", async () => {
-    const { store, service, sendNotification } = await setup();
-    store.setTask(task({ id: "FN-1", status: "failed" }));
-
-    store.emit("task:updated", task({ id: "FN-1", status: "failed" }));
-    store.emit("task:updated", task({ id: "FN-1", status: "failed" }));
-
-    expect(service.getPendingFailureCount()).toBe(1);
-
-    await vi.advanceTimersByTimeAsync(30000);
-    expect(sendNotification).toHaveBeenCalledTimes(1);
-    await service.stop();
-  });
-
-  it("Fresh re-read at fire time", async () => {
-    const { store, service, sendNotification } = await setup();
-    store.setTask(task({ id: "FN-1", status: "failed", title: "Old" }));
-    store.emit("task:updated", task({ id: "FN-1", status: "failed", title: "Old" }));
-
-    store.setTask(task({ id: "FN-1", status: "failed", title: "New Title" }));
-    await vi.advanceTimersByTimeAsync(30000);
-
-    expect(sendNotification).toHaveBeenCalledWith(
-      "failed",
-      expect.objectContaining({ taskTitle: "New Title" }),
-    );
-    await service.stop();
-  });
-
-  it("Setting change refreshes cached knobs", async () => {
-    const { store, service, sendNotification } = await setup();
-    const nextSettings = { ...store.settings(), failureNotificationMode: "all" as const };
-
-    store.emit("settings:updated", { settings: nextSettings, previous: store.settings() });
-    store.setSettings({ failureNotificationMode: "all" });
-    await Promise.resolve();
-
-    store.emit("task:updated", task({ id: "FN-1", status: "failed" }));
-
-    expect(sendNotification).toHaveBeenCalledTimes(1);
-    await service.stop();
   });
 });

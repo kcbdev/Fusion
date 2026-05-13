@@ -117,13 +117,13 @@ describe("NotificationService", () => {
       sendNotification,
     };
 
-    const service = new NotificationService(store as any);
+    const service = new NotificationService(store as any, { failedNotificationGraceMs: 0 });
     service.registerProvider(provider);
     await service.start();
 
     store.emit("task:moved", { task: task(), from: "todo", to: "in-review" });
     store.emit("task:moved", { task: task(), from: "todo", to: "in-review" });
-    store.emit("task:updated", task({ status: "failed" }));
+    store.emit("task:updated", task({ status: "awaiting-approval" }));
     await Promise.resolve();
 
     expect(sendNotification).toHaveBeenCalledTimes(2);
