@@ -2206,7 +2206,7 @@ describe("MissionManager", () => {
     });
   });
 
-  it("renders mission interview drafts with discard actions", async () => {
+  it("renders mission interview drafts with explicit resume and discard actions", async () => {
     mockFetchMissionInterviewDrafts.mockResolvedValueOnce([
       {
         id: "draft-awaiting",
@@ -2237,8 +2237,16 @@ describe("MissionManager", () => {
     expect(screen.getByText("Awaiting input")).toBeInTheDocument();
     expect(screen.getByText("Needs retry")).toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByLabelText("Discard draft")[0]!);
-    fireEvent.click(screen.getByText("Delete"));
+    const awaitingRow = screen.getByText("Draft awaiting input").closest(".mission-list__item");
+    const errorRow = screen.getByText("Draft with error").closest(".mission-list__item");
+    expect(awaitingRow).not.toBeNull();
+    expect(errorRow).not.toBeNull();
+    expect(within(awaitingRow!).getByRole("button", { name: "Resume interview" })).toBeInTheDocument();
+    expect(within(awaitingRow!).getByRole("button", { name: "Discard draft" })).toBeInTheDocument();
+    expect(within(errorRow!).getByRole("button", { name: "Retry interview" })).toBeInTheDocument();
+
+    fireEvent.click(within(awaitingRow!).getByRole("button", { name: "Discard draft" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
 
     await waitFor(() => {
       expect(mockDiscardMissionInterviewDraft).toHaveBeenCalledWith("draft-awaiting", undefined);
@@ -2246,7 +2254,7 @@ describe("MissionManager", () => {
     });
   });
 
-  it("resumes a mission interview draft", async () => {
+  it("resumes a mission interview draft from the explicit resume action", async () => {
     mockFetchAiSession.mockResolvedValue({
       id: "draft-awaiting",
       type: "mission_interview",
@@ -2283,7 +2291,10 @@ describe("MissionManager", () => {
     render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
 
     expect(await screen.findByText("Draft awaiting input")).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText("Resume interview"));
+    const draftRow = screen.getByText("Draft awaiting input").closest(".mission-list__item");
+    expect(draftRow).not.toBeNull();
+
+    fireEvent.click(within(draftRow!).getByRole("button", { name: "Resume interview" }));
 
     await waitFor(() => {
       expect(screen.getByText("Plan Mission with AI")).toBeInTheDocument();
@@ -2300,6 +2311,27 @@ describe("MissionManager", () => {
       expect(screen.getByText("Build Auth System")).toBeInTheDocument();
     });
     expect(screen.queryByText("Drafts")).not.toBeInTheDocument();
+  });
+
+  it("suppresses the empty mission state when drafts exist without missions", async () => {
+    mockFetchMissionInterviewDrafts.mockResolvedValueOnce([
+      {
+        id: "draft-only",
+        title: "Draft only mission",
+        status: "awaiting_input",
+        projectId: null,
+        createdAt: "2026-05-12T00:00:00.000Z",
+        updatedAt: "2026-05-12T00:05:00.000Z",
+        hasConversation: true,
+      },
+    ]);
+    globalThis.fetch = createFetchMockWithHealth([], {});
+
+    render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+    expect(await screen.findByText("Drafts")).toBeInTheDocument();
+    expect(screen.getByText("Draft only mission")).toBeInTheDocument();
+    expect(screen.queryByText("No missions yet")).not.toBeInTheDocument();
   });
 
   it("logs a warning when pending interview session fetch fails", async () => {

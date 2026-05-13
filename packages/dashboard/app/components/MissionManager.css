@@ -536,6 +536,8 @@
 
 .mission-list__resume-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--space-xs);
   margin-inline-start: auto;
 }
@@ -2431,6 +2433,7 @@
 
   /* Touch-friendly controls */
   .mission-list__item-actions .mission-icon-btn,
+  .mission-list__item-actions .mission-btn,
   .mission-milestone__actions .mission-icon-btn,
   .mission-slice__actions .mission-icon-btn,
   .mission-feature__actions .mission-icon-btn {
@@ -2466,6 +2469,7 @@
 
   /* Fix touch targets to meet 36px minimum */
   .mission-list__item-actions .mission-icon-btn,
+  .mission-list__item-actions .mission-btn,
   .mission-milestone__actions .mission-icon-btn,
   .mission-slice__actions .mission-icon-btn,
   .mission-feature__actions .mission-icon-btn {

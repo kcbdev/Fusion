@@ -3585,6 +3585,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   const renderInterviewSessionItems = () => missionInterviewDrafts.map((session) => {
     const isErrored = session.status === "error";
     const isGenerating = session.status === "generating";
+    const resumeActionLabel = getInterviewActionLabel(session.status);
 
     return (
       <div
@@ -3610,22 +3611,24 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                 : "Interview is waiting for your next response."}
           </p>
         </div>
-        <div className="mission-list__item-actions" onClick={(event) => event.stopPropagation()}>
+        <div className="mission-list__item-actions mission-list__resume-actions" onClick={(event) => event.stopPropagation()}>
           <button
-            className={`mission-icon-btn ${isErrored ? "mission-icon-btn--danger" : "mission-icon-btn--success"}`}
+            className="mission-btn mission-btn--ghost mission-btn--sm"
             onClick={() => handleResumeInterviewSession(session.id)}
-            title={getInterviewActionLabel(session.status)}
-            aria-label={getInterviewActionLabel(session.status)}
+            title={resumeActionLabel}
+            aria-label={resumeActionLabel}
           >
             {isGenerating ? <Loader2 size={14} className="spinner" /> : isErrored ? <RefreshCw size={14} /> : <Sparkles size={14} />}
+            <span>{isErrored ? "Retry" : "Resume"}</span>
           </button>
           <button
-            className="mission-icon-btn mission-icon-btn--danger"
+            className="mission-btn mission-btn--danger mission-btn--sm"
             onClick={() => setDeleteConfirmId({ type: "interview_draft", id: session.id })}
             title="Discard draft"
             aria-label="Discard draft"
           >
             <Trash2 size={14} />
+            <span>Discard</span>
           </button>
         </div>
       </div>
@@ -3890,7 +3893,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                 </div>
               )}
 
-              {missions.length === 0 && !isCreatingMission && (
+              {missions.length === 0 && missionInterviewDrafts.length === 0 && !isCreatingMission && (
                 <div className="mission-manager__empty mission-manager__empty--large mission-manager__empty--mission">
                   <Target size={32} />
                   <h3 className="mission-manager__empty-title">No missions yet</h3>
@@ -3925,39 +3928,45 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
     );
   };
 
-  const renderDeleteConfirmPanel = () => (
-    <div className="mission-confirm-panel mission-confirm-panel--danger">
-      <div className="mission-confirm-panel__content">
-        <p>
-          Delete this {deleteConfirmId?.type}? This cannot be undone.
-        </p>
-        <div className="mission-confirm-panel__actions">
-          <button
-            className="mission-btn mission-btn--danger"
-            onClick={async () => {
-              if (!deleteConfirmId) return;
-              if (deleteConfirmId.type === "mission") {
-                await handleDeleteMission(deleteConfirmId.id);
-              } else if (deleteConfirmId.type === "milestone") {
-                await handleDeleteMilestone(deleteConfirmId.id);
-              } else if (deleteConfirmId.type === "slice") {
-                await handleDeleteSlice(deleteConfirmId.id);
-              } else if (deleteConfirmId.type === "feature") {
-                await handleDeleteFeature(deleteConfirmId.id);
-              } else if (deleteConfirmId.type === "interview_draft") {
-                await handleDiscardInterviewSession(deleteConfirmId.id);
-              }
-            }}
-          >
-            Delete
-          </button>
-          <button className="mission-btn mission-btn--ghost" onClick={() => setDeleteConfirmId(null)}>
-            Cancel
-          </button>
+  const renderDeleteConfirmPanel = () => {
+    const isInterviewDraftDelete = deleteConfirmId?.type === "interview_draft";
+
+    return (
+      <div className="mission-confirm-panel mission-confirm-panel--danger">
+        <div className="mission-confirm-panel__content">
+          <p>
+            {isInterviewDraftDelete
+              ? "Discard this interview draft? This removes the saved draft and cannot be undone."
+              : `Delete this ${deleteConfirmId?.type}? This cannot be undone.`}
+          </p>
+          <div className="mission-confirm-panel__actions">
+            <button
+              className="mission-btn mission-btn--danger"
+              onClick={async () => {
+                if (!deleteConfirmId) return;
+                if (deleteConfirmId.type === "mission") {
+                  await handleDeleteMission(deleteConfirmId.id);
+                } else if (deleteConfirmId.type === "milestone") {
+                  await handleDeleteMilestone(deleteConfirmId.id);
+                } else if (deleteConfirmId.type === "slice") {
+                  await handleDeleteSlice(deleteConfirmId.id);
+                } else if (deleteConfirmId.type === "feature") {
+                  await handleDeleteFeature(deleteConfirmId.id);
+                } else if (deleteConfirmId.type === "interview_draft") {
+                  await handleDiscardInterviewSession(deleteConfirmId.id);
+                }
+              }}
+            >
+              {isInterviewDraftDelete ? "Discard" : "Delete"}
+            </button>
+            <button className="mission-btn mission-btn--ghost" onClick={() => setDeleteConfirmId(null)}>
+              Cancel
+            </button>
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderLinkTaskPanel = () => (
     <div className="mission-confirm-panel mission-confirm-panel--link">
