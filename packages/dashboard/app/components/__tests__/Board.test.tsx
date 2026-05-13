@@ -6,6 +6,17 @@ import { COLUMNS } from "@fusion/core";
 
 import type { Task } from "@fusion/core";
 
+const fetchBatchMock = vi.fn();
+
+vi.mock("../../hooks/useBatchBadgeFetch", () => ({
+  useBatchBadgeFetch: vi.fn(() => ({
+    fetchBatch: fetchBatchMock,
+    isLoading: false,
+    lastFetchTime: null,
+    getBatchData: vi.fn(),
+  })),
+}));
+
 vi.mock("../../api", () => ({
   fetchWorkflowSteps: vi.fn().mockResolvedValue([
     { id: "WS-003", name: "Accessibility Audit", enabled: true },
@@ -30,6 +41,7 @@ const noop = () => {};
 const noopAsync = () => Promise.resolve({} as any);
 
 beforeEach(() => {
+  fetchBatchMock.mockReset();
   for (const key of Object.keys(columnRenderCounts)) {
     delete columnRenderCounts[key];
   }
@@ -70,6 +82,46 @@ describe("Board", () => {
     renderBoard();
     const main = screen.getByRole("main");
     expect(main.id).toBe("board");
+  });
+
+  it("FN-4380: does not eagerly fetch GitHub badge status on board mount", () => {
+    vi.useFakeTimers();
+    try {
+      const tasksWithBadges: Task[] = [
+        {
+          id: "FN-PR-1",
+          title: "Task with PR badge",
+          description: "Has prInfo",
+          column: "todo",
+          dependencies: [],
+          steps: [],
+          currentStep: 0,
+          log: [],
+          createdAt: "2024-01-01T00:00:00.000Z",
+          updatedAt: "2024-01-01T00:00:00.000Z",
+          prInfo: { number: 123, owner: "runfusion", repo: "fusion" } as Task["prInfo"],
+        },
+        {
+          id: "FN-ISSUE-1",
+          title: "Task with issue badge",
+          description: "Has issueInfo",
+          column: "todo",
+          dependencies: [],
+          steps: [],
+          currentStep: 0,
+          log: [],
+          createdAt: "2024-01-01T00:00:00.000Z",
+          updatedAt: "2024-01-01T00:00:00.000Z",
+          issueInfo: { number: 456, owner: "runfusion", repo: "fusion" } as Task["issueInfo"],
+        },
+      ];
+
+      renderBoard({ tasks: tasksWithBadges });
+      vi.runAllTimers();
+      expect(fetchBatchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("renders all 6 columns", () => {
