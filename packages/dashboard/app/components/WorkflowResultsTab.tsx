@@ -557,7 +557,7 @@ export function WorkflowResultsTab({
                         </div>
                       ) : (
                         <pre className="workflow-result-output-text">
-                          {linkifyFilePaths(result.output)}
+                          {linkifyFilePaths(result.output ?? "")}
                         </pre>
                       )}
                     </div>
@@ -701,7 +701,7 @@ export function WorkflowResultsTab({
                       </ReactMarkdown>
                     </div>
                   ) : (
-                    <pre className="workflow-result-output-text">{linkifyFilePaths(result.output)}</pre>
+                    <pre className="workflow-result-output-text">{linkifyFilePaths(result.output ?? "")}</pre>
                   )}
                 </div>
               </div>

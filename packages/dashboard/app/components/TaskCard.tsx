@@ -758,8 +758,8 @@ function TaskCardComponent({
   const sourceIssueUrl = getIssueUrlFromMetadata(task.sourceMetadata);
   const sourceIssueFromUrl = useMemo(() => parseGithubIssueUrl(sourceIssueUrl), [sourceIssueUrl]);
   const issueInfoFromUrl = useMemo(() => parseGithubIssueUrl(task.issueInfo?.url), [task.issueInfo?.url]);
-  const issueInfoOwner = task.issueInfo?.owner ?? issueInfoFromUrl?.owner;
-  const issueInfoRepo = task.issueInfo?.repo ?? issueInfoFromUrl?.repo;
+  const issueInfoOwner = issueInfoFromUrl?.owner;
+  const issueInfoRepo = issueInfoFromUrl?.repo;
   const hasMatchingIssueInfoBadge = Boolean(
     task.issueInfo
     && githubTrackedIssue
