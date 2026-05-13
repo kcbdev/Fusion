@@ -1666,7 +1666,7 @@ export default function kbExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "fn_research_retry",
     label: "fn: Retry Research Run",
-    description: "Cited-research pipeline: retry a failed run when lifecycle marks it retryable (not an autonomous experiment loop retry)."
+    description: "Cited-research pipeline: retry a failed run when lifecycle marks it retryable (not an autonomous experiment loop retry).",
     parameters: Type.Object({ id: Type.String({ description: "Research run ID" }) }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const store = await getStore(ctx.cwd);

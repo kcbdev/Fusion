@@ -117,6 +117,7 @@ describe("ResearchView", () => {
     render(<ResearchView projectId="p1" />);
 
     expect(await screen.findByLabelText("Query")).toBeInTheDocument();
+    expect(screen.getByText("Cited search and synthesis runs: gather sources, fetch content, and synthesize findings.")).toBeInTheDocument();
     expect(screen.queryByText(/Research defaults are incomplete/i)).not.toBeInTheDocument();
     expect(screen.queryByTestId("research-state-unavailable")).not.toBeInTheDocument();
   });
