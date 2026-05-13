@@ -1,4 +1,4 @@
-import { exec } from "node:child_process";
+import { exec, execSync } from "node:child_process";
 import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
@@ -2500,24 +2500,9 @@ export class TaskExecutor {
       }
 
       // Capture the base commit SHA for diff computation whenever a task
-      // starts with a newly assigned worktree. Recycled worktrees must
-      // overwrite any prior task baseline instead of inheriting it.
+      // starts with a newly assigned worktree.
       if (!acquisition.isResume) {
-        try {
-          const { stdout } = await execAsync("git rev-parse HEAD", {
-            cwd: worktreePath,
-            encoding: "utf-8",
-          });
-          const baseCommitSha = stdout.trim();
-          await this.store.updateTask(task.id, { baseCommitSha });
-          executorLog.log(`${task.id}: captured baseCommitSha ${baseCommitSha.slice(0, 7)}`);
-          // Audit trail: record base commit capture for later diff computation (FN-1404)
-          await audit.git({ type: "commit:create", target: baseCommitSha, metadata: { purpose: "base" } });
-        } catch (err: unknown) {
-          const errorMessage = err instanceof Error ? err.message : String(err);
-          executorLog.log(`Failed to capture baseCommitSha for ${task.id}: ${errorMessage}`);
-          // Non-fatal: task can continue without baseCommitSha
-        }
+        await this.captureBaseCommitSha(task, worktreePath, audit);
       }
 
       const expectedRoot = canonicalizePath(this.rootDir);
@@ -5641,6 +5626,60 @@ ${failureFeedback}
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       executorLog.error(`${task.id}: failed to inject workflow step failure instructions: ${errorMessage}`);
+    }
+  }
+
+  private async captureBaseCommitSha(
+    task: Task,
+    worktreePath: string,
+    audit: { git: (event: { type: "commit:create"; target: string; metadata: Record<string, unknown> }) => Promise<void> },
+  ): Promise<void> {
+    try {
+      if (task.baseCommitSha) {
+        try {
+          execSync(`git merge-base --is-ancestor ${task.baseCommitSha} HEAD`, {
+            cwd: worktreePath,
+            stdio: "pipe",
+          });
+          executorLog.log(`${task.id}: preserved baseCommitSha ${task.baseCommitSha.slice(0, 7)}`);
+          await audit.git({
+            type: "commit:create",
+            target: task.baseCommitSha,
+            metadata: { purpose: "base", preserved: true },
+          });
+          return;
+        } catch {
+          // Existing baseCommitSha is stale or invalid. Recapture below.
+        }
+      }
+
+      let baseCommitSha: string | undefined;
+      try {
+        const { stdout } = await execAsync(
+          "git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main",
+          { cwd: worktreePath, encoding: "utf-8" },
+        );
+        baseCommitSha = stdout.trim() || undefined;
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        executorLog.warn(`${task.id}: merge-base failed for ${task.id}, falling back to HEAD: ${errorMessage}`);
+      }
+
+      if (!baseCommitSha) {
+        const { stdout } = await execAsync("git rev-parse HEAD", {
+          cwd: worktreePath,
+          encoding: "utf-8",
+        });
+        baseCommitSha = stdout.trim();
+      }
+
+      await this.store.updateTask(task.id, { baseCommitSha });
+      executorLog.log(`${task.id}: captured baseCommitSha ${baseCommitSha.slice(0, 7)}`);
+      await audit.git({ type: "commit:create", target: baseCommitSha, metadata: { purpose: "base", preserved: false } });
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      executorLog.log(`Failed to capture baseCommitSha for ${task.id}: ${errorMessage}`);
+      // Non-fatal: task can continue without baseCommitSha
     }
   }
 
