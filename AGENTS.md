@@ -878,6 +878,15 @@ Cards have `--focus-ring-strong` focus style and `--card-hover` background on ho
 
 **Touch targets:** All interactive elements must be at least **36px** on mobile. Use `.touch-target` for elements below this threshold (which sets `44px` minimum). Inside mobile media queries, individual component touch targets may be `36px`.
 
+**Touch-target convention — primary vs secondary controls (added 2026-05-13 after FN-3965/FN-4351):**
+
+WCAG 2.5.8 / Apple HIG apply to the **primary interaction target** of a surface, not to every visible interactive element. Blanket-inflating secondary controls to 36px+ breaks density and is an anti-pattern.
+
+- **Primary controls** (mobile nav bar, FAB, tab action rows, modal CTAs, list-row entire-row tap targets, settings/onboarding form controls): MUST be ≥36px on mobile. Use `calc(var(--space-xl) + var(--space-md))` or `.touch-target`.
+- **Secondary controls** on a density-sensitive surface where the surface itself is the primary tap target (e.g., TaskCard's archive/unarchive/send-back/edit/delete buttons — the card body opens detail on tap; list-row hover-revealed action buttons; chip-style provenance/tracking affordances): MUST remain compact (typically 24–28px square or `font-size: 0.625rem`-class chips). Do NOT apply mobile touch-target inflation here.
+
+If you're tempted to add `min-height: calc(var(--space-xl) + var(--space-md))` (or any 36px+ override) to a hover-revealed or chip-style control inside a card or list row, stop and ask: is the parent surface itself the tap target? If yes, the secondary control stays compact. Reference FN-3965 (the wrong application) and FN-4351 (the restoration) for the canonical case.
+
 **Safe area:** Use `max(var(--space-md), env(safe-area-inset-left, 0px))` pattern for content respecting device notches on mobile.
 
 ---
