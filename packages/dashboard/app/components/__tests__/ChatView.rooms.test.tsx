@@ -247,6 +247,32 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     expect(selectRoom).toHaveBeenCalledWith("room-b");
   });
 
+  it.each([
+    { memberCount: 1, expectedText: "1 member" },
+    { memberCount: 2, expectedText: "2 members" },
+  ])("shows active room member count ($expectedText) and hides inactive meta", ({ memberCount, expectedText }) => {
+    const roomB = { ...roomA, id: "room-b", name: "Room B", slug: "room-b" };
+    const activeMembers = Array.from({ length: memberCount }, (_, index) => ({
+      roomId: roomA.id,
+      agentId: `agent-${index + 1}`,
+      role: "member" as const,
+      addedAt: "2026-04-08T00:00:00.000Z",
+    }));
+
+    setup({}, { rooms: [roomA, roomB], activeRoom: roomA, activeRoomMembers: activeMembers });
+
+    const { container } = render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+    const activeRow = screen.getByTestId("chat-room-item-room-a");
+    const inactiveRow = screen.getByTestId("chat-room-item-room-b");
+
+    expect(within(activeRow).getByText(expectedText)).toBeInTheDocument();
+    expect(within(activeRow).queryByText("— members")).not.toBeInTheDocument();
+    expect(within(inactiveRow).getByText("#Room B")).toBeInTheDocument();
+    expect(inactiveRow.querySelector(".chat-room-item-meta")).toBeNull();
+    expect(container.textContent).not.toContain("— members");
+  });
+
   it("creates room via modal and sends room message on Enter", async () => {
     const createRoom = vi.fn().mockResolvedValue({ ...roomA, id: "room-new", name: "Room New", slug: "room-new" });
     const sendRoomMessage = vi.fn().mockResolvedValue(undefined);
