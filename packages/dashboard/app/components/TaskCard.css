@@ -1152,11 +1152,9 @@
   /* Card edit button: always visible on mobile (no hover) */
   .card-edit-btn {
     opacity: 1;
-    width: calc(var(--space-xl) + var(--space-md));
-    height: calc(var(--space-xl) + var(--space-md));
-    margin-right: calc(-1 * var(--space-sm));
-    margin-top: calc(-1 * var(--space-sm));
-    margin-bottom: calc(-1 * var(--space-sm));
+    width: 28px;
+    height: 28px;
+    margin: -6px -6px -6px 0;
     border-radius: var(--radius-md);
   }
 
@@ -1168,11 +1166,9 @@
   /* Card delete button: always visible on mobile (no hover) */
   .card-delete-btn {
     opacity: 1;
-    width: calc(var(--space-xl) + var(--space-md));
-    height: calc(var(--space-xl) + var(--space-md));
-    margin-right: calc(-1 * var(--space-sm));
-    margin-top: calc(-1 * var(--space-sm));
-    margin-bottom: calc(-1 * var(--space-sm));
+    width: 28px;
+    height: 28px;
+    margin: -6px -6px -6px 0;
     border-radius: var(--radius-md);
   }
 
@@ -1187,17 +1183,14 @@
     flex-shrink: 0;
   }
 
+  /* FN-4351/FN-3965: keep secondary actions visible on touch, but compact per WCAG 2.5.8 because the card tap surface is the primary target for opening task detail. */
   .card-archive-btn,
   .card-unarchive-btn {
     opacity: 1;
-    min-height: calc(var(--space-xl) + var(--space-md));
-    padding: var(--space-xs) var(--space-md);
   }
 
   .card-send-back-btn {
     opacity: 1;
-    min-height: calc(var(--space-xl) + var(--space-md));
-    padding: var(--space-xs) var(--space-md);
   }
 
   /* Card: compact progress bar on narrow cards */
