@@ -503,6 +503,14 @@
   margin-top: var(--space-xs);
 }
 
+.card-bottom-right-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: var(--space-sm);
+  min-width: 0;
+}
+
 .card-provider-icons {
   display: inline-flex;
   align-items: center;
@@ -1189,6 +1197,10 @@
   .card-github-tracking-link {
     min-width: calc(var(--space-xl) + var(--space-xl));
     min-height: calc(var(--space-xl) + var(--space-xl));
+  }
+
+  .card-bottom-right-row {
+    margin-top: var(--space-xs);
   }
 
   /* Card: smaller status badges for 280px width */
