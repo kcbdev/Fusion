@@ -182,4 +182,9 @@
   .task-review-tab__refresh-meta {
     align-items: flex-start;
   }
+
+  .task-review-tab__actions .btn {
+    min-width: calc(var(--space-lg) * 2 + var(--space-xs));
+    min-height: calc(var(--space-lg) * 2 + var(--space-xs));
+  }
 }

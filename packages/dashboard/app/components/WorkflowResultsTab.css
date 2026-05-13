@@ -556,4 +556,9 @@
     min-width: calc(var(--space-lg) * 2 + var(--space-xs));
     min-height: calc(var(--space-lg) * 2 + var(--space-xs));
   }
+
+  .workflow-step-order-actions .btn {
+    min-width: calc(var(--space-lg) * 2 + var(--space-xs));
+    min-height: calc(var(--space-lg) * 2 + var(--space-xs));
+  }
 }
