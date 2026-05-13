@@ -684,6 +684,7 @@ describe("TaskDetailModal", () => {
               { name: "Step 2", status: "in-progress" },
               { name: "Step 3", status: "pending" },
               { name: "Step 4", status: "skipped" },
+              { name: "Step 5", status: "mystery" },
             ],
           })}
           onClose={noop}
@@ -697,9 +698,10 @@ describe("TaskDetailModal", () => {
 
       const segments = container.querySelectorAll(".step-progress-segment");
       expect((segments[0] as HTMLElement).style.backgroundColor).toBe("var(--color-success)");
-      expect((segments[1] as HTMLElement).style.backgroundColor).toBe("var(--todo)");
+      expect((segments[1] as HTMLElement).style.backgroundColor).toBe("var(--in-progress)");
       expect((segments[2] as HTMLElement).style.backgroundColor).toBe("var(--border)");
       expect((segments[3] as HTMLElement).style.backgroundColor).toBe("var(--text-dim)");
+      expect((segments[4] as HTMLElement).style.backgroundColor).toBe("var(--border)");
     });
 
     it("displays singular completion label for one-step tasks", () => {
