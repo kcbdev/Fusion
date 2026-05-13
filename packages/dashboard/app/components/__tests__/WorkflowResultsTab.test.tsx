@@ -957,6 +957,24 @@ describe("WorkflowResultsTab", () => {
       expect(css).toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.workflow-output-modal-controls\s*\{[^}]*width:\s*100%;[^}]*justify-content:\s*space-between;/);
       expect(css).toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.workflow-configured-header \.workflow-results-edit-toggle\s*\{[^}]*width:\s*100%;[^}]*justify-content:\s*center;/);
     });
+
+    it("applies fullscreen modal dimensions on mobile", () => {
+      const css = loadAllAppCss();
+
+      expect(css).toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.workflow-output-modal\s*\{[^}]*width:\s*100%;[^}]*height:\s*100%;[^}]*border-radius:\s*0;/);
+    });
+
+    it("removes mobile modal overlay inset padding", () => {
+      const css = loadAllAppCss();
+
+      expect(css).toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.workflow-output-modal-overlay\s*\{[^}]*padding:\s*0;/);
+    });
+
+    it("includes safe-area bottom padding for expanded output modal body on mobile", () => {
+      const css = loadAllAppCss();
+
+      expect(css).toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.workflow-output-modal-body\s*\{[^}]*padding-bottom:\s*calc\([^;]*env\(safe-area-inset-bottom/);
+    });
   });
 
   describe("expanded view modal", () => {
