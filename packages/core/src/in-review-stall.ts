@@ -73,7 +73,7 @@ export function getInReviewStallReason(
   }
 
   const mergeRetries = task.mergeRetries ?? 0;
-  if (mergeRetries >= maxAutoMergeRetries && task.mergeDetails?.mergeConfirmed !== true) {
+  if (mergeRetries >= maxAutoMergeRetries) {
     return {
       code: "merge-retries-exhausted",
       reason: `Auto-merge retries exhausted (${mergeRetries}/${maxAutoMergeRetries}) without confirmed merge`,
@@ -81,7 +81,7 @@ export function getInReviewStallReason(
     };
   }
 
-  if (!task.worktree && task.mergeDetails?.mergeConfirmed !== true && task.mergeDetails?.noOpMerge !== true) {
+  if (!task.worktree && task.mergeDetails?.noOpMerge !== true) {
     return {
       code: "no-worktree-no-merge-confirmed",
       reason: "No worktree on disk and merge not confirmed",
