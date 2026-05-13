@@ -1,10 +1,18 @@
 import type { OrgTreeNode } from "../api";
 
 export type OrgChartLayoutMode = "horizontal" | "vertical";
+export type OrgChartLayoutPreference = "auto" | "horizontal" | "vertical";
+
+export const ORG_CHART_LAYOUT_STORAGE_KEY = "fn-agent-org-chart-layout";
+
+export function isOrgChartLayoutPreference(value: unknown): value is OrgChartLayoutPreference {
+  return value === "auto" || value === "horizontal" || value === "vertical";
+}
 
 export interface OrgChartLayoutInput {
   tree: OrgTreeNode[];
   availableWidth: number;
+  preference?: OrgChartLayoutPreference;
 }
 
 const DEFAULT_NODE_WIDTH = 220;
@@ -35,6 +43,11 @@ export function estimateOrgChartWidth(tree: OrgTreeNode[]): number {
 }
 
 export function resolveOrgChartLayoutMode(input: OrgChartLayoutInput): OrgChartLayoutMode {
+  const preference = input.preference ?? "auto";
+  if (preference !== "auto") {
+    return preference;
+  }
+
   const safeAvailableWidth = Number.isFinite(input.availableWidth) && input.availableWidth > 0
     ? input.availableWidth
     : 0;
