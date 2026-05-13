@@ -452,6 +452,63 @@ describe("TaskCard", () => {
     expect(screen.queryByText(/Re-enqueued for merge/)).toBeNull();
   });
 
+  it("renders in-review stall badge with code and tooltip", () => {
+    render(
+      <TaskCard
+        task={makeTask({
+          column: "in-review",
+          status: "merging",
+          inReviewStall: {
+            code: "merge-retries-exhausted",
+            reason: "Auto-merge retries exhausted",
+            observedAt: "2026-05-13T00:00:00.000Z",
+          },
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    const badge = screen.getByText("Stall");
+    expect(badge.getAttribute("data-stall-code")).toBe("merge-retries-exhausted");
+    expect(badge.getAttribute("title")).toContain("Auto-merge retries exhausted");
+  });
+
+  it.each([
+    {
+      label: "paused in-review task",
+      task: makeTask({
+        column: "in-review",
+        paused: true,
+        status: "merging",
+        inReviewStall: {
+          code: "merge-retries-exhausted",
+          reason: "Auto-merge retries exhausted",
+          observedAt: "2026-05-13T00:00:00.000Z",
+        },
+      }),
+    },
+    {
+      label: "in-review task without inReviewStall",
+      task: makeTask({ column: "in-review", status: "merging", inReviewStall: undefined }),
+    },
+    {
+      label: "non in-review task with fabricated signal",
+      task: makeTask({
+        column: "in-progress",
+        status: "executing",
+        inReviewStall: {
+          code: "merge-retries-exhausted",
+          reason: "Auto-merge retries exhausted",
+          observedAt: "2026-05-13T00:00:00.000Z",
+        },
+      }),
+    },
+  ])("hides in-review stall badge for $label", ({ task }) => {
+    render(<TaskCard task={task} onOpenDetail={noop} addToast={noop} />);
+    expect(screen.queryByText("Stall")).toBeNull();
+  });
+
   it("shows paused by agent label when pausedByAgentId is set", () => {
     render(
       <TaskCard task={makeTask({ paused: true, pausedByAgentId: "agent-1" })} onOpenDetail={noop} addToast={noop} />,

@@ -19,6 +19,7 @@ import { getFreshBatchData } from "../hooks/useBatchBadgeFetch";
 import { useTaskDiffStats } from "../hooks/useTaskDiffStats";
 import { isTaskStuck } from "../utils/taskStuck";
 import { getStalledReviewSignal } from "../utils/taskStalledReview";
+import { getInReviewStallCopy, shouldShowInReviewStallBadge } from "../utils/inReviewStallCopy";
 import { getUnifiedTaskProgress } from "../utils/taskProgress";
 import { getEndToEndDurationMs, getTimedDurationMs, getWorkflowRuntimeMs, parseTimestampToMs } from "../utils/taskTiming";
 import type { ToastType } from "../hooks/useToast";
@@ -751,6 +752,8 @@ function TaskCardComponent({
   const isStuck = isTaskStuck(task, taskStuckTimeoutMs, lastFetchTimeMs);
   const stalledReview = getStalledReviewSignal(task);
   const showStalledReview = Boolean(stalledReview && task.column === "in-review" && !isPaused);
+  const hasInReviewStall = shouldShowInReviewStallBadge(task);
+  const stallCopy = task.inReviewStall ? getInReviewStallCopy(task.inReviewStall) : undefined;
   const isAwaitingApproval = task.column === "triage" && task.status === "awaiting-approval";
   const isArchived = task.column === "archived";
   const isAgentActive = !globalPaused && !queued && !isFailed && !isPaused && !isStuck && !isAwaitingApproval && (task.column === "in-progress" || ACTIVE_STATUSES.has(task.status as string));
@@ -1441,6 +1444,15 @@ function TaskCardComponent({
             className={`card-status-badge card-status-badge--${task.column}${isAwaitingApproval ? " awaiting-approval" : ""}${ACTIVE_STATUSES.has(task.status) ? " pulsing" : ""}${isFailed ? " failed" : ""}${isStuck ? " stuck" : ""}`}
           >
             {isStuck ? "Stuck" : isAwaitingApproval ? "Awaiting Approval" : getTaskStatusLabel(task.status)}
+          </span>
+        )}
+        {hasInReviewStall && stallCopy && (
+          <span
+            className={`card-status-badge card-status-badge--in-review in-review-stall in-review-stall--${stallCopy.code}`}
+            title={`${stallCopy.headline} — ${stallCopy.description}`}
+            data-stall-code={stallCopy.code}
+          >
+            {stallCopy.badgeLabel}
           </span>
         )}
         {isStuck && (isPaused || !task.status || task.status === "queued") && (

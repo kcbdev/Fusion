@@ -208,6 +208,12 @@
   animation: stuck-pulse 2s ease-in-out infinite;
 }
 
+.card-status-badge.in-review-stall {
+  background: color-mix(in srgb, var(--color-warning) 14%, transparent);
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 45%, transparent);
+}
+
 .card-status-badge.paused {
   background: var(--status-done-bg-deep);
   color: var(--text-muted);
