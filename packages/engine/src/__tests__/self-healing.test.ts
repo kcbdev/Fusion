@@ -66,15 +66,17 @@ const { selfHealingLoggerMock } = vi.hoisted(() => ({
 
 vi.mock("../logger.js", () => ({
   createLogger: vi.fn((_name: string) => selfHealingLoggerMock),
+  schedulerLog: { log: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 import { SelfHealingManager, isBranchAheadOfBase } from "../self-healing.js";
-import type { TaskStore, Settings, Task, AgentStore, Agent } from "@fusion/core";
+import type { TaskStore, Settings, Task, AgentStore, Agent, NotificationProvider } from "@fusion/core";
 import { EventEmitter } from "node:events";
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { scanOrphanedBranches } from "../worktree-pool.js";
 import { createLogger } from "../logger.js";
+import { NotificationService } from "../notification/notification-service.js";
 
 const mockedExecSync = vi.mocked(execSync);
 const mockedExistsSync = vi.mocked(existsSync);
@@ -3546,6 +3548,80 @@ describe("SelfHealingManager", () => {
       expect(store.moveTask).not.toHaveBeenCalled();
       expect(store.logEntry).not.toHaveBeenCalled();
 
+      managerWithRecovery.stop();
+    });
+
+    it("suppresses transient failed notification when already-merged sweep recovers to done", async () => {
+      const now = new Date().toISOString();
+      const tasks = new Map<string, Task>([["FN-1", { id: "FN-1", column: "in-review", paused: false, status: "failed", mergeRetries: 3, mergeDetails: undefined, baseBranch: "main", branch: "fusion/fn-1", worktree: "/tmp/wt", dependencies: [], steps: [], currentStep: 0, description: "x", log: [], createdAt: now, updatedAt: now } as Task]]);
+      const eventedStore = createMockStore({
+        getSettings: vi.fn().mockResolvedValue({ globalPause: false, enginePaused: false, ntfyEnabled: true, ntfyTopic: "topic", failureNotificationMode: "sticky-only", failureNotificationDelayMs: 50 }),
+        listTasks: vi.fn().mockImplementation(async () => Array.from(tasks.values())),
+        getTask: vi.fn().mockImplementation(async (id: string) => tasks.get(id)),
+      });
+      (eventedStore.updateTask as ReturnType<typeof vi.fn>).mockImplementation(async (id: string, patch: Partial<Task>) => {
+        const next = { ...(tasks.get(id) as Task), ...patch } as Task;
+        tasks.set(id, next);
+        (eventedStore as unknown as EventEmitter).emit("task:updated", next);
+        return next;
+      });
+      (eventedStore.moveTask as ReturnType<typeof vi.fn>).mockImplementation(async (id: string, to: any) => {
+        const current = tasks.get(id) as Task;
+        const next = { ...current, column: to } as Task;
+        tasks.set(id, next);
+        (eventedStore as unknown as EventEmitter).emit("task:moved", { task: next, from: current.column, to });
+      });
+      const managerWithRecovery = new SelfHealingManager(eventedStore, { rootDir: "/tmp/test-project" });
+      const sendNotification = vi.fn(async () => ({ success: true, providerId: "mock" }));
+      const provider: NotificationProvider = { getProviderId: () => "mock", isEventSupported: () => true, sendNotification };
+      const notificationService = new NotificationService(eventedStore as any);
+      notificationService.registerProvider(provider);
+      await notificationService.start();
+
+      (eventedStore.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([tasks.get("FN-1")]);
+      mockedExecSync.mockImplementation((command: string | Buffer) => {
+        if (String(command).includes("Fusion-Task-Id: FN-1")) return "abc123\n" as any;
+        return "tip\n" as any;
+      });
+      mockedExistsSync.mockReturnValue(false);
+
+      (eventedStore as unknown as EventEmitter).emit("task:updated", tasks.get("FN-1"));
+      await managerWithRecovery.recoverAlreadyMergedReviewTasks();
+      await vi.advanceTimersByTimeAsync(60);
+
+      expect(sendNotification).not.toHaveBeenCalledWith("failed", expect.anything());
+      expect(tasks.get("FN-1")?.column).toBe("done");
+      expect(tasks.get("FN-1")?.mergeDetails?.mergeConfirmed).toBe(true);
+
+      await notificationService.stop();
+      managerWithRecovery.stop();
+    });
+
+    it("keeps failed notification when already-merged sweep finds no landed commit", async () => {
+      const now = new Date().toISOString();
+      const tasks = new Map<string, Task>([["FN-1", { id: "FN-1", column: "in-review", paused: false, status: "failed", mergeRetries: 3, mergeDetails: undefined, baseBranch: "main", branch: "fusion/fn-1", worktree: "/tmp/wt", dependencies: [], steps: [], currentStep: 0, description: "x", log: [], createdAt: now, updatedAt: now } as Task]]);
+      const eventedStore = createMockStore({
+        getSettings: vi.fn().mockResolvedValue({ globalPause: false, enginePaused: false, ntfyEnabled: true, ntfyTopic: "topic", failureNotificationMode: "sticky-only", failureNotificationDelayMs: 50 }),
+        listTasks: vi.fn().mockImplementation(async () => Array.from(tasks.values())),
+        getTask: vi.fn().mockImplementation(async (id: string) => tasks.get(id)),
+      });
+      const managerWithRecovery = new SelfHealingManager(eventedStore, { rootDir: "/tmp/test-project" });
+      const sendNotification = vi.fn(async () => ({ success: true, providerId: "mock" }));
+      const provider: NotificationProvider = { getProviderId: () => "mock", isEventSupported: () => true, sendNotification };
+      const notificationService = new NotificationService(eventedStore as any);
+      notificationService.registerProvider(provider);
+      await notificationService.start();
+
+      mockedExecSync.mockImplementation(() => {
+        throw new Error("missing branch");
+      });
+      (eventedStore as unknown as EventEmitter).emit("task:updated", tasks.get("FN-1"));
+      await managerWithRecovery.recoverAlreadyMergedReviewTasks();
+      await vi.advanceTimersByTimeAsync(60);
+
+      expect(sendNotification).toHaveBeenCalledWith("failed", expect.objectContaining({ taskId: "FN-1" }));
+
+      await notificationService.stop();
       managerWithRecovery.stop();
     });
 

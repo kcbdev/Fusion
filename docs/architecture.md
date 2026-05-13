@@ -649,6 +649,7 @@ Guardrails: this routine does **not** retry merges, does **not** apply to mixed/
   - Legacy gridlock ntfy delivery is cooldown-throttled: first detection notifies immediately, subsequent detections are suppressed for 15 minutes (even if blocked-task membership changes), and the cooldown resets as soon as gridlock fully clears.
 - `NotificationService` (`notification/notification-service.ts`) — provider lifecycle + event dispatch orchestration
   - Subscribes to task lifecycle events plus mailbox and memory events. `message:sent` dispatches `message:agent-to-user` and `message:agent-to-agent` notification events (with message metadata for deep-links), and manual `POST /api/memory/dream` processing emits `store.emit("memory:dreams-processed", payload)` when new DREAMS content is written.
+  - `failed` task notifications are deferred behind a grace window (default 60s) and suppressed when recovery signals arrive (`column=done`, `mergeDetails.mergeConfirmed=true`, or status clear with an `Auto-recovered:` log). Persistent failures still emit exactly once after the window.
 - `NotificationProvider` interface (`@fusion/core` `notification/provider.ts`) — pluggable provider contract
 - Built-in providers: `NtfyNotificationProvider` (`notification/ntfy-provider.ts`), `WebhookNotificationProvider` (`notification/webhook-provider.ts`)
 - `AgentReflection` (`agent-reflection.ts`) — reflection extraction and persistence
