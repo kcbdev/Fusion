@@ -1506,6 +1506,25 @@ export class GitHubClient {
     }
   }
 
+  async deleteIssue(owner: string, repo: string, issueNumber: number): Promise<void> {
+    if (this.forceMode === "gh-cli") {
+      this.requireGh();
+      runGh(["issue", "delete", String(issueNumber), "--repo", `${owner}/${repo}`, "--yes"]);
+      return;
+    }
+
+    if (this.forceMode === "token") {
+      throw new Error("Deleting GitHub issues requires gh CLI authentication. Token-only mode does not support issue deletion.");
+    }
+
+    if (this.hasGhAuth()) {
+      runGh(["issue", "delete", String(issueNumber), "--repo", `${owner}/${repo}`, "--yes"]);
+      return;
+    }
+
+    throw new Error("Deleting GitHub issues requires gh CLI authentication. Configure gh auth and retry.");
+  }
+
   /**
    * Fetch current issue status using gh CLI if available, otherwise REST API.
    * Returns null if the issue is not found or is a pull request.

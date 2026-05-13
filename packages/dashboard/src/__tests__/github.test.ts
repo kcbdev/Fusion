@@ -600,6 +600,41 @@ describe("GitHubClient", () => {
     });
   });
 
+  describe("deleteIssue", () => {
+    it("deletes an issue via gh CLI", async () => {
+      mockRunGh.mockReturnValue("deleted");
+      const ghClient = new GitHubClient({ forceMode: "gh-cli" });
+
+      await ghClient.deleteIssue("owner", "repo", 123);
+
+      expect(mockRunGh).toHaveBeenCalledWith([
+        "issue",
+        "delete",
+        "123",
+        "--repo",
+        "owner/repo",
+        "--yes",
+      ]);
+    });
+
+    it("surfaces gh CLI failures", async () => {
+      mockRunGh.mockImplementation(() => {
+        throw new Error("permission denied");
+      });
+      const ghClient = new GitHubClient({ forceMode: "gh-cli" });
+
+      await expect(ghClient.deleteIssue("owner", "repo", 124)).rejects.toThrow("permission denied");
+    });
+
+    it("rejects deletion in token-only mode with explanatory error", async () => {
+      const tokenClient = new GitHubClient({ token: "ghp_token", forceMode: "token" });
+
+      await expect(tokenClient.deleteIssue("owner", "repo", 125)).rejects.toThrow(
+        "Deleting GitHub issues requires gh CLI authentication. Token-only mode does not support issue deletion.",
+      );
+    });
+  });
+
   describe("getBatchIssueStatus", () => {
     it("uses the REST issues list endpoint for recent requested issues", async () => {
       mockRunGhJsonAsync.mockResolvedValue([
