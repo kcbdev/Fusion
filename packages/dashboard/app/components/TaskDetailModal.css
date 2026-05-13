@@ -1657,8 +1657,9 @@
 
   .detail-github-tracking-section .detail-github-tracking-enable {
     margin-left: auto;
-    min-width: 44px; /* Match the global .touch-target minimum on mobile. */
-    min-height: 44px; /* Match the global .touch-target minimum on mobile. */
+    min-width: calc(var(--space-lg) + var(--space-xl) - var(--space-xs));
+    min-height: calc(var(--space-lg) + var(--space-xl) - var(--space-xs));
+    padding-block: var(--space-xs);
     justify-content: center;
   }
 
