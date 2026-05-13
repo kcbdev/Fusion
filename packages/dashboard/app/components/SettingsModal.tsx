@@ -4528,16 +4528,14 @@ export function SettingsModal({
             </div>
             <div className="form-group">
               <label>Enabled Sources</label>
+              <label htmlFor="research-project-source-webSearch" className="checkbox-label">
+                <input id="research-project-source-webSearch" type="checkbox" checked disabled readOnly />
+                Web Search <span className="settings-muted">Always on</span>
+              </label>
+              <small className="settings-muted">
+                Web search is always enabled. Configure the search provider under Research Defaults.
+              </small>
               <div className="settings-research-source-grid">
-                <div>
-                  <label htmlFor="research-project-source-webSearch" className="checkbox-label">
-                    <input id="research-project-source-webSearch" type="checkbox" checked disabled readOnly />
-                    Web Search
-                  </label>
-                  <div className="settings-field-help">
-                    Always on. The resolver ignores any older persisted <code>enabledSources.webSearch=false</code> value.
-                  </div>
-                </div>
                 {[
                   ["pageFetch", "Page Fetch"],
                   ["github", "GitHub"],
