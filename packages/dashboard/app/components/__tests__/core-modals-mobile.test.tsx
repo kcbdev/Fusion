@@ -133,6 +133,20 @@ describe("core modals mobile css coverage", () => {
     expect(mobileBlock).toContain("gap: 4px;");
   });
 
+  it("FN-4281: SettingsModal header reflows and keeps close button touch target on mobile", () => {
+    const css = loadAllAppCss();
+    const mobileBlock = getMainMobileBlock(css);
+
+    expect(mobileBlock).toContain(".settings-modal .modal-header {");
+    expect(mobileBlock).toContain("flex-wrap: wrap;");
+    expect(mobileBlock).toContain(".settings-header-actions {");
+    expect(mobileBlock).toContain("flex: 1 1 100%;");
+    expect(mobileBlock).toContain("margin-left: 0;");
+    expect(mobileBlock).toContain(".settings-modal .modal-close {");
+    expect(mobileBlock).toContain("min-width: calc(var(--space-md) * 3);");
+    expect(mobileBlock).toContain("min-height: calc(var(--space-md) * 3);");
+  });
+
   it("GitManagerModal: 768px mobile block includes stacked layout rules", () => {
     const css = loadAllAppCss();
     const mobileBlock = getMainMobileBlock(css);
