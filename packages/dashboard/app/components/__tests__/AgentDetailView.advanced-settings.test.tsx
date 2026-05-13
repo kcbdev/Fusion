@@ -1084,6 +1084,113 @@ describe("Advanced Settings", () => {
     });
   });
 
+  it("defaults skip-heartbeat-when-idle toggle to unchecked when runtimeConfig.skipHeartbeatWhenIdle is undefined", async () => {
+    mockFetchAgent.mockResolvedValue(createMockAgent({
+      runtimeConfig: {
+        heartbeatIntervalMs: 30000,
+      },
+    }));
+
+    const user = userEvent.setup();
+    render(
+      <AgentDetailView
+        agentId="agent-001"
+        onClose={vi.fn()}
+        addToast={vi.fn()}
+      />
+    );
+
+    await navigateToSettings(user);
+
+    await waitFor(() => {
+      expect((screen.getByLabelText(/skip heartbeat when idle/i) as HTMLInputElement).checked).toBe(false);
+    });
+  });
+
+  it("defaults skip-heartbeat-when-idle toggle to unchecked when runtimeConfig.skipHeartbeatWhenIdle === false", async () => {
+    mockFetchAgent.mockResolvedValue(createMockAgent({
+      runtimeConfig: {
+        heartbeatIntervalMs: 30000,
+        skipHeartbeatWhenIdle: false,
+      },
+    }));
+
+    const user = userEvent.setup();
+    render(
+      <AgentDetailView
+        agentId="agent-001"
+        onClose={vi.fn()}
+        addToast={vi.fn()}
+      />
+    );
+
+    await navigateToSettings(user);
+
+    await waitFor(() => {
+      expect((screen.getByLabelText(/skip heartbeat when idle/i) as HTMLInputElement).checked).toBe(false);
+    });
+  });
+
+  it("defaults skip-heartbeat-when-idle toggle to checked when runtimeConfig.skipHeartbeatWhenIdle === true", async () => {
+    mockFetchAgent.mockResolvedValue(createMockAgent({
+      runtimeConfig: {
+        heartbeatIntervalMs: 30000,
+        skipHeartbeatWhenIdle: true,
+      },
+    }));
+
+    const user = userEvent.setup();
+    render(
+      <AgentDetailView
+        agentId="agent-001"
+        onClose={vi.fn()}
+        addToast={vi.fn()}
+      />
+    );
+
+    await navigateToSettings(user);
+
+    await waitFor(() => {
+      expect((screen.getByLabelText(/skip heartbeat when idle/i) as HTMLInputElement).checked).toBe(true);
+    });
+  });
+
+  it("persists skip-heartbeat-when-idle toggle changes on save", async () => {
+    mockFetchAgent.mockResolvedValue(createMockAgent({
+      runtimeConfig: {
+        enabled: true,
+        skipHeartbeatWhenIdle: false,
+        heartbeatIntervalMs: 30000,
+      },
+    }));
+    mockUpdateAgent.mockResolvedValue(createMockAgent() as any);
+
+    const user = userEvent.setup();
+    render(
+      <AgentDetailView
+        agentId="agent-001"
+        onClose={vi.fn()}
+        addToast={vi.fn()}
+      />
+    );
+
+    await navigateToSettings(user);
+
+    const toggle = await screen.findByLabelText(/skip heartbeat when idle/i);
+    await user.click(toggle);
+    await user.click(screen.getByText("Save Settings"));
+
+    await waitFor(() => {
+      expect(mockUpdateAgent).toHaveBeenCalledWith(
+        "agent-001",
+        expect.objectContaining({
+          runtimeConfig: expect.objectContaining({ skipHeartbeatWhenIdle: true }),
+        }),
+        undefined,
+      );
+    });
+  });
+
   it("forwards projectId to updateAgent", async () => {
     const addToast = vi.fn();
     mockUpdateAgent.mockResolvedValue(createMockAgent() as any);
