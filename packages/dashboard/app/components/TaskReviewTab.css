@@ -88,7 +88,26 @@
   background: var(--surface);
   color: var(--text);
   white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 100%;
   font-family: var(--font-primary);
+}
+
+.task-review-tab__body.markdown-body {
+  overflow-wrap: anywhere;
+}
+
+.task-review-tab__body.markdown-body > :first-child {
+  margin-top: 0;
+}
+
+.task-review-tab__body.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+
+.task-review-tab__body.markdown-body pre,
+.task-review-tab__body.markdown-body table {
+  max-width: 100%;
 }
 
 .task-review-tab__status {

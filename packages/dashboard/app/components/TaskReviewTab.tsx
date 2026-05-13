@@ -1,6 +1,9 @@
 import "./TaskReviewTab.css";
 import type { Task, TaskDetail } from "@fusion/core";
 import { useEffect, useMemo, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import type { Components } from "react-markdown";
 import { fetchTaskReview, refreshTaskReview, reviseTaskReviewItems } from "../api";
 import type { SelectedReviewItem } from "../api";
 import type { ToastType } from "../hooks/useToast";
@@ -14,6 +17,7 @@ interface Props {
 
 const REVIEW_LOAD_ERROR_MESSAGE = "Failed to load review data.";
 const DIRECT_MODE_EMPTY_MESSAGE = "No reviewer feedback yet — this task has not produced reviewer-agent feedback in direct mode.";
+const REVIEW_MARKDOWN_TOGGLE_STORAGE_KEY = "fn-task-review-markdown";
 
 type ReviewState = NonNullable<TaskDetail["reviewState"]>;
 type ReviewItem = ReviewState["items"][number];
@@ -28,6 +32,54 @@ type DisplayReviewItem = {
   status: "queued" | "in-progress" | "addressed" | "failed";
   addressing?: AddressingRecord;
   item?: ReviewItem;
+};
+
+function readBooleanPref(key: string, defaultValue: boolean): boolean {
+  if (typeof window === "undefined") return defaultValue;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (raw === null) return defaultValue;
+    return raw === "true";
+  } catch {
+    return defaultValue;
+  }
+}
+
+function writeBooleanPref(key: string, value: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, value ? "true" : "false");
+  } catch {
+    // ignore storage failures (quota, private mode, etc.)
+  }
+}
+
+const markdownComponents: Components = {
+  pre: ({ children, ...props }) => (
+    <pre
+      {...props}
+      style={{
+        overflowX: "auto",
+        maxWidth: "100%",
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+      }}
+    >
+      {children}
+    </pre>
+  ),
+  table: ({ children, ...props }) => (
+    <table
+      {...props}
+      style={{
+        display: "block",
+        overflowX: "auto",
+        maxWidth: "100%",
+      }}
+    >
+      {children}
+    </table>
+  ),
 };
 
 function formatTimestamp(value?: string): string {
@@ -81,10 +133,15 @@ export function TaskReviewTab({ task, projectId, onTaskUpdated, addToast }: Prop
   const [error, setError] = useState<string | null>(null);
   const [emptyMessage, setEmptyMessage] = useState<string | null>(null);
   const [review, setReview] = useState(task.reviewState ?? null);
+  const [renderMarkdown, setRenderMarkdown] = useState<boolean>(() => readBooleanPref(REVIEW_MARKDOWN_TOGGLE_STORAGE_KEY, true));
 
   const canRevise = selected.length > 0 && !revising;
   const isPrMode = review?.source === "pull-request";
   const displayItems = useMemo(() => (review ? getDisplayReviewItems(review) : []), [review]);
+
+  useEffect(() => {
+    writeBooleanPref(REVIEW_MARKDOWN_TOGGLE_STORAGE_KEY, renderMarkdown);
+  }, [renderMarkdown]);
 
   useEffect(() => {
     let cancelled = false;
@@ -214,6 +271,15 @@ export function TaskReviewTab({ task, projectId, onTaskUpdated, addToast }: Prop
           {decisionLabel ? <span className={`task-review-tab__decision task-review-tab__decision--${decisionLabel}`}>{decisionLabel}</span> : null}
         </div>
         <div className="task-review-tab__actions">
+          <button
+            className="btn btn-sm"
+            onClick={() => setRenderMarkdown((prev) => !prev)}
+            aria-pressed={renderMarkdown}
+            data-testid="task-review-markdown-toggle"
+            title={renderMarkdown ? "Show raw text" : "Show formatted markdown"}
+          >
+            {renderMarkdown ? "Markdown" : "Plain"}
+          </button>
           <button className="btn btn-sm" onClick={onRefresh} disabled={refreshing || loading}>{refreshing ? "Refreshing…" : "Refresh"}</button>
           <button className="btn btn-primary btn-sm" disabled={!canRevise} onClick={onRevise}>{revising ? "Queueing…" : "Request revision"}</button>
         </div>
@@ -239,7 +305,15 @@ export function TaskReviewTab({ task, projectId, onTaskUpdated, addToast }: Prop
                 {item.addressing ? (
                   <div className="task-review-tab__meta">Selected: {formatTimestamp(item.addressing.selectedAt)}{item.addressing.startedAt ? ` · Started: ${formatTimestamp(item.addressing.startedAt)}` : ""}{item.addressing.completedAt ? ` · Completed: ${formatTimestamp(item.addressing.completedAt)}` : ""}{item.addressing.error ? ` · Error: ${item.addressing.error}` : ""}</div>
                 ) : null}
-                <pre className="task-review-tab__body">{item.body}</pre>
+                {renderMarkdown ? (
+                  <div className="task-review-tab__body markdown-body">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                      {item.body}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <pre className="task-review-tab__body">{item.body}</pre>
+                )}
               </label>
             </li>
           ))}
