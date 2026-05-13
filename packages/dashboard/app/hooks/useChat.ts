@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   fetchChatSessions,
+  fetchChatSession,
   createChatSession as apiCreateChatSession,
   fetchChatMessages,
   updateChatSession,
@@ -405,7 +406,11 @@ export function useChat(
     setIsStreaming(false);
   }, []);
 
-  const attachIfGenerating = useCallback((sessionId: string, inFlightGeneration?: ChatInFlightGenerationState | null) => {
+  const attachIfGenerating = useCallback((
+    sessionId: string,
+    inFlightGeneration?: ChatInFlightGenerationState | null,
+    options?: { silent?: boolean },
+  ) => {
     if (streamRef.current || !sessionId) {
       return true;
     }
@@ -425,7 +430,7 @@ export function useChat(
       setStreamingThinking,
       setStreamingToolCalls,
       cancelStreamingFlushesRef,
-      addToast,
+      addToast: options?.silent ? undefined : addToast,
       onFallbackSession: (data, fallbackSessionId) => {
         const nextModel = parseModelDescriptor(data.fallbackModel);
         setSessions((prev) => prev.map((session) =>
@@ -450,7 +455,9 @@ export function useChat(
         isStreamingRef.current = false;
         streamRef.current = null;
         const failureInfo = normalizeFailureInfo(data);
-        addToast?.(failureInfo.summary, "error");
+        if (!options?.silent) {
+          addToast?.(failureInfo.summary, "error");
+        }
         void loadMessages(sessionId);
       },
     });
@@ -625,6 +632,43 @@ export function useChat(
   });
   const visibilitySuspension = useTabVisibilitySuspension();
 
+  const reconnectSessionSilently = useCallback(async (sessionId: string) => {
+    try {
+      await refreshSessions();
+      const refreshedSession = await fetchChatSession(sessionId, projectId);
+
+      if (activeSessionRef.current?.id === sessionId) {
+        setActiveSession((prev) => {
+          if (!prev || prev.id !== sessionId) {
+            return prev;
+          }
+          return {
+            ...prev,
+            ...refreshedSession.session,
+          };
+        });
+      }
+
+      if (refreshedSession.session.isGenerating) {
+        setStreamingText("");
+        setStreamingThinking("");
+        setStreamingToolCalls([]);
+        setIsStreaming(true);
+        isStreamingRef.current = true;
+        attachIfGenerating(sessionId, refreshedSession.session.inFlightGeneration, { silent: true });
+      } else {
+        setStreamingText("");
+        setStreamingThinking("");
+        setStreamingToolCalls([]);
+        setIsStreaming(false);
+        isStreamingRef.current = false;
+        await loadMessages(sessionId);
+      }
+    } catch {
+      // Intentionally swallow reconnect failures for suspension-style recovery.
+    }
+  }, [attachIfGenerating, loadMessages, projectId, refreshSessions]);
+
   const sendMessage = useCallback(
     (content: string, attachments?: File[]) => {
       if (!activeSession) return;
@@ -719,9 +763,8 @@ export function useChat(
         },
         onError: (data, tempUserMessageId) => {
           const failureInfo = normalizeFailureInfo(data);
-          const shouldSuppressSuspensionError = typeof data === "string"
-            && isLikelyTabSuspensionError(data)
-            && (visibilitySuspension.isHiddenNow() || visibilitySuspension.wasRecentlyHidden(5000));
+          const suspensionMessage = typeof data === "string" ? data : failureInfo.summary;
+          const shouldSuppressSuspensionError = isLikelyTabSuspensionError(suspensionMessage);
 
           setMessages((prev) => {
             const nextMessages = prev.filter((message) => message.id !== tempUserMessageId);
@@ -751,11 +794,12 @@ export function useChat(
           if (shouldSuppressSuspensionError) {
             console.info("[useChat] Suppressed tab-suspension stream error:", data);
             if (activeSession?.id) {
-              if (activeSession.isGenerating) {
-                attachIfGenerating(activeSession.id, activeSession.inFlightGeneration);
-              } else {
-                void loadMessages(activeSession.id);
-              }
+              setStreamingText("");
+              setStreamingThinking("");
+              setStreamingToolCalls([]);
+              setIsStreaming(true);
+              isStreamingRef.current = true;
+              void reconnectSessionSilently(activeSession.id);
             }
           } else {
             addToast?.(failureInfo.summary, "error");
@@ -775,7 +819,7 @@ export function useChat(
 
       streamRef.current = streamChatResponse(activeSession.id, content, handlers, attachments, projectId);
     },
-    [activeSession, projectId, refreshSessions, addToast, loadMessages, attachIfGenerating, visibilitySuspension],
+    [activeSession, projectId, refreshSessions, addToast, attachIfGenerating, reconnectSessionSilently],
   );
 
   sendMessageRef.current = sendMessage;
@@ -824,6 +868,47 @@ export function useChat(
 
     return () => clearInterval(interval);
   }, [attachIfGenerating, loadMessages, projectId, activeSession]);
+
+  useEffect(() => {
+    const unsubscribe = visibilitySuspension.onBecameVisible(() => {
+      const currentSession = activeSessionRef.current;
+      if (!currentSession || streamRef.current) {
+        return;
+      }
+
+      const contextVersionAtStart = projectContextVersionRef.current;
+      void fetchChatSession(currentSession.id, projectId)
+        .then((data) => {
+          if (projectContextVersionRef.current !== contextVersionAtStart || streamRef.current) {
+            return;
+          }
+
+          if (data.session.isGenerating) {
+            setStreamingText("");
+            setStreamingThinking("");
+            setStreamingToolCalls([]);
+            setIsStreaming(true);
+            isStreamingRef.current = true;
+            attachIfGenerating(currentSession.id, data.session.inFlightGeneration, { silent: true });
+            return;
+          }
+
+          if (isStreamingRef.current) {
+            setStreamingText("");
+            setStreamingThinking("");
+            setStreamingToolCalls([]);
+            setIsStreaming(false);
+            isStreamingRef.current = false;
+            void loadMessages(currentSession.id);
+          }
+        })
+        .catch(() => {
+          // Intentionally silent for visibility reconnect path.
+        });
+    });
+
+    return unsubscribe;
+  }, [attachIfGenerating, loadMessages, projectId, visibilitySuspension]);
 
   // SSE real-time updates
   useEffect(() => {

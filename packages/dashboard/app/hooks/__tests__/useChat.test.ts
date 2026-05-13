@@ -12,6 +12,7 @@ import type { ChatSession, ChatMessage } from "@fusion/core";
 // Mock the API module
 vi.mock("../../api", () => ({
   fetchChatSessions: vi.fn(),
+  fetchChatSession: vi.fn(),
   createChatSession: vi.fn(),
   fetchChatMessages: vi.fn(),
   updateChatSession: vi.fn(),
@@ -46,6 +47,7 @@ const mockRemoveScopedItem = vi.mocked(projectStorageModule.removeScopedItem);
 const mockSubscribeSse = vi.mocked(sseBusModule.subscribeSse);
 
 const mockFetchChatSessions = vi.mocked(apiModule.fetchChatSessions);
+const mockFetchChatSession = vi.mocked(apiModule.fetchChatSession);
 const mockCreateChatSession = vi.mocked(apiModule.createChatSession);
 const mockFetchChatMessages = vi.mocked(apiModule.fetchChatMessages);
 const mockUpdateChatSession = vi.mocked(apiModule.updateChatSession);
@@ -93,6 +95,9 @@ describe("useChat", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFetchChatSessions.mockResolvedValue({ sessions: [] });
+    mockFetchChatSession.mockResolvedValue({
+      session: makeSession({ id: "session-001", agentId: "agent-001" }),
+    });
     mockCreateChatSession.mockResolvedValue({
       session: makeSession({ id: "session-001", agentId: "agent-001", title: "New Chat" }),
     });
@@ -752,6 +757,7 @@ describe("useChat", () => {
       },
     };
     mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
+    mockFetchChatSession.mockResolvedValueOnce({ session });
     mockFetchChatMessages.mockResolvedValue({ messages: [] });
     const addToast = vi.fn();
 
@@ -795,10 +801,11 @@ describe("useChat", () => {
     });
   });
 
-  it("shows Load failed toast when tab stays visible", async () => {
+  it("suppresses Load failed when tab stays visible and does not add failure bubble", async () => {
     const session = makeSession({ id: "session-001", agentId: "agent-001" });
     mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
     mockFetchChatMessages.mockResolvedValue({ messages: [] });
+    mockFetchChatSession.mockResolvedValueOnce({ session });
     const addToast = vi.fn();
 
     let errorHandler: ((data: string | apiModule.ChatFailureInfo) => void) | undefined;
@@ -828,7 +835,9 @@ describe("useChat", () => {
     });
 
     await waitFor(() => {
-      expect(addToast).toHaveBeenCalledWith("Load failed", "error");
+      expect(addToast).not.toHaveBeenCalledWith("Load failed", "error");
+      expect(result.current.messages.find((m) => m.failureInfo?.summary === "Load failed")).toBeUndefined();
+      expect(mockFetchChatSession).toHaveBeenCalledWith("session-001", undefined);
     });
   });
 
@@ -868,6 +877,99 @@ describe("useChat", () => {
     await waitFor(() => {
       expect(addToast).not.toHaveBeenCalledWith("Failed to fetch", "error");
     });
+  });
+
+  it("re-attaches from fetchChatSession replay id when tab becomes visible", async () => {
+    const session = makeSession({ id: "session-001", agentId: "agent-001" });
+    const generatingSession = {
+      ...session,
+      isGenerating: true,
+      inFlightGeneration: {
+        status: "generating" as const,
+        streamingText: "partial",
+        streamingThinking: "thinking",
+        toolCalls: [],
+        replayFromEventId: 77,
+        updatedAt: "2026-04-08T00:00:00.000Z",
+      },
+    };
+    mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
+    mockFetchChatSession.mockResolvedValueOnce({ session: generatingSession });
+    const addToast = vi.fn();
+
+    const { result } = renderHook(() => useChat(undefined, addToast));
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.selectSession("session-001");
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.id).toBe("session-001");
+    });
+
+    act(() => {
+      setDocumentVisibilityState("hidden");
+      setDocumentVisibilityState("visible");
+    });
+
+    await waitFor(() => {
+      expect(mockFetchChatSession).toHaveBeenCalledWith("session-001", undefined);
+      expect(mockAttachChatStream).toHaveBeenCalledWith(
+        "session-001",
+        expect.any(Object),
+        undefined,
+        { lastEventId: 77 },
+      );
+      expect(addToast).not.toHaveBeenCalled();
+    });
+  });
+
+  it("fetches session on visible return only when no live stream and swallows reconnect failures", async () => {
+    const session = {
+      ...makeSession({ id: "session-001", agentId: "agent-001" }),
+      isGenerating: false,
+    };
+    mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
+    mockFetchChatSession.mockRejectedValueOnce(new Error("network"));
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+    const addToast = vi.fn();
+
+    const { result } = renderHook(() => useChat(undefined, addToast));
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.selectSession("session-001");
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.id).toBe("session-001");
+    });
+
+    act(() => {
+      setDocumentVisibilityState("hidden");
+      setDocumentVisibilityState("visible");
+    });
+
+    await waitFor(() => {
+      expect(mockFetchChatSession).toHaveBeenCalledWith("session-001", undefined);
+      expect(addToast).not.toHaveBeenCalled();
+    });
+
+    mockFetchChatSession.mockClear();
+    act(() => {
+      result.current.sendMessage("Hello");
+      setDocumentVisibilityState("hidden");
+      setDocumentVisibilityState("visible");
+    });
+
+    expect(mockFetchChatSession).not.toHaveBeenCalled();
   });
 
   it("still shows toast for non-suspension errors regardless of visibility", async () => {
