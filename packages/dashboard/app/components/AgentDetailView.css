@@ -83,6 +83,7 @@
   padding: var(--space-md) calc(var(--space-lg) + var(--space-xs));
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
+  flex-shrink: 0;
 }
 
 /* Identity area: icon + name + badges */
@@ -239,6 +240,7 @@
   padding: 0 calc(var(--space-lg) + var(--space-xs));
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
+  flex-shrink: 0;
 }
 
 .agent-detail-tab {
@@ -275,6 +277,7 @@
 
 .agent-detail-content {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: var(--space-xl);
 }
@@ -288,6 +291,7 @@
   background: var(--bg-secondary);
   font-size: var(--space-md);
   color: var(--text-muted);
+  flex-shrink: 0;
 }
 
 .agent-detail-id {
@@ -1732,6 +1736,8 @@
 
   .agent-detail-content {
     padding: var(--space-lg);
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
 
   .agent-detail-footer {
