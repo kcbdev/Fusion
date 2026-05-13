@@ -1904,13 +1904,14 @@ describe("TaskExecutor worktree pool integration", () => {
       }
       return "" as any;
     });
-    mockedExec.mockImplementation((cmd: any, _opts: any, cb: any) => {
+    mockedExec.mockImplementation(((cmd: any, _opts: any, cb: any) => {
       if (String(cmd).includes("git merge-base HEAD origin/main")) {
         cb(null, "newbase123\n", "");
-        return;
+        return {} as any;
       }
       cb(null, "", "");
-    });
+      return {} as any;
+    }) as any);
 
     const store = createMockStore();
     store.getTask.mockResolvedValue({

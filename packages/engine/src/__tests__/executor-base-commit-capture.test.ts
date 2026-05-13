@@ -27,7 +27,10 @@ describe("captureBaseCommitSha", () => {
   });
 
   it("captures merge-base for fresh worktree", async () => {
-    mockedExec.mockImplementation((cmd: any, _opts: any, cb: any) => cb(null, cmd.includes("merge-base") ? "abc1234\n" : ""));
+    mockedExec.mockImplementation(((cmd: any, _opts: any, cb: any) => {
+      cb(null, cmd.includes("merge-base") ? "abc1234\n" : "");
+      return {} as any;
+    }) as any);
     const store = createMockStore();
     const executor = new TaskExecutor(store, "/tmp/test");
     const audit = { git: vi.fn().mockResolvedValue(undefined) };
@@ -54,7 +57,10 @@ describe("captureBaseCommitSha", () => {
     mockedExecSync.mockImplementation(() => {
       throw new Error("not ancestor");
     });
-    mockedExec.mockImplementation((cmd: any, _opts: any, cb: any) => cb(null, cmd.includes("merge-base") ? "new456\n" : ""));
+    mockedExec.mockImplementation(((cmd: any, _opts: any, cb: any) => {
+      cb(null, cmd.includes("merge-base") ? "new456\n" : "");
+      return {} as any;
+    }) as any);
     const store = createMockStore();
     const executor = new TaskExecutor(store, "/tmp/test");
     const audit = { git: vi.fn().mockResolvedValue(undefined) };
@@ -77,13 +83,14 @@ describe("captureBaseCommitSha", () => {
   });
 
   it("falls back to HEAD when merge-base fails", async () => {
-    mockedExec.mockImplementation((cmd: any, _opts: any, cb: any) => {
+    mockedExec.mockImplementation(((cmd: any, _opts: any, cb: any) => {
       if (String(cmd).includes("merge-base")) {
         cb(new Error("merge-base failed"), "", "merge-base failed");
-        return;
+        return {} as any;
       }
       cb(null, "head777\n", "");
-    });
+      return {} as any;
+    }) as any);
     const store = createMockStore();
     const executor = new TaskExecutor(store, "/tmp/test");
     const audit = { git: vi.fn().mockResolvedValue(undefined) };
