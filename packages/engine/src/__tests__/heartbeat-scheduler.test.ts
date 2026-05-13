@@ -1621,5 +1621,111 @@ describe("HeartbeatTriggerScheduler", () => {
       expect(callback).toHaveBeenCalledOnce();
     });
   });
+
+  describe("skipHeartbeatWhenIdle gate", () => {
+    function makeAgentWithConfig(overrides: Record<string, unknown> = {}, taskId?: string) {
+      return {
+        id: "agent-idle",
+        name: "Idle Agent",
+        role: "executor",
+        state: "active",
+        taskId,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: {},
+        runtimeConfig: overrides,
+      };
+    }
+
+    it("timer tick is skipped when skipHeartbeatWhenIdle=true and no task is assigned", async () => {
+      vi.useFakeTimers();
+
+      const idleStore = {
+        getAgent: vi.fn().mockResolvedValue(makeAgentWithConfig({ skipHeartbeatWhenIdle: true })),
+        getActiveHeartbeatRun: vi.fn().mockResolvedValue(null),
+        getBudgetStatus: vi.fn().mockResolvedValue(createBudgetStatus()),
+        on: vi.fn(),
+        off: vi.fn(),
+      } as unknown as AgentStore;
+
+      scheduler = new HeartbeatTriggerScheduler(idleStore, callback);
+      scheduler.start();
+      scheduler.registerAgent("agent-idle", { heartbeatIntervalMs: 1000 });
+
+      await vi.advanceTimersByTimeAsync(1100);
+
+      expect(callback).not.toHaveBeenCalled();
+      expect(scheduler.getRegisteredAgents()).toContain("agent-idle");
+    });
+
+    it("timer tick fires when skipHeartbeatWhenIdle=true and task is assigned", async () => {
+      vi.useFakeTimers();
+
+      const idleStore = {
+        getAgent: vi.fn().mockResolvedValue(makeAgentWithConfig({ skipHeartbeatWhenIdle: true }, "FN-TASK-7")),
+        getActiveHeartbeatRun: vi.fn().mockResolvedValue(null),
+        getBudgetStatus: vi.fn().mockResolvedValue(createBudgetStatus()),
+        on: vi.fn(),
+        off: vi.fn(),
+      } as unknown as AgentStore;
+
+      scheduler = new HeartbeatTriggerScheduler(idleStore, callback);
+      scheduler.start();
+      scheduler.registerAgent("agent-idle", { heartbeatIntervalMs: 1000 });
+
+      await vi.advanceTimersByTimeAsync(1100);
+
+      expect(callback).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+      [undefined, undefined],
+      [{}, undefined],
+      [{ skipHeartbeatWhenIdle: false }, undefined],
+    ])("timer tick fires by default when config=%p taskId=%p", async (runtimeConfig, taskId) => {
+      vi.useFakeTimers();
+
+      const idleStore = {
+        getAgent: vi.fn().mockResolvedValue(makeAgentWithConfig((runtimeConfig ?? {}) as Record<string, unknown>, taskId as string | undefined)),
+        getActiveHeartbeatRun: vi.fn().mockResolvedValue(null),
+        getBudgetStatus: vi.fn().mockResolvedValue(createBudgetStatus()),
+        on: vi.fn(),
+        off: vi.fn(),
+      } as unknown as AgentStore;
+
+      scheduler = new HeartbeatTriggerScheduler(idleStore, callback);
+      scheduler.start();
+      scheduler.registerAgent("agent-idle", { heartbeatIntervalMs: 1000 });
+
+      await vi.advanceTimersByTimeAsync(1100);
+
+      expect(callback).toHaveBeenCalledOnce();
+    });
+
+    it("assignment trigger still fires when skipHeartbeatWhenIdle=true", async () => {
+      vi.useRealTimers();
+      const eventStore = Object.assign(new EventEmitter(), {
+        getActiveHeartbeatRun: vi.fn().mockResolvedValue(null),
+        getBudgetStatus: vi.fn().mockRejectedValue(new Error("budget status unavailable")),
+        getRecentRuns: vi.fn().mockResolvedValue([]),
+      });
+
+      scheduler = new HeartbeatTriggerScheduler(eventStore as unknown as AgentStore, callback);
+      scheduler.start();
+
+      const agent = makeAgentWithConfig({ skipHeartbeatWhenIdle: true }) as import("@fusion/core").Agent;
+      eventStore.emit("agent:assigned", agent, "FN-123");
+
+      await vi.waitFor(() => {
+        expect(callback).toHaveBeenCalledOnce();
+      }, { timeout: 1000 });
+
+      expect(callback).toHaveBeenCalledWith("agent-idle", "assignment", {
+        taskId: "FN-123",
+        wakeReason: "assignment",
+        triggerDetail: "task-assigned",
+      });
+    });
+  });
 });
 
