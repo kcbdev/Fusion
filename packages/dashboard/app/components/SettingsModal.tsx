@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense, type CSSProperties, type MouseEvent } from "react";
 import { Globe, Folder, RefreshCw, Star, HelpCircle, Loader2, CheckCircle, AlertTriangle } from "lucide-react";
 import {
+  AGENT_PERMISSION_POLICY_ACTION_CATEGORIES,
   THINKING_LEVELS,
   getErrorMessage,
   isGlobalSettingsKey,
@@ -10,7 +11,7 @@ import {
   resolveProjectDefaultModel,
   resolveTitleSummarizerSettingsModel,
 } from "@fusion/core";
-import type { Settings, GlobalSettings, ThemeMode, ColorTheme, ModelPreset, NtfyNotificationEvent, AgentPromptsConfig, ThinkingLevel } from "@fusion/core";
+import type { AgentPermissionPolicyRules, Settings, GlobalSettings, ThemeMode, ColorTheme, ModelPreset, NtfyNotificationEvent, AgentPromptsConfig, ThinkingLevel } from "@fusion/core";
 import { fetchSettings, fetchSettingsByScope, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, cancelProviderLogin, saveApiKey, clearApiKey, fetchModels, testNotification, fetchBackups, createBackup, exportSettings, importSettings, fetchMemoryFile, fetchMemoryFiles, saveMemoryFile, compactMemory, fetchGlobalConcurrency, updateGlobalConcurrency, installQmd, testMemoryRetrieval, triggerMemoryDreams, fetchGitRemotesDetailed, fetchDashboardHealth, checkForUpdates, fetchRemoteSettings, updateRemoteSettings, fetchRemoteStatus, installCloudflared, startRemoteTunnel, stopRemoteTunnel, killExternalTunnel, regenerateRemotePersistentToken, generateShortLivedRemoteToken, fetchRemoteQr, fetchRemoteUrl, submitProviderManualCode } from "../api";
 import type { AuthProvider, ManualOAuthCodeInfo, ModelInfo, BackupListResponse, SettingsExportData, MemoryFileInfo, MemoryRetrievalTestResult, GitRemoteDetailed, RemoteSettings, RemoteStatus, UpdateCheckResponse } from "../api";
 import { useMemoryBackendStatus } from "../hooks/useMemoryBackendStatus";
@@ -56,6 +57,13 @@ import { filterVisibleOnboardingAndSettingsProviders } from "./providerVisibilit
 const GITHUB_STAR_CACHE_KEY = "fusion_github_star_count";
 const GITHUB_STAR_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 const GITHUB_STAR_CLICKED_KEY = "fusion:github-star-clicked";
+
+function toCompleteAgentPermissionRules(rules?: Partial<AgentPermissionPolicyRules>): AgentPermissionPolicyRules {
+  return AGENT_PERMISSION_POLICY_ACTION_CATEGORIES.reduce((acc, category) => {
+    acc[category] = rules?.[category] ?? "allow";
+    return acc;
+  }, {} as AgentPermissionPolicyRules);
+}
 
 function getNodeStatusLabel(status: "online" | "offline" | "connecting" | "error"): string {
   if (status === "online") return "Online";
@@ -4198,11 +4206,11 @@ export function SettingsModal({
             </div>
             <AgentPermissionPolicyEditor
               mode="project-default"
-              value={form.defaultAgentPermissionPolicy ? { presetId: "custom", rules: form.defaultAgentPermissionPolicy.rules ?? {} } : { presetId: "custom", rules: {} }}
+              value={form.defaultAgentPermissionPolicy ? { presetId: "custom", rules: toCompleteAgentPermissionRules(form.defaultAgentPermissionPolicy.rules) } : { presetId: "custom", rules: toCompleteAgentPermissionRules() }}
               onChange={(next) =>
                 setForm((f) => ({
                   ...f,
-                  defaultAgentPermissionPolicy: { rules: next?.rules ?? {} },
+                  defaultAgentPermissionPolicy: { rules: toCompleteAgentPermissionRules(next?.rules) },
                 }))
               }
             />

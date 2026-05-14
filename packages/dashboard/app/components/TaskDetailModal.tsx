@@ -895,16 +895,16 @@ export function TaskDetailContent({
   const showGithubTrackingSection = canEditGithubTracking || githubTrackingEnabled || Boolean(githubTrackedIssue);
   const retrySummary = task.retrySummary;
   const retryRows = [
-    { key: "stuckKillCount", label: "Stuck kills", title: "Stuck-task detector forced agent kill retries", value: retrySummary?.stuckKillCount ?? 0 },
-    { key: "recoveryRetryCount", label: "Recovery retries", title: "Transient executor recovery retries", value: retrySummary?.recoveryRetryCount ?? 0 },
-    { key: "taskDoneRetryCount", label: "task_done retries", title: "Agent exited without task_done and task was retried", value: retrySummary?.taskDoneRetryCount ?? 0 },
-    { key: "workflowStepRetries", label: "Workflow retries", title: "Workflow step failure retries", value: retrySummary?.workflowStepRetries ?? 0 },
-    { key: "verificationFailureCount", label: "Verification bounces", title: "Verification failure bounce retries", value: retrySummary?.verificationFailureCount ?? 0 },
-    { key: "postReviewFixCount", label: "Post-review fixes", title: "Post-review remediation retries", value: retrySummary?.postReviewFixCount ?? 0 },
-    { key: "mergeConflictBounceCount", label: "Merge conflict bounces", title: "Merge conflict bounce retries", value: retrySummary?.mergeConflictBounceCount ?? 0 },
-    { key: "branchConflictRecoveryCount", label: "Branch conflict recovery", title: "FN-4068 branch-conflict recovery retries", value: retrySummary?.branchConflictRecoveryCount ?? 0 },
-    { key: "reviewerContextRetryCount", label: "Reviewer context retries", title: "FN-4082 compact reviewer retry", value: retrySummary?.reviewerContextRetryCount ?? 0 },
-    { key: "reviewerFallbackRetryCount", label: "Reviewer fallback retries", title: "FN-4092 fallback-model retry", value: retrySummary?.reviewerFallbackRetryCount ?? 0 },
+    { key: "stuckKill", label: "Stuck kills", title: "Stuck-task detector forced agent kill retries", value: retrySummary?.stuckKill ?? 0 },
+    { key: "recovery", label: "Recovery retries", title: "Transient executor recovery retries", value: retrySummary?.recovery ?? 0 },
+    { key: "taskDone", label: "task_done retries", title: "Agent exited without task_done and task was retried", value: retrySummary?.taskDone ?? 0 },
+    { key: "workflowStep", label: "Workflow retries", title: "Workflow step failure retries", value: retrySummary?.workflowStep ?? 0 },
+    { key: "verification", label: "Verification bounces", title: "Verification failure bounce retries", value: retrySummary?.verification ?? 0 },
+    { key: "postReviewFix", label: "Post-review fixes", title: "Post-review remediation retries", value: retrySummary?.postReviewFix ?? 0 },
+    { key: "mergeConflict", label: "Merge conflict bounces", title: "Merge conflict bounce retries", value: retrySummary?.mergeConflict ?? 0 },
+    { key: "branchConflict", label: "Branch conflict recovery", title: "FN-4068 branch-conflict recovery retries", value: retrySummary?.branchConflict ?? 0 },
+    { key: "reviewerContext", label: "Reviewer context retries", title: "FN-4082 compact reviewer retry", value: retrySummary?.reviewerContext ?? 0 },
+    { key: "reviewerFallback", label: "Reviewer fallback retries", title: "FN-4092 fallback-model retry", value: retrySummary?.reviewerFallback ?? 0 },
   ].filter((row) => row.value > 0);
   const githubTrackingStatus = githubTrackingDetailPending
     ? "Loading"

@@ -479,6 +479,7 @@ export function ListView({
     column: "Column",
     dependencies: "Dependencies",
     progress: "Progress",
+    retries: "Retries",
   };
 
   const handleSort = useCallback((field: SortField) => {
