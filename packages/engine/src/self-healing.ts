@@ -1399,10 +1399,11 @@ export class SelfHealingManager {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
 
-      const candidates = [
-        ...(await this.store.listTasks({ column: "todo", slim: true })),
-        ...(await this.store.listTasks({ column: "in-progress", slim: true })),
-      ];
+      const todoCandidates = await this.store.listTasks({ column: "todo", slim: true });
+      const inProgressCandidates = await this.store.listTasks({ column: "in-progress", slim: true });
+      const inReviewPausedCandidates = (await this.store.listTasks({ column: "in-review", slim: true }))
+        .filter((task) => task.paused === true && task.pausedReason === "branch-conflict-unrecoverable");
+      const candidates = [...todoCandidates, ...inProgressCandidates, ...inReviewPausedCandidates];
 
       const activeTaskIds = new Set<string>();
       if (this.options.agentStore) {
@@ -1427,6 +1428,7 @@ export class SelfHealingManager {
       let recovered = 0;
       for (const task of candidates) {
         if (task.checkedOutBy || activeTaskIds.has(task.id.toUpperCase()) || !task.branch || !task.worktree) continue;
+        if (task.userPaused && task.pausedReason !== "branch-conflict-unrecoverable") continue;
         if (!await isUsableTaskWorktree(this.options.rootDir, task.worktree)) continue;
 
         try {
@@ -1449,15 +1451,29 @@ export class SelfHealingManager {
           const preservedCommitCount = inspection.kind === "fully-subsumed"
             ? 0
             : inspection.taskAttributedCommitCount;
-          if (inspection.kind !== "fully-subsumed" && preservedCommitCount <= 0) {
-            continue;
-          }
 
-          await this.store.updateTask(task.id, { worktree: inspection.livePath, branch: task.branch });
+          const wasPausedBranchConflict = task.paused === true && task.pausedReason === "branch-conflict-unrecoverable";
+          await this.store.updateTask(task.id, {
+            worktree: inspection.livePath,
+            branch: task.branch,
+            paused: false,
+            pausedReason: undefined,
+            status: null,
+            error: null,
+          });
           await this.store.logEntry(
             task.id,
-            `[recovery] reclaimed existing worktree for ${task.id} at ${inspection.livePath} (${preservedCommitCount} commits preserved, tip ${inspection.tipSha.slice(0, 12)})`,
+            `[recovery] ${wasPausedBranchConflict ? "reclaim-paused-review" : "reclaim-self-owned"} ${task.id} at ${inspection.livePath} (${preservedCommitCount} commits preserved, tip ${inspection.tipSha.slice(0, 12)})`,
           );
+
+          if (task.column === "in-review") {
+            await this.store.moveTask(task.id, "todo", {
+              moveSource: "engine",
+              preserveWorktree: true,
+              preserveProgress: true,
+              preserveResumeState: true,
+            });
+          }
 
           try {
             const auditor = createRunAuditor(this.store, {
@@ -1465,7 +1481,7 @@ export class SelfHealingManager {
               agentId: "self-healing",
               taskId: task.id,
               taskLineageId: task.lineageId,
-              phase: "reclaim-self-owned-branch-conflicts",
+              phase: wasPausedBranchConflict ? "reclaim-paused-review" : "reclaim-self-owned-branch-conflicts",
             });
             await auditor.git({
               type: "branch:auto-reclaim",
@@ -1477,6 +1493,8 @@ export class SelfHealingManager {
                 existingTipSha: inspection.tipSha,
                 strandedCommitCount: inspection.kind === "fully-subsumed" ? 0 : inspection.strandedCommits.length,
                 subsumed: inspection.kind === "fully-subsumed",
+                recoveredFromPaused: wasPausedBranchConflict,
+                previousPausedReason: wasPausedBranchConflict ? task.pausedReason : null,
                 trigger: "self-healing-sweep",
               },
             });

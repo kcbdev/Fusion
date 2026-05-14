@@ -1343,7 +1343,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const prefix = tableAlias ? `${tableAlias}.` : "";
     return [
       "id", "lineageId", "title", "description", "priority", "\"column\"", "status", "size", "reviewLevel", "currentStep",
-      "worktree", "blockedBy", "paused", "userPaused", "baseBranch", "branch", "executionStartBranch", "baseCommitSha",
+      "worktree", "blockedBy", "paused", "pausedReason", "userPaused", "baseBranch", "branch", "executionStartBranch", "baseCommitSha",
       "modelPresetId", "modelProvider", "modelId",
       "validatorModelProvider", "validatorModelId",
       "planningModelProvider", "planningModelId",
@@ -1392,7 +1392,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private getTaskSelectClauseWithActivityLogLimit(limit: number): string {
     const columns = [
       "id", "lineageId", "title", "description", "priority", "\"column\"", "status", "size", "reviewLevel", "currentStep",
-      "worktree", "blockedBy", "paused", "userPaused", "baseBranch", "branch", "executionStartBranch", "baseCommitSha",
+      "worktree", "blockedBy", "paused", "pausedReason", "userPaused", "baseBranch", "branch", "executionStartBranch", "baseCommitSha",
       "modelPresetId", "modelProvider", "modelId",
       "validatorModelProvider", "validatorModelId",
       "planningModelProvider", "planningModelId",

@@ -5840,7 +5840,7 @@ describe("SelfHealingManager reclaimSelfOwnedBranchConflicts", () => {
 
     const recovered = await manager.reclaimSelfOwnedBranchConflicts();
     expect(recovered).toBe(1);
-    expect(store.updateTask).toHaveBeenCalledWith("FN-509", { worktree: "/tmp/fn-509", branch: "fusion/fn-509" });
+    expect(store.updateTask).toHaveBeenCalledWith("FN-509", expect.objectContaining({ worktree: "/tmp/fn-509", branch: "fusion/fn-509", status: null, paused: false }));
     expect((store as any).recordRunAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         domain: "git",
@@ -5865,7 +5865,7 @@ describe("SelfHealingManager reclaimSelfOwnedBranchConflicts", () => {
 
     const recovered = await manager.reclaimSelfOwnedBranchConflicts();
     expect(recovered).toBe(1);
-    expect(store.updateTask).toHaveBeenCalledWith("FN-500", { worktree: "/tmp/fn-500", branch: "fusion/fn-500" });
+    expect(store.updateTask).toHaveBeenCalledWith("FN-500", expect.objectContaining({ worktree: "/tmp/fn-500", branch: "fusion/fn-500", status: null, paused: false }));
   });
 
   it("skips checked out tasks", async () => {
@@ -5905,8 +5905,9 @@ describe("SelfHealingManager reclaimSelfOwnedBranchConflicts", () => {
     expect(inspectSpy).not.toHaveBeenCalled();
   });
 
-  it("only scans todo and in-progress columns", async () => {
+  it("scans todo, in-progress, and paused in-review columns", async () => {
     (store.listTasks as any)
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
 
@@ -5914,6 +5915,7 @@ describe("SelfHealingManager reclaimSelfOwnedBranchConflicts", () => {
 
     expect(store.listTasks).toHaveBeenNthCalledWith(1, { column: "todo", slim: true });
     expect(store.listTasks).toHaveBeenNthCalledWith(2, { column: "in-progress", slim: true });
+    expect(store.listTasks).toHaveBeenNthCalledWith(3, { column: "in-review", slim: true });
   });
 
   it("escalates live-foreign conflicts to in-review failed", async () => {
