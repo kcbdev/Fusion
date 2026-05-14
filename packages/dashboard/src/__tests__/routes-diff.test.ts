@@ -398,6 +398,81 @@ describe("FN-4308 multi-commit done task aggregation", () => {
     expect(response.body.files.length).toBe(response.body.stats.filesChanged);
   });
 
+  it("returns destination path for renames via branch-ref fallback", async () => {
+    const store = new MockStore();
+    store.addTask(createTask({ column: "in-progress", worktree: undefined, branch: "feature/rename", baseBranch: "main" }));
+
+    gitResponses({
+      "rev-parse --verify --quiet feature/rename": "rename-sha",
+      "diff --name-status -M origin/main..feature/rename": "R100\told.ts\tnew.ts",
+      "diff origin/main..feature/rename -- new.ts": "rename from old.ts\nrename to new.ts\n+added\n",
+    });
+
+    const app = createServer(store as any);
+    const response = await requestDiff(app);
+
+    expect(response.status).toBe(200);
+    expect(response.body.files).toHaveLength(1);
+    expect(response.body.files[0].path).toBe("new.ts");
+    expect(response.body.files[0].status).toBe("modified");
+    expect(response.body.stats.filesChanged).toBe(1);
+  });
+
+  it("returns destination path for copies via branch-ref fallback", async () => {
+    const store = new MockStore();
+    store.addTask(createTask({ column: "in-review", worktree: undefined, branch: "feature/copy", baseBranch: "main" }));
+
+    gitResponses({
+      "rev-parse --verify --quiet feature/copy": "copy-sha",
+      "diff --name-status -M origin/main..feature/copy": "C100\tsrc.ts\tdst.ts",
+      "diff origin/main..feature/copy -- dst.ts": "+copied\n",
+    });
+
+    const app = createServer(store as any);
+    const response = await requestDiff(app);
+
+    expect(response.status).toBe(200);
+    expect(response.body.files).toHaveLength(1);
+    expect(response.body.files[0].path).toBe("dst.ts");
+    expect(response.body.stats.filesChanged).toBe(1);
+  });
+
+  it("returns renamed destination and oldPath for /file-diffs branch-ref fallback", async () => {
+    const store = new MockStore();
+    store.addTask(createTask({ column: "in-review", worktree: undefined, branch: "feature/rename-file-diffs", baseBranch: "main" }));
+
+    gitResponses({
+      "rev-parse --verify --quiet feature/rename-file-diffs": "rename-sha",
+      "diff --name-status -M origin/main..feature/rename-file-diffs": "R100\told.ts\tnew.ts",
+      "diff origin/main..feature/rename-file-diffs -- new.ts": "rename from old.ts\nrename to new.ts\n",
+    });
+
+    const app = createServer(store as any);
+    const response = await requestFileDiffs(app);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toHaveLength(1);
+    expect(response.body[0]).toMatchObject({ path: "new.ts", status: "renamed", oldPath: "old.ts" });
+  });
+
+  it("returns copied destination path as modified for /file-diffs branch-ref fallback", async () => {
+    const store = new MockStore();
+    store.addTask(createTask({ column: "in-progress", worktree: undefined, branch: "feature/copy-file-diffs", baseBranch: "main" }));
+
+    gitResponses({
+      "rev-parse --verify --quiet feature/copy-file-diffs": "copy-sha",
+      "diff --name-status -M origin/main..feature/copy-file-diffs": "C100\tsrc.ts\tdst.ts",
+      "diff origin/main..feature/copy-file-diffs -- dst.ts": "+copied\n",
+    });
+
+    const app = createServer(store as any);
+    const response = await requestFileDiffs(app);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toHaveLength(1);
+    expect(response.body[0]).toMatchObject({ path: "dst.ts", status: "modified" });
+  });
+
   it("uses diffBase-to-worktree patching for in-progress committed/staged/unstaged files", async () => {
     const store = new MockStore();
     store.addTask(createTask({ column: "in-progress", worktree: process.cwd() }));

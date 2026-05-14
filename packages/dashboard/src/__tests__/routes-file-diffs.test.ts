@@ -71,6 +71,20 @@ class MockStore extends EventEmitter {
   }
 }
 
+class RepoBackedStore extends MockStore {
+  constructor(private readonly rootDir: string) {
+    super();
+  }
+
+  override getRootDir(): string {
+    return this.rootDir;
+  }
+
+  override getFusionDir(): string {
+    return join(this.rootDir, ".fusion");
+  }
+}
+
 function createTask(overrides: Partial<Task> = {}): Task {
   return {
     id: "KB-651",
@@ -165,6 +179,64 @@ describe("GET /api/tasks/:id/file-diffs", () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual([]);
   });
+
+  it("returns destination path for renames via branch-ref fallback", async () => {
+    const repoDir = mkdtempSync(join(tmpdir(), "fn-file-diffs-rename-"));
+
+    try {
+      execFileSync("git", ["init", "-b", "main", repoDir], { stdio: "pipe" });
+      execFileSync("git", ["-C", repoDir, "config", "user.email", "rename@example.com"], { stdio: "pipe" });
+      execFileSync("git", ["-C", repoDir, "config", "user.name", "Rename Test"], { stdio: "pipe" });
+      writeFileSync(join(repoDir, "old.ts"), "export const oldValue = 1;\n");
+      execFileSync("git", ["-C", repoDir, "add", "old.ts"], { stdio: "pipe" });
+      execFileSync("git", ["-C", repoDir, "commit", "-m", "base"], { stdio: "pipe" });
+      execFileSync("git", ["-C", repoDir, "checkout", "-b", "feature-rename"], { stdio: "pipe" });
+      execFileSync("git", ["-C", repoDir, "mv", "old.ts", "new.ts"], { stdio: "pipe" });
+      execFileSync("git", ["-C", repoDir, "commit", "-m", "rename file"], { stdio: "pipe" });
+
+      const store = new RepoBackedStore(repoDir);
+      store.addTask(createTask({ column: "in-review", worktree: undefined, branch: "feature-rename", baseBranch: "main" }));
+
+      const app = createServer(store as any);
+      const response = await requestFileDiffs(app);
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveLength(1);
+      expect(response.body[0]).toMatchObject({ path: "new.ts", status: "renamed", oldPath: "old.ts" });
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  it("returns destination path for copies via branch-ref fallback", async () => {
+    const repoDir = mkdtempSync(join(tmpdir(), "fn-file-diffs-copy-"));
+
+    try {
+      execFileSync("git", ["init", "-b", "main", repoDir], { stdio: "pipe" });
+      execFileSync("git", ["-C", repoDir, "config", "user.email", "copy@example.com"], { stdio: "pipe" });
+      execFileSync("git", ["-C", repoDir, "config", "user.name", "Copy Test"], { stdio: "pipe" });
+      execFileSync("git", ["-C", repoDir, "config", "diff.renames", "copies"], { stdio: "pipe" });
+      writeFileSync(join(repoDir, "src.ts"), "export const source = 1;\n");
+      execFileSync("git", ["-C", repoDir, "add", "src.ts"], { stdio: "pipe" });
+      execFileSync("git", ["-C", repoDir, "commit", "-m", "base"], { stdio: "pipe" });
+      execFileSync("git", ["-C", repoDir, "checkout", "-b", "feature-copy"], { stdio: "pipe" });
+      writeFileSync(join(repoDir, "dst.ts"), "export const source = 1;\n");
+      execFileSync("git", ["-C", repoDir, "add", "dst.ts"], { stdio: "pipe" });
+      execFileSync("git", ["-C", repoDir, "commit", "-m", "copy file"], { stdio: "pipe" });
+
+      const store = new RepoBackedStore(repoDir);
+      store.addTask(createTask({ column: "in-progress", worktree: undefined, branch: "feature-copy", baseBranch: "main" }));
+
+      const app = createServer(store as any);
+      const response = await requestFileDiffs(app);
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveLength(1);
+      expect(response.body[0].path).toBe("dst.ts");
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  }, 15_000);
 });
 
 describe("resolveDiffBase", () => {
