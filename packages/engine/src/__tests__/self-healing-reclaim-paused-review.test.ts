@@ -107,4 +107,19 @@ describe("self-healing reclaim paused review", () => {
     expect(recovered).toBe(0);
     expect(inspectSpy).not.toHaveBeenCalled();
   });
+
+  it("does not reclaim userPaused tasks even when pausedReason is branch-conflict-unrecoverable", async () => {
+    (store.listTasks as any)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: "FN-4490", column: "in-progress", checkedOutBy: null, branch: "fusion/fn-4490", worktree: "/tmp/fn-4490", userPaused: true, paused: true, pausedReason: "branch-conflict-unrecoverable" },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const inspectSpy = vi.spyOn(branchConflicts, "inspectBranchConflict");
+    const recovered = await manager.reclaimSelfOwnedBranchConflicts();
+
+    expect(recovered).toBe(0);
+    expect(inspectSpy).not.toHaveBeenCalled();
+  });
 });

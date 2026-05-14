@@ -1428,7 +1428,7 @@ export class SelfHealingManager {
       let recovered = 0;
       for (const task of candidates) {
         if (task.checkedOutBy || activeTaskIds.has(task.id.toUpperCase()) || !task.branch || !task.worktree) continue;
-        if (task.userPaused && task.pausedReason !== "branch-conflict-unrecoverable") continue;
+        if (task.userPaused) continue;
         if (!await isUsableTaskWorktree(this.options.rootDir, task.worktree)) continue;
 
         try {
