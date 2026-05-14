@@ -2579,6 +2579,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       description: template.description,
       mode: "prompt",
       phase: "pre-merge",
+      gateMode: "advisory",
       prompt: template.prompt,
       gateMode: "advisory",
       toolMode: template.toolMode || "readonly",
@@ -2595,6 +2596,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     description: string;
     mode: string;
     phase: string | null;
+    gateMode: string | null;
     prompt: string;
     gateMode: string | null;
     toolMode: string | null;
@@ -2613,6 +2615,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       description: row.description,
       mode: row.mode === "script" ? "script" : "prompt",
       phase: row.phase === "post-merge" ? "post-merge" : "pre-merge",
+      gateMode: row.gateMode === "advisory" || row.gateMode === "gate"
+        ? row.gateMode
+        : (row.mode === "script" ? "gate" : "advisory"),
       prompt: row.prompt || "",
       gateMode: row.gateMode === "gate" || row.gateMode === "advisory"
         ? row.gateMode
@@ -2656,6 +2661,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     }
     if (!Object.prototype.hasOwnProperty.call(legacy, "phase")) {
       normalized.phase = undefined;
+    }
+    if (!Object.prototype.hasOwnProperty.call(legacy, "gateMode")) {
+      normalized.gateMode = normalized.mode === "script" ? "gate" : "advisory";
     }
 
     return normalized;
@@ -7150,6 +7158,7 @@ ${stepsSection}`;
       const id = `WS-${String(nextWsId).padStart(3, "0")}`;
 
       const mode = input.mode || "prompt";
+      const gateMode = input.gateMode || (mode === "script" ? "gate" : "advisory");
 
       // Validate: script mode requires scriptName
       if (mode === "script" && !input.scriptName?.trim()) {
@@ -7164,6 +7173,7 @@ ${stepsSection}`;
         description: input.description,
         mode,
         phase: input.phase || "pre-merge",
+        gateMode,
         prompt: mode === "prompt" ? (input.prompt || "") : "",
         gateMode: input.gateMode || (mode === "script" ? "gate" : "advisory"),
         toolMode: mode === "prompt" ? (input.toolMode || "readonly") : undefined,
@@ -7184,6 +7194,7 @@ ${stepsSection}`;
           description,
           mode,
           phase,
+          gateMode,
           prompt,
           gateMode,
           toolMode,
@@ -7202,6 +7213,7 @@ ${stepsSection}`;
         step.description,
         step.mode,
         step.phase || "pre-merge",
+        step.gateMode,
         step.prompt,
         step.gateMode ?? (step.mode === "script" ? "gate" : "advisory"),
         step.toolMode ?? null,
@@ -7245,6 +7257,7 @@ ${stepsSection}`;
       description: entry.template.description,
       mode: entry.template.mode ?? "prompt",
       phase: entry.template.phase ?? "pre-merge",
+      gateMode: (entry.template.mode ?? "prompt") === "script" ? "gate" : "advisory",
       prompt: entry.template.prompt ?? "",
       gateMode: entry.template.gateMode ?? ((entry.template.mode ?? "prompt") === "script" ? "gate" : "advisory"),
       scriptName: entry.template.scriptName,
@@ -7309,6 +7322,7 @@ ${stepsSection}`;
           description: string;
           mode: string;
           phase: string | null;
+          gateMode: string | null;
           prompt: string;
           gateMode: string | null;
           toolMode: string | null;
@@ -7335,6 +7349,7 @@ ${stepsSection}`;
           description: string;
           mode: string;
           phase: string | null;
+          gateMode: string | null;
           prompt: string;
           gateMode: string | null;
           toolMode: string | null;
@@ -7368,6 +7383,7 @@ ${stepsSection}`;
           description: string;
           mode: string;
           phase: string | null;
+          gateMode: string | null;
           prompt: string;
           gateMode: string | null;
           toolMode: string | null;
@@ -7414,6 +7430,7 @@ ${stepsSection}`;
     if (updates.name !== undefined) step.name = updates.name;
     if (updates.description !== undefined) step.description = updates.description;
     if (updates.phase !== undefined) step.phase = updates.phase;
+    if (updates.gateMode !== undefined) step.gateMode = updates.gateMode;
     if (updates.prompt !== undefined && step.mode === "prompt") step.prompt = updates.prompt;
     if (updates.toolMode !== undefined && step.mode === "prompt") step.toolMode = updates.toolMode;
     if (updates.gateMode !== undefined) step.gateMode = updates.gateMode;
@@ -7436,6 +7453,7 @@ ${stepsSection}`;
            description = ?,
            mode = ?,
            phase = ?,
+           gateMode = ?,
            prompt = ?,
            gateMode = ?,
            toolMode = ?,
@@ -7452,6 +7470,7 @@ ${stepsSection}`;
       step.description,
       step.mode,
       step.phase || "pre-merge",
+      step.gateMode,
       step.prompt,
       step.gateMode ?? (step.mode === "script" ? "gate" : "advisory"),
       step.toolMode ?? null,

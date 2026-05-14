@@ -29,6 +29,7 @@ describe("TaskStore Workflow Steps", () => {
       expect(ws.name).toBe("Documentation Review");
       expect(ws.description).toBe("Verify all public APIs have documentation");
       expect(ws.mode).toBe("prompt");
+      expect(ws.gateMode).toBe("advisory");
       expect(ws.prompt).toBe("Review the task changes and verify that all new public functions have docs.");
       expect(ws.scriptName).toBeUndefined();
       expect(ws.enabled).toBe(true);
@@ -46,6 +47,7 @@ describe("TaskStore Workflow Steps", () => {
       expect(ws.name).toBe("QA Check");
       expect(ws.description).toBe("Run tests and verify they pass");
       expect(ws.mode).toBe("prompt"); // Default mode
+      expect(ws.gateMode).toBe("advisory"); // prompt default gate mode
       expect(ws.prompt).toBe(""); // Empty when not provided
       expect(ws.enabled).toBe(true); // Default enabled
     });
@@ -61,11 +63,39 @@ describe("TaskStore Workflow Steps", () => {
       expect(ws.id).toBe("WS-001");
       expect(ws.name).toBe("Run Tests");
       expect(ws.mode).toBe("script");
+      expect(ws.gateMode).toBe("gate");
       expect(ws.prompt).toBe("");
       expect(ws.scriptName).toBe("test");
       expect(ws.modelProvider).toBeUndefined();
       expect(ws.modelId).toBeUndefined();
       expect(ws.enabled).toBe(true);
+    });
+
+    it("should round-trip gateMode create/list/update", async () => {
+      const promptStep = await store.createWorkflowStep({
+        name: "Prompt advisory",
+        description: "advisory default",
+        mode: "prompt",
+        prompt: "review",
+      });
+      const scriptStep = await store.createWorkflowStep({
+        name: "Script gate",
+        description: "gate default",
+        mode: "script",
+        scriptName: "test",
+      });
+
+      expect(promptStep.gateMode).toBe("advisory");
+      expect(scriptStep.gateMode).toBe("gate");
+
+      await store.updateWorkflowStep(promptStep.id, { gateMode: "gate" });
+      await store.updateWorkflowStep(scriptStep.id, { gateMode: "advisory" });
+      const listed = await store.listWorkflowSteps();
+      const updatedPrompt = listed.find((step) => step.id === promptStep.id);
+      const updatedScript = listed.find((step) => step.id === scriptStep.id);
+
+      expect(updatedPrompt?.gateMode).toBe("gate");
+      expect(updatedScript?.gateMode).toBe("advisory");
     });
 
     it("should reject script mode without scriptName", async () => {
@@ -157,6 +187,7 @@ describe("TaskStore Workflow Steps", () => {
         templateId: "my-step",
         name: "My Plugin Step",
         mode: "script",
+        gateMode: "gate",
         phase: "pre-merge",
         scriptName: "my-plugin:run-step",
         defaultOn: false,
@@ -169,6 +200,7 @@ describe("TaskStore Workflow Steps", () => {
         id: "plugin:my-plugin:my-step",
         templateId: "my-step",
         mode: "script",
+        gateMode: "gate",
         phase: "pre-merge",
         scriptName: "my-plugin:run-step",
         defaultOn: false,
@@ -201,6 +233,7 @@ describe("TaskStore Workflow Steps", () => {
         id: "plugin:my-plugin:prompt-step",
         templateId: "prompt-step",
         mode: "prompt",
+        gateMode: "advisory",
         prompt: "Run plugin checks",
       });
     });
