@@ -2309,6 +2309,11 @@ export interface ProjectSettings {
    *  given one shot to retry with the configured fallback model before the
    *  step is reported as failed. Default: 360_000 (6 minutes). */
   workflowStepTimeoutMs?: number;
+  /** How pre-merge prompt workflow steps enforce declared File Scope at step end.
+   *  - "block" (default): mark the step failed/revision-requested on off-scope writes
+   *  - "warn": log off-scope writes but allow the step to pass
+   *  - "off": disable workflow-step scope enforcement and keep legacy behavior */
+  workflowStepScopeEnforcement?: "block" | "warn" | "off";
   /** When true (default), workflow revision feedback that explicitly names files
    *  outside the task's declared File Scope is forked into a dependent follow-up
    *  task instead of being appended to the original PROMPT.md. Set to false to
