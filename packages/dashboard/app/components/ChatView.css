@@ -1657,7 +1657,7 @@
     opacity: 1;
   }
 
-  /* FN-4352/FN-4387: keep row text clearance aligned to compact secondary delete control (matches base compact clearance). */
+  /* FN-4352/FN-4385: keep row text clearance aligned to compact secondary delete control (matches base compact clearance). */
   .chat-session-title,
   .chat-session-preview {
     padding-right: calc(var(--space-md) * 3);
