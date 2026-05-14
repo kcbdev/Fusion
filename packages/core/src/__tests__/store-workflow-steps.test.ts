@@ -128,7 +128,7 @@ describe("TaskStore Workflow Steps", () => {
       expect(found).toBeUndefined();
     });
 
-    it("should resolve plugin workflow steps from injected templates", async () => {
+    it("should resolve plugin script-mode workflow steps from injected templates", async () => {
       store.setPluginWorkflowStepTemplates([
         {
           pluginId: "my-plugin",
@@ -136,6 +136,58 @@ describe("TaskStore Workflow Steps", () => {
             id: "plugin:my-plugin:my-step",
             name: "My Plugin Step",
             description: "Plugin-provided step",
+            mode: "script",
+            phase: "pre-merge",
+            scriptName: "my-plugin:run-step",
+            prompt: "",
+            toolMode: "readonly",
+            defaultOn: false,
+            modelProvider: "anthropic",
+            modelId: "claude-sonnet-4-5",
+            category: "Plugin",
+            icon: "puzzle",
+          },
+        },
+      ]);
+
+      const listed = await store.listWorkflowSteps();
+      const listedStep = listed.find((candidate) => candidate.id === "plugin:my-plugin:my-step");
+      expect(listedStep).toMatchObject({
+        id: "plugin:my-plugin:my-step",
+        templateId: "my-step",
+        name: "My Plugin Step",
+        mode: "script",
+        phase: "pre-merge",
+        scriptName: "my-plugin:run-step",
+        defaultOn: false,
+        modelProvider: "anthropic",
+        modelId: "claude-sonnet-4-5",
+      });
+
+      const step = await store.getWorkflowStep("plugin:my-plugin:my-step");
+      expect(step).toMatchObject({
+        id: "plugin:my-plugin:my-step",
+        templateId: "my-step",
+        mode: "script",
+        phase: "pre-merge",
+        scriptName: "my-plugin:run-step",
+        defaultOn: false,
+        modelProvider: "anthropic",
+        modelId: "claude-sonnet-4-5",
+        enabled: true,
+      });
+    });
+
+    it("should resolve plugin prompt-mode workflow steps from injected templates", async () => {
+      store.setPluginWorkflowStepTemplates([
+        {
+          pluginId: "my-plugin",
+          template: {
+            id: "plugin:my-plugin:prompt-step",
+            name: "My Prompt Step",
+            description: "Prompt plugin step",
+            mode: "prompt",
+            phase: "pre-merge",
             prompt: "Run plugin checks",
             toolMode: "readonly",
             category: "Plugin",
@@ -144,14 +196,12 @@ describe("TaskStore Workflow Steps", () => {
         },
       ]);
 
-      const step = await store.getWorkflowStep("plugin:my-plugin:my-step");
+      const step = await store.getWorkflowStep("plugin:my-plugin:prompt-step");
       expect(step).toMatchObject({
-        id: "plugin:my-plugin:my-step",
-        templateId: "my-step",
-        name: "My Plugin Step",
+        id: "plugin:my-plugin:prompt-step",
+        templateId: "prompt-step",
         mode: "prompt",
-        phase: "pre-merge",
-        enabled: true,
+        prompt: "Run plugin checks",
       });
     });
 

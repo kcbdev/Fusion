@@ -396,8 +396,20 @@ export interface WorkflowStepTemplate {
   description: string;
   /** Full agent prompt template */
   prompt: string;
+  /** Execution mode for plugin-contributed templates; defaults to prompt. */
+  mode?: WorkflowStepMode;
+  /** Task lifecycle phase for plugin-contributed templates; defaults to pre-merge. */
+  phase?: "pre-merge" | "post-merge";
+  /** Script name for script-mode plugin templates. */
+  scriptName?: string;
   /** Tool set available when the template runs as a prompt-mode step. */
   toolMode?: WorkflowStepToolMode;
+  /** Whether this template should be auto-selected for new tasks. */
+  defaultOn?: boolean;
+  /** AI model provider override for prompt-mode templates. */
+  modelProvider?: string;
+  /** AI model ID override for prompt-mode templates. */
+  modelId?: string;
   /** Grouping category (e.g., "Quality", "Security") */
   category: string;
   /** Optional icon identifier for UI (e.g., "file-text", "shield") */
