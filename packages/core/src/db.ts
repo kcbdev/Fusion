@@ -119,7 +119,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 77;
+const SCHEMA_VERSION = 78;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -3273,6 +3273,14 @@ export class Database {
         this.addColumnIfMissing("tasks", "tokenBudgetSoftAlertedAt", "TEXT");
         this.addColumnIfMissing("tasks", "tokenBudgetHardAlertedAt", "TEXT");
         this.addColumnIfMissing("tasks", "tokenBudgetOverride", "TEXT");
+      });
+    }
+
+    if (version < 78) {
+      this.applyMigration(78, () => {
+        this.addColumnIfMissing("tasks", "branchConflictRecoveryCount", "INTEGER DEFAULT 0");
+        this.addColumnIfMissing("tasks", "reviewerContextRetryCount", "INTEGER DEFAULT 0");
+        this.addColumnIfMissing("tasks", "reviewerFallbackRetryCount", "INTEGER DEFAULT 0");
       });
     }
 

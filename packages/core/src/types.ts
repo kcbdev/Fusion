@@ -1417,6 +1417,15 @@ export interface Task {
    *  `MAX_MERGE_AUDIT_BOUNCES`, the task is parked with `status="failed"` and a
    *  recovery follow-up task is created. */
   mergeAuditBounceCount?: number;
+  /** Number of branch-conflict recovery attempts consumed by executor branch
+   *  conflict auto-recovery loops. Incremented once per recovery retry attempt. */
+  branchConflictRecoveryCount?: number;
+  /** Number of reviewer context-limit retries consumed by FN-4082 compact
+   *  reviewer-request fallback handling. */
+  reviewerContextRetryCount?: number;
+  /** Number of reviewer fallback retries consumed by FN-4092 fallback-model
+   *  and same-model strict-prompt retry paths. */
+  reviewerFallbackRetryCount?: number;
   /** ISO-8601 timestamp indicating when the task becomes eligible for the next
    *  recovery retry. Scheduler and triage processor skip tasks whose
    *  `nextRecoveryAt` is still in the future. Cleared alongside `recoveryRetryCount`. */

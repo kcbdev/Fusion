@@ -717,7 +717,57 @@ describe("schema migration", () => {
       { id: "WS-001", mode: "prompt", gateMode: "advisory" },
       { id: "WS-002", mode: "script", gateMode: "advisory" },
     ]);
-    expect(db.getSchemaVersion()).toBe(77);
+    expect(db.getSchemaVersion()).toBe(78);
+
+    db.close();
+  });
+
+  it("adds retry-burned task counters when migrating from schema version 77", () => {
+    const db = new Database(fusionDir);
+    db.exec("CREATE TABLE IF NOT EXISTS __meta (key TEXT PRIMARY KEY, value TEXT)");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY,
+        description TEXT NOT NULL,
+        "column" TEXT NOT NULL,
+        currentStep INTEGER NOT NULL DEFAULT 0,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      )
+    `);
+    db.exec("INSERT INTO __meta (key, value) VALUES ('schemaVersion', '77')");
+    db.exec("INSERT INTO __meta (key, value) VALUES ('lastModified', '1000')");
+    db.exec(`
+      INSERT INTO tasks (
+        id, description, "column", currentStep, createdAt, updatedAt
+      ) VALUES (
+        'FN-0001', 'legacy row', 'todo', 0, '2025-01-01T00:00:00.000Z', '2025-01-01T00:00:00.000Z'
+      )
+    `);
+
+    db.init();
+
+    const columns = db
+      .prepare("PRAGMA table_info(tasks)")
+      .all() as Array<{ name: string }>;
+    const names = new Set(columns.map((col) => col.name));
+    expect(names.has("branchConflictRecoveryCount")).toBe(true);
+    expect(names.has("reviewerContextRetryCount")).toBe(true);
+    expect(names.has("reviewerFallbackRetryCount")).toBe(true);
+
+    const counts = db
+      .prepare("SELECT branchConflictRecoveryCount, reviewerContextRetryCount, reviewerFallbackRetryCount FROM tasks WHERE id = ?")
+      .get("FN-0001") as {
+        branchConflictRecoveryCount: number;
+        reviewerContextRetryCount: number;
+        reviewerFallbackRetryCount: number;
+      };
+    expect(counts).toEqual({
+      branchConflictRecoveryCount: 0,
+      reviewerContextRetryCount: 0,
+      reviewerFallbackRetryCount: 0,
+    });
+    expect(db.getSchemaVersion()).toBe(78);
 
     db.close();
   });
@@ -752,7 +802,7 @@ describe("schema migration", () => {
       { id: "WS-002", mode: "script", enabled: 1, gateMode: "advisory" },
       { id: "WS-003", mode: "prompt", enabled: 0, gateMode: "advisory" },
     ]);
-    expect(db.getSchemaVersion()).toBe(77);
+    expect(db.getSchemaVersion()).toBe(78);
 
     db.close();
   });
