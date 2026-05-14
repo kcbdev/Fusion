@@ -2510,11 +2510,18 @@ export class TaskExecutor {
       // Capture the base commit SHA for diff computation whenever a task
       // starts with a newly assigned worktree.
       if (!acquisition.isResume) {
-        await this.captureBaseCommitSha(task, worktreePath, audit);
+        await this.captureBaseCommitSha(task, worktreePath, audit, { isResume: false });
       }
 
-      const latestTaskForBase = await this.store.getTask(task.id);
-      const contaminationBaseRef = await this.resolveDiffBaseRef(worktreePath, latestTaskForBase.baseCommitSha);
+      // Contamination check must use a FRESH merge-base with the integration
+      // branch — NOT task.baseCommitSha. baseCommitSha is intentionally
+      // preserved across sessions for stable diff math, which makes it
+      // potentially stale relative to main. Using it here would falsely flag
+      // every legitimately-merged commit on main since that stale SHA as
+      // "foreign contamination" (see FN-4417). The real signal we want is:
+      // does the branch contain commits past its current merge-base with main
+      // that are attributed to OTHER tasks? Compute the merge-base fresh.
+      const contaminationBaseRef = await this.resolveContaminationBaseRef(worktreePath);
       if (contaminationBaseRef) {
         await assertCleanBranchAtBase(this.rootDir, acquisition.branch, contaminationBaseRef, task.id);
       }
@@ -5689,15 +5696,23 @@ ${failureFeedback}
     task: Task,
     worktreePath: string,
     audit: { git: (event: { type: "commit:create"; target: string; metadata: Record<string, unknown> }) => Promise<void> },
+    options: { isResume: boolean } = { isResume: false },
   ): Promise<void> {
     try {
-      if (task.baseCommitSha) {
+      // Preserve an existing baseCommitSha only on RESUME of the same
+      // worktree, where diff-base stability across sessions of the same task
+      // matters. On fresh/pooled acquisitions the branch was just
+      // force-reset to current main, so any stored baseCommitSha is by
+      // definition behind the new merge-base — preserving it would yield
+      // stale diff math and (when reused as a contamination reference) the
+      // FN-4417 false-positive cascade. Always recapture on non-resume.
+      if (options.isResume && task.baseCommitSha) {
         try {
           execSync(`git merge-base --is-ancestor ${task.baseCommitSha} HEAD`, {
             cwd: worktreePath,
             stdio: "pipe",
           });
-          executorLog.log(`${task.id}: preserved baseCommitSha ${task.baseCommitSha.slice(0, 7)}`);
+          executorLog.log(`${task.id}: preserved baseCommitSha ${task.baseCommitSha.slice(0, 7)} (resume)`);
           await audit.git({
             type: "commit:create",
             target: task.baseCommitSha,
@@ -5736,6 +5751,34 @@ ${failureFeedback}
       const errorMessage = err instanceof Error ? err.message : String(err);
       executorLog.log(`Failed to capture baseCommitSha for ${task.id}: ${errorMessage}`);
       // Non-fatal: task can continue without baseCommitSha
+    }
+  }
+
+  /**
+   * Resolve a fresh merge-base against the integration branch for use as a
+   * contamination check reference. Unlike {@link resolveDiffBaseRef}, this
+   * NEVER falls back to `task.baseCommitSha`, because a stale stored base
+   * would make the contamination check flag every legitimately-merged commit
+   * since that snapshot as "foreign" (FN-4417). It also never falls back to
+   * `HEAD~1`, because for a newly force-reset pooled branch HEAD~1 is a
+   * commit on main itself, which would yield the same false positive on a
+   * smaller scale.
+   *
+   * Returns `undefined` when neither `origin/main` nor `main` is resolvable;
+   * the caller is expected to treat that as "contamination check skipped".
+   */
+  private async resolveContaminationBaseRef(worktreePath: string): Promise<string | undefined> {
+    try {
+      const { stdout } = await execAsync(
+        "git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main",
+        { cwd: worktreePath, encoding: "utf-8" },
+      );
+      const ref = stdout.trim();
+      return ref || undefined;
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      executorLog.warn(`Failed merge-base lookup for contamination check in ${worktreePath}: ${errorMessage}`);
+      return undefined;
     }
   }
 

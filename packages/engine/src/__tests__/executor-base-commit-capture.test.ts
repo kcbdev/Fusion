@@ -41,16 +41,50 @@ describe("captureBaseCommitSha", () => {
     expect(audit.git).toHaveBeenCalledWith(expect.objectContaining({ metadata: { purpose: "base", preserved: false } }));
   });
 
-  it("preserves existing valid baseCommitSha across sessions", async () => {
+  it("preserves existing valid baseCommitSha across resumed sessions", async () => {
     mockedExecSync.mockReturnValue("");
     const store = createMockStore();
     const executor = new TaskExecutor(store, "/tmp/test");
     const audit = { git: vi.fn().mockResolvedValue(undefined) };
 
-    await (executor as any).captureBaseCommitSha(makeTask({ baseCommitSha: "old123" }), "/tmp/test/.worktrees/fn-4383", audit);
+    await (executor as any).captureBaseCommitSha(
+      makeTask({ baseCommitSha: "old123" }),
+      "/tmp/test/.worktrees/fn-4383",
+      audit,
+      { isResume: true },
+    );
 
     expect(store.updateTask).not.toHaveBeenCalled();
     expect(audit.git).toHaveBeenCalledWith(expect.objectContaining({ metadata: { purpose: "base", preserved: true } }));
+  });
+
+  it("recaptures baseCommitSha on non-resume acquisitions even when stored value is ancestor (FN-4417)", async () => {
+    // FN-4417 regression: on a fresh pool acquisition the branch was just
+    // force-reset to current main, so any stored baseCommitSha is stale
+    // relative to the new merge-base. Preserving it would re-introduce the
+    // false-positive contamination cascade.
+    mockedExecSync.mockReturnValue(""); // is-ancestor would succeed if asked
+    mockedExec.mockImplementation(((cmd: any, _opts: any, cb: any) => {
+      cb(null, cmd.includes("merge-base") ? "freshmainSHA\n" : "");
+      return {} as any;
+    }) as any);
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+    const audit = { git: vi.fn().mockResolvedValue(undefined) };
+
+    await (executor as any).captureBaseCommitSha(
+      makeTask({ baseCommitSha: "stale_main_sha" }),
+      "/tmp/test/.worktrees/fn-4383",
+      audit,
+      { isResume: false },
+    );
+
+    expect(store.updateTask).toHaveBeenCalledWith("FN-4383", { baseCommitSha: "freshmainSHA" });
+    expect(audit.git).toHaveBeenCalledWith(
+      expect.objectContaining({ metadata: { purpose: "base", preserved: false } }),
+    );
+    // Critically: is-ancestor must NOT have been the deciding factor.
+    // Even if it would have passed, non-resume always recaptures.
   });
 
   it("recaptures when existing baseCommitSha is not ancestor", async () => {
@@ -70,13 +104,18 @@ describe("captureBaseCommitSha", () => {
     expect(store.updateTask).toHaveBeenCalledWith("FN-4383", { baseCommitSha: "new456" });
   });
 
-  it("preserves prior merge base for FN-4309/FN-4383 multi-session regression", async () => {
+  it("preserves prior merge base on resume for FN-4309/FN-4383 multi-session regression", async () => {
     mockedExecSync.mockReturnValue("");
     const store = createMockStore();
     const executor = new TaskExecutor(store, "/tmp/test");
     const audit = { git: vi.fn().mockResolvedValue(undefined) };
 
-    await (executor as any).captureBaseCommitSha(makeTask({ baseCommitSha: "merge_base_sha" }), "/tmp/test/.worktrees/fn-4383", audit);
+    await (executor as any).captureBaseCommitSha(
+      makeTask({ baseCommitSha: "merge_base_sha" }),
+      "/tmp/test/.worktrees/fn-4383",
+      audit,
+      { isResume: true },
+    );
 
     expect(store.updateTask).not.toHaveBeenCalled();
     expect(audit.git).toHaveBeenCalledWith(expect.objectContaining({ metadata: { purpose: "base", preserved: true } }));

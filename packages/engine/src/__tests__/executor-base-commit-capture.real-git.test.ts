@@ -65,14 +65,16 @@ describeIfGit("captureBaseCommitSha (real git)", () => {
     const executor = new TaskExecutor(store, repo);
     const audit = { git: vi.fn().mockResolvedValue(undefined) };
 
-    await (executor as any).captureBaseCommitSha(makeTask(), repo, audit);
+    await (executor as any).captureBaseCommitSha(makeTask(), repo, audit, { isResume: false });
     const firstBase = (store.updateTask as any).mock.calls[0][1].baseCommitSha as string;
     expect(firstBase).toBeTruthy();
 
     writeFileSync(path.join(repo, "branch-18.txt"), "branch 18\n", "utf-8");
     git(repo, "git add branch-18.txt && git commit -m 'branch 18'");
 
-    await (executor as any).captureBaseCommitSha(makeTask(firstBase), repo, audit);
+    // Resume of the same task: baseCommitSha must be preserved so diff math
+    // stays stable across sessions (FN-4309/FN-4383).
+    await (executor as any).captureBaseCommitSha(makeTask(firstBase), repo, audit, { isResume: true });
 
     expect((store.updateTask as any).mock.calls).toHaveLength(1);
 
