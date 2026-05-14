@@ -888,6 +888,8 @@ describe("QuickChatFAB session-first UX", () => {
     });
   });
 
+  // FN-4437 coverage note: initial-open snap-to-bottom regression coverage lives in
+  // both paths below — controlled open transition (FN-3945) and uncontrolled FAB open (FN-4095).
   it("FN-3945: snaps to bottom on controlled initial open (open=false -> open=true) with an active session already loaded", async () => {
     mockFetchChatMessages.mockResolvedValueOnce({
       messages: [{ id: "msg-open", sessionId: "session-model", role: "assistant", content: "Loaded", createdAt: new Date().toISOString() }],
