@@ -43,7 +43,7 @@ const plugin: FusionPlugin = definePlugin({
   },
   state: "installed",
   hooks: {
-    onLoad: async (ctx) => {
+    onLoad: async (ctx: PluginContext) => {
       const config = resolveCliConfig(ctx.settings);
       const probe = await probeOpenClawBinary({ binaryPath: config.binaryPath });
 

@@ -13,6 +13,7 @@ import { installFusionSkillIntoHermesHome } from "./fusion-skill-install.js";
 import { HermesRuntimeAdapter } from "./runtime-adapter.js";
 import type {
   FusionPlugin,
+  PluginContext,
   PluginRuntimeFactory,
   PluginRuntimeManifestMetadata,
 } from "@fusion/plugin-sdk";
@@ -50,7 +51,7 @@ const plugin: FusionPlugin = definePlugin({
   },
   state: "installed",
   hooks: {
-    onLoad: (ctx) => {
+    onLoad: (ctx: PluginContext) => {
       const settings = resolveCliSettings(ctx.settings);
       const skillInstall = installFusionSkillIntoHermesHome({ profile: settings.profile });
 

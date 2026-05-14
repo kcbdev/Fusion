@@ -1,12 +1,12 @@
 declare module "node-pty" {
   export interface IPty {
-    [key: string]: any;
+    [key: string]: unknown;
   }
   export interface IPtyForkOptions {
-    [key: string]: any;
+    [key: string]: unknown;
   }
   export interface IWindowsPtyForkOptions extends IPtyForkOptions {
-    [key: string]: any;
+    [key: string]: unknown;
   }
-  export function spawn(...args: any[]): IPty;
+  export function spawn(...args: unknown[]): IPty;
 }
