@@ -2120,12 +2120,13 @@ export class TaskExecutor {
         return false;
       }
       await this.persistTokenUsage(task.id);
-      if (task.column === "todo") {
+      const originColumn = task.column;
+      if (originColumn === "todo") {
         await this.store.moveTask(task.id, "in-progress");
       }
       await this.store.moveTask(task.id, "in-review");
       this.clearCompletedTaskWatchdog(task.id);
-      await this.store.logEntry(task.id, "Auto-recovered: task work was complete but stuck in in-progress — moved to in-review");
+      await this.store.logEntry(task.id, `Auto-recovered: task work was complete but stranded in ${originColumn} — moved to in-review`);
       executorLog.log(`✓ ${task.id} auto-recovered completed task → in-review`);
       this.options.onComplete?.(task);
       return true;

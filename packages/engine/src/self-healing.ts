@@ -84,13 +84,12 @@ export interface SelfHealingOptions {
   /** Canonical stale-lease recovery manager. */
   leaseManager?: MeshLeaseManager;
   /**
-   * Callback to recover a completed task that is stuck in in-progress.
-   * Called by the periodic maintenance cycle when it detects a task whose
-   * work is done but was never transitioned to in-review (e.g., killed by
-   * stuck detector after task_done but before moveTask).
+   * Callback to recover a completed task that is stranded in todo/in-progress.
+   * Called by periodic self-healing passes when task work is complete but the
+   * final transition never happened (for example killed after task_done).
    *
-   * Should return true if the task was successfully transitioned out of
-   * in-progress, false if recovery failed.
+   * Should return true if the task was successfully transitioned, false if
+   * recovery failed.
    */
   recoverCompletedTask?: (task: Task) => Promise<boolean>;
   /**
