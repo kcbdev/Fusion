@@ -104,6 +104,12 @@ export type BranchConflictInspectionResult =
   | { kind: "reclaimable"; livePath: string; tipSha: string; taskAttributedCommitCount: number; strandedCommits: BranchConflictCommit[] }
   | { kind: "live-foreign"; livePath: string; error: BranchConflictError };
 
+interface UniqueBranchCommitListResult {
+  commits: BranchConflictCommit[];
+  mainRef: string;
+  degraded: boolean;
+}
+
 export interface ListBranchRecoveryCandidatesInput {
   repoDir: string;
   branchName: string;
@@ -145,6 +151,58 @@ async function listStrandedCommits(repoDir: string, startPoint: string, branchNa
       });
   } catch {
     return [];
+  }
+}
+
+async function resolveBranchComparisonRef(repoDir: string, startPoint: string, branchName: string): Promise<string> {
+  try {
+    await revParse(repoDir, startPoint);
+    await runGit(repoDir, `git merge-base ${quoteShellArg(startPoint)} ${quoteShellArg(branchName)}`);
+    return startPoint;
+  } catch {
+    return "main";
+  }
+}
+
+export async function listUniqueBranchCommits(
+  repoDir: string,
+  startPoint: string,
+  branchName: string,
+): Promise<UniqueBranchCommitListResult> {
+  const mainRef = await resolveBranchComparisonRef(repoDir, startPoint, branchName);
+  try {
+    const comparisonBase = await runGit(repoDir, `git merge-base ${quoteShellArg(mainRef)} ${quoteShellArg(branchName)}`);
+    const cherryOutput = await runGit(
+      repoDir,
+      `git cherry ${quoteShellArg(mainRef)} ${quoteShellArg(branchName)} ${quoteShellArg(comparisonBase)}`,
+    );
+    const plusTokens = cherryOutput
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("+ "))
+      .map((line) => line.slice(2).trim())
+      .filter(Boolean);
+
+    const commits: BranchConflictCommit[] = [];
+    for (const token of plusTokens) {
+      const [sha, subject] = await Promise.all([
+        runGit(repoDir, `git rev-parse --verify ${quoteShellArg(`${token}^{commit}`)}`).catch(() => token),
+        runGit(repoDir, `git log -1 --format=%s ${quoteShellArg(token)}`).catch(() => ""),
+      ]);
+      commits.push({ sha, subject });
+    }
+
+    return {
+      commits,
+      mainRef,
+      degraded: false,
+    };
+  } catch {
+    return {
+      commits: await listStrandedCommits(repoDir, mainRef, branchName),
+      mainRef,
+      degraded: true,
+    };
   }
 }
 
