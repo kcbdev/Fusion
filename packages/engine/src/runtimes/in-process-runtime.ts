@@ -42,6 +42,7 @@ import { MissionExecutionLoop } from "../mission-execution-loop.js";
 import { TriageProcessor } from "../triage.js";
 import { EphemeralWorkerManager } from "../ephemeral-worker-manager.js";
 import { validateProjectNodeMapping } from "../node-dispatch-validation.js";
+import { attachAgentLinkSync } from "../task-agent-sync.js";
 
 /**
  * InProcessRuntime runs a project within the main process.
@@ -116,6 +117,7 @@ export class InProcessRuntime
   private triageProcessor?: TriageProcessor;
   private messageStore?: MessageStore;
   private chatStore?: ChatStore;
+  private detachAgentLinkSync?: () => void;
   private concurrencyChangedListener?: (state: { globalMaxConcurrent: number }) => void;
   /**
    * Optional callback the runtime forwards to SelfHealingManager so that
@@ -672,6 +674,12 @@ export class InProcessRuntime
       });
       this.selfHealingManager.start();
       this.stuckTaskDetector.start();
+      this.detachAgentLinkSync = attachAgentLinkSync({
+        store: this.taskStore,
+        agentStore: this.agentStore,
+        hasActiveAgentExecution: (agentId: string) => this.heartbeatMonitor?.getTrackedAgents().includes(agentId) ?? false,
+        logger: runtimeLog,
+      });
       this.restartRecoveryCoordinator = new RestartRecoveryCoordinator(this.taskStore, this.executor);
 
       // 8. Set up event forwarding from TaskStore
@@ -776,6 +784,9 @@ export class InProcessRuntime
         this.routineScheduler.stop();
         runtimeLog.log("RoutineScheduler stopped");
       }
+
+      this.detachAgentLinkSync?.();
+      this.detachAgentLinkSync = undefined;
 
       // 3. Tear down the ephemeral worker manager (detaches the
       // agent:stateChanged listener and clears in-memory tracking). Safe to
