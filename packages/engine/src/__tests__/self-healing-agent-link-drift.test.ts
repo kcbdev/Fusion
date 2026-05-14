@@ -5,8 +5,8 @@ import type { AgentStore } from "@fusion/core";
 
 import { SelfHealingManager } from "../self-healing";
 
-describe("FN-4296: self-healing agent link drift repro", () => {
-  it("FN-4296: durable running agent linked to done task remains stale before fix", async () => {
+describe("FN-4296: self-healing agent link drift", () => {
+  it("FN-4296: durable running agent linked to done task is cleared by drift recovery", async () => {
     const agents: Agent[] = [
       {
         id: "agent-Y",
@@ -32,8 +32,9 @@ describe("FN-4296: self-healing agent link drift repro", () => {
 
     const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
 
-    await manager.recoverAgentsRunningOnInactiveTasks();
+    const recovered = await manager.recoverDriftedAgentTaskLinks();
 
+    expect(recovered).toBe(1);
     expect(agents[0].taskId).toBeUndefined();
 
     manager.stop();
