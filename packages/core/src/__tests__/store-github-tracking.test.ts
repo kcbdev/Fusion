@@ -134,14 +134,26 @@ describe("TaskStore github tracking", () => {
     expect(updatedEvents).toEqual([task.id]);
   });
 
-  it("omits githubTracking in slim list paths", async () => {
+  it("includes githubTracking in slim list paths", async () => {
     const task = await store.createTask({ description: "Slim list" });
-    await store.updateGithubTracking(task.id, { enabled: true, repoOverride: "octocat/hello-world" });
+    await store.updateGithubTracking(task.id, {
+      enabled: true,
+      repoOverride: "octocat/hello-world",
+      issue,
+    });
 
     const tasks = await store.listTasks({ slim: true });
     const listed = tasks.find((entry) => entry.id === task.id);
 
-    expect(listed?.githubTracking).toBeUndefined();
+    expect(listed?.githubTracking?.enabled).toBe(true);
+    expect(listed?.githubTracking?.repoOverride).toBe("octocat/hello-world");
+    expect(listed?.githubTracking?.issue).toEqual(issue);
+
+    const searched = await store.searchTasks("Slim list", { slim: true });
+    expect(searched.find((entry) => entry.id === task.id)?.githubTracking?.issue).toEqual(issue);
+
+    const modifiedSince = await store.listTasksModifiedSince("1970-01-01T00:00:00.000Z");
+    expect(modifiedSince.tasks.find((entry) => entry.id === task.id)?.githubTracking?.issue).toEqual(issue);
   });
 
   it("preserves githubTracking through archive and restore", async () => {
@@ -191,7 +203,11 @@ describe("TaskStore github tracking", () => {
         });
 
         const slim = await reloadedStore.listTasks({ slim: true });
-        expect(slim.find((task) => task.id === reloadedTask!.id)?.githubTracking).toBeUndefined();
+        expect(slim.find((task) => task.id === reloadedTask!.id)?.githubTracking).toEqual({
+          enabled: true,
+          repoOverride: "octocat/hello-world",
+          issue,
+        });
       },
     );
   });
@@ -272,7 +288,11 @@ describe("TaskStore github tracking", () => {
           repoOverride: "octocat/renamed-repo",
           issue,
         });
-        expect((await fourthStore.listTasks({ slim: true })).find((task) => task.id === created.id)?.githubTracking).toBeUndefined();
+        expect((await fourthStore.listTasks({ slim: true })).find((task) => task.id === created.id)?.githubTracking).toEqual({
+          enabled: false,
+          repoOverride: "octocat/renamed-repo",
+          issue,
+        });
       } finally {
         fourthStore.close();
       }
