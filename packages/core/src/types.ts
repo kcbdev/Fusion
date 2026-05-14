@@ -2434,6 +2434,11 @@ export interface ProjectSettings {
    *  - "warn": log off-scope writes but allow the step to pass
    *  - "off": disable workflow-step scope enforcement and keep legacy behavior */
   workflowStepScopeEnforcement?: "block" | "warn" | "off";
+  /** Executor-side scope-leak policy at fn_task_done time for plan-only tasks (review level 1).
+   *  - "off": disable guard
+   *  - "warn" (default): log [scope-leak] activity but allow completion
+   *  - "block": refuse fn_task_done when off-scope files are detected */
+  planOnlyScopeLeakEnforcement?: "off" | "warn" | "block";
   /** When true (default), workflow revision feedback that explicitly names files
    *  outside the task's declared File Scope is forked into a dependent follow-up
    *  task instead of being appended to the original PROMPT.md. Set to false to

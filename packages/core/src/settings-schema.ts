@@ -229,6 +229,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   mergeAuditAutoRecovery: "ai-assisted",
   workflowStepTimeoutMs: 360_000,
   workflowStepScopeEnforcement: "block",
+  planOnlyScopeLeakEnforcement: "warn",
   workflowRevisionForkOnScopeMismatch: true,
   strictScopeEnforcement: false,
   buildRetryCount: 0,

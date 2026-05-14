@@ -229,6 +229,11 @@ export function workflowPathMatchesDeclaredScope(filePath: string, scopePatterns
   return false;
 }
 
+export function parseReviewLevelFromPrompt(prompt: string): number {
+  const reviewMatch = prompt.match(/##\s*Review Level[:\s]*(\d)/);
+  return reviewMatch ? parseInt(reviewMatch[1], 10) : 0;
+}
+
 export function partitionWorkflowRevisionFeedback(
   feedback: string,
   declaredFileScope: readonly string[],
@@ -4867,6 +4872,62 @@ export class TaskExecutor {
     return { ok: true };
   }
 
+  private async evaluateTaskDoneScopeLeak(
+    task: Task,
+    worktreePath: string,
+    settings: Settings,
+  ): Promise<{ blocked: false } | { blocked: true; message: string }> {
+    if (task.scopeOverride === true) {
+      executorLog.log(`${task.id}: scope-leak guard bypassed (scopeOverride=true)`);
+      await this.store.logEntry(task.id, "[scope-leak] scope guard bypassed via task.scopeOverride", undefined, this.currentRunContext);
+      return { blocked: false };
+    }
+
+    const declaredScope = await this.store.parseFileScopeFromPrompt(task.id).catch(() => [] as string[]);
+    if (declaredScope.length === 0) {
+      return { blocked: false };
+    }
+
+    const reviewLevel = parseReviewLevelFromPrompt(task.prompt ?? "");
+    const configuredMode = settings.planOnlyScopeLeakEnforcement ?? "warn";
+    const enforcementMode: "off" | "warn" | "block" = reviewLevel === 1
+      ? configuredMode
+      : "warn";
+
+    if (enforcementMode === "off") {
+      return { blocked: false };
+    }
+
+    const [uncommittedTouchedFiles, branchCommittedFiles] = await Promise.all([
+      this.captureUncommittedModifiedFiles(worktreePath),
+      this.captureModifiedFiles(worktreePath, task.baseCommitSha),
+    ]);
+
+    const touchedFiles = [...new Set([...uncommittedTouchedFiles, ...branchCommittedFiles])];
+    if (touchedFiles.length === 0) {
+      return { blocked: false };
+    }
+
+    const offScopeFiles = touchedFiles
+      .filter((filePath) => !workflowPathMatchesDeclaredScope(filePath, declaredScope));
+    if (offScopeFiles.length === 0) {
+      return { blocked: false };
+    }
+
+    const message = `[scope-leak] reviewLevel=${reviewLevel} enforcement=${enforcementMode} off-scope touched files [${offScopeFiles.join(", ")}]; declared scope [${declaredScope.join(", ")}]`;
+    executorLog.warn(`${task.id}: ${message}`);
+    await this.store.logEntry(task.id, message, undefined, this.currentRunContext);
+
+    if (enforcementMode === "block") {
+      return {
+        blocked: true,
+        message: `Plan-Only scope-leak guard refused fn_task_done. Off-scope paths: [${offScopeFiles.join(", ")}]. Revert them before retrying (for example: git checkout -- <paths>).`,
+      };
+    }
+
+    return { blocked: false };
+  }
+
   private createTaskDoneTool(taskId: string, worktreePath: string, onDone: () => void): ToolDefinition {
     const store = this.store;
     return {
@@ -4946,6 +5007,23 @@ export class TaskExecutor {
           };
         }
 
+        const settings = await store.getSettings();
+        const scopeLeakCheck = await this.evaluateTaskDoneScopeLeak(task, worktreePath, settings)
+          .catch((error: unknown) => {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            executorLog.warn(`${taskId}: scope-leak guard failed open: ${errorMessage}`);
+            return { blocked: false } as const;
+          });
+        if (scopeLeakCheck.blocked) {
+          await store.logEntry(taskId, `[scope-leak] blocked fn_task_done: ${scopeLeakCheck.message}`, undefined, this.currentRunContext);
+          return {
+            content: [{ type: "text" as const, text: scopeLeakCheck.message }],
+            details: {
+              error: scopeLeakCheck.message,
+            },
+          };
+        }
+
         onDone();
 
         // Mark all pending/in-progress steps as done
@@ -4971,7 +5049,6 @@ export class TaskExecutor {
             await store.updateTask(taskId, { summary: params.summary });
           }
         }
-        const settings = await store.getSettings();
         const hardPauseActive = Boolean(settings.globalPause);
         // Task-level pause prevents new work from starting, not completion of
         // in-flight work. Always clear it on explicit agent completion so the
@@ -6148,7 +6225,7 @@ ${failureFeedback}
       return [...new Set(files)];
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
-      executorLog.log(`Failed to capture uncommitted modified files: ${errorMessage}`);
+      executorLog.warn(`Failed to capture uncommitted modified files: ${errorMessage}`);
       return [];
     }
   }
@@ -8740,8 +8817,7 @@ export function buildExecutionPrompt(
   pluginRunner?: PluginRunner,
 ): string {
   const prompt = scopePromptToWorktree(task.prompt, rootDir, worktreePath);
-  const reviewMatch = prompt.match(/##\s*Review Level[:\s]*(\d)/);
-  const reviewLevel = reviewMatch ? parseInt(reviewMatch[1], 10) : 0;
+  const reviewLevel = parseReviewLevelFromPrompt(prompt);
 
   // Build author arg for git commits based on settings
   const authorArg = settings?.commitAuthorEnabled !== false
