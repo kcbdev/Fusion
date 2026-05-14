@@ -22,7 +22,7 @@ function printTable(title, rows) {
   console.table(rows);
 }
 
-export async function collectCacheStats({ taskStore, agentStore }) {
+export async function collectCacheStats({ taskStore, agentStore, isEphemeralAgent = () => false }) {
   const tasks = await taskStore.listTasks({ includeArchived: true, slim: true });
   const agents = await agentStore.listAgents({ includeEphemeral: true });
   const agentById = new Map(agents.map((agent) => [agent.id, agent]));
@@ -39,7 +39,7 @@ export async function collectCacheStats({ taskStore, agentStore }) {
     if (!roleSummaries.has(role)) roleSummaries.set(role, createSummary());
     applyUsage(roleSummaries.get(role), task.tokenUsage);
 
-    if (owner && owner.metadata?.type !== "spawned") {
+    if (owner && !isEphemeralAgent(owner)) {
       if (!agentSummaries.has(owner.id)) agentSummaries.set(owner.id, { id: owner.id, role: owner.role, ...createSummary() });
       applyUsage(agentSummaries.get(owner.id), task.tokenUsage);
     }
@@ -54,16 +54,16 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
   const asJson = argv.includes("--json");
   const projectDir = process.cwd();
 
-  const { taskStore, agentStore } = deps.stores ?? (await (async () => {
-    const { TaskStore, AgentStore } = await import("../packages/core/dist/index.js");
+  const { taskStore, agentStore, isEphemeralAgent } = deps.stores ?? (await (async () => {
+    const { TaskStore, AgentStore, isEphemeralAgent } = await import("../packages/core/dist/index.js");
     const store = new TaskStore(projectDir);
     await store.init();
     const aStore = new AgentStore({ rootDir: store.getFusionDir() });
     await aStore.init();
-    return { taskStore: store, agentStore: aStore };
+    return { taskStore: store, agentStore: aStore, isEphemeralAgent };
   })());
 
-  const result = await collectCacheStats({ taskStore, agentStore });
+  const result = await collectCacheStats({ taskStore, agentStore, isEphemeralAgent });
   if (asJson) {
     console.log(JSON.stringify(result, null, 2));
     return 0;
