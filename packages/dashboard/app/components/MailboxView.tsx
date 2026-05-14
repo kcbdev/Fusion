@@ -374,6 +374,7 @@ export function MailboxView({
     try {
       const data = await fetchUnreadCount(projectId);
       setUnreadCount(data.unreadCount);
+      setApprovalPendingCount(data.pendingApprovalCount ?? 0);
       onUnreadCountChange?.(data.unreadCount);
     } catch {
       // Silently fail
