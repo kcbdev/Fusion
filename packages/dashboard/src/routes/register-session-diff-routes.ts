@@ -263,17 +263,31 @@ function parseStatusCode(statusCode: string): DoneTaskFileStatus {
   return "modified";
 }
 
+/**
+ * Parse a single `git diff --name-status` line.
+ *
+ * Rename/copy entries are detected by `R*`/`C*` status prefixes. Their
+ * destination path is `parts[2]` in normal output, with a defensive `parts[3]`
+ * fallback for variants that split score fields across extra tab columns.
+ */
+function parseNameStatusLine(line: string): { statusCode: string; path: string; oldPath?: string } | null {
+  const parts = line.split("\t");
+  const statusCode = parts[0] ?? "M";
+  const isRenameLike = statusCode.startsWith("R") || statusCode.startsWith("C");
+  const oldPath = isRenameLike ? (parts[1] ?? "") : undefined;
+  const path = isRenameLike ? (parts.length > 3 ? (parts[3] ?? "") : (parts[2] ?? "")) : (parts[1] ?? "");
+  if (!path) return null;
+  return oldPath ? { statusCode, path, oldPath } : { statusCode, path };
+}
+
 async function collectDoneRangeFiles(range: string, rootDir: string): Promise<AggregatedDoneTaskFile[]> {
   const nameStatus = (await runGitCommand(["diff", "--name-status", "-M", range], rootDir, 10000)).trim();
   const files: AggregatedDoneTaskFile[] = [];
 
   for (const line of nameStatus.split("\n").filter(Boolean)) {
-    const parts = line.split("\t");
-    const statusCode = parts[0] ?? "M";
-    const isRenameLike = statusCode.startsWith("R") || statusCode.startsWith("C");
-    const oldPath = isRenameLike ? (parts[1] ?? "") : undefined;
-    const filePath = isRenameLike ? (parts[2] ?? parts[1] ?? "") : (parts[1] ?? "");
-    if (!filePath) continue;
+    const parsed = parseNameStatusLine(line);
+    if (!parsed) continue;
+    const { statusCode, path: filePath, oldPath } = parsed;
 
     let patch = "";
     try {
@@ -628,8 +642,9 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
         try {
           const committedOutput = (await runGitCommand(["diff", "--name-status", `${diffBase}..HEAD`], cwd, 10000)).trim();
           for (const line of committedOutput.split("\n").filter(Boolean)) {
-            const parts = line.split("\t");
-            fileMap.set(parts[1] ?? "", parts[0] ?? "M");
+            const parsed = parseNameStatusLine(line);
+            if (!parsed) continue;
+            fileMap.set(parsed.path, parsed.statusCode);
           }
         } catch {
           // committed diff failed
@@ -639,11 +654,9 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
       try {
         const stagedOutput = (await runGitCommand(["diff", "--cached", "--name-status"], cwd, 10000)).trim();
         for (const line of stagedOutput.split("\n").filter(Boolean)) {
-          const parts = line.split("\t");
-          const filePath = parts[1] ?? "";
-          if (filePath && !fileMap.has(filePath)) {
-            fileMap.set(filePath, parts[0] ?? "M");
-          }
+          const parsed = parseNameStatusLine(line);
+          if (!parsed || fileMap.has(parsed.path)) continue;
+          fileMap.set(parsed.path, parsed.statusCode);
         }
       } catch {
         // staged diff failed
@@ -652,11 +665,9 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
       try {
         const workingTreeOutput = (await runGitCommand(["diff", "--name-status"], cwd, 10000)).trim();
         for (const line of workingTreeOutput.split("\n").filter(Boolean)) {
-          const parts = line.split("\t");
-          const filePath = parts[1] ?? "";
-          if (filePath && !fileMap.has(filePath)) {
-            fileMap.set(filePath, parts[0] ?? "M");
-          }
+          const parsed = parseNameStatusLine(line);
+          if (!parsed || fileMap.has(parsed.path)) continue;
+          fileMap.set(parsed.path, parsed.statusCode);
         }
       } catch {
         // working tree diff failed

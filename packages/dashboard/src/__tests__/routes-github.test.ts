@@ -1978,6 +1978,45 @@ describe("GET /tasks/:id/diff", () => {
       expect(res.body.stats).toHaveProperty("filesChanged");
     });
   });
+
+  it("uses destination path for rename entries in active-task name-status parsing", async () => {
+    const root = mkdtempSync(join(tmpdir(), "kb-dashboard-rename-"));
+    try {
+      execFileSync("git", ["init", "--initial-branch=main", root], { stdio: "pipe" });
+      execFileSync("git", ["-C", root, "config", "user.email", "kb-tests@example.com"], { stdio: "pipe" });
+      execFileSync("git", ["-C", root, "config", "user.name", "KB Tests"], { stdio: "pipe" });
+      writeFileSync(join(root, "old.ts"), "export const value = 1;\n");
+      execFileSync("git", ["-C", root, "add", "old.ts"], { stdio: "pipe" });
+      execFileSync("git", ["-C", root, "commit", "-m", "add old"], { stdio: "pipe" });
+      const baseSha = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf-8", stdio: "pipe" }).trim();
+      execFileSync("git", ["-C", root, "mv", "old.ts", "new.ts"], { stdio: "pipe" });
+      writeFileSync(join(root, "new.ts"), "export const value = 2;\n");
+
+      const localStore = createMockStore({ getRootDir: vi.fn().mockReturnValue(root) });
+      (localStore.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ...FAKE_TASK_DETAIL,
+        id: "FN-001",
+        column: "in-progress",
+        branch: "main",
+        worktree: root,
+        baseCommitSha: baseSha,
+      });
+
+      const app = express();
+      app.use(express.json());
+      app.use("/api", createApiRoutes(localStore));
+
+      const res = await GET(app, "/api/tasks/FN-001/diff");
+      expect(res.status).toBe(200);
+      expect(res.body.files.map((file: { path: string }) => file.path)).toContain("new.ts");
+      expect(res.body.files.map((file: { path: string }) => file.path)).not.toContain("old.ts");
+      expect(res.body.stats.filesChanged).toBe(1);
+      expect(Number.isInteger(res.body.stats.additions)).toBe(true);
+      expect(Number.isInteger(res.body.stats.deletions)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("GET /tasks/:id/file-diffs", () => {
