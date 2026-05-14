@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { isEphemeralAgent, type Agent, type AgentStore, type Task } from "@fusion/core";
 
-import { SelfHealingManager } from "../self-healing";
+import { SelfHealingManager } from "../self-healing.js";
 
 function makeAgent(id: string, taskId: string, state: Agent["state"] = "active"): Agent {
   return { id, state, taskId, updatedAt: new Date(Date.now() - 120_000).toISOString() } as Agent;

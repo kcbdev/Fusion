@@ -484,10 +484,10 @@ describe("InProcessRuntime", () => {
       const moveData = { task: mockTask, from: "todo", to: "in-progress" };
       
       const onCalls = (taskStore.on as ReturnType<typeof vi.fn>).mock.calls;
-      const taskMovedHandler = onCalls.find((call: unknown[]) => call[0] === "task:moved");
-      
-      if (taskMovedHandler) {
-        (taskMovedHandler[1] as (data: { task: Task; from: string; to: string }) => void)(moveData);
+      const taskMovedHandlers = onCalls.filter((call: unknown[]) => call[0] === "task:moved");
+
+      for (const handler of taskMovedHandlers) {
+        (handler[1] as (data: { task: Task; from: string; to: string }) => void)(moveData);
       }
 
       expect(taskMovedSpy).toHaveBeenCalledWith(moveData);

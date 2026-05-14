@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { AgentStore, type AgentCreateInput, type Task } from "@fusion/core";
 import { describe, expect, it, vi } from "vitest";
 
-import { attachAgentLinkSync } from "../task-agent-sync";
+import { attachAgentLinkSync } from "../task-agent-sync.js";
 
 class EventedStore extends EventEmitter {
   on(event: "task:moved", listener: (data: { task: Task; from: string; to: string }) => void): this {

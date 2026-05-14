@@ -676,7 +676,7 @@ export class InProcessRuntime
       this.stuckTaskDetector.start();
       this.detachAgentLinkSync = attachAgentLinkSync({
         store: this.taskStore,
-        agentStore: this.agentStore,
+        agentStore: this.agentStore!,
         hasActiveAgentExecution: (agentId: string) => this.heartbeatMonitor?.getTrackedAgents().includes(agentId) ?? false,
         logger: runtimeLog,
       });
