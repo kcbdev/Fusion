@@ -5,6 +5,7 @@ import path from "node:path";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import {
+  autoRecoverCrossContamination,
   classifyForeignCommits,
   type BranchCrossContaminationCommit,
 } from "../branch-conflicts.js";
@@ -40,9 +41,9 @@ describe("branch contamination recovery classification", () => {
     return { repoDir, baseSha };
   }
 
-  async function makeCommit(repoDir: string, body: string, subject: string, foreignTaskId: string): Promise<BranchCrossContaminationCommit> {
-    await appendFile(path.join(repoDir, "note.txt"), `${body}\n`, "utf-8");
-    await run("git add note.txt", repoDir);
+  async function makeCommit(repoDir: string, body: string, subject: string, foreignTaskId: string, file = "note.txt"): Promise<BranchCrossContaminationCommit> {
+    await appendFile(path.join(repoDir, file), `${body}\n`, "utf-8");
+    await run(`git add ${file}`, repoDir);
     await run(`git commit -m ${JSON.stringify(subject)} -m ${JSON.stringify(`Fusion-Task-Id: ${foreignTaskId}`)}`, repoDir);
     const sha = await run("git rev-parse HEAD", repoDir);
     return { sha, subject, foreignTaskId };
@@ -103,5 +104,34 @@ describe("branch contamination recovery classification", () => {
 
     expect(result.alreadyUpstream.map((entry) => entry.sha)).toEqual([upstreamCommit.sha]);
     expect(result.unique.map((entry) => entry.sha)).toEqual([uniqueCommit.sha]);
+  });
+
+  it("auto-recovers by dropping already-upstream foreign commits and preserving remaining branch work", async () => {
+    const { repoDir, baseSha } = await setupRepo();
+    await writeFile(path.join(repoDir, "foreign.txt"), "", "utf-8");
+    await writeFile(path.join(repoDir, "own.txt"), "", "utf-8");
+    const foreign = await makeCommit(repoDir, "foreign-e", "feat(FN-4412): upstream duplicate", "FN-4412", "foreign.txt");
+    await appendFile(path.join(repoDir, "own.txt"), "own-work\n", "utf-8");
+    await run("git add own.txt", repoDir);
+    await run("git commit -m 'feat(FN-4428): own work' -m 'Fusion-Task-Id: FN-4428'", repoDir);
+
+    await run("git checkout main", repoDir);
+    await run(`git cherry-pick ${foreign.sha}`, repoDir);
+    await run("git checkout feature", repoDir);
+
+    const originalTip = await run("git rev-parse HEAD", repoDir);
+    const result = await autoRecoverCrossContamination({
+      repoDir,
+      branchName: "feature",
+      baseSha,
+      taskId: "FN-4428",
+      alreadyUpstreamShas: [foreign.sha],
+    });
+
+    const history = await run(`git log --format=%s ${baseSha}..feature`, repoDir);
+    expect(history).toContain("feat(FN-4428): own work");
+    expect(history).not.toContain("feat(FN-4412): upstream duplicate");
+    expect(result.droppedShas).toEqual([foreign.sha]);
+    expect(result.newTipSha).not.toEqual(originalTip);
   });
 });
