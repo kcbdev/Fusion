@@ -224,7 +224,13 @@ async function isReachableFromHead(sha: string, rootDir: string): Promise<boolea
 type DoneTaskAggregationTask = {
   id: string;
   lineageId?: string | null;
-  mergeDetails?: { commitSha?: string; filesChanged?: number; insertions?: number; deletions?: number } | null;
+  mergeDetails?: {
+    commitSha?: string;
+    rebaseBaseSha?: string;
+    filesChanged?: number;
+    insertions?: number;
+    deletions?: number;
+  } | null;
 };
 
 type DoneTaskAggregationStore = {
@@ -250,6 +256,19 @@ async function resolveCommitDiffSpec(sha: string, rootDir: string): Promise<
   }
 
   return { mode: "single-parent", base: parents[0]!, range: `${parents[0]}..${sha}` };
+}
+
+async function resolveRebaseDiffSpec(
+  rebaseBaseSha: string,
+  commitSha: string,
+  rootDir: string,
+): Promise<{ mode: "rebase-range"; base: string; range: string } | null> {
+  try {
+    await runGitCommand(["merge-base", "--is-ancestor", rebaseBaseSha, commitSha], rootDir, 5000);
+    return { mode: "rebase-range", base: rebaseBaseSha, range: `${rebaseBaseSha}..${commitSha}` };
+  } catch {
+    return null;
+  }
 }
 
 function parseStatusCode(statusCode: string): DoneTaskFileStatus {
@@ -637,12 +656,28 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
         const rootDir = scopedStore.getRootDir();
         const sha = resolvedMergeSha;
 
-        let diffSpec: Awaited<ReturnType<typeof resolveCommitDiffSpec>>;
-        try {
-          diffSpec = await resolveCommitDiffSpec(sha, rootDir);
-        } catch {
-          res.json({ files: [], stats: { filesChanged: 0, additions: 0, deletions: 0 } });
-          return;
+        let diffSpec: Awaited<ReturnType<typeof resolveCommitDiffSpec>> | { mode: "rebase-range"; base: string; range: string };
+        const rebaseBaseSha = task.mergeDetails?.rebaseBaseSha?.trim();
+        if (rebaseBaseSha) {
+          const rebaseDiffSpec = await resolveRebaseDiffSpec(rebaseBaseSha, sha, rootDir);
+          if (rebaseDiffSpec) {
+            diffSpec = rebaseDiffSpec;
+          } else {
+            console.warn(`[diff] done task ${task.id}: mergeDetails.rebaseBaseSha ${rebaseBaseSha} is not ancestor of ${sha}; falling back to single-commit diff`);
+            try {
+              diffSpec = await resolveCommitDiffSpec(sha, rootDir);
+            } catch {
+              res.json({ files: [], stats: { filesChanged: 0, additions: 0, deletions: 0 } });
+              return;
+            }
+          }
+        } else {
+          try {
+            diffSpec = await resolveCommitDiffSpec(sha, rootDir);
+          } catch {
+            res.json({ files: [], stats: { filesChanged: 0, additions: 0, deletions: 0 } });
+            return;
+          }
         }
 
         const doneFiles = await collectDoneRangeFiles(diffSpec.range, rootDir).catch(() => []);
@@ -836,13 +871,29 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
         const rootDir = scopedStore.getRootDir();
         const sha = resolvedMergeSha;
 
-        let diffSpec: Awaited<ReturnType<typeof resolveCommitDiffSpec>>;
+        let diffSpec: Awaited<ReturnType<typeof resolveCommitDiffSpec>> | { mode: "rebase-range"; base: string; range: string };
+        const rebaseBaseSha = task.mergeDetails?.rebaseBaseSha?.trim();
 
-        try {
-          diffSpec = await resolveCommitDiffSpec(sha, rootDir);
-        } catch {
-          res.json([]);
-          return;
+        if (rebaseBaseSha) {
+          const rebaseDiffSpec = await resolveRebaseDiffSpec(rebaseBaseSha, sha, rootDir);
+          if (rebaseDiffSpec) {
+            diffSpec = rebaseDiffSpec;
+          } else {
+            console.warn(`[file-diffs] done task ${task.id}: mergeDetails.rebaseBaseSha ${rebaseBaseSha} is not ancestor of ${sha}; falling back to single-commit diff`);
+            try {
+              diffSpec = await resolveCommitDiffSpec(sha, rootDir);
+            } catch {
+              res.json([]);
+              return;
+            }
+          }
+        } else {
+          try {
+            diffSpec = await resolveCommitDiffSpec(sha, rootDir);
+          } catch {
+            res.json([]);
+            return;
+          }
         }
 
         try {

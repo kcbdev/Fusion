@@ -285,6 +285,65 @@ describe("FN-4308 multi-commit done task aggregation", () => {
     expect(response.body.files[0].path).toBe("healed.ts");
   });
 
+  it("uses rebaseBaseSha..commitSha fallback range for done task diff", async () => {
+    const store = new MockStore();
+    store.addTask(createTask({ column: "done", mergeDetails: { commitSha: "head-sha", rebaseBaseSha: "base-sha", filesChanged: 2 } }));
+
+    gitResponses({
+      "merge-base --is-ancestor head-sha HEAD": "",
+      "merge-base --is-ancestor base-sha head-sha": "",
+      "diff --name-status -M base-sha..head-sha": "A\tone.ts\nA\ttwo.ts",
+      "diff -M base-sha..head-sha -- one.ts": "+1\n",
+      "diff -M base-sha..head-sha -- two.ts": "+2\n",
+    });
+
+    const app = createServer(store as any);
+    const response = await requestDiff(app);
+    expect(response.status).toBe(200);
+    expect(response.body.stats.filesChanged).toBe(2);
+    expect(response.body.files.map((f: any) => f.path).sort()).toEqual(["one.ts", "two.ts"]);
+  });
+
+  it("falls back to single-commit range when rebaseBaseSha is unreachable", async () => {
+    const store = new MockStore();
+    store.addTask(createTask({ column: "done", mergeDetails: { commitSha: "head-sha", rebaseBaseSha: "base-sha" } }));
+
+    runGitCommandMock.mockImplementation(async (args: string[]) => {
+      const key = args.join(" ");
+      if (key === "merge-base --is-ancestor head-sha HEAD") return "";
+      if (key === "merge-base --is-ancestor base-sha head-sha") throw new Error("unreachable");
+      if (key === "rev-list --parents -n 1 head-sha") return "head-sha parent";
+      if (key === "diff --name-status -M parent..head-sha") return "A\tfallback.ts";
+      if (key === "diff -M parent..head-sha -- fallback.ts") return "+f\n";
+      throw new Error(`Unexpected git command: ${key}`);
+    });
+
+    const app = createServer(store as any);
+    const response = await requestDiff(app);
+    expect(response.status).toBe(200);
+    expect(response.body.files).toHaveLength(1);
+    expect(response.body.files[0].path).toBe("fallback.ts");
+  });
+
+  it("uses rebaseBaseSha..commitSha fallback range for done task file-diffs", async () => {
+    const store = new MockStore();
+    store.addTask(createTask({ column: "done", mergeDetails: { commitSha: "head-sha", rebaseBaseSha: "base-sha", filesChanged: 2 } }));
+
+    gitResponses({
+      "merge-base --is-ancestor head-sha HEAD": "",
+      "merge-base --is-ancestor base-sha head-sha": "",
+      "diff --name-status -M base-sha..head-sha": "A\tone.ts\nA\ttwo.ts",
+      "diff -M base-sha..head-sha -- one.ts": "+1\n",
+      "diff -M base-sha..head-sha -- two.ts": "+2\n",
+    });
+
+    const app = createServer(store as any);
+    const response = await requestFileDiffs(app);
+    expect(response.status).toBe(200);
+    expect(response.body).toHaveLength(2);
+    expect(response.body.map((f: any) => f.path).sort()).toEqual(["one.ts", "two.ts"]);
+  });
+
   it("uses parent-to-parent range for merge commits", async () => {
     const store = new MockStore();
     store.addTask(createTask({ column: "done", mergeDetails: { commitSha: "merge-sha" } }));
