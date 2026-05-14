@@ -522,7 +522,9 @@ interface CppWorkflowStep {
 }
 ```
 
-This is registered via `definePlugin({ workflowStepTemplates: [...] })` following `docs/PLUGIN_AUTHORING.md` Section 16.
+This is registered via `definePlugin({ workflowSteps: [...] })` following `docs/PLUGIN_AUTHORING.md` Section 16.
+
+> **Implemented in FN-4150:** the plugin now contributes `stepId: "run-service-cli"` as a script-mode pre-merge workflow step with `scriptName: "cli-printing-press:run-service-cli"`.
 
 ### 7.3 Execution Flow
 

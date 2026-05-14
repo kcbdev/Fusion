@@ -1467,6 +1467,8 @@ const workflowSteps: PluginWorkflowStepContribution[] = [
 
 Use `mode: "prompt" | "script"` and `toolMode: "readonly" | "coding"`.
 
+Plugin-contributed workflow steps are materialized through core `resolvePluginWorkflowStep(...)`; `mode`, `phase`, `scriptName`, `toolMode`, `defaultOn`, `modelProvider`, and `modelId` are preserved from your contribution (with defaults when omitted).
+
 ## 17. Contributing Prompt Modifications
 
 Prompt contributions let a plugin inject additional instructions into specific prompt surfaces.
