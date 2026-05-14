@@ -2313,17 +2313,19 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
           </>
         ) : (
           <div className="chat-sidebar-rooms" data-testid="chat-sidebar-rooms">
-            <div className="chat-sidebar-rooms-header">
-              <button
-                type="button"
-                className="btn btn-sm btn-primary"
-                data-testid="chat-create-room-btn"
-                onClick={() => setCreateRoomOpen(true)}
-              >
-                <Plus size={14} />
-                Create room
-              </button>
-            </div>
+            {!isMobile && (
+              <div className="chat-sidebar-rooms-header" data-testid="chat-sidebar-rooms-header">
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  data-testid="chat-create-room-btn"
+                  onClick={() => setCreateRoomOpen(true)}
+                >
+                  <Plus size={14} />
+                  Create room
+                </button>
+              </div>
+            )}
             {rooms.rooms.length === 0 ? (
               <div className="chat-sidebar-rooms-empty" data-testid="chat-sidebar-rooms-empty">
                 No rooms yet.
@@ -2382,17 +2384,32 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
             )}
           </div>
         )}
-        {/* Mobile footer with New Chat action */}
-        <div className="chat-sidebar-footer">
-          <button
-            className="btn btn-sm btn-primary chat-sidebar-footer-btn"
-            onClick={() => setShowNewDialog(true)}
-            data-testid="chat-new-btn"
-          >
-            <Plus size={14} />
-            New Chat
-          </button>
-        </div>
+        {chatScope === "rooms" ? (
+          isMobile ? (
+            <div className="chat-sidebar-footer">
+              <button
+                type="button"
+                className="btn btn-sm btn-primary chat-sidebar-footer-btn"
+                data-testid="chat-create-room-btn"
+                onClick={() => setCreateRoomOpen(true)}
+              >
+                <Plus size={14} />
+                Create room
+              </button>
+            </div>
+          ) : null
+        ) : (
+          <div className="chat-sidebar-footer">
+            <button
+              className="btn btn-sm btn-primary chat-sidebar-footer-btn"
+              onClick={() => setShowNewDialog(true)}
+              data-testid="chat-new-btn"
+            >
+              <Plus size={14} />
+              New Chat
+            </button>
+          </div>
+        )}
       </div>
 
       {!isMobile && sidebarVisible && (
