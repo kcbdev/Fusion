@@ -221,6 +221,23 @@ After each successful **prompt-mode pre-merge** workflow step, Fusion runs a sco
   - `"warn"`: log the violation but allow the step to pass.
   - `"off"`: disable this pre-merge workflow-step invariant entirely.
 
+### Executor `fn_task_done` scope-leak guard for Plan-Only tasks (FN-4482)
+
+Fusion also enforces a completion-time scope-leak check in the executor `fn_task_done` path:
+
+- Applies to tasks with declared `## File Scope`.
+- Uses touched files from branch committed delta plus uncommitted working-tree edits at completion time.
+- Emits `[scope-leak]` activity-log entries when touched files are off-scope.
+- Honors `task.scopeOverride === true` as an explicit bypass.
+
+`planOnlyScopeLeakEnforcement` controls Review Level 1 behavior:
+
+- `"warn"` (default): log and allow completion.
+- `"block"`: refuse `fn_task_done` and ask the agent to revert off-scope paths.
+- `"off"`: disable this completion-time guard.
+
+Review Level `0` and `>=2` run in warn-only telemetry mode (never block).
+
 ### Hard Failures vs Revisions
 
 Not all workflow failures are revision requests:
