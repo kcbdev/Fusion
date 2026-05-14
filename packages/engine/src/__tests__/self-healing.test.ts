@@ -5714,6 +5714,43 @@ describe("SelfHealingManager reclaimSelfOwnedBranchConflicts", () => {
     expect(inspectSpy).not.toHaveBeenCalled();
   });
 
+  it("skips tasks with recent active heartbeat runs", async () => {
+    const agentStore = {
+      listActiveHeartbeatRuns: vi.fn().mockResolvedValue([
+        {
+          id: "run-1",
+          agentId: "agent-1",
+          startedAt: new Date().toISOString(),
+          endedAt: null,
+          status: "active",
+          contextSnapshot: { taskId: "FN-777" },
+        },
+      ]),
+    } as any;
+    manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+
+    (store.listTasks as any)
+      .mockResolvedValueOnce([{ id: "FN-777", checkedOutBy: null, branch: "fusion/fn-777", worktree: "/tmp/fn-777" }])
+      .mockResolvedValueOnce([]);
+
+    const inspectSpy = vi.spyOn(branchConflictModule, "inspectBranchConflict");
+    const recovered = await manager.reclaimSelfOwnedBranchConflicts();
+
+    expect(recovered).toBe(0);
+    expect(inspectSpy).not.toHaveBeenCalled();
+  });
+
+  it("only scans todo and in-progress columns", async () => {
+    (store.listTasks as any)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    await manager.reclaimSelfOwnedBranchConflicts();
+
+    expect(store.listTasks).toHaveBeenNthCalledWith(1, { column: "todo", slim: true });
+    expect(store.listTasks).toHaveBeenNthCalledWith(2, { column: "in-progress", slim: true });
+  });
+
   it("escalates unrecoverable reclaim failures to in-review failed", async () => {
     (store.listTasks as any)
       .mockResolvedValueOnce([{ id: "FN-502", checkedOutBy: null, branch: "fusion/fn-502", worktree: "/tmp/fn-502" }])

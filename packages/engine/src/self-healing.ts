@@ -1313,9 +1313,29 @@ export class SelfHealingManager {
         ...(await this.store.listTasks({ column: "in-progress", slim: true })),
       ];
 
+      const activeTaskIds = new Set<string>();
+      if (this.options.agentStore) {
+        try {
+          const activeRuns = await this.options.agentStore.listActiveHeartbeatRuns();
+          const activeWindowMs = RUNNING_ON_INACTIVE_TASK_STALE_RUN_MS;
+          const now = Date.now();
+          for (const run of activeRuns) {
+            const startedAtMs = Date.parse(run.startedAt ?? "");
+            if (!Number.isFinite(startedAtMs) || now - startedAtMs > activeWindowMs) continue;
+            const taskId = run.contextSnapshot && typeof run.contextSnapshot.taskId === "string"
+              ? run.contextSnapshot.taskId.toUpperCase()
+              : null;
+            if (taskId) activeTaskIds.add(taskId);
+          }
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.warn(`Unable to enumerate active heartbeat runs for self-owned branch reclaim sweep: ${message}`);
+        }
+      }
+
       let recovered = 0;
       for (const task of candidates) {
-        if (task.checkedOutBy || !task.branch || !task.worktree) continue;
+        if (task.checkedOutBy || activeTaskIds.has(task.id.toUpperCase()) || !task.branch || !task.worktree) continue;
         if (!await isUsableTaskWorktree(this.options.rootDir, task.worktree)) continue;
 
         try {
