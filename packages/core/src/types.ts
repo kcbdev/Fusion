@@ -1976,6 +1976,12 @@ export interface GlobalSettings {
   researchGlobalFetchTimeoutMs?: number;
   /** User-Agent header for HTTP requests made by research providers. Default: "FusionResearchBot/1.0". */
   researchGlobalUserAgent?: string;
+  /** Agent memory prompt inclusion mode baseline for all projects/agents.
+   *  - "full": inline full curated memory content into prompts (default)
+   *  - "index": include only a compact memory index, then fetch on demand via memory tools
+   *  - "off": omit agent-memory prompt sections entirely
+   */
+  agentMemoryInclusionMode?: AgentMemoryInclusionMode;
   /** Global-scoped remote access configuration persisted in `~/.fusion/settings.json`.
    *  Stores both provider configs, active provider selection, token strategy,
    *  and lifecycle restart metadata for remote tunnel orchestration. */
@@ -2517,12 +2523,6 @@ export interface ProjectSettings {
   /** Reference to a named script in the scripts map that runs before task execution.
    *  Used for pre-task setup like environment preparation. */
   setupScript?: string;
-  /** Agent memory prompt inclusion mode baseline for all projects/agents.
-   *  - "full": inline full curated memory content into prompts (default)
-   *  - "index": include only a compact memory index, then fetch on demand via memory tools
-   *  - "off": omit agent-memory prompt sections entirely
-   */
-  agentMemoryInclusionMode?: AgentMemoryInclusionMode;
   /** When true, enables periodic AI-powered extraction of insights from working memory
    *  into a distilled long-term memory file. Creates an automation schedule that reads
    *  `.fusion/memory/MEMORY.md`, identifies patterns/principles/pitfalls, and writes to

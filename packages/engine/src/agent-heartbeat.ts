@@ -2048,10 +2048,13 @@ export class HeartbeatMonitor {
 
         if (priorMemoryMode !== resolvedMemoryMode.mode) {
           const from = priorMemoryMode ? priorMemoryMode : "(initial)";
+          const runContextTaskId = typeof run.contextSnapshot?.taskId === "string"
+            ? run.contextSnapshot.taskId
+            : undefined;
           try {
             await this.store.appendRunLog(agentId, run.id, {
               timestamp: new Date().toISOString(),
-              taskId: taskId ?? run.taskId ?? "heartbeat",
+              taskId: taskId ?? runContextTaskId ?? "heartbeat",
               type: "text",
               text: `Agent memory inclusion mode: ${from} → ${resolvedMemoryMode.mode} (source: ${resolvedMemoryMode.source})`,
             });
