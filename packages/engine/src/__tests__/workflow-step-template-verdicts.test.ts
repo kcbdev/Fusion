@@ -17,10 +17,20 @@ describe("workflow step template verdict interoperability", () => {
     const template = WORKFLOW_STEP_TEMPLATES.find((entry) => entry.id === id);
     expect(template).toBeTruthy();
 
-    expect(parseWorkflowStepVerdict('{"verdict":"APPROVE","notes":""}')).toEqual({ verdict: "APPROVE", notes: "" });
-    expect(parseWorkflowStepVerdict('{"verdict":"APPROVE","notes":"out of scope: no UI files changed"}')).toEqual({
+    const promptBody = template!.prompt;
+    expect(promptBody).toContain('"verdict":"APPROVE|APPROVE_WITH_NOTES|REVISE"');
+
+    expect(parseWorkflowStepVerdict('{"verdict":"APPROVE","notes":""}')).toEqual({
       verdict: "APPROVE",
-      notes: "out of scope: no UI files changed",
+      notes: "",
+    });
+    expect(parseWorkflowStepVerdict(`{"verdict":"APPROVE","notes":"out of scope: ${id}"}`)).toEqual({
+      verdict: "APPROVE",
+      notes: `out of scope: ${id}`,
+    });
+    expect(parseWorkflowStepVerdict(`{"verdict":"APPROVE_WITH_NOTES","notes":"advisory only: ${id}"}`)).toEqual({
+      verdict: "APPROVE_WITH_NOTES",
+      notes: `advisory only: ${id}`,
     });
     expect(inferWorkflowStepVerdictFromProse("REQUEST REVISION\nfix packages/foo.ts")).toEqual({
       verdict: "REVISE",
