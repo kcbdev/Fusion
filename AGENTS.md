@@ -1,5 +1,15 @@
 # Project Guidelines
 
+## STANDING DIRECTIVE: Buttons Are Frozen (2026-05-13)
+
+Do not file, plan, or implement tasks that adjust button mobile-responsiveness, touch-target sizing, or mobile reflow of header/action button rows anywhere in the dashboard (TaskCard, SettingsModal, ChatView, MissionManager, AgentsView, FAB, etc.). **Keep buttons as they are.**
+
+This supersedes earlier guidance in this document about mobile touch targets, primary/secondary control sizing on mobile, and `.touch-target` minimums for buttons. The CSS guidance for non-button elements still applies. The `Frontend UX Design` workflow step (WS-006) is disabled and must stay disabled.
+
+If you find yourself opening `SettingsModal.css`, `TaskCard.css`, `ChatView.css`, or similar files inside an `@media (max-width: 768px)` block to touch a `.btn`, `.modal-close`, `.settings-header-actions`, `.card-*` button, or similar control — stop. Confirm with the user in chat before proceeding.
+
+Exceptions only for: explicit named user request in chat that overrides this directive.
+
 ## Finalizing Changes
 
 When making changes that affect published packages, create a changeset file:
@@ -252,42 +262,6 @@ node scripts/audit-squash-merge.mjs <squash-sha>
 ```
 
 Review every flagged item yourself (no human handoff): for every duplicate-cherry-pick subject, diff the matching main commit against HEAD and confirm its net contribution survived; for every touched-file overlap, confirm the recent main commits' changes still appear in HEAD. If anything was silently dropped, restore it as a follow-up commit on the same branch before reporting the merge complete. Only if the audit is clean (or all losses have been restored) is the merge done.
-
-## Reliability Mechanism Governance
-
-A temporary governance freeze is in place because of a composition failure observed on 2026-05-13: Fusion accumulated roughly ten reliability mechanisms over 30 days, and they interacted in unmodeled ways (a hallucinated off-scope edit tripped the file-scope invariant, which blocked the merge, which the watchdog auto-revived, producing a bounce loop). Each layer was correct in isolation; the failure was their composition.
-
-| Layer | FN | Purpose |
-|---|---|---|
-| Post-merge audit gate | — | Audits squash merges for silently dropped work; can block completion |
-| File-scope invariant | — | Rejects squash commits whose staged files don't overlap declared `## File Scope` |
-| `directMergeCommitStrategy=auto` | — | Auto-switches multi-substantive branches from squash to rebase to preserve history |
-| Pre-rebase overlap guard | — | Flips to prefer-branch when recent main commits overlap task-branch files |
-| Diff-volume gate | — | Blocks squash when a non-allowlisted file loses too much branch volume vs merge-base |
-| Pre-merge workflow steps | — | User-configured quality gates that run before merge and can block |
-| Watchdog auto-revive | — | Detects stalled tasks and auto-revives them |
-| `recoverAlreadyMergedReviewTasks` | — | Auto-finalizes already-landed retry-exhausted review tasks |
-| `recoverMisclassifiedFailures` | — | Reclassifies misrouted failures so they retry on the correct path |
-| Tree-equality recovery | — | Recognizes deterministically-equivalent merged trees and clears overlap-only findings |
-| `postMergeAuditMode` kill-switch | — | `block` / `warn` / `off` knob controlling audit-gate enforcement |
-
-> A **reliability layer** is any new gate, guard, audit, recovery routine, auto-revive trigger, or watchdog that can:
-> - Block a merge that would otherwise complete
-> - Move a task between columns automatically
-> - Mutate task state in response to a failure signal
-
-> Until the interaction-test backstop is in place AND the in-review failure rate over a 7-day rolling window has dropped to <5% of completed merges, **no new reliability layer may be added** to the merge / pre-merge / self-healing pipeline. Bug fixes to existing layers and refactors that do not introduce new gating behavior are allowed.
-
-> - `packages/engine/src/__tests__/reliability-interactions*` exists with ≥15 passing interaction tests.
-> - In-review failure rate <5% over a 7-day rolling window as measured by the reliability metrics surface.
-
-When triaging or planning a task during this freeze, if the proposal adds a reliability layer matching the definition above, reject or defer the task and link to this section. If the proposal is truly urgent (active production stall), require escalation approval rather than adding the layer autonomously.
-
-Out of scope for this freeze:
-- Bug fixes to existing layers
-- Observability and metrics additions
-- Refactors that don't change gating behavior
-- Changes to thresholds or config of existing layers
 
 ## Node Dashboard
 
