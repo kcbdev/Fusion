@@ -1,4 +1,5 @@
 import { definePlugin } from "@fusion/plugin-sdk";
+import type { PluginContext } from "@fusion/plugin-sdk";
 import {
   probePaperclipConnection,
   resolvePaperclipConfig,
@@ -80,7 +81,7 @@ const plugin: FusionPlugin = definePlugin({
   state: "installed",
   runtime: paperclipRuntime,
   hooks: {
-    onLoad: async (ctx) => {
+    onLoad: async (ctx: PluginContext) => {
       const config = getSettingsConfig(ctx.settings);
       ctx.logger.info(`Paperclip Runtime Plugin loaded (apiUrl=${config.apiUrl})`);
 
