@@ -1982,12 +1982,6 @@ export interface GlobalSettings {
   researchGlobalFetchTimeoutMs?: number;
   /** User-Agent header for HTTP requests made by research providers. Default: "FusionResearchBot/1.0". */
   researchGlobalUserAgent?: string;
-  /** Agent memory prompt inclusion mode baseline for all projects/agents.
-   *  - "full": inline full curated memory content into prompts (default)
-   *  - "index": include only a compact memory index, then fetch on demand via memory tools
-   *  - "off": omit agent-memory prompt sections entirely
-   */
-  agentMemoryInclusionMode?: AgentMemoryInclusionMode;
   /** Global-scoped remote access configuration persisted in `~/.fusion/settings.json`.
    *  Stores both provider configs, active provider selection, token strategy,
    *  and lifecycle restart metadata for remote tunnel orchestration. */
