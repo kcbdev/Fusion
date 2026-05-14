@@ -75,6 +75,9 @@ import type { TaskStore, Settings, Task, AgentStore, Agent, NotificationProvider
 import { EventEmitter } from "node:events";
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { isUsableTaskWorktree, scanOrphanedBranches } from "../worktree-pool.js";
 import * as branchConflictModule from "../branch-conflicts.js";
 import { createLogger } from "../logger.js";
@@ -5819,6 +5822,35 @@ describe("SelfHealingManager reclaimSelfOwnedBranchConflicts", () => {
     mockedIsUsableTaskWorktree.mockResolvedValue(true);
   });
 
+  it("reclaims fully-subsumed branch conflicts and emits subsumed audit metadata", async () => {
+    store = createMockStore({
+      getSettings: vi.fn().mockResolvedValue({ globalPause: false, enginePaused: false } as any),
+      recordRunAuditEvent: vi.fn().mockResolvedValue(undefined),
+    });
+    manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+
+    (store.listTasks as any)
+      .mockResolvedValueOnce([{ id: "FN-509", checkedOutBy: null, branch: "fusion/fn-509", worktree: "/tmp/fn-509", lineageId: "lin-9" }])
+      .mockResolvedValueOnce([]);
+    vi.spyOn(branchConflictModule, "inspectBranchConflict").mockResolvedValueOnce({
+      kind: "fully-subsumed",
+      livePath: "/tmp/fn-509",
+      tipSha: "abc123def456",
+    } as any);
+
+    const recovered = await manager.reclaimSelfOwnedBranchConflicts();
+    expect(recovered).toBe(1);
+    expect(store.updateTask).toHaveBeenCalledWith("FN-509", { worktree: "/tmp/fn-509", branch: "fusion/fn-509" });
+    expect((store as any).recordRunAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        domain: "git",
+        mutationType: "branch:auto-reclaim",
+        target: "fusion/fn-509",
+        metadata: expect.objectContaining({ subsumed: true, strandedCommitCount: 0 }),
+      }),
+    );
+  });
+
   it("reclaims stranded same-task branch conflicts", async () => {
     (store.listTasks as any)
       .mockResolvedValueOnce([{ id: "FN-500", checkedOutBy: null, branch: "fusion/fn-500", worktree: "/tmp/fn-500", lineageId: "lin-1" }])
@@ -5902,6 +5934,38 @@ describe("SelfHealingManager reclaimSelfOwnedBranchConflicts", () => {
       pausedReason: "branch-conflict-unrecoverable",
     }));
     expect(store.moveTask).toHaveBeenCalledWith("FN-503", "in-review");
+  });
+
+  it("preserves dirty worktree as recovery patch before unrecoverable escalation", async () => {
+    const fixtureRoot = await mkdtemp(join(tmpdir(), "fn-4476-self-heal-"));
+    manager = new SelfHealingManager(store, { rootDir: fixtureRoot });
+
+    (store.listTasks as any)
+      .mockResolvedValueOnce([{ id: "FN-504", checkedOutBy: null, branch: "fusion/fn-504", worktree: "/tmp/fn-504" }])
+      .mockResolvedValueOnce([]);
+    vi.spyOn(branchConflictModule, "inspectBranchConflict").mockRejectedValueOnce(new Error("boom"));
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const command = String(cmd);
+      if (command === "git status --porcelain") {
+        return Buffer.from(" M src/file.ts\n");
+      }
+      if (command === "git diff HEAD --binary") {
+        return Buffer.from("diff --git a/src/file.ts b/src/file.ts\n");
+      }
+      return Buffer.from("");
+    });
+
+    const recovered = await manager.reclaimSelfOwnedBranchConflicts();
+    expect(recovered).toBe(0);
+    expect(store.moveTask).toHaveBeenCalledWith("FN-504", "in-review");
+
+    const recoveryDir = join(fixtureRoot, ".fusion", "recovery");
+    const files = await readdir(recoveryDir);
+    const patchName = files.find((entry) => entry.startsWith("fn-504-") && entry.endsWith(".patch"));
+    expect(patchName).toBeTruthy();
+    const patchContent = await readFile(join(recoveryDir, patchName ?? ""), "utf-8");
+    expect(patchContent).toContain("diff --git");
+    await rm(fixtureRoot, { recursive: true, force: true });
   });
 
   it("escalates unrecoverable reclaim failures to in-review failed", async () => {

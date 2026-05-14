@@ -102,6 +102,52 @@ describe("branch-conflicts", () => {
     expect(result).toEqual({ kind: "stale-resolved" });
   });
 
+  it("FN-4476/FN-4471: classifies live branch at main tip as fully-subsumed even with stale-base churn", async () => {
+    mockedExecSync.mockImplementation((cmd: string | string[]) => {
+      const command = typeof cmd === "string" ? cmd : cmd[0];
+      if (command === "git worktree prune") return Buffer.from("");
+      if (command === "git worktree list --porcelain") {
+        return Buffer.from(["worktree /tmp/existing-wt", "HEAD 2222222", "branch refs/heads/fusion/fn-4068", ""].join("\n"));
+      }
+      if (command.includes("git rev-parse --verify 'refs/heads/fusion/fn-4068^{commit}'")) {
+        return Buffer.from("abc123def456\n");
+      }
+      if (command.includes("git rev-parse --verify 'fusion/fn-4068^{commit}'")) {
+        return Buffer.from("abc123def456\n");
+      }
+      if (command.includes("git rev-parse --verify 'main^{commit}'")) {
+        return Buffer.from("abc123def456\n");
+      }
+      if (command === "git merge-base 'main' 'fusion/fn-4068'") {
+        return Buffer.from("50ccd27a\n");
+      }
+      if (command === "git cherry 'main' 'fusion/fn-4068' '50ccd27a'") {
+        return Buffer.from("");
+      }
+      if (command.includes("git log --reverse --format=%H%x09%s 'main..fusion/fn-4068'")) {
+        throw new Error("stale-base rev-list should not run when git cherry succeeds");
+      }
+      if (command.includes("git log --format=%H%x00%s%x00%b 'main..fusion/fn-4068'")) {
+        return Buffer.from("");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    const result = await inspectBranchConflict({
+      repoDir: "/tmp/repo",
+      branchName: "fusion/fn-4068",
+      conflictingWorktreePath: "/tmp/existing-wt",
+      requestingTaskId: "FN-4068",
+      startPoint: "main",
+    });
+
+    expect(result).toEqual({
+      kind: "fully-subsumed",
+      livePath: "/tmp/existing-wt",
+      tipSha: "abc123def456",
+    });
+  });
+
   it("returns fully-subsumed when git cherry reports no unique commits", async () => {
     mockedExecSync.mockImplementation((cmd: string | string[]) => {
       const command = typeof cmd === "string" ? cmd : cmd[0];
