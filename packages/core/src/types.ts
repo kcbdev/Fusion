@@ -1936,7 +1936,7 @@ export interface GlobalSettings {
    *  undefined, this value seeds that undefined granular kind at read time.
    *  Default: false (suppressed). */
   persistAgentThinkingLog?: boolean;
-  /** Agent memory prompt inclusion mode baseline for all projects/agents.
+  /** Global default for memory prompt inclusion mode across projects/agents.
    *  - "full": inline full curated memory content into prompts (default)
    *  - "index": include only a compact memory index, then fetch on demand via memory tools
    *  - "off": omit agent-memory prompt sections entirely
@@ -4171,6 +4171,8 @@ export interface AgentHeartbeatRun {
   id: string;
   /** ID of the agent this run belongs to */
   agentId: string;
+  /** Task ID associated with this heartbeat run when bound to a task. */
+  taskId?: string;
   /** ISO-8601 timestamp when the run started */
   startedAt: string;
   /** ISO-8601 timestamp when the run ended (null if active) */
