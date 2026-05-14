@@ -196,6 +196,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   blockedBy TEXT,
   paused INTEGER DEFAULT 0,
   userPaused INTEGER DEFAULT 0,
+  pausedReason TEXT,
   baseBranch TEXT,
   branch TEXT,
   executionStartBranch TEXT,
@@ -1613,6 +1614,7 @@ export class Database {
       this.addColumnIfMissing("tasks", "executionStartBranch", "TEXT");
       this.addColumnIfMissing("tasks", "review", "TEXT");
       this.addColumnIfMissing("tasks", "userPaused", "INTEGER DEFAULT 0");
+      this.addColumnIfMissing("tasks", "pausedReason", "TEXT");
     }
 
     if (version >= SCHEMA_VERSION) return;

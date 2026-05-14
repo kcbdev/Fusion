@@ -196,7 +196,7 @@ Port 4040 is the production dashboard port. A user's live dashboard session is t
 
 ## Architecture
 
-- Merge deadlock self-healing now has three layered defenses: `SelfHealingManager.recoverAlreadyMergedReviewTasks()`, `SelfHealingManager.clearStaleBlockedBy()`, and `SelfHealingManager.reclaimSelfOwnedBranchConflicts()` in `packages/engine/src/self-healing.ts`, plus the paused-aware in-review scope filter in `packages/engine/src/scheduler.ts` (`inReviewWithWorktree` excludes `paused` tasks). Together these auto-finalize already-landed retry-exhausted review tasks, clear stale downstream blockers, auto-reclaim self-owned stranded branch/worktree conflicts, and prevent paused review cards from re-blocking overlap dispatch.
+- Merge deadlock self-healing now layers `recoverAlreadyMergedReviewTasks()`, `clearStaleBlockedBy()`, and `reclaimSelfOwnedBranchConflicts()` in `packages/engine/src/self-healing.ts`, plus the paused-aware in-review scope filter in `packages/engine/src/scheduler.ts` (`inReviewWithWorktree` excludes `paused` tasks). `reclaimSelfOwnedBranchConflicts()` now also recovers paused `branch-conflict-unrecoverable` review rows when ownership is self-proven, and orphan `fusion/*` branches are resolved by prune-or-rescue logic (subsumed branches pruned; unique-commit branches rescued into triage tasks instead of force delete).
 - Restart recovery is coordinated through `RestartRecoveryCoordinator` (`packages/engine/src/restart-recovery-coordinator.ts`), which classifies interrupted `in-progress` runs at runtime startup: no-progress `fn_task_done` failures are safely requeued to `todo`, then remaining orphaned work is resumed via the executor.
 
 ## Engine Process Rules
