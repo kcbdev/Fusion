@@ -123,14 +123,54 @@ Workflow steps can request implementation revisions instead of just blocking com
 
 ### How It Works
 
-When a prompt-mode workflow step agent finishes its review, it can output a **revision request** to indicate that code changes are needed:
+Prompt-mode workflow step output is parsed in this order:
 
-```
-REQUEST REVISION
+1. Structured JSON verdict (`parseWorkflowStepVerdict`)
+2. Legacy prose fallback (`inferWorkflowStepVerdictFromProse`)
+3. `malformed` when neither format can be interpreted
 
-Fix the SQL injection vulnerability in src/auth.ts. The login function does not
-handle the case where the user account is locked.
+#### Structured Verdict Output
+
+Use a JSON object with this schema:
+
+```json
+{ "verdict": "APPROVE|APPROVE_WITH_NOTES|REVISE", "notes": "..." }
 ```
+
+- Valid `verdict` values are exactly: `APPROVE`, `APPROVE_WITH_NOTES`, `REVISE`.
+- `notes` is optional and defaults to `""` when missing or non-string.
+- The parser checks fenced and inline JSON candidates, and the **last valid candidate wins**.
+
+Accepted shapes:
+
+- Fenced JSON block (supports both ``` and ```json fences):
+
+```json
+{"verdict":"REVISE","notes":"Fix auth lock handling in src/auth.ts."}
+```
+
+- Inline JSON object scanned from prose:
+
+`Review complete. {"verdict":"APPROVE_WITH_NOTES","notes":"Looks good; consider tightening error copy."}`
+
+Additional example:
+
+`{"verdict":"APPROVE"}`
+
+#### Prose Fallback
+
+Legacy prose is still supported when structured JSON is missing:
+
+- Output beginning with `REQUEST REVISION` (case-insensitive) maps to `REVISE`.
+  - Remaining prose becomes `notes`.
+  - If nothing follows, notes default to `"Revision requested"`.
+- Output containing one of these phrases maps to `APPROVE` with empty notes: `approve`, `approved`, `looks good`, `no issues`, `out of scope`.
+
+For new workflow step prompts, prefer the structured JSON contract.
+
+#### Malformed Output
+
+If output matches neither structured JSON nor known prose fallback patterns, Fusion records the step output as `malformed`. Operationally, this means no workflow verdict could be inferred from that response.
 
 ### Behavior
 
@@ -145,7 +185,20 @@ When a revision is requested:
 
 ### Feedback Format
 
-Workflow step prompts should instruct agents to use this exact format for revision requests:
+Recommended (structured JSON, prompt-mode):
+
+```json
+{"verdict":"REVISE","notes":"[Clear, actionable description of what needs to be fixed]"}
+```
+
+Also valid for approvals:
+
+```json
+{"verdict":"APPROVE","notes":""}
+{"verdict":"APPROVE_WITH_NOTES","notes":"Optional non-blocking feedback"}
+```
+
+Legacy fallback (still supported via prose inference):
 
 ```
 REQUEST REVISION
@@ -235,7 +288,7 @@ Prompt-mode workflow agents should emit a trailing JSON object:
 - `verdict` and `notes` are persisted on `WorkflowStepResult` when present.
 - Script-mode steps do not populate these fields.
 - Backward compatibility remains for legacy prose-only responses via heuristic fallback (`REQUEST REVISION` and approval keywords).
-- If neither structured JSON nor fallback prose can be interpreted, the step is treated as skipped (malformed output) instead of hard-failing the task.
+- If neither structured JSON nor fallback prose can be interpreted, output is recorded as `malformed` (no inferable verdict) instead of hard-failing the task.
 
 ## Workflow Step APIs
 
