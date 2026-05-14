@@ -172,6 +172,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   pollIntervalMs: 15000,
   heartbeatMultiplier: 1,
   autoClaimCandidatesInPrompt: 5,
+  heartbeatScopeDiscipline: "strict",
   groupOverlappingFiles: true,
   overlapIgnorePaths: [],
   autoMerge: true,

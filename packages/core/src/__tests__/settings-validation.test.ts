@@ -3,6 +3,7 @@ import {
   validateDirectMergeCommitStrategy,
   validateGithubAuthMode,
   validateGithubRepoSlug,
+  validateHeartbeatScopeDisciplineMode,
   validateUnavailableNodePolicy,
 } from "../settings-validation.js";
 
@@ -44,6 +45,20 @@ describe("settings-validation", () => {
       expect(validateGithubAuthMode("oauth")).toBeUndefined();
       expect(validateGithubAuthMode(123)).toBeUndefined();
       expect(validateGithubAuthMode(undefined)).toBeUndefined();
+    });
+  });
+
+  describe("validateHeartbeatScopeDisciplineMode", () => {
+    it("accepts supported modes", () => {
+      expect(validateHeartbeatScopeDisciplineMode("strict")).toBe("strict");
+      expect(validateHeartbeatScopeDisciplineMode("lite")).toBe("lite");
+      expect(validateHeartbeatScopeDisciplineMode("off")).toBe("off");
+    });
+
+    it("returns undefined for invalid values", () => {
+      expect(validateHeartbeatScopeDisciplineMode("minimal")).toBeUndefined();
+      expect(validateHeartbeatScopeDisciplineMode(123)).toBeUndefined();
+      expect(validateHeartbeatScopeDisciplineMode(undefined)).toBeUndefined();
     });
   });
 

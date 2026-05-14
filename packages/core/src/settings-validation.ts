@@ -1,9 +1,19 @@
-import type { DirectMergeCommitStrategy, GithubAuthMode, UnavailableNodePolicy } from "./types.js";
+import type {
+  DirectMergeCommitStrategy,
+  GithubAuthMode,
+  HeartbeatScopeDisciplineMode,
+  UnavailableNodePolicy,
+} from "./types.js";
 
 const UNAVAILABLE_NODE_POLICIES: readonly UnavailableNodePolicy[] = ["block", "fallback-local"] as const;
 const DIRECT_MERGE_COMMIT_STRATEGIES: readonly DirectMergeCommitStrategy[] = ["auto", "always-squash", "always-rebase"] as const;
 const GITHUB_AUTH_MODES: readonly GithubAuthMode[] = ["gh-cli", "token"] as const;
 const GITHUB_REPO_SLUG_PATTERN = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+const HEARTBEAT_SCOPE_DISCIPLINE_MODES: readonly HeartbeatScopeDisciplineMode[] = [
+  "strict",
+  "lite",
+  "off",
+] as const;
 
 /**
  * Validates a project unavailable-node routing policy value.
@@ -59,4 +69,17 @@ export function validateGithubRepoSlug(value: unknown): string | undefined {
     return undefined;
   }
   return GITHUB_REPO_SLUG_PATTERN.test(trimmed) ? trimmed : undefined;
+}
+
+/** Returns a validated heartbeat scope-discipline mode for project/agent settings, otherwise undefined. */
+export function validateHeartbeatScopeDisciplineMode(value: unknown): HeartbeatScopeDisciplineMode | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  return (HEARTBEAT_SCOPE_DISCIPLINE_MODES as readonly string[]).includes(value)
+    ? (value as HeartbeatScopeDisciplineMode)
+    : undefined;
 }
