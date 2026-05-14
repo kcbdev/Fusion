@@ -578,6 +578,16 @@ describe("TaskCard", () => {
     expect(screen.queryByText("paused by agent")).toBeNull();
   });
 
+  it("renders decision-only badge when noCommitsExpected is true", () => {
+    render(<TaskCard task={makeTask({ noCommitsExpected: true })} onOpenDetail={noop} addToast={noop} />);
+    expect(screen.getByText("decision-only")).toBeTruthy();
+  });
+
+  it("hides decision-only badge when noCommitsExpected is false", () => {
+    render(<TaskCard task={makeTask({ noCommitsExpected: false })} onOpenDetail={noop} addToast={noop} />);
+    expect(screen.queryByText("decision-only")).toBeNull();
+  });
+
   it("does not render fan-out badge when fanout is missing or zero", () => {
     const { container, rerender } = render(
       <TaskCard task={makeTask({ column: "todo" })} onOpenDetail={noop} addToast={noop} />,

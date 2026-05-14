@@ -612,6 +612,8 @@ export function TaskDetailContent({
   const [isSavingInlinePriority, setIsSavingInlinePriority] = useState(false);
   const [inlineExecutionMode, setInlineExecutionMode] = useState<"standard" | "fast">(normalizeExecutionModeValue(task.executionMode));
   const [isSavingInlineExecutionMode, setIsSavingInlineExecutionMode] = useState(false);
+  const [inlineNoCommitsExpected, setInlineNoCommitsExpected] = useState<boolean>(task.noCommitsExpected === true);
+  const [isSavingInlineNoCommitsExpected, setIsSavingInlineNoCommitsExpected] = useState(false);
   const mountedRef = useRef(false);
 
   // Split-menu dropdown state for footer actions
@@ -688,6 +690,10 @@ export function TaskDetailContent({
   useEffect(() => {
     setInlineExecutionMode(normalizeExecutionModeValue(task.executionMode));
   }, [task.id, task.executionMode]);
+
+  useEffect(() => {
+    setInlineNoCommitsExpected(task.noCommitsExpected === true);
+  }, [task.id, task.noCommitsExpected]);
 
   useEffect(() => {
     if (githubTrackingEnabledDraft === null) return;
@@ -1230,6 +1236,29 @@ export function TaskDetailContent({
       }
     }
   }, [task.id, task.executionMode, projectId, inlineExecutionMode, onTaskUpdated, addToast]);
+
+  const handleInlineNoCommitsExpectedToggle = useCallback(async () => {
+    const nextValue = !inlineNoCommitsExpected;
+    const previousValue = inlineNoCommitsExpected;
+
+    setInlineNoCommitsExpected(nextValue);
+    setIsSavingInlineNoCommitsExpected(true);
+
+    try {
+      const updatedTask = await updateTask(task.id, { noCommitsExpected: nextValue }, projectId);
+      const normalizedUpdatedValue = updatedTask.noCommitsExpected === true;
+      setInlineNoCommitsExpected(normalizedUpdatedValue);
+      onTaskUpdated?.(updatedTask);
+      addToast(`No-commits expectation ${normalizedUpdatedValue ? "enabled" : "disabled"}`, "success");
+    } catch (err) {
+      setInlineNoCommitsExpected(previousValue);
+      addToast(`Failed to update ${task.id}: ${getErrorMessage(err)}`, "error");
+    } finally {
+      if (mountedRef.current) {
+        setIsSavingInlineNoCommitsExpected(false);
+      }
+    }
+  }, [task.id, projectId, inlineNoCommitsExpected, onTaskUpdated, addToast]);
 
   // Handle keyboard shortcuts for edit mode
   const handleEditKeyDown = useCallback((e: KeyboardEvent) => {
@@ -2146,6 +2175,21 @@ export function TaskDetailContent({
                     <Zap aria-hidden="true" />
                     <span>{inlineExecutionMode === "fast" ? "Fast" : "Standard"}</span>
                   </button>
+                </div>
+                <div className="form-group">
+                  <label className="checkbox-label" htmlFor="detail-no-commits-expected-toggle">
+                    <input
+                      id="detail-no-commits-expected-toggle"
+                      type="checkbox"
+                      checked={inlineNoCommitsExpected}
+                      disabled={isSavingInlineNoCommitsExpected}
+                      onChange={() => {
+                        void handleInlineNoCommitsExpectedToggle();
+                      }}
+                    />
+                    No commits expected (decision-only task)
+                  </label>
+                  <small>Allows the task to complete without producing git commits. Use for evaluation, verification, or audit tasks where the deliverable is the recorded decision.</small>
                 </div>
                 {provenanceDisplay && (
                   <div className="detail-provenance">

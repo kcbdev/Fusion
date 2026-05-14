@@ -132,7 +132,8 @@
 
 .card-status-badge,
 .card-priority-badge,
-.card-size-badge {
+.card-size-badge,
+.card-no-commits-expected-badge {
   display: inline-flex;
   align-items: center;
   font-size: 0.625rem;
@@ -146,6 +147,13 @@
 
 .card-status-badge {
   letter-spacing: 0.5px;
+}
+
+.card-no-commits-expected-badge {
+  background: color-mix(in srgb, var(--text-muted) 18%, transparent);
+  border-color: color-mix(in srgb, var(--text-muted) 35%, transparent);
+  color: var(--text-muted);
+  text-transform: lowercase;
 }
 
 .card-status-badge.stalled-review {

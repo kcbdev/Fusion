@@ -5984,3 +5984,45 @@ describe("SelfHealingManager reclaimSelfOwnedBranchConflicts", () => {
     expect(store.moveTask).toHaveBeenCalledWith("FN-502", "in-review");
   });
 });
+
+describe("SelfHealingManager no-commits-expected audit", () => {
+  it("logs candidate task IDs without mutating tasks", async () => {
+    const store = createMockStore();
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+    const now = new Date().toISOString();
+    const candidate = {
+      id: "FN-900",
+      column: "in-review",
+      status: "failed",
+      error: "fn_task_done refused: no_commits",
+      noCommitsExpected: undefined,
+      branch: "fusion/fn-900",
+      baseBranch: "main",
+      paused: false,
+      steps: [{ id: "s1", name: "done", status: "done" }],
+      log: [],
+      createdAt: now,
+      updatedAt: now,
+      description: "audit",
+      dependencies: [],
+      currentStep: 1,
+    } as unknown as Task;
+
+    vi.mocked(store.listTasks)
+      .mockResolvedValueOnce([candidate])
+      .mockResolvedValueOnce([candidate]);
+
+    mockedExecSync.mockImplementation((command: string) => {
+      if (command.includes("git rev-list --count")) {
+        return Buffer.from("0\n");
+      }
+      return Buffer.from("ok\n");
+    });
+
+    const count = await manager.auditNoCommitsExpectedCandidates();
+    expect(count).toBe(1);
+    expect(getSelfHealingLogger().warn).toHaveBeenCalledWith(expect.stringContaining("FN-900"));
+    expect(store.updateTask).not.toHaveBeenCalled();
+    expect(store.moveTask).not.toHaveBeenCalled();
+  });
+});

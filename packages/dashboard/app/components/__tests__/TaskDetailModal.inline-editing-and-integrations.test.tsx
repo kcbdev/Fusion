@@ -1159,6 +1159,30 @@ describe("TaskDetailModal", () => {
       });
     });
 
+    it("toggles no-commits-expected checkbox and patches task", async () => {
+      const { updateTask } = await import("../../api");
+      const mockUpdate = vi.mocked(updateTask);
+      mockUpdate.mockResolvedValueOnce(makeTask({ id: "FN-001", column: "todo", noCommitsExpected: true }) as Task);
+
+      render(
+        <TaskDetailModal
+          task={makeTask({ id: "FN-001", column: "todo", noCommitsExpected: false })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      fireEvent.click(screen.getByLabelText("No commits expected (decision-only task)"));
+
+      await waitFor(() => {
+        expect(mockUpdate).toHaveBeenCalledWith("FN-001", { noCommitsExpected: true }, undefined);
+      });
+    });
+
     it("pre-populates form with existing task values", () => {
       const { container } = render(
         <TaskDetailModal

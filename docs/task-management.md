@@ -708,3 +708,14 @@ When `autoSummarizeTitles` is enabled and a task has a long untitled description
 ![Task detail modal](./screenshots/task-detail.png)
 
 For UI-level details, see [Dashboard Guide](./dashboard-guide.md).
+
+## Decision-only tasks (`noCommitsExpected`)
+
+Use `noCommitsExpected: true` for tasks where the deliverable is a decision/report, not code changes.
+
+- Meaning: executor allows `fn_task_done` with zero commits for that task.
+- Triage auto-sets it only when the task is clearly decision-shaped (e.g. "Decide whether...", "Evaluate...", "Verify...", "Audit...") with explicitly observational acceptance criteria and explicit no-code language.
+- Ambiguous/forked tasks (e.g. "Investigate..." or "Investigate and fix if needed") leave it unset by default.
+- You can manually set/clear it in Task Detail via **No commits expected (decision-only task)**.
+- Task cards show a **decision-only** badge when enabled.
+- Finalization still uses the existing no-op review/merge path (`mergeDetails.noOpMerge: true`, `mergeConfirmed: true`); no synthetic merge strategy values are introduced.

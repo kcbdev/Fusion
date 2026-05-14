@@ -412,6 +412,7 @@ export class SelfHealingManager {
       { name: "clear-stale-blocked-by", fn: () => this.clearStaleBlockedBy().then(() => undefined) },
       { name: "reclaim-self-owned-branch-conflicts", fn: () => this.reclaimSelfOwnedBranchConflicts().then(() => undefined) },
       { name: "surface-in-review-stalls", fn: () => this.surfaceInReviewStalls().then(() => undefined) },
+      { name: "audit-no-commits-expected-candidates", fn: () => this.auditNoCommitsExpectedCandidates().then(() => undefined) },
     ];
 
     for (const step of steps) {
@@ -1114,6 +1115,7 @@ export class SelfHealingManager {
           { name: "clear-stale-blocked-by", fn: () => this.clearStaleBlockedBy() },
           { name: "reclaim-self-owned-branch-conflicts", fn: () => this.reclaimSelfOwnedBranchConflicts() },
           { name: "surface-in-review-stalls", fn: () => this.surfaceInReviewStalls() },
+          { name: "audit-no-commits-expected-candidates", fn: () => this.auditNoCommitsExpectedCandidates() },
         ];
         for (const fn of batch2Fns) {
           try {
@@ -2821,6 +2823,44 @@ export class SelfHealingManager {
       return recovered;
     } catch (err: unknown) { const errorMessage = err instanceof Error ? err.message : String(err);
       log.error(`Misclassified failure recovery failed: ${errorMessage}`);
+      return 0;
+    }
+  }
+
+  async auditNoCommitsExpectedCandidates(): Promise<number> {
+    try {
+      const inReviewTasks = await this.store.listTasks({ column: "in-review", slim: true });
+      const allTasks = await this.store.listTasks({ slim: true });
+      const failedTasks = allTasks.filter((task) => task.status === "failed");
+      const candidateMap = new Map<string, Task>();
+      for (const task of [...inReviewTasks, ...failedTasks]) {
+        candidateMap.set(task.id, task);
+      }
+      const candidates = [...candidateMap.values()].filter((task) => {
+        if (task.noCommitsExpected === true) return false;
+        if (task.steps.length === 0 || !task.steps.every((step) => step.status === "done" || step.status === "skipped")) return false;
+        const noCommitsError = typeof task.error === "string" && /no_commits/i.test(task.error);
+        return task.column === "in-review" || noCommitsError;
+      });
+
+      if (candidates.length === 0) return 0;
+
+      const taskIds: string[] = [];
+      for (const task of candidates) {
+        const ahead = await isBranchAheadOfBase(task, this.options.rootDir, task.baseBranch || "main");
+        if (ahead && ahead.aheadCount === 0) {
+          taskIds.push(task.id);
+        }
+      }
+
+      if (taskIds.length > 0) {
+        log.warn(`no-commits-expected audit candidates: ${JSON.stringify({ taskIds })}`);
+      }
+
+      return taskIds.length;
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      log.error(`No-commits-expected audit failed: ${errorMessage}`);
       return 0;
     }
   }

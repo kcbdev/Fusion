@@ -1519,6 +1519,9 @@ function TaskCardComponent({
             <span className="visually-hidden">Fast mode</span>
           </span>
         )}
+        {task.noCommitsExpected === true && (
+          <span className="card-no-commits-expected-badge" title="Decision-only task">decision-only</span>
+        )}
         {task.missionId && (
           <span
             className="card-mission-badge"
