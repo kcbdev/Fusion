@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Task } from "@fusion/core";
+import type { NodePositions } from "../utils/graphPositionStorage";
 import { DependencyGraph } from "../DependencyGraph";
 
 const fitToGraph = vi.fn();
@@ -12,6 +13,9 @@ const onPointerDown = vi.fn();
 const onPointerMove = vi.fn();
 const onPointerUp = vi.fn();
 const setGraphBounds = vi.fn();
+const clearSavedPositions = vi.fn();
+let mockSavedPositions: NodePositions | null = null;
+let resizeObserverCallback: ResizeObserverCallback | null = null;
 
 vi.mock("@fusion/dashboard/app/components/TaskCard", () => ({
   TaskCard: ({ task, onOpenDetail, disableDrag }: { task: Task; onOpenDetail: (task: Task) => void; disableDrag?: boolean }) => (
@@ -37,8 +41,32 @@ vi.mock("../useGraphInteraction", () => ({
   }),
 }));
 
+vi.mock("../hooks/useGraphPositions", () => ({
+  useGraphPositions: () => ({
+    savedPositions: mockSavedPositions,
+    persistPositions: vi.fn(),
+    clearSavedPositions,
+  }),
+}));
+
 function createTask(id: string, column: Task["column"], dependencies: string[] = []): Task {
   return { id, description: id, column, dependencies, steps: [], currentStep: 0, log: [] } as Task;
+}
+
+function setViewportSize(width: number, height: number): void {
+  const viewport = document.querySelector(".dependency-graph__viewport") as HTMLDivElement | null;
+  if (!viewport) throw new Error("missing viewport");
+  Object.defineProperty(viewport, "clientWidth", { value: width, configurable: true });
+  Object.defineProperty(viewport, "clientHeight", { value: height, configurable: true });
+  resizeObserverCallback?.([{ contentRect: { width, height } } as ResizeObserverEntry], {} as ResizeObserver);
+}
+
+function readNodePosition(taskId: string): { left: number; top: number } {
+  const node = screen.getByTestId(`graph-task-node-${taskId}`) as HTMLElement;
+  return {
+    left: Number.parseFloat(node.style.left),
+    top: Number.parseFloat(node.style.top),
+  };
 }
 
 describe("DependencyGraph", () => {
@@ -52,9 +80,26 @@ describe("DependencyGraph", () => {
     onPointerMove.mockReset();
     onPointerUp.mockReset();
     setGraphBounds.mockReset();
+    clearSavedPositions.mockReset();
+    mockSavedPositions = null;
+    resizeObserverCallback = null;
+
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resizeObserverCallback = callback;
+        }
+
+        observe() {}
+
+        disconnect() {}
+      },
+    );
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     cleanup();
   });
 
@@ -171,5 +216,59 @@ describe("DependencyGraph", () => {
     expect(onPointerDown).toHaveBeenCalled();
     expect(onPointerMove).toHaveBeenCalled();
     expect(onPointerUp).toHaveBeenCalled();
+  });
+
+  it("uses vertical-depth auto-layout in wide viewports and flips to horizontal-depth in tall viewports", async () => {
+    render(
+      <DependencyGraph
+        tasks={[createTask("A", "todo", ["B"]), createTask("B", "todo", ["C"]), createTask("C", "todo")]}
+        onOpenTaskDetail={vi.fn()}
+      />,
+    );
+
+    setViewportSize(1400, 900);
+
+    await waitFor(() => {
+      const wideA = readNodePosition("A");
+      const wideB = readNodePosition("B");
+      const wideC = readNodePosition("C");
+      expect(wideC.top).toBeLessThan(wideB.top);
+      expect(wideB.top).toBeLessThan(wideA.top);
+      expect(wideA.left).toBe(wideB.left);
+      expect(wideB.left).toBe(wideC.left);
+    });
+
+    setViewportSize(400, 900);
+
+    await waitFor(() => {
+      const tallA = readNodePosition("A");
+      const tallB = readNodePosition("B");
+      const tallC = readNodePosition("C");
+      expect(tallC.left).toBeLessThan(tallB.left);
+      expect(tallB.left).toBeLessThan(tallA.left);
+      expect(tallA.top).toBe(tallB.top);
+      expect(tallB.top).toBe(tallC.top);
+    });
+  });
+
+  it("preserves saved node positions across viewport orientation changes", async () => {
+    mockSavedPositions = {
+      A: { x: 500, y: 200 },
+      B: { x: 100, y: 100 },
+    };
+
+    render(<DependencyGraph tasks={[createTask("A", "todo", ["B"]), createTask("B", "todo")]} projectId="project-1" onOpenTaskDetail={vi.fn()} />);
+
+    setViewportSize(400, 900);
+    await waitFor(() => {
+      expect(readNodePosition("B")).toEqual({ left: 0, top: 0 });
+      expect(readNodePosition("A")).toEqual({ left: 400, top: 100 });
+    });
+
+    setViewportSize(1400, 900);
+    await waitFor(() => {
+      expect(readNodePosition("B")).toEqual({ left: 0, top: 0 });
+      expect(readNodePosition("A")).toEqual({ left: 400, top: 100 });
+    });
   });
 });
