@@ -721,4 +721,39 @@ describe("schema migration", () => {
 
     db.close();
   });
+
+  it("v76 backfill preserves explicit gateMode and defaults the rest to advisory (FN-4497)", () => {
+    const db = new Database(fusionDir);
+    db.exec("CREATE TABLE IF NOT EXISTS __meta (key TEXT PRIMARY KEY, value TEXT)");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS workflow_steps (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL,
+        mode TEXT NOT NULL DEFAULT 'prompt',
+        phase TEXT NOT NULL DEFAULT 'pre-merge',
+        prompt TEXT NOT NULL DEFAULT '',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      )
+    `);
+    db.exec("INSERT INTO __meta (key, value) VALUES ('schemaVersion', '75')");
+    db.exec("INSERT INTO __meta (key, value) VALUES ('lastModified', '1000')");
+    db.exec("INSERT INTO workflow_steps (id, name, description, mode, phase, prompt, enabled, createdAt, updatedAt) VALUES ('WS-001', 'Prompt', 'Prompt step', 'prompt', 'pre-merge', 'p', 1, '2025-01-01T00:00:00.000Z', '2025-01-01T00:00:00.000Z')");
+    db.exec("INSERT INTO workflow_steps (id, name, description, mode, phase, prompt, enabled, createdAt, updatedAt) VALUES ('WS-002', 'Script', 'Script step', 'script', 'pre-merge', '', 1, '2025-01-01T00:00:00.000Z', '2025-01-01T00:00:00.000Z')");
+    db.exec("INSERT INTO workflow_steps (id, name, description, mode, phase, prompt, enabled, createdAt, updatedAt) VALUES ('WS-003', 'Disabled Prompt', 'Disabled step', 'prompt', 'pre-merge', 'p', 0, '2025-01-01T00:00:00.000Z', '2025-01-01T00:00:00.000Z')");
+
+    db.init();
+
+    const rows = db.prepare("SELECT id, mode, enabled, gateMode FROM workflow_steps ORDER BY id ASC").all() as Array<{ id: string; mode: string; enabled: number; gateMode: string }>;
+    expect(rows).toEqual([
+      { id: "WS-001", mode: "prompt", enabled: 1, gateMode: "advisory" },
+      { id: "WS-002", mode: "script", enabled: 1, gateMode: "advisory" },
+      { id: "WS-003", mode: "prompt", enabled: 0, gateMode: "advisory" },
+    ]);
+    expect(db.getSchemaVersion()).toBe(77);
+
+    db.close();
+  });
 });
