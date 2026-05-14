@@ -4847,7 +4847,7 @@ export async function handleDirtyPostMergeAuditOutcome(opts: {
   verificationPassed: boolean;
   audit: RunAuditor;
   store: TaskStore;
-  mergerLog: Pick<ReturnType<typeof createLogger>, "warn" | "log">;
+  mergerLog: { warn: (message: string) => void; log: (message: string) => void; };
 }): Promise<PostMergeAuditAction> {
   const decision = resolvePostMergeAuditAction({
     mode: opts.mode,
