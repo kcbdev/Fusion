@@ -1,30 +1,36 @@
 import { describe, expect, it } from "vitest";
 import { loadAllAppCss } from "../../test/cssFixture";
 
-function extractMediaBlock(css: string, query: string): string {
-  const start = css.indexOf(`@media ${query}`);
-  if (start < 0) {
-    throw new Error(`Missing media query: ${query}`);
+function extractMediaBlocks(css: string, query: string): string[] {
+  const blocks: string[] = [];
+  let cursor = 0;
+  while (cursor < css.length) {
+    const start = css.indexOf(`@media ${query}`, cursor);
+    if (start < 0) break;
+    const open = css.indexOf("{", start);
+    let depth = 1;
+    let i = open + 1;
+    while (i < css.length && depth > 0) {
+      if (css[i] === "{") depth += 1;
+      else if (css[i] === "}") depth -= 1;
+      i += 1;
+    }
+    blocks.push(css.slice(open + 1, i - 1));
+    cursor = i;
   }
-  const open = css.indexOf("{", start);
-  let depth = 1;
-  let i = open + 1;
-  while (i < css.length && depth > 0) {
-    if (css[i] === "{") depth += 1;
-    else if (css[i] === "}") depth -= 1;
-    i += 1;
-  }
-  return css.slice(open + 1, i - 1);
+  return blocks;
 }
 
 describe("FileBrowser mobile dropdown regression", () => {
   it("keeps mobile file-browser header overflow unclipped", () => {
     const css = loadAllAppCss();
-    const mobileBlock = extractMediaBlock(css, "(max-width: 768px)");
-    const headerRuleMatch = mobileBlock.match(/\.file-browser-modal-header\s*\{[^}]*\}/);
+    const mobileBlocks = extractMediaBlocks(css, "(max-width: 768px)");
+    const headerRule = mobileBlocks
+      .map((block) => block.match(/\.file-browser-modal-header\s*\{[^}]*\}/)?.[0])
+      .find(Boolean);
 
-    expect(headerRuleMatch?.[0]).toBeTruthy();
-    expect(headerRuleMatch?.[0]).not.toMatch(/overflow\s*:\s*hidden/);
+    expect(headerRule).toBeTruthy();
+    expect(headerRule).not.toMatch(/overflow\s*:\s*hidden/);
   });
 
   it("keeps workspace selector menu positioned above content", () => {
