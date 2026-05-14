@@ -6576,6 +6576,50 @@ ${failureFeedback}
   }
 
   /**
+   * Parse structured JSON verdict from workflow step output.
+   *
+   * Looks for a trailing JSON block of the form:
+   *   ```json-workflow-verdict
+   *   {"verdict":"PASS"|"FAIL","notes":"..."}
+   *   ```
+   *
+   * If found, extracts verdict/notes and returns the prose before the block
+   * as `output`.
+   *
+   * Falls back to prose-only parsing (REQUEST REVISION) for backward compat.
+   */
+  private parseWorkflowStepOutput(rawOutput: string): {
+    output: string;
+    verdict?: "PASS" | "FAIL";
+    notes?: string;
+  } {
+    const trimmed = rawOutput.trim();
+
+    // Try structured JSON block first
+    const jsonBlockMatch = trimmed.match(
+      /```json-workflow-verdict\s*\n([\s\S]*?)\n\s*```/,
+    );
+    if (jsonBlockMatch) {
+      try {
+        const parsed = JSON.parse(jsonBlockMatch[1].trim());
+        if (parsed.verdict === "PASS" || parsed.verdict === "FAIL") {
+          const proseBefore = trimmed.slice(0, trimmed.indexOf(jsonBlockMatch[0])).trim();
+          return {
+            output: proseBefore || parsed.notes || "",
+            verdict: parsed.verdict,
+            notes: parsed.notes,
+          };
+        }
+      } catch {
+        // Malformed JSON — fall through to prose parsing
+      }
+    }
+
+    // Fallback: no structured block found, return raw output
+    return { output: trimmed };
+  }
+
+  /**
    * Execute a single workflow step by spawning an agent with the step's prompt.
    * Returns structured outcome with support for revision requests.
    */
