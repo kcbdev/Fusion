@@ -939,6 +939,7 @@ export function QuickChatFAB({
   const modelsInitSettledRef = useRef(false);
   const prevSessionTargetRef = useRef("");
   const hasAppliedInitialSessionRef = useRef(false);
+  const restoredFromExistingSessionRef = useRef(false);
   const selectedAgentIdRef = useRef(selectedAgentId);
   const selectedModelRef = useRef(selectedModel);
   const mentionCursorPosRef = useRef(0);
@@ -1234,21 +1235,35 @@ export function QuickChatFAB({
       return;
     }
 
-    const latestSession = sessions[0];
-    if (!latestSession) {
-      return;
-    }
+    const activeSessions = sessions.filter((session) => session.status !== "archived");
+    const timestamp = (value?: string | null): number => {
+      if (!value) return 0;
+      const parsed = Date.parse(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const latestSession = [...activeSessions].sort((a, b) => {
+      const aLastTouched = Math.max(timestamp(a.lastMessageAt), timestamp(a.updatedAt));
+      const bLastTouched = Math.max(timestamp(b.lastMessageAt), timestamp(b.updatedAt));
+      return bLastTouched - aLastTouched;
+    })[0];
 
-    if (latestSession.modelProvider && latestSession.modelId) {
-      setChatMode("model");
-      setSelectedModel(`${latestSession.modelProvider}/${latestSession.modelId}`);
+    if (latestSession) {
+      if (latestSession.modelProvider && latestSession.modelId) {
+        setChatMode("model");
+        setSelectedModel(`${latestSession.modelProvider}/${latestSession.modelId}`);
+      } else {
+        setChatMode("agent");
+        setSelectedAgentId(latestSession.agentId);
+      }
+
+      restoredFromExistingSessionRef.current = true;
+      void selectSession(latestSession);
     } else {
-      setChatMode("agent");
-      setSelectedAgentId(latestSession.agentId);
+      restoredFromExistingSessionRef.current = false;
     }
 
     hasAppliedInitialSessionRef.current = true;
-  }, [isOpen, sessions, sessionsLoading]);
+  }, [isOpen, selectSession, sessions, sessionsLoading]);
 
   // Initialize/switch quick chat session whenever the selected target changes.
   // NOTE: activeSession and sessionsLoading are in the dependency array to
@@ -1286,6 +1301,12 @@ export function QuickChatFAB({
     const shouldRetrySessionInit = sessionTargetKey === prevSessionTargetRef.current
       && !activeSession
       && !sessionsLoading;
+
+    if (restoredFromExistingSessionRef.current) {
+      restoredFromExistingSessionRef.current = false;
+      prevSessionTargetRef.current = sessionTargetKey;
+      return;
+    }
 
     if (sessionTargetKey === prevSessionTargetRef.current && !shouldRetrySessionInit) {
       return;

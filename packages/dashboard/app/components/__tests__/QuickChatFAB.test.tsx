@@ -164,9 +164,22 @@ describe("QuickChatFAB session-first UX", () => {
     expect(screen.getByTestId("quick-chat-new-model-select")).toBeInTheDocument();
   });
 
-  it("restores the newest agent session target on first open after reload", async () => {
+  it("restores the most recently touched active session by id", async () => {
     mockFetchChatSessions.mockResolvedValueOnce({
-      sessions: [agentTwoSession, modelSession, agentSession],
+      sessions: [
+        {
+          ...modelSession,
+          id: "older-updated",
+          updatedAt: "2026-05-13T10:00:00.000Z",
+          lastMessageAt: "2026-05-13T10:00:00.000Z",
+        },
+        {
+          ...agentTwoSession,
+          id: "newer-last-message",
+          updatedAt: "2026-05-13T09:00:00.000Z",
+          lastMessageAt: "2026-05-13T11:00:00.000Z",
+        },
+      ],
     });
 
     render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
@@ -174,25 +187,38 @@ describe("QuickChatFAB session-first UX", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("quick-chat-input")).toHaveAttribute("placeholder", "Message Agent Two");
+      expect(screen.getByTestId("quick-chat-session-dropdown")).toHaveValue("newer-last-message");
     });
-    expect(mockFetchResumeChatSession).toHaveBeenCalledWith({ agentId: "agent-002" }, "proj-1");
+    expect(mockFetchResumeChatSession).not.toHaveBeenCalled();
   });
 
-  it("restores the newest model session target instead of the configured default", async () => {
+  it("skips archived newest sessions and restores the newest active session", async () => {
     mockFetchChatSessions.mockResolvedValueOnce({
-      sessions: [modelSessionAnthropic, modelSession, agentSession],
+      sessions: [
+        {
+          ...modelSessionAnthropic,
+          id: "archived-newest",
+          status: "archived",
+          updatedAt: "2026-05-13T12:00:00.000Z",
+          lastMessageAt: "2026-05-13T12:00:00.000Z",
+        },
+        {
+          ...agentTwoSession,
+          id: "active-latest",
+          updatedAt: "2026-05-13T11:00:00.000Z",
+          lastMessageAt: "2026-05-13T11:00:00.000Z",
+        },
+      ],
     });
 
     render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
     fireEvent.click(screen.getByTestId("quick-chat-fab"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("quick-chat-model-tag")).toHaveTextContent("Claude 3.7 Sonnet");
+      expect(screen.getByTestId("quick-chat-input")).toHaveAttribute("placeholder", "Message Agent Two");
+      expect(screen.getByTestId("quick-chat-session-dropdown")).toHaveValue("active-latest");
     });
-    expect(mockFetchResumeChatSession).toHaveBeenCalledWith(
-      { agentId: "__fn_agent__", modelProvider: "anthropic", modelId: "claude-3-7-sonnet" },
-      "proj-1",
-    );
+    expect(screen.getByRole("option", { name: /Claude thread/i })).toBeInTheDocument();
   });
 
   it("falls back to the existing default target when there are no prior sessions", async () => {
