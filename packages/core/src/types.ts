@@ -1935,6 +1935,12 @@ export interface GlobalSettings {
    *  undefined, this value seeds that undefined granular kind at read time.
    *  Default: false (suppressed). */
   persistAgentThinkingLog?: boolean;
+  /** Agent memory prompt inclusion mode baseline for all projects/agents.
+   *  - "full": inline full curated memory content into prompts (default)
+   *  - "index": include only a compact memory index, then fetch on demand via memory tools
+   *  - "off": omit agent-memory prompt sections entirely
+   */
+  agentMemoryInclusionMode?: AgentMemoryInclusionMode;
   /** Research defaults shared across all projects.
    * Project settings may override these via `researchSettings`. */
   researchGlobalDefaults?: ResearchGlobalDefaults;
