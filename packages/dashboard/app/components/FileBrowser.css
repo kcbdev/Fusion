@@ -711,6 +711,10 @@
   flex-wrap: wrap;
 }
 
+.file-editor-toolbar-collapsible[hidden] {
+  display: none;
+}
+
 .file-editor-line-numbers-button {
   display: inline-flex;
   align-items: center;
