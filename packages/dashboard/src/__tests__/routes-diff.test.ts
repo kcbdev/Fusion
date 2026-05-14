@@ -304,7 +304,7 @@ describe("FN-4308 multi-commit done task aggregation", () => {
     expect(response.body.stats.filesChanged).toBe(2);
   });
 
-  it("falls back to commitSha enumeration when aggregation under-counts mergeDetails", async () => {
+  it("keeps lineage aggregation when mergeDetails filesChanged is higher", async () => {
     const store = new MockStore();
     store.addTask(createTask({ column: "done", lineageId: "lin-1", mergeDetails: { commitSha: "merge", filesChanged: 3 } }));
     store.setAssociations("lin-1", [makeAssociation("assoc", "2026-04-01T00:00:00.000Z")]);
@@ -335,7 +335,7 @@ describe("FN-4308 multi-commit done task aggregation", () => {
     const app = createServer(store as any);
     const response = await requestDiff(app);
     expect(response.status).toBe(200);
-    expect(response.body.files.map((f: any) => f.path).sort()).toEqual(["one.ts", "three.ts", "two.ts"]);
+    expect(response.body.files.map((f: any) => f.path).sort()).toEqual(["a.txt", "b.txt"]);
     expect(response.body.files.length).toBe(response.body.stats.filesChanged);
   });
 

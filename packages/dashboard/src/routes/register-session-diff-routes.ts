@@ -412,7 +412,8 @@ async function collectDoneTaskFiles(task: DoneTaskAggregationTask, scopedStore: 
     };
   }
 
-  const byPath = new Map<string, DoneTaskFileStatus>();
+  const byPath = new Map<string, AggregatedDoneTaskFile>();
+  let usedAggregation = false;
 
   for (const sha of reachableShas) {
     let diffSpec: Awaited<ReturnType<typeof resolveCommitDiffSpec>>;
@@ -429,34 +430,32 @@ async function collectDoneTaskFiles(task: DoneTaskAggregationTask, scopedStore: 
       continue;
     }
 
+    if (filesForSha.length > 0) {
+      usedAggregation = true;
+    }
+
     for (const file of filesForSha) {
       const existing = byPath.get(file.path);
-      if (!existing || statusPriority(file.status) > statusPriority(existing)) {
-        byPath.set(file.path, file.status);
+      if (!existing) {
+        byPath.set(file.path, { ...file });
+        continue;
       }
+
+      const representative = (file.additions + file.deletions) > (existing.additions + existing.deletions) ? file.patch : existing.patch;
+      const status = statusPriority(file.status) > statusPriority(existing.status) ? file.status : existing.status;
+
+      byPath.set(file.path, {
+        path: file.path,
+        status,
+        additions: existing.additions + file.additions,
+        deletions: existing.deletions + file.deletions,
+        patch: representative,
+      });
     }
   }
 
-  const earliestSha = reachableShas[0];
-  const latestSha = reachableShas[reachableShas.length - 1];
-  if (!earliestSha || !latestSha) {
-    return {
-      files: [],
-      stats: { filesChanged: 0, additions: 0, deletions: 0 },
-      usedAggregation: false,
-    };
-  }
+  const files = Array.from(byPath.values());
 
-  let earliestParent = EMPTY_TREE_SHA;
-  try {
-    earliestParent = (await runGitCommand(["rev-parse", `${earliestSha}^`], rootDir, 5000)).trim() || EMPTY_TREE_SHA;
-  } catch {
-    earliestParent = EMPTY_TREE_SHA;
-  }
-
-  const netRange = `${earliestParent}..${latestSha}`;
-  const netFiles = await collectDoneRangeFiles(netRange, rootDir).catch(() => []);
-  const files = netFiles.map((file) => ({ ...file, status: byPath.get(file.path) ?? file.status }));
   return {
     files,
     stats: {
@@ -464,7 +463,7 @@ async function collectDoneTaskFiles(task: DoneTaskAggregationTask, scopedStore: 
       additions: files.reduce((sum, file) => sum + file.additions, 0),
       deletions: files.reduce((sum, file) => sum + file.deletions, 0),
     },
-    usedAggregation: true,
+    usedAggregation,
   };
 }
 
@@ -605,7 +604,7 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
 
         const aggregated = await collectDoneTaskFiles(doneTaskForDiff, scopedStore);
         const expectedFilesChanged = task.mergeDetails?.filesChanged ?? 0;
-        const aggregationLooksComplete = expectedFilesChanged <= 0 || aggregated.stats.filesChanged === expectedFilesChanged;
+        const aggregationLooksComplete = expectedFilesChanged <= 0 || aggregated.stats.filesChanged >= expectedFilesChanged;
 
         if (aggregated.usedAggregation && aggregated.files.length > 0 && aggregationLooksComplete) {
           res.json({
@@ -824,7 +823,7 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
 
         const aggregated = await collectDoneTaskFiles(doneTaskForDiff, scopedStore);
         const expectedFilesChanged = task.mergeDetails?.filesChanged ?? 0;
-        const aggregationLooksComplete = expectedFilesChanged <= 0 || aggregated.stats.filesChanged === expectedFilesChanged;
+        const aggregationLooksComplete = expectedFilesChanged <= 0 || aggregated.stats.filesChanged >= expectedFilesChanged;
 
         if (aggregated.usedAggregation && aggregated.files.length > 0 && aggregationLooksComplete) {
           res.json(aggregated.files.map((file) => ({ path: file.path, status: file.status, diff: file.patch })));
