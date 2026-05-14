@@ -232,7 +232,28 @@ function isAutoClaimRelevantTasksEnabled(agent: Agent): boolean {
   return runtimeConfig.autoClaimRelevantTasks !== false;
 }
 
-function taskRelevanceScore(agent: Agent, task: TaskDetail): number {
+type RelevanceScorableTask = Pick<TaskDetail, "title" | "description">;
+
+const agentSoulWordsCache = new Map<string, { soulSnapshot: string; words: readonly string[] }>();
+
+export function getAgentSoulWords(agent: Pick<Agent, "id" | "soul">): readonly string[] {
+  const soulSnapshot = agent.soul ?? "";
+  const existing = agentSoulWordsCache.get(agent.id);
+  if (existing && existing.soulSnapshot === soulSnapshot) {
+    return existing.words;
+  }
+
+  const words = soulSnapshot
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length >= 4)
+    .slice(0, 8);
+
+  agentSoulWordsCache.set(agent.id, { soulSnapshot, words });
+  return words;
+}
+
+export function taskRelevanceScore(agent: Agent, task: RelevanceScorableTask): number {
   const haystack = `${task.title ?? ""} ${task.description}`.toLowerCase();
   let score = 0;
 
@@ -241,11 +262,7 @@ function taskRelevanceScore(agent: Agent, task: TaskDetail): number {
     score += 3;
   }
 
-  const soulWords = (agent.soul ?? "")
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((word) => word.length >= 4)
-    .slice(0, 8);
+  const soulWords = getAgentSoulWords(agent);
 
   for (const word of soulWords) {
     if (haystack.includes(word)) {

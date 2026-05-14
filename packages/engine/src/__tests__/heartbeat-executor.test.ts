@@ -8,6 +8,7 @@ import {
   HEARTBEAT_NO_TASK_SYSTEM_PROMPT,
   HEARTBEAT_PROCEDURE,
   HEARTBEAT_NO_TASK_PROCEDURE,
+  getAgentSoulWords,
 } from "../agent-heartbeat.js";
 import { AgentLogger } from "../agent-logger.js";
 import type { AgentStore, AgentHeartbeatRun, TaskStore, TaskDetail, Agent, MessageStore, Message } from "@fusion/core";
@@ -34,6 +35,28 @@ const mockedAcquireTaskWorktree = vi.mocked(acquireTaskWorktree);
 vi.mock("../worktree-acquisition.js", () => ({
   acquireTaskWorktree: vi.fn(),
 }));
+
+describe("getAgentSoulWords", () => {
+  it("memoizes soul words for repeated calls", () => {
+    const agent = { id: "agent-memo-1", soul: "Focus reliability automation and clarity" } as Agent;
+
+    const first = getAgentSoulWords(agent);
+    const second = getAgentSoulWords(agent);
+
+    expect(second).toBe(first);
+  });
+
+  it("recomputes when soul changes", () => {
+    const agent = { id: "agent-memo-2", soul: "Focus reliability automation" } as Agent;
+
+    const first = getAgentSoulWords(agent);
+    agent.soul = "Focus performance profiling";
+    const second = getAgentSoulWords(agent);
+
+    expect(second).not.toBe(first);
+    expect(second).toContain("performance");
+  });
+});
 
 describe("executeHeartbeat", () => {
   let mockTaskStore: TaskStore;
