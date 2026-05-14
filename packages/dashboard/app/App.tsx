@@ -372,7 +372,7 @@ function AppInner() {
   // Tasks hook with project context and search query
   // SSE is only enabled for board/list views to free connection slots for mission detail fetches
   const taskSseEnabled = taskView === "board" || taskView === "list";
-  const { tasks, createTask, moveTask, pauseTask, deleteTask, mergeTask, retryTask, resetTask, updateTask, duplicateTask, archiveTask, unarchiveTask, archiveAllDone, loadArchivedTasks, ingestCreatedTasks, lastFetchTimeMs } = useTasks(
+  const { tasks, createTask, moveTask, pauseTask, unpauseTask, deleteTask, mergeTask, retryTask, resetTask, updateTask, duplicateTask, archiveTask, unarchiveTask, archiveAllDone, loadArchivedTasks, ingestCreatedTasks, lastFetchTimeMs } = useTasks(
     {
       ...(currentProject ? { projectId: currentProject.id } : {}),
       searchQuery: searchQuery || undefined,
@@ -1556,6 +1556,9 @@ function AppInner() {
           onMoveTask={moveTask}
           onRetryTask={retryTask}
           onDeleteTask={deleteTask}
+          onPauseTask={pauseTask}
+          onUnpauseTask={unpauseTask}
+          onArchiveTask={archiveTask}
           onMergeTask={mergeTask}
           onResetTask={resetTask}
           onDuplicateTask={duplicateTask}

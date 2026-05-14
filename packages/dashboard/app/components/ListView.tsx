@@ -168,6 +168,9 @@ interface ListViewProps {
   onMoveTask: (id: string, column: Column, optionsOrPosition?: { preserveProgress?: boolean } | number) => Promise<Task>;
   onRetryTask?: (id: string) => Promise<Task>;
   onDeleteTask: (id: string, options?: { removeDependencyReferences?: boolean; githubIssueAction?: GithubIssueAction }) => Promise<Task>;
+  onPauseTask?: (id: string) => Promise<Task>;
+  onUnpauseTask?: (id: string) => Promise<Task>;
+  onArchiveTask?: (id: string) => Promise<Task>;
   onMergeTask: (id: string) => Promise<MergeResult>;
   onResetTask?: (id: string) => Promise<Task>;
   onDuplicateTask?: (id: string) => Promise<Task>;
@@ -229,6 +232,9 @@ export function ListView({
   onMoveTask,
   onRetryTask,
   onDeleteTask,
+  onPauseTask,
+  onUnpauseTask,
+  onArchiveTask,
   onMergeTask,
   onResetTask,
   onDuplicateTask,

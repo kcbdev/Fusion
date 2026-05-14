@@ -365,6 +365,10 @@ export function useTasks(options?: UseTasksOptions) {
     return normalizeTask(await api.pauseTask(id, projectId));
   }, [projectId]);
 
+  const unpauseTask = useCallback(async (id: string): Promise<Task> => {
+    return normalizeTask(await api.unpauseTask(id, projectId));
+  }, [projectId]);
+
   const deleteTask = useCallback(async (
     id: string,
     options?: { removeDependencyReferences?: boolean; githubIssueAction?: GithubIssueAction },
@@ -493,5 +497,5 @@ export function useTasks(options?: UseTasksOptions) {
     lastFetchTimeMs.current = Date.now();
   }, []);
 
-  return { tasks, createTask, moveTask, pauseTask, deleteTask, mergeTask, retryTask, resetTask, duplicateTask, updateTask, archiveTask, unarchiveTask, archiveAllDone, loadArchivedTasks, includeArchived, ingestCreatedTasks, lastFetchTimeMs: lastFetchTimeMs.current };
+  return { tasks, createTask, moveTask, pauseTask, unpauseTask, deleteTask, mergeTask, retryTask, resetTask, duplicateTask, updateTask, archiveTask, unarchiveTask, archiveAllDone, loadArchivedTasks, includeArchived, ingestCreatedTasks, lastFetchTimeMs: lastFetchTimeMs.current };
 }
