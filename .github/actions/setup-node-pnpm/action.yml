@@ -47,3 +47,13 @@ runs:
       if: ${{ inputs.skip-install != 'true' && steps.node-modules-cache.outputs.cache-hit != 'true' }}
       shell: bash
       run: pnpm install ${{ inputs.install-args }}
+
+    - name: Verify restored node_modules cache integrity
+      if: ${{ inputs.skip-install != 'true' && steps.node-modules-cache.outputs.cache-hit == 'true' }}
+      shell: bash
+      run: |
+        test -f node_modules/.modules.yaml || {
+          echo "ERROR: node_modules cache hit but node_modules/.modules.yaml is missing"
+          exit 1
+        }
+        pnpm -v
