@@ -1155,6 +1155,10 @@ export class TaskExecutor {
     store.on("task:moved", ({ task, from, to }) => {
       executorLog.log(`[event:task:moved] ${task.id}: ${from} → ${to}`);
       if (to === "in-progress") {
+        if (this.recoveringCompleted.has(task.id)) {
+          executorLog.log(`[event:task:moved] Skipping execute() for ${task.id} — completed-task recovery in progress`);
+          return;
+        }
         this.clearWorkflowRerunWatchdog(task.id);
         executorLog.log(`[event:task:moved] Initiating execute() for ${task.id}`);
         void (async () => {
@@ -2121,16 +2125,22 @@ export class TaskExecutor {
       }
       await this.persistTokenUsage(task.id);
       const originColumn = task.column;
-      if (originColumn === "todo") {
+      const promotedFromTodo = originColumn === "todo";
+      if (promotedFromTodo) {
+        this.recoveringCompleted.add(task.id);
         await this.store.moveTask(task.id, "in-progress");
       }
       await this.store.moveTask(task.id, "in-review");
+      if (promotedFromTodo) {
+        this.recoveringCompleted.delete(task.id);
+      }
       this.clearCompletedTaskWatchdog(task.id);
       await this.store.logEntry(task.id, `Auto-recovered: task work was complete but stranded in ${originColumn} — moved to in-review`);
       executorLog.log(`✓ ${task.id} auto-recovered completed task → in-review`);
       this.options.onComplete?.(task);
       return true;
     } catch (err: unknown) {
+      this.recoveringCompleted.delete(task.id);
       const errorMessage = err instanceof Error ? err.message : String(err);
       executorLog.error(`Failed to recover completed task ${task.id}: ${errorMessage}`);
       return false;
