@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -33,26 +33,139 @@ export const REQUIRED_BUILD_PACKAGES = [
   },
 ];
 
-export function detectMissingArtifacts(rootDir = process.cwd(), existsFn = existsSync) {
-  return REQUIRED_BUILD_PACKAGES.filter((pkg) =>
-    pkg.requiredArtifacts.some((artifactPath) => !existsFn(path.join(rootDir, artifactPath))),
-  );
+function collectNewestSourceMtimeMs(sourceDir, statFn, readdirFn) {
+  let newest = 0;
+  const stack = [sourceDir];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    let entries = [];
+    try {
+      entries = readdirFn(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (entry.name.startsWith(".")) continue;
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === "node_modules" || entry.name === "dist") continue;
+        stack.push(fullPath);
+        continue;
+      }
+
+      let stats;
+      try {
+        stats = statFn(fullPath);
+      } catch {
+        continue;
+      }
+      newest = Math.max(newest, stats.mtimeMs);
+    }
+  }
+
+  return newest;
 }
 
-function run(command, args, cwd) {
-  const result = spawnSync(command, args, { cwd, stdio: "inherit" });
+export function isStale(
+  pkgEntry,
+  rootDir = process.cwd(),
+  statFn = statSync,
+  readdirFn = readdirSync,
+  existsFn = existsSync,
+) {
+  if (!pkgEntry?.staleAgainstGlobs?.length) return false;
+
+  let minArtifactMtimeMs = Number.POSITIVE_INFINITY;
+  for (const artifactPath of pkgEntry.requiredArtifacts) {
+    const fullPath = path.join(rootDir, artifactPath);
+    if (!existsFn(fullPath)) continue;
+    let stats;
+    try {
+      stats = statFn(fullPath);
+    } catch {
+      continue;
+    }
+    minArtifactMtimeMs = Math.min(minArtifactMtimeMs, stats.mtimeMs);
+  }
+
+  if (!Number.isFinite(minArtifactMtimeMs)) return false;
+
+  let maxSourceMtimeMs = 0;
+  for (const { sourcePath } of pkgEntry.staleAgainstGlobs) {
+    const sourceDir = path.join(rootDir, sourcePath);
+    maxSourceMtimeMs = Math.max(maxSourceMtimeMs, collectNewestSourceMtimeMs(sourceDir, statFn, readdirFn));
+  }
+
+  return maxSourceMtimeMs > minArtifactMtimeMs;
+}
+
+export function detectMissingOrStaleArtifacts(
+  rootDir = process.cwd(),
+  existsFn = existsSync,
+  statFn = statSync,
+  readdirFn = readdirSync,
+) {
+  return REQUIRED_BUILD_PACKAGES.filter((pkg) => {
+    const missing = pkg.requiredArtifacts.some((artifactPath) => !existsFn(path.join(rootDir, artifactPath)));
+    if (missing) return true;
+    return isStale(pkg, rootDir, statFn, readdirFn, existsFn);
+  });
+}
+
+export function detectMissingArtifacts(rootDir = process.cwd(), existsFn = existsSync, statFn = statSync, readdirFn = readdirSync) {
+  return detectMissingOrStaleArtifacts(rootDir, existsFn, statFn, readdirFn);
+}
+
+function writeRemediation(stderrWrite, pkgNames, filterCommand) {
+  stderrWrite("\n[test-bootstrap] FAILED: workspace dist artifact rebuild did not complete.\n");
+  stderrWrite(`[test-bootstrap] command: ${filterCommand}\n`);
+  stderrWrite(`[test-bootstrap] affected packages: ${pkgNames.join(", ")}\n`);
+  stderrWrite("[test-bootstrap] next steps:\n");
+  stderrWrite("  1) pnpm install --frozen-lockfile\n");
+  stderrWrite("  2) pnpm --filter <pkg> build\n");
+  stderrWrite("  3) delete <plugin>/dist and re-run pnpm test\n");
+  stderrWrite("[test-bootstrap] reference: FN-4232\n\n");
+}
+
+function run(
+  command,
+  args,
+  cwd,
+  {
+    exitFn = process.exit,
+    stderrWrite = process.stderr.write.bind(process.stderr),
+    spawnFn = spawnSync,
+  } = {},
+) {
+  const result = spawnFn(command, args, { cwd, stdio: "inherit" });
   if (result.status !== 0) {
-    process.exit(result.status ?? 1);
+    const filterCommand = `${command} ${args.join(" ")}`;
+    const packageNames = args.filter((entry, index) => args[index - 1] === "--filter");
+    writeRemediation(stderrWrite, packageNames, filterCommand);
+    exitFn(result.status ?? 1);
   }
 }
 
-export function ensureTestArtifacts(rootDir = process.cwd(), runFn = run, existsFn = existsSync) {
-  const missing = detectMissingArtifacts(rootDir, existsFn);
-  if (missing.length === 0) return [];
+export function ensureTestArtifacts(
+  rootDir = process.cwd(),
+  runFn = run,
+  existsFn = existsSync,
+  statFn = statSync,
+  readdirFn = readdirSync,
+  runOptions = {},
+) {
+  const missingOrStale = detectMissingOrStaleArtifacts(rootDir, existsFn, statFn, readdirFn);
+  if (missingOrStale.length === 0) return [];
 
-  const names = missing.map((pkg) => pkg.name);
-  console.log(`[test-bootstrap] building missing dist artifacts: ${names.join(", ")}`);
-  runFn("pnpm", [...names.flatMap((name) => ["--filter", name]), "build"], rootDir);
+  const names = missingOrStale.map((pkg) => pkg.name);
+  console.log(`[test-bootstrap] rebuilding workspace dist artifacts (missing or stale): ${names.join(", ")}`);
+  if (runFn === run) {
+    runFn("pnpm", [...names.flatMap((name) => ["--filter", name]), "build"], rootDir, runOptions);
+  } else {
+    runFn("pnpm", [...names.flatMap((name) => ["--filter", name]), "build"], rootDir);
+  }
   return names;
 }
 

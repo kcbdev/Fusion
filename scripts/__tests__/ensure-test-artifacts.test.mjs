@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   detectMissingArtifacts,
+  detectMissingOrStaleArtifacts,
   ensureTestArtifacts,
   REQUIRED_BUILD_PACKAGES,
 } from "../ensure-test-artifacts.mjs";
@@ -100,4 +101,145 @@ test("ensureTestArtifacts rebuilds openclaw for incomplete dist artifacts", () =
   assert.equal(calls.length, 1);
   assert.equal(calls[0].cmd, "pnpm");
   assert.deepEqual(calls[0].args, ["--filter", "@fusion-plugin-examples/openclaw-runtime", "build"]);
+});
+
+function createStaleFs(pluginName, { artifactMtime = 1000, sourceMtime = 2000 } = {}) {
+  const sourceDir = `/repo/plugins/${pluginName}/src`;
+  const sourceFile = `${sourceDir}/index.ts`;
+
+  const statFn = (fullPath) => {
+    if (fullPath.includes("/dist/")) return { mtimeMs: artifactMtime };
+    if (fullPath === sourceFile) return { mtimeMs: sourceMtime };
+    return { mtimeMs: 0 };
+  };
+
+  const readdirFn = (dirPath) => {
+    if (dirPath === sourceDir) {
+      return [{ name: "index.ts", isDirectory: () => false }];
+    }
+    return [];
+  };
+
+  return { statFn, readdirFn };
+}
+
+test("detectMissingOrStaleArtifacts returns hermes when dist artifact is older than src", () => {
+  const { statFn, readdirFn } = createStaleFs("fusion-plugin-hermes-runtime", {
+    artifactMtime: 1000,
+    sourceMtime: 3000,
+  });
+
+  const result = detectMissingOrStaleArtifacts("/repo", () => true, statFn, readdirFn);
+  assert.ok(result.some((pkg) => pkg.name === "@fusion-plugin-examples/hermes-runtime"));
+});
+
+test("detectMissingOrStaleArtifacts does not flag hermes when dist is newer than src", () => {
+  const { statFn, readdirFn } = createStaleFs("fusion-plugin-hermes-runtime", {
+    artifactMtime: 4000,
+    sourceMtime: 2000,
+  });
+
+  const result = detectMissingOrStaleArtifacts("/repo", () => true, statFn, readdirFn);
+  assert.ok(!result.some((pkg) => pkg.name === "@fusion-plugin-examples/hermes-runtime"));
+});
+
+test("detectMissingOrStaleArtifacts covers all example plugins for staleness", async (t) => {
+  const cases = [
+    ["fusion-plugin-hermes-runtime", "@fusion-plugin-examples/hermes-runtime"],
+    ["fusion-plugin-openclaw-runtime", "@fusion-plugin-examples/openclaw-runtime"],
+    ["fusion-plugin-paperclip-runtime", "@fusion-plugin-examples/paperclip-runtime"],
+  ];
+
+  for (const [pluginName, pkgName] of cases) {
+    await t.test(pkgName, () => {
+      const { statFn, readdirFn } = createStaleFs(pluginName, { artifactMtime: 1000, sourceMtime: 3000 });
+      const result = detectMissingOrStaleArtifacts("/repo", () => true, statFn, readdirFn);
+      assert.ok(result.some((pkg) => pkg.name === pkgName));
+    });
+  }
+});
+
+test("detectMissingOrStaleArtifacts merges missing and stale results without duplicates", () => {
+  const { statFn, readdirFn } = createStaleFs("fusion-plugin-hermes-runtime", {
+    artifactMtime: 1000,
+    sourceMtime: 3000,
+  });
+
+  const result = detectMissingOrStaleArtifacts(
+    "/repo",
+    (fullPath) => !fullPath.endsWith("packages/dashboard/dist/index.js"),
+    statFn,
+    readdirFn,
+  );
+
+  const names = result.map((pkg) => pkg.name);
+  assert.ok(names.includes("@fusion/dashboard"));
+  assert.ok(names.includes("@fusion-plugin-examples/hermes-runtime"));
+  assert.equal(new Set(names).size, names.length);
+});
+
+test("detectMissingArtifacts alias returns same value as detectMissingOrStaleArtifacts", () => {
+  const { statFn, readdirFn } = createStaleFs("fusion-plugin-hermes-runtime", {
+    artifactMtime: 1000,
+    sourceMtime: 3000,
+  });
+
+  const aliasResult = detectMissingArtifacts("/repo", () => true, statFn, readdirFn);
+  const directResult = detectMissingOrStaleArtifacts("/repo", () => true, statFn, readdirFn);
+
+  assert.deepEqual(aliasResult.map((pkg) => pkg.name), directResult.map((pkg) => pkg.name));
+});
+
+test("ensureTestArtifacts invokes rebuild command for stale package", () => {
+  const { statFn, readdirFn } = createStaleFs("fusion-plugin-hermes-runtime", {
+    artifactMtime: 1000,
+    sourceMtime: 3000,
+  });
+  const calls = [];
+
+  const built = ensureTestArtifacts(
+    "/repo",
+    (cmd, args, cwd) => calls.push({ cmd, args, cwd }),
+    () => true,
+    statFn,
+    readdirFn,
+  );
+
+  assert.ok(built.includes("@fusion-plugin-examples/hermes-runtime"));
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].args, ["--filter", "@fusion-plugin-examples/hermes-runtime", "build"]);
+});
+
+test("ensureTestArtifacts writes FN-4232 remediation block to stderr on rebuild failure", () => {
+  const { statFn, readdirFn } = createStaleFs("fusion-plugin-hermes-runtime", {
+    artifactMtime: 1000,
+    sourceMtime: 3000,
+  });
+
+  let stderr = "";
+  let exitCode = null;
+
+  const built = ensureTestArtifacts(
+    "/repo",
+    undefined,
+    () => true,
+    statFn,
+    readdirFn,
+    {
+      spawnFn: () => ({ status: 2 }),
+      exitFn: (code) => {
+        exitCode = code;
+      },
+      stderrWrite: (chunk) => {
+        stderr += String(chunk);
+        return true;
+      },
+    },
+  );
+
+  assert.ok(built.includes("@fusion-plugin-examples/hermes-runtime"));
+  assert.equal(exitCode, 2);
+  assert.match(stderr, /@fusion-plugin-examples\/hermes-runtime/);
+  assert.match(stderr, /pnpm install --frozen-lockfile/);
+  assert.match(stderr, /FN-4232/);
 });
