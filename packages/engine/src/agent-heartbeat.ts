@@ -41,7 +41,7 @@ import type { AgentReflectionService } from "./agent-reflection.js";
 
 function adjustHeartbeatMemoryPrimer(basePrompt: string, mode: AgentMemoryInclusionMode): string {
   if (mode === "full") return basePrompt;
-  const memoryPrimer = /\nYou may receive an Agent Memory section and a Project Memory section\.[\s\S]*?repository pitfalls\.\n/;
+  const memoryPrimer = /\nYou may receive an Agent Memory section and a Project Memory section\.[\s\S]*?- Project Memory examples:[^\n]*\n/;
   if (mode === "off") return basePrompt.replace(memoryPrimer, "\n");
   return basePrompt.replace(
     memoryPrimer,
@@ -2057,6 +2057,16 @@ export class HeartbeatMonitor {
             });
           } catch (modeLogError) {
             heartbeatLog.warn(`Failed to append memory-mode transition run log for ${agentId}: ${modeLogError instanceof Error ? modeLogError.message : String(modeLogError)}`);
+          }
+          try {
+            await this.store.updateAgent(agentId, {
+              runtimeConfig: {
+                ...(agent.runtimeConfig ?? {}),
+                lastAgentMemoryInclusionMode: resolvedMemoryMode.mode,
+              },
+            });
+          } catch (modePersistError) {
+            heartbeatLog.warn(`Failed to persist memory-mode transition for ${agentId}: ${modePersistError instanceof Error ? modePersistError.message : String(modePersistError)}`);
           }
         }
 
