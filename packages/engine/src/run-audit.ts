@@ -79,6 +79,7 @@ export type GitMutationType =
   | "branch:auto-reclaim"
   | "branch:orphan-prune"
   | "branch:orphan-rescued"
+  | "branch:reanchor"
   | "stash:push"
   | "stash:pop";
 

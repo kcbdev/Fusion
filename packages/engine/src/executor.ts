@@ -44,8 +44,10 @@ import {
   BranchCrossContaminationError,
   assertCleanBranchAtBase,
   autoRecoverCrossContamination,
+  classifyBootstrapMisbinding,
   classifyForeignCommits,
   isBranchConflictError,
+  reanchorBranchToBase,
   inspectBranchConflict,
 } from "./branch-conflicts.js";
 import { AgentLogger } from "./agent-logger.js";
@@ -2656,7 +2658,18 @@ export class TaskExecutor {
       // that are attributed to OTHER tasks? Compute the merge-base fresh.
       const contaminationBaseRef = await this.resolveContaminationBaseRef(worktreePath);
       if (contaminationBaseRef) {
-        await assertCleanBranchAtBase(this.rootDir, acquisition.branch, contaminationBaseRef, task.id);
+        try {
+          await assertCleanBranchAtBase(this.rootDir, acquisition.branch, contaminationBaseRef, task.id);
+        } catch (contaminationError: unknown) {
+          if (!(contaminationError instanceof BranchCrossContaminationError)) {
+            throw contaminationError;
+          }
+          const recovered = await this.tryBootstrapMisbindingRecovery(task, contaminationError, audit);
+          if (recovered) {
+            return;
+          }
+          throw contaminationError;
+        }
       }
 
       const expectedRoot = canonicalizePath(this.rootDir);
@@ -4164,6 +4177,11 @@ export class TaskExecutor {
           await this.store.logEntry(task.id, `[recovery] branch cross-contamination detected on ${err.branchName} since ${err.baseSha}: ${details}`, undefined, this.currentRunContext);
 
           try {
+            const recoveredBootstrapMisbinding = await this.tryBootstrapMisbindingRecovery(task, err, audit);
+            if (recoveredBootstrapMisbinding) {
+              return;
+            }
+
             const classified = await classifyForeignCommits({
               repoDir: this.rootDir,
               branchName: err.branchName,
@@ -6941,6 +6959,65 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
 
   private readonly MAX_AUTO_RECOVERY_ATTEMPTS = 3;
   private readonly BRANCH_CONFLICT_TRIPWIRE_THRESHOLD = 5;
+
+  private async tryBootstrapMisbindingRecovery(
+    task: Task,
+    contamination: BranchCrossContaminationError,
+    audit: ReturnType<typeof createRunAuditor>,
+  ): Promise<boolean> {
+    const bootstrap = await classifyBootstrapMisbinding({
+      repoDir: this.rootDir,
+      branchName: contamination.branchName,
+      baseSha: contamination.baseSha,
+      taskId: task.id,
+      foreignCommits: contamination.foreignCommits,
+    });
+
+    if (!bootstrap.isBootstrapMisbinding) {
+      return false;
+    }
+
+    const worktreePath = task.worktree;
+    if (!worktreePath || !await isUsableTaskWorktree(this.rootDir, worktreePath)) {
+      await this.store.logEntry(task.id, `[recovery] bootstrap misbinding detected but worktree unavailable for re-anchor: ${worktreePath ?? "none"}`, undefined, this.currentRunContext);
+      return false;
+    }
+
+    await this.store.logEntry(task.id, `[recovery] bootstrap-time branch misbinding detected on ${contamination.branchName}: 0 own commits, re-anchoring to ${contamination.baseSha}`, undefined, this.currentRunContext);
+
+    try {
+      const reanchor = await reanchorBranchToBase({
+        repoDir: this.rootDir,
+        worktreePath,
+        branchName: contamination.branchName,
+        baseSha: contamination.baseSha,
+        taskId: task.id,
+      });
+      await audit.git({
+        type: "branch:reanchor",
+        target: contamination.branchName,
+        metadata: {
+          taskId: task.id,
+          baseSha: contamination.baseSha,
+          previousTipSha: reanchor.previousTipSha,
+          newTipSha: reanchor.newTipSha,
+          trigger: "bootstrap-misbinding",
+        },
+      });
+      await this.store.updateTask(task.id, {
+        recoveryRetryCount: null,
+        nextRecoveryAt: null,
+        error: null,
+        paused: false,
+        pausedReason: null,
+      });
+      await this.store.moveTask(task.id, "todo", { preserveResumeState: false, preserveWorktree: true });
+      return true;
+    } catch (error) {
+      await this.store.logEntry(task.id, `[recovery] bootstrap re-anchor failed; falling back to contamination safety path: ${formatError(error)}`, undefined, this.currentRunContext);
+      return false;
+    }
+  }
 
   private async reclaimExistingWorktree(
     task: Task,
