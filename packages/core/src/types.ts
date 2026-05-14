@@ -1100,9 +1100,11 @@ export interface TaskTokenUsage {
   inputTokens: number;
   /** Cumulative completion/output tokens consumed by the task. */
   outputTokens: number;
-  /** Cumulative cache-hit tokens reported by providers. */
+  /** Cumulative cache-read (cache hit) tokens reported by providers. */
   cachedTokens: number;
-  /** Cumulative total tokens for the task (input + output + cached semantics per provider reporting). */
+  /** Cumulative cache-write tokens reported by providers. */
+  cacheWriteTokens: number;
+  /** Cumulative total tokens for the task (input + output + cache-read + cache-write). */
   totalTokens: number;
   /** ISO-8601 timestamp of the first recorded usage event for this task. */
   firstUsedAt: string;
@@ -4165,7 +4167,7 @@ export interface AgentHeartbeatRun {
   /** Session ID after execution */
   sessionIdAfter?: string;
   /** Token usage for this run */
-  usageJson?: { inputTokens: number; outputTokens: number; cachedTokens: number };
+  usageJson?: { inputTokens: number; outputTokens: number; cachedTokens: number; cacheWriteTokens: number };
   /** Structured result from the run */
   resultJson?: Record<string, unknown>;
   /** Snapshot of context at run start (taskId, projectId, etc.).

@@ -24,7 +24,8 @@ describe("TaskStore", () => {
         inputTokens: 120,
         outputTokens: 45,
         cachedTokens: 30,
-        totalTokens: 195,
+        cacheWriteTokens: 9,
+        totalTokens: 204,
         firstUsedAt: "2026-04-23T10:00:00.000Z",
         lastUsedAt: "2026-04-23T10:05:00.000Z",
       };
@@ -47,7 +48,8 @@ describe("TaskStore", () => {
         inputTokens: 210,
         outputTokens: 80,
         cachedTokens: 40,
-        totalTokens: 330,
+        cacheWriteTokens: 15,
+        totalTokens: 345,
         firstUsedAt: "2026-04-23T12:00:00.000Z",
         lastUsedAt: "2026-04-23T12:30:00.000Z",
       };
@@ -70,7 +72,8 @@ describe("TaskStore", () => {
         inputTokens: 300,
         outputTokens: 120,
         cachedTokens: 50,
-        totalTokens: 470,
+        cacheWriteTokens: 25,
+        totalTokens: 495,
         firstUsedAt: "2026-04-23T13:00:00.000Z",
         lastUsedAt: "2026-04-23T13:45:00.000Z",
       };
@@ -87,6 +90,27 @@ describe("TaskStore", () => {
       expect(reloaded.tokenUsage).toEqual(tokenUsage);
     });
 
+    it("round-trips cacheWriteTokens specifically", async () => {
+      const tokenUsage = {
+        inputTokens: 1,
+        outputTokens: 2,
+        cachedTokens: 3,
+        cacheWriteTokens: 1234,
+        totalTokens: 1240,
+        firstUsedAt: "2026-04-23T15:00:00.000Z",
+        lastUsedAt: "2026-04-23T15:01:00.000Z",
+      };
+
+      const task = await harness.store().createTask({
+        description: "Cache write token round-trip",
+        tokenUsage,
+      });
+
+      const detail = await harness.store().getTask(task.id);
+      expect(detail.tokenUsage?.cacheWriteTokens).toBe(1234);
+      expect(detail.tokenUsage).toEqual(tokenUsage);
+    });
+
     it("clears token usage via null update and keeps it absent after reload", async () => {
       // Cross-instance persistence test — see counterpart above.
       harness.store().close();
@@ -98,7 +122,8 @@ describe("TaskStore", () => {
           inputTokens: 99,
           outputTokens: 44,
           cachedTokens: 11,
-          totalTokens: 154,
+          cacheWriteTokens: 3,
+          totalTokens: 157,
           firstUsedAt: "2026-04-23T14:00:00.000Z",
           lastUsedAt: "2026-04-23T14:01:00.000Z",
         },
