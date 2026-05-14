@@ -5,6 +5,7 @@ const mockChatStore = {
   listRoomMembers: vi.fn(),
   createSession: vi.fn(),
   getRoom: vi.fn(),
+  getRoomMessages: vi.fn(),
   addRoomMessage: vi.fn(),
 };
 
@@ -18,6 +19,7 @@ describe("ChatManager room hybrid responder resolution", () => {
     vi.clearAllMocks();
     __resetChatState();
     mockChatStore.getRoom.mockReturnValue({ id: "room-1", name: "room-1" });
+    mockChatStore.getRoomMessages.mockReturnValue([]);
     mockChatStore.addRoomMessage.mockImplementation((_roomId: string, input: any) => ({
       id: `msg-${mockChatStore.addRoomMessage.mock.calls.length}`,
       roomId: "room-1",

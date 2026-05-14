@@ -1158,7 +1158,7 @@ describe("ChatManager.sendMessage", () => {
     expect(mockAgentStore.getAgent).toHaveBeenCalledWith("agent-001");
     expect(createOptions.systemPrompt).toContain("Be calm and precise.");
     expect(createOptions.systemPrompt).toContain("Your chat reply is the primary response to the user.");
-    expect(createOptions.systemPrompt).toContain("Only use `fn_send_message` when the user explicitly asks");
+    expect(createOptions.systemPrompt).toContain("Use `fn_send_message` only when either (a) the user explicitly asks");
   });
 
   it("includes guidance to avoid double-sending mailbox copies by default", async () => {
@@ -1180,7 +1180,7 @@ describe("ChatManager.sendMessage", () => {
     await chatManager.sendMessage("chat-001", "Hello");
 
     expect(createOptions.systemPrompt).toContain("Do not also call `fn_send_message` with the same content");
-    expect(createOptions.systemPrompt).toContain("Only use `fn_send_message` when the user explicitly asks for mailbox/inbox/notification delivery");
+    expect(createOptions.systemPrompt).toContain("Use `fn_send_message` only when either (a) the user explicitly asks for mailbox/inbox/notification delivery");
   });
 
   it("passes enriched system prompt with agent memory when agent context is available", async () => {
