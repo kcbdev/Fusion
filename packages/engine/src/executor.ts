@@ -4335,9 +4335,8 @@ export class TaskExecutor {
           this.stuckAborted.delete(task.id);
           this.userCanceledTaskIds.delete(task.id);
           await this.store.logEntry(task.id, "Execution canceled by user — leaving task in todo");
-          return;
-        }
-        try {
+        } else {
+          try {
           // Re-read latest task state. While this execute() invocation was
           // unwinding, self-healing (e.g. recoverCompletedTasks) may have
           // already transitioned the task to in-review or done. Continuing
@@ -4388,9 +4387,10 @@ export class TaskExecutor {
               executorLog.log(`${task.id} already in todo — skipping redundant move`);
             }
           }
-        } catch (err: unknown) {
-          const errorMessage = err instanceof Error ? err.message : String(err);
-          executorLog.error(`Failed to requeue stuck task ${task.id}: ${errorMessage}`);
+          } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            executorLog.error(`Failed to requeue stuck task ${task.id}: ${errorMessage}`);
+          }
         }
       }
     }
