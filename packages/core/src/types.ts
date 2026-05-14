@@ -1484,6 +1484,8 @@ export interface TaskCreateInput {
   column?: Column;
   dependencies?: string[];
   breakIntoSubtasks?: boolean;
+  /** When true, this task is expected to complete without creating git commits. */
+  noCommitsExpected?: boolean;
   /** IDs of workflow steps to enable for this task */
   enabledWorkflowSteps?: string[];
   /** Model preset selected during task creation. Presets resolve to concrete model overrides at creation time. */
