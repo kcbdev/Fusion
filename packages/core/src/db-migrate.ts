@@ -190,7 +190,7 @@ async function migrateConfig(fusionDir: string, db: Database): Promise<void> {
       mode,
       phase,
       mode === "prompt" ? step.prompt || "" : "",
-      step.gateMode ?? (mode === "script" ? "gate" : "advisory"),
+      step.gateMode ?? "advisory",
       mode === "prompt" ? step.toolMode ?? null : null,
       mode === "script" ? step.scriptName ?? null : null,
       step.enabled === false ? 0 : 1,

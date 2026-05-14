@@ -2637,7 +2637,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       phase: row.phase === "post-merge" ? "post-merge" : "pre-merge",
       gateMode: row.gateMode === "advisory" || row.gateMode === "gate"
         ? row.gateMode
-        : (row.mode === "script" ? "gate" : "advisory"),
+        : "advisory",
       prompt: row.prompt || "",
       toolMode: row.toolMode === "coding" || row.toolMode === "readonly" ? row.toolMode : undefined,
       scriptName: row.scriptName ?? undefined,
@@ -2680,7 +2680,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       normalized.phase = undefined;
     }
     if (!Object.prototype.hasOwnProperty.call(legacy, "gateMode")) {
-      normalized.gateMode = normalized.mode === "script" ? "gate" : "advisory";
+      normalized.gateMode = "advisory";
     }
 
     return normalized;
@@ -7208,7 +7208,7 @@ ${stepsSection}`;
       const id = `WS-${String(nextWsId).padStart(3, "0")}`;
 
       const mode = input.mode || "prompt";
-      const gateMode = input.gateMode || (mode === "script" ? "gate" : "advisory");
+      const gateMode = input.gateMode || "advisory";
 
       // Validate: script mode requires scriptName
       if (mode === "script" && !input.scriptName?.trim()) {
@@ -7304,7 +7304,7 @@ ${stepsSection}`;
       description: entry.template.description,
       mode: entry.template.mode ?? "prompt",
       phase: entry.template.phase ?? "pre-merge",
-      gateMode: entry.template.gateMode ?? ((entry.template.mode ?? "prompt") === "script" ? "gate" : "advisory"),
+      gateMode: entry.template.gateMode ?? "advisory",
       prompt: entry.template.prompt ?? "",
       scriptName: entry.template.scriptName,
       toolMode: entry.template.toolMode,
