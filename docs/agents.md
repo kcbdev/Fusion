@@ -1273,7 +1273,7 @@ Heartbeat events are also appended to `.fusion/agents/{agentId}-heartbeats.jsonl
 
 ### Thinking/Reasoning Log Persistence
 
-By default, `thinking`/reasoning agent log entries are discarded after each run. The `persistAgentThinkingLogPermanent` and `persistAgentThinkingLogEphemeral` project settings (both `boolean`, default `false`) control whether these entries are persisted for permanent and ephemeral agents respectively. A legacy `persistAgentThinkingLog` fallback is also supported. When disabled, only thinking rows are suppressed; normal assistant text and tool rows are unchanged. See the [settings reference](./settings-reference.md) for full configuration details.
+`persistAgentThinkingLog` is a `boolean` setting with a default of `false` (legacy alias for the granular persistence keys). It controls whether `thinking`/reasoning agent-log rows are persisted across agent roles (executor, reviewer, merger, triage, and step-session). When disabled (the default), only `thinking` rows are suppressed; normal assistant text output and tool rows are unchanged. See the [settings reference](./settings-reference.md) for full configuration details.
 
 ### Stopping Runs
 
