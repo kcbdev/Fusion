@@ -3263,7 +3263,8 @@ export class Database {
     if (version < 76) {
       this.applyMigration(76, () => {
         this.addColumnIfMissing("workflow_steps", "gateMode", "TEXT NOT NULL DEFAULT 'advisory'");
-        this.db.exec("UPDATE workflow_steps SET gateMode = CASE WHEN mode = 'script' THEN 'gate' ELSE 'advisory' END");
+        // FN-4368: advisory-by-default for all legacy workflow_steps rows; users opt in to 'gate' via UI.
+        this.db.exec("UPDATE workflow_steps SET gateMode = 'advisory'");
       });
     }
 
