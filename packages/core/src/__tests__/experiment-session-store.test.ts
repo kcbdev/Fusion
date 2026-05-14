@@ -158,6 +158,23 @@ describe("ExperimentSessionStore", () => {
     expect(onRecord).not.toHaveBeenCalled();
   });
 
+  it("updates run payload patch additively", () => {
+    const session = store.createSession({ name: "p", metric: { name: "x", direction: "maximize" } });
+    const run = store.appendRecord(session.id, {
+      type: "run",
+      payload: { primaryMetric: 9, secondaryMetrics: [], status: "keep" },
+    });
+
+    const updated = store.updateRecordPayload(run.id, { commit: "abc123" });
+    expect(updated.payload).toEqual({
+      primaryMetric: 9,
+      secondaryMetrics: [],
+      status: "keep",
+      commit: "abc123",
+    });
+    expect(store.getRecord(run.id)?.payload).toEqual(updated.payload);
+  });
+
   it("recordKept is idempotent", () => {
     const session = store.createSession({ name: "k", metric: { name: "x", direction: "maximize" } });
     const run = store.appendRecord(session.id, {

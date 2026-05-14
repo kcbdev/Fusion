@@ -270,6 +270,28 @@ export class ExperimentSessionStore extends EventEmitter<ExperimentSessionStoreE
     return this.updateSession(session.id, { bestRunId: runRecordId });
   }
 
+  updateRecordPayload(recordId: string, patch: Partial<ExperimentSessionRecord["payload"]>): ExperimentSessionRecord {
+    const record = this.getRecord(recordId);
+    if (!record) throw new Error(`Experiment record not found: ${recordId}`);
+
+    const updated = {
+      ...record,
+      payload: {
+        ...record.payload,
+        ...patch,
+      },
+    } as ExperimentSessionRecord;
+
+    this.db.prepare(`
+      UPDATE experiment_session_records
+      SET payload = ?
+      WHERE id = ?
+    `).run(toJson(updated.payload), recordId);
+
+    this.db.bumpLastModified();
+    return updated;
+  }
+
   recordKept(sessionId: string, runRecordId: string): ExperimentSession {
     const session = this.assertRunRecordOwnership(sessionId, runRecordId);
     const keptRunIds = session.keptRunIds.includes(runRecordId)

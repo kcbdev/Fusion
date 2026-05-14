@@ -115,6 +115,19 @@ export { isUsageLimitError, UsageLimitPauser } from "./usage-limit-detector.js";
 export { withRateLimitRetry } from "./rate-limit-retry.js";
 export { ResearchOrchestrator, type ResearchOrchestratorOptions, type ResearchOrchestratorStatus, type ResearchOrchestratorStartOptions } from "./research-orchestrator.js";
 export {
+  ExperimentExecutor,
+  ExperimentMaxIterationsError,
+  ExperimentGitNotConfiguredError,
+  ExperimentRevertConflictError,
+  defaultGitOps,
+  type ExperimentExecutorOptions,
+  type ExperimentExecutorStatus,
+  type InitExperimentInput,
+  type RunExperimentInput,
+  type RunExperimentResult,
+  type LogExperimentInput,
+} from "./experiment-executor.js";
+export {
   ResearchStepRunner,
   ResearchStepTimeoutError,
   ResearchStepAbortError,
