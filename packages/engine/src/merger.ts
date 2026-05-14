@@ -4284,7 +4284,35 @@ async function ensureTaskTrailersOnHead(rootDir: string, task: Pick<Task, "id"> 
   }
 }
 
-type CherryPickCommitResult = { landed: boolean };
+type CherryPickCommitResult = { landed: true } | { landed: false; reason: "empty" };
+
+type CherryPickAttemptResult =
+  | { kind: "landed" }
+  | { kind: "empty"; recovery: "skip" | "abort-reset" };
+
+async function runCherryPickWithEmptySkip(rootDir: string, args: string): Promise<CherryPickAttemptResult> {
+  try {
+    await execAsync(`git cherry-pick ${args}`, { cwd: rootDir });
+    return { kind: "landed" };
+  } catch (error) {
+    if (!isEmptyCherryPickError(error)) {
+      throw error;
+    }
+
+    try {
+      await execAsync("git cherry-pick --skip", { cwd: rootDir });
+      return { kind: "empty", recovery: "skip" };
+    } catch {
+      try {
+        await execAsync("git cherry-pick --abort", { cwd: rootDir });
+      } catch {
+        // best effort
+      }
+      await execAsync("git reset --hard HEAD", { cwd: rootDir });
+      return { kind: "empty", recovery: "abort-reset" };
+    }
+  }
+}
 
 export function isEmptyCherryPickError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
@@ -4331,23 +4359,13 @@ async function cherryPickCommitPreservingTaskTrailers(
   result: MergeResult,
 ): Promise<CherryPickCommitResult> {
   try {
-    await execAsync(`git cherry-pick ${quoteArg(commitSha)}`, { cwd: rootDir });
+    const initialPick = await runCherryPickWithEmptySkip(rootDir, quoteArg(commitSha));
+    if (initialPick.kind === "empty") {
+      return { landed: false, reason: "empty" };
+    }
   } catch (error) {
     const conflictedFiles = await getConflictedFiles(rootDir);
     if (conflictedFiles.length === 0) {
-      if (isEmptyCherryPickError(error)) {
-        try {
-          await execAsync("git cherry-pick --skip", { cwd: rootDir });
-        } catch {
-          try {
-            await execAsync("git cherry-pick --abort", { cwd: rootDir });
-          } catch {
-            // best effort
-          }
-          await execAsync("git reset --hard HEAD", { cwd: rootDir });
-        }
-        return { landed: false };
-      }
       throw error;
     }
 
@@ -4383,9 +4401,15 @@ async function cherryPickCommitPreservingTaskTrailers(
     }
 
     if (mergeConflictStrategy === "smart-prefer-main") {
-      await execAsync(`git cherry-pick -X ours ${quoteArg(commitSha)}`, { cwd: rootDir });
+      const fallbackPick = await runCherryPickWithEmptySkip(rootDir, `-X ours ${quoteArg(commitSha)}`);
+      if (fallbackPick.kind === "empty") {
+        return { landed: false, reason: "empty" };
+      }
     } else if (mergeConflictStrategy === "smart-prefer-branch") {
-      await execAsync(`git cherry-pick -X theirs ${quoteArg(commitSha)}`, { cwd: rootDir });
+      const fallbackPick = await runCherryPickWithEmptySkip(rootDir, `-X theirs ${quoteArg(commitSha)}`);
+      if (fallbackPick.kind === "empty") {
+        return { landed: false, reason: "empty" };
+      }
     } else {
       throw error;
     }
