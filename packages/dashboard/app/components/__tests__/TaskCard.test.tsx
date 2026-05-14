@@ -1818,6 +1818,18 @@ describe("TaskCard", () => {
     expect(container.querySelector(".card-time-indicator")).not.toBeNull();
   });
 
+  it("keeps GitHub badge sizing tokens aligned with card-time-indicator", () => {
+    const baseCss = loadAllAppCssBaseOnly();
+
+    expect(baseCss).toMatch(/\.card-github-badge\s*\{[^}]*padding:\s*var\(--space-xs\)\s+var\(--space-sm\);[^}]*\}/);
+    expect(baseCss).toMatch(/\.card-github-badge\s*\{[^}]*font-size:\s*0\.6875rem;[^}]*\}/);
+    expect(baseCss).toMatch(/\.card-github-badge\s*\{[^}]*gap:\s*var\(--space-xs\);[^}]*\}/);
+    expect(baseCss).toMatch(/\.card-github-badge\s*\{[^}]*font-family:\s*var\(--font-mono\);[^}]*\}/);
+
+    const fullCss = loadAllAppCss();
+    expect(fullCss).toMatch(/@media\s*\(max-width:\s*768px\)\s*\{[\s\S]*?\.card-github-badge\s*\{[^}]*font-size:\s*0\.625rem;[^}]*\}/);
+  });
+
   it("prefers done-task /diff filesChanged over mergeDetails.filesChanged", () => {
     useTaskDiffStatsMock.mockReturnValue({
       stats: { filesChanged: 4, additions: 10, deletions: 2 },

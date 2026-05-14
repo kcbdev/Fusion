@@ -27,7 +27,7 @@ export function GitHubBadge({ prInfo, issueInfo, onIssueRefresh: _onIssueRefresh
           target="_blank"
           rel="noopener noreferrer"
         >
-          <GitPullRequest size={12} />
+          <GitPullRequest size={11} />
           <span>#{prInfo.number}</span>
         </a>
       )}
@@ -39,7 +39,7 @@ export function GitHubBadge({ prInfo, issueInfo, onIssueRefresh: _onIssueRefresh
           target="_blank"
           rel="noopener noreferrer"
         >
-          <CircleDot size={12} />
+          <CircleDot size={11} />
           <span>#{issueInfo.number}</span>
         </a>
       )}

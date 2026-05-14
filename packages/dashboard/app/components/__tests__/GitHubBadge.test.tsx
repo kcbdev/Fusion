@@ -162,11 +162,29 @@ describe("GitHubBadge", () => {
       const badge = screen.getByRole("link", { name: "#42" });
       const styles = getComputedStyle(badge);
 
-      expect(styles.fontSize).toBe("9px");
+      expect(styles.fontSize).toBe("11px");
       const resolvedGap = styles.gap.startsWith("var(")
-        ? getComputedStyle(document.documentElement).getPropertyValue("--space-sm").trim()
+        ? getComputedStyle(document.documentElement).getPropertyValue("--space-xs").trim()
         : styles.gap;
-      expect(resolvedGap).toBe("8px");
+      expect(resolvedGap).toBe("4px");
+    });
+
+    it("renders PR icon at 11x11", () => {
+      const { container } = render(<GitHubBadge prInfo={mockPrInfo} />);
+
+      const icon = container.querySelector(".card-github-badge svg");
+      expect(icon).not.toBeNull();
+      expect(icon?.getAttribute("width")).toBe("11");
+      expect(icon?.getAttribute("height")).toBe("11");
+    });
+
+    it("renders Issue icon at 11x11", () => {
+      const { container } = render(<GitHubBadge issueInfo={mockIssueInfo} />);
+
+      const icon = container.querySelector(".card-github-badge svg");
+      expect(icon).not.toBeNull();
+      expect(icon?.getAttribute("width")).toBe("11");
+      expect(icon?.getAttribute("height")).toBe("11");
     });
   });
 
