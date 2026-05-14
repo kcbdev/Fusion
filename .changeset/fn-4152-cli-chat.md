@@ -1,5 +1,5 @@
 ---
-"@runfusion/fusion": minor
+"@runfusion/fusion": patch
 ---
 
-Add `fn chat [agent-id]` for interactive multi-turn chat with an agent from the CLI. Connects to a running `fn dashboard` / `fn serve` over its existing chat HTTP+SSE API and streams responses incrementally. Supports `--session <id>` to resume, `--url` / `--token` / `--no-auth` to target alternate servers, and stdin piping for scripted single-turn messages.
+Add `fn chat <agent-id>` for interactive REPL conversations with an agent from the CLI. Sends messages via the project's MessageStore (so a running `fn` / `fn serve` engine wakes the agent) and polls for replies.
