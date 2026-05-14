@@ -119,7 +119,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 74;
+const SCHEMA_VERSION = 75;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -561,6 +561,42 @@ CREATE TABLE IF NOT EXISTS research_run_events (
   FOREIGN KEY (runId) REFERENCES research_runs(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idxResearchRunEventsRunIdSeq ON research_run_events(runId, seq);
+
+CREATE TABLE IF NOT EXISTS experiment_sessions (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  projectId TEXT,
+  status TEXT NOT NULL,
+  metric TEXT NOT NULL,
+  currentSegment INTEGER NOT NULL DEFAULT 1,
+  maxIterations INTEGER,
+  workingDir TEXT,
+  baselineRunId TEXT,
+  bestRunId TEXT,
+  keptRunIds TEXT NOT NULL DEFAULT '[]',
+  tags TEXT NOT NULL DEFAULT '[]',
+  metadata TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  finalizedAt TEXT
+);
+CREATE INDEX IF NOT EXISTS idxExperimentSessionsStatus ON experiment_sessions(status);
+CREATE INDEX IF NOT EXISTS idxExperimentSessionsProject ON experiment_sessions(projectId);
+CREATE INDEX IF NOT EXISTS idxExperimentSessionsCreatedAt ON experiment_sessions(createdAt);
+
+CREATE TABLE IF NOT EXISTS experiment_session_records (
+  id TEXT PRIMARY KEY,
+  sessionId TEXT NOT NULL,
+  segment INTEGER NOT NULL,
+  seq INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY (sessionId) REFERENCES experiment_sessions(id) ON DELETE CASCADE,
+  UNIQUE(sessionId, seq)
+);
+CREATE INDEX IF NOT EXISTS idxExperimentRecordsSessionSegment ON experiment_session_records(sessionId, segment, seq);
+CREATE INDEX IF NOT EXISTS idxExperimentRecordsType ON experiment_session_records(sessionId, type);
 
 -- Eval run persistence (FN-3387)
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -3161,6 +3197,50 @@ export class Database {
     if (version < 74) {
       this.applyMigration(74, () => {
         this.addColumnIfMissing("tasks", "tokenUsageCacheWriteTokens", "INTEGER");
+      });
+    }
+
+    if (version < 75) {
+      this.applyMigration(75, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS experiment_sessions (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            projectId TEXT,
+            status TEXT NOT NULL,
+            metric TEXT NOT NULL,
+            currentSegment INTEGER NOT NULL DEFAULT 1,
+            maxIterations INTEGER,
+            workingDir TEXT,
+            baselineRunId TEXT,
+            bestRunId TEXT,
+            keptRunIds TEXT NOT NULL DEFAULT '[]',
+            tags TEXT NOT NULL DEFAULT '[]',
+            metadata TEXT,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL,
+            finalizedAt TEXT
+          )
+        `);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxExperimentSessionsStatus ON experiment_sessions(status)`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxExperimentSessionsProject ON experiment_sessions(projectId)`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxExperimentSessionsCreatedAt ON experiment_sessions(createdAt)`);
+
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS experiment_session_records (
+            id TEXT PRIMARY KEY,
+            sessionId TEXT NOT NULL,
+            segment INTEGER NOT NULL,
+            seq INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            createdAt TEXT NOT NULL,
+            FOREIGN KEY (sessionId) REFERENCES experiment_sessions(id) ON DELETE CASCADE,
+            UNIQUE(sessionId, seq)
+          )
+        `);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxExperimentRecordsSessionSegment ON experiment_session_records(sessionId, segment, seq)`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxExperimentRecordsType ON experiment_session_records(sessionId, type)`);
       });
     }
 

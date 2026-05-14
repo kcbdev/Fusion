@@ -185,6 +185,36 @@ export type { AutomationStoreEvents } from "./automation-store.js";
 export { runCommandAsync } from "./run-command.js";
 export type { RunCommandOptions, RunCommandResult } from "./run-command.js";
 export {
+  EXPERIMENT_SESSION_STATUSES,
+  EXPERIMENT_METRIC_DIRECTIONS,
+  EXPERIMENT_RECORD_TYPES,
+  EXPERIMENT_RUN_OUTCOMES,
+  isRunRecord,
+  isConfigRecord,
+  isHookRecord,
+  isFinalizeRecord,
+} from "./experiment-session-types.js";
+export type {
+  ExperimentSessionStatus,
+  ExperimentMetricDirection,
+  ExperimentMetricDefinition,
+  ExperimentRecordType,
+  ExperimentRunOutcome,
+  ExperimentSecondaryMetric,
+  ExperimentRunRecordPayload,
+  ExperimentConfigRecordPayload,
+  ExperimentHookRecordPayload,
+  ExperimentFinalizeRecordPayload,
+  ExperimentSessionRecord,
+  ExperimentSession,
+  ExperimentSessionCreateInput,
+  ExperimentSessionUpdateInput,
+  ExperimentSessionRecordAppendInput,
+  ExperimentSessionListOptions,
+  ExperimentSessionStoreEvents,
+} from "./experiment-session-types.js";
+export { ExperimentSessionStore } from "./experiment-session-store.js";
+export {
   detectFnBinary,
   FN_NPM_PACKAGE,
   FN_INSTALL_NPM,
