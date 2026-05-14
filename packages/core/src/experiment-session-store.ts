@@ -97,7 +97,7 @@ export class ExperimentSessionStore extends EventEmitter<ExperimentSessionStoreE
     }
     if (options.tag) {
       where.push("tags LIKE ?");
-      params.push(`%\"${options.tag}\"%`);
+      params.push(`%"${options.tag}"%`);
     }
     if (options.search) {
       where.push("(name LIKE ? OR COALESCE(workingDir, '') LIKE ?)");
