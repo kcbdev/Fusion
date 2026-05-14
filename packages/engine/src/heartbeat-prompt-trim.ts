@@ -30,16 +30,22 @@ export function trimPromptMd(prompt: string | undefined, template: HeartbeatProm
   return truncate(prompt, PROMPT_MD_CAP[template], TASK_TRUNCATION_MARKER);
 }
 
+const TRIGGERING_COMMENT_HEADING = "New comments since last run:";
+
 export function trimTriggeringComments(lines: string[], _template: HeartbeatPromptTemplate): string[] {
-  if (lines.length <= 3) {
+  const headingIndex = lines.indexOf(TRIGGERING_COMMENT_HEADING);
+  const headings = headingIndex >= 0 ? lines.slice(0, headingIndex + 1) : [];
+  const body = headingIndex >= 0 ? lines.slice(headingIndex + 1) : lines;
+
+  if (body.length <= 3) {
     return lines;
   }
 
-  const selected = lines.slice(-3);
+  const selected = body.slice(-3);
   const joined = selected.join("\n");
   if (joined.length <= 500) {
-    return selected;
+    return [...headings, ...selected];
   }
   const truncated = truncate(joined, 500, COMMENTS_TRUNCATION_MARKER);
-  return truncated.split("\n");
+  return [...headings, ...truncated.split("\n")];
 }

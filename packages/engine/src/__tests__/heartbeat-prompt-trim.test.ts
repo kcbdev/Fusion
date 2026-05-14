@@ -85,6 +85,17 @@ describe("trimTriggeringComments", () => {
     expect(trimTriggeringComments(lines, "default")).toEqual(["t3", "t4", "t5"]);
   });
 
+  it("preserves heading lines while trimming comment body", () => {
+    const headings = [
+      "",
+      "You were woken because of new comments on this task. Review them and take appropriate action.",
+      "Triggering comment type: task",
+      "New comments since last run:",
+    ];
+    const lines = [...headings, "c1", "c2", "c3", "c4", "c5"];
+    expect(trimTriggeringComments(lines, "compact")).toEqual([...headings, "c3", "c4", "c5"]);
+  });
+
   it("caps joined body at 500 chars and appends marker", () => {
     const lines = ["h1", "h2", `A${"z".repeat(600)}`, `B${"z".repeat(600)}`, `C${"z".repeat(600)}`];
     const trimmed = trimTriggeringComments(lines, "default");
