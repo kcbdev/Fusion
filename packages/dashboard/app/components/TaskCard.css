@@ -552,11 +552,31 @@
   margin-top: var(--space-xs);
 }
 
+.card-bottom-row {
+  margin-top: var(--space-sm);
+}
+
+.card-bottom-row--split {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.card-bottom-left-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.card-bottom-left-row:focus-within .card-send-back-btn {
+  opacity: 1;
+}
+
 .card-bottom-right-row {
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  margin-top: var(--space-sm);
   min-width: 0;
 }
 
@@ -1137,6 +1157,13 @@
   overflow: hidden;
 }
 
+.card-bottom-left-row .card-send-back-menu {
+  top: auto;
+  right: auto;
+  bottom: calc(100% + var(--space-xs));
+  left: 0;
+}
+
 .card-send-back-menu-item {
   display: block;
   width: 100%;
@@ -1259,8 +1286,12 @@
     font-size: 0.625rem;
   }
 
-  .card-bottom-right-row {
+  .card-bottom-row {
     margin-top: var(--space-xs);
+  }
+
+  .card-bottom-row--split {
+    gap: var(--space-xs);
   }
 
   /* Card: smaller status badges for 280px width */

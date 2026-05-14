@@ -801,6 +801,7 @@ function TaskCardComponent({
   const showTrackingIndicator = hasGithubTrackingLink
     && !hasMatchingIssueInfoBadge
     && !hasMatchingSourceIssue;
+  const showInReviewMoveControl = task.column === "in-review" && Boolean(onMoveTask);
   const branchMetadata = useMemo(() => getVisibleTaskCardBranches(task), [task.id, task.branch, task.baseBranch]);
   const hasBranchMetadata = Boolean(branchMetadata.branch || branchMetadata.baseBranch);
   const isAgentCreated = isAgentCreatedTask(task);
@@ -1610,35 +1611,6 @@ function TaskCardComponent({
               )}
             </div>
           )}
-          {task.column === "in-review" && onMoveTask && (
-            <div className="card-send-back" ref={sendBackRef}>
-              <button
-                className="card-send-back-btn"
-                onClick={handleSendBackClick}
-                title="Move task"
-                aria-label="Move task"
-                aria-haspopup="menu"
-                aria-expanded={showSendBackMenu}
-              >
-                Move
-                <ChevronDown size={10} />
-              </button>
-              {showSendBackMenu && (
-                <div className="card-send-back-menu" role="menu">
-                  {VALID_TRANSITIONS["in-review"].map((col) => (
-                    <button
-                      key={col}
-                      className="card-send-back-menu-item"
-                      role="menuitem"
-                      onClick={(e) => handleSendBackOptionClick(e, col)}
-                    >
-                      {col === "done" ? "Done (no merge)" : COLUMN_LABELS[col]}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
           {task.size && (
             <span className={`card-size-badge size-${task.size.toLowerCase()}`}>
               {task.size}
@@ -1850,20 +1822,55 @@ function TaskCardComponent({
           )}
         </div>
       )}
-      {showTrackingIndicator && githubTrackedIssue && (
-        <div className="card-bottom-right-row">
-          <a
-            className="card-github-tracking-chip card-github-tracking-link"
-            href={githubTrackedIssue.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={`Linked GitHub issue: ${githubTrackedIssue.owner}/${githubTrackedIssue.repo}#${githubTrackedIssue.number}`}
-            aria-label={`Linked GitHub issue #${githubTrackedIssue.number}`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <ProviderIcon provider="github" size="sm" />
-            <span>{`#${githubTrackedIssue.number}`}</span>
-          </a>
+      {(showInReviewMoveControl || (showTrackingIndicator && githubTrackedIssue)) && (
+        <div className={`card-bottom-row${showInReviewMoveControl && showTrackingIndicator ? " card-bottom-row--split" : ""}`}>
+          {showInReviewMoveControl && (
+            <div className="card-bottom-left-row">
+              <div className="card-send-back" ref={sendBackRef}>
+                <button
+                  className="card-send-back-btn"
+                  onClick={handleSendBackClick}
+                  title="Move task"
+                  aria-label="Move task"
+                  aria-haspopup="menu"
+                  aria-expanded={showSendBackMenu}
+                >
+                  Move
+                  <ChevronDown size={10} />
+                </button>
+                {showSendBackMenu && (
+                  <div className="card-send-back-menu" role="menu">
+                    {VALID_TRANSITIONS["in-review"].map((col) => (
+                      <button
+                        key={col}
+                        className="card-send-back-menu-item"
+                        role="menuitem"
+                        onClick={(e) => handleSendBackOptionClick(e, col)}
+                      >
+                        {col === "done" ? "Done (no merge)" : COLUMN_LABELS[col]}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {showTrackingIndicator && githubTrackedIssue && (
+            <div className="card-bottom-right-row">
+              <a
+                className="card-github-tracking-chip card-github-tracking-link"
+                href={githubTrackedIssue.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`Linked GitHub issue: ${githubTrackedIssue.owner}/${githubTrackedIssue.repo}#${githubTrackedIssue.number}`}
+                aria-label={`Linked GitHub issue #${githubTrackedIssue.number}`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ProviderIcon provider="github" size="sm" />
+                <span>{`#${githubTrackedIssue.number}`}</span>
+              </a>
+            </div>
+          )}
         </div>
       )}
       <PluginSlot slotId="task-card-badge" projectId={projectId} />

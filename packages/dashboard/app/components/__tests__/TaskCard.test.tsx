@@ -1281,6 +1281,48 @@ describe("TaskCard", () => {
     expect(actionsContainer?.contains(archiveBtn)).toBe(true);
   });
 
+  it("FN-4540 renders in-review Move control in card-bottom-left-row and keeps menu behavior", () => {
+    const onMoveTask = vi.fn();
+    const { container } = render(
+      <TaskCard
+        task={makeTask({ column: "in-review" })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onMoveTask={onMoveTask}
+      />,
+    );
+
+    const moveButton = screen.getByRole("button", { name: "Move task" });
+    const actionsContainer = container.querySelector(".card-header-actions");
+    const bottomLeft = moveButton.closest(".card-bottom-left-row");
+
+    expect(actionsContainer).not.toBeNull();
+    expect(actionsContainer?.contains(moveButton)).toBe(false);
+    expect(bottomLeft).not.toBeNull();
+
+    fireEvent.click(moveButton);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Done (no merge)" }));
+
+    expect(onMoveTask).toHaveBeenCalledWith("FN-001", "done", undefined);
+  });
+
+  it("FN-4540 keeps in-progress Send back control in card-header-actions", () => {
+    const { container } = render(
+      <TaskCard
+        task={makeTask({ column: "in-progress" })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onMoveTask={vi.fn()}
+      />,
+    );
+
+    const sendBackButton = screen.getByRole("button", { name: "Send back" });
+    const actionsContainer = container.querySelector(".card-header-actions");
+
+    expect(actionsContainer).not.toBeNull();
+    expect(actionsContainer?.contains(sendBackButton)).toBe(true);
+  });
+
   it("shows timer chip for in-progress cards summing workflow runtime + timed events", () => {
     const { container } = render(
       <TaskCard
