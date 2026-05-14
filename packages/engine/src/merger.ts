@@ -3517,6 +3517,7 @@ export async function commitOrAmendMergeWithFixes(
           rootDir,
           task: await store.getTask(taskId),
           resetLabel: "file-scope invariant violation",
+          auditor: audit,
         });
       }
       await runDiffVolumeGate({
@@ -3559,6 +3560,7 @@ export async function commitOrAmendMergeWithFixes(
         rootDir,
         task: await store.getTask(taskId),
         resetLabel: "file-scope invariant violation",
+        auditor: audit,
       });
     }
     await runDiffVolumeGate({
@@ -3774,6 +3776,7 @@ async function enforceSquashFileScopeInvariant(params: {
   rootDir: string;
   task: Task;
   resetLabel: string;
+  auditor?: RunAuditor;
 }): Promise<void> {
   try {
     await assertSquashOverlapsFileScope(params);
@@ -3788,6 +3791,23 @@ async function enforceSquashFileScopeInvariant(params: {
       formatFileScopeViolationAgentLog(error),
       "merger",
     );
+    if (params.auditor) {
+      try {
+        await params.auditor.git({
+          type: "merge:file-scope-violation",
+          target: params.taskId,
+          metadata: {
+            resetLabel: params.resetLabel,
+            stagedFiles: error.stagedFiles,
+            declaredScope: error.declaredScope,
+            stagedFileCount: error.stagedFiles.length,
+            declaredScopeCount: error.declaredScope.length,
+          },
+        });
+      } catch (auditErr) {
+        mergerLog.warn(`${params.taskId}: failed to emit run_audit event for FileScopeViolationError: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`);
+      }
+    }
     resetMergeWithWarn(params.rootDir, params.taskId, params.resetLabel);
     throw error;
   }
@@ -6493,6 +6513,7 @@ export async function aiMergeTask(
         preMergeRebaseFallthrough,
         attempt3BranchWinsFiles: preferBranchOnOverlapFiles,
         preAttemptHeadSha,
+        auditor: audit,
       }, aiTracker);
 
       if (success) {
@@ -7476,6 +7497,7 @@ interface MergeAttemptParams {
    *  suppress the unsafe `-X ours` Attempt 3. Carries the original rebase
    *  failure message for diagnostic context. */
   preMergeRebaseFallthrough?: string;
+  auditor?: RunAuditor;
   /** Under smart-prefer-main overlap protection, these files are restored from
    *  the task branch after the default `-X ours` squash so overlapping files
    *  keep the branch's hardening while non-overlapping files still prefer main. */
@@ -7659,6 +7681,7 @@ export async function executeMergeAttempt(
               rootDir,
               task: await store.getTask(taskId),
               resetLabel: "file-scope invariant violation",
+              auditor: params.auditor,
             });
             await runDiffVolumeGate({
               rootDir,
@@ -7796,6 +7819,7 @@ export async function executeMergeAttempt(
       rootDir,
       task: await store.getTask(taskId),
       resetLabel: "file-scope invariant violation",
+      auditor: params.auditor,
     });
     const agentResult = await runAiAgentForCommit({
       store,
@@ -8083,6 +8107,7 @@ async function finalizeSideStrategyAttempt(
     rootDir,
     task: await store.getTask(taskId),
     resetLabel: "file-scope invariant violation",
+    auditor: params.auditor,
   });
   await runDiffVolumeGate({
     rootDir,
