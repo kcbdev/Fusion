@@ -1402,3 +1402,24 @@ POST /api/agents/:id/ratings
 - [Workflow Steps](./workflow-steps.md)
 - [Settings Reference](./settings-reference.md)
 - [Architecture](./architecture.md)
+
+## Permission Policies
+
+Permanent-agent sensitive actions are gated across five categories:
+- `git_write`
+- `file_write_delete`
+- `command_execution`
+- `network_api`
+- `task_agent_mutation`
+
+Each category can be set to one disposition:
+- `allow`
+- `require-approval`
+- `block`
+
+Precedence:
+1. Per-agent permission policy override (Agent Detail → Settings → Permissions)
+2. Project default permission policy (`defaultAgentPermissionPolicy` in Project Settings → Agent Permissions)
+3. Built-in fallback preset (`unrestricted` / allow-all)
+
+Per-agent rows can inherit project defaults category-by-category.

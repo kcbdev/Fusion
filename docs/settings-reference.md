@@ -1144,3 +1144,25 @@ Fusion supports scoped automations and routines:
 **Settings that interact with scheduling:**
 - `autoBackupEnabled` / `autoBackupSchedule` — Backup automation respects scope like any other scheduled task.
 - `insightExtractionEnabled` / `insightExtractionSchedule` — Insight extraction can be configured as global or project-scoped.
+
+### `defaultAgentPermissionPolicy`
+
+Project-scoped default permission policy for permanent-agent action gates.
+
+```json
+{
+  "defaultAgentPermissionPolicy": {
+    "rules": {
+      "git_write": "require-approval",
+      "command_execution": "require-approval",
+      "network_api": "block"
+    }
+  }
+}
+```
+
+- `rules` is a partial map of category → disposition.
+- Categories: `git_write`, `file_write_delete`, `command_execution`, `network_api`, `task_agent_mutation`.
+- Dispositions: `allow`, `require-approval`, `block`.
+- Missing categories default to `allow` via the built-in `unrestricted` seed.
+- Per-agent overrides take precedence over this project default.
