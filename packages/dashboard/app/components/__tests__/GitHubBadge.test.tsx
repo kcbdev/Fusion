@@ -162,7 +162,7 @@ describe("GitHubBadge", () => {
       const badge = screen.getByRole("link", { name: "#42" });
       const styles = getComputedStyle(badge);
 
-      expect(styles.fontSize).toBe("11px");
+      expect(styles.fontSize).toBe("0.6875rem");
       const resolvedGap = styles.gap.startsWith("var(")
         ? getComputedStyle(document.documentElement).getPropertyValue("--space-xs").trim()
         : styles.gap;
