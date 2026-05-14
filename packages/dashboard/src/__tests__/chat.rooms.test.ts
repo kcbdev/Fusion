@@ -260,6 +260,74 @@ describe("Chat orchestration — rooms (FN-3805..FN-3811 contract)", () => {
       expect(prompt.match(/\[LATEST USER MESSAGE — ANSWER THIS\]/g)).toHaveLength(1);
     });
 
+    it("uses project chat room compaction settings at responder time", async () => {
+      mockChatStore.listRoomMembers.mockReturnValue([
+        { roomId: "room-1", agentId: "agent-a", role: "member", addedAt: "2026-01-01" },
+      ]);
+      mockAgentStore.listAgents.mockResolvedValue([{ id: "agent-a", name: "Alpha", role: "executor" }]);
+      mockAgentStore.getAgent.mockResolvedValue({ id: "agent-a", name: "Alpha", role: "executor" });
+
+      const promptSpy = vi.fn().mockResolvedValue(undefined);
+      mockChatStore.addRoomMessage.mockImplementationOnce((_roomId: string, input: any) => ({
+        id: "history-latest",
+        roomId: "room-1",
+        ...input,
+      }));
+      __setCreateResolvedAgentSession(async () => ({
+        session: {
+          prompt: promptSpy,
+          dispose: vi.fn(),
+          state: {
+            messages: [{ role: "assistant", content: "Room reply" }],
+          },
+        },
+      } as any));
+
+      const history = Array.from({ length: 15 }, (_, index) => ({
+        id: `msg-${index + 1}`,
+        role: index % 2 === 0 ? "user" : "assistant",
+        senderAgentId: index % 2 === 0 ? null : "agent-a",
+        content: `history-item-${index}`,
+        createdAt: `2026-01-01T00:00:${String(index).padStart(2, "0")}.000Z`,
+      }));
+      history[history.length - 1] = {
+        ...history[history.length - 1],
+        id: "history-latest",
+        role: "user",
+        senderAgentId: null,
+        content: "hello @Alpha",
+      };
+      mockChatStore.getRoomMessages.mockImplementation((_roomId: string, filter?: { limit?: number }) => {
+        const limit = filter?.limit ?? history.length;
+        return history.slice(-limit);
+      });
+
+      const manager = new ChatManager(
+        mockChatStore as any,
+        "/tmp",
+        mockAgentStore as any,
+        undefined,
+        async () => ({
+          fallbackProvider: undefined,
+          fallbackModelId: undefined,
+          defaultProvider: undefined,
+          defaultModelId: undefined,
+          chatRoomRecentVerbatimMessages: 3,
+          chatRoomCompactionFetchLimit: 10,
+          chatRoomSummaryMaxChars: 400,
+        }),
+      );
+      await manager.sendRoomMessage("room-1", "hello @Alpha");
+
+      expect(mockChatStore.getRoomMessages).toHaveBeenCalledWith("room-1", { limit: 10 });
+      const prompt = promptSpy.mock.calls[0]?.[0] as string;
+      expect(prompt).toContain("## Earlier room context (compacted)");
+      expect(prompt).toContain("history-item-12");
+      expect(prompt).toContain("history-item-13");
+      expect(prompt).toContain("hello @Alpha [LATEST USER MESSAGE — ANSWER THIS]");
+      expect(prompt).not.toContain("- [2026-01-01T00:00:11.000Z] (assistant) Agent agent-a: history-item-11");
+    });
+
     it("throws surfaced error when room has members but no resolvable responders", async () => {
       mockChatStore.listRoomMembers.mockReturnValue([
         { roomId: "room-1", agentId: "agent-a", role: "member", addedAt: "2026-01-01" },

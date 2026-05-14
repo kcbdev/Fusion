@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCompactedRoomTranscript } from "../chat.js";
+import { buildCompactedRoomTranscript, ChatManager } from "../chat.js";
 
 function makeMessage(index: number, overrides: Partial<{
   id: string;
@@ -104,6 +104,58 @@ describe("buildCompactedRoomTranscript", () => {
 
     expect(transcript.length).toBeLessThanOrEqual(8000);
     expect(transcript).toContain("message-79-");
+  });
+
+  it("supports recentVerbatim override via opts", () => {
+    const messages = Array.from({ length: 10 }, (_, index) => makeMessage(index));
+
+    const transcript = buildCompactedRoomTranscript(messages, "msg-8", { recentVerbatim: 4 });
+
+    expect(transcript).toContain("## Earlier room context (compacted)");
+    expect(transcript).toContain("- Span: 6 messages");
+    expect(transcript).not.toContain("- [2026-01-01T00:00:00.000Z] (user) User: message-0");
+    for (let index = 6; index < 10; index += 1) {
+      expect(transcript).toContain(`- [2026-01-01T00:00:${String(index).padStart(2, "0")}.000Z]`);
+    }
+  });
+
+  it("supports summaryMaxChars override via opts", () => {
+    const olderMessages = Array.from({ length: 18 }, (_, index) => makeMessage(index, {
+      role: "user",
+      content: `older-${index}-` + "z".repeat(500),
+    }));
+    const recentMessages = Array.from({ length: 12 }, (_, index) => makeMessage(index + 18, {
+      role: index === 11 ? "user" : "assistant",
+      senderAgentId: index === 11 ? null : `agent-${index}`,
+      content: `recent-${index}`,
+    }));
+
+    const transcript = buildCompactedRoomTranscript([...olderMessages, ...recentMessages], "msg-29", { summaryMaxChars: 200 });
+    const [summaryBlock] = transcript.split("\n\n");
+
+    expect(summaryBlock.length).toBeLessThanOrEqual(200);
+    expect(summaryBlock).toContain("## Earlier room context (compacted)");
+  });
+
+  it("falls back to defaults when room compaction settings are invalid", async () => {
+    const manager = new ChatManager({} as any, "/tmp", undefined, undefined, async () => ({
+      fallbackProvider: undefined,
+      fallbackModelId: undefined,
+      defaultProvider: undefined,
+      defaultModelId: undefined,
+      chatRoomRecentVerbatimMessages: 0,
+      chatRoomCompactionFetchLimit: -1,
+      chatRoomSummaryMaxChars: Number.NaN,
+    }));
+
+    const settings = await (manager as any).getRoomCompactionSettings();
+    expect(settings).toEqual({ recentVerbatim: 12, fetchLimit: 80, summaryMaxChars: 1500 });
+
+    const managerWithThrow = new ChatManager({} as any, "/tmp", undefined, undefined, async () => {
+      throw new Error("boom");
+    });
+    const fallbackSettings = await (managerWithThrow as any).getRoomCompactionSettings();
+    expect(fallbackSettings).toEqual({ recentVerbatim: 12, fetchLimit: 80, summaryMaxChars: 1500 });
   });
 
   it("computes unique participant labels from older messages", () => {
