@@ -754,6 +754,51 @@ describe("SettingsModal", () => {
       expect(ephemeralToggle.checked).toBe(true);
     });
 
+    it("exposes the ephemeral agents toggle via the mobile Settings Section picker", async () => {
+      Object.defineProperty(window, "matchMedia", {
+        writable: true,
+        value: vi.fn().mockImplementation((query: string) => ({
+          matches: query === "(max-width: 768px)",
+          media: query,
+          onchange: null,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        })),
+      });
+
+      renderModal();
+      await waitForSettingsModalReady();
+
+      const sectionPicker = screen.getByLabelText("Settings Section") as HTMLSelectElement;
+      expect(sectionPicker).toBeInTheDocument();
+      const projectGeneralOption = sectionPicker.querySelector('option[value="general"]');
+      expect(projectGeneralOption).toBeInTheDocument();
+      expect(projectGeneralOption).toHaveTextContent("Project General");
+
+      await userEvent.selectOptions(sectionPicker, "general");
+
+      const ephemeralToggle = screen.getByLabelText("Use ephemeral task-worker agents") as HTMLInputElement;
+      expect(ephemeralToggle).toBeInTheDocument();
+      expect(ephemeralToggle.checked).toBe(true);
+
+      Object.defineProperty(window, "matchMedia", {
+        writable: true,
+        value: vi.fn().mockImplementation((query: string) => ({
+          matches: false,
+          media: query,
+          onchange: null,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        })),
+      });
+    });
+
     it("keeps ephemeral agent toggle checked when upgrading settings omit the key", async () => {
       const { ephemeralAgentsEnabled: _omitted, ...upgradeSettings } = defaultSettings;
       mockFetchSettings.mockResolvedValueOnce(upgradeSettings);
