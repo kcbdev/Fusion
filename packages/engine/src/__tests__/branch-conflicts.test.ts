@@ -102,6 +102,49 @@ describe("branch-conflicts", () => {
     expect(result).toEqual({ kind: "stale-resolved" });
   });
 
+  it("returns fully-subsumed when git cherry reports no unique commits", async () => {
+    mockedExecSync.mockImplementation((cmd: string | string[]) => {
+      const command = typeof cmd === "string" ? cmd : cmd[0];
+      if (command === "git worktree prune") return Buffer.from("");
+      if (command === "git worktree list --porcelain") {
+        return Buffer.from(["worktree /tmp/existing-wt", "HEAD 2222222", "branch refs/heads/fusion/fn-4068", ""].join("\n"));
+      }
+      if (command.includes("git rev-parse --verify 'refs/heads/fusion/fn-4068^{commit}'")) {
+        return Buffer.from("abc123def456\n");
+      }
+      if (command.includes("git rev-parse --verify 'fusion/fn-4068^{commit}'")) {
+        return Buffer.from("abc123def456\n");
+      }
+      if (command.includes("git rev-parse --verify 'main^{commit}'")) {
+        return Buffer.from("mainsha\n");
+      }
+      if (command === "git merge-base 'main' 'fusion/fn-4068'") {
+        return Buffer.from("base123\n");
+      }
+      if (command === "git cherry 'main' 'fusion/fn-4068' 'base123'") {
+        return Buffer.from("- abc111\n");
+      }
+      if (command.includes("git log --format=%H%x00%s%x00%b 'main..fusion/fn-4068'")) {
+        return Buffer.from("");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    const result = await inspectBranchConflict({
+      repoDir: "/tmp/repo",
+      branchName: "fusion/fn-4068",
+      conflictingWorktreePath: "/tmp/existing-wt",
+      requestingTaskId: "FN-4068",
+      startPoint: "main",
+    });
+
+    expect(result).toEqual({
+      kind: "fully-subsumed",
+      livePath: "/tmp/existing-wt",
+      tipSha: "abc123def456",
+    });
+  });
+
   it("returns reclaimable for same-task live conflicts with stranded commits", async () => {
     mockedExecSync.mockImplementation((cmd: string | string[]) => {
       const command = typeof cmd === "string" ? cmd : cmd[0];
@@ -115,8 +158,26 @@ describe("branch-conflicts", () => {
       if (command.includes("git rev-parse --verify 'fusion/fn-4068^{commit}'")) {
         return Buffer.from("abc123def456\n");
       }
-      if (command.includes("git log --reverse --format=%H%x09%s 'main..fusion/fn-4068'")) {
-        return Buffer.from("aaa111\tPreserve prior fix\nbbb222\tAdd regression coverage\n");
+      if (command.includes("git rev-parse --verify 'main^{commit}'")) {
+        return Buffer.from("mainsha\n");
+      }
+      if (command === "git merge-base 'main' 'fusion/fn-4068'") {
+        return Buffer.from("base123\n");
+      }
+      if (command === "git cherry 'main' 'fusion/fn-4068' 'base123'") {
+        return Buffer.from("+ aaa111\n+ bbb222\n");
+      }
+      if (command.includes("git rev-parse --verify 'aaa111^{commit}'")) {
+        return Buffer.from("aaa111\n");
+      }
+      if (command.includes("git rev-parse --verify 'bbb222^{commit}'")) {
+        return Buffer.from("bbb222\n");
+      }
+      if (command === "git log -1 --format=%s 'aaa111'") {
+        return Buffer.from("Preserve prior fix\n");
+      }
+      if (command === "git log -1 --format=%s 'bbb222'") {
+        return Buffer.from("Add regression coverage\n");
       }
       if (command.includes("git log --format=%H%x00%s%x00%b 'main..fusion/fn-4068'")) {
         return Buffer.from("aaa111\u0000feat(FN-4068): preserve\u0000Fusion-Task-Id: FN-4068\u0000" +
@@ -161,8 +222,20 @@ describe("branch-conflicts", () => {
       if (command.includes("git rev-parse --verify 'fusion/fn-4068^{commit}'")) {
         return Buffer.from("abc123def456\n");
       }
-      if (command.includes("git log --reverse --format=%H%x09%s 'main..fusion/fn-4068'")) {
-        return Buffer.from("aaa111\tPreserve prior fix\n");
+      if (command.includes("git rev-parse --verify 'main^{commit}'")) {
+        return Buffer.from("mainsha\n");
+      }
+      if (command === "git merge-base 'main' 'fusion/fn-4068'") {
+        return Buffer.from("base123\n");
+      }
+      if (command === "git cherry 'main' 'fusion/fn-4068' 'base123'") {
+        return Buffer.from("+ aaa111\n");
+      }
+      if (command.includes("git rev-parse --verify 'aaa111^{commit}'")) {
+        return Buffer.from("aaa111\n");
+      }
+      if (command === "git log -1 --format=%s 'aaa111'") {
+        return Buffer.from("Preserve prior fix\n");
       }
       if (command.includes("git log --format=%H%x00%s%x00%b 'main..fusion/fn-4068'")) {
         return Buffer.from("aaa111\u0000feat(FN-9999): foreign\u0000Fusion-Task-Id: FN-9999\u0000");
@@ -183,6 +256,7 @@ describe("branch-conflicts", () => {
       throw new Error("expected live-foreign conflict");
     }
     expect(result.error).toBeInstanceOf(BranchConflictError);
+    expect(result.error.message).toContain("1 stranded commit since main");
     expect(result.error.message).toContain("Run branch recovery");
   });
 

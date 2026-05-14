@@ -101,6 +101,7 @@ export interface InspectBranchConflictInput {
 export type BranchConflictInspectionResult =
   | { kind: "stale" }
   | { kind: "stale-resolved" }
+  | { kind: "fully-subsumed"; livePath: string; tipSha: string }
   | { kind: "reclaimable"; livePath: string; tipSha: string; taskAttributedCommitCount: number; strandedCommits: BranchConflictCommit[] }
   | { kind: "live-foreign"; livePath: string; error: BranchConflictError };
 
@@ -516,12 +517,20 @@ export async function inspectBranchConflict(
   }
 
   const existingTipSha = await revParse(input.repoDir, input.branchName);
-  const strandedCommits = await listStrandedCommits(input.repoDir, startPoint, input.branchName);
+  const uniqueCommitResult = await listUniqueBranchCommits(input.repoDir, startPoint, input.branchName);
   const taskAttributedCommitCount = await countTaskAttributedCommits(
     input.repoDir,
     `${startPoint}..${input.branchName}`,
     input.requestingTaskId,
   );
+
+  if (!uniqueCommitResult.degraded && uniqueCommitResult.commits.length === 0) {
+    return {
+      kind: "fully-subsumed",
+      livePath,
+      tipSha: existingTipSha,
+    };
+  }
 
   if (taskAttributedCommitCount > 0) {
     return {
@@ -529,7 +538,7 @@ export async function inspectBranchConflict(
       livePath,
       tipSha: existingTipSha,
       taskAttributedCommitCount,
-      strandedCommits,
+      strandedCommits: uniqueCommitResult.commits,
     };
   }
 
@@ -540,8 +549,8 @@ export async function inspectBranchConflict(
       branchName: input.branchName,
       conflictingWorktreePath: livePath,
       existingTipSha,
-      strandedCommits,
-      startPoint,
+      strandedCommits: uniqueCommitResult.commits,
+      startPoint: uniqueCommitResult.mainRef,
       recommendedAction: "Run branch recovery and explicitly choose whether to reclaim or discard prior work.",
     }),
   };
