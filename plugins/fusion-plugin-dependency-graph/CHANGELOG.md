@@ -1,5 +1,11 @@
 # @fusion-plugin-examples/dependency-graph
 
+## Unreleased
+
+### Patch Changes
+
+- Dependency graph auto-layout now switches orientation on tall or narrow viewports so dependency depth flows left-to-right on mobile/portrait layouts.
+
 ## 0.1.20
 
 ### Patch Changes
