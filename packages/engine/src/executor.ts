@@ -5999,6 +5999,43 @@ ${failureFeedback}
         const completedAt = new Date().toISOString();
 
         if (result.success) {
+          const workflowStepScopeEnforcement = settings.workflowStepScopeEnforcement ?? "block";
+          if (stepPhase === "pre-merge" && stepMode === "prompt" && workflowStepScopeEnforcement !== "off") {
+            const declaredScope = await this.store.parseFileScopeFromPrompt(task.id).catch(() => [] as string[]);
+            const refreshedTask = await this.store.getTask(task.id);
+            if (declaredScope.length > 0 && refreshedTask?.scopeOverride !== true) {
+              const postStepModifiedFiles = await this.captureModifiedFiles(worktreePath, currentTask.baseCommitSha);
+              const hasScopeOverlap = postStepModifiedFiles.some((filePath) => workflowPathMatchesDeclaredScope(filePath, declaredScope));
+              if (postStepModifiedFiles.length > 0 && !hasScopeOverlap) {
+                const scopeLeakMessage = `Workflow step '${ws.name}' wrote files outside declared File Scope. Staged: [${postStepModifiedFiles.join(", ")}]. Declared: [${declaredScope.join(", ")}]. (FN-4343)`;
+                await this.store.logEntry(
+                  task.id,
+                  `[pre-merge] Workflow step scope leak: ${ws.name} wrote off-scope files [${postStepModifiedFiles.join(", ") || "<none>"}]`,
+                );
+                if (workflowStepScopeEnforcement === "warn") {
+                  await this.store.logEntry(task.id, `[pre-merge] workflowStepScopeEnforcement=warn — ${scopeLeakMessage}`);
+                } else {
+                  const existingIdx = results.findIndex(r => r.workflowStepId === ws.id);
+                  if (existingIdx >= 0) {
+                    results[existingIdx] = {
+                      ...results[existingIdx],
+                      status: "failed",
+                      output: scopeLeakMessage,
+                      completedAt,
+                    };
+                  }
+                  await this.store.updateTask(task.id, { workflowStepResults: results });
+                  return {
+                    allPassed: false,
+                    revisionRequested: true,
+                    feedback: scopeLeakMessage,
+                    stepName: ws.name,
+                  };
+                }
+              }
+            }
+          }
+
           await this.store.logEntry(task.id, `[timing] Workflow step '${ws.name}' completed in ${Date.now() - stepStartedAtMs}ms`);
           await this.store.logEntry(task.id, `[pre-merge] Workflow step completed: ${ws.name}`);
           executorLog.log(`${task.id} — [pre-merge] workflow step passed: ${ws.name}`);

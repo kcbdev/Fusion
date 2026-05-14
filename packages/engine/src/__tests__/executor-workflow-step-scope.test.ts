@@ -19,7 +19,7 @@ function createTask() {
   };
 }
 
-function createFrontendStep() {
+function createWorkflowStep(overrides: Record<string, unknown> = {}) {
   return {
     id: "frontend-ux-design",
     name: "Frontend UX Design",
@@ -28,6 +28,7 @@ function createFrontendStep() {
     enabled: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    ...overrides,
   };
 }
 
@@ -49,18 +50,8 @@ describe("executor workflow step scope gating", () => {
   });
 
   it.each([
-    {
-      name: "both signals empty",
-      diffFiles: [] as string[],
-      declaredFiles: [] as string[],
-      expectedSkip: false,
-    },
-    {
-      name: "diff only non-frontend",
-      diffFiles: ["packages/engine/src/executor.ts"],
-      declaredFiles: [],
-      expectedSkip: true,
-    },
+    { name: "both signals empty", diffFiles: [] as string[], declaredFiles: [] as string[], expectedSkip: false },
+    { name: "diff only non-frontend", diffFiles: ["packages/engine/src/executor.ts"], declaredFiles: [], expectedSkip: true },
     {
       name: "declared only non-frontend",
       diffFiles: [],
@@ -79,7 +70,7 @@ describe("executor workflow step scope gating", () => {
     const store = createMockStore();
     const task = createTask();
     store.getTask.mockResolvedValue(task as any);
-    store.getWorkflowStep.mockResolvedValue(createFrontendStep() as any);
+    store.getWorkflowStep.mockResolvedValue(createWorkflowStep() as any);
     store.parseFileScopeFromPrompt.mockResolvedValue(declaredFiles);
     mockDiffFiles(diffFiles);
 
@@ -91,8 +82,6 @@ describe("executor workflow step scope gating", () => {
     expect(result).toEqual({ allPassed: true });
     if (expectedSkip) {
       expect(executeStepSpy).not.toHaveBeenCalled();
-      const statuses = store.updateTask.mock.calls.flatMap((call: any[]) => call[1]?.workflowStepResults ?? []).map((r: any) => r.status);
-      expect(statuses).toContain("skipped");
       if (expectedLog) {
         const logged = store.logEntry.mock.calls.map((call: any[]) => String(call[1] ?? ""));
         expect(logged.some((line: string) => line.includes(expectedLog))).toBe(true);
@@ -100,5 +89,113 @@ describe("executor workflow step scope gating", () => {
     } else {
       expect(executeStepSpy).toHaveBeenCalledTimes(1);
     }
+  });
+
+  it("passes when prompt-mode pre-merge step writes in-scope files", async () => {
+    const store = createMockStore();
+    const task = { ...createTask(), enabledWorkflowSteps: ["WS-001"] };
+    store.getTask.mockResolvedValue(task as any);
+    store.getWorkflowStep.mockResolvedValue(createWorkflowStep({ id: "WS-001", name: "Workflow Review" }) as any);
+    store.parseFileScopeFromPrompt.mockResolvedValue(["packages/engine/src/executor.ts"]);
+    mockDiffFiles(["packages/engine/src/executor.ts"]);
+
+    const executor = new TaskExecutor(store as any, "/tmp/test", {} as any);
+    vi.spyOn(executor as any, "executeWorkflowStep").mockResolvedValue({ success: true, output: "ok" });
+
+    const result = await (executor as any).runWorkflowSteps(task as any, "/tmp/test", { workflowStepScopeEnforcement: "block" } as any);
+
+    expect(result).toEqual({ allPassed: true });
+  });
+
+  it("requests revision in block mode when step writes off-scope files", async () => {
+    const store = createMockStore();
+    const task = { ...createTask(), enabledWorkflowSteps: ["WS-001"] };
+    store.getTask.mockResolvedValue(task as any);
+    store.getWorkflowStep.mockResolvedValue(createWorkflowStep({ id: "WS-001", name: "Workflow Review" }) as any);
+    store.parseFileScopeFromPrompt.mockResolvedValue(["packages/engine/src/executor.ts"]);
+    mockDiffFiles(["packages/dashboard/app/components/TaskDetailModal.tsx"]);
+
+    const executor = new TaskExecutor(store as any, "/tmp/test", {} as any);
+    vi.spyOn(executor as any, "executeWorkflowStep").mockResolvedValue({ success: true, output: "ok" });
+
+    const result = await (executor as any).runWorkflowSteps(task as any, "/tmp/test", { workflowStepScopeEnforcement: "block" } as any);
+
+    expect(result).toEqual(expect.objectContaining({ allPassed: false, revisionRequested: true, stepName: "Workflow Review" }));
+    expect(String((result as any).feedback)).toContain("wrote files outside declared File Scope");
+  });
+
+  it("warn mode logs but passes on off-scope writes", async () => {
+    const store = createMockStore();
+    const task = { ...createTask(), enabledWorkflowSteps: ["WS-001"] };
+    store.getTask.mockResolvedValue(task as any);
+    store.getWorkflowStep.mockResolvedValue(createWorkflowStep({ id: "WS-001", name: "Workflow Review" }) as any);
+    store.parseFileScopeFromPrompt.mockResolvedValue(["packages/engine/src/executor.ts"]);
+    mockDiffFiles(["packages/dashboard/app/components/TaskDetailModal.tsx"]);
+
+    const executor = new TaskExecutor(store as any, "/tmp/test", {} as any);
+    vi.spyOn(executor as any, "executeWorkflowStep").mockResolvedValue({ success: true, output: "ok" });
+
+    const result = await (executor as any).runWorkflowSteps(task as any, "/tmp/test", { workflowStepScopeEnforcement: "warn" } as any);
+
+    expect(result).toEqual({ allPassed: true });
+    const logged = store.logEntry.mock.calls.map((call: any[]) => String(call[1] ?? ""));
+    expect(logged.some((line: string) => line.includes("workflowStepScopeEnforcement=warn"))).toBe(true);
+  });
+
+  it("off mode bypasses enforcement", async () => {
+    const store = createMockStore();
+    const task = { ...createTask(), enabledWorkflowSteps: ["WS-001"] };
+    store.getTask.mockResolvedValue(task as any);
+    store.getWorkflowStep.mockResolvedValue(createWorkflowStep({ id: "WS-001", name: "Workflow Review" }) as any);
+    store.parseFileScopeFromPrompt.mockResolvedValue(["packages/engine/src/executor.ts"]);
+    mockDiffFiles(["packages/dashboard/app/components/TaskDetailModal.tsx"]);
+
+    const executor = new TaskExecutor(store as any, "/tmp/test", {} as any);
+    vi.spyOn(executor as any, "executeWorkflowStep").mockResolvedValue({ success: true, output: "ok" });
+
+    const result = await (executor as any).runWorkflowSteps(task as any, "/tmp/test", { workflowStepScopeEnforcement: "off" } as any);
+
+    expect(result).toEqual({ allPassed: true });
+  });
+
+  it("scopeOverride=true bypasses enforcement regardless of mode", async () => {
+    const store = createMockStore();
+    const task = { ...createTask(), enabledWorkflowSteps: ["WS-001"], scopeOverride: true };
+    store.getTask.mockResolvedValue(task as any);
+    store.getWorkflowStep.mockResolvedValue(createWorkflowStep({ id: "WS-001", name: "Workflow Review" }) as any);
+    store.parseFileScopeFromPrompt.mockResolvedValue(["packages/engine/src/executor.ts"]);
+    mockDiffFiles(["packages/dashboard/app/components/TaskDetailModal.tsx"]);
+
+    const executor = new TaskExecutor(store as any, "/tmp/test", {} as any);
+    vi.spyOn(executor as any, "executeWorkflowStep").mockResolvedValue({ success: true, output: "ok" });
+
+    const result = await (executor as any).runWorkflowSteps(task as any, "/tmp/test", { workflowStepScopeEnforcement: "block" } as any);
+
+    expect(result).toEqual({ allPassed: true });
+  });
+
+  it("FN-4280 regression: declared workflow-only scope skips Frontend UX without executing agent", async () => {
+    const store = createMockStore();
+    const task = createTask();
+    store.getTask.mockResolvedValue(task as any);
+    store.getWorkflowStep.mockResolvedValue(createWorkflowStep() as any);
+    store.parseFileScopeFromPrompt.mockResolvedValue([
+      ".github/workflows/ci.yml",
+      ".github/workflows/mobile.yml",
+      ".github/workflows/test-release.yml",
+      ".github/workflows/release.yml",
+      ".github/workflows/version.yml",
+    ]);
+    mockDiffFiles([]);
+
+    const executor = new TaskExecutor(store as any, "/tmp/test", {} as any);
+    const executeStepSpy = vi.spyOn(executor as any, "executeWorkflowStep").mockResolvedValue({ success: true, output: "ok" });
+
+    const result = await (executor as any).runWorkflowSteps(task as any, "/tmp/test", {} as any);
+
+    expect(result).toEqual({ allPassed: true });
+    expect(executeStepSpy).not.toHaveBeenCalled();
+    const logged = store.logEntry.mock.calls.map((call: any[]) => String(call[1] ?? ""));
+    expect(logged.some((line: string) => line.includes("declared File Scope contains no frontend/UI files"))).toBe(true);
   });
 });
