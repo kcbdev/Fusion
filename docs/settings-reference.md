@@ -330,6 +330,9 @@ Override precedence for direct merges is:
 | `reflectionAfterTask` | `boolean` | `true` | Trigger reflection after task completion. |
 | `reviewHandoffPolicy` | `"disabled" \| "comment-triggered" \| "always"` | `"disabled"` | Policy for agent-to-user review handoff detection. |
 | `showQuickChatFAB` | `boolean` | `false` | Show floating quick-chat button (chat remains available via More menu). |
+| `chatRoomRecentVerbatimMessages` | `number` | `12` | Number of newest chat-room messages kept verbatim in responder context before older entries are compacted. |
+| `chatRoomCompactionFetchLimit` | `number` | `80` | Upper bound on room messages fetched for transcript compaction per responder turn. |
+| `chatRoomSummaryMaxChars` | `number` | `1500` | Hard cap for the synthesized “Earlier room context” summary block. |
 | `researchSettings` | `ResearchProjectSettings` | `{ enabled: true, searchProvider: undefined, synthesisProvider: undefined, synthesisModelId: undefined, enabledSources: { webSearch: true, pageFetch: true, github: false, localDocs: true, llmSynthesis: true }, limits: { maxConcurrentRuns: 3, maxSourcesPerRun: 20, maxDurationMs: 300000, requestTimeoutMs: 30000 } }` | Project-specific Research enablement/overrides. Resolved together with `researchGlobalDefaults` via `resolveResearchSettings()`. |
 | `researchEnabled` | `boolean` | `undefined` | Enable or disable research for this project. **Deprecated:** prefer `researchSettings.enabled`. |
 | `researchMaxConcurrentRuns` | `number` | `undefined` | Project-level max concurrent research runs. |
