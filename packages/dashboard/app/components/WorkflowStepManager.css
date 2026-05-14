@@ -445,6 +445,12 @@
   margin-bottom: 6px;
 }
 
+.wfm-field-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+}
+
 @media (max-width: 768px) {
   /* Full-screen sheet on mobile — drop the overlay's top padding so the
      modal fills the viewport instead of being pushed below it. */
