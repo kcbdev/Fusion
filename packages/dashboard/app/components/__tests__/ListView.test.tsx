@@ -2544,6 +2544,98 @@ describe("ListView - Bulk Selection", () => {
     expect(applyButton).toBeDisabled();
   });
 
+  describe("bulk pause/unpause/archive", () => {
+    it("shows pause/unpause/archive buttons only when bulk selection is active", async () => {
+      const user = userEvent.setup();
+      const tasks = [createMockTask({ id: "FN-001" })];
+
+      renderListView({ tasks });
+      expect(screen.queryByRole("button", { name: /^pause selected$/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /^unpause selected$/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /^archive selected$/i })).toBeNull();
+
+      enterBulkEditMode();
+      await user.click(screen.getByLabelText("Select FN-001"));
+
+      expect(screen.getByRole("button", { name: /^pause selected$/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^unpause selected$/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^archive selected$/i })).toBeInTheDocument();
+    });
+
+    it("pauses only non-paused selected tasks and clears successful selections", async () => {
+      const user = userEvent.setup();
+      const tasks = [createMockTask({ id: "FN-001", paused: false }), createMockTask({ id: "FN-002", paused: true })];
+      const onPauseTask = vi.fn(async () => createMockTask());
+      localStorage.setItem(scopedStorageKey("kb-dashboard-selected-tasks"), JSON.stringify(["FN-001", "FN-002"]));
+
+      renderListView({ tasks, onPauseTask });
+      enterBulkEditMode();
+      await user.click(screen.getByRole("button", { name: /^pause selected$/i }));
+
+      await waitFor(() => {
+        expect(onPauseTask).toHaveBeenCalledTimes(1);
+        expect(onPauseTask).toHaveBeenCalledWith("FN-001");
+      });
+      expect(mockAddToast).toHaveBeenCalledWith("Paused 1 · 1 skipped · 0 failed", "success");
+      expect(screen.getByText("1 selected")).toBeInTheDocument();
+    });
+
+    it("unpauses only paused tasks and reports skipped count", async () => {
+      const user = userEvent.setup();
+      const tasks = [createMockTask({ id: "FN-001", paused: true }), createMockTask({ id: "FN-002", paused: false })];
+      const onUnpauseTask = vi.fn(async () => createMockTask());
+      localStorage.setItem(scopedStorageKey("kb-dashboard-selected-tasks"), JSON.stringify(["FN-001", "FN-002"]));
+
+      renderListView({ tasks, onUnpauseTask });
+      enterBulkEditMode();
+      await user.click(screen.getByRole("button", { name: /^unpause selected$/i }));
+
+      await waitFor(() => {
+        expect(onUnpauseTask).toHaveBeenCalledTimes(1);
+        expect(onUnpauseTask).toHaveBeenCalledWith("FN-001");
+      });
+      expect(mockAddToast).toHaveBeenCalledWith("Unpaused 1 · 1 skipped · 0 failed", "success");
+    });
+
+    it("archives only done tasks after confirmation", async () => {
+      const user = userEvent.setup();
+      const tasks = [createMockTask({ id: "FN-001", column: "done" }), createMockTask({ id: "FN-002", column: "todo" })];
+      const onArchiveTask = vi.fn(async () => createMockTask());
+      mockConfirm.mockResolvedValueOnce(true);
+      localStorage.setItem(scopedStorageKey("kb-dashboard-selected-tasks"), JSON.stringify(["FN-001", "FN-002"]));
+
+      renderListView({ tasks, onArchiveTask });
+      enterBulkEditMode();
+      await user.click(screen.getByRole("button", { name: /^archive selected$/i }));
+
+      await waitFor(() => {
+        expect(mockConfirm).toHaveBeenCalledTimes(1);
+        expect(onArchiveTask).toHaveBeenCalledTimes(1);
+        expect(onArchiveTask).toHaveBeenCalledWith("FN-001");
+      });
+      expect(mockAddToast).toHaveBeenCalledWith("Archived 1 · 1 skipped · 0 failed", "success");
+    });
+
+    it("shows error summary when pause has failures", async () => {
+      const user = userEvent.setup();
+      const tasks = [createMockTask({ id: "FN-001", paused: false })];
+      const onPauseTask = vi.fn(async () => {
+        throw new Error("boom");
+      });
+
+      renderListView({ tasks, onPauseTask });
+      enterBulkEditMode();
+      await user.click(screen.getByLabelText("Select FN-001"));
+      await user.click(screen.getByRole("button", { name: /^pause selected$/i }));
+
+      await waitFor(() => {
+        expect(onPauseTask).toHaveBeenCalledTimes(1);
+      });
+      expect(mockAddToast).toHaveBeenCalledWith("Paused 0 · 0 skipped · 1 failed", "error");
+      expect(screen.getByText("1 selected")).toBeInTheDocument();
+    });
+  });
+
   describe("bulk delete", () => {
     it("deletes selected tasks and clears selection on success", async () => {
       const user = userEvent.setup();

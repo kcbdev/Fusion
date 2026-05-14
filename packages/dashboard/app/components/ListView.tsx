@@ -1,6 +1,6 @@
 import "./ListView.css";
 import { useState, useCallback, useMemo, Fragment, useEffect, useRef } from "react";
-import { ArrowUpDown, ArrowUp, ArrowDown, Link, Columns3, EyeOff, Eye, ChevronRight, Zap, Trash2 } from "lucide-react";
+import { ArrowUpDown, ArrowUp, ArrowDown, Link, Columns3, EyeOff, Eye, ChevronRight, Zap, Trash2, Pause, Play, Archive } from "lucide-react";
 import type { Task, TaskDetail, Column, TaskCreateInput, MergeResult, GithubIssueAction } from "@fusion/core";
 import { COLUMN_LABELS, COLUMNS, DEFAULT_COLUMN, getErrorMessage, isColumn } from "@fusion/core";
 import { sortTasksForDisplayColumn } from "./taskSorting";
@@ -732,6 +732,169 @@ export function ListView({
     );
   }, [addToast, confirm, onDeleteTask, selectedTaskIds, tasks]);
 
+  const handleBulkPause = useCallback(async () => {
+    if (selectedTaskIds.size === 0) return;
+    if (!onPauseTask) {
+      addToast("Pause action is unavailable", "error");
+      return;
+    }
+
+    const selectedTasks = Array.from(selectedTaskIds)
+      .map((id) => tasks.find((task) => task.id === id))
+      .filter((task): task is Task => Boolean(task));
+    const actionableTasks = selectedTasks.filter((task) => task.column !== "archived" && task.paused !== true);
+    const skippedCount = selectedTasks.length - actionableTasks.length;
+
+    if (actionableTasks.length === 0) {
+      addToast("No selected tasks can be paused", "error");
+      return;
+    }
+
+    setIsApplying(true);
+    const pausedIds: string[] = [];
+    const failedIds: string[] = [];
+
+    try {
+      for (const task of actionableTasks) {
+        try {
+          await onPauseTask(task.id);
+          pausedIds.push(task.id);
+        } catch {
+          failedIds.push(task.id);
+        }
+      }
+    } finally {
+      setIsApplying(false);
+    }
+
+    if (pausedIds.length > 0) {
+      setSelectedTaskIds((previous) => {
+        const next = new Set(previous);
+        for (const id of pausedIds) {
+          next.delete(id);
+        }
+        return next;
+      });
+    }
+
+    addToast(
+      `Paused ${pausedIds.length} · ${skippedCount} skipped · ${failedIds.length} failed`,
+      failedIds.length > 0 ? "error" : "success",
+    );
+  }, [addToast, onPauseTask, selectedTaskIds, tasks]);
+
+  const handleBulkUnpause = useCallback(async () => {
+    if (selectedTaskIds.size === 0) return;
+    if (!onUnpauseTask) {
+      addToast("Unpause action is unavailable", "error");
+      return;
+    }
+
+    const selectedTasks = Array.from(selectedTaskIds)
+      .map((id) => tasks.find((task) => task.id === id))
+      .filter((task): task is Task => Boolean(task));
+    const actionableTasks = selectedTasks.filter((task) => task.column !== "archived" && task.paused === true);
+    const skippedCount = selectedTasks.length - actionableTasks.length;
+
+    if (actionableTasks.length === 0) {
+      addToast("No selected tasks can be unpaused", "error");
+      return;
+    }
+
+    setIsApplying(true);
+    const unpausedIds: string[] = [];
+    const failedIds: string[] = [];
+
+    try {
+      for (const task of actionableTasks) {
+        try {
+          await onUnpauseTask(task.id);
+          unpausedIds.push(task.id);
+        } catch {
+          failedIds.push(task.id);
+        }
+      }
+    } finally {
+      setIsApplying(false);
+    }
+
+    if (unpausedIds.length > 0) {
+      setSelectedTaskIds((previous) => {
+        const next = new Set(previous);
+        for (const id of unpausedIds) {
+          next.delete(id);
+        }
+        return next;
+      });
+    }
+
+    addToast(
+      `Unpaused ${unpausedIds.length} · ${skippedCount} skipped · ${failedIds.length} failed`,
+      failedIds.length > 0 ? "error" : "success",
+    );
+  }, [addToast, onUnpauseTask, selectedTaskIds, tasks]);
+
+  const handleBulkArchive = useCallback(async () => {
+    if (selectedTaskIds.size === 0) return;
+    if (!onArchiveTask) {
+      addToast("Archive action is unavailable", "error");
+      return;
+    }
+
+    const selectedTasks = Array.from(selectedTaskIds)
+      .map((id) => tasks.find((task) => task.id === id))
+      .filter((task): task is Task => Boolean(task));
+    const actionableTasks = selectedTasks.filter((task) => task.column === "done");
+    const skippedCount = selectedTasks.length - actionableTasks.length;
+
+    if (actionableTasks.length === 0) {
+      addToast("No selected tasks can be archived (only done tasks)", "error");
+      return;
+    }
+
+    const confirmed = await confirm({
+      title: "Archive Selected Tasks",
+      message: `Archive ${actionableTasks.length} selected task${actionableTasks.length === 1 ? "" : "s"}?`,
+      confirmLabel: "Archive",
+      cancelLabel: "Cancel",
+      danger: false,
+    });
+
+    if (!confirmed) return;
+
+    setIsApplying(true);
+    const archivedIds: string[] = [];
+    const failedIds: string[] = [];
+
+    try {
+      for (const task of actionableTasks) {
+        try {
+          await onArchiveTask(task.id);
+          archivedIds.push(task.id);
+        } catch {
+          failedIds.push(task.id);
+        }
+      }
+    } finally {
+      setIsApplying(false);
+    }
+
+    if (archivedIds.length > 0) {
+      setSelectedTaskIds((previous) => {
+        const next = new Set(previous);
+        for (const id of archivedIds) {
+          next.delete(id);
+        }
+        return next;
+      });
+    }
+
+    addToast(
+      `Archived ${archivedIds.length} · ${skippedCount} skipped · ${failedIds.length} failed`,
+      failedIds.length > 0 ? "error" : "success",
+    );
+  }, [addToast, confirm, onArchiveTask, selectedTaskIds, tasks]);
+
   const handleApplyBulkUpdate = useCallback(async () => {
     if (selectedTaskIds.size === 0) return;
 
@@ -1190,7 +1353,19 @@ export function ListView({
                 {bulkEditEnabled && selectedTaskIds.size > 0 ? (
                   <>
                     <div className="bulk-edit-toolbar">
-                      <button className="btn btn-danger btn-sm" onClick={handleBulkDelete} disabled={isApplying}>
+                      <button className="btn btn-sm" onClick={handleBulkPause} disabled={isApplying} title="Pause all selected tasks that are not already paused">
+                        <Pause size={14} />
+                        Pause selected
+                      </button>
+                      <button className="btn btn-sm" onClick={handleBulkUnpause} disabled={isApplying} title="Unpause selected tasks that are currently paused">
+                        <Play size={14} />
+                        Unpause selected
+                      </button>
+                      <button className="btn btn-sm" onClick={handleBulkArchive} disabled={isApplying} title="Archive selected tasks that are in Done">
+                        <Archive size={14} />
+                        Archive selected
+                      </button>
+                      <button className="btn btn-danger btn-sm" onClick={handleBulkDelete} disabled={isApplying} title="Delete selected tasks">
                         <Trash2 size={14} />
                         Delete selected
                       </button>
