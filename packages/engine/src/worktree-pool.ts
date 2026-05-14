@@ -286,6 +286,19 @@ export class WorktreePool {
         };
       }
 
+      if (inspection.kind === "fully-subsumed") {
+        worktreePoolLog.log(
+          `reclaimed fully-subsumed branch conflict for ${branchName}: tip=${inspection.tipSha} strandedSince${base}=0`,
+        );
+        return {
+          branch: branchName,
+          worktreePath: inspection.livePath,
+          reclaimed: true,
+          existingTipSha: inspection.tipSha,
+          strandedCommitCount: 0,
+        };
+      }
+
       if (!options?.allowSiblingBranchRename) {
         if (inspection.kind === "live-foreign") {
           throw inspection.error;

@@ -341,6 +341,19 @@ describe("WorktreePool", () => {
         return Buffer.from("");
       });
 
+      vi.spyOn(branchConflictModule, "inspectBranchConflict").mockResolvedValueOnce({
+        kind: "live-foreign",
+        livePath: "/other/wt",
+        error: new BranchConflictError({
+          branchName: "fusion/fn-042",
+          conflictingWorktreePath: "/other/wt",
+          existingTipSha: "abc123def456",
+          strandedCommits: [{ sha: "aaa111", subject: "Foreign fix" }],
+          startPoint: "main",
+          recommendedAction: "Run branch recovery",
+        }),
+      });
+
       await expect(pool.prepareForTask("/tmp/wt", "fusion/fn-042", undefined, {
         repoDir: "/tmp/repo",
         requestingTaskId: "FN-042",
@@ -371,6 +384,19 @@ describe("WorktreePool", () => {
         return Buffer.from("");
       });
 
+      vi.spyOn(branchConflictModule, "inspectBranchConflict").mockResolvedValueOnce({
+        kind: "live-foreign",
+        livePath: "/other/wt",
+        error: new BranchConflictError({
+          branchName: "fusion/fn-042",
+          conflictingWorktreePath: "/other/wt",
+          existingTipSha: "abc123def456",
+          strandedCommits: [{ sha: "aaa111", subject: "Foreign fix" }],
+          startPoint: "fusion/fn-041",
+          recommendedAction: "Run branch recovery",
+        }),
+      });
+
       const result = await pool.prepareForTask("/tmp/wt", "fusion/fn-042", "fusion/fn-041", { allowSiblingBranchRename: true, repoDir: "/tmp/repo" });
       expect(result.branch).toBe("fusion/fn-042-2");
     });
@@ -392,6 +418,19 @@ describe("WorktreePool", () => {
         if (cmdStr.includes("git rev-parse --verify 'fusion/fn-042-2^{commit}'")) return Buffer.from("bbb222ccc333\n");
         if (cmdStr.includes("git log --reverse --format=%H%x09%s 'main..fusion/fn-042-2'")) return Buffer.from("bbb222\tFirst sibling\n");
         return Buffer.from("");
+      });
+
+      vi.spyOn(branchConflictModule, "inspectBranchConflict").mockResolvedValueOnce({
+        kind: "live-foreign",
+        livePath: "/other/wt",
+        error: new BranchConflictError({
+          branchName: "fusion/fn-042",
+          conflictingWorktreePath: "/other/wt",
+          existingTipSha: "abc123def456",
+          strandedCommits: [{ sha: "aaa111", subject: "Foreign fix" }],
+          startPoint: "main",
+          recommendedAction: "Run branch recovery",
+        }),
       });
 
       const result = await pool.prepareForTask("/tmp/wt", "fusion/fn-042", undefined, { allowSiblingBranchRename: true, repoDir: "/tmp/repo" });
@@ -458,6 +497,19 @@ describe("WorktreePool", () => {
         if (cmdStr.includes("git log --reverse --format=%H%x09%s 'main..fusion/fn-042'")) return Buffer.from("aaa111\tPreserve prior fix\n");
         if (cmdStr.includes("git log --format=%H%x00%s%x00%b 'main..fusion/fn-042'")) return Buffer.from("aaa111\u001ffeat(FN-999): foreign\u001fFusion-Task-Id: FN-999\n");
         return Buffer.from("");
+      });
+
+      vi.spyOn(branchConflictModule, "inspectBranchConflict").mockResolvedValue({
+        kind: "live-foreign",
+        livePath: "/other/wt",
+        error: new BranchConflictError({
+          branchName: "fusion/fn-042",
+          conflictingWorktreePath: "/other/wt",
+          existingTipSha: "abc123def456",
+          strandedCommits: [{ sha: "aaa111", subject: "Foreign fix" }],
+          startPoint: "main",
+          recommendedAction: "Run branch recovery",
+        }),
       });
 
       await expect(pool.prepareForTask("/tmp/wt", "fusion/fn-042", undefined, { allowSiblingBranchRename: true, repoDir: "/tmp/repo" })).rejects.toThrow(/suffixes -2 through -6 are all in use/);

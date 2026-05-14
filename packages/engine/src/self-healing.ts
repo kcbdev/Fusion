@@ -15,7 +15,7 @@
 
 import { exec, execSync } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { getInReviewStallReason, getTaskMergeBlocker, isEphemeralAgent, type AgentStore, type TaskStore, type Settings, type Task, type MergeDetails } from "@fusion/core";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
@@ -28,6 +28,30 @@ import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
 
 const log = createLogger("self-healing");
 const execAsync = promisify(exec);
+
+function formatRecoveryTimestamp(date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}-${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}`;
+}
+
+async function preserveWorktreeChanges(repoDir: string, worktreePath: string, taskId: string): Promise<string | null> {
+  try {
+    const status = (await execAsync("git status --porcelain", { cwd: worktreePath, encoding: "utf-8" })).stdout.trim();
+    if (!status) {
+      return null;
+    }
+
+    const diff = (await execAsync("git diff HEAD --binary", { cwd: worktreePath, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 })).stdout;
+    const recoveryDir = join(repoDir, ".fusion", "recovery");
+    mkdirSync(recoveryDir, { recursive: true });
+    const patchPath = join(recoveryDir, `${taskId.toLowerCase()}-${formatRecoveryTimestamp()}.patch`);
+    writeFileSync(patchPath, diff, "utf-8");
+    return patchPath;
+  } catch (error) {
+    log.warn(`Failed to preserve worktree changes for ${taskId}: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
 
 function matchGlob(path: string, pattern: string): boolean {
   if (pattern.includes("**")) {
@@ -1418,14 +1442,18 @@ export class SelfHealingManager {
           if (inspection.kind === "live-foreign") {
             throw inspection.error;
           }
-          if (inspection.taskAttributedCommitCount <= 0) {
+
+          const preservedCommitCount = inspection.kind === "fully-subsumed"
+            ? 0
+            : inspection.taskAttributedCommitCount;
+          if (inspection.kind !== "fully-subsumed" && preservedCommitCount <= 0) {
             continue;
           }
 
           await this.store.updateTask(task.id, { worktree: inspection.livePath, branch: task.branch });
           await this.store.logEntry(
             task.id,
-            `[recovery] reclaimed existing worktree for ${task.id} at ${inspection.livePath} (${inspection.taskAttributedCommitCount} commits preserved, tip ${inspection.tipSha.slice(0, 12)})`,
+            `[recovery] reclaimed existing worktree for ${task.id} at ${inspection.livePath} (${preservedCommitCount} commits preserved, tip ${inspection.tipSha.slice(0, 12)})`,
           );
 
           try {
@@ -1444,7 +1472,8 @@ export class SelfHealingManager {
                 branch: task.branch,
                 worktreePath: inspection.livePath,
                 existingTipSha: inspection.tipSha,
-                strandedCommitCount: inspection.strandedCommits.length,
+                strandedCommitCount: inspection.kind === "fully-subsumed" ? 0 : inspection.strandedCommits.length,
+                subsumed: inspection.kind === "fully-subsumed",
                 trigger: "self-healing-sweep",
               },
             });
@@ -1455,6 +1484,10 @@ export class SelfHealingManager {
           recovered++;
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : String(err);
+          const patchPath = await preserveWorktreeChanges(this.options.rootDir, task.worktree, task.id);
+          if (patchPath) {
+            await this.store.logEntry(task.id, `Preserved uncommitted worktree changes before pause: ${patchPath}`);
+          }
           await this.store.updateTask(task.id, {
             status: "failed",
             error: `Task branch conflict: ${task.branch} is not safely reclaimable (${message})`,

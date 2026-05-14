@@ -6824,6 +6824,11 @@ and show an appropriate message to the user.\`
       return "reclaimed";
     }
 
+    if (inspection.kind === "fully-subsumed") {
+      await this.reclaimExistingWorktree(task, inspection.livePath, error.branchName, inspection.tipSha, 0);
+      return "reclaimed";
+    }
+
     if (inspection.kind === "live-foreign") {
       const cleanupSuccess = await this.cleanupConflictingWorktree(inspection.livePath, error.branchName, task.id);
       if (cleanupSuccess) {
@@ -7509,6 +7514,15 @@ and show an appropriate message to the user.\`
         await this.store.logEntry(
           taskId,
           `[recovery] reclaimed existing worktree for ${taskId} at ${inspection.livePath} (${inspection.taskAttributedCommitCount} commits preserved)`,
+          inspection.tipSha,
+        );
+        return { path: inspection.livePath, branch };
+      }
+
+      if (inspection.kind === "fully-subsumed") {
+        await this.store.logEntry(
+          taskId,
+          `[recovery] reclaimed existing worktree for ${taskId} at ${inspection.livePath} (0 commits preserved)`,
           inspection.tipSha,
         );
         return { path: inspection.livePath, branch };
