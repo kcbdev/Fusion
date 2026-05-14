@@ -1828,7 +1828,7 @@ describe("TaskCard", () => {
     expect(container.querySelector(".card-time-indicator")).not.toBeNull();
   });
 
-  it("keeps GitHub badge sizing tokens aligned with card-time-indicator", () => {
+  it("FN-4511 keeps GitHub badge sizing tokens aligned with card-time-indicator", () => {
     const baseCss = loadAllAppCssBaseOnly();
 
     expect(baseCss).toMatch(/\.card-github-badge\s*\{[^}]*padding:\s*var\(--space-xs\)\s+var\(--space-sm\);[^}]*\}/);
@@ -1838,6 +1838,56 @@ describe("TaskCard", () => {
 
     const fullCss = loadAllAppCss();
     expect(fullCss).toMatch(/@media\s*\(max-width:\s*768px\)\s*\{[\s\S]*?\.card-github-badge\s*\{[^}]*font-size:\s*0\.625rem;[^}]*\}/);
+  });
+
+  it("FN-4511 keeps GitHub badge and timer chip geometry in parity", () => {
+    const cleanupCss = mountCssForBadgeTests();
+    try {
+      const { container } = render(
+        <TaskCard
+          task={makeTask({
+            column: "done",
+            issueInfo: {
+              owner: "owner",
+              repo: "repo",
+              issueNumber: 7,
+              state: "open",
+              title: "Fix bug",
+            } as any,
+            executionStartedAt: "2026-04-25T13:00:00.000Z",
+            executionCompletedAt: "2026-04-25T15:00:00.000Z",
+          })}
+          onOpenDetail={noop}
+          addToast={noop}
+        />,
+      );
+
+      const githubBadge = container.querySelector(".card-github-badge") as HTMLElement;
+      const timeIndicator = container.querySelector(".card-time-indicator") as HTMLElement;
+      expect(githubBadge).toBeDefined();
+      expect(timeIndicator).toBeDefined();
+
+      const githubStyles = getComputedStyle(githubBadge);
+      const timeStyles = getComputedStyle(timeIndicator);
+
+      expect(githubStyles.padding).toBe(timeStyles.padding);
+      expect(githubStyles.fontSize).toBe(timeStyles.fontSize);
+      expect(githubStyles.lineHeight).toBe(timeStyles.lineHeight);
+      const githubBorderTopWidth = githubStyles.borderTopWidth || "1px";
+      const timeBorderTopWidth = timeStyles.borderTopWidth || "1px";
+      const githubBorderBottomWidth = githubStyles.borderBottomWidth || "1px";
+      const timeBorderBottomWidth = timeStyles.borderBottomWidth || "1px";
+      expect(githubBorderTopWidth).toBe(timeBorderTopWidth);
+      expect(githubBorderBottomWidth).toBe(timeBorderBottomWidth);
+      expect(githubStyles.gap).toBe(timeStyles.gap);
+    } finally {
+      cleanupCss();
+    }
+  });
+
+  it("FN-4511 preserves transparent border slot on .card-github-badge", () => {
+    const css = loadAllAppCssBaseOnly();
+    expect(css).toMatch(/\.card-github-badge\s*\{[^}]*border:\s*1px\s+solid\s+transparent;[^}]*\}/);
   });
 
   it("prefers done-task /diff filesChanged over mergeDetails.filesChanged", () => {

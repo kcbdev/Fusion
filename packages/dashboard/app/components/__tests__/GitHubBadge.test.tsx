@@ -169,22 +169,22 @@ describe("GitHubBadge", () => {
       expect(resolvedGap).toBe("4px");
     });
 
-    it("renders PR icon at 11x11", () => {
+    it("renders PR icon at 10x10", () => {
       const { container } = render(<GitHubBadge prInfo={mockPrInfo} />);
 
       const icon = container.querySelector(".card-github-badge svg");
       expect(icon).not.toBeNull();
-      expect(icon?.getAttribute("width")).toBe("11");
-      expect(icon?.getAttribute("height")).toBe("11");
+      expect(icon?.getAttribute("width")).toBe("10");
+      expect(icon?.getAttribute("height")).toBe("10");
     });
 
-    it("renders Issue icon at 11x11", () => {
+    it("renders Issue icon at 10x10", () => {
       const { container } = render(<GitHubBadge issueInfo={mockIssueInfo} />);
 
       const icon = container.querySelector(".card-github-badge svg");
       expect(icon).not.toBeNull();
-      expect(icon?.getAttribute("width")).toBe("11");
-      expect(icon?.getAttribute("height")).toBe("11");
+      expect(icon?.getAttribute("width")).toBe("10");
+      expect(icon?.getAttribute("height")).toBe("10");
     });
   });
 
