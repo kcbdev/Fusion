@@ -290,7 +290,13 @@ describe("Database", () => {
     });
 
     it("seeds schema version", () => {
-      expect(db.getSchemaVersion()).toBe(73);
+      expect(db.getSchemaVersion()).toBe(74);
+    });
+
+    it("includes tokenUsageCacheWriteTokens on freshly initialized tasks table", () => {
+      const columns = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
+      const columnNames = columns.map((column) => column.name);
+      expect(columnNames).toContain("tokenUsageCacheWriteTokens");
     });
     it("seeds lastModified", () => {
       const ts = db.getLastModified();
@@ -312,7 +318,7 @@ describe("Database", () => {
 
     it("is idempotent - calling init() twice does not fail", () => {
       expect(() => db.init()).not.toThrow();
-      expect(db.getSchemaVersion()).toBe(73);
+      expect(db.getSchemaVersion()).toBe(74);
     });
     it("does not overwrite existing config on re-init", () => {
       // Update the config
@@ -1377,7 +1383,7 @@ describe("schema migrations", () => {
     db.init();
 
     // Verify version bumped to 29 (includes v1→v2 through v26→v29)
-    expect(db.getSchemaVersion()).toBe(73);
+    expect(db.getSchemaVersion()).toBe(74);
 
     // Verify new columns exist and existing data is intact
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
@@ -1402,11 +1408,11 @@ describe("schema migrations", () => {
     const db = new Database(fusionDir);
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(73);
+    expect(db.getSchemaVersion()).toBe(74);
 
     // Re-init should not fail
     db.init();
-    expect(db.getSchemaVersion()).toBe(73);
+    expect(db.getSchemaVersion()).toBe(74);
 
     db.close();
   });
@@ -1441,7 +1447,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(73);
+    expect(db.getSchemaVersion()).toBe(74);
 
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
     expect(cols.map((col) => col.name)).toContain("priority");
@@ -1482,13 +1488,14 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(73);
+    expect(db.getSchemaVersion()).toBe(74);
 
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
     const colNames = cols.map((col) => col.name);
     expect(colNames).toContain("tokenUsageInputTokens");
     expect(colNames).toContain("tokenUsageOutputTokens");
     expect(colNames).toContain("tokenUsageCachedTokens");
+    expect(colNames).toContain("tokenUsageCacheWriteTokens");
     expect(colNames).toContain("tokenUsageTotalTokens");
     expect(colNames).toContain("tokenUsageFirstUsedAt");
     expect(colNames).toContain("tokenUsageLastUsedAt");
@@ -1498,6 +1505,7 @@ describe("schema migrations", () => {
         tokenUsageInputTokens,
         tokenUsageOutputTokens,
         tokenUsageCachedTokens,
+        tokenUsageCacheWriteTokens,
         tokenUsageTotalTokens,
         tokenUsageFirstUsedAt,
         tokenUsageLastUsedAt
@@ -1508,6 +1516,7 @@ describe("schema migrations", () => {
     expect(task.tokenUsageInputTokens).toBeNull();
     expect(task.tokenUsageOutputTokens).toBeNull();
     expect(task.tokenUsageCachedTokens).toBeNull();
+    expect(task.tokenUsageCacheWriteTokens).toBeNull();
     expect(task.tokenUsageTotalTokens).toBeNull();
     expect(task.tokenUsageFirstUsedAt).toBeNull();
     expect(task.tokenUsageLastUsedAt).toBeNull();
@@ -1551,7 +1560,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(73);
+    expect(db.getSchemaVersion()).toBe(74);
 
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
     const colNames = cols.map((col) => col.name);
@@ -1791,7 +1800,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(73);
+    expect(db.getSchemaVersion()).toBe(74);
 
     const cols = db.prepare("PRAGMA table_info(chat_messages)").all() as Array<{ name: string }>;
     expect(cols.map((col) => col.name)).toContain("attachments");
@@ -1865,7 +1874,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(73);
+    expect(db.getSchemaVersion()).toBe(74);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = 'agentRatings'").all() as Array<{ name: string }>;
     expect(tables).toEqual([{ name: "agentRatings" }]);
@@ -1889,7 +1898,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(73);
+    expect(db.getSchemaVersion()).toBe(74);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = 'mission_events'").all() as Array<{ name: string }>;
     expect(tables).toEqual([{ name: "mission_events" }]);
@@ -1993,7 +2002,7 @@ describe("schema migrations", () => {
     db.init();
 
     // Verify version bumped to 29
-    expect(db.getSchemaVersion()).toBe(73);
+    expect(db.getSchemaVersion()).toBe(74);
 
     // Verify new columns exist and existing data is intact
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
@@ -2174,6 +2183,67 @@ describe("schema migrations", () => {
     ]);
 
     db.close();
+  });
+
+  it("migration v74 adds tokenUsageCacheWriteTokens without data loss", () => {
+    tmpDir = makeTmpDir();
+    const fusionDir = join(tmpDir, ".fusion");
+    const localDb = new Database(fusionDir);
+
+    localDb.exec(`
+      CREATE TABLE IF NOT EXISTS __meta (key TEXT PRIMARY KEY, value TEXT);
+      CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY,
+        description TEXT NOT NULL,
+        "column" TEXT NOT NULL,
+        priority TEXT DEFAULT 'normal',
+        tokenUsageInputTokens INTEGER,
+        tokenUsageOutputTokens INTEGER,
+        tokenUsageCachedTokens INTEGER,
+        tokenUsageTotalTokens INTEGER,
+        tokenUsageFirstUsedAt TEXT,
+        tokenUsageLastUsedAt TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS config (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        nextId INTEGER DEFAULT 1,
+        nextWorkflowStepId INTEGER DEFAULT 1,
+        settings TEXT DEFAULT '{}',
+        workflowSteps TEXT DEFAULT '[]',
+        updatedAt TEXT
+      );
+    `);
+    localDb.exec("INSERT INTO __meta (key, value) VALUES ('schemaVersion', '73')");
+    localDb.exec("INSERT INTO __meta (key, value) VALUES ('lastModified', '1000')");
+    localDb.exec(`INSERT INTO tasks (id, description, "column", tokenUsageInputTokens, tokenUsageOutputTokens, tokenUsageCachedTokens, tokenUsageTotalTokens, createdAt, updatedAt) VALUES ('FN-74', 'legacy v73', 'todo', 10, 20, 30, 60, '2026-01-01', '2026-01-01')`);
+
+    localDb.init();
+
+    expect(localDb.getSchemaVersion()).toBe(74);
+    const columns = localDb.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toContain("tokenUsageCacheWriteTokens");
+
+    const row = localDb.prepare(`
+      SELECT tokenUsageInputTokens, tokenUsageOutputTokens, tokenUsageCachedTokens, tokenUsageCacheWriteTokens, tokenUsageTotalTokens
+      FROM tasks
+      WHERE id = 'FN-74'
+    `).get() as {
+      tokenUsageInputTokens: number;
+      tokenUsageOutputTokens: number;
+      tokenUsageCachedTokens: number;
+      tokenUsageCacheWriteTokens: number | null;
+      tokenUsageTotalTokens: number;
+    };
+
+    expect(row.tokenUsageInputTokens).toBe(10);
+    expect(row.tokenUsageOutputTokens).toBe(20);
+    expect(row.tokenUsageCachedTokens).toBe(30);
+    expect(row.tokenUsageCacheWriteTokens).toBeNull();
+    expect(row.tokenUsageTotalTokens).toBe(60);
+
+    localDb.close();
   });
 
   it("SCHEMA_VERSION matches the highest applyMigration target", () => {
@@ -2462,7 +2532,7 @@ describe("createDatabase factory", () => {
     const db = createDatabase(fusionDir);
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(73);
+    expect(db.getSchemaVersion()).toBe(74);
     expect(db.getLastModified()).toBeGreaterThan(0);
 
     db.close();
@@ -2598,7 +2668,7 @@ describe("migration v67 drops orphan project auth tables", () => {
 
       migrated = new Database(fusion);
       migrated.init();
-      expect(migrated.getSchemaVersion()).toBe(73);
+      expect(migrated.getSchemaVersion()).toBe(74);
       const tables = migrated
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'project_auth_%'")
         .all() as Array<{ name: string }>;
@@ -2625,7 +2695,7 @@ describe("migration v67 drops orphan project auth tables", () => {
 
     try {
       fresh.init();
-      expect(fresh.getSchemaVersion()).toBe(73);
+      expect(fresh.getSchemaVersion()).toBe(74);
       const tables = fresh
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'project_auth_%'")
         .all() as Array<{ name: string }>;

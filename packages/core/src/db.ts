@@ -119,7 +119,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 73;
+const SCHEMA_VERSION = 74;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -220,6 +220,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   tokenUsageInputTokens INTEGER,
   tokenUsageOutputTokens INTEGER,
   tokenUsageCachedTokens INTEGER,
+  tokenUsageCacheWriteTokens INTEGER,
   tokenUsageTotalTokens INTEGER,
   tokenUsageFirstUsedAt TEXT,
   tokenUsageLastUsedAt TEXT,
@@ -3154,6 +3155,12 @@ export class Database {
     if (version < 73) {
       this.applyMigration(73, () => {
         this.addColumnIfMissing("tasks", "mergeAuditBounceCount", "INTEGER DEFAULT 0");
+      });
+    }
+
+    if (version < 74) {
+      this.applyMigration(74, () => {
+        this.addColumnIfMissing("tasks", "tokenUsageCacheWriteTokens", "INTEGER");
       });
     }
 
