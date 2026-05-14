@@ -99,6 +99,10 @@ function formatModelTagName(modelInfo: ModelInfo | null, parsedSelection: Parsed
     .trim();
 }
 
+export function clampQuickChatInputHeight(scrollHeight: number): number {
+  return Math.max(40, Math.min(scrollHeight, 320));
+}
+
 function truncateToolValue(value: string, maxLength: number): string {
   if (value.length <= maxLength) return value;
   return `${value.slice(0, maxLength)}…`;
@@ -919,7 +923,7 @@ export function QuickChatFAB({
   const fileMention = useFileMention({ projectId });
 
   // Calculate popup position based on caret position in input
-  const updateFileMentionPosition = useCallback((input: HTMLInputElement | null) => {
+  const updateFileMentionPosition = useCallback((input: HTMLTextAreaElement | null) => {
     if (!input || !fileMention.mentionActive) return;
 
     // Get input position
@@ -985,7 +989,7 @@ export function QuickChatFAB({
   const panelRef = useRef<HTMLDivElement | null>(null);
   const fabRef = useRef<HTMLButtonElement | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingAttachmentsRef = useRef<PendingAttachment[]>([]);
   const shouldAutoFocusComposerRef = useRef(false);
@@ -1749,7 +1753,7 @@ export function QuickChatFAB({
     });
   }, []);
 
-  const handlePaste = useCallback((event: React.ClipboardEvent<HTMLInputElement>) => {
+  const handlePaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
     handleAttachmentFiles(event.clipboardData?.files);
   }, [handleAttachmentFiles]);
 
@@ -1939,7 +1943,7 @@ export function QuickChatFAB({
   );
 
   const handleInputChange = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
+    (event: React.ChangeEvent<HTMLTextAreaElement>) => {
       const nextValue = event.target.value;
       const cursorPos = event.target.selectionStart ?? nextValue.length;
       mentionCursorPosRef.current = cursorPos;
@@ -2033,7 +2037,7 @@ export function QuickChatFAB({
   }, []);
 
   const handleInputSelectionChange = useCallback(
-    (event: React.SyntheticEvent<HTMLInputElement>) => {
+    (event: React.SyntheticEvent<HTMLTextAreaElement>) => {
       const input = event.currentTarget;
       const cursorPos = input.selectionStart ?? input.value.length;
       mentionCursorPosRef.current = cursorPos;
@@ -2050,7 +2054,7 @@ export function QuickChatFAB({
   );
 
   const handleInputKeyUp = useCallback(
-    (event: React.KeyboardEvent<HTMLInputElement>) => {
+    (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (event.key === "Escape") {
         return;
       }
@@ -2089,7 +2093,7 @@ export function QuickChatFAB({
   );
 
   const handleInputKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
       mentionCursorPosRef.current = event.currentTarget.selectionStart ?? mentionCursorPosRef.current;
 
       // Handle file mention popup keyboard navigation first
