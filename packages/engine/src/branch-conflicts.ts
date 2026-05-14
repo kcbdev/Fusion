@@ -282,6 +282,38 @@ export interface ClassifyForeignCommitsResult {
   unique: BranchCrossContaminationCommit[];
 }
 
+async function classifyForeignCommitsViaPatchId(
+  repoDir: string,
+  mainRef: string,
+  commits: BranchCrossContaminationCommit[],
+): Promise<ClassifyForeignCommitsResult> {
+  const upstreamPatchIdsOutput = await runGit(
+    repoDir,
+    `git rev-list ${quoteShellArg(mainRef)} | while read c; do git show "$c" | git patch-id --stable; done`,
+  ).catch(() => "");
+
+  const upstreamPatchIds = new Set(
+    upstreamPatchIdsOutput
+      .split("\n")
+      .map((line) => line.trim().split(" ")[0])
+      .filter(Boolean),
+  );
+
+  const alreadyUpstream: BranchCrossContaminationCommit[] = [];
+  const unique: BranchCrossContaminationCommit[] = [];
+  for (const commit of commits) {
+    const patchIdLine = await runGit(repoDir, `git show ${quoteShellArg(commit.sha)} | git patch-id --stable`).catch(() => "");
+    const patchId = patchIdLine.trim().split(" ")[0];
+    if (patchId && upstreamPatchIds.has(patchId)) {
+      alreadyUpstream.push(commit);
+    } else {
+      unique.push(commit);
+    }
+  }
+
+  return { alreadyUpstream, unique };
+}
+
 export async function classifyForeignCommits(
   input: ClassifyForeignCommitsInput,
 ): Promise<ClassifyForeignCommitsResult> {
@@ -291,7 +323,7 @@ export async function classifyForeignCommits(
     return { alreadyUpstream: [], unique: [] };
   }
 
-  const classifyFromCherryOutput = (output: string): ClassifyForeignCommitsResult => {
+  const classifyFromCherryOutput = async (output: string): Promise<ClassifyForeignCommitsResult> => {
     const alreadyUpstreamSha = new Set<string>();
     const uniqueSha = new Set<string>();
     const resolveFullSha = (token: string): string | null => {
@@ -314,40 +346,29 @@ export async function classifyForeignCommits(
       }
     }
 
-    const alreadyUpstream = foreignCommits.filter((commit) => alreadyUpstreamSha.has(commit.sha) || !uniqueSha.has(commit.sha));
-    const unique = foreignCommits.filter((commit) => uniqueSha.has(commit.sha));
-    return { alreadyUpstream, unique };
+    const unresolved = foreignCommits.filter((commit) => !alreadyUpstreamSha.has(commit.sha) && !uniqueSha.has(commit.sha));
+    const unresolvedClassified = unresolved.length > 0
+      ? await classifyForeignCommitsViaPatchId(repoDir, mainRef, unresolved)
+      : { alreadyUpstream: [], unique: [] };
+
+    return {
+      alreadyUpstream: [
+        ...foreignCommits.filter((commit) => alreadyUpstreamSha.has(commit.sha)),
+        ...unresolvedClassified.alreadyUpstream,
+      ],
+      unique: [
+        ...foreignCommits.filter((commit) => uniqueSha.has(commit.sha)),
+        ...unresolvedClassified.unique,
+      ],
+    };
   };
 
   try {
     const comparisonBase = baseSha || await runGit(repoDir, `git merge-base ${quoteShellArg(mainRef)} ${quoteShellArg(branchName)}`);
     const output = await runGit(repoDir, `git cherry ${quoteShellArg(mainRef)} ${quoteShellArg(branchName)} ${quoteShellArg(comparisonBase)}`);
-    return classifyFromCherryOutput(output);
+    return await classifyFromCherryOutput(output);
   } catch {
-    const upstreamPatchIdsOutput = await runGit(
-      repoDir,
-      `git rev-list ${quoteShellArg(mainRef)} | while read c; do git show "$c" | git patch-id --stable; done`,
-    ).catch(() => "");
-    const upstreamPatchIds = new Set(
-      upstreamPatchIdsOutput
-        .split("\n")
-        .map((line) => line.trim().split(" ")[0])
-        .filter(Boolean),
-    );
-
-    const alreadyUpstream: BranchCrossContaminationCommit[] = [];
-    const unique: BranchCrossContaminationCommit[] = [];
-    for (const commit of foreignCommits) {
-      const patchIdLine = await runGit(repoDir, `git show ${quoteShellArg(commit.sha)} | git patch-id --stable`).catch(() => "");
-      const patchId = patchIdLine.trim().split(" ")[0];
-      if (patchId && upstreamPatchIds.has(patchId)) {
-        alreadyUpstream.push(commit);
-      } else {
-        unique.push(commit);
-      }
-    }
-
-    return { alreadyUpstream, unique };
+    return classifyForeignCommitsViaPatchId(repoDir, mainRef, foreignCommits);
   }
 }
 
