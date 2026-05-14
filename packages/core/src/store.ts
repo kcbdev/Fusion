@@ -24,6 +24,7 @@ import { BackwardCompat, ProjectRequiredError } from "./migration.js";
 import { CentralCore } from "./central-core.js";
 import { getTaskMergeBlocker, resolveTaskMergeTarget } from "./task-merge.js";
 import { getInReviewStallReason } from "./in-review-stall.js";
+import { getTaskAgeStalenessSignal, type TaskAgeStalenessThresholds } from "./task-age-staleness.js";
 import { ensureMemoryFileWithBackend } from "./project-memory.js";
 import { runCommandAsync } from "./run-command.js";
 import { createLogger } from "./logger.js";
@@ -3230,9 +3231,31 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     const rows = this.db.prepare(sql).all(...params);
     const now = Date.now();
+    const settings = await this.getSettingsFast();
+    const staleThresholds: TaskAgeStalenessThresholds = {
+      inProgressWarningMs: settings.staleInProgressWarningMs,
+      inProgressCriticalMs: settings.staleInProgressCriticalMs,
+      inReviewWarningMs: settings.staleInReviewWarningMs,
+      inReviewCriticalMs: settings.staleInReviewCriticalMs,
+    };
+    let disableAgeStalenessHydration = false;
     const activeTasks = await Promise.all((rows as unknown as TaskRow[]).map(async (row) => {
       const task = this.rowToTask(row);
       task.inReviewStall = getInReviewStallReason(task, { now });
+      if (!disableAgeStalenessHydration) {
+        try {
+          task.ageStaleness = getTaskAgeStalenessSignal(task, { now, thresholds: staleThresholds });
+        } catch (error) {
+          if (error instanceof RangeError) {
+            disableAgeStalenessHydration = true;
+            storeLog.warn("Invalid stale task thresholds; skipping age staleness hydration for this listTasks pass", {
+              error: error.message,
+            });
+          } else {
+            throw error;
+          }
+        }
+      }
       task.stalledReview = detectStalledReview(task, { now });
 
       // Slim path: aggregate the timed-execution total server-side, then
@@ -3315,9 +3338,31 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     const hasMore = rows.length > resolvedLimit;
     const now = Date.now();
+    const settings = await this.getSettingsFast();
+    const staleThresholds: TaskAgeStalenessThresholds = {
+      inProgressWarningMs: settings.staleInProgressWarningMs,
+      inProgressCriticalMs: settings.staleInProgressCriticalMs,
+      inReviewWarningMs: settings.staleInReviewWarningMs,
+      inReviewCriticalMs: settings.staleInReviewCriticalMs,
+    };
+    let disableAgeStalenessHydration = false;
     const tasks = rows.slice(0, resolvedLimit).map((row) => {
       const task = this.rowToTask(row);
       task.inReviewStall = getInReviewStallReason(task, { now });
+      if (!disableAgeStalenessHydration) {
+        try {
+          task.ageStaleness = getTaskAgeStalenessSignal(task, { now, thresholds: staleThresholds });
+        } catch (error) {
+          if (error instanceof RangeError) {
+            disableAgeStalenessHydration = true;
+            storeLog.warn("Invalid stale task thresholds; skipping age staleness hydration for this modified-since pass", {
+              error: error.message,
+            });
+          } else {
+            throw error;
+          }
+        }
+      }
       task.timedExecutionMs = this.computeTimedExecutionMs(task.log);
       task.stalledReview = detectStalledReview(task, { now });
       task.log = [];
@@ -3425,9 +3470,31 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     }
 
     const now = Date.now();
+    const settings = await this.getSettingsFast();
+    const staleThresholds: TaskAgeStalenessThresholds = {
+      inProgressWarningMs: settings.staleInProgressWarningMs,
+      inProgressCriticalMs: settings.staleInProgressCriticalMs,
+      inReviewWarningMs: settings.staleInReviewWarningMs,
+      inReviewCriticalMs: settings.staleInReviewCriticalMs,
+    };
+    let disableAgeStalenessHydration = false;
     const activeMatches = await Promise.all(rows.map(async (row) => {
       const task = this.rowToTask(row);
       task.inReviewStall = getInReviewStallReason(task, { now });
+      if (!disableAgeStalenessHydration) {
+        try {
+          task.ageStaleness = getTaskAgeStalenessSignal(task, { now, thresholds: staleThresholds });
+        } catch (error) {
+          if (error instanceof RangeError) {
+            disableAgeStalenessHydration = true;
+            storeLog.warn("Invalid stale task thresholds; skipping age staleness hydration for this searchTasks pass", {
+              error: error.message,
+            });
+          } else {
+            throw error;
+          }
+        }
+      }
 
       // Slim path mirrors `listTasks`: aggregate timed execution server-side
       // before stripping the heavy log payload from the wire response.
