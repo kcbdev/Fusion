@@ -253,8 +253,12 @@ export function TaskTokenStatsPanel({ tokenUsage, loading, task }: TaskTokenStat
                 <span className="task-token-stats-panel__value">{formatTokenCount(tokenUsage.outputTokens)}</span>
               </div>
               <div className="task-token-stats-panel__metric" role="listitem">
-                <span className="task-token-stats-panel__label">Cached</span>
+                <span className="task-token-stats-panel__label">Cache read</span>
                 <span className="task-token-stats-panel__value">{formatTokenCount(tokenUsage.cachedTokens)}</span>
+              </div>
+              <div className="task-token-stats-panel__metric" role="listitem">
+                <span className="task-token-stats-panel__label">Cache write</span>
+                <span className="task-token-stats-panel__value">{formatTokenCount(tokenUsage.cacheWriteTokens ?? 0)}</span>
               </div>
               <div className="task-token-stats-panel__metric" role="listitem">
                 <span className="task-token-stats-panel__label">Total</span>

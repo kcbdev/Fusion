@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Task, TaskStore } from "@fusion/core";
 import { accumulateSessionTokenUsage } from "../session-token-usage.js";
+import { TaskExecutor } from "../executor.js";
 
 interface MockSessionStats {
   tokens?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
@@ -123,5 +124,38 @@ describe("accumulateSessionTokenUsage", () => {
     const session = createSession({ tokens: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } });
 
     await expect(accumulateSessionTokenUsage(store, "FN-1", session)).resolves.toBeUndefined();
+  });
+
+  it.each([
+    { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, total: 15 },
+    { input: 1000, output: 500, cacheRead: 800, cacheWrite: 200, total: 2500 },
+  ])("FN-4389 canonical semantic parity for stats %#", async (tokens) => {
+    const heartbeatStore = createStore(undefined);
+    const heartbeatSession = createSession({ tokens });
+    await accumulateSessionTokenUsage(heartbeatStore, "FN-1", heartbeatSession);
+    const heartbeatUsage = (heartbeatStore.updateTask.mock.calls[0]?.[1] as { tokenUsage?: Task["tokenUsage"] })?.tokenUsage;
+
+    const executor = Object.create(TaskExecutor.prototype) as TaskExecutor;
+    const extract = (executor as unknown as {
+      extractSessionTokenUsage: (session: unknown) => Promise<{ inputTokens: number; outputTokens: number; cachedTokens: number; cacheWriteTokens: number; totalTokens: number } | undefined>;
+      accumulateTokenUsage: (existing: Task["tokenUsage"], delta: { inputTokens: number; outputTokens: number; cachedTokens: number; cacheWriteTokens: number; totalTokens: number }) => Task["tokenUsage"];
+    });
+    const delta = await extract.extractSessionTokenUsage({ getSessionStats: () => ({ tokens }) });
+    const executorUsage = delta ? extract.accumulateTokenUsage(undefined, delta) : undefined;
+
+    expect(heartbeatUsage).toMatchObject({
+      inputTokens: tokens.input,
+      outputTokens: tokens.output,
+      cachedTokens: tokens.cacheRead,
+      cacheWriteTokens: tokens.cacheWrite,
+      totalTokens: tokens.total,
+    });
+    expect(executorUsage).toMatchObject({
+      inputTokens: tokens.input,
+      outputTokens: tokens.output,
+      cachedTokens: tokens.cacheRead,
+      cacheWriteTokens: tokens.cacheWrite,
+      totalTokens: tokens.total,
+    });
   });
 });

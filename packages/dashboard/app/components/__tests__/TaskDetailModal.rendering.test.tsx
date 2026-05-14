@@ -1607,6 +1607,7 @@ describe("TaskDetailModal", () => {
           inputTokens: 1200,
           outputTokens: 450,
           cachedTokens: 210,
+          cacheWriteTokens: 15,
           totalTokens: 1860,
           firstUsedAt: "2026-04-24T09:00:00.000Z",
           lastUsedAt: "2026-04-24T10:15:00.000Z",

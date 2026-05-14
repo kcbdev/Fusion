@@ -71,6 +71,7 @@ describe("TaskTokenStatsPanel", () => {
           inputTokens: 1200,
           outputTokens: 450,
           cachedTokens: 210,
+          cacheWriteTokens: 15,
           totalTokens: 1860,
           firstUsedAt: "2026-04-24T09:00:00.000Z",
           lastUsedAt: "2026-04-24T10:15:00.000Z",
@@ -87,11 +88,13 @@ describe("TaskTokenStatsPanel", () => {
 
     expect(screen.getByText("Input")).toBeInTheDocument();
     expect(screen.getByText("Output")).toBeInTheDocument();
-    expect(screen.getByText("Cached")).toBeInTheDocument();
+    expect(screen.getByText("Cache read")).toBeInTheDocument();
+    expect(screen.getByText("Cache write")).toBeInTheDocument();
     expect(screen.getByText("Total")).toBeInTheDocument();
     expect(screen.getByText("1,200")).toBeInTheDocument();
     expect(screen.getByText("450")).toBeInTheDocument();
     expect(screen.getByText("210")).toBeInTheDocument();
+    expect(screen.getByText("15")).toBeInTheDocument();
     expect(screen.getByText("1,860")).toBeInTheDocument();
 
     const firstUsedTime = screen.getByText((_, element) => element?.tagName === "TIME" && element.getAttribute("datetime") === "2026-04-24T09:00:00.000Z");

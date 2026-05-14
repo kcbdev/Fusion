@@ -335,6 +335,7 @@ describe("AppModals", () => {
         inputTokens: 1200,
         outputTokens: 300,
         cachedTokens: 100,
+        cacheWriteTokens: 25,
         totalTokens: 1600,
         firstUsedAt: "2026-04-25T12:05:00.000Z",
         lastUsedAt: "2026-04-25T12:10:00.000Z",

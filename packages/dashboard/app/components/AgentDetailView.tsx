@@ -1830,13 +1830,14 @@ function RunsTab({
   const activeRuns = sortedRuns.filter(r => r.status === "active");
   const completedRuns = sortedRuns.filter(r => r.status !== "active");
 
-  const renderUsage = (usage: { inputTokens: number; outputTokens: number; cachedTokens: number } | undefined) => {
+  const renderUsage = (usage: { inputTokens: number; outputTokens: number; cachedTokens: number; cacheWriteTokens?: number } | undefined) => {
     if (!usage) return null;
     return (
       <div className="run-usage">
         <span>Input: {usage.inputTokens.toLocaleString()}</span>
         <span>Output: {usage.outputTokens.toLocaleString()}</span>
-        {usage.cachedTokens > 0 && <span>Cached: {usage.cachedTokens.toLocaleString()}</span>}
+        {usage.cachedTokens > 0 && <span>Cache read: {usage.cachedTokens.toLocaleString()}</span>}
+        {(usage.cacheWriteTokens ?? 0) > 0 && <span>Cache write: {(usage.cacheWriteTokens ?? 0).toLocaleString()}</span>}
       </div>
     );
   };
