@@ -48,6 +48,7 @@ import {
   assertCleanBranchAtBase,
   inspectBranchConflict,
   listBranchRecoveryCandidates,
+  listUniqueBranchCommits,
 } from "../branch-conflicts.js";
 
 const mockedExecSync = vi.mocked(execSync);
@@ -183,6 +184,92 @@ describe("branch-conflicts", () => {
     }
     expect(result.error).toBeInstanceOf(BranchConflictError);
     expect(result.error.message).toContain("Run branch recovery");
+  });
+
+  it("lists zero unique commits when git cherry has no plus entries", async () => {
+    mockedExecSync.mockImplementation((cmd: string | string[]) => {
+      const command = typeof cmd === "string" ? cmd : cmd[0];
+      if (command.includes("git rev-parse --verify 'main^{commit}'")) {
+        return Buffer.from("mainsha\n");
+      }
+      if (command === "git merge-base 'main' 'fusion/fn-4068'") {
+        return Buffer.from("base123\n");
+      }
+      if (command === "git cherry 'main' 'fusion/fn-4068' 'base123'") {
+        return Buffer.from("- abc111\n");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    const result = await listUniqueBranchCommits("/tmp/repo", "main", "fusion/fn-4068");
+
+    expect(result).toEqual({ commits: [], mainRef: "main", degraded: false });
+  });
+
+  it("lists patch-id-unique commits from git cherry plus lines", async () => {
+    mockedExecSync.mockImplementation((cmd: string | string[]) => {
+      const command = typeof cmd === "string" ? cmd : cmd[0];
+      if (command.includes("git rev-parse --verify 'main^{commit}'")) {
+        return Buffer.from("mainsha\n");
+      }
+      if (command === "git merge-base 'main' 'fusion/fn-4068'") {
+        return Buffer.from("base123\n");
+      }
+      if (command === "git cherry 'main' 'fusion/fn-4068' 'base123'") {
+        return Buffer.from("+ abc111\n+ def222\n");
+      }
+      if (command.includes("git rev-parse --verify 'abc111^{commit}'")) {
+        return Buffer.from("abc111full\n");
+      }
+      if (command.includes("git rev-parse --verify 'def222^{commit}'")) {
+        return Buffer.from("def222full\n");
+      }
+      if (command === "git log -1 --format=%s 'abc111'") {
+        return Buffer.from("First unique\n");
+      }
+      if (command === "git log -1 --format=%s 'def222'") {
+        return Buffer.from("Second unique\n");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    const result = await listUniqueBranchCommits("/tmp/repo", "main", "fusion/fn-4068");
+
+    expect(result).toEqual({
+      commits: [
+        { sha: "abc111full", subject: "First unique" },
+        { sha: "def222full", subject: "Second unique" },
+      ],
+      mainRef: "main",
+      degraded: false,
+    });
+  });
+
+  it("falls back to rev-list stranded commits when git cherry fails", async () => {
+    mockedExecSync.mockImplementation((cmd: string | string[]) => {
+      const command = typeof cmd === "string" ? cmd : cmd[0];
+      if (command.includes("git rev-parse --verify 'main^{commit}'")) {
+        return Buffer.from("mainsha\n");
+      }
+      if (command === "git merge-base 'main' 'fusion/fn-4068'") {
+        return Buffer.from("base123\n");
+      }
+      if (command === "git cherry 'main' 'fusion/fn-4068' 'base123'") {
+        throw new Error("cherry failed");
+      }
+      if (command.includes("git log --reverse --format=%H%x09%s 'main..fusion/fn-4068'")) {
+        return Buffer.from("aaa111\tFallback one\n");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    const result = await listUniqueBranchCommits("/tmp/repo", "main", "fusion/fn-4068");
+
+    expect(result).toEqual({
+      commits: [{ sha: "aaa111", subject: "Fallback one" }],
+      mainRef: "main",
+      degraded: true,
+    });
   });
 
   it("assertCleanBranchAtBase passes when no foreign task commits exist", async () => {
