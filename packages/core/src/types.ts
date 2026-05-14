@@ -462,9 +462,12 @@ Files to Review:
 - Check test files for test documentation
 
 Output Requirements:
-- If documentation is adequate: call task_done() with success status
-- If documentation is missing: list specific files and functions that need documentation using task_log()
-- Provide specific suggestions for what documentation should be added`,
+- Fast-bail: if Diff Scope contains no documentation-relevant files, output {"verdict":"APPROVE","notes":"out of scope: documentation"} immediately.
+- APPROVE: documentation is adequate; use empty or brief notes.
+- APPROVE_WITH_NOTES: documentation is adequate with advisory improvements; include concise suggestions in notes.
+- REVISE: documentation is missing or incorrect; include actionable file paths/functions in notes.
+- Final output: output exactly one trailing JSON object on the final line (no markdown fences, no surrounding prose):
+{"verdict":"APPROVE|APPROVE_WITH_NOTES|REVISE","notes":"..."}`,
   },
   {
     id: "qa-check",
@@ -489,9 +492,12 @@ Code Review:
 4. Look for common issues: null pointer risks, off-by-one errors, race conditions
 
 Output Requirements:
-- If lint, tests, and typecheck all pass and no bugs found: call task_done() with success status
-- If any gate fails (lint, tests, or typecheck): provide detailed failure information via task_log()
-- If bugs are found: describe the bug, affected files, and suggested fix via task_log()`,
+- Fast-bail: if Diff Scope contains no QA-relevant files, output {"verdict":"APPROVE","notes":"out of scope: QA"} immediately.
+- APPROVE: lint/tests/typecheck pass and no actionable bugs.
+- APPROVE_WITH_NOTES: quality gates pass but include non-blocking advisories in notes.
+- REVISE: any gate fails or actionable bugs are found; include failing commands and affected file paths in notes.
+- Final output: output exactly one trailing JSON object on the final line (no markdown fences, no surrounding prose):
+{"verdict":"APPROVE|APPROVE_WITH_NOTES|REVISE","notes":"..."}`,
   },
   {
     id: "security-audit",
@@ -517,9 +523,12 @@ Files to Review:
 - Areas handling user input or external data
 
 Output Requirements:
-- If no security issues found: call task_done() with success status
-- If issues found: describe each vulnerability with specific file paths, line numbers, and severity via task_log()
-- Provide remediation suggestions for each issue`,
+- Fast-bail: if Diff Scope contains no security-relevant files, output {"verdict":"APPROVE","notes":"out of scope: security"} immediately.
+- APPROVE: no security issues found.
+- APPROVE_WITH_NOTES: no blocking issues, but include advisory hardening opportunities in notes.
+- REVISE: vulnerabilities require changes; include file paths, severity, and remediation guidance in notes.
+- Final output: output exactly one trailing JSON object on the final line (no markdown fences, no surrounding prose):
+{"verdict":"APPROVE|APPROVE_WITH_NOTES|REVISE","notes":"..."}`,
   },
   {
     id: "performance-review",
@@ -545,8 +554,12 @@ Files to Review:
 - API endpoints and route handlers
 
 Output Requirements:
-- If performance is acceptable: call task_done() with success status
-- If issues found: describe each issue with specific file paths and suggested optimizations via task_log()`,
+- Fast-bail: if Diff Scope contains no performance-relevant files, output {"verdict":"APPROVE","notes":"out of scope: performance"} immediately.
+- APPROVE: performance impact is acceptable.
+- APPROVE_WITH_NOTES: acceptable overall, but include optimization advisories in notes.
+- REVISE: performance risks require changes; include actionable file paths and optimization guidance in notes.
+- Final output: output exactly one trailing JSON object on the final line (no markdown fences, no surrounding prose):
+{"verdict":"APPROVE|APPROVE_WITH_NOTES|REVISE","notes":"..."}`,
   },
   {
     id: "accessibility-check",
@@ -572,8 +585,12 @@ Files to Review:
 - New HTML templates or JSX
 
 Output Requirements:
-- If accessibility requirements are met: call task_done() with success status
-- If issues found: describe each issue with specific file paths, WCAG guideline references, and remediation steps via task_log()`,
+- Fast-bail: if Diff Scope contains no accessibility-relevant UI files, output {"verdict":"APPROVE","notes":"out of scope: accessibility"} immediately.
+- APPROVE: accessibility requirements are met.
+- APPROVE_WITH_NOTES: compliant overall, with advisory improvements in notes.
+- REVISE: accessibility issues require changes; include file paths, WCAG references, and remediation steps in notes.
+- Final output: output exactly one trailing JSON object on the final line (no markdown fences, no surrounding prose):
+{"verdict":"APPROVE|APPROVE_WITH_NOTES|REVISE","notes":"..."}`,
   },
   {
     id: "browser-verification",
@@ -606,9 +623,13 @@ Use these agent-browser commands for verification:
 6. Screenshots capture expected content
 
 ## Output Requirements
-- If verification succeeds: call task_done() with success status
-- If verification fails: describe what failed and how it should behave via task_log()
-- Include screenshots as evidence of verification results
+- Fast-bail: if Diff Scope contains no browser-verification-relevant UI files, output {"verdict":"APPROVE","notes":"out of scope: browser verification"} immediately.
+- APPROVE: verification succeeds.
+- APPROVE_WITH_NOTES: verification succeeds with non-blocking advisory findings; include evidence references in notes.
+- REVISE: verification failures or regressions require changes; include failing behavior and actionable file paths in notes.
+- Screenshots/artifacts referenced in notes are evidence only; verdict must be conveyed by the final JSON line.
+- Final output: output exactly one trailing JSON object on the final line (no markdown fences, no surrounding prose):
+{"verdict":"APPROVE|APPROVE_WITH_NOTES|REVISE","notes":"..."}
 
 Note: Refs (@e1, @e2) are invalidated after page navigation. Re-snapshot after clicking links or form submissions.`,
   },
@@ -626,11 +647,7 @@ Note: Refs (@e1, @e2) are invalidated after page navigation. Re-snapshot after c
 The task harness provides a "Diff Scope" listing files this task actually changed.
 
 If the Diff Scope contains ZERO frontend/UI files (no .tsx/.jsx/.ts/.js component files, no .css/.scss/.sass/.styl, no .html/.vue/.svelte/.astro, no design-token/theme files), output ONLY:
-
-\`\`\`json-workflow-verdict
-{"verdict":"PASS","notes":"No UI changes in scope — approved."}
-\`\`\`
-
+{"verdict":"APPROVE","notes":"out of scope: frontend UX design"}
 Then STOP. Do not browse the worktree. Do not read any files.
 
 If there ARE frontend/UI files in scope, proceed to Step 2.
@@ -649,17 +666,11 @@ Check:
 
 ## Output Format
 
-End your response with a JSON verdict block:
-
-For clean reviews:
-\`\`\`json-workflow-verdict
-{"verdict":"PASS","notes":"<1-2 sentence summary>"}
-\`\`\`
-
-For issues requiring code changes:
-\`\`\`json-workflow-verdict
-{"verdict":"FAIL","notes":"<specific files and what needs to change>"}
-\`\`\`
+- APPROVE: visual quality is acceptable; use empty or brief notes.
+- APPROVE_WITH_NOTES: acceptable with non-blocking polish advisories; include specific notes.
+- REVISE: issues require code changes; include specific files and required changes in notes.
+- Final output: output exactly one trailing JSON object on the final line (no markdown fences, no surrounding prose):
+{"verdict":"APPROVE|APPROVE_WITH_NOTES|REVISE","notes":"..."}
 
 Prioritize: layout breaks > visual inconsistency > style preferences.
 Do NOT spend time on nits when no real issues exist.`,
