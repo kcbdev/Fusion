@@ -94,6 +94,105 @@ async function tryBranchRefFallbackFiles(
   }
 }
 
+async function tryBranchRefFallbackDetailedDiff(
+  task: BranchFallbackTask,
+  rootDir: string,
+): Promise<{
+  files: Array<{ path: string; status: "added" | "modified" | "deleted"; additions: number; deletions: number; patch: string }>;
+  stats: { filesChanged: number; additions: number; deletions: number };
+}> {
+  const resolved = await resolveBranchDiffBaseInRoot(task, rootDir);
+  if (!resolved) {
+    return { files: [], stats: { filesChanged: 0, additions: 0, deletions: 0 } };
+  }
+
+  const fileMap = new Map<string, string>();
+  try {
+    const nameStatusOutput = (await runGitCommand(["diff", "--name-status", `${resolved.baseRef}..${resolved.branchRef}`], rootDir, 10000)).trim();
+    for (const line of nameStatusOutput.split("\n").filter(Boolean)) {
+      const parts = line.split("\t");
+      const statusCode = parts[0] ?? "M";
+      const filePath = statusCode.startsWith("R") ? (parts[2] ?? parts[1] ?? "") : (parts[1] ?? "");
+      if (filePath) fileMap.set(filePath, statusCode);
+    }
+  } catch {
+    return { files: [], stats: { filesChanged: 0, additions: 0, deletions: 0 } };
+  }
+
+  const files: Array<{ path: string; status: "added" | "modified" | "deleted"; additions: number; deletions: number; patch: string }> = [];
+  for (const [filePath, statusCode] of fileMap.entries()) {
+    let status: "added" | "modified" | "deleted" = "modified";
+    if (statusCode.startsWith("A")) status = "added";
+    else if (statusCode.startsWith("D")) status = "deleted";
+
+    let patch = "";
+    try {
+      patch = await runGitCommand(["diff", `${resolved.baseRef}..${resolved.branchRef}`, "--", filePath], rootDir, 10000);
+    } catch {
+      patch = "";
+    }
+
+    const additions = (patch.match(/^\+[^+]/gm) || []).length;
+    const deletions = (patch.match(/^-[^-]/gm) || []).length;
+    files.push({ path: filePath, status, additions, deletions, patch });
+  }
+
+  return {
+    files,
+    stats: {
+      filesChanged: files.length,
+      additions: files.reduce((sum, file) => sum + file.additions, 0),
+      deletions: files.reduce((sum, file) => sum + file.deletions, 0),
+    },
+  };
+}
+
+async function tryBranchRefFallbackFileDiffs(
+  task: BranchFallbackTask,
+  rootDir: string,
+): Promise<Array<{ path: string; status: "added" | "modified" | "deleted" | "renamed"; diff: string; oldPath?: string }>> {
+  const resolved = await resolveBranchDiffBaseInRoot(task, rootDir);
+  if (!resolved) return [];
+
+  const fileMap = new Map<string, { statusCode: string; oldPath?: string }>();
+  try {
+    const nameStatusOutput = (await runGitCommand(["diff", "--name-status", `${resolved.baseRef}..${resolved.branchRef}`], rootDir, 5000)).trim();
+    for (const line of nameStatusOutput.split("\n").filter(Boolean)) {
+      const parts = line.split("\t");
+      const statusCode = parts[0] ?? "M";
+      if (statusCode.startsWith("R")) {
+        const nextPath = parts[2] ?? parts[1] ?? "";
+        if (nextPath) fileMap.set(nextPath, { statusCode, oldPath: parts[1] });
+      } else {
+        const filePath = parts[1] ?? "";
+        if (filePath) fileMap.set(filePath, { statusCode });
+      }
+    }
+  } catch {
+    return [];
+  }
+
+  const files: Array<{ path: string; status: "added" | "modified" | "deleted" | "renamed"; diff: string; oldPath?: string }> = [];
+  for (const [filePath, { statusCode, oldPath }] of fileMap.entries()) {
+    let status: "added" | "modified" | "deleted" | "renamed" = "modified";
+    if (statusCode.startsWith("A")) status = "added";
+    else if (statusCode.startsWith("D")) status = "deleted";
+    else if (statusCode.startsWith("R")) status = "renamed";
+
+    let diff = "";
+    try {
+      diff = await runGitCommand(["diff", `${resolved.baseRef}..${resolved.branchRef}`, "--", filePath], rootDir, 5000);
+    } catch {
+      diff = "";
+    }
+
+    if (!diff) continue;
+    files.push(oldPath ? { path: filePath, status, diff, oldPath } : { path: filePath, status, diff });
+  }
+
+  return files;
+}
+
 type AggregatedDoneTaskFile = {
   path: string;
   status: DoneTaskFileStatus;
@@ -428,7 +527,8 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
       const resolvedWorktree = worktree || task.worktree;
 
       if (!resolvedWorktree) {
-        res.json({ files: [], stats: { filesChanged: 0, additions: 0, deletions: 0 } });
+        const fallback = await tryBranchRefFallbackDetailedDiff(task, scopedStore.getRootDir());
+        res.json(fallback);
         return;
       }
       let worktreeExists = false;
@@ -439,11 +539,13 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
         worktreeExists = false;
       }
       if (!worktreeExists) {
-        res.json({ files: [], stats: { filesChanged: 0, additions: 0, deletions: 0 } });
+        const fallback = await tryBranchRefFallbackDetailedDiff(task, scopedStore.getRootDir());
+        res.json(fallback);
         return;
       }
       if (!(await worktreeStillBelongsToTask(resolvedWorktree, task.branch))) {
-        res.json({ files: [], stats: { filesChanged: 0, additions: 0, deletions: 0 } });
+        const fallback = await tryBranchRefFallbackDetailedDiff(task, scopedStore.getRootDir());
+        res.json(fallback);
         return;
       }
       const cwd = resolvedWorktree;
@@ -600,7 +702,12 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
       }
 
       if (!task.worktree) {
-        res.json([]);
+        const fallbackFiles = await tryBranchRefFallbackFileDiffs(task, scopedStore.getRootDir());
+        fileDiffsCache.set(task.id, {
+          files: fallbackFiles,
+          expiresAt: Date.now() + 10000,
+        });
+        res.json(fallbackFiles);
         return;
       }
 
@@ -613,13 +720,23 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
       }
 
       if (!worktreeExists) {
-        res.json([]);
+        const fallbackFiles = await tryBranchRefFallbackFileDiffs(task, scopedStore.getRootDir());
+        fileDiffsCache.set(task.id, {
+          files: fallbackFiles,
+          expiresAt: Date.now() + 10000,
+        });
+        res.json(fallbackFiles);
         return;
       }
 
       const worktree = task.worktree;
       if (!(await worktreeStillBelongsToTask(worktree, task.branch))) {
-        res.json([]);
+        const fallbackFiles = await tryBranchRefFallbackFileDiffs(task, scopedStore.getRootDir());
+        fileDiffsCache.set(task.id, {
+          files: fallbackFiles,
+          expiresAt: Date.now() + 10000,
+        });
+        res.json(fallbackFiles);
         return;
       }
       const cached = fileDiffsCache.get(task.id);
