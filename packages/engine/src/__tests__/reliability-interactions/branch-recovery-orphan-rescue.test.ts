@@ -4,6 +4,7 @@ import type { TaskStore } from "@fusion/core";
 import { SelfHealingManager } from "../../self-healing.js";
 import * as branchConflicts from "../../branch-conflicts.js";
 import * as worktreePool from "../../worktree-pool.js";
+import { RestartRecoveryCoordinator } from "../../restart-recovery-coordinator.js";
 
 function createStore(): TaskStore & EventEmitter {
   const emitter = new EventEmitter() as TaskStore & EventEmitter;
@@ -39,6 +40,52 @@ describe("reliability interactions: branch recovery + orphan rescue", () => {
 
     expect(recovered).toBe(0);
     expect(inspectSpy).not.toHaveBeenCalled();
+  });
+
+  it("restart recovery safe-requeue and reclaim sweep do not race on paused branch-conflict tasks", async () => {
+    const task: any = {
+      id: "FN-6000",
+      column: "in-progress",
+      checkedOutBy: null,
+      branch: "fusion/fn-6000",
+      worktree: "/tmp/fn-6000",
+      paused: true,
+      userPaused: false,
+      pausedReason: "branch-conflict-unrecoverable",
+      status: "failed",
+      error: "Agent exited without calling fn_task_done",
+      steps: [{ name: "A", status: "pending" }],
+    };
+    const statefulStore: any = createStore();
+    statefulStore.listTasks = vi.fn(async ({ column }: { column?: string }) => {
+      if (!column) return [task];
+      return task.column === column ? [task] : [];
+    });
+    statefulStore.updateTask = vi.fn(async (_id: string, updates: Record<string, unknown>) => {
+      Object.assign(task, updates);
+    });
+    statefulStore.moveTask = vi.fn(async (_id: string, column: string) => {
+      task.column = column;
+    });
+
+    const restart = new RestartRecoveryCoordinator(statefulStore, { resumeOrphaned: vi.fn().mockResolvedValue(undefined) } as any);
+    const localManager = new SelfHealingManager(statefulStore, { rootDir: "/tmp/repo" });
+
+    vi.spyOn(branchConflicts, "inspectBranchConflict").mockResolvedValueOnce({
+      kind: "reclaimable",
+      livePath: "/tmp/fn-6000",
+      tipSha: "abc123def456",
+      taskAttributedCommitCount: 0,
+      strandedCommits: [],
+    } as any);
+
+    await restart.recoverInterruptedRuns();
+    const recovered = await localManager.reclaimSelfOwnedBranchConflicts();
+
+    expect(task.column).toBe("in-progress");
+    expect(task.branch).toBe("fusion/fn-6000");
+    expect(task.worktree).toBe("/tmp/fn-6000");
+    expect(recovered).toBe(1);
   });
 
   it("orphan-rescue sweep is idempotent across consecutive runs", async () => {
