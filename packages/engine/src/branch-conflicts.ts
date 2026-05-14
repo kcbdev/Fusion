@@ -4,6 +4,8 @@ import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
 const FUSION_TASK_ID_TRAILER_KEY = "Fusion-Task-Id";
+const GIT_TIMEOUT_MS = 120_000;
+const GIT_MAX_BUFFER = 10 * 1024 * 1024;
 
 export interface BranchConflictCommit {
   sha: string;
@@ -116,6 +118,8 @@ async function runGit(repoDir: string, command: string): Promise<string> {
   const { stdout } = await execAsync(command, {
     cwd: repoDir,
     encoding: "utf-8",
+    timeout: GIT_TIMEOUT_MS,
+    maxBuffer: GIT_MAX_BUFFER,
   });
   return stdout.trim();
 }
@@ -257,6 +261,152 @@ export async function assertCleanBranchAtBase(
   if (foreignCommits.length > 0) {
     throw new BranchCrossContaminationError({ branchName, baseSha, taskId, foreignCommits });
   }
+}
+
+export interface ClassifyForeignCommitsInput {
+  repoDir: string;
+  branchName: string;
+  baseSha: string;
+  foreignCommits: BranchCrossContaminationCommit[];
+  mainRef?: string;
+}
+
+export interface ClassifyForeignCommitsResult {
+  /**
+   * Commits whose patch-id already exists on main and are safe to drop.
+   */
+  alreadyUpstream: BranchCrossContaminationCommit[];
+  /**
+   * Commits whose patch-id is unique and require human adjudication.
+   */
+  unique: BranchCrossContaminationCommit[];
+}
+
+export async function classifyForeignCommits(
+  input: ClassifyForeignCommitsInput,
+): Promise<ClassifyForeignCommitsResult> {
+  const { repoDir, branchName, baseSha, foreignCommits, mainRef = "main" } = input;
+  const targetBySha = new Map(foreignCommits.map((commit) => [commit.sha, commit]));
+  if (targetBySha.size === 0) {
+    return { alreadyUpstream: [], unique: [] };
+  }
+
+  const classifyFromCherryOutput = (output: string): ClassifyForeignCommitsResult => {
+    const alreadyUpstreamSha = new Set<string>();
+    const uniqueSha = new Set<string>();
+    const resolveFullSha = (token: string): string | null => {
+      if (targetBySha.has(token)) return token;
+      const match = foreignCommits.find((commit) => commit.sha.startsWith(token));
+      return match?.sha ?? null;
+    };
+
+    for (const rawLine of output.split("\n")) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      const [marker, token] = line.split(/\s+/, 2);
+      if (!token) continue;
+      const sha = resolveFullSha(token);
+      if (!sha) continue;
+      if (marker === "-") {
+        alreadyUpstreamSha.add(sha);
+      } else if (marker === "+") {
+        uniqueSha.add(sha);
+      }
+    }
+
+    const alreadyUpstream = foreignCommits.filter((commit) => alreadyUpstreamSha.has(commit.sha) || !uniqueSha.has(commit.sha));
+    const unique = foreignCommits.filter((commit) => uniqueSha.has(commit.sha));
+    return { alreadyUpstream, unique };
+  };
+
+  try {
+    const comparisonBase = baseSha || await runGit(repoDir, `git merge-base ${quoteShellArg(mainRef)} ${quoteShellArg(branchName)}`);
+    const output = await runGit(repoDir, `git cherry ${quoteShellArg(mainRef)} ${quoteShellArg(branchName)} ${quoteShellArg(comparisonBase)}`);
+    return classifyFromCherryOutput(output);
+  } catch {
+    const upstreamPatchIdsOutput = await runGit(
+      repoDir,
+      `git rev-list ${quoteShellArg(mainRef)} | while read c; do git show "$c" | git patch-id --stable; done`,
+    ).catch(() => "");
+    const upstreamPatchIds = new Set(
+      upstreamPatchIdsOutput
+        .split("\n")
+        .map((line) => line.trim().split(" ")[0])
+        .filter(Boolean),
+    );
+
+    const alreadyUpstream: BranchCrossContaminationCommit[] = [];
+    const unique: BranchCrossContaminationCommit[] = [];
+    for (const commit of foreignCommits) {
+      const patchIdLine = await runGit(repoDir, `git show ${quoteShellArg(commit.sha)} | git patch-id --stable`).catch(() => "");
+      const patchId = patchIdLine.trim().split(" ")[0];
+      if (patchId && upstreamPatchIds.has(patchId)) {
+        alreadyUpstream.push(commit);
+      } else {
+        unique.push(commit);
+      }
+    }
+
+    return { alreadyUpstream, unique };
+  }
+}
+
+export interface AutoRecoverCrossContaminationInput {
+  repoDir: string;
+  branchName: string;
+  baseSha: string;
+  taskId: string;
+  alreadyUpstreamShas: string[];
+  mainRef?: string;
+}
+
+export interface AutoRecoverCrossContaminationResult {
+  newTipSha: string;
+  droppedShas: string[];
+}
+
+export async function autoRecoverCrossContamination(
+  input: AutoRecoverCrossContaminationInput,
+): Promise<AutoRecoverCrossContaminationResult> {
+  const { repoDir, branchName, baseSha, taskId, alreadyUpstreamShas } = input;
+  const dropSet = new Set(alreadyUpstreamShas);
+  if (dropSet.size === 0) {
+    throw new Error("autoRecoverCrossContamination requires at least one already-upstream SHA");
+  }
+
+  const originalTip = await revParse(repoDir, branchName);
+  const commitListOutput = await runGit(repoDir, `git rev-list --reverse ${quoteShellArg(`${baseSha}..${branchName}`)}`)
+    .catch(() => "");
+  const commits = commitListOutput.split("\n").map((line) => line.trim()).filter(Boolean);
+
+  await runGit(repoDir, `git checkout --detach ${quoteShellArg(baseSha)}`);
+
+  try {
+    for (const sha of commits) {
+      if (dropSet.has(sha)) continue;
+      await execAsync(`git cherry-pick ${quoteShellArg(sha)}`, {
+        cwd: repoDir,
+        encoding: "utf-8",
+        timeout: GIT_TIMEOUT_MS,
+        maxBuffer: GIT_MAX_BUFFER,
+      });
+    }
+
+    const newTip = await revParse(repoDir, "HEAD");
+    await runGit(repoDir, `git update-ref ${quoteShellArg(`refs/heads/${branchName}`)} ${quoteShellArg(newTip)} ${quoteShellArg(originalTip)}`);
+    await runGit(repoDir, `git checkout ${quoteShellArg(branchName)}`);
+  } catch (error) {
+    await runGit(repoDir, `git cherry-pick --abort`).catch(() => undefined);
+    await runGit(repoDir, `git checkout ${quoteShellArg(branchName)}`).catch(() => undefined);
+    throw error;
+  }
+
+  await assertCleanBranchAtBase(repoDir, branchName, baseSha, taskId);
+
+  return {
+    newTipSha: await revParse(repoDir, branchName),
+    droppedShas: Array.from(dropSet),
+  };
 }
 
 export async function inspectBranchConflict(
