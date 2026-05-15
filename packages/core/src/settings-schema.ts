@@ -162,6 +162,11 @@ export const DEFAULT_GLOBAL_SETTINGS = {
       lastRunningProvider: null,
     },
   },
+  worktrunk: {
+    enabled: false,
+    binaryPath: undefined,
+    onFailure: "fail",
+  },
   experimentalFeatures: {},
 } satisfies CompleteSettings<GlobalSettings>;
 
@@ -195,6 +200,11 @@ export const DEFAULT_PROJECT_SETTINGS = {
   recycleWorktrees: false,
   executorAllowSiblingBranchRename: false,
   worktreeNaming: "random",
+  worktrunk: {
+    enabled: false,
+    binaryPath: undefined,
+    onFailure: "fail",
+  },
   worktreesDir: undefined,
   taskPrefix: "FN",
   includeTaskIdInCommit: true,
