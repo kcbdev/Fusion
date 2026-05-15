@@ -51,7 +51,7 @@ The canonical per-parameter tool reference lives in `packages/cli/skill/fusion/r
 |---|---|
 | `fn_mission_create` | Create a mission with title/description and optional auto-advance behavior. |
 | `fn_mission_list` | List missions and their current status. |
-| `fn_mission_show` | Show mission details with milestone/slice/feature hierarchy. |
+| `fn_mission_show` | Show mission details with milestone/slice/feature hierarchy, including milestone/feature acceptance criteria and slice verification when present. |
 | `fn_mission_delete` | Delete a mission and its hierarchy. |
 | `fn_milestone_add` | Add a milestone to a mission. |
 | `fn_milestone_update` | Update milestone fields using partial patches. |
