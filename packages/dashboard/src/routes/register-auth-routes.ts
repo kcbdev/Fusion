@@ -149,9 +149,10 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
       return false;
     }
 
-    // These providers rely on pasted-code UX with their own localhost callbacks,
-    // so redirect_uri must remain untouched.
-    if (providerId === "openai-codex" || providerId === "anthropic") {
+    // These providers do not use a redirect_uri-based callback:
+    //   - openai-codex, anthropic: pasted-code UX with their own localhost callbacks
+    //   - github-copilot: OAuth device-code flow (verification_uri has no state/redirect_uri)
+    if (providerId === "openai-codex" || providerId === "anthropic" || providerId === "github-copilot") {
       return false;
     }
 
