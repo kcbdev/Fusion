@@ -376,13 +376,29 @@ function AppInner() {
   // Tasks hook with project context and search query
   // SSE is only enabled for board/list views to free connection slots for mission detail fetches
   const taskSseEnabled = taskView === "board" || taskView === "list";
-  const { tasks, createTask, moveTask, pauseTask, unpauseTask, deleteTask, mergeTask, retryTask, resetTask, updateTask, duplicateTask, archiveTask, unarchiveTask, archiveAllDone, loadArchivedTasks, ingestCreatedTasks, lastFetchTimeMs } = useTasks(
+  const { tasks, createTask, moveTask, pauseTask, unpauseTask, deleteTask, mergeTask, retryTask, resetTask, updateTask, duplicateTask, archiveTask, unarchiveTask, archiveAllDone, loadArchivedTasks, refreshTasks, ingestCreatedTasks, lastFetchTimeMs } = useTasks(
     {
       ...(currentProject ? { projectId: currentProject.id } : {}),
       searchQuery: searchQuery || undefined,
       sseEnabled: taskSseEnabled,
     }
   );
+
+  const previousTaskViewRef = useRef<TaskView>(taskView);
+
+  useEffect(() => {
+    const previousTaskView = previousTaskViewRef.current;
+    const wasTaskView = previousTaskView === "board" || previousTaskView === "list";
+    const isTaskView = taskView === "board" || taskView === "list";
+
+    // Task SSE is disabled off board/list. Refetch once when returning because
+    // in-app navigation does not trigger document.visibilitychange.
+    if (!wasTaskView && isTaskView) {
+      void refreshTasks();
+    }
+
+    previousTaskViewRef.current = taskView;
+  }, [taskView, refreshTasks]);
 
   const boardSourceTasks = isRemote && remoteData.tasks.length > 0 ? remoteData.tasks : tasks;
 
