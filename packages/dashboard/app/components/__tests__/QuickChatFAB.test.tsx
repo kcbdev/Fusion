@@ -178,15 +178,18 @@ describe("QuickChatFAB session-first UX", () => {
     expect(screen.getByTestId("quick-chat-session-option-session-agent")).toBeInTheDocument();
   });
 
-  it("does not render room options when chat rooms are disabled", async () => {
+  it("does not render room options or group labels when chat rooms are disabled", async () => {
     render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
     fireEvent.click(screen.getByTestId("quick-chat-fab"));
     fireEvent.click(await screen.findByTestId("quick-chat-session-dropdown-trigger"));
 
+    expect(screen.getByTestId("quick-chat-session-option-session-model")).toBeInTheDocument();
     expect(screen.queryByTestId("quick-chat-session-option-room-engineering")).toBeNull();
+    expect(screen.queryByText("Rooms")).toBeNull();
+    expect(screen.queryByText("Sessions")).toBeNull();
   });
 
-  it("opens/closes session menu and handles rooms when enabled", async () => {
+  it("FN-4660: opens/closes session menu and shows rooms before sessions when enabled", async () => {
     const selectRoom = vi.fn();
     mockUseAppSettings.mockReturnValue({ experimentalFeatures: { chatRooms: true } } as ReturnType<typeof useAppSettings>);
     mockUseChatRooms.mockReturnValue({
@@ -212,8 +215,11 @@ describe("QuickChatFAB session-first UX", () => {
     fireEvent.click(trigger);
 
     expect(screen.getByTestId("quick-chat-session-dropdown-menu")).toBeInTheDocument();
-    expect(screen.getByText("Sessions")).toBeInTheDocument();
-    expect(screen.getByText("Rooms")).toBeInTheDocument();
+    const roomsLabel = screen.getByText("Rooms");
+    const sessionsLabel = screen.getByText("Sessions");
+    expect(roomsLabel).toBeInTheDocument();
+    expect(sessionsLabel).toBeInTheDocument();
+    expect(roomsLabel.compareDocumentPosition(sessionsLabel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByTestId("quick-chat-session-option-session-model")).toHaveClass("quick-chat-session-option");
     expect(screen.getByTestId("quick-chat-session-option-room-engineering")).toHaveClass("quick-chat-session-option--active");
 
