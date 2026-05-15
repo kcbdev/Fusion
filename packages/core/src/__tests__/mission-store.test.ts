@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { MissionStore } from "../mission-store.js";
+import { MissionStore, deriveMilestoneAcceptanceCriteriaFromFeatures } from "../mission-store.js";
 import { Database } from "../db.js";
+import type { MissionFeature } from "../mission-types.js";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -913,6 +914,77 @@ describe("MissionStore", () => {
       });
 
       expect(milestone.dependencies).toEqual([dep1.id]);
+    });
+  });
+
+  describe("milestone acceptance criteria derivation", () => {
+    const makeFeature = (overrides: Partial<MissionFeature>): MissionFeature => ({
+      id: "F-1",
+      sliceId: "SL-1",
+      title: "Feature",
+      status: "defined",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...overrides,
+    });
+
+    it("derives milestone acceptance from feature acceptance criteria", () => {
+      const derived = deriveMilestoneAcceptanceCriteriaFromFeatures([
+        makeFeature({ title: "Login", acceptanceCriteria: "  Auth succeeds  " }),
+      ]);
+
+      expect(derived).toBe("- Login: Auth succeeds");
+    });
+
+    it("falls back to feature description when acceptance criteria is blank", () => {
+      const derived = deriveMilestoneAcceptanceCriteriaFromFeatures([
+        makeFeature({ title: "Login", acceptanceCriteria: "   ", description: "  Works across browsers " }),
+      ]);
+
+      expect(derived).toBe("- Login: Works across browsers");
+    });
+
+    it("skips features without acceptance text and returns undefined when none contribute", () => {
+      const derived = deriveMilestoneAcceptanceCriteriaFromFeatures([
+        makeFeature({ title: "Login", acceptanceCriteria: "", description: "   " }),
+      ]);
+
+      expect(derived).toBeUndefined();
+    });
+
+    it("does not overwrite explicit milestone acceptance criteria", () => {
+      const mission = store.createMission({ title: "Mission" });
+      const milestone = store.addMilestone(mission.id, {
+        title: "Milestone",
+        acceptanceCriteria: "Explicit criteria",
+      });
+      const slice = store.addSlice(milestone.id, { title: "Slice" });
+      store.addFeature(slice.id, {
+        title: "Feature",
+        acceptanceCriteria: "Feature criteria",
+      });
+
+      const updated = store.applyDerivedMilestoneAcceptanceCriteria(milestone.id);
+      expect(updated.acceptanceCriteria).toBe("Explicit criteria");
+    });
+
+    it("preserves explicit milestone criteria when re-applied after feature changes", () => {
+      const mission = store.createMission({ title: "Mission" });
+      const milestone = store.addMilestone(mission.id, { title: "Milestone" });
+      const slice = store.addSlice(milestone.id, { title: "Slice" });
+      const feature = store.addFeature(slice.id, {
+        title: "Feature",
+        acceptanceCriteria: "Initial acceptance",
+      });
+
+      const firstDerived = store.applyDerivedMilestoneAcceptanceCriteria(milestone.id);
+      expect(firstDerived.acceptanceCriteria).toBe("- Feature: Initial acceptance");
+
+      store.updateMilestone(milestone.id, { acceptanceCriteria: "Manual lock" });
+      store.updateFeature(feature.id, { acceptanceCriteria: "Changed acceptance" });
+
+      const preserved = store.applyDerivedMilestoneAcceptanceCriteria(milestone.id);
+      expect(preserved.acceptanceCriteria).toBe("Manual lock");
     });
   });
 
