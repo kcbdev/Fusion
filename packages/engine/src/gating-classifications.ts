@@ -35,6 +35,7 @@ const PERMANENT_TASK_AGENT_ONLY_TOOLS = [
   "fn_slice_activate",
   "fn_feature_link_task",
   "fn_feature_update",
+  "fn_milestone_update",
   "fn_agent_stop",
   "fn_agent_start",
 ] as const;
