@@ -63,7 +63,8 @@ Fusion codifies workspace verification as a deterministic contract:
 
 - Use `pnpm install --frozen-lockfile` for clean bootstrap and dependency repair paths.
 - `pnpm test:full` must be runnable in a clean worktree without requiring a prior `pnpm build`.
-- Root test entrypoints (`pnpm test` via `scripts/test-changed.mjs` and `pnpm test:ci:shard` via `scripts/ci-test-shard.mjs`) call `scripts/ensure-test-artifacts.mjs`, which deterministically builds only missing required workspace dist artifacts (`@fusion/core`, `@fusion/plugin-sdk`, and runtime plugins that export from `dist/*`).
+- Root test entrypoints (`pnpm test` via `scripts/test-changed.mjs` and `pnpm test:ci:shard` via `scripts/ci-test-shard.mjs`) call `scripts/ensure-test-artifacts.mjs`, which deterministically builds only missing/stale required workspace dist artifacts (`@fusion/core`, `@fusion/dashboard`, `@fusion/engine`, `@fusion/plugin-sdk`, and `@fusion-plugin-examples/{dependency-graph,hermes-runtime,openclaw-runtime,paperclip-runtime}`).
+- Package-scoped hooks now mirror this bootstrap for fresh worktrees where needed: `@fusion/dashboard` and `@fusion-plugin-examples/dependency-graph` run `pretest: node ../../scripts/ensure-test-artifacts.mjs`.
 - This includes clean states where those required dist directories are absent.
 - `pnpm verify:workspace` is the canonical pre-merge gate and runs in strict order:
   1. `pnpm lint`

@@ -113,6 +113,12 @@ FUSION_TEST_TOTAL_WORKERS=4 FUSION_TEST_CONCURRENCY=2 pnpm -r --workspace-concur
 
 Do not casually raise worker counts to make a run faster; dashboard/jsdom and integration-heavy packages can become slower or unstable when oversubscribed. Use `VITEST_MAX_WORKERS=<n>` only for targeted package-level investigation.
 
+### Fresh-worktree dist bootstrap
+
+- `pnpm test` auto-runs `scripts/ensure-test-artifacts.mjs` to rebuild only missing/stale dist artifacts needed by tests.
+- Wired package lanes also auto-bootstrap: `pnpm --filter @fusion/dashboard test` and `pnpm --filter @fusion-plugin-examples/dependency-graph test`.
+- If you hit opaque `Failed to resolve import "./cli-spawn.js"` (or similar dist-entry import failures), treat it as bootstrap regression and file against FN-4605; do not work around with a manual blanket `pnpm build`.
+
 ### Dashboard Test Lanes
 
 Dashboard has a curated default gate plus explicit exhaustive lanes:
