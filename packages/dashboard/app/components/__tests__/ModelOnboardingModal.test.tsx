@@ -840,6 +840,56 @@ describe("ModelOnboardingModal", () => {
       expect(mockWindowOpen).toHaveBeenCalled();
     });
 
+    it("renders github copilot device-code panel in onboarding", async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText },
+      });
+
+      mockFetchAuthStatus
+        .mockResolvedValueOnce({
+          providers: [{ id: "github-copilot", name: "GitHub Copilot", authenticated: false, type: "oauth" }],
+        })
+        .mockResolvedValueOnce({
+          providers: [{ id: "github-copilot", name: "GitHub Copilot", authenticated: false, type: "oauth", loginInProgress: true }],
+        })
+        .mockResolvedValueOnce({
+          providers: [{ id: "github-copilot", name: "GitHub Copilot", authenticated: true, type: "oauth" }],
+        });
+      mockLoginProvider.mockResolvedValueOnce({
+        url: "https://auth.example.com/login",
+        instructions: "Enter code: ABCD-1234",
+        deviceCode: {
+          userCode: "ABCD-1234",
+          verificationUri: "https://github.com/login/device",
+        },
+      });
+
+      const mockWindowOpen = vi.fn();
+      vi.spyOn(window, "open").mockImplementation(mockWindowOpen);
+
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} projectId="proj_123" />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /Advanced provider settings/ })).toBeTruthy();
+      });
+      fireEvent.click(screen.getByRole("button", { name: /Advanced provider settings/ }));
+
+      const copilotCard = await screen.findByTestId("onboarding-provider-card-github-copilot");
+      fireEvent.click(within(copilotCard).getByRole("button", { name: "Login" }));
+
+      expect(await within(copilotCard).findByText("ABCD-1234")).toBeTruthy();
+      expect(within(copilotCard).queryByTestId("onboarding-login-instructions-github-copilot")).toBeNull();
+
+      fireEvent.click(within(copilotCard).getByRole("button", { name: "Copy code" }));
+      expect(writeText).toHaveBeenCalledWith("ABCD-1234");
+
+      fireEvent.click(within(copilotCard).getByRole("button", { name: "Open GitHub" }));
+      expect(mockWindowOpen).toHaveBeenCalledWith("https://github.com/login/device", "_blank");
+
+    });
+
     it("keeps OpenAI Codex manual-code UX available in onboarding", async () => {
       mockFetchAuthStatus.mockResolvedValueOnce({
         providers: [{ id: "openai-codex", name: "OpenAI Codex", authenticated: false, type: "oauth" }],
