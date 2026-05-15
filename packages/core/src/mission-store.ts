@@ -62,6 +62,32 @@ import {
  */
 const DEFAULT_IMPLEMENTATION_RETRY_BUDGET = 3;
 
+export function deriveMilestoneAcceptanceCriteriaFromFeatures(features: MissionFeature[]): string | undefined {
+  const lines = features
+    .map((feature) => {
+      const acceptance = feature.acceptanceCriteria?.trim();
+      const description = feature.description?.trim();
+      const text = acceptance && acceptance.length > 0
+        ? acceptance
+        : description && description.length > 0
+          ? description
+          : undefined;
+
+      if (!text) {
+        return undefined;
+      }
+
+      return `- ${feature.title}: ${text}`;
+    })
+    .filter((line): line is string => Boolean(line));
+
+  if (lines.length === 0) {
+    return undefined;
+  }
+
+  return lines.join("\n");
+}
+
 // ── Mission Summary Type ─────────────────────────────────────────────
 
 /** Status summary for a mission, computed from its hierarchy. */
@@ -1341,6 +1367,26 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     return this.updateMilestone(id, { interviewState: state });
   }
 
+  applyDerivedMilestoneAcceptanceCriteria(milestoneId: string): Milestone {
+    const milestone = this.getMilestone(milestoneId);
+    if (!milestone) {
+      throw new Error(`Milestone ${milestoneId} not found`);
+    }
+
+    if (milestone.acceptanceCriteria?.trim()) {
+      return milestone;
+    }
+
+    const features = this.listSlices(milestoneId).flatMap((slice) => this.listFeatures(slice.id));
+    const derivedAcceptanceCriteria = deriveMilestoneAcceptanceCriteriaFromFeatures(features);
+
+    if (!derivedAcceptanceCriteria) {
+      return milestone;
+    }
+
+    return this.updateMilestone(milestoneId, { acceptanceCriteria: derivedAcceptanceCriteria });
+  }
+
   // ── Slice Operations ───────────────────────────────────────────────
 
   /**
@@ -1664,6 +1710,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     // update the parent milestone and mission statuses. Calling recomputeSliceStatus
     // here ensures the full chain is updated atomically when a feature is added.
     this.recomputeSliceStatus(sliceId);
+    this.applyDerivedMilestoneAcceptanceCriteria(slice.milestoneId);
 
     return feature;
   }
