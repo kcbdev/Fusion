@@ -4922,6 +4922,7 @@ export class TaskExecutor {
     task: Task,
     worktreePathOverride?: string,
   ): Promise<{ ok: true } | { ok: false; reason: "wrong_toplevel" | "wrong_branch" | "no_commits"; observed: string; expected: string }> {
+    const settings = await this.store.getSettings();
     const branchName = task.branch || `fusion/${task.id.toLowerCase()}`;
     const worktreePath = worktreePathOverride ?? task.worktree ?? this.activeWorktrees.get(task.id) ?? null;
 
@@ -4960,7 +4961,7 @@ export class TaskExecutor {
 
         if (
           observedTopLevel === expectedRoot ||
-          !isInsideWorktreesDir(this.rootDir, observedTopLevel) ||
+          !isInsideWorktreesDir(this.rootDir, observedTopLevel, settings) ||
           observedTopLevel !== expectedWorktreeRealpath
         ) {
           return {
@@ -7462,6 +7463,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
           attempt,
           0,
           allowSiblingBranchRename,
+          settings,
         );
         // Squash-import dep content into the freshly created worktree so the
         // branch contains main's history + 1 import commit instead of the
@@ -7836,6 +7838,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
     attemptNumber = 0,
     recoveryDepth = 0,
     allowSiblingBranchRename = false,
+    settings: Partial<Settings> = {},
   ): Promise<{ path: string; branch: string }> {
     // Guard: refuse to create a worktree nested inside another worktree.
     // Nested worktrees happen when the executor is launched with rootDir pointed
@@ -7925,6 +7928,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
           startPoint,
           attemptNumber,
           allowSiblingBranchRename,
+          settings,
         );
         if (result) {
           return result;
@@ -7944,7 +7948,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         const branchCleaned = await this.cleanupStaleBranch(branch, taskId);
         if (branchCleaned) {
           await this.store.logEntry(taskId, `Removed stale branch reference, retrying`);
-          return this.tryCreateWorktree(branch, path, taskId, startPoint, attemptNumber, recoveryDepth + 1, allowSiblingBranchRename);
+          return this.tryCreateWorktree(branch, path, taskId, startPoint, attemptNumber, recoveryDepth + 1, allowSiblingBranchRename, settings);
         }
         throw new Error(
           `Invalid reference for branch ${branch}: unable to clean up stale reference`,
@@ -7983,6 +7987,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
             startPoint,
             attemptNumber,
             allowSiblingBranchRename,
+            settings,
           );
           if (result) {
             return result;
@@ -8002,7 +8007,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
           const branchCleaned = await this.cleanupStaleBranch(branch, taskId);
           if (branchCleaned) {
             await this.store.logEntry(taskId, `Cleaned up stale reference in fallback, retrying`);
-            return this.tryCreateWorktree(branch, path, taskId, startPoint, attemptNumber, recoveryDepth + 1, allowSiblingBranchRename);
+            return this.tryCreateWorktree(branch, path, taskId, startPoint, attemptNumber, recoveryDepth + 1, allowSiblingBranchRename, settings);
           }
         }
 
@@ -8026,6 +8031,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
     startPoint?: string,
     attemptNumber?: number,
     allowSiblingBranchRename = false,
+    settings: Partial<Settings> = {},
   ): Promise<{ path: string; branch: string } | null> {
     const shouldGenerateNewName = await this.shouldGenerateNewWorktreeName(
       conflictPath,
@@ -8046,7 +8052,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         const cleanupSuccess = await this.cleanupConflictingWorktree(conflictPath, branch, taskId);
         if (cleanupSuccess) {
           await this.store.logEntry(taskId, `Cleaned up conflicting worktree, retrying`, path);
-          return this.tryCreateWorktree(branch, path, taskId, startPoint, attemptNumber, 0, allowSiblingBranchRename);
+          return this.tryCreateWorktree(branch, path, taskId, startPoint, attemptNumber, 0, allowSiblingBranchRename, settings);
         }
         return null;
       }
@@ -8073,7 +8079,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         const cleanupSuccess = await this.cleanupConflictingWorktree(inspection.livePath, branch, taskId);
         if (cleanupSuccess) {
           await this.store.logEntry(taskId, `Removed foreign conflicting worktree and retrying`, inspection.livePath);
-          return this.tryCreateWorktree(branch, path, taskId, startPoint, attemptNumber, 0, allowSiblingBranchRename);
+          return this.tryCreateWorktree(branch, path, taskId, startPoint, attemptNumber, 0, allowSiblingBranchRename, settings);
         }
         return null;
       }
@@ -8092,7 +8098,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
             `Conflicting worktree in use by active task, trying new path with branch ${suffixedBranch}`,
             newPath,
           );
-          return await this.tryCreateWorktree(suffixedBranch, newPath, taskId, conflictStartPoint, attemptNumber, 0, true);
+          return await this.tryCreateWorktree(suffixedBranch, newPath, taskId, conflictStartPoint, attemptNumber, 0, true, settings);
         } catch (suffixErr: unknown) {
           const info = this.extractWorktreeConflictInfo(suffixErr);
           if (info.type === "already-used") {
@@ -8109,7 +8115,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
     const cleanupSuccess = await this.cleanupConflictingWorktree(conflictPath, branch, taskId);
     if (cleanupSuccess) {
       await this.store.logEntry(taskId, `Cleaned up conflicting worktree, retrying`, path);
-      return this.tryCreateWorktree(branch, path, taskId, startPoint, attemptNumber, 0, allowSiblingBranchRename);
+      return this.tryCreateWorktree(branch, path, taskId, startPoint, attemptNumber, 0, allowSiblingBranchRename, settings);
     }
 
     return null;

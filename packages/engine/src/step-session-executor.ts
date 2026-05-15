@@ -1275,7 +1275,7 @@ Follow instructions precisely and avoid unrelated changes.`,
    * @returns The path to the new worktree.
    */
   private async createStepWorktree(stepIndex: number): Promise<string> {
-    const { rootDir } = this.options;
+    const { rootDir, settings } = this.options;
     const name = generateWorktreeName(rootDir, settings);
     const worktreePath = resolveTaskWorktreePath(rootDir, settings, name);
     const branchName = `fusion/step-${stepIndex}-${name}`;
