@@ -456,12 +456,13 @@ describe("TaskCard", () => {
     expect(screen.queryByText(/Re-enqueued for merge/)).toBeNull();
   });
 
-  it("renders in-review stall badge with code and tooltip", () => {
+  it("renders retry-exhausted in-review stall badge with counter, code, and tooltip", () => {
     render(
       <TaskCard
         task={makeTask({
           column: "in-review",
           status: "merging",
+          mergeRetries: 3,
           inReviewStall: {
             code: "merge-retries-exhausted",
             reason: "Auto-merge retries exhausted",
@@ -473,9 +474,31 @@ describe("TaskCard", () => {
       />,
     );
 
-    const badge = screen.getByText("Stall");
+    const badge = screen.getByText("Retries exhausted 3/3");
     expect(badge.getAttribute("data-stall-code")).toBe("merge-retries-exhausted");
     expect(badge.getAttribute("title")).toContain("Auto-merge retries exhausted");
+  });
+
+  it("renders merge-blocker in-review stall badge without retry counter", () => {
+    render(
+      <TaskCard
+        task={makeTask({
+          column: "in-review",
+          status: "merging",
+          mergeRetries: 3,
+          inReviewStall: {
+            code: "merge-blocker",
+            reason: "Merge blocked by pre-merge check",
+            observedAt: "2026-05-13T00:00:00.000Z",
+          },
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.getByText("Merge blocked")).toBeDefined();
+    expect(screen.queryByText(/\/3/)).toBeNull();
   });
 
   it.each([
@@ -510,7 +533,7 @@ describe("TaskCard", () => {
     },
   ])("hides in-review stall badge for $label", ({ task }) => {
     render(<TaskCard task={task} onOpenDetail={noop} addToast={noop} />);
-    expect(screen.queryByText("Stall")).toBeNull();
+    expect(screen.queryByText("Retries exhausted")).toBeNull();
   });
 
   it("renders stale paused review badge for paused in-review signal", () => {

@@ -27,7 +27,7 @@ import { getEndToEndDurationMs, getTimedDurationMs, getWorkflowRuntimeMs, parseT
 import type { ToastType } from "../hooks/useToast";
 import { useConfirm } from "../hooks/useConfirm";
 import { extractDependencyDeleteConflict } from "../utils/taskDelete";
-import type { BlockerFanoutEntry } from "../hooks/useBlockerFanout";
+import { MAX_AUTO_MERGE_RETRIES, type BlockerFanoutEntry } from "../hooks/useBlockerFanout";
 import { useRetryWarning } from "../context/RetryWarningContext";
 
 // ── Mission title caching ───────────────────────────────────────────────────
@@ -768,7 +768,12 @@ function TaskCardComponent({
   const stalledReview = getStalledReviewSignal(task);
   const showStalledReview = Boolean(stalledReview && task.column === "in-review" && !isPaused);
   const hasInReviewStall = shouldShowInReviewStallBadge(task);
-  const stallCopy = task.inReviewStall ? getInReviewStallCopy(task.inReviewStall) : undefined;
+  const stallCopy = task.inReviewStall
+    ? getInReviewStallCopy(task.inReviewStall, {
+      mergeRetries: task.mergeRetries,
+      maxAutoMergeRetries: MAX_AUTO_MERGE_RETRIES,
+    })
+    : undefined;
   const hasStalePausedReview = shouldShowStalePausedReviewBadge(task);
   const stalePausedReviewCopy = task.stalePausedReview ? getStalePausedReviewCopy(task.stalePausedReview) : undefined;
   const hasTaskAgeStaleness = shouldShowTaskAgeStalenessBadge(task);
@@ -1477,7 +1482,7 @@ function TaskCardComponent({
             title={`${stallCopy.headline} — ${stallCopy.description}`}
             data-stall-code={stallCopy.code}
           >
-            {stallCopy.badgeLabel}
+            {stallCopy.badgeLabel}{stallCopy.counter ? ` ${stallCopy.counter}` : ""}
           </span>
         )}
         {hasStalePausedReview && stalePausedReviewCopy && (
