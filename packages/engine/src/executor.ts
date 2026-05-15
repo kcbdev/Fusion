@@ -73,6 +73,7 @@ import type { AgentReflectionService } from "./agent-reflection.js";
 import { createRunAuditor, generateSyntheticRunId, type EngineRunContext, type RunAuditor } from "./run-audit.js";
 import { AutoRecoveryDispatcher } from "./auto-recovery.js";
 import { BranchWorktreeAutoRecoveryHandler } from "./auto-recovery-handlers/branch-worktree.js";
+import { ContaminationAutoRecoveryHandler } from "./auto-recovery-handlers/contamination.js";
 import { createFileScopeAutoRecoveryHandler } from "./auto-recovery-handlers/file-scope.js";
 import { ReadonlyViolationError, filterCustomToolsForReadonly } from "./workflow-step-tool-policy.js";
 import { evaluateSpecStaleness, getPromptPath } from "./spec-staleness.js";
@@ -848,11 +849,20 @@ export class TaskExecutor {
       runAudit: audit,
       logger: executorLog,
     });
+    const contaminationHandler = new ContaminationAutoRecoveryHandler({
+      taskStore: this.store,
+      runAudit: audit,
+      logger: executorLog,
+      repoDir: this.rootDir,
+    });
     return new AutoRecoveryDispatcher({
       taskStore: this.store,
       auditEmitter: audit,
       handlers: {
         issueRetry: async (failure, decision, ctx) => {
+          if (failure.class === "branch-cross-contamination") {
+            return contaminationHandler.issueRetry(failure, decision, ctx);
+          }
           if (failure.class === "branch-conflict-unrecoverable") {
             return branchWorktreeHandler.issueRetry(failure, decision, ctx);
           }

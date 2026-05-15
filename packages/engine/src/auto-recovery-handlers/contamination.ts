@@ -20,7 +20,6 @@ export class ContaminationAutoRecoveryHandler implements Pick<AutoRecoveryHandle
   }
 
   async issueRetry(failure: AutoRecoveryFailure, decision: AutoRecoveryDecision, ctx: AutoRecoveryContext): Promise<void> {
-    void this.deps.repoDir;
     const task = ctx.task;
     if (task.userPaused) {
       this.logger.warn(`auto-recovery: skipped (userPaused) class=${failure.class} task=${task.id}`);
