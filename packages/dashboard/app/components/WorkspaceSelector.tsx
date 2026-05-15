@@ -23,15 +23,16 @@ export function WorkspaceSelector({
   onSelect,
 }: WorkspaceSelectorProps) {
   const [open, setOpen] = useState(false);
+  const safeWorkspace = typeof currentWorkspace === "string" ? currentWorkspace : "project";
 
   const currentLabel = useMemo(() => {
-    if (currentWorkspace === "project") {
+    if (safeWorkspace === "project") {
       return projectName || "Project Root";
     }
 
-    const match = workspaces.find((workspace) => workspace.id === currentWorkspace);
-    return match?.label ?? currentWorkspace;
-  }, [currentWorkspace, projectName, workspaces]);
+    const match = workspaces.find((workspace) => workspace.id === safeWorkspace);
+    return match?.label ?? safeWorkspace;
+  }, [safeWorkspace, projectName, workspaces]);
 
   return (
     <div className="workspace-selector">
@@ -42,7 +43,7 @@ export function WorkspaceSelector({
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        {currentWorkspace === "project" ? <FolderRoot size={14} /> : <FolderGit2 size={14} />}
+        {safeWorkspace === "project" ? <FolderRoot size={14} /> : <FolderGit2 size={14} />}
         <span className="workspace-selector-trigger-label">{currentLabel}</span>
         <ChevronDown size={14} className={`workspace-selector-trigger-icon${open ? " open" : ""}`} />
       </button>
@@ -51,7 +52,7 @@ export function WorkspaceSelector({
         <div className="workspace-selector-menu" role="listbox" aria-label="Select workspace">
           <button
             type="button"
-            className={`workspace-selector-option${currentWorkspace === "project" ? " active" : ""}`}
+            className={`workspace-selector-option${safeWorkspace === "project" ? " active" : ""}`}
             onClick={() => {
               onSelect("project");
               setOpen(false);
@@ -71,7 +72,7 @@ export function WorkspaceSelector({
                 <button
                   key={workspace.id}
                   type="button"
-                  className={`workspace-selector-option${currentWorkspace === workspace.id ? " active" : ""}`}
+                  className={`workspace-selector-option${safeWorkspace === workspace.id ? " active" : ""}`}
                   onClick={() => {
                     onSelect(workspace.id);
                     setOpen(false);

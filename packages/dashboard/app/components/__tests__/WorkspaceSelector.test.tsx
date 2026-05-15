@@ -38,6 +38,19 @@ describe("WorkspaceSelector", () => {
     expect(screen.getByRole("button", { name: /kb/i })).toBeInTheDocument();
   });
 
+  it("falls back to project label when currentWorkspace is not a string", () => {
+    render(
+      <WorkspaceSelector
+        currentWorkspace={{} as unknown as string}
+        projectName="kb"
+        workspaces={workspaces}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /kb/i })).toBeInTheDocument();
+  });
+
   it("opens the menu and highlights the current workspace", async () => {
     const user = userEvent.setup();
     render(
