@@ -1862,7 +1862,7 @@ function TaskCardComponent({
       )}
       {showInReviewMoveControl && (
         <div className="card-bottom-row">
-          <div className="card-bottom-left-row">
+          <div className="card-bottom-right-row">
             <div className="card-send-back" ref={sendBackRef}>
               <button
                 className="card-send-back-btn"
