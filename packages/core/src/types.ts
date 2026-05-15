@@ -1,4 +1,5 @@
 import type { InReviewStallSignal } from "./in-review-stall.js";
+import type { StalePausedReviewSignal } from "./stale-paused-review.js";
 import type { StalledReviewSignal } from "./stalled-review-detector.js";
 import type { TaskAgeStalenessSignal } from "./task-age-staleness.js";
 
@@ -1393,6 +1394,9 @@ export interface Task {
   /** Server-computed task age staleness signal. Undefined when no staleness rule matches.
    *  Diagnostic-only: must not be used as an auto-completion signal. */
   ageStaleness?: TaskAgeStalenessSignal;
+  /** Server-computed stale paused review diagnostic signal. Undefined when no rule matches.
+   *  Diagnostic-only: must not trigger automatic state mutation. */
+  stalePausedReview?: StalePausedReviewSignal;
   /** Heuristic stalled-review diagnostic signal (legacy compatibility contract). */
   stalledReview?: StalledReviewSignal;
   /** Durable aggregate token usage totals for the task. Undefined when no usage has been recorded yet. */
@@ -2585,6 +2589,10 @@ export interface ProjectSettings {
    *  than this duration, the task is considered stuck and will be terminated and retried.
    *  Default: 600000 (10 minutes). Set to 0 to disable. */
   taskStuckTimeoutMs?: number;
+  /** Threshold in milliseconds for surfacing paused in-review tasks as stale.
+   *  Age is measured from columnMovedAt when present, otherwise updatedAt.
+   *  Default: 86400000 (24 hours). Set to 0 or undefined to disable surfacing. */
+  stalePausedReviewThresholdMs?: number;
   /** Age threshold in milliseconds before a blocker with high todo fan-out is escalated.
    *  Blocker age is measured from columnMovedAt when available, otherwise updatedAt.
    *  Only blockers currently in in-progress or in-review are eligible. */

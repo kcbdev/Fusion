@@ -163,6 +163,11 @@ export {
 } from "./in-review-stall.js";
 export type { InReviewStallSignal, InReviewStallCode } from "./in-review-stall.js";
 export {
+  getStalePausedReviewSignal,
+  DEFAULT_STALE_PAUSED_REVIEW_THRESHOLD_MS,
+} from "./stale-paused-review.js";
+export type { StalePausedReviewCode, StalePausedReviewSignal } from "./stale-paused-review.js";
+export {
   getTaskAgeStalenessSignal,
   DEFAULT_TASK_AGE_STALENESS_THRESHOLDS,
 } from "./task-age-staleness.js";
