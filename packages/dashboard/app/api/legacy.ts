@@ -1364,6 +1364,11 @@ export interface ManualOAuthCodeInfo {
   helpText?: string;
 }
 
+export interface OAuthDeviceCodeInfo {
+  userCode: string;
+  verificationUri: string;
+}
+
 /**
  * Snapshot of the Claude-CLI-via-pi health state. Powers the
  * "Anthropic — via Claude CLI" provider card.
@@ -1927,11 +1932,13 @@ export function loginProvider(provider: string): Promise<{
   url: string;
   instructions?: string;
   manualCode?: ManualOAuthCodeInfo;
+  deviceCode?: OAuthDeviceCodeInfo;
 }> {
   return api<{
     url: string;
     instructions?: string;
     manualCode?: ManualOAuthCodeInfo;
+    deviceCode?: OAuthDeviceCodeInfo;
   }>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ provider, origin: window.location.origin }),
