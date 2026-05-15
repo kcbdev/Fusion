@@ -6,6 +6,11 @@ export interface LayoutOptions {
   horizontalGap?: number;
   verticalGap?: number;
   orientation?: "vertical" | "horizontal";
+  /**
+   * Optional measured per-node heights (in px). Used by vertical layout to avoid
+   * overlaps; nodes without a measurement fall back to `nodeHeight`.
+   */
+  measuredHeights?: ReadonlyMap<string, number>;
 }
 
 const DEFAULT_LAYOUT_OPTIONS: Required<LayoutOptions> = {
@@ -76,6 +81,20 @@ export function computeAutoLayout(
   const positions = new Map<string, GraphPosition>();
   const sortedDepths = Array.from(layers.keys()).sort((a, b) => a - b);
 
+  const rowOffsetByDepth = new Map<number, number>();
+  if (settings.orientation === "vertical") {
+    let currentOffset = 0;
+    for (const depth of sortedDepths) {
+      rowOffsetByDepth.set(depth, currentOffset);
+      const layer = layers.get(depth) ?? [];
+      const layerHeight = Math.max(
+        settings.nodeHeight,
+        ...layer.map((id) => settings.measuredHeights?.get(id) ?? settings.nodeHeight),
+      );
+      currentOffset += layerHeight + settings.verticalGap;
+    }
+  }
+
   for (const depth of sortedDepths) {
     const layer = layers.get(depth) ?? [];
     layer.sort();
@@ -94,7 +113,7 @@ export function computeAutoLayout(
       }
 
       const x = startOffset + index * (settings.nodeWidth + settings.horizontalGap);
-      const y = depth * (settings.nodeHeight + settings.verticalGap);
+      const y = rowOffsetByDepth.get(depth) ?? depth * (settings.nodeHeight + settings.verticalGap);
       positions.set(id, { x, y });
     });
   }
