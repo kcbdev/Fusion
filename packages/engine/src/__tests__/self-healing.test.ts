@@ -5432,6 +5432,32 @@ describe("FN-4538 overlapBlockedBy self-healing", () => {
     expect(store.updateTask).toHaveBeenCalledWith("FN-TARGET", { blockedBy: null, overlapBlockedBy: null, status: null });
     manager.stop();
   });
+
+  it("FN-4538: reconcileCompletedTask clears overlapBlockedBy when completed task is overlap blocker", async () => {
+    const target = makeTask("FN-TARGET", { column: "todo", status: "queued", overlapBlockedBy: "FN-X" });
+    const blocker = makeTask("FN-X", { column: "done" });
+    const store = makeStore([target, blocker]);
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(blocker);
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+
+    await manager.reconcileCompletedTask("FN-X");
+
+    expect(store.updateTask).toHaveBeenCalledWith("FN-TARGET", { blockedBy: null, overlapBlockedBy: null, status: null });
+    manager.stop();
+  });
+
+  it("FN-4538: no oscillation — scheduler + self-healing agree on overlap-blocked state", async () => {
+    const overlapBlocker = makeTask("FN-ACTIVE", { column: "in-progress" });
+    const target = makeTask("FN-TARGET", { column: "todo", status: "queued", blockedBy: null, overlapBlockedBy: "FN-ACTIVE" });
+    const store = makeStore([target, overlapBlocker]);
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+
+    await manager.clearStaleBlockedBy();
+
+    expect(store.updateTask).toHaveBeenCalledWith("FN-TARGET", { blockedBy: null, status: "queued" });
+    expect(store.updateTask).not.toHaveBeenCalledWith("FN-TARGET", expect.objectContaining({ status: null }));
+    manager.stop();
+  });
 });
 
 describe("stale triage processing eviction before recovery", () => {
