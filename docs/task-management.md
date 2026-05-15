@@ -129,6 +129,28 @@ These entries are rate-limited per `(task, code)` over `taskStuckTimeoutMs`, so 
 
 **Dashboard surface:** In-review, non-paused tasks with `inReviewStall` set show a `Stall` badge on `TaskCard` and a code-specific diagnostic row in `TaskDetailModal` above the PR section. The diagnostic row includes headline/description/action copy, raw reason text, observed timestamp, and a `View activity log` deep-link that switches to Logs → Activity and highlights the most recent matching `In-review stall surfaced [<code>]: <reason>` entry. This UI is diagnostic only: neither the badge nor the jump button mutates task state.
 
+#### Stale paused review signal
+
+Fusion now derives `task.stalePausedReview` for paused `in-review` tasks whose review-column age is at/over `stalePausedReviewThresholdMs` (age source: `columnMovedAt ?? updatedAt`) while merge is still unconfirmed (`mergeDetails.mergeConfirmed !== true`).
+
+`StalePausedReviewCode` values:
+- `stale-paused-review`
+
+Invariant: `stalePausedReview` is **diagnostic-only**. It never auto-unpauses, retries, archives, or moves tasks.
+
+Self-healing surfaces this diagnosis via task log entries in the form:
+- `Stale paused review surfaced [<code>]: paused <duration>; disposition options — unpause, retry, archive, or create follow-up task. pausedReason=<reason|none>`
+
+These entries are rate-limited per `(task, code)` over `stalePausedReviewThresholdMs` so unchanged paused-review debt is visible without log spam.
+
+**Dashboard surface:** paused `in-review` tasks with `stalePausedReview` set show a `Paused stall` badge on `TaskCard`, a diagnostic row in `TaskDetailModal` (age/threshold/observed timestamp + disposition copy + `View activity log` jump), and a `Stale paused review` list filter that narrows to tasks where `task.stalePausedReview != null`.
+
+Disposition options:
+- Unpause
+- Retry
+- Archive
+- Create follow-up task
+
 #### Task age staleness signal
 
 Fusion now derives `task.ageStaleness` for tasks in `in-progress` and `in-review` (including paused tasks). Age is computed from `columnMovedAt` and falls back to `updatedAt` when needed.

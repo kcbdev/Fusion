@@ -265,6 +265,7 @@ Override precedence for direct merges is:
 | `specStalenessEnabled` | `boolean` | `false` | Enforce automatic re-planning for stale plans. |
 | `specStalenessMaxAgeMs` | `number` | `21600000` | Spec staleness threshold in ms (6 hours). |
 | `taskStuckTimeoutMs` | `number` | `undefined` | Inactivity timeout for stuck-task recovery. |
+| `stalePausedReviewThresholdMs` | `number` | `86400000` | Threshold in ms for surfacing paused `in-review` tasks as stale paused review diagnostics (24 hours). `0` or `undefined` disables stale paused review surfacing/logging. |
 | `staleInProgressWarningMs` | `number` | `14400000` | Task-age staleness warning threshold in ms for `in-progress` tasks (4 hours). `0` or `undefined` disables warning-level surfacing. |
 | `staleInProgressCriticalMs` | `number` | `86400000` | Task-age staleness critical threshold in ms for `in-progress` tasks (24 hours). `0` or `undefined` disables critical-level surfacing. |
 | `staleInReviewWarningMs` | `number` | `86400000` | Task-age staleness warning threshold in ms for `in-review` tasks (24 hours). `0` or `undefined` disables warning-level surfacing. |
