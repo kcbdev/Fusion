@@ -927,6 +927,22 @@ export function Header({
                     </button>
                   );
                 })}
+                {onViewAllProjects && (
+                  <>
+                    <div className="mobile-project-switch-divider" />
+                    <button
+                      className="mobile-project-switch-manage"
+                      onClick={() => {
+                        onViewAllProjects();
+                        setIsMobileProjectSwitchOpen(false);
+                      }}
+                      data-testid="mobile-project-switch-view-all"
+                    >
+                      <Grid3X3 size={14} />
+                      <span>View Projects</span>
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>
