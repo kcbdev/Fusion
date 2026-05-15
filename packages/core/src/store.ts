@@ -24,6 +24,7 @@ import { BackwardCompat, ProjectRequiredError } from "./migration.js";
 import { CentralCore } from "./central-core.js";
 import { getTaskMergeBlocker, resolveTaskMergeTarget } from "./task-merge.js";
 import { getInReviewStallReason } from "./in-review-stall.js";
+import { getStalePausedReviewSignal } from "./stale-paused-review.js";
 import { getTaskAgeStalenessSignal, type TaskAgeStalenessThresholds } from "./task-age-staleness.js";
 import { ensureMemoryFileWithBackend } from "./project-memory.js";
 import { runCommandAsync } from "./run-command.js";
@@ -3283,6 +3284,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const activeTasks = await Promise.all((rows as unknown as TaskRow[]).map(async (row) => {
       const task = this.rowToTask(row);
       task.inReviewStall = getInReviewStallReason(task, { now });
+      task.stalePausedReview = getStalePausedReviewSignal(task, {
+        now,
+        thresholdMs: settings.stalePausedReviewThresholdMs,
+      });
       if (!disableAgeStalenessHydration) {
         try {
           task.ageStaleness = getTaskAgeStalenessSignal(task, { now, thresholds: staleThresholds });
@@ -3392,6 +3397,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const tasks = rows.slice(0, resolvedLimit).map((row) => {
       const task = this.rowToTask(row);
       task.inReviewStall = getInReviewStallReason(task, { now });
+      task.stalePausedReview = getStalePausedReviewSignal(task, {
+        now,
+        thresholdMs: settings.stalePausedReviewThresholdMs,
+      });
       if (!disableAgeStalenessHydration) {
         try {
           task.ageStaleness = getTaskAgeStalenessSignal(task, { now, thresholds: staleThresholds });
@@ -3526,6 +3535,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const activeMatches = await Promise.all(rows.map(async (row) => {
       const task = this.rowToTask(row);
       task.inReviewStall = getInReviewStallReason(task, { now });
+      task.stalePausedReview = getStalePausedReviewSignal(task, {
+        now,
+        thresholdMs: settings.stalePausedReviewThresholdMs,
+      });
       if (!disableAgeStalenessHydration) {
         try {
           task.ageStaleness = getTaskAgeStalenessSignal(task, { now, thresholds: staleThresholds });
