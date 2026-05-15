@@ -35,9 +35,10 @@ vi.mock("../../sandbox/native.js", () => ({
   NativeSandboxBackend: class {
     prepare = nativePrepareMock;
     run = nativeRunMock;
+    runStreaming = vi.fn();
     dispose = nativeDisposeMock;
     capabilities() {
-      return { id: "native", supportsNetworkPolicy: false, supportsFilesystemPolicy: false, platform: "any" };
+      return { id: "native", supportsNetworkPolicy: false, supportsFilesystemPolicy: false, supportsStreaming: true, platform: "any" };
     }
   },
 }));

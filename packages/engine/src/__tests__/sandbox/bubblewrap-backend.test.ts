@@ -50,9 +50,10 @@ describe("BubblewrapBackend", () => {
     };
 
     const nativeStub: SandboxBackend = {
-      capabilities: () => ({ id: "native", supportsNetworkPolicy: false, supportsFilesystemPolicy: false, platform: "any" }),
+      capabilities: () => ({ id: "native", supportsNetworkPolicy: false, supportsFilesystemPolicy: false, supportsStreaming: true, platform: "any" }),
       prepare: vi.fn(async () => undefined),
       run: vi.fn(async () => runResult),
+      runStreaming: vi.fn(async () => ({ outcome: "success", stdout: "", stderr: "", bufferOverflow: false })),
       dispose: vi.fn(async () => undefined),
     };
 

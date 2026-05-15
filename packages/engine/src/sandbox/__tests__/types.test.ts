@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import type { SandboxBackend, SandboxCapabilities, SandboxPolicy, SandboxRunOptions, SandboxRunResult } from "../types.js";
+import type {
+  SandboxBackend,
+  SandboxCapabilities,
+  SandboxPolicy,
+  SandboxRunOptions,
+  SandboxRunResult,
+  SandboxRunStreamingOptions,
+  SandboxStreamingResult,
+} from "../types.js";
 
 describe("SandboxBackend types", () => {
   it("accepts a minimal mock backend", async () => {
@@ -10,6 +18,7 @@ describe("SandboxBackend types", () => {
           id: "native",
           supportsNetworkPolicy: false,
           supportsFilesystemPolicy: false,
+          supportsStreaming: true,
           platform: "any",
         };
       },
@@ -22,6 +31,14 @@ describe("SandboxBackend types", () => {
           signal: null,
           timedOut: false,
           bufferExceeded: false,
+        };
+      },
+      async runStreaming(_command: string, _options: SandboxRunStreamingOptions): Promise<SandboxStreamingResult> {
+        return {
+          outcome: "success",
+          stdout: "",
+          stderr: "",
+          bufferOverflow: false,
         };
       },
       async dispose(): Promise<void> {},
