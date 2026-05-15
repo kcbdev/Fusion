@@ -108,15 +108,13 @@ interface NormalizedFile {
  * TaskChangesTab displays file-level diffs for a task.
  *
  * For in-progress/in-review tasks it loads the diff from the live worktree.
- * For done tasks with a recorded merge commit (mergeDetails.commitSha) it loads
- * the diff from git history instead, so changes remain visible even after the
- * worktree is cleaned up.
+ * For done tasks it always attempts `/api/tasks/:id/diff` (lineage-backed when
+ * needed) so the detailed view stays aligned with TaskCard/useTaskDiffStats.
  *
- * For done tasks WITHOUT a recorded commit SHA, the tab shows a safe summary
- * fallback using the merge details numbers (filesChanged/insertions/deletions)
- * rather than fetching a detailed diff that could include unrelated repository
- * changes. This prevents inflated file counts that don't match the card-level
- * display.
+ * When a done task has no recorded merge commit SHA and the server returns no
+ * diff rows (or diff loading fails), the tab falls back to the safe summary/
+ * modifiedFiles view instead of showing a hard error. This preserves the prior
+ * graceful behavior while allowing FN-4563/FN-4576 lineage-backed parity.
  */
 export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetails, modifiedFiles }: TaskChangesTabProps) {
   const [files, setFiles] = useState<NormalizedFile[]>([]);
@@ -133,9 +131,7 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
   const isDone = column === "done";
   const isDoneWithCommit = isDone && Boolean(mergeDetails?.commitSha);
 
-  // Done tasks without commit SHA must not fetch detailed diffs — the server
-  // would fall back to a repository-wide scan that inflates the file list.
-  const canLoad = (column === "in-progress" || column === "in-review") || isDoneWithCommit;
+  const canLoad = column === "in-progress" || column === "in-review" || isDone;
 
   const loadDiff = useCallback(async () => {
     if (!canLoad && !isDone) {
@@ -171,11 +167,17 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
         setCurrentFileIndex(0);
       }
     } catch (err) {
-      setError(getErrorMessage(err) || "Failed to load task changes");
+      if (isDone && !mergeDetails?.commitSha) {
+        setFiles([]);
+        setStats({ filesChanged: 0, additions: 0, deletions: 0 });
+        setError(null);
+      } else {
+        setError(getErrorMessage(err) || "Failed to load task changes");
+      }
     } finally {
       setLoading(false);
     }
-  }, [taskId, projectId, canLoad, isDone]);
+  }, [taskId, projectId, canLoad, isDone, mergeDetails?.commitSha]);
 
   useEffect(() => {
     loadDiff();
@@ -250,33 +252,6 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
     );
   }
 
-  // Done task without commit SHA → show safe summary fallback.
-  // We must NOT fetch detailed diffs here because the server would fall back
-  // to a repository-wide scan, producing an inflated/unrelated file list.
-  if (isDone && !isDoneWithCommit) {
-    if (modifiedFiles && modifiedFiles.length > 0) {
-      return renderModifiedFilesFallback(modifiedFiles, true, mergeDetails);
-    }
-
-    const summaryFiles = mergeDetails?.filesChanged;
-    const summaryAdditions = mergeDetails?.insertions;
-    const summaryDeletions = mergeDetails?.deletions;
-    const hasSummary = summaryFiles != null || summaryAdditions != null || summaryDeletions != null;
-
-    return (
-      <div className="detail-section">
-        <div className="task-changes-state task-changes-state--empty">
-          <FileCode size={24} />
-          <p>Detailed file changes unavailable.</p>
-          <span className="task-changes-state-hint">
-            {hasSummary
-              ? `Merge summary: ${summaryFiles ?? 0} file${(summaryFiles ?? 0) === 1 ? "" : "s"} changed, +${summaryAdditions ?? 0} additions, -${summaryDeletions ?? 0} deletions.`
-              : "No merge commit was recorded for this task."}
-          </span>
-        </div>
-      </div>
-    );
-  }
 
   const renderCommitAssociations = () => (
     <section className="task-lineage-associations" aria-label="Task commit associations">
@@ -320,6 +295,31 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
   );
 
   if (files.length === 0) {
+    if (isDone && !isDoneWithCommit) {
+      if (modifiedFiles && modifiedFiles.length > 0) {
+        return renderModifiedFilesFallback(modifiedFiles, true, mergeDetails);
+      }
+
+      const summaryFiles = mergeDetails?.filesChanged;
+      const summaryAdditions = mergeDetails?.insertions;
+      const summaryDeletions = mergeDetails?.deletions;
+      const hasSummary = summaryFiles != null || summaryAdditions != null || summaryDeletions != null;
+
+      return (
+        <div className="detail-section">
+          <div className="task-changes-state task-changes-state--empty">
+            <FileCode size={24} />
+            <p>Detailed file changes unavailable.</p>
+            <span className="task-changes-state-hint">
+              {hasSummary
+                ? `Merge summary: ${summaryFiles ?? 0} file${(summaryFiles ?? 0) === 1 ? "" : "s"} changed, +${summaryAdditions ?? 0} additions, -${summaryDeletions ?? 0} deletions.`
+                : "No merge commit was recorded for this task."}
+            </span>
+          </div>
+        </div>
+      );
+    }
+
     if (modifiedFiles && modifiedFiles.length > 0) {
       return renderModifiedFilesFallback(modifiedFiles, isDone, mergeDetails);
     }
