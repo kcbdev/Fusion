@@ -381,6 +381,91 @@
   padding: calc(var(--space-sm) - (var(--space-xs) / 4)) calc(var(--space-md) - (var(--space-xs) / 4));
 }
 
+.quick-chat-session-menu {
+  position: relative;
+}
+
+.quick-chat-session-trigger {
+  width: 100%;
+  justify-content: flex-start;
+  gap: var(--space-sm);
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm);
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.quick-chat-session-trigger > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-chat-session-trigger > svg:last-child {
+  margin-left: auto;
+  color: var(--text-muted);
+}
+
+.quick-chat-session-trigger:hover {
+  background: var(--card-hover);
+}
+
+.quick-chat-session-trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+.quick-chat-session-dropdown {
+  position: absolute;
+  top: calc(100% + var(--space-xs));
+  left: 0;
+  width: 100%;
+  max-height: calc(var(--space-xl) * 10);
+  overflow-y: auto;
+  background: var(--surface);
+  border: var(--btn-border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-xs);
+  z-index: 4;
+}
+
+.quick-chat-session-dropdown-group-label {
+  margin: var(--space-xs) var(--space-sm);
+  color: var(--text-muted);
+  font-size: var(--space-sm);
+  font-weight: 600;
+  letter-spacing: calc(var(--space-xs) / 8);
+  text-transform: uppercase;
+}
+
+.quick-chat-session-option {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+  text-align: left;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.quick-chat-session-option:hover {
+  background: var(--card-hover);
+}
+
+.quick-chat-session-option:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+.quick-chat-session-option--active {
+  background: color-mix(in srgb, var(--todo) 12%, transparent);
+}
+
 .quick-chat-panel-messages {
   flex: 1;
   min-height: 0;
@@ -789,6 +874,13 @@
     border-radius: 0;
     border: none;
     z-index: 1100;
+  }
+
+  .quick-chat-session-dropdown {
+    left: 0;
+    right: 0;
+    width: auto;
+    max-height: calc(100vh - var(--header-height) - var(--mobile-nav-height));
   }
 
   .quick-chat-resize-handle {

@@ -6,6 +6,8 @@ import * as apiModule from "../../api";
 import { useAgents } from "../../hooks/useAgents";
 import { useViewportMode } from "../../hooks/useViewportMode";
 import { useMobileKeyboard } from "../../hooks/useMobileKeyboard";
+import { useAppSettings } from "../../hooks/useAppSettings";
+import { useChatRooms } from "../../hooks/useChatRooms";
 import { QuickChatFAB } from "../QuickChatFAB";
 
 vi.mock("../../api", () => ({
@@ -24,6 +26,8 @@ vi.mock("../../api", () => ({
 vi.mock("../../hooks/useAgents", () => ({ useAgents: vi.fn() }));
 vi.mock("../../hooks/useViewportMode", () => ({ useViewportMode: vi.fn() }));
 vi.mock("../../hooks/useMobileKeyboard", () => ({ useMobileKeyboard: vi.fn() }));
+vi.mock("../../hooks/useAppSettings", () => ({ useAppSettings: vi.fn() }));
+vi.mock("../../hooks/useChatRooms", () => ({ useChatRooms: vi.fn() }));
 
 const mockFetchResumeChatSession = vi.mocked(apiModule.fetchResumeChatSession);
 const mockFetchChatSessions = vi.mocked(apiModule.fetchChatSessions);
@@ -36,6 +40,8 @@ const mockCancelChatResponse = vi.mocked(apiModule.cancelChatResponse);
 const mockUseAgents = vi.mocked(useAgents);
 const mockUseViewportMode = vi.mocked(useViewportMode);
 const mockUseMobileKeyboard = vi.mocked(useMobileKeyboard);
+const mockUseAppSettings = vi.mocked(useAppSettings);
+const mockUseChatRooms = vi.mocked(useChatRooms);
 
 const agents: Agent[] = [
   { id: "agent-001", name: "Agent One", role: "executor", state: "active", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), metadata: {} },
@@ -117,6 +123,23 @@ describe("QuickChatFAB session-first UX", () => {
       viewportOffsetTop: 0,
       keyboardOpen: false,
     });
+    mockUseAppSettings.mockReturnValue({
+      experimentalFeatures: {},
+    } as ReturnType<typeof useAppSettings>);
+    mockUseChatRooms.mockReturnValue({
+      rooms: [],
+      roomsLoading: false,
+      roomsError: null,
+      activeRoom: null,
+      activeRoomMembers: [],
+      messages: [],
+      messagesLoading: false,
+      selectRoom: vi.fn(),
+      createRoom: vi.fn(),
+      deleteRoom: vi.fn(),
+      sendRoomMessage: vi.fn(),
+      refreshRooms: vi.fn(),
+    });
     mockFetchResumeChatSession.mockImplementation(async ({ agentId, modelProvider, modelId }) => ({
       session: resolveResumeSession(agentId, modelProvider, modelId),
     }));
@@ -150,8 +173,64 @@ describe("QuickChatFAB session-first UX", () => {
 
     expect(await screen.findByTestId("quick-chat-session-dropdown")).toBeInTheDocument();
     expect(screen.queryByTestId("quick-chat-mode-toggle")).toBeNull();
-    expect(screen.getByRole("option", { name: "Model thread — GPT-4o [openai/gpt-4o]" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Session 2 — Agent One" })).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("quick-chat-session-dropdown-trigger"));
+    expect(screen.getByTestId("quick-chat-session-option-session-model")).toHaveClass("quick-chat-session-option--active");
+    expect(screen.getByTestId("quick-chat-session-option-session-agent")).toBeInTheDocument();
+  });
+
+  it("does not render room options when chat rooms are disabled", async () => {
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+    fireEvent.click(await screen.findByTestId("quick-chat-session-dropdown-trigger"));
+
+    expect(screen.queryByTestId("quick-chat-session-option-room-engineering")).toBeNull();
+  });
+
+  it("opens/closes session menu and handles rooms when enabled", async () => {
+    const selectRoom = vi.fn();
+    mockUseAppSettings.mockReturnValue({ experimentalFeatures: { chatRooms: true } } as ReturnType<typeof useAppSettings>);
+    mockUseChatRooms.mockReturnValue({
+      rooms: [{ id: "room-1", name: "engineering", slug: "engineering", memberCount: 2, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }],
+      roomsLoading: false,
+      roomsError: null,
+      activeRoom: { id: "room-1", name: "engineering", slug: "engineering", memberCount: 2, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+      activeRoomMembers: [],
+      messages: [],
+      messagesLoading: false,
+      selectRoom,
+      createRoom: vi.fn(),
+      deleteRoom: vi.fn(),
+      sendRoomMessage: vi.fn(),
+      refreshRooms: vi.fn(),
+    });
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const trigger = await screen.findByTestId("quick-chat-session-dropdown-trigger");
+    expect(trigger).toHaveTextContent("#engineering");
+    fireEvent.click(trigger);
+
+    expect(screen.getByTestId("quick-chat-session-dropdown-menu")).toBeInTheDocument();
+    expect(screen.getByText("Sessions")).toBeInTheDocument();
+    expect(screen.getByText("Rooms")).toBeInTheDocument();
+    expect(screen.getByTestId("quick-chat-session-option-session-model")).toHaveClass("quick-chat-session-option");
+    expect(screen.getByTestId("quick-chat-session-option-room-engineering")).toHaveClass("quick-chat-session-option--active");
+
+    fireEvent.click(screen.getByTestId("quick-chat-session-option-room-engineering"));
+    expect(selectRoom).toHaveBeenCalledWith("room-1");
+
+    fireEvent.click(trigger);
+    fireEvent.mouseDown(screen.getByTestId("quick-chat-new-thread"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("quick-chat-session-dropdown-menu")).toBeNull();
+    });
+
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByTestId("quick-chat-session-option-session-model"));
+    await waitFor(() => {
+      expect(mockFetchChatMessages).toHaveBeenCalledWith("session-model", { limit: 50 }, "proj-1");
+    });
   });
 
   it("opens inline chooser from new button defaulting to model", async () => {
@@ -218,7 +297,8 @@ describe("QuickChatFAB session-first UX", () => {
       expect(screen.getByTestId("quick-chat-input")).toHaveAttribute("placeholder", "Message Agent Two");
       expect(screen.getByTestId("quick-chat-session-dropdown")).toHaveValue("active-latest");
     });
-    expect(screen.getByRole("option", { name: /Claude thread/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("quick-chat-session-dropdown-trigger"));
+    expect(screen.getByTestId("quick-chat-session-option-archived-newest")).toBeInTheDocument();
   });
 
   it("reopen restores the newest active session by max(lastMessageAt, updatedAt)", async () => {
@@ -247,7 +327,8 @@ describe("QuickChatFAB session-first UX", () => {
       expect(screen.getByTestId("quick-chat-session-dropdown")).toHaveValue("newer-last-message");
     });
 
-    fireEvent.change(screen.getByTestId("quick-chat-session-dropdown"), { target: { value: "older-updated" } });
+    fireEvent.click(screen.getByTestId("quick-chat-session-dropdown-trigger"));
+    fireEvent.click(screen.getByTestId("quick-chat-session-option-older-updated"));
     await waitFor(() => {
       expect(screen.getByTestId("quick-chat-session-dropdown")).toHaveValue("older-updated");
     });
@@ -293,7 +374,8 @@ describe("QuickChatFAB session-first UX", () => {
       expect(screen.getByTestId("quick-chat-session-dropdown")).toHaveValue("active-latest");
     });
 
-    fireEvent.change(screen.getByTestId("quick-chat-session-dropdown"), { target: { value: "active-older" } });
+    fireEvent.click(screen.getByTestId("quick-chat-session-dropdown-trigger"));
+    fireEvent.click(screen.getByTestId("quick-chat-session-option-active-older"));
     await waitFor(() => {
       expect(screen.getByTestId("quick-chat-session-dropdown")).toHaveValue("active-older");
     });
@@ -372,15 +454,17 @@ describe("QuickChatFAB session-first UX", () => {
     render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
     fireEvent.click(screen.getByTestId("quick-chat-fab"));
 
-    expect(await screen.findByRole("option", { name: "Session 1 — GPT-4o [openai/gpt-4o]" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Session 2 — Claude 3.7 Sonnet [anthropic/claude-3-7-sonnet]" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByTestId("quick-chat-session-dropdown-trigger"));
+    expect(screen.getByTestId("quick-chat-session-option-session-openai")).toBeInTheDocument();
+    expect(screen.getByTestId("quick-chat-session-option-session-anthropic")).toBeInTheDocument();
   });
 
   it("includes both title and model descriptor in session label", async () => {
     render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
     fireEvent.click(screen.getByTestId("quick-chat-fab"));
 
-    expect(await screen.findByRole("option", { name: "Model thread — GPT-4o [openai/gpt-4o]" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByTestId("quick-chat-session-dropdown-trigger"));
+    expect(screen.getByTestId("quick-chat-session-option-session-model")).toBeInTheDocument();
   });
 
   it("uses icon-only model tag without pill styling when mobile header fallback is active", async () => {
@@ -577,9 +661,9 @@ describe("QuickChatFAB session-first UX", () => {
     render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
     fireEvent.click(screen.getByTestId("quick-chat-fab"));
 
-    const select = await screen.findByTestId("quick-chat-session-dropdown");
-    await screen.findByRole("option", { name: "Session 2 — Agent One" });
-    fireEvent.change(select, { target: { value: "session-agent" } });
+    await screen.findByTestId("quick-chat-session-dropdown");
+    fireEvent.click(screen.getByTestId("quick-chat-session-dropdown-trigger"));
+    fireEvent.click(screen.getByTestId("quick-chat-session-option-session-agent"));
 
     await waitFor(() => {
       expect(mockFetchChatMessages).toHaveBeenCalledWith("session-agent", { limit: 50 }, "proj-1");
@@ -970,7 +1054,9 @@ describe("QuickChatFAB session-first UX", () => {
       },
     });
 
-    fireEvent.change(await screen.findByTestId("quick-chat-session-dropdown"), { target: { value: "session-agent" } });
+    await screen.findByTestId("quick-chat-session-dropdown");
+    fireEvent.click(screen.getByTestId("quick-chat-session-dropdown-trigger"));
+    fireEvent.click(screen.getByTestId("quick-chat-session-option-session-agent"));
     scrollHeightValue = 1700;
 
     await waitFor(() => {

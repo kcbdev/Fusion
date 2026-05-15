@@ -26,6 +26,8 @@ import { FileMentionPopup } from "./FileMentionPopup";
 import { useFileMention } from "../hooks/useFileMention";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
 import { useViewportMode } from "../hooks/useViewportMode";
+import { useAppSettings } from "../hooks/useAppSettings";
+import { useChatRooms } from "../hooks/useChatRooms";
 
 interface PendingAttachment {
   file: File;
@@ -893,6 +895,7 @@ export function QuickChatFAB({
   const [chatMode, setChatMode] = useState<"agent" | "model">("agent");
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
   const [newSessionChooserOpen, setNewSessionChooserOpen] = useState(false);
+  const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
   const [newSessionMode, setNewSessionMode] = useState<"agent" | "model">("model");
   const [newSessionAgentId, setNewSessionAgentId] = useState<string>("");
   const [newSessionModel, setNewSessionModel] = useState<string>("");
@@ -985,11 +988,15 @@ export function QuickChatFAB({
     refreshSessions,
     skipNextSessionInitRef,
   } = useQuickChat(projectId, addToast);
+  const { experimentalFeatures } = useAppSettings();
+  const chatRoomsEnabled = experimentalFeatures?.chatRooms === true;
+  const roomsState = useChatRooms(projectId, addToast);
 
   const panelRef = useRef<HTMLDivElement | null>(null);
   const fabRef = useRef<HTMLButtonElement | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const sessionMenuRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingAttachmentsRef = useRef<PendingAttachment[]>([]);
   const shouldAutoFocusComposerRef = useRef(false);
@@ -1648,6 +1655,60 @@ export function QuickChatFAB({
     });
   }, [agents, models, sessions]);
 
+  const roomOptions = useMemo(
+    () => (chatRoomsEnabled ? roomsState.rooms : []),
+    [chatRoomsEnabled, roomsState.rooms],
+  );
+
+  const showRoomGroups = chatRoomsEnabled && roomOptions.length > 0;
+
+  const activeSessionLabel = useMemo(() => {
+    if (showRoomGroups && roomsState.activeRoom) {
+      return `#${roomsState.activeRoom.name}`;
+    }
+    const activeOption = sessionOptions.find((option) => option.id === activeSession?.id);
+    if (activeOption) {
+      return activeOption.label;
+    }
+    if (sessionsLoading) {
+      return "Loading sessions…";
+    }
+    return "Select a session";
+  }, [activeSession?.id, roomsState.activeRoom, sessionOptions, sessionsLoading, showRoomGroups]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setSessionMenuOpen(false);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!sessionMenuOpen) {
+      return;
+    }
+
+    const handleSessionMenuOutsideClick = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (sessionMenuRef.current?.contains(target)) {
+        return;
+      }
+      setSessionMenuOpen(false);
+    };
+
+    const handleSessionMenuEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSessionMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleSessionMenuOutsideClick);
+    document.addEventListener("keydown", handleSessionMenuEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleSessionMenuOutsideClick);
+      document.removeEventListener("keydown", handleSessionMenuEscape);
+    };
+  }, [sessionMenuOpen]);
+
   const inputPlaceholder = useMemo(() => {
     if (chatMode === "agent") {
       if (selectedAgent) {
@@ -1679,7 +1740,13 @@ export function QuickChatFAB({
     }
 
     void selectSession(selectedSession);
+    setSessionMenuOpen(false);
   }, [selectSession, sessions]);
+
+  const handleRoomSwitch = useCallback((roomId: string) => {
+    roomsState.selectRoom(roomId);
+    setSessionMenuOpen(false);
+  }, [roomsState]);
 
   const handleCreateFreshSession = useCallback(async () => {
     if (sessionsLoading) return;
@@ -2405,18 +2472,65 @@ export function QuickChatFAB({
           </div>
 
           <div className="quick-chat-panel-agent-select" data-testid="quick-chat-session-select">
-            <label htmlFor="quick-chat-session-select" className="visually-hidden">Select session</label>
-            <select
-              id="quick-chat-session-select"
-              value={activeSession?.id ?? ""}
-              onChange={(event) => handleSessionSwitch(event.target.value)}
-              data-testid="quick-chat-session-dropdown"
-            >
-              <option value="" disabled>{sessionsLoading ? "Loading sessions…" : "Select a session"}</option>
-              {sessionOptions.map((sessionOption) => (
-                <option key={sessionOption.id} value={sessionOption.id}>{sessionOption.label}</option>
-              ))}
-            </select>
+            <div className="quick-chat-session-menu" ref={sessionMenuRef}>
+              <label htmlFor="quick-chat-session-dropdown-trigger" className="visually-hidden">Select session</label>
+              <input type="hidden" data-testid="quick-chat-session-dropdown" value={activeSession?.id ?? ""} readOnly />
+              <button
+                id="quick-chat-session-dropdown-trigger"
+                type="button"
+                className="btn quick-chat-session-trigger"
+                aria-haspopup="menu"
+                aria-expanded={sessionMenuOpen}
+                data-testid="quick-chat-session-dropdown-trigger"
+                onClick={() => setSessionMenuOpen((current) => !current)}
+              >
+                {activeSession?.modelProvider ? (
+                  <ProviderIcon provider={activeSession.modelProvider} size="sm" />
+                ) : (
+                  <MessageSquare size={16} aria-hidden="true" />
+                )}
+                <span>{activeSessionLabel}</span>
+                <ChevronDown size={16} aria-hidden="true" />
+              </button>
+
+              {sessionMenuOpen && (
+                <div className="quick-chat-session-dropdown" role="menu" data-testid="quick-chat-session-dropdown-menu">
+                  {showRoomGroups && (
+                    <div className="quick-chat-session-dropdown-group-label">Sessions</div>
+                  )}
+                  {sessionOptions.map((sessionOption) => (
+                    <button
+                      key={sessionOption.id}
+                      type="button"
+                      role="menuitem"
+                      data-testid={`quick-chat-session-option-${sessionOption.id}`}
+                      className={`quick-chat-session-option${roomsState.activeRoom === null && activeSession?.id === sessionOption.id ? " quick-chat-session-option--active" : ""}`}
+                      onClick={() => handleSessionSwitch(sessionOption.id)}
+                    >
+                      {sessionOption.label}
+                    </button>
+                  ))}
+
+                  {showRoomGroups && (
+                    <>
+                      <div className="quick-chat-session-dropdown-group-label">Rooms</div>
+                      {roomOptions.map((room) => (
+                        <button
+                          key={room.id}
+                          type="button"
+                          role="menuitem"
+                          data-testid={`quick-chat-session-option-room-${room.slug}`}
+                          className={`quick-chat-session-option${roomsState.activeRoom?.id === room.id ? " quick-chat-session-option--active" : ""}`}
+                          onClick={() => handleRoomSwitch(room.id)}
+                        >
+                          #{room.name}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {newSessionChooserOpen && (
