@@ -226,6 +226,7 @@ const { stdout, stderr } = await execAsync(command, {
 ```
 
 `execSync` is only acceptable for short, deterministic git plumbing (`git rev-parse`, `git branch -d`, `git worktree remove`, etc.). When in doubt, use async.
+User-configured command wiring lives under `packages/engine/src/sandbox/` (FN-4636 seam); keep internal git plumbing on direct async exec paths.
 
 User-initiated `moveTask(in-progress → todo)` is a hard cancel contract: executor listeners must abort active sessions before dispose, stop step/workflow subprocesses, and leave the task parked in `todo` with `userPaused` semantics intact. Engine-initiated rebounds (pause, stuck recovery, workflow rerun, self-healing) must continue to use default `moveSource: "engine"` plus the appropriate `preserve*` flags (`preserveResumeState`, `preserveProgress`, `preserveWorktree`) and must not set `userPaused`.
 

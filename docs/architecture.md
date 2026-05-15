@@ -591,6 +591,10 @@ See [Memory Plugin Contract](./memory-plugin-contract.md) for the full plan.
 - `RoutineScheduler` (`routine-scheduler.ts`) — schedules due routines
 - `CronRunner` (`cron-runner.ts`) — cron-based AI/script jobs
 
+### Sandbox backend seam (FN-4636)
+- Engine user-configured command runners now route through `packages/engine/src/sandbox/` via a shared `SandboxBackend` abstraction (`resolveSandboxBackend()`), currently implemented only by the transparent `NativeSandboxBackend` passthrough (no behavior change).
+- Follow-up chain: FN-4637 (bubblewrap), FN-4638 (sandbox-exec), FN-4639 (settings selection), FN-4640 (run-audit telemetry), FN-4641 (action-gate), FN-4642 (container backends).
+
 ### Execution context + skills
 - `SkillResolver` (`skill-resolver.ts`) — resolves active skill sets for sessions
 - `SessionSkillContext` (`session-skill-context.ts`) — skill context materialization per run
