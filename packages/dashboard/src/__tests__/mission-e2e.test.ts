@@ -1430,6 +1430,26 @@ describe("Mission API", () => {
       expect(updateDependencies.status).toBe(200);
       expect(updateDependencies.body.dependencies).toEqual(["MS-DEP-1"]);
 
+      const updateAcceptanceCriteria = await request(
+        app,
+        "PATCH",
+        `/api/missions/milestones/${milestone.id}`,
+        JSON.stringify({ acceptanceCriteria: "Acceptance ready" }),
+        { "content-type": "application/json" },
+      );
+      expect(updateAcceptanceCriteria.status).toBe(200);
+      expect(updateAcceptanceCriteria.body.acceptanceCriteria).toBe("Acceptance ready");
+
+      const malformedAcceptanceCriteria = await request(
+        app,
+        "PATCH",
+        `/api/missions/milestones/${milestone.id}`,
+        JSON.stringify({ acceptanceCriteria: 42 }),
+        { "content-type": "application/json" },
+      );
+      expect(malformedAcceptanceCriteria.status).toBe(500);
+      expect(malformedAcceptanceCriteria.body.error).toContain("Description must be a string");
+
       const noFields = await request(
         app,
         "PATCH",
