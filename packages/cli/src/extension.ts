@@ -2204,6 +2204,16 @@ export default function kbExtension(pi: ExtensionAPI) {
       }
 
       const lines: string[] = [];
+      const renderGateLine = (indent: string, label: string, value: string | undefined) => {
+        const trimmed = value?.trim();
+        if (!trimmed) return;
+        if (trimmed.length > 240) {
+          lines.push(`${indent}${label} ${trimmed.slice(0, 240)}… (truncated, ${trimmed.length} chars)`);
+          return;
+        }
+        lines.push(`${indent}${label} ${trimmed}`);
+      };
+
       lines.push(`${mission.id}: ${mission.title}`);
       lines.push(`Status: ${mission.status}`);
       if (mission.description) {
@@ -2218,15 +2228,18 @@ export default function kbExtension(pi: ExtensionAPI) {
         for (const milestone of mission.milestones) {
           const mIcon = milestone.status === "complete" ? "✓" : milestone.status === "active" ? "●" : "○";
           lines.push(`  ${mIcon} ${milestone.id}: ${milestone.title} (${milestone.status})`);
+          renderGateLine("    ", "AC:", milestone.acceptanceCriteria);
 
           for (const slice of milestone.slices) {
             const sIcon = slice.status === "complete" ? "✓" : slice.status === "active" ? "●" : "○";
             lines.push(`    ${sIcon} ${slice.id}: ${slice.title} (${slice.status})`);
+            renderGateLine("      ", "Verification:", slice.verification);
 
             for (const feature of slice.features) {
               const fIcon = feature.status === "done" ? "✓" : feature.status === "in-progress" ? "▸" : feature.status === "triaged" ? "●" : "○";
               const taskLink = feature.taskId ? ` → ${feature.taskId}` : "";
               lines.push(`      ${fIcon} ${feature.id}: ${feature.title} (${feature.status})${taskLink}`);
+              renderGateLine("        ", "AC:", feature.acceptanceCriteria);
             }
           }
         }
