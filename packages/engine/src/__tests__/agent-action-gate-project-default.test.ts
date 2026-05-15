@@ -17,16 +17,42 @@ describe("agent action gate project-default resolution", () => {
       evaluateAgentActionGate({ agentId: "a1", toolName: "bash", args: { command: "git commit -m x" }, permissionPolicy }),
       evaluateAgentActionGate({ agentId: "a1", toolName: "write", args: { path: "x.ts", content: "x" }, permissionPolicy }),
       evaluateAgentActionGate({ agentId: "a1", toolName: "bash", args: { command: "pnpm test" }, permissionPolicy }),
-      evaluateAgentActionGate({ agentId: "a1", toolName: "fn_web_fetch", args: { url: "https://example.com" }, permissionPolicy }),
       evaluateAgentActionGate({ agentId: "a1", toolName: "fn_task_add_dep", args: { task_id: "FN-1" }, permissionPolicy }),
     ];
 
     for (const decision of decisions) {
-      if (decision.category === "exempt") {
-        continue;
-      }
       expect(decision.disposition).toBe("require-approval");
     }
+
+    const webFetchDecision = evaluateAgentActionGate({
+      agentId: "a1",
+      toolName: "fn_web_fetch",
+      args: { url: "https://example.com" },
+      permissionPolicy,
+    });
+
+    expect(webFetchDecision.category).toBe("network_api");
+    expect(webFetchDecision.disposition).toBe("require-approval");
+  });
+
+  it.each([
+    ["allow", "allow"],
+    ["block", "block"],
+    ["require-approval", "require-approval"],
+  ] as const)("routes fn_web_fetch through network_api policy (%s)", (networkDisposition, expected) => {
+    const permissionPolicy = resolveEffectiveAgentPermissionPolicy(undefined, {
+      rules: { network_api: networkDisposition },
+    });
+
+    const decision = evaluateAgentActionGate({
+      agentId: "a1",
+      toolName: "fn_web_fetch",
+      args: { url: "https://example.com" },
+      permissionPolicy,
+    });
+
+    expect(decision.category).toBe("network_api");
+    expect(decision.disposition).toBe(expected);
   });
 
   it("keeps per-agent custom rule over project default", () => {
