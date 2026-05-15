@@ -1176,6 +1176,16 @@ export interface MergeDetails {
    */
   rebaseBaseSha?: string;
   /**
+   * Authoritative landed file set on the merge target:
+   * - squash: files touched by the final recorded squash commit
+   * - rebase/cherry-pick: files touched across `rebaseBaseSha..commitSha`
+   *
+   * This differs from `Task.modifiedFiles`, which is an executor pre-merge
+   * worktree snapshot and can include in-flight files later reverted before
+   * landing.
+   */
+  landedFiles?: string[];
+  /**
    * Shortstat file count of the final recorded merge/squash commit only.
    * For multi-commit task lineage this can undercount landed scope.
    * Use `/api/tasks/:id/diff` for lineage-backed landed totals.
