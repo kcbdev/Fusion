@@ -100,6 +100,8 @@ export type DatabaseMutationType =
   | "task:unpause"
   | "task:dependency:add"
   | "task:auto-recover-already-merged"
+  | "task:auto-recover-finalize-already-on-main"
+  | "task:auto-recover-branch-misbound"
   | "task:auto-recover-completion-fanout"
   | "auto-recovery:classify-decision"
   | "auto-recovery:retry-issued"

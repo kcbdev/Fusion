@@ -235,6 +235,40 @@ describeIfGit("SelfHealingManager recoverAlreadyMergedReviewTasks (real git)", (
     expect(existsSync(worktreePath)).toBe(true);
   });
 
+  it("recovers misbound in-review branch when main already carries task trailer", async () => {
+    const repo = setupRepo();
+    mkdirSync(path.join(repo, "src"), { recursive: true });
+    writeFileSync(path.join(repo, "src", "other.txt"), "other\n", "utf-8");
+    git(repo, "git add src/other.txt && git commit -m 'feat: unrelated' -m 'Fusion-Task-Id: FN-OTHER'");
+    const unrelatedSha = git(repo, "git rev-parse HEAD");
+
+    writeFileSync(path.join(repo, "src", "misbound.txt"), "landed\n", "utf-8");
+    git(repo, "git add src/misbound.txt && git commit -m 'feat: landed' -m 'Fusion-Task-Id: FN-TEST-MISBOUND'");
+    const landedSha = git(repo, "git rev-parse HEAD");
+
+    const worktreePath = path.join(repo, ".worktrees", "fn-test-misbound");
+    mkdirSync(path.dirname(worktreePath), { recursive: true });
+    git(repo, `git branch fusion/fn-test-misbound ${unrelatedSha}`);
+    git(repo, `git worktree add ${JSON.stringify(worktreePath)} fusion/fn-test-misbound`);
+
+    const tasks: TaskMap = new Map([
+      ["FN-TEST-MISBOUND", makeTask({ id: "FN-TEST-MISBOUND", column: "in-review", paused: false, baseBranch: "main", branch: "fusion/fn-test-misbound", worktree: worktreePath })],
+    ]);
+    const store = createStore(tasks);
+    const manager = new SelfHealingManager(store, { rootDir: repo, getExecutingTaskIds: () => new Set() });
+
+    await (manager as any).runMaintenance();
+
+    const task = tasks.get("FN-TEST-MISBOUND")!;
+    expect(task.column).toBe("done");
+    expect(task.branch).toBeNull();
+    expect(task.worktree).toBeNull();
+    expect(task.mergeDetails?.commitSha).toBe(landedSha);
+    expect((store as any).recordRunAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ mutationType: "task:auto-recover-branch-misbound", target: "FN-TEST-MISBOUND" }),
+    );
+  });
+
   it("is idempotent across two maintenance passes", async () => {
     const repo = setupRepo();
     mkdirSync(path.join(repo, "src"), { recursive: true });

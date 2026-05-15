@@ -3494,7 +3494,7 @@ export async function commitOrAmendMergeWithFixes(
             );
             await auditor?.database({
               type: "task:auto-recover-finalize-already-on-main",
-              taskId,
+              target: taskId,
               metadata: {
                 mergeSha: landed.sha,
                 mergeStrategy: landed.strategy,

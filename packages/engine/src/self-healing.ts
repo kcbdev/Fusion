@@ -409,6 +409,7 @@ export class SelfHealingManager {
       { name: "interrupted-merging", fn: () => this.recoverInterruptedMergingTasks().then(() => undefined) },
       { name: "done-merge-metadata", fn: () => this.recoverDoneTaskMergeMetadata().then(() => undefined) },
       { name: "recover-already-merged-review", fn: () => this.recoverAlreadyMergedReviewTasks().then(() => undefined) },
+      { name: "recover-branch-misbound-in-review", fn: () => this.recoverBranchMisboundInReviewTasks().then(() => undefined) },
       { name: "recover-orphan-only-scope-violations", fn: () => this.recoverOrphanOnlyScopeViolations().then(() => undefined) },
       { name: "recover-stuck-merge-deadlocks", fn: () => this.recoverStuckMergeDeadlocks().then(() => undefined) },
       { name: "misclassified-failures", fn: () => this.recoverMisclassifiedFailures().then(() => undefined) },
@@ -830,6 +831,17 @@ export class SelfHealingManager {
     return commit;
   }
 
+  private async findAlreadyMergedTaskCommit(input: {
+    taskId: string;
+    lineageId?: string;
+    repoDir: string;
+    baseBranch: string;
+    taskBranch?: string;
+    baseCommitSha?: string;
+  }) {
+    return findAlreadyMergedTaskCommit(input);
+  }
+
   private async cleanupWorktreeOnly(task: Task): Promise<void> {
     if (task.worktree && existsSync(task.worktree)) {
       try {
@@ -925,6 +937,7 @@ export class SelfHealingManager {
           { name: "recover-mergeable-review", fn: () => this.recoverMergeableReviewTasks() },
           { name: "recover-merged-review", fn: () => this.recoverMergedReviewTasks() },
           { name: "recover-already-merged-review", fn: () => this.recoverAlreadyMergedReviewTasks() },
+          { name: "recover-branch-misbound-in-review", fn: () => this.recoverBranchMisboundInReviewTasks() },
           { name: "recover-orphan-only-scope-violations", fn: () => this.recoverOrphanOnlyScopeViolations() },
           { name: "recover-stuck-merge-deadlocks", fn: () => this.recoverStuckMergeDeadlocks() },
           { name: "recover-misclassified-failures", fn: () => this.recoverMisclassifiedFailures() },
@@ -3063,7 +3076,7 @@ export class SelfHealingManager {
           if (hasDeclaredOverlap) continue;
 
           const baseBranch = task.baseBranch || task.executionStartBranch || "main";
-          const landed = await findAlreadyMergedTaskCommit({
+          const landed = await this.findAlreadyMergedTaskCommit({
             taskId: task.id,
             lineageId: task.lineageId,
             repoDir: this.options.rootDir,
@@ -3173,7 +3186,7 @@ export class SelfHealingManager {
           const baseBranch = task.baseBranch || task.executionStartBranch || "main";
           if (!baseBranch) continue;
 
-          const landed = await findAlreadyMergedTaskCommit({
+          const landed = await this.findAlreadyMergedTaskCommit({
             taskId: task.id,
             lineageId: task.lineageId,
             repoDir: this.options.rootDir,
@@ -3259,6 +3272,135 @@ export class SelfHealingManager {
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       log.error(`Already-merged review recovery failed: ${errorMessage}`);
+      return 0;
+    }
+  }
+
+  private async isBranchTipMisboundToTask(input: {
+    branch: string;
+    taskId: string;
+    lineageId?: string;
+    baseBranch: string;
+  }): Promise<{ misbound: boolean; branchTip: string; landed: Awaited<ReturnType<typeof findAlreadyMergedTaskCommit>> }> {
+    const { branch, taskId, lineageId, baseBranch } = input;
+    const { stdout: bodyOut } = await execAsync(`git log -1 --format=%B ${shellQuote(branch)}`, {
+      cwd: this.options.rootDir,
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024,
+    });
+    const body = bodyOut;
+    const hasTaskId = body.includes(`Fusion-Task-Id: ${taskId}`);
+    const hasLineage = lineageId ? body.includes(`Fusion-Task-Lineage: ${lineageId}`) : false;
+    const { stdout: tipOut } = await execAsync(`git rev-parse ${shellQuote(branch)}`, {
+      cwd: this.options.rootDir,
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024,
+    });
+    const branchTip = tipOut.trim();
+    const landed = await this.findAlreadyMergedTaskCommit({
+      taskId,
+      lineageId,
+      repoDir: this.options.rootDir,
+      baseBranch,
+      taskBranch: branch,
+    });
+    return { misbound: !hasTaskId && !hasLineage, branchTip, landed };
+  }
+
+  async recoverBranchMisboundInReviewTasks(): Promise<number> {
+    try {
+      const settings = await this.store.getSettings();
+      if (settings.globalPause || settings.enginePaused) return 0;
+
+      const executingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
+      const tasks = await this.store.listTasks({ column: "in-review", slim: true });
+      const candidates = tasks.filter((task) =>
+        task.column === "in-review" &&
+        Boolean(task.branch) &&
+        task.mergeDetails?.mergeConfirmed !== true &&
+        !executingIds.has(task.id),
+      );
+
+      let recovered = 0;
+      for (const task of candidates) {
+        try {
+          const branch = task.branch;
+          if (!branch) continue;
+          const baseBranch = task.baseBranch || task.executionStartBranch || "main";
+          const check = await this.isBranchTipMisboundToTask({
+            branch,
+            taskId: task.id,
+            lineageId: task.lineageId,
+            baseBranch,
+          });
+          if (!check.misbound || !check.landed) continue;
+
+          const mergeDetails: MergeDetails = {
+            commitSha: check.landed.sha,
+            mergedAt: new Date().toISOString(),
+            mergeConfirmed: true,
+            prNumber: task.prInfo?.number,
+          };
+
+          await this.store.updateTask(task.id, {
+            mergeDetails,
+            branch: null,
+            worktree: null,
+            status: null,
+            error: null,
+          });
+
+          if (task.worktree && existsSync(task.worktree)) {
+            await execAsync(`git worktree remove --force ${shellQuote(task.worktree)}`, {
+              cwd: this.options.rootDir,
+              timeout: 30_000,
+            }).catch(() => undefined);
+          }
+
+          await this.clearCompletionBranchIfSubsumed(task, branch).catch(() => false);
+
+          await this.store.moveTask(task.id, "done");
+          await this.store.logEntry(
+            task.id,
+            `Auto-recovered: branch tip misbound but content found on ${baseBranch} at ${check.landed.sha.slice(0, 8)} via ${check.landed.strategy}`,
+          );
+          await this.reconcileCompletedTask(task.id, { worktreeHint: task.worktree ?? undefined });
+
+          try {
+            const auditor = createRunAuditor(this.store, {
+              runId: generateSyntheticRunId("self-heal", task.id),
+              agentId: "self-healing",
+              taskId: task.id,
+              taskLineageId: task.lineageId,
+              phase: "recover-branch-misbound-in-review",
+            });
+            await auditor.database({
+              type: "task:auto-recover-branch-misbound",
+              target: task.id,
+              metadata: {
+                branch,
+                branchTip: check.branchTip,
+                mergeSha: check.landed.sha,
+                mergeStrategy: check.landed.strategy,
+                lineageId: task.lineageId,
+                baseBranch,
+              },
+            });
+          } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            log.warn(`recoverBranchMisboundInReviewTasks: failed to record run-audit event for ${task.id}: ${errorMessage}`);
+          }
+          recovered++;
+        } catch (err: unknown) {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          log.warn(`recoverBranchMisboundInReviewTasks: failed for task ${task.id}: ${errorMessage}`);
+        }
+      }
+
+      return recovered;
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      log.error(`Branch-misbound in-review recovery failed: ${errorMessage}`);
       return 0;
     }
   }
