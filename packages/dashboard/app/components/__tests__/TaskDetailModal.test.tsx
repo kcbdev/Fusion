@@ -172,6 +172,30 @@ describe("TaskDetailModal in-review stall diagnostics", () => {
     expect(screen.queryByRole("button", { name: "View activity log" })).not.toBeInTheDocument();
   });
 
+  it("FN-4570: hides merge-blocker diagnostic while task is actively merging", () => {
+    render(
+      <TaskDetailModal
+        task={makeTask({
+          column: "in-review",
+          status: "merging-fix",
+          inReviewStall: {
+            code: "merge-blocker",
+            reason: "Workflow pre-merge check failed",
+            observedAt: "2026-05-13T00:00:00.000Z",
+          },
+        })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.queryByText("Merge blocked by a pre-merge check")).not.toBeInTheDocument();
+  });
+
   it.each([
     {
       label: "paused in-review task",
