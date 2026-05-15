@@ -290,10 +290,14 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   }, []);
 
   const openFiles = useCallback((workspace?: string, initialFile?: string | null) => {
-    if (workspace) {
+    if (typeof workspace === "string" && workspace) {
       setFileBrowserWorkspace(workspace);
     }
-    setFileBrowserInitialFile(initialFile ?? null);
+    if (typeof initialFile === "string" || initialFile === null) {
+      setFileBrowserInitialFile(initialFile);
+    } else {
+      setFileBrowserInitialFile(null);
+    }
     setFilesOpen(true);
   }, []);
   const closeFiles = useCallback(() => {
@@ -303,7 +307,9 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const openTodos = useCallback(() => setTodosOpen(true), []);
   const closeTodos = useCallback(() => setTodosOpen(false), []);
   const setFileWorkspace = useCallback((workspace: string) => {
-    setFileBrowserWorkspace(workspace);
+    if (typeof workspace === "string" && workspace) {
+      setFileBrowserWorkspace(workspace);
+    }
   }, []);
 
   const openActivityLog = useCallback(() => setActivityLogOpen(true), []);

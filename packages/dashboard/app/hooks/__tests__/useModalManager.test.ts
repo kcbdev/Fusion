@@ -229,6 +229,24 @@ describe("useModalManager", () => {
     expect(result.current.fileBrowserInitialFile).toBeNull();
   });
 
+  it("ignores non-string workspace values in openFiles and keeps existing workspace", () => {
+    const { result } = renderHook(() =>
+      useModalManager({ projectId: "proj_1", planningSessions: [] }),
+    );
+
+    act(() => {
+      result.current.openFiles("FN-123", "packages/dashboard/app/App.tsx");
+    });
+
+    act(() => {
+      result.current.openFiles({ type: "click" } as unknown as string, { path: "bad" } as unknown as string);
+    });
+
+    expect(result.current.fileBrowserWorkspace).toBe("FN-123");
+    expect(result.current.fileBrowserInitialFile).toBeNull();
+    expect(result.current.filesOpen).toBe(true);
+  });
+
   it("accepts plain Task object in openDetailWithChangesTab", () => {
     const task = createTask("FN-789");
     const { result } = renderHook(() =>
