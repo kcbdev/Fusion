@@ -1,5 +1,149 @@
 # @runfusion/fusion
 
+## 0.30.0
+
+### Minor Changes
+
+- 9db9cfe: Add `--project <id|name>` support to `fn serve` and `fn daemon` for explicit primary project binding.
+
+  Headless startup now resolves its primary engine in this order: CLI `--project`, central `defaultProjectId`, cwd project, then first started engine from the central registry. `serve`/`daemon` no longer require cwd to be a registered project and now only exit when no engines start across the registry.
+
+  Add central `defaultProjectId` persistence so headless nodes can select a default project across restarts.
+
+- e1bc0c2: Add bulk Pause / Unpause / Archive actions to List View bulk edit.
+- a9ed315: Add a diagnostic-only stale paused review signal (`task.stalePausedReview`) for paused in-review tasks, including a configurable `stalePausedReviewThresholdMs` setting, self-healing surfacing logs, and dashboard badge/filter/detail visibility for faster operator triage.
+- 11d521b: Add a diagnostic task-age staleness signal for `in-progress` and `in-review` tasks, with configurable warning/critical thresholds. Surface stale state in the dashboard with task-card badges, task-detail diagnostics, and a new ListView "Stale only" filter. Add scheduler-side structured stale-threshold log emission and settings for per-column warning/critical thresholds.
+- 7a1d39c: Add workflow-step `gateMode` support so steps can run as blocking gates or advisory polish checks.
+- bbb6d9c: Fix Google Generative AI custom provider not saving after model detection. The probe endpoint accepted `google-generative-ai` but create/update routes rejected it. Also adds SSRF protection, body validation, and fixes stale type mappings.
+- cfeb1f2: Chat-room transcript compaction limits (recent verbatim window, fetch limit,
+  summary cap) are now configurable in project settings instead of hardcoded.
+  Defaults match prior behavior.
+- e1bc0c2: Auto-recover from post-merge audit blocks: programmatic per-file survival check, optional AI-driven restoration pass, and an audit-bounce loop (parallel to conflict bounces) before parking a task as failed. Governed by the new `mergeAuditAutoRecovery` setting (default: `ai-assisted`).
+- 1b0f7b1: Add configurable heartbeat scope-discipline modes (`strict`, `lite`, `off`) with a project-level default setting and per-agent runtime override.
+
+  The default remains `strict` so existing installations keep current behavior until explicitly changed.
+
+- 9f24f1b: Add per-task token-budget alerts. Soft cap emits a single notification; hard cap pauses the task with `pausedReason: token_budget_exceeded`. New project/global setting `taskTokenBudget` with optional per-size (S/M/L) overrides; new per-task `tokenBudgetOverride` set on resume. New optional `token-budget` ntfy event.
+- 940f701: Trim heartbeat execution prompt sections by template-aware caps, add per-project and per-agent `heartbeatPromptTemplate` controls, emit `prompt-size` heartbeat audit logs, and expose per-agent prompt-size history via `/api/agents/:id/prompt-sizes` with dashboard sparkline visualization.
+- b63b721: Add CodeMirror-powered syntax highlighting to the dashboard file browser editor (JS/TS, CSS, JSON, Markdown).
+- 216d76d: Add `fn_feature_update` extension tool to edit existing mission feature title/description/acceptance criteria without delete+re-add.
+- 7730860: Add `noCommitsExpected` task-level flag so decision-only / evaluation tasks can complete cleanly without tripping the executor's `no_commits` invariant. Triage auto-detects decision-shaped tasks; the flag can also be set manually from the task detail modal and is surfaced as a badge on TaskCard. The existing merger no-op finalization path handles completion.
+
+### Patch Changes
+
+- ed648b2: Add experiment-session domain model (types, store, SQLite schema) for upstream pi-autoresearch parity. Additive only; no behavior change to the existing research subsystem.
+- 79ea9e9: Add experiment executor runtime (init/run/log lifecycle, METRIC parser, async benchmark runner, keep/revert git policy) for upstream pi-autoresearch parity. Additive only; existing research subsystem unchanged.
+- 034528c: Add experiment session finalize workflow across engine, CLI, extension, and dashboard API. The workflow previews and finalizes kept experiment runs into reviewable branches from merge-base, with typed error mapping for CLI/API consumers and rollback on partial branch creation failures.
+- e5189e3: Test bootstrap (`scripts/ensure-test-artifacts.mjs`) now detects STALE example-plugin
+  dist artifacts (`@fusion-plugin-examples/{hermes-runtime,openclaw-runtime,paperclip-runtime}`)
+  in addition to missing ones by comparing `src/` mtimes against the oldest `dist/`
+  entry artifact. When a rebuild fails, the script emits an actionable remediation
+  block (FN-4232) before exiting non-zero so worktree and merger-verification flows
+  no longer fail first with opaque Vite "Failed to resolve entry for package" errors.
+- 7dc0276: Add a reliability metrics surface with `GET /api/health/reliability` and a new dashboard Reliability view showing in-review failure rate, duration percentiles, and merge-attempt distribution.
+- e663a1d: Emit a new run_audit git-domain mutation type, `merge:audit-failure`, for dirty post-merge audit outcomes in the merger path.
+
+  The event metadata now records the audit decision contract: `mode`, `strategy`, `action`, `reason`, `issueCount`, `duplicateSubjectCount`, `touchedFileOverlapCount`, `verificationPassed`, and `auditTargetLabel`. This covers both blocking failures and warn/verified-short-circuit pass-through outcomes so downstream reliability metrics (FN-4360) can source post-merge audit failures from `run_audit` instead of agent-log scraping.
+
+- e964bda: Emit `git` / `merge:file-scope-violation` run_audit event when the merger's file-scope invariant aborts a squash, enabling the `fileScopeInvariantFailuresPerDay` reliability metric.
+- 12bdec8: Remove `agentMemoryInclusionMode` from `ProjectSettings` and make memory inclusion mode global-only by default resolution (`agent.runtimeConfig.agentMemoryInclusionMode` → `GlobalSettings.agentMemoryInclusionMode` → default).
+
+  Per-agent `runtimeConfig.agentMemoryInclusionMode` override behavior is unchanged, and `GlobalSettings.agentMemoryInclusionMode` remains the default source when no agent override is set.
+
+  If you previously set `agentMemoryInclusionMode` in project `.fusion/config.json`, move that setting to global `~/.fusion/settings.json`; project-level values are now ignored.
+
+  Also tighten heartbeat memory-mode transition log fallback to use `taskId ?? "heartbeat"`.
+
+- 3ea3da6: Add TaskStore.getExperimentSessionStore() accessor so engine, CLI, and
+  dashboard surfaces resolve the ExperimentSessionStore through a single
+  canonical entry point (parallels getResearchStore()). Additive; no
+  behavior change to existing research or experiment-session code paths.
+- 7d67cbb: Consolidate ExperimentSessionStore resolution onto
+  TaskStore.getExperimentSessionStore() across the dashboard experiment
+  routes, CLI experiment finalize command, and pi-extension tool. Removes
+  the temporary FN-4218 fallback shim introduced in FN-4222. Behavior
+  unchanged; single canonical store-resolution path.
+- b7659f9: Add executor-side scope-leak guard at fn_task_done for Plan-Only (Review Level 1) tasks. Off-scope uncommitted edits now produce a [scope-leak] activity-log entry (default warn) or refuse fn_task_done when planOnlyScopeLeakEnforcement="block". Respects task.scopeOverride and never blocks on git infrastructure failures.
+- 3d19aab: Engine: when an in-review task moves to done (auto-merger, self-healing, or manual move), the engine now fans out blockedBy reconciliation and residual branch/worktree cleanup in the same pass instead of waiting for the next periodic self-healing sweep. Prevents FN-4008-class stranded-task incidents.
+- c3209aa: Dependency graph view now switches to a vertical orientation on tall or narrow viewports so graph nodes stay reachable on mobile screens.
+- 79dac9b: Dashboard: Agents → Org Chart now supports drag-to-pan, wheel/pinch zoom, and a unified zoom toolbar on desktop and mobile. Parent→child connectors are drawn via a measurement-based SVG overlay so they always stay attached, including asymmetric subtrees and single-child chains.
+- d4f4733: Fix file browser crash (React error #31) when opening from the desktop Header Files button.
+- 4adc182: Suppress false `verification fix finalize failed (fix produced no content)` failures when task content is already on main by adding a last-chance already-landed classification in merger finalize and a new self-healing sweep that recovers misbound in-review branch tips. This also avoids noisy Task Failed notifications for this recovered path and records dedicated audit events for both finalize and self-healing recovery flows.
+- 458c234: Enforce `workflow_steps.toolMode="readonly"` as a hard tool allowlist at the engine's agent-session layer. Readonly workflow steps can no longer hold Edit, Write, Bash, or task/agent mutation tools. Steps that attempted to write under `toolMode="readonly"` now fail closed with a `READONLY_VIOLATION` outcome instead of silently staging files.
+- 4bafbaf: Fix file browser editor toolbar collapse button so the line-number / word-wrap controls actually hide when collapsed (FN-4480).
+- e1bc0c2: Fix false-positive `BranchCrossContaminationError` that paused tasks at start when their stored `baseCommitSha` was stale relative to `main`. The contamination check now computes a fresh merge-base against the integration branch instead of reusing the diff-stable `task.baseCommitSha`, and `captureBaseCommitSha` only preserves a prior stored value when resuming an existing worktree. Diff-base stability across resumed sessions is preserved (FN-4309/FN-4383 behavior unchanged).
+- f9af9fc: Add explicit overlap/`blockedBy` bottleneck visibility across scheduler logs and dashboard fan-out surfaces, including de-duplicated scheduler warnings and overlap-specific footer/card/detail summaries.
+- 00e2679: Self-healing now auto-promotes tasks with all steps completed out of the `todo`
+  column to `in-review` (or `done` for Review Level 0 tasks), preventing finished
+  work from being stranded after stuck-task timeouts, ghost-review bounces, or
+  merge-failure re-queues.
+- d83e4de: Add `fn chat <agent-id>` for interactive REPL conversations with an agent from the CLI. Sends messages via the project's MessageStore (so a running `fn` / `fn serve` engine wakes the agent) and polls for replies.
+- ecaeaf0: Engine reliability: durable agents no longer retain a stale Current Task pointer after the task moves to done/archived/todo/triage. A new task-move listener clears agent.taskId in real time, and the self-healing sweep recovers already-drifted records on startup and periodically.
+- e1bc0c2: Removed the Plan and Subtask AI-assist buttons from the New Task dialog. The same Plan/Subtask actions remain available in the board quick-entry box and other inline create surfaces.
+- e4ea9bf: Harden post-merge audit deterministic short-circuit against HEAD drift by checking both the audited commit tree and task-branch tip tree against verification cache entries.
+- 2838df2: Add cache-hit observability surfaces across Fusion: structured `token-cache-metrics` logs during token persistence, a new `GET /api/agents/:id/token-usage` endpoint with windowed summaries, dashboard cache-hit ratio displays, and a new `pnpm fn:cache-stats` CLI report.
+- 1696c31: Canonicalize task token usage semantics across heartbeat and executor paths by treating `cachedTokens` as cache-read only, storing cache writes in new `cacheWriteTokens`, and preserving raw `inputTokens`.
+
+  Dashboard token stats now render separate `Cache read` and `Cache write` values.
+
+  Historical rows created before this fix may still contain mixed cache-read+cache-write values inside `cachedTokens`; existing data is not backfilled.
+
+- e1bc0c2: Fix FN-4068 branch-conflict recovery hot loop: prevent repeated "Branch conflict recovery required" emissions and add a per-task tripwire that hard-pauses after 5 repeats.
+- 85c6869: Add per-task retry observability and guardrails across core, engine, and dashboard surfaces. Tasks now expose a derived `retrySummary` breakdown (including new branch-conflict recovery, reviewer context retry, and reviewer fallback retry counters), the engine emits structured `retry-burned` logs, and retry caps can hard-fail with `RetryStormError` when `maxTotalRetriesBeforeFail` is exceeded. The dashboard now surfaces retry totals on cards, list view, and task detail breakdowns, and existing databases auto-migrate schema version `72 -> 73` on startup.
+- 3869db3: Cache no-task auto-claim candidates project-wide with scheduler-driven invalidation and a 30s TTL snapshot to reduce duplicate board scans. Add `autoClaimCandidatesInPrompt` (project setting + per-agent runtime override) to cap/suppress injected candidate lines in heartbeat prompts, and add a Coordination-only preset in Agent Detail to disable auto-claim for routing-style agents.
+- aa2fd6a: Fix self-owned task branch conflicts so dispatch can reclaim an existing task worktree/branch instead of hard-failing with a branch conflict. Add a self-healing sweep that reclaims stranded self-owned branch conflicts for idle todo/in-progress tasks and emits `branch:auto-reclaim` run-audit telemetry including task/branch/worktree/tip/stranded commit metadata. Cross-task (`live-foreign`) branch collisions remain blocked and still require `fn task branch-recovery`.
+- 07b16d9: Fix mobile File Browser workspace selector dropdown clipping by removing header overflow clipping in the mobile modal header layout, so the menu can render fully while title/path truncation remains intact.
+- e1bc0c2: Revert the Todo aging indicator added in FN-4316. The Todo column header
+  no longer shows age-bucket counts or supports click-to-filter by bucket;
+  Column rendering and pagination behave exactly as they did before
+  FN-4316.
+- 65bf8f3: Auto-recover branch cross-contamination when all foreign commits are already upstream, with per-commit classification and a single-shot guard that escalates repeat contamination to paused human adjudication.
+- c003f4b: User-initiated drag/move of an in-progress task back to todo now hard-cancels the active executor session, aborts running task work before disposal, and parks the task with `userPaused: true` so scheduler dispatch does not immediately restart it.
+- b9fe0f4: Self-healing now emits a `task:auto-recover-already-merged` run-audit event when `SelfHealingManager.recoverAlreadyMergedReviewTasks` finalizes a phantom-merge-guard false positive. Enables the `recoverAlreadyMergedReviewTasksRecoveriesPerDay` reliability metric to be derived from `run_audit_events`.
+- 52615b6: Slim task listings now include `githubTracking`, keeping GitHub tracking badges stable on board/list cards across refreshes and updates.
+- 2a2c0c9: Fix merger history-preserving cherry-pick fallback handling so empty `-X ours` / `-X theirs` picks are treated as already-on-main no-ops instead of merge conflicts that park tasks.
+- 4c4f11b: Fix branch-conflict recovery to treat fully-subsumed branches (no patch-id-unique commits vs main) as safe auto-reclaim cases, and report stranded commit counts using patch-id-aware `git cherry` results instead of stale base ranges. Also preserve dirty worktree changes to `.fusion/recovery/<task>-<timestamp>.patch` before unrecoverable branch-conflict escalation.
+- b565fde: Quick Chat now restores the most-recently-active non-archived chat on every open, not just the first open after page load.
+- e2e2ca5: Fix dashboard file browser editor rendering both a plain textarea and the
+  CodeMirror editor pane simultaneously — only the syntax-highlighted CodeMirror
+  pane now renders.
+- 4615c48: Self-healing now auto-reclaims paused `branch-conflict-unrecoverable` tasks when the branch/worktree is self-owned, and orphaned `fusion/*` branches with unique commits are rescued as new triage tasks instead of force-deleted.
+- 2faf28e: Add editable agent permission policies with project defaults and per-agent overrides, including per-category action-gate dispositions across git writes, file writes/deletes, command execution, network/API, and task/agent mutation.
+- cf4723a: Add bootstrap-time branch misbinding recovery for contamination checks. The engine now classifies foreign-only contamination ranges with zero own/non-attributed commits, re-anchors the task branch to its intended base, audits the re-anchor event, and retries safely without pausing. Acquisition now also logs a warning when a `fusion/fn-*` start point resolves to a foreign task-attributed tip so future misbinding incidents are diagnosable.
+- ab0dd0e: Self-healing now auto-reclaims `fusion/<task-id>` branches that are still live-mapped to a worktree but have zero unique commits vs `main` by force-removing the stale worktree and deleting the branch, so retry can recreate a clean checkout without manual branch-recovery intervention.
+- 9fe8142: Branch-conflict detection now clears stale cached task metadata (`worktree`, `branch`, `baseCommitSha`) when live branch/worktree mappings are missing, and classifies branch tips already reachable from `main` as `tip-already-merged` instead of reporting main's forward progress as stranded commits. This fixes FN-4471-class false-positive `branch-conflict-unrecoverable` parking.
+- 8835c68: Auto-grow the QuickChat composer (FAB and room chat) when typed text wraps past one line, matching the full ChatView composer behavior.
+- 9214052: Fix permanent-agent and action-gate classification for `fn_post_room_message` so restricted agents can post room replies without spurious approval gating.
+- 779e31f: Fix done-task diff display for rebase-merged tasks: persist the rebase base SHA in `MergeDetails` and use `rebaseBaseSha..commitSha` as the diff range so the dashboard Changes tab and task-card file counts match the stored aggregate stats. Squash merges are unaffected.
+- 1beb633: Show pending-approval indicator on the Mailbox Approvals tab immediately, not only after opening it.
+- decfeba: Fix inconsistent "files changed" counts between TaskCard and the Task Changes tab. (1) Active tasks without a worktree now fetch the same branch-fallback diff for both surfaces. (2) Done-task lineage aggregation now unions per-lineage-commit file sets instead of sweeping the parent..HEAD range, so interleaved non-task commits no longer inflate the count. (3) Additions/deletions counting no longer drops lines that start with `++` or `--`.
+- 97f6558: Fix inaccurate "files changed" counts on done tasks. Done-task lineage aggregation now unions per-lineage-commit file sets (instead of sweeping `earliestParent..latestSha`), so interleaved non-task commits no longer inflate the count, and rename/copy entries are deduplicated. Additions/deletions counting no longer drops lines that start with `++` or `--`. Add regression tests in `packages/dashboard/src/__tests__/routes-diff-done-tasks.test.ts` that compare done-task diff stats against real git shortstat outputs for lineage, rename/copy, squash-merge, and `++`/`--` patch content scenarios.
+- 1a6e89c: Fix stale "files changed / insertions / deletions" on done tasks when `pushAfterMerge` is enabled. After `pushToRemoteAfterMerge` rebases HEAD, the merger now re-reads `git show --shortstat <postPushSha>` and rewrites `mergeDetails.filesChanged/insertions/deletions` alongside the refreshed `commitSha` (previously only the SHA was updated, leaving pre-rebase squash stats attached to the post-rebase commit). The `recoverDoneTaskMergeMetadata` self-healing pass also now detects and repairs stored stats that disagree with the live commit at the stored SHA, both at startup and during periodic maintenance.
+- 816575c: Fix stale "files changed" counts on done task cards. The `/api/tasks/:id/diff`
+  endpoint and the TaskCard done-task badge no longer fall back to the stored
+  `task.mergeDetails.filesChanged` value, which can be stale after a rebase-and-
+  push (see FN-4526). The endpoint now always derives stats from a live
+  `git show --shortstat <commitSha>` when a merge SHA is resolvable, and the
+  TaskCard treats the endpoint's response — including `0` — as authoritative.
+  The stored `mergeDetails.filesChanged` is shown only as a transient placeholder
+  while the live fetch is in flight.
+- 581b3e7: Dashboard task diff APIs now return destination paths for renamed/copied files and count them once (instead of add+delete pairs) when serving in-progress/in-review tasks via branch-ref fallback.
+- 44d9d03: Introduce AutoRecoveryDispatcher and `ProjectSettings.autoRecovery` (mode/perClass/maxRetries) for classifier-driven recovery of reliability-layer failures. Adds new run-audit event types `auto-recovery:classify-decision`, `auto-recovery:retry-issued`, `auto-recovery:ai-session-spawned`, and `auto-recovery:pause-because-destructive-ambiguity`. Default mode preserves prior behavior; `mode: "off"` is byte-identical to legacy parking.
+- 71bd971: Add branch/worktree auto-recovery handler that resolves FN-4519-class incidents (ghost worktrees, branch misbinding, stale branch-conflict-unrecoverable parking) by re-running deterministic classification (FN-4499 bootstrap re-anchor, FN-4500 zero-unique-commit reclaim via inspectBranchConflict kinds `stale-resolved` / `fully-subsumed`, FN-4499 `reclaimable`-with-zero-own-commits re-anchor) against live evidence and requeueing through the FN-4534 dispatcher. Adds run-audit events branch-worktree:auto-requeue, branch-worktree:ai-session-spawned, branch-worktree:irreducible-pause. Genuine live-foreign (FN-3936-class) cases continue to pause; userPaused (FN-4429) is preserved; autoRecovery.mode === "off" behavior is byte-identical to legacy parking.
+- 38341e9: Auto-recovery: contamination + message-delivery handlers. Adds ContaminationAutoRecoveryHandler (issueRetry for branch-cross-contamination, composes with FN-4499 bootstrap re-anchor and FN-4428 contamination classifier) and MessageDeliveryAutoRecoveryHandler (bounded retry-or-park for fn_send_message / fn_post_room_message inside agent-tools.ts). New ProjectSettings.autoRecovery failure class "message-delivery-failure". New run-audit event types contamination:retry-issued, contamination:irreducible-pause, message-delivery:retry-issued, message-delivery:park. Genuine destructive-ambiguity contamination still pauses; userPaused (FN-4429) is preserved; autoRecovery.mode === "off" is byte-identical to legacy behavior at every wired site.
+- cfedb27: Reclaim zero-unique-commit `fusion/<task-id>` branches owned by active tasks with no live worktree (FN-4546).
+- 3302612: Dependency graph: fix card overlaps in vertical orientation by laying out rows using measured node heights and anchoring edges to actual card bottoms.
+- b08b8c5: Fix syntax highlighting in the dashboard file editor when running in light mode or any non-dark color theme; the editor now also reacts to live theme switches without losing cursor position or unsaved edits.
+- 73c17f3: Fix GitHub Copilot OAuth login hanging in Settings and Onboarding. The dashboard now auto-answers the enterprise-domain prompt (defaulting to github.com) and surfaces the device user code + verification URL so users can complete the device-code flow end to end.
+- 327c0de: Show the chat-icon unread dot when a new reply arrives in any individual chat session or any chat room (previously only the active individual chat session triggered it).
+- f8520fb: Broaden unusable-worktree session-start failure recovery to auto-requeue in-review tasks when coding sessions fail with missing, incomplete, or unregistered git worktree errors.
+- b86248e: Widen restart-recovery missing-worktree classification so self-healing also recovers `incomplete worktree` and `unregistered git worktree` session-start failures, matching existing handling for `missing worktree` failures.
+- 54ed639: Task cards now show linked GitHub issue, retry count, and execution timing chips on one row with consistent chip sizing and a smaller GitHub icon for visual parity.
+- 507a0be: TaskCard in-review Move dropdown now sits in the bottom-right corner of the card.
+- 5528113: Fix Task Detail Changes tab to match Task Card file counts for done tasks that lack a merge commit SHA but still have a server-computable lineage diff, while preserving safe summary fallback when no detailed diff is available.
+- 716b9ab: Migrate the six remaining built-in prompt-mode workflow step templates (documentation-review, qa-check, security-audit, performance-review, accessibility-check, browser-verification) to emit the structured {verdict, notes} JSON contract introduced in FN-4367. Fix the frontend-ux-design template's verdict enum to match the parser's accepted set (APPROVE | APPROVE_WITH_NOTES | REVISE). Ships scripts/replace-seeded-workflow-prompts.mjs as a one-off operator tool to bring already-materialized project DB rows (e.g. WS-004) onto the new prompts; the prose-fallback path remains intact for backward compatibility.
+- e7348ea: Add structured verdict/notes contract for prompt-mode workflow step output, with backward-compatible prose fallback. Updates WS-006 prompt template (manual operator step to apply via scripts/replace-ws006-prompt.mjs).
+
 ## 0.29.0
 
 ### Minor Changes
