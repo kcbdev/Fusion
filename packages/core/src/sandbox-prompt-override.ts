@@ -13,7 +13,12 @@ export function parseSandboxPromptOverride(prompt: string | undefined): SandboxB
     return undefined;
   }
   const match = prompt.match(SANDBOX_OVERRIDE_RE);
-  return match ? (match[1] as SandboxBackendName) : undefined;
+  if (!match) {
+    return undefined;
+  }
+
+  const backend = match[1];
+  return backend === backend.toLowerCase() ? (backend as SandboxBackendName) : undefined;
 }
 
 export function resolveSandboxBackend(
