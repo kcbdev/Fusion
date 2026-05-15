@@ -30,6 +30,18 @@ describe("startup-model-sync", () => {
     mockSpawn.mockReset();
   });
 
+  function mockOpenRouterFetchSequence(...responses: Array<{ ok: boolean; status?: number; body?: unknown }>): void {
+    const fetchMock = vi.fn();
+    for (const response of responses) {
+      fetchMock.mockResolvedValueOnce({
+        ok: response.ok,
+        status: response.status ?? (response.ok ? 200 : 500),
+        json: vi.fn().mockResolvedValue(response.body ?? { data: [] }),
+      });
+    }
+    vi.stubGlobal("fetch", fetchMock);
+  }
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -44,12 +56,10 @@ describe("startup-model-sync", () => {
       return proc;
     });
 
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+    mockOpenRouterFetchSequence({
       ok: true,
-      json: vi.fn().mockResolvedValue({
-        data: [{ id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000 }],
-      }),
-    }));
+      body: { data: [{ id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000 }] },
+    });
 
     const registerProvider = vi.fn();
     const log = vi.fn();
@@ -87,6 +97,149 @@ describe("startup-model-sync", () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
     expect(mockSpawn).not.toHaveBeenCalled();
     expect(registerProvider).not.toHaveBeenCalled();
+  });
+
+  it("sends default OpenRouter attribution headers", async () => {
+    mockOpenRouterFetchSequence({ ok: true });
+
+    await syncStartupModels({
+      getSettings: vi.fn().mockResolvedValue({ openrouterModelSync: true, opencodeGoModelSync: false }),
+      authStorage: { getApiKey: vi.fn().mockResolvedValue(undefined) },
+      modelRegistry: { registerProvider: vi.fn() },
+      log: vi.fn(),
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/models"),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "HTTP-Referer": "https://runfusion.ai",
+          "X-Title": "Fusion",
+        }),
+      }),
+    );
+  });
+
+  it("uses custom OpenRouter attribution headers", async () => {
+    mockOpenRouterFetchSequence({ ok: true });
+
+    await syncStartupModels({
+      getSettings: vi.fn().mockResolvedValue({
+        openrouterModelSync: true,
+        opencodeGoModelSync: false,
+        openrouterAppAttribution: { referer: "https://example.com", title: "ExampleApp" },
+      }),
+      authStorage: { getApiKey: vi.fn().mockResolvedValue(undefined) },
+      modelRegistry: { registerProvider: vi.fn() },
+      log: vi.fn(),
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "HTTP-Referer": "https://example.com",
+          "X-Title": "ExampleApp",
+        }),
+      }),
+    );
+  });
+
+  it("uses OpenRouter user models endpoint when API key is present", async () => {
+    mockOpenRouterFetchSequence({ ok: true });
+
+    await syncStartupModels({
+      getSettings: vi.fn().mockResolvedValue({ openrouterModelSync: true, opencodeGoModelSync: false }),
+      authStorage: { getApiKey: vi.fn().mockResolvedValue("key") },
+      modelRegistry: { registerProvider: vi.fn() },
+      log: vi.fn(),
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/models/user"),
+      expect.any(Object),
+    );
+  });
+
+  it("falls back to public OpenRouter endpoint when user endpoint fails", async () => {
+    const log = vi.fn();
+    mockOpenRouterFetchSequence(
+      { ok: false, status: 401 },
+      { ok: true, body: { data: [] } },
+    );
+
+    await syncStartupModels({
+      getSettings: vi.fn().mockResolvedValue({ openrouterModelSync: true, opencodeGoModelSync: false }),
+      authStorage: { getApiKey: vi.fn().mockResolvedValue("key") },
+      modelRegistry: { registerProvider: vi.fn() },
+      log,
+    });
+
+    const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls[0]?.[0]).toContain("/api/v1/models/user");
+    expect(calls[1]?.[0]).toContain("/api/v1/models");
+    expect(log).toHaveBeenCalledWith("openrouter", expect.stringContaining("falling back"));
+  });
+
+  it("applies OpenRouter model filters as comma-joined query params", async () => {
+    mockOpenRouterFetchSequence({ ok: true });
+
+    await syncStartupModels({
+      getSettings: vi.fn().mockResolvedValue({
+        openrouterModelSync: true,
+        opencodeGoModelSync: false,
+        openrouterModelFilters: {
+          supported_parameters: ["tools", "structured_outputs"],
+          output_modalities: ["text"],
+        },
+      }),
+      authStorage: { getApiKey: vi.fn().mockResolvedValue(undefined) },
+      modelRegistry: { registerProvider: vi.fn() },
+      log: vi.fn(),
+    });
+
+    const requestUrl = new URL((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string);
+    expect(requestUrl.searchParams.get("supported_parameters")).toBe("tools,structured_outputs");
+    expect(requestUrl.searchParams.get("output_modalities")).toBe("text");
+  });
+
+  it("passes OpenRouter routing compat and provider headers to model registry", async () => {
+    mockOpenRouterFetchSequence({ ok: true });
+    const registerProvider = vi.fn();
+
+    await syncStartupModels({
+      getSettings: vi.fn().mockResolvedValue({
+        openrouterModelSync: true,
+        opencodeGoModelSync: false,
+        openrouterProviderPreferences: {
+          order: ["openai"],
+          allow_fallbacks: false,
+          sort: "price",
+          require_parameters: true,
+        },
+      }),
+      authStorage: { getApiKey: vi.fn().mockResolvedValue("key") },
+      modelRegistry: { registerProvider },
+      log: vi.fn(),
+    });
+
+    expect(registerProvider).toHaveBeenCalledWith(
+      "openrouter",
+      expect.objectContaining({
+        headers: {
+          "HTTP-Referer": "https://runfusion.ai",
+          "X-Title": "Fusion",
+        },
+        compat: {
+          openRouterRouting: expect.objectContaining({
+            order: ["openai"],
+            allow_fallbacks: false,
+            sort: "price",
+            require_parameters: true,
+          }),
+        },
+      }),
+    );
   });
 
   it("logs failures and continues", async () => {

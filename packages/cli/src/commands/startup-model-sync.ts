@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 
-const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
+const OPENROUTER_PUBLIC_MODELS_URL = "https://openrouter.ai/api/v1/models";
+const OPENROUTER_USER_MODELS_URL = "https://openrouter.ai/api/v1/models/user";
+const OPENROUTER_DEFAULT_REFERER = "https://runfusion.ai";
+const OPENROUTER_DEFAULT_TITLE = "Fusion";
 const OPENCODE_MODELS_TIMEOUT_MS = 15_000;
 
 type ModelConfig = {
@@ -24,6 +27,8 @@ interface ModelRegistryLike {
     api: string;
     apiKey?: string;
     models: ModelConfig[];
+    headers?: Record<string, string>;
+    compat?: { openRouterRouting?: OpenRouterProviderPreferences };
   }) => void;
 }
 
@@ -31,9 +36,26 @@ interface AuthStorageLike {
   getApiKey: (provider: string) => Promise<string | undefined>;
 }
 
+interface OpenRouterModelFilters {
+  supported_parameters?: string[];
+  output_modalities?: string[];
+}
+
+interface OpenRouterProviderPreferences {
+  order?: string[];
+  ignore?: string[];
+  only?: string[];
+  allow_fallbacks?: boolean;
+  sort?: "price" | "throughput" | "latency";
+  require_parameters?: boolean;
+}
+
 interface SettingsLike {
   openrouterModelSync?: boolean;
   opencodeGoModelSync?: boolean;
+  openrouterAppAttribution?: { referer?: string; title?: string };
+  openrouterModelFilters?: OpenRouterModelFilters;
+  openrouterProviderPreferences?: OpenRouterProviderPreferences;
 }
 
 interface StartupSyncOptions {
@@ -91,15 +113,58 @@ function toOpenRouterModels(json: {
   });
 }
 
-async function syncOpenRouterModels(options: StartupSyncOptions): Promise<void> {
+function withOpenRouterFilters(baseUrl: string, filters?: OpenRouterModelFilters): string {
+  const url = new URL(baseUrl);
+  if (filters?.supported_parameters?.length) {
+    url.searchParams.set("supported_parameters", filters.supported_parameters.join(","));
+  }
+  if (filters?.output_modalities?.length) {
+    url.searchParams.set("output_modalities", filters.output_modalities.join(","));
+  }
+  return url.toString();
+}
+
+function hasOpenRouterRoutingPreferences(preferences?: OpenRouterProviderPreferences): preferences is OpenRouterProviderPreferences {
+  return Boolean(
+    preferences
+      && Object.values(preferences).some((value) => {
+        if (Array.isArray(value)) {
+          return value.length > 0;
+        }
+        return value !== undefined;
+      }),
+  );
+}
+
+async function syncOpenRouterModels(options: StartupSyncOptions, settings: SettingsLike): Promise<void> {
   const { authStorage, modelRegistry, log } = options;
   const apiKey = await authStorage.getApiKey("openrouter");
+  const referer = settings.openrouterAppAttribution?.referer ?? OPENROUTER_DEFAULT_REFERER;
+  const title = settings.openrouterAppAttribution?.title ?? OPENROUTER_DEFAULT_TITLE;
   const headers: Record<string, string> = {};
   if (apiKey) {
     headers.Authorization = `Bearer ${apiKey}`;
   }
+  if (referer !== "") {
+    headers["HTTP-Referer"] = referer;
+  }
+  if (title !== "") {
+    headers["X-Title"] = title;
+  }
 
-  const response = await fetch(OPENROUTER_MODELS_URL, { headers });
+  const fetchModels = async (url: string) => {
+    const response = await fetch(withOpenRouterFilters(url, settings.openrouterModelFilters), { headers });
+    return response;
+  };
+
+  const primaryUrl = apiKey ? OPENROUTER_USER_MODELS_URL : OPENROUTER_PUBLIC_MODELS_URL;
+  let response = await fetchModels(primaryUrl);
+
+  if (!response.ok && apiKey && primaryUrl === OPENROUTER_USER_MODELS_URL) {
+    log("openrouter", `OpenRouter /models/user returned HTTP ${response.status}; falling back to public catalog`);
+    response = await fetchModels(OPENROUTER_PUBLIC_MODELS_URL);
+  }
+
   if (!response.ok) {
     log("openrouter", `Failed to sync models: HTTP ${response.status}`);
     return;
@@ -122,6 +187,12 @@ async function syncOpenRouterModels(options: StartupSyncOptions): Promise<void> 
     apiKey: "OPENROUTER_API_KEY",
     api: "openai-completions",
     models,
+    headers: Object.keys(headers).filter((key) => key !== "Authorization").length > 0
+      ? Object.fromEntries(Object.entries(headers).filter(([key]) => key !== "Authorization"))
+      : undefined,
+    compat: hasOpenRouterRoutingPreferences(settings.openrouterProviderPreferences)
+      ? { openRouterRouting: settings.openrouterProviderPreferences }
+      : undefined,
   });
   log("openrouter", `Synced ${models.length} models from OpenRouter API`);
 }
@@ -215,7 +286,7 @@ export async function syncStartupModels(options: StartupSyncOptions): Promise<vo
 
   if (settings.openrouterModelSync !== false) {
     try {
-      await syncOpenRouterModels(options);
+      await syncOpenRouterModels(options, settings);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       options.log("openrouter", `Failed to sync models: ${message}`);
