@@ -98,7 +98,7 @@ describe("reliability interactions: self-healing", () => {
     expect(tasks.get(taskId)?.branch ?? null).toBeNull();
     expect(store.logEntry).toHaveBeenCalledWith(
       taskId,
-      expect.stringContaining("Auto-recovered: retry/verification session targeted missing worktree"),
+      expect.stringContaining("Auto-recovered: retry/verification session targeted unusable worktree"),
     );
   });
 
