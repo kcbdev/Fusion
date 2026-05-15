@@ -1855,6 +1855,20 @@ export type AgentMemoryInclusionMode = "full" | "index" | "off";
 export type HeartbeatScopeDisciplineMode = "strict" | "lite" | "off";
 export type HeartbeatPromptTemplate = "default" | "compact";
 
+export interface OpenRouterModelFilters {
+  supported_parameters?: string[];
+  output_modalities?: string[];
+}
+
+export interface OpenRouterProviderPreferences {
+  order?: string[];
+  ignore?: string[];
+  only?: string[];
+  allow_fallbacks?: boolean;
+  sort?: "price" | "throughput" | "latency";
+  require_parameters?: boolean;
+}
+
 export interface GlobalSettings {
   /** Theme mode preference: dark, light, or system (follows OS). Default: "dark". */
   themeMode?: ThemeMode;
@@ -1960,6 +1974,19 @@ export interface GlobalSettings {
    *  the OpenRouter API at startup so the model picker shows all available
    *  OpenRouter models (not just the static built-in list). Default: true. */
   openrouterModelSync?: boolean;
+  /** Optional OpenRouter app-attribution header overrides.
+   *  Use-time defaults are referer=`https://runfusion.ai` and title=`Fusion`.
+   *  Empty string values intentionally suppress sending that header. */
+  openrouterAppAttribution?: { referer?: string; title?: string };
+  /** Optional OpenRouter model-catalog filters for startup sync fetches.
+   *  Values are sent as comma-joined query params (`supported_parameters`,
+   *  `output_modalities`) when configured. */
+  openrouterModelFilters?: OpenRouterModelFilters;
+  /** Optional OpenRouter provider routing preferences forwarded to chat
+   *  completions as `compat.openRouterRouting`.
+   *  Supports order/ignore/only provider lists, fallback behavior, sort mode,
+   *  and require-parameters preference. */
+  openrouterProviderPreferences?: OpenRouterProviderPreferences;
   /** When true, startup refreshes the opencode-go model catalog via
    *  `opencode models opencode --refresh` so model pickers expose an up-to-date
    *  opencode-go provider list without waiting for a later session bootstrap.

@@ -147,6 +147,18 @@ describe("settings key parity", () => {
     expect(normalizeAutoRecovery({ mode: "invalid" })).toEqual({ mode: "deterministic-only", perClass: undefined, maxRetries: 3 });
   });
 
+  it("keeps OpenRouter advanced sync/routing settings global with undefined defaults", () => {
+    expect(DEFAULT_GLOBAL_SETTINGS.openrouterAppAttribution).toBeUndefined();
+    expect(DEFAULT_GLOBAL_SETTINGS.openrouterModelFilters).toBeUndefined();
+    expect(DEFAULT_GLOBAL_SETTINGS.openrouterProviderPreferences).toBeUndefined();
+    expect(isGlobalSettingsKey("openrouterAppAttribution")).toBe(true);
+    expect(isGlobalSettingsKey("openrouterModelFilters")).toBe(true);
+    expect(isGlobalSettingsKey("openrouterProviderPreferences")).toBe(true);
+    expect(isProjectSettingsKey("openrouterAppAttribution")).toBe(false);
+    expect(isProjectSettingsKey("openrouterModelFilters")).toBe(false);
+    expect(isProjectSettingsKey("openrouterProviderPreferences")).toBe(false);
+  });
+
   it("defaults stale high fan-out blocker escalation age threshold", () => {
     expect(DEFAULT_PROJECT_SETTINGS.staleHighFanoutBlockerAgeThresholdMs).toBe(2 * 60 * 60 * 1000);
     expect(isProjectSettingsKey("staleHighFanoutBlockerAgeThresholdMs")).toBe(true);
