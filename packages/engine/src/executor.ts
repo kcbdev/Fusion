@@ -72,6 +72,10 @@ import { buildPromptLayers, collapsePromptLayers } from "./prompt-layers.js";
 import type { AgentReflectionService } from "./agent-reflection.js";
 import { createRunAuditor, generateSyntheticRunId, type EngineRunContext, type RunAuditor } from "./run-audit.js";
 import { AutoRecoveryDispatcher } from "./auto-recovery.js";
+import {
+  extractMissingWorktreePathFromSessionStartFailure,
+  isMissingWorktreeSessionStartFailure,
+} from "./restart-recovery-coordinator.js";
 import { BranchWorktreeAutoRecoveryHandler } from "./auto-recovery-handlers/branch-worktree.js";
 import { ContaminationAutoRecoveryHandler } from "./auto-recovery-handlers/contamination.js";
 import { createFileScopeAutoRecoveryHandler } from "./auto-recovery-handlers/file-scope.js";
@@ -3835,91 +3839,115 @@ export class TaskExecutor {
               this.tokenUsageBaselines.delete(task.id);
               session.dispose();
 
-              const { session: retrySession, sessionFile: retrySessionFile } = await createResolvedAgentSession({
-                sessionPurpose: "executor",
-                runtimeHint: executorRuntimeHint,
-                pluginRunner: this.options.pluginRunner,
-                cwd: worktreePath,
-                systemPrompt: executorSystemPromptFinal,
-                systemPromptLayers: executorLayers,
-                tools: "coding",
-                customTools,
-                onText: agentLogger.onText,
-                onThinking: agentLogger.onThinking,
-                onToolStart: agentLogger.onToolStart,
-                onToolEnd: agentLogger.onToolEnd,
-                defaultProvider: executorProvider,
-                defaultModelId: executorModelId,
-                fallbackProvider: executorFallbackProvider,
-                fallbackModelId: executorFallbackModelId,
-                defaultThinkingLevel: executorThinkingLevel,
-                sessionManager: SessionManager.create(worktreePath),
-                taskEnv,
-                // Skill selection: use assigned agent skills if available, otherwise role fallback
-                ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
-                actionGateContext: this.buildActionGateContext(task.id, assignedAgent, settings.defaultAgentPermissionPolicy),
-                permanentAgentGating: this.buildPermanentAgentGatingContext(task.id, assignedAgent, settings.defaultAgentPermissionPolicy),
-              });
-              if (retrySessionFile) {
-                this.store.updateTask(task.id, { sessionFile: retrySessionFile }).catch((err: unknown) => {
-                  const msg = err instanceof Error ? err.message : String(err);
-                  executorLog.warn(`${task.id} failed to persist retry sessionFile: ${msg}`);
+              let retrySession: AgentSession | null = null;
+              try {
+                const createdRetrySession = await createResolvedAgentSession({
+                  sessionPurpose: "executor",
+                  runtimeHint: executorRuntimeHint,
+                  pluginRunner: this.options.pluginRunner,
+                  cwd: worktreePath,
+                  systemPrompt: executorSystemPromptFinal,
+                  systemPromptLayers: executorLayers,
+                  tools: "coding",
+                  customTools,
+                  onText: agentLogger.onText,
+                  onThinking: agentLogger.onThinking,
+                  onToolStart: agentLogger.onToolStart,
+                  onToolEnd: agentLogger.onToolEnd,
+                  defaultProvider: executorProvider,
+                  defaultModelId: executorModelId,
+                  fallbackProvider: executorFallbackProvider,
+                  fallbackModelId: executorFallbackModelId,
+                  defaultThinkingLevel: executorThinkingLevel,
+                  sessionManager: SessionManager.create(worktreePath),
+                  taskEnv,
+                  // Skill selection: use assigned agent skills if available, otherwise role fallback
+                  ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
+                  actionGateContext: this.buildActionGateContext(task.id, assignedAgent, settings.defaultAgentPermissionPolicy),
+                  permanentAgentGating: this.buildPermanentAgentGatingContext(task.id, assignedAgent, settings.defaultAgentPermissionPolicy),
                 });
+                retrySession = createdRetrySession.session;
+                if (createdRetrySession.sessionFile) {
+                  this.store.updateTask(task.id, { sessionFile: createdRetrySession.sessionFile }).catch((err: unknown) => {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    executorLog.warn(`${task.id} failed to persist retry sessionFile: ${msg}`);
+                  });
+                }
+
+                session = retrySession;
+                sessionRef.current = retrySession;
+                this.activeSessions.set(task.id, {
+                  session: retrySession,
+                  seenSteeringIds,
+                  lastResolvedModelProvider: executorProvider,
+                  lastResolvedModelId: executorModelId,
+                  lastTaskModelProvider: detail.modelProvider,
+                  lastTaskModelId: detail.modelId,
+                  lastAssignedAgentId: detail.assignedAgentId ?? null,
+                });
+                stuckDetector?.trackTask(task.id, retrySession);
+
+                let retryPrompt: string;
+                if (pseudoPause.kind !== "none") {
+                  const shortMatch = (pseudoPause.matched ?? "").slice(0, 120);
+                  retryPrompt = [
+                    `Your previous turn ended with a pseudo-pause: "${shortMatch}". This is forbidden.`,
+                    "",
+                    "Turn-ending rules you violated:",
+                    "- You MUST NOT end a turn by asking the user a question, summarizing progress, or requesting permission to continue.",
+                    "- Phrases like 'If you want, I can continue', 'Should I proceed?', 'Let me know if...' are FORBIDDEN turn-endings.",
+                    "- The user is not watching this conversation. Questions written as prose are ignored.",
+                    "- If you genuinely cannot proceed, call fn_task_done with a clear explanation — never write the blocker as plain prose.",
+                    "",
+                    "What you must do now:",
+                    "1. Review the PROMPT.md steps and identify the next pending step.",
+                    "2. Do the work for that step immediately — call fn_task_update, write code, run tests.",
+                    "3. Continue until all steps are done, then call fn_task_done.",
+                    "Do NOT ask for permission. Do NOT write a summary. Just call a tool and keep working.",
+                    "",
+                    "Original task:",
+                    buildExecutionPrompt(detail, this.rootDir, settings, worktreePath, this.options.pluginRunner),
+                  ].join("\n");
+                } else {
+                  retryPrompt = [
+                    "Your previous session ended without calling the fn_task_done tool.",
+                    "The task may already be complete — review the current state of the worktree and either:",
+                    "1. If the work is done, call fn_task_done with a summary of what was accomplished.",
+                    "2. If there is remaining work, finish it and then call fn_task_done.",
+                    "",
+                    "Original task:",
+                    buildExecutionPrompt(detail, this.rootDir, settings, worktreePath, this.options.pluginRunner),
+                  ].join("\n");
+                }
+
+                stuckDetector?.recordActivity(task.id);
+                await promptWithFallback(retrySession, retryPrompt);
+                checkSessionError(retrySession);
+                await accumulateSessionTokenUsage(this.store, task.id, retrySession, {
+                  agentId: task.assignedAgentId ?? undefined,
+                  role: "executor",
+                });
+              } catch (retryError) {
+                const retryErrorText = retryError instanceof Error ? retryError.message : String(retryError);
+                if (!isMissingWorktreeSessionStartFailure(retryErrorText)) {
+                  throw retryError;
+                }
+                const recoveredPath = extractMissingWorktreePathFromSessionStartFailure(retryErrorText) ?? worktreePath;
+                const reclaimMessage = `${task.id}: no-fn_task_done retry hit missing worktree session-start failure (${recoveredPath}) — clearing stale metadata and requeueing`;
+                executorLog.log(reclaimMessage);
+                await this.store.logEntry(task.id, reclaimMessage, undefined, this.currentRunContext);
+                await this.store.updateTask(task.id, {
+                  sessionFile: null,
+                  worktree: null,
+                  branch: null,
+                  baseCommitSha: null,
+                });
+                this.activeSessions.delete(task.id);
+                this.tokenUsageBaselines.delete(task.id);
+                retrySession?.dispose();
+                retryAbortedDueToReclaim = true;
+                break;
               }
-
-              session = retrySession;
-              sessionRef.current = retrySession;
-              this.activeSessions.set(task.id, {
-                session: retrySession,
-                seenSteeringIds,
-                lastResolvedModelProvider: executorProvider,
-                lastResolvedModelId: executorModelId,
-                lastTaskModelProvider: detail.modelProvider,
-                lastTaskModelId: detail.modelId,
-                lastAssignedAgentId: detail.assignedAgentId ?? null,
-              });
-              stuckDetector?.trackTask(task.id, retrySession);
-
-              let retryPrompt: string;
-              if (pseudoPause.kind !== "none") {
-                const shortMatch = (pseudoPause.matched ?? "").slice(0, 120);
-                retryPrompt = [
-                  `Your previous turn ended with a pseudo-pause: "${shortMatch}". This is forbidden.`,
-                  "",
-                  "Turn-ending rules you violated:",
-                  "- You MUST NOT end a turn by asking the user a question, summarizing progress, or requesting permission to continue.",
-                  "- Phrases like 'If you want, I can continue', 'Should I proceed?', 'Let me know if...' are FORBIDDEN turn-endings.",
-                  "- The user is not watching this conversation. Questions written as prose are ignored.",
-                  "- If you genuinely cannot proceed, call fn_task_done with a clear explanation — never write the blocker as plain prose.",
-                  "",
-                  "What you must do now:",
-                  "1. Review the PROMPT.md steps and identify the next pending step.",
-                  "2. Do the work for that step immediately — call fn_task_update, write code, run tests.",
-                  "3. Continue until all steps are done, then call fn_task_done.",
-                  "Do NOT ask for permission. Do NOT write a summary. Just call a tool and keep working.",
-                  "",
-                  "Original task:",
-                  buildExecutionPrompt(detail, this.rootDir, settings, worktreePath, this.options.pluginRunner),
-                ].join("\n");
-              } else {
-                retryPrompt = [
-                  "Your previous session ended without calling the fn_task_done tool.",
-                  "The task may already be complete — review the current state of the worktree and either:",
-                  "1. If the work is done, call fn_task_done with a summary of what was accomplished.",
-                  "2. If there is remaining work, finish it and then call fn_task_done.",
-                  "",
-                  "Original task:",
-                  buildExecutionPrompt(detail, this.rootDir, settings, worktreePath, this.options.pluginRunner),
-                ].join("\n");
-              }
-
-              stuckDetector?.recordActivity(task.id);
-              await promptWithFallback(retrySession, retryPrompt);
-              checkSessionError(retrySession);
-              await accumulateSessionTokenUsage(this.store, task.id, retrySession, {
-                agentId: task.assignedAgentId ?? undefined,
-                role: "executor",
-              });
 
               if (!taskDone) {
                 const implicitCheck = await this.store.getTask(task.id);
