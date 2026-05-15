@@ -348,6 +348,49 @@ test("ensureTestArtifacts writes detailed FN-4232/FN-4605 remediation block to s
   assert.match(stderr, /FN-4232, FN-4605/);
 });
 
+test("ensureTestArtifacts triggers a single pnpm invocation covering the full registry in fresh-worktree layout", () => {
+  const workspaceRoot = mkdtempSync(path.join(tmpdir(), "fn-4605-fresh-"));
+  const calls = [];
+
+  try {
+    writeFileSync(path.join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - 'packages/*'\n  - 'plugins/*'\n");
+    for (const pkg of REQUIRED_BUILD_PACKAGES) {
+      for (const artifact of pkg.requiredArtifacts) {
+        const sourceDir = path.dirname(path.join(workspaceRoot, artifact)).replace(/\/dist$/u, "/src");
+        mkdirSync(sourceDir, { recursive: true });
+      }
+    }
+
+    const built = ensureTestArtifacts(
+      workspaceRoot,
+      (cmd, args, cwd) => calls.push({ cmd, args, cwd }),
+      () => false,
+    );
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].cmd, "pnpm");
+    assert.equal(calls[0].cwd, workspaceRoot);
+    const filters = calls[0].args.filter((entry, index) => calls[0].args[index - 1] === "--filter");
+    assert.deepEqual(filters, REQUIRED_BUILD_PACKAGES.map((pkg) => pkg.name));
+    assert.deepEqual(built, REQUIRED_BUILD_PACKAGES.map((pkg) => pkg.name));
+  } finally {
+    rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test("ensureTestArtifacts rebuilds only dependency-graph when only dashboard-view dist is missing", () => {
+  const calls = [];
+  const built = ensureTestArtifacts(
+    "/repo",
+    (cmd, args, cwd) => calls.push({ cmd, args, cwd }),
+    (fullPath) => !fullPath.endsWith("plugins/fusion-plugin-dependency-graph/dist/dashboard-view.js"),
+  );
+
+  assert.deepEqual(built, ["@fusion-plugin-examples/dependency-graph"]);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].args, ["--filter", "@fusion-plugin-examples/dependency-graph", "build"]);
+});
+
 test("ensureTestArtifacts remediation labels missing artifact paths", () => {
   let stderr = "";
   let exitCode = null;
