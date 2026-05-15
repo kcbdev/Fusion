@@ -199,6 +199,7 @@ API endpoints reviewed:
 | `buildCommand` | Project | `GET/PUT /api/settings` | Project build command |
 | `recycleWorktrees` | Project | `GET/PUT /api/settings` | Worktree pool toggle |
 | `worktreeNaming` | Project | `GET/PUT /api/settings` | Worktree naming strategy |
+| `worktreesDir` | Project | `GET/PUT /api/settings` | Optional worktree container directory (supports absolute/project-relative paths, `~`, `{repo}` token) |
 | `taskPrefix` | Project | `GET/PUT /api/settings` | Task ID prefix |
 | `includeTaskIdInCommit` | Project | `GET/PUT /api/settings` | Commit scope formatting |
 | `defaultProviderOverride` | Project | `GET/PUT /api/settings` | Project-level override for base default provider |
