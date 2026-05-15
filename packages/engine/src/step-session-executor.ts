@@ -29,6 +29,7 @@ import {
 import type { AgentActionGateContext } from "./agent-action-gate.js";
 import type { SkillSelectionContext } from "./skill-resolver.js";
 import { generateWorktreeName } from "./worktree-names.js";
+import { resolveTaskWorktreePath } from "./worktree-paths.js";
 import { AgentSemaphore } from "./concurrency.js";
 import { StuckTaskDetector } from "./stuck-task-detector.js";
 import { AgentLogger } from "./agent-logger.js";
@@ -1275,8 +1276,8 @@ Follow instructions precisely and avoid unrelated changes.`,
    */
   private async createStepWorktree(stepIndex: number): Promise<string> {
     const { rootDir } = this.options;
-    const name = generateWorktreeName(rootDir);
-    const worktreePath = join(rootDir, ".worktrees", name);
+    const name = generateWorktreeName(rootDir, settings);
+    const worktreePath = resolveTaskWorktreePath(rootDir, settings, name);
     const branchName = `fusion/step-${stepIndex}-${name}`;
 
     stepExecLog.log(`Creating worktree for step ${stepIndex}: ${worktreePath} (branch: ${branchName})`);

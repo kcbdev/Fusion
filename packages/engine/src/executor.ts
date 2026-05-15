@@ -27,6 +27,7 @@ import {
   type VerificationResult,
 } from "./verification-utils.js";
 import { generateWorktreeName } from "./worktree-names.js";
+import { resolveTaskWorktreePath, resolveWorktreesDir } from "./worktree-paths.js";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import { describeModel, promptWithFallback, compactSessionContext } from "./pi.js";
 import { accumulateSessionTokenUsage } from "./session-token-usage.js";
@@ -299,16 +300,24 @@ export function partitionWorkflowRevisionFeedback(
 
 class NonRetryableWorktreeError extends Error {}
 
-const SESSION_WORKTREE_PATH_REGEX = /([A-Za-z]:)?[^"'\s]*\.worktrees[\\/][^"'\s]+/g;
+function buildSessionWorktreePathRegex(rootDir: string, settings: Partial<Settings>): RegExp {
+  const configuredBase = resolveWorktreesDir(rootDir, settings).split(/[\\/]/).filter(Boolean).pop() ?? ".worktrees";
+  const escapedBase = configuredBase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`([A-Za-z]:)?[^"'\\s]*(?:\\.worktrees|${escapedBase})[\\\\/][^"'\\s]+`, "g");
+}
 
 function normalizeWorktreePath(pathValue: string): string {
   return resolvePath(pathValue).replace(/\\/g, "/").replace(/\/+$/, "");
 }
 
-async function extractPersistedSessionWorktreePath(sessionFile: string): Promise<string | null> {
+async function extractPersistedSessionWorktreePath(
+  sessionFile: string,
+  rootDir: string,
+  settings: Partial<Settings>,
+): Promise<string | null> {
   try {
     const content = await readFile(sessionFile, "utf-8");
-    const matches = content.match(SESSION_WORKTREE_PATH_REGEX) ?? [];
+    const matches = content.match(buildSessionWorktreePathRegex(rootDir, settings)) ?? [];
     if (matches.length === 0) return null;
 
     const normalizedCounts = new Map<string, number>();
@@ -3423,7 +3432,7 @@ export class TaskExecutor {
         // persisted session metadata still matches the task's live worktree.
         let isResuming = !!task.sessionFile && existsSync(task.sessionFile);
         if (isResuming) {
-          const persistedWorktreePath = await extractPersistedSessionWorktreePath(task.sessionFile!);
+          const persistedWorktreePath = await extractPersistedSessionWorktreePath(task.sessionFile!, this.rootDir, settings);
           if (!isSessionWorktreeCompatible(persistedWorktreePath, worktreePath)) {
             executorLog.warn(
               `${task.id}: stale sessionFile worktree mismatch (session=${persistedWorktreePath}, task=${worktreePath}); starting fresh session`,
@@ -8074,7 +8083,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
       }
 
       const conflictStartPoint = branch;
-      const newPath = join(this.rootDir, ".worktrees", generateWorktreeName(this.rootDir));
+      const newPath = resolveTaskWorktreePath(this.rootDir, settings, generateWorktreeName(this.rootDir, settings));
       for (let suffix = 2; suffix <= 6; suffix++) {
         const suffixedBranch = `${branch}-${suffix}`;
         try {
@@ -8877,8 +8886,8 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
           });
 
           // Create git worktree for child (branched from parent's worktree)
-          const childWorktreeName = generateWorktreeName(this.rootDir);
-          const childWorktreePath = join(this.rootDir, ".worktrees", childWorktreeName);
+          const childWorktreeName = generateWorktreeName(this.rootDir, settings);
+          const childWorktreePath = resolveTaskWorktreePath(this.rootDir, settings, childWorktreeName);
           const childBranch = `fusion/spawn-${agent.id}`;
           await this.createWorktree(childBranch, childWorktreePath, taskId, worktreePath);
 

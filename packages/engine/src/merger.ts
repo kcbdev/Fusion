@@ -30,6 +30,7 @@ export {
 import { existsSync, readFileSync, writeFileSync, unlinkSync, renameSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
+import { resolveTaskWorktreePath } from "./worktree-paths.js";
 import { hostname } from "node:os";
 import {
   buildTaskLineageTrailer,
@@ -5625,9 +5626,10 @@ export async function pushToRemoteAfterMerge(
 async function createPostMergeWorktree(
   rootDir: string,
   taskId: string,
+  settings: Partial<Settings>,
 ): Promise<string | null> {
   const randomSuffix = Math.random().toString(36).slice(2, 10);
-  const postMergeWorktree = join(rootDir, ".worktrees", `post-merge-${taskId}-${randomSuffix}`);
+  const postMergeWorktree = resolveTaskWorktreePath(rootDir, settings, `post-merge-${taskId}-${randomSuffix}`);
 
   try {
     await execAsync(`git worktree add ${quoteArg(postMergeWorktree)} HEAD`, { cwd: rootDir });
@@ -7285,7 +7287,7 @@ export async function aiMergeTask(
   throwIfAborted(options.signal, taskId);
   const hasPostMergeSteps = await hasEnabledPostMergeWorkflowSteps(store, taskId, task.enabledWorkflowSteps);
   if (hasPostMergeSteps) {
-    const postMergeWorktree = await createPostMergeWorktree(rootDir, taskId);
+    const postMergeWorktree = await createPostMergeWorktree(rootDir, taskId, settings);
     const postMergeCwd = postMergeWorktree || rootDir;
     if (postMergeWorktree) {
       mergerLog.log(`${taskId}: running post-merge workflow steps in isolated worktree: ${postMergeWorktree}`);

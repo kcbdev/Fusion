@@ -27,6 +27,7 @@ import { deriveTaskIdFromFusionBranch, inspectBranchConflict, listUniqueBranchCo
 import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
 import { AutoRecoveryDispatcher } from "./auto-recovery.js";
 import { findAlreadyMergedTaskCommit } from "./already-merged-detector.js";
+import { resolveWorktreesDir } from "./worktree-paths.js";
 
 const log = createLogger("self-healing");
 const execAsync = promisify(exec);
@@ -4398,7 +4399,8 @@ export class SelfHealingManager {
    * tracks registered idle worktrees, never these orphans.
    */
   private async reapUnregisteredOrphans(): Promise<number> {
-    const worktreesDir = join(this.options.rootDir, ".worktrees");
+    const settings = await this.store.getSettings();
+    const worktreesDir = resolveWorktreesDir(this.options.rootDir, settings);
     if (!existsSync(worktreesDir)) return 0;
 
     let dirs: string[];
@@ -4652,11 +4654,10 @@ export class SelfHealingManager {
 
   /** Remove oldest idle worktrees if total count exceeds 2× maxWorktrees. */
   private async enforceWorktreeCap(): Promise<void> {
-    const worktreesDir = join(this.options.rootDir, ".worktrees");
-    if (!existsSync(worktreesDir)) return;
-
     try {
       const settings = await this.store.getSettings();
+      const worktreesDir = resolveWorktreesDir(this.options.rootDir, settings);
+      if (!existsSync(worktreesDir)) return;
       const cap = (settings.maxWorktrees ?? 4) * 2;
 
       const entries = readdirSync(worktreesDir, { withFileTypes: true });

@@ -2,9 +2,10 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync, lstatSync, readdirSync, rmSync, realpathSync } from "node:fs";
 import { join, relative, resolve, isAbsolute } from "node:path";
-import type { Column, TaskStore } from "@fusion/core";
+import type { Column, Settings, TaskStore } from "@fusion/core";
 import { assertCleanBranchAtBase, inspectBranchConflict } from "./branch-conflicts.js";
 import { worktreePoolLog } from "./logger.js";
+import { isInsideConfiguredWorktreesDir, resolveWorktreesDir } from "./worktree-paths.js";
 
 const execAsync = promisify(exec);
 
@@ -75,11 +76,12 @@ export async function isUsableTaskWorktree(rootDir: string, worktreePath: string
     hasRequiredWorktreeFiles(worktreePath);
 }
 
-export function isInsideWorktreesDir(rootDir: string, worktreePath: string): boolean {
-  const worktreesDir = canonicalizePath(join(rootDir, ".worktrees"));
-  const target = canonicalizePath(worktreePath);
-  const rel = relative(worktreesDir, target);
-  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+export function isInsideWorktreesDir(
+  rootDir: string,
+  worktreePath: string,
+  settings?: Pick<Settings, "worktreesDir">,
+): boolean {
+  return isInsideConfiguredWorktreesDir(rootDir, settings, worktreePath);
 }
 
 /**
@@ -352,8 +354,12 @@ export class WorktreePool {
  * @param store — Task store for listing tasks and their worktree assignments
  * @returns Absolute paths of idle worktree directories
  */
-export async function scanIdleWorktrees(rootDir: string, store: TaskStore): Promise<string[]> {
-  const worktreesDir = join(rootDir, ".worktrees");
+export async function scanIdleWorktrees(
+  rootDir: string,
+  store: TaskStore,
+  settings?: Pick<Settings, "worktreesDir">,
+): Promise<string[]> {
+  const worktreesDir = resolveWorktreesDir(rootDir, settings);
 
   if (!existsSync(worktreesDir)) {
     return [];
@@ -409,13 +415,17 @@ export async function scanIdleWorktrees(rootDir: string, store: TaskStore): Prom
  * @param store — Task store for listing tasks and their worktree assignments
  * @returns Number of worktrees cleaned up
  */
-export async function cleanupOrphanedWorktrees(rootDir: string, store: TaskStore): Promise<number> {
-  const worktreesDir = join(rootDir, ".worktrees");
+export async function cleanupOrphanedWorktrees(
+  rootDir: string,
+  store: TaskStore,
+  settings?: Pick<Settings, "worktreesDir">,
+): Promise<number> {
+  const worktreesDir = resolveWorktreesDir(rootDir, settings);
   if (!existsSync(worktreesDir)) {
     return 0;
   }
 
-  const orphaned = await scanIdleWorktrees(rootDir, store);
+  const orphaned = await scanIdleWorktrees(rootDir, store, settings);
   const registeredWorktrees = await getRegisteredWorktreePaths(rootDir);
 
   let dirs: string[] = [];
@@ -442,7 +452,7 @@ export async function cleanupOrphanedWorktrees(rootDir: string, store: TaskStore
           cwd: rootDir,
         });
       } else {
-        if (!isInsideWorktreesDir(rootDir, worktreePath)) {
+        if (!isInsideWorktreesDir(rootDir, worktreePath, settings)) {
           throw new Error(`Refusing to remove path outside .worktrees: ${worktreePath}`);
         }
         rmSync(worktreePath, { recursive: true, force: true });
@@ -479,8 +489,11 @@ export async function cleanupOrphanedWorktrees(rootDir: string, store: TaskStore
  * @param projectRoot - Absolute path to the project root (parent of `.worktrees/`)
  * @returns Number of orphan directories removed
  */
-export async function reapOrphanWorktrees(projectRoot: string): Promise<number> {
-  const worktreesDir = join(projectRoot, ".worktrees");
+export async function reapOrphanWorktrees(
+  projectRoot: string,
+  settings?: Pick<Settings, "worktreesDir">,
+): Promise<number> {
+  const worktreesDir = resolveWorktreesDir(projectRoot, settings);
 
   if (!existsSync(worktreesDir)) {
     return 0;

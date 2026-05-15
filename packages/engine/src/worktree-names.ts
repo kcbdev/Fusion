@@ -1,6 +1,7 @@
 import { readdirSync } from "node:fs";
-import { join } from "node:path";
 import { existsSync } from "node:fs";
+import type { Settings } from "@fusion/core";
+import { resolveTaskWorktreePath, resolveWorktreesDir } from "./worktree-paths.js";
 
 export const ADJECTIVES = [
   "amber", "azure", "bold", "brave", "bright",
@@ -60,8 +61,8 @@ export function slugify(str: string): string {
  * @param rootDir - The project root directory (parent of `.worktrees/`)
  * @returns A unique worktree directory name (not a full path)
  */
-export function generateWorktreeName(rootDir: string): string {
-  return generateReservedWorktreeName(rootDir);
+export function generateWorktreeName(rootDir: string, settings?: Pick<Settings, "worktreesDir">): string {
+  return generateReservedWorktreeName(rootDir, new Set(), settings);
 }
 
 /**
@@ -71,12 +72,13 @@ export function generateWorktreeName(rootDir: string): string {
 export function generateReservedWorktreeName(
   rootDir: string,
   reservedNames: Set<string> = new Set(),
+  settings?: Pick<Settings, "worktreesDir">,
 ): string {
   const adjective = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
   const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)];
   const baseName = `${adjective}-${noun}`;
 
-  const worktreesDir = join(rootDir, ".worktrees");
+  const worktreesDir = resolveWorktreesDir(rootDir, settings);
   const existing = getExistingWorktreeNames(worktreesDir);
   for (const reserved of reservedNames) {
     existing.add(reserved);
@@ -111,6 +113,7 @@ export function planTaskWorktreePath(
   rootDir: string,
   naming: string | undefined,
   reservedNames: Set<string>,
+  settings?: Pick<Settings, "worktreesDir">,
 ): string {
   if (task.worktree) {
     const existingName = task.worktree.split("/").filter(Boolean).pop();
@@ -128,12 +131,12 @@ export function planTaskWorktreePath(
       break;
     case "random":
     default:
-      worktreeName = generateReservedWorktreeName(rootDir, reservedNames);
+      worktreeName = generateReservedWorktreeName(rootDir, reservedNames, settings);
       break;
   }
 
   reservedNames.add(worktreeName);
-  return join(rootDir, ".worktrees", worktreeName);
+  return resolveTaskWorktreePath(rootDir, settings, worktreeName);
 }
 
 function getExistingWorktreeNames(worktreesDir: string): Set<string> {

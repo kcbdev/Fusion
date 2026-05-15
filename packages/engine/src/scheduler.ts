@@ -638,8 +638,9 @@ export class Scheduler {
     task: Task,
     naming: string | undefined,
     reservedNames: Set<string>,
+    settings: Partial<Settings>,
   ): string {
-    return planTaskWorktreePath(task, this.store.getRootDir(), naming, reservedNames);
+    return planTaskWorktreePath(task, this.store.getRootDir(), naming, reservedNames, settings);
   }
 
   /**
@@ -1078,7 +1079,7 @@ export class Scheduler {
         });
         await this.store.moveTask(task.id, "in-progress", {
           allocateWorktree: (reservedNames) =>
-            this.planWorktreePath(task, settings.worktreeNaming, reservedNames),
+            this.planWorktreePath(task, settings.worktreeNaming, reservedNames, settings),
         });
         this.wasNodeBlocked.delete(task.id);
         this.wasNodeDispatchValidationBlocked.delete(task.id);
