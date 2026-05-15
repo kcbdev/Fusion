@@ -8,12 +8,7 @@ import { hydrateWorktreeDb } from "./worktree-db-hydrate.js";
 import { formatError } from "./logger.js";
 import { isBranchConflictError } from "./branch-conflicts.js";
 import { type WorktreePool, isUsableTaskWorktree } from "./worktree-pool.js";
-import {
-  NativeWorktreeBackend,
-  WorktrunkOperationError,
-  resolveWorktreeBackend,
-  type WorktreeBackend,
-} from "./worktree-backend.js";
+import { WorktrunkOperationError, resolveWorktreeBackend, type WorktreeBackend } from "./worktree-backend.js";
 import type { RunAuditor } from "./run-audit.js";
 
 const execAsync = promisify(exec);
@@ -226,42 +221,16 @@ export async function acquireTaskWorktree(opts: AcquireTaskWorktreeOptions): Pro
         }
         return created;
       } catch (error) {
-        if (
-          backend.kind === "worktrunk" &&
-          error instanceof WorktrunkOperationError &&
-          settings.worktrunk?.onFailure === "fallback-native"
-        ) {
-          logger?.warn?.(
-            `${taskId}: worktrunk create failed (${error.code}); falling back to native git worktree backend`,
-          );
-          await audit?.git({
-            type: "worktree:worktrunk-fallback",
-            target: path,
-            metadata: {
-              branch,
-              operation: error.operation,
-              code: error.code,
-              stderr: error.stderr,
-              exitCode: error.exitCode,
-            },
-          });
-          const nativeBackend = new NativeWorktreeBackend({ logger });
-          return nativeBackend.create({
-            rootDir,
-            branch,
-            worktreePath: path,
-            startPoint,
-            taskId,
-            allowSiblingBranchRename: allowRename,
-          });
+        if (backend.kind === "worktrunk" && error instanceof WorktrunkOperationError) {
+          // TODO(FN-4625): honor worktrunk.onFailure fallback semantics.
+          throw error;
         }
         throw error;
       }
     };
 
-  // Removal/sync/prune call sites in executor.ts, merger.ts, worktree-pool.ts, and
-  // self-healing.ts remain on native git worktree flows in this task; migration is
-  // FN-4678 follow-up.
+  // Removal call sites in executor.ts, merger.ts, and self-healing.ts are not
+  // migrated in this task. See FN-4678.
   const created = await createWorktreeImpl(branchName, worktreePath, task.id, baseBranch ?? undefined, allowSiblingBranchRename);
   worktreePath = created.path;
   branch = created.branch;
