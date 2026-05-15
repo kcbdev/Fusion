@@ -29,24 +29,43 @@ describe("sandbox prompt override", () => {
   });
 
   describe("resolveSandboxBackend", () => {
-    it("prefers prompt override", () => {
+    it("ignores prompt override when sandbox experimental flag is disabled", () => {
+      expect(resolveSandboxBackend(undefined, "**Sandbox:** bubblewrap")).toEqual({
+        backend: "native",
+        source: "default",
+      });
+    });
+
+    it("ignores project setting when sandbox experimental flag is disabled", () => {
+      expect(resolveSandboxBackend({ sandbox: { backend: "podman" } }, undefined)).toEqual({
+        backend: "native",
+        source: "default",
+      });
+    });
+
+    it("prefers prompt override when sandbox experimental flag is enabled", () => {
       expect(
         resolveSandboxBackend(
-          { sandbox: { backend: "docker" } },
+          { sandbox: { backend: "docker" }, experimentalFeatures: { sandbox: true } },
           "**Sandbox:** bubblewrap",
         ),
       ).toEqual({ backend: "bubblewrap", source: "prompt" });
     });
 
-    it("falls back to project setting", () => {
-      expect(resolveSandboxBackend({ sandbox: { backend: "podman" } }, undefined)).toEqual({
+    it("falls back to project setting when sandbox experimental flag is enabled", () => {
+      expect(
+        resolveSandboxBackend(
+          { sandbox: { backend: "podman" }, experimentalFeatures: { sandbox: true } },
+          undefined,
+        ),
+      ).toEqual({
         backend: "podman",
         source: "project",
       });
     });
 
-    it("falls back to default", () => {
-      expect(resolveSandboxBackend(undefined, undefined)).toEqual({
+    it("falls back to default when enabled and no overrides are present", () => {
+      expect(resolveSandboxBackend({ experimentalFeatures: { sandbox: true } }, undefined)).toEqual({
         backend: "native",
         source: "default",
       });

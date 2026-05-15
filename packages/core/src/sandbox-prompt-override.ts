@@ -1,4 +1,5 @@
-import type { SandboxBackendName, SandboxProjectSettings } from "./types.js";
+import { isSandboxExperimentalEnabled } from "./sandbox-settings.js";
+import type { SandboxBackendName, SandboxProjectSettings, Settings } from "./types.js";
 
 /**
  * Sandbox backend override parsing for per-task PROMPT.md content (FN-4639; design from FN-4635).
@@ -22,9 +23,13 @@ export function parseSandboxPromptOverride(prompt: string | undefined): SandboxB
 }
 
 export function resolveSandboxBackend(
-  settings: { sandbox?: SandboxProjectSettings } | undefined,
+  settings: Pick<Settings, "sandbox" | "experimentalFeatures"> | { sandbox?: SandboxProjectSettings } | undefined,
   prompt: string | undefined,
 ): { backend: SandboxBackendName; source: "default" | "project" | "prompt" } {
+  if (!isSandboxExperimentalEnabled(settings)) {
+    return { backend: "native", source: "default" };
+  }
+
   const promptOverride = parseSandboxPromptOverride(prompt);
   if (promptOverride) {
     return { backend: promptOverride, source: "prompt" };
