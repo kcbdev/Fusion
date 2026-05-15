@@ -88,6 +88,20 @@ describe("getProjectRootFromWorktree", () => {
     expect(getProjectRootFromWorktree("C:\\repo\\.worktrees\\fn-001")).toBe("C:\\repo");
     expect(getProjectRootFromWorktree("C:\\repo\\.worktrees\\fn-001\\src\\file.ts")).toBe("C:\\repo");
   });
+
+  it("supports configured candidate worktrees dir paths", () => {
+    expect(
+      getProjectRootFromWorktree("/tmp/.fn-worktrees/repo/fn-001/src", {
+        worktreesDirCandidates: ["/tmp/.fn-worktrees/repo"],
+      }),
+    ).toBe("/tmp/.fn-worktrees");
+
+    expect(
+      getProjectRootFromWorktree("/tmp/repo.worktrees/fn-001", {
+        worktreesDirCandidates: ["/tmp/repo.worktrees"],
+      }),
+    ).toBe("/tmp");
+  });
 });
 
 // Initialize mocks before first test

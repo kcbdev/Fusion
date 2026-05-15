@@ -1242,15 +1242,30 @@ async function registerExtensionProviders(cwd: string, modelRegistry: ModelRegis
  *   `/project/.worktrees/fn-001/src/file.ts` → `/project`
  *   `/project` → null (not a worktree)
  */
-export function getProjectRootFromWorktree(cwd: string): string | null {
-  // Match paths like:
-  //   /project/.worktrees/task-id
-  //   /project/.worktrees/task-id/src/file.ts
-  //   C:\project\.worktrees\task-id
-  const match = cwd.match(/^(.+?)[\\/]\.worktrees[\\/][^\\/]+(?:[\\/]|$)/);
-  if (match) {
-    return match[1]!;
+export function getProjectRootFromWorktree(
+  cwd: string,
+  opts?: { worktreesDirCandidates?: string[] },
+): string | null {
+  const legacyMatch = cwd.match(/^(.+?)[\\/]\.worktrees[\\/][^\\/]+(?:[\\/]|$)/);
+  if (legacyMatch) {
+    return legacyMatch[1]!;
   }
+
+  for (const candidate of opts?.worktreesDirCandidates ?? []) {
+    const normalizedCandidate = resolve(candidate);
+    const normalizedCwd = resolve(cwd);
+    const rel = relative(normalizedCandidate, normalizedCwd);
+    if (rel !== "" && !rel.startsWith("..") && !isAbsolute(rel)) {
+      const firstSegment = rel.split(/[\\/]/).filter(Boolean)[0];
+      if (firstSegment) {
+        const parent = normalizedCandidate.split(/[\\/]/).slice(0, -1).join("/");
+        if (parent) {
+          return parent;
+        }
+      }
+    }
+  }
+
   return null;
 }
 
