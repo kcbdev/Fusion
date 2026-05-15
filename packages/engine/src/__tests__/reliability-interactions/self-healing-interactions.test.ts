@@ -70,6 +70,38 @@ describe("reliability interactions: self-healing", () => {
     expect(recovered).toBe(0);
   });
 
+  it.each([
+    "Refusing to start coding agent in incomplete worktree: /tmp/wt",
+    "Refusing to start coding agent in unregistered git worktree: /tmp/wt",
+  ])("recoverMissingWorktreeReviewFailures rebounds review tasks for '%s'", async (error) => {
+    const taskId = "WT";
+    const tasks = new Map<string, Task>([[
+      taskId,
+      makeTask(taskId, {
+        column: "in-review",
+        paused: false,
+        status: "failed",
+        error,
+        worktree: "/tmp/wt",
+        branch: "fusion/wt",
+        steps: [{ id: "s1", title: "Step", status: "done" }] as any,
+      }),
+    ]]);
+    const store = makeStore(tasks);
+    const mgr = new SelfHealingManager(store, { rootDir: process.cwd(), getExecutingTaskIds: () => new Set() });
+
+    const recovered = await mgr.recoverMissingWorktreeReviewFailures();
+
+    expect(recovered).toBe(1);
+    expect(tasks.get(taskId)?.column).toBe("todo");
+    expect(tasks.get(taskId)?.worktree ?? null).toBeNull();
+    expect(tasks.get(taskId)?.branch ?? null).toBeNull();
+    expect(store.logEntry).toHaveBeenCalledWith(
+      taskId,
+      expect.stringContaining("Auto-recovered: retry/verification session targeted missing worktree"),
+    );
+  });
+
   it.skipIf(!hasGit)("recoverAlreadyMergedReviewTasks can still finalize from real git state", async () => {
     const fx = await makeReliabilityFixture({ taskId: "FN-4361-SH-GIT" });
     fixtures.push(fx);
