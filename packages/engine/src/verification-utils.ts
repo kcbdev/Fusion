@@ -2,8 +2,9 @@
  * Shared verification utilities for running deterministic test/build commands.
  * Used by both the merger and executor verification gates.
  */
-import { spawn } from "node:child_process";
 import type { TaskStore, AgentRole } from "@fusion/core";
+import { resolveSandboxBackend } from "./sandbox/index.js";
+import type { SandboxBackend, SandboxRunStreamingOptions, SandboxStreamingResult } from "./sandbox/index.js";
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -45,130 +46,85 @@ export interface VerificationResult {
  * vitest/pnpm workers can survive and accumulate across retries. Using
  * detached + negative-pid signal terminates the full tree.
  */
-export async function execWithProcessGroup(
+function getSandboxBackend(): SandboxBackend {
+  return resolveSandboxBackend();
+}
+
+function toLegacyExecResult(
   command: string,
-  options: { cwd: string; timeout: number; maxBuffer: number; signal?: AbortSignal; env?: NodeJS.ProcessEnv },
-): Promise<{ stdout: string; stderr: string; bufferOverflow: boolean; aborted?: boolean }> {
-  return new Promise((resolve, reject) => {
-    if (options.signal?.aborted) {
-      reject(Object.assign(
+  streamingResult: SandboxStreamingResult,
+): { stdout: string; stderr: string; bufferOverflow: boolean; aborted?: boolean } {
+  if (streamingResult.outcome === "success") {
+    return {
+      stdout: streamingResult.stdout,
+      stderr: streamingResult.stderr,
+      bufferOverflow: streamingResult.bufferOverflow,
+    };
+  }
+
+  if (streamingResult.outcome === "non-zero-exit") {
+    throw Object.assign(
+      new Error(`Command failed (exit ${streamingResult.exitCode ?? streamingResult.signal ?? "unknown"}): ${command}`),
+      {
+        code: streamingResult.exitCode ?? undefined,
+        status: streamingResult.exitCode,
+        stdout: streamingResult.stdout,
+        stderr: streamingResult.stderr,
+      },
+    );
+  }
+
+  if (streamingResult.outcome === "timeout") {
+    throw Object.assign(
+      new Error(`Command timed out after ${streamingResult.timeoutMs}ms: ${command}`),
+      {
+        code: "ETIMEDOUT",
+        stdout: streamingResult.stdout,
+        stderr: streamingResult.stderr,
+        killed: true,
+      },
+    );
+  }
+
+  if (streamingResult.outcome === "aborted") {
+    if (streamingResult.phase === "pre-start") {
+      throw Object.assign(
         new Error(`Command aborted before start: ${command}`),
         { code: "ABORT_ERR", aborted: true, stdout: "", stderr: "" },
-      ));
-      return;
+      );
     }
 
-    const useProcessGroup = process.platform !== "win32";
-
-    const child = spawn(command, {
-      cwd: options.cwd,
-      shell: true,
-      detached: useProcessGroup,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        // Corepack otherwise prompts interactively before fetching a pinned
-        // packageManager version, hanging the non-TTY child until timeout.
-        COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
-        ...(options.env ?? {}),
+    throw Object.assign(
+      new Error(`Command aborted: ${command}`),
+      {
+        code: "ABORT_ERR",
+        aborted: true,
+        stdout: streamingResult.stdout,
+        stderr: streamingResult.stderr,
+        killed: true,
       },
-    });
+    );
+  }
 
-    let stdout = "";
-    let stderr = "";
-    let stdoutOverflow = false;
-    let stderrOverflow = false;
-    let timedOut = false;
-    let aborted = false;
-    let settled = false;
-
-    const killTree = (sig: NodeJS.Signals) => {
-      if (child.pid === undefined) return;
-      try {
-        if (useProcessGroup) {
-          process.kill(-child.pid, sig);
-        } else {
-          child.kill(sig);
-        }
-      } catch { /* group may already be gone */ }
-    };
-
-    const timer = setTimeout(() => {
-      timedOut = true;
-      killTree("SIGTERM");
-      setTimeout(() => {
-        if (settled) return;
-        killTree("SIGKILL");
-      }, 5_000).unref();
-    }, options.timeout);
-    timer.unref();
-
-    const onAbort = () => {
-      aborted = true;
-      killTree("SIGTERM");
-      setTimeout(() => {
-        if (settled) return;
-        killTree("SIGKILL");
-      }, 5_000).unref();
-    };
-    options.signal?.addEventListener("abort", onAbort, { once: true });
-
-    child.stdout?.on("data", (chunk: Buffer) => {
-      if (stdoutOverflow) return;
-      if (stdout.length + chunk.length > options.maxBuffer) {
-        stdoutOverflow = true;
-        stdout += chunk.toString("utf-8", 0, options.maxBuffer - stdout.length);
-        return;
-      }
-      stdout += chunk.toString("utf-8");
-    });
-    child.stderr?.on("data", (chunk: Buffer) => {
-      if (stderrOverflow) return;
-      if (stderr.length + chunk.length > options.maxBuffer) {
-        stderrOverflow = true;
-        stderr += chunk.toString("utf-8", 0, options.maxBuffer - stderr.length);
-        return;
-      }
-      stderr += chunk.toString("utf-8");
-    });
-
-    const finish = (err: NodeJS.ErrnoException | null, code: number | null, signal: NodeJS.Signals | null) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      options.signal?.removeEventListener("abort", onAbort);
-
-      if (aborted) {
-        reject(Object.assign(
-          new Error(`Command aborted: ${command}`),
-          { code: "ABORT_ERR", aborted: true, stdout, stderr, killed: true },
-        ));
-        return;
-      }
-      if (timedOut) {
-        reject(Object.assign(
-          new Error(`Command timed out after ${options.timeout}ms: ${command}`),
-          { code: "ETIMEDOUT", stdout, stderr, killed: true },
-        ));
-        return;
-      }
-      if (err) {
-        reject(Object.assign(err, { stdout, stderr }));
-        return;
-      }
-      if (code === 0) {
-        resolve({ stdout, stderr, bufferOverflow: stdoutOverflow || stderrOverflow });
-        return;
-      }
-      reject(Object.assign(
-        new Error(`Command failed (exit ${code ?? signal ?? "unknown"}): ${command}`),
-        { code: code ?? undefined, status: code, stdout, stderr },
-      ));
-    };
-
-    child.on("error", (err) => finish(err, null, null));
-    child.on("close", (code, signal) => finish(null, code, signal));
+  throw Object.assign(streamingResult.error, {
+    stdout: streamingResult.stdout,
+    stderr: streamingResult.stderr,
   });
+}
+
+/**
+ * Run a verification command with a wallclock timeout that reaps the whole
+ * process group on expiry. Node's exec timeout only kills the immediate shell;
+ * vitest/pnpm workers can survive and accumulate across retries. Using
+ * detached + negative-pid signal terminates the full tree.
+ */
+export async function execWithProcessGroup(
+  command: string,
+  options: SandboxRunStreamingOptions,
+): Promise<{ stdout: string; stderr: string; bufferOverflow: boolean; aborted?: boolean }> {
+  const backend = getSandboxBackend();
+  const result = await backend.runStreaming(command, options);
+  return toLegacyExecResult(command, result);
 }
 
 // ── Output summarization ───────────────────────────────────────────────
