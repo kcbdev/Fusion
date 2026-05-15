@@ -1320,6 +1320,12 @@ export interface Task {
    *  the task due to file-scope overlap; cleared (set to `undefined`)
    *  when the task is eventually started or moved to done. */
   blockedBy?: string;
+  /** ID of the in-progress/in-review task whose file scope overlaps with this task's
+   *  file scope, causing the scheduler to defer dispatch. Set independently of
+   *  `blockedBy` so overlap state survives dependency-based blockedBy transitions.
+   *  Cleared when the overlap resolves (the blocker task moves to done or its
+   *  scope no longer overlaps). */
+  overlapBlockedBy?: string;
   /** When true, all automated agent and scheduler interaction is suspended. */
   paused?: boolean;
   /** When true, this task was explicitly moved back to todo by a user and should not auto-dispatch. */

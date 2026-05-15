@@ -119,7 +119,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 78;
+const SCHEMA_VERSION = 79;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -194,6 +194,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   currentStep INTEGER DEFAULT 0,
   worktree TEXT,
   blockedBy TEXT,
+  overlapBlockedBy TEXT,
   paused INTEGER DEFAULT 0,
   userPaused INTEGER DEFAULT 0,
   pausedReason TEXT,
@@ -3281,6 +3282,12 @@ export class Database {
         this.addColumnIfMissing("tasks", "branchConflictRecoveryCount", "INTEGER DEFAULT 0");
         this.addColumnIfMissing("tasks", "reviewerContextRetryCount", "INTEGER DEFAULT 0");
         this.addColumnIfMissing("tasks", "reviewerFallbackRetryCount", "INTEGER DEFAULT 0");
+      });
+    }
+
+    if (version < 79) {
+      this.applyMigration(79, () => {
+        this.addColumnIfMissing("tasks", "overlapBlockedBy", "TEXT");
       });
     }
 

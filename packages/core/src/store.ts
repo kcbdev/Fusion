@@ -61,6 +61,7 @@ interface TaskRow {
   currentStep: number;
   worktree: string | null;
   blockedBy: string | null;
+  overlapBlockedBy: string | null;
   paused: number | null;
   userPaused: number | null;
   baseBranch: string | null;
@@ -989,6 +990,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       currentStep: row.currentStep || 0,
       worktree: row.worktree || undefined,
       blockedBy: row.blockedBy || undefined,
+      overlapBlockedBy: row.overlapBlockedBy || undefined,
       paused: row.paused ? true : undefined,
       userPaused: row.userPaused ? true : undefined,
       baseBranch: row.baseBranch || undefined,
@@ -1351,7 +1353,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const prefix = tableAlias ? `${tableAlias}.` : "";
     return [
       "id", "lineageId", "title", "description", "priority", "\"column\"", "status", "size", "reviewLevel", "currentStep",
-      "worktree", "blockedBy", "paused", "pausedReason", "userPaused", "baseBranch", "branch", "executionStartBranch", "baseCommitSha",
+      "worktree", "blockedBy", "overlapBlockedBy", "paused", "pausedReason", "userPaused", "baseBranch", "branch", "executionStartBranch", "baseCommitSha",
       "modelPresetId", "modelProvider", "modelId",
       "validatorModelProvider", "validatorModelId",
       "planningModelProvider", "planningModelId",
@@ -1400,7 +1402,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private getTaskSelectClauseWithActivityLogLimit(limit: number): string {
     const columns = [
       "id", "lineageId", "title", "description", "priority", "\"column\"", "status", "size", "reviewLevel", "currentStep",
-      "worktree", "blockedBy", "paused", "pausedReason", "userPaused", "baseBranch", "branch", "executionStartBranch", "baseCommitSha",
+      "worktree", "blockedBy", "overlapBlockedBy", "paused", "pausedReason", "userPaused", "baseBranch", "branch", "executionStartBranch", "baseCommitSha",
       "modelPresetId", "modelProvider", "modelId",
       "validatorModelProvider", "validatorModelId",
       "planningModelProvider", "planningModelId",
@@ -1452,6 +1454,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.currentStep || 0,
       task.worktree ?? null,
       task.blockedBy ?? null,
+      task.overlapBlockedBy ?? null,
       task.paused ? 1 : 0,
       task.userPaused ? 1 : 0,
       task.baseBranch ?? null,
@@ -1555,7 +1558,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     this.db.prepare(`
       INSERT INTO tasks (
         id, lineageId, title, description, priority, "column", status, size, reviewLevel, currentStep,
-        worktree, blockedBy, paused, userPaused, baseBranch, branch, executionStartBranch, baseCommitSha, modelPresetId, modelProvider,
+        worktree, blockedBy, overlapBlockedBy, paused, userPaused, baseBranch, branch, executionStartBranch, baseCommitSha, modelPresetId, modelProvider,
         modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, mergeRetries,
         workflowStepRetries, stuckKillCount, postReviewFixCount, recoveryRetryCount, taskDoneRetryCount, verificationFailureCount, mergeConflictBounceCount, mergeAuditBounceCount, branchConflictRecoveryCount, reviewerContextRetryCount, reviewerFallbackRetryCount, nextRecoveryAt, error,
         summary, thinkingLevel, executionMode, tokenUsageInputTokens, tokenUsageOutputTokens, tokenUsageCachedTokens,
@@ -1580,7 +1583,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     this.db.prepare(`
       INSERT INTO tasks (
         id, lineageId, title, description, priority, "column", status, size, reviewLevel, currentStep,
-        worktree, blockedBy, paused, userPaused, baseBranch, branch, executionStartBranch, baseCommitSha, modelPresetId, modelProvider,
+        worktree, blockedBy, overlapBlockedBy, paused, userPaused, baseBranch, branch, executionStartBranch, baseCommitSha, modelPresetId, modelProvider,
         modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, mergeRetries,
         workflowStepRetries, stuckKillCount, postReviewFixCount, recoveryRetryCount, taskDoneRetryCount, verificationFailureCount, mergeConflictBounceCount, mergeAuditBounceCount, branchConflictRecoveryCount, reviewerContextRetryCount, reviewerFallbackRetryCount, nextRecoveryAt, error,
         summary, thinkingLevel, executionMode, tokenUsageInputTokens, tokenUsageOutputTokens, tokenUsageCachedTokens,
@@ -1603,6 +1606,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         currentStep = excluded.currentStep,
         worktree = excluded.worktree,
         blockedBy = excluded.blockedBy,
+        overlapBlockedBy = excluded.overlapBlockedBy,
         paused = excluded.paused,
         userPaused = excluded.userPaused,
         baseBranch = excluded.baseBranch,
@@ -3824,6 +3828,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           task.pausedReason = undefined;
         }
         task.blockedBy = undefined;
+        task.overlapBlockedBy = undefined;
         task.paused = undefined;
         task.pausedByAgentId = undefined;
         if (moveSource === "user" && toColumn === "todo") {
@@ -3960,7 +3965,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   async updateTask(
     id: string,
-    updates: { title?: string; description?: string; priority?: TaskPriority | null; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; currentStep?: number; blockedBy?: string | null; assignedAgentId?: string | null; pausedByAgentId?: string | null; pausedReason?: string | null; tokenBudgetSoftAlertedAt?: string | null; tokenBudgetHardAlertedAt?: string | null; tokenBudgetOverride?: import("./types.js").TaskTokenBudgetOverride | null; dispatchStormCount?: number | null; lastDispatchAt?: string | null; assigneeUserId?: string | null; scopeOverride?: boolean | null; scopeOverrideReason?: string | null; nodeId?: string | null; effectiveNodeId?: string | null; effectiveNodeSource?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; checkoutNodeId?: string | null; checkoutRunId?: string | null; checkoutLeaseRenewedAt?: string | null; checkoutLeaseEpoch?: number | null; paused?: boolean; baseBranch?: string | null; branch?: string | null; executionStartBranch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; executionMode?: import("./types.js").ExecutionMode | null; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; verificationFailureCount?: number | null; mergeConflictBounceCount?: number | null; mergeAuditBounceCount?: number | null; branchConflictRecoveryCount?: number | null; reviewerContextRetryCount?: number | null; reviewerFallbackRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; noCommitsExpected?: boolean | null; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; executionStartedAt?: string | null; executionCompletedAt?: string | null; review?: import("./types.js").TaskReview | null; reviewState?: import("./types.js").TaskReviewState | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; sourceIssue?: import("./types.js").TaskSourceIssue | null; githubTracking?: import("./types.js").TaskGithubTracking | null; tokenUsage?: import("./types.js").TaskTokenUsage | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
+    updates: { title?: string; description?: string; priority?: TaskPriority | null; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; currentStep?: number; blockedBy?: string | null; overlapBlockedBy?: string | null; assignedAgentId?: string | null; pausedByAgentId?: string | null; pausedReason?: string | null; tokenBudgetSoftAlertedAt?: string | null; tokenBudgetHardAlertedAt?: string | null; tokenBudgetOverride?: import("./types.js").TaskTokenBudgetOverride | null; dispatchStormCount?: number | null; lastDispatchAt?: string | null; assigneeUserId?: string | null; scopeOverride?: boolean | null; scopeOverrideReason?: string | null; nodeId?: string | null; effectiveNodeId?: string | null; effectiveNodeSource?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; checkoutNodeId?: string | null; checkoutRunId?: string | null; checkoutLeaseRenewedAt?: string | null; checkoutLeaseEpoch?: number | null; paused?: boolean; baseBranch?: string | null; branch?: string | null; executionStartBranch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; executionMode?: import("./types.js").ExecutionMode | null; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; verificationFailureCount?: number | null; mergeConflictBounceCount?: number | null; mergeAuditBounceCount?: number | null; branchConflictRecoveryCount?: number | null; reviewerContextRetryCount?: number | null; reviewerFallbackRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; noCommitsExpected?: boolean | null; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; executionStartedAt?: string | null; executionCompletedAt?: string | null; review?: import("./types.js").TaskReview | null; reviewState?: import("./types.js").TaskReviewState | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; sourceIssue?: import("./types.js").TaskSourceIssue | null; githubTracking?: import("./types.js").TaskGithubTracking | null; tokenUsage?: import("./types.js").TaskTokenUsage | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
     runContext?: RunMutationContext,
   ): Promise<Task> {
     return this.withTaskLock(id, async () => {
@@ -4038,6 +4043,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         task.blockedBy = undefined;
       } else if (updates.blockedBy !== undefined) {
         task.blockedBy = updates.blockedBy;
+      }
+      if (updates.overlapBlockedBy === null) {
+        task.overlapBlockedBy = undefined;
+      } else if (updates.overlapBlockedBy !== undefined) {
+        task.overlapBlockedBy = updates.overlapBlockedBy;
       }
       const previousAssignedAgentId = task.assignedAgentId;
       if (updates.assignedAgentId === null) {
@@ -5556,6 +5566,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.error = undefined;
       task.worktree = undefined;
       task.blockedBy = undefined;
+      task.overlapBlockedBy = undefined;
       task.recoveryRetryCount = undefined;
       task.nextRecoveryAt = undefined;
 
@@ -5607,6 +5618,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       || task.error !== undefined
       || task.worktree !== undefined
       || task.blockedBy !== undefined
+      || task.overlapBlockedBy !== undefined
       || task.recoveryRetryCount !== undefined
       || task.nextRecoveryAt !== undefined;
 
@@ -5614,6 +5626,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     task.error = undefined;
     task.worktree = undefined;
     task.blockedBy = undefined;
+    task.overlapBlockedBy = undefined;
     task.recoveryRetryCount = undefined;
     task.nextRecoveryAt = undefined;
 
