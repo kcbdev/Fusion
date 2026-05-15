@@ -122,12 +122,19 @@
 .card-meta {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-sm);
+  row-gap: var(--space-xs);
   margin-top: var(--space-sm);
   font-size: 0.6875rem;
   color: var(--text-dim);
   position: relative;
   z-index: 1;
+}
+
+.card-meta-move {
+  margin-left: auto;
+  position: relative;
 }
 
 .card-retry-badge {
@@ -1175,6 +1182,11 @@
   top: auto;
   left: auto;
   bottom: calc(100% + var(--space-xs));
+  right: 0;
+}
+
+.card-meta-move .card-send-back-menu {
+  left: auto;
   right: 0;
 }
 

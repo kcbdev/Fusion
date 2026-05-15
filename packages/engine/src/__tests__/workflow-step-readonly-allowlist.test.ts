@@ -14,6 +14,8 @@ describe("workflow-step readonly allowlist policy", () => {
       "grep",
       "find",
       "ls",
+      "WebSearch",
+      "WebFetch",
       "fn_web_fetch",
       "fn_task_show",
       "fn_task_list",

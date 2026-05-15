@@ -1417,30 +1417,63 @@ describe("TaskCard", () => {
     expect(actionsContainer?.contains(archiveBtn)).toBe(true);
   });
 
-  it("FN-4540 renders in-review Move control in card-bottom-right-row and keeps menu behavior", () => {
-    const onMoveTask = vi.fn();
+  it("renders in-review Move control inline in card-meta when meta row is visible", () => {
     const { container } = render(
       <TaskCard
-        task={makeTask({ column: "in-review" })}
+        task={makeTask({ column: "in-review", blockedBy: "FN-777" })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onMoveTask={vi.fn()}
+      />,
+    );
+
+    const moveButton = screen.getByRole("button", { name: "Move task" });
+    const metaRow = container.querySelector(".card-meta");
+    const bottomRow = container.querySelector(".card-bottom-row");
+
+    expect(metaRow).not.toBeNull();
+    expect(metaRow?.contains(moveButton)).toBe(true);
+    expect(moveButton.closest(".card-meta")).not.toBeNull();
+    expect(bottomRow).toBeNull();
+  });
+
+  it("keeps in-review Move control in card-bottom-row when meta row is not visible", () => {
+    const { container } = render(
+      <TaskCard
+        task={makeTask({ column: "in-review", dependencies: [], blockedBy: undefined, overlapBlockedBy: undefined, status: undefined as any })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onMoveTask={vi.fn()}
+      />,
+    );
+
+    const moveButton = screen.getByRole("button", { name: "Move task" });
+    const bottomRow = container.querySelector(".card-bottom-row");
+
+    expect(moveButton.closest(".card-bottom-right-row")).not.toBeNull();
+    expect(bottomRow).not.toBeNull();
+    expect(bottomRow?.contains(moveButton)).toBe(true);
+    expect(moveButton.closest(".card-meta")).toBeNull();
+  });
+
+  it.each([
+    { name: "inline meta-row variant", task: makeTask({ column: "in-review", blockedBy: "FN-777" }) },
+    { name: "fallback bottom-row variant", task: makeTask({ column: "in-review", dependencies: [], blockedBy: undefined, overlapBlockedBy: undefined, status: undefined as any }) },
+  ])("keeps Move dropdown behavior for $name", ({ task }) => {
+    const onMoveTask = vi.fn();
+    render(
+      <TaskCard
+        task={task}
         onOpenDetail={noop}
         addToast={noop}
         onMoveTask={onMoveTask}
       />,
     );
 
-    const moveButton = screen.getByRole("button", { name: "Move task" });
-    const actionsContainer = container.querySelector(".card-header-actions");
-    const bottomRow = container.querySelector(".card-bottom-row");
-    const bottomRight = moveButton.closest(".card-bottom-right-row");
+    fireEvent.click(screen.getByRole("button", { name: "Move task" }));
 
-    expect(actionsContainer).not.toBeNull();
-    expect(actionsContainer?.contains(moveButton)).toBe(false);
-    expect(bottomRow).not.toBeNull();
-    expect(bottomRight).not.toBeNull();
-    expect(bottomRow?.contains(bottomRight as HTMLElement)).toBe(true);
-    expect(getComputedStyle(bottomRow as HTMLElement).justifyContent).toBe("flex-end");
+    expect(screen.getAllByRole("menuitem").length).toBeGreaterThan(0);
 
-    fireEvent.click(moveButton);
     fireEvent.click(screen.getByRole("menuitem", { name: "Done (no merge)" }));
 
     expect(onMoveTask).toHaveBeenCalledWith("FN-001", "done", undefined);

@@ -815,6 +815,13 @@ function TaskCardComponent({
     && !hasMatchingIssueInfoBadge
     && !hasMatchingSourceIssue;
   const showInReviewMoveControl = task.column === "in-review" && Boolean(onMoveTask);
+  const metaRowVisible =
+    (task.dependencies?.length ?? 0) > 0
+    || queued
+    || task.status === "queued"
+    || Boolean(task.blockedBy)
+    || Boolean(task.overlapBlockedBy)
+    || Boolean(fanout && fanout.totalCount > 0);
   const branchMetadata = useMemo(() => getVisibleTaskCardBranches(task), [task.id, task.branch, task.baseBranch]);
   const hasBranchMetadata = Boolean(branchMetadata.branch || branchMetadata.baseBranch);
   const isAgentCreated = isAgentCreatedTask(task);
@@ -1804,7 +1811,7 @@ function TaskCardComponent({
           )}
         </div>
       )}
-      {((task.dependencies && task.dependencies.length > 0) || queued || task.status === "queued" || task.blockedBy || task.overlapBlockedBy || (fanout && fanout.totalCount > 0)) && (
+      {metaRowVisible && (
         <div className="card-meta">
           {task.dependencies && task.dependencies.length > 0 && (
             <div className="card-dep-list">
@@ -1839,6 +1846,37 @@ function TaskCardComponent({
             </span>
           )}
           {(queued || task.status === "queued") && task.column !== "in-progress" && <span className="queued-badge"><Clock size={12} style={{ verticalAlign: "middle" }} /> Queued</span>}
+          {showInReviewMoveControl && (
+            <div className="card-meta-move">
+              <div className="card-send-back" ref={sendBackRef}>
+                <button
+                  className="card-send-back-btn"
+                  onClick={handleSendBackClick}
+                  title="Move task"
+                  aria-label="Move task"
+                  aria-haspopup="menu"
+                  aria-expanded={showSendBackMenu}
+                >
+                  Move
+                  <ChevronDown size={10} />
+                </button>
+                {showSendBackMenu && (
+                  <div className="card-send-back-menu" role="menu">
+                    {VALID_TRANSITIONS["in-review"].map((col) => (
+                      <button
+                        key={col}
+                        className="card-send-back-menu-item"
+                        role="menuitem"
+                        onClick={(e) => handleSendBackOptionClick(e, col)}
+                      >
+                        {col === "done" ? "Done (no merge)" : COLUMN_LABELS[col]}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
       {(task.assignedAgentId || taskProviders.length > 0) && (
@@ -1864,7 +1902,7 @@ function TaskCardComponent({
           )}
         </div>
       )}
-      {showInReviewMoveControl && (
+      {showInReviewMoveControl && !metaRowVisible && (
         <div className="card-bottom-row">
           <div className="card-bottom-right-row">
             <div className="card-send-back" ref={sendBackRef}>
