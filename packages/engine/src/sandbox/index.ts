@@ -1,5 +1,6 @@
 import { BubblewrapBackend } from "./bubblewrap-backend.js";
 import { NativeSandboxBackend } from "./native.js";
+import { SandboxExecBackend } from "./sandbox-exec-backend.js";
 import type { SandboxBackend, SandboxCapabilities } from "./types.js";
 
 export type {
@@ -27,6 +28,13 @@ export function resolveSandboxBackend(options?: { backendId?: SandboxCapabilitie
 
   if (options?.backendId === "bubblewrap" && process.platform === "linux") {
     return new BubblewrapBackend();
+  }
+
+  if (options?.backendId === "sandbox-exec") {
+    if (process.platform === "darwin") {
+      return new SandboxExecBackend();
+    }
+    return new NativeSandboxBackend();
   }
 
   return new NativeSandboxBackend();

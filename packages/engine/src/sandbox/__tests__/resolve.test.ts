@@ -21,4 +21,14 @@ describe("resolveSandboxBackend", () => {
     }
     expect(backend).toBeInstanceOf(NativeSandboxBackend);
   });
+
+  it("returns sandbox-exec on darwin when requested", async () => {
+    const { SandboxExecBackend } = await import("../sandbox-exec-backend.js");
+    const backend = resolveSandboxBackend({ backendId: "sandbox-exec" });
+    if (process.platform === "darwin") {
+      expect(backend).toBeInstanceOf(SandboxExecBackend);
+      return;
+    }
+    expect(backend).toBeInstanceOf(NativeSandboxBackend);
+  });
 });
