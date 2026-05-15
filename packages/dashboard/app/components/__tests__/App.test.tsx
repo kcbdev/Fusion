@@ -93,14 +93,21 @@ const mockUseTasks = vi.fn(() => ({
   tasks: [],
   createTask: mockCreateTask,
   moveTask: vi.fn(),
+  pauseTask: vi.fn(),
+  unpauseTask: vi.fn(),
   deleteTask: vi.fn(),
   mergeTask: vi.fn(),
   retryTask: vi.fn(),
+  resetTask: vi.fn(),
   updateTask: vi.fn(),
   duplicateTask: vi.fn(),
   archiveTask: vi.fn(),
   unarchiveTask: vi.fn(),
   archiveAllDone: vi.fn(),
+  loadArchivedTasks: vi.fn(),
+  refreshTasks: vi.fn(),
+  ingestCreatedTasks: vi.fn(),
+  lastFetchTimeMs: Date.now(),
 }));
 
 // Accept both old and new hook signatures
@@ -594,14 +601,21 @@ beforeEach(() => {
     tasks: [],
     createTask: mockCreateTask,
     moveTask: vi.fn(),
+    pauseTask: vi.fn(),
+    unpauseTask: vi.fn(),
     deleteTask: vi.fn(),
     mergeTask: vi.fn(),
     retryTask: vi.fn(),
+    resetTask: vi.fn(),
     updateTask: vi.fn(),
     duplicateTask: vi.fn(),
     archiveTask: vi.fn(),
     unarchiveTask: vi.fn(),
     archiveAllDone: vi.fn(),
+    loadArchivedTasks: vi.fn(),
+    refreshTasks: vi.fn(),
+    ingestCreatedTasks: vi.fn(),
+    lastFetchTimeMs: Date.now(),
   }));
   // Reset mock states
   mockProjectsState.projects = [];
@@ -861,6 +875,7 @@ describe("App approval notification banner", () => {
       resetTask: vi.fn(),
       loadArchivedTasks: vi.fn(),
       ingestCreatedTasks: vi.fn(),
+      refreshTasks: vi.fn(),
       lastFetchTimeMs: Date.now(),
     }));
 
@@ -903,6 +918,7 @@ describe("App approval notification banner", () => {
       resetTask: vi.fn(),
       loadArchivedTasks: vi.fn(),
       ingestCreatedTasks: vi.fn(),
+      refreshTasks: vi.fn(),
       lastFetchTimeMs: Date.now(),
     }));
 
@@ -967,6 +983,7 @@ describe("App approval notification banner", () => {
       resetTask: vi.fn(),
       loadArchivedTasks: vi.fn(),
       ingestCreatedTasks: vi.fn(),
+      refreshTasks: vi.fn(),
       lastFetchTimeMs: Date.now(),
     }));
 
@@ -3710,6 +3727,7 @@ describe("App board branch filters", () => {
       archiveTask: vi.fn(),
       unarchiveTask: vi.fn(),
       archiveAllDone: vi.fn(),
+      refreshTasks: vi.fn(),
     }));
 
     render(<App />);
@@ -3741,6 +3759,7 @@ describe("App board branch filters", () => {
       archiveTask: vi.fn(),
       unarchiveTask: vi.fn(),
       archiveAllDone: vi.fn(),
+      refreshTasks: vi.fn(),
     }));
 
     render(<App />);
@@ -3771,6 +3790,7 @@ describe("App board branch filters", () => {
       archiveTask: vi.fn(),
       unarchiveTask: vi.fn(),
       archiveAllDone: vi.fn(),
+      refreshTasks: vi.fn(),
     }));
 
     render(<App />);
@@ -3836,6 +3856,7 @@ describe("App board branch filters", () => {
       archiveTask: vi.fn(),
       unarchiveTask: vi.fn(),
       archiveAllDone: vi.fn(),
+      refreshTasks: vi.fn(),
     }));
 
     render(<App />);
@@ -3877,6 +3898,7 @@ describe("App board branch filters", () => {
       archiveTask: vi.fn(),
       unarchiveTask: vi.fn(),
       archiveAllDone: vi.fn(),
+      refreshTasks: vi.fn(),
     }));
 
     const { rerender } = render(<App />);
@@ -3926,6 +3948,7 @@ describe("App board branch filters", () => {
       archiveTask: vi.fn(),
       unarchiveTask: vi.fn(),
       archiveAllDone: vi.fn(),
+      refreshTasks: vi.fn(),
     }));
 
     render(<App />);
