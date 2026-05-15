@@ -4,6 +4,7 @@ import { fetchGlobalSettings, updateGlobalSettings } from "../api";
 
 // Legacy localStorage key for migration - no longer used as primary storage
 const LEGACY_STORAGE_KEY = "kb-dashboard-current-project";
+export const CONSECUTIVE_ABSENCE_THRESHOLD = 3;
 
 /**
  * Get the node key used in dashboardCurrentProjectIdByNode.
@@ -48,6 +49,8 @@ export function useCurrentProject(
   const explicitlyClearedRef = useRef(false);
   // Cache of current settings to avoid repeated fetches
   const settingsCacheRef = useRef<Record<string, string> | null>(null);
+  // Consecutive poll cycles where current project is missing from availableProjects
+  const absentCountRef = useRef(0);
 
   const nodeKey = getNodeKey(nodeId);
 
@@ -119,6 +122,11 @@ export function useCurrentProject(
     };
   }, [nodeKey, availableProjects]);
 
+  // Reset absence tracking when selection changes
+  useEffect(() => {
+    absentCountRef.current = 0;
+  }, [currentProject?.id]);
+
   // Validate project still exists and persist to global settings
   useEffect(() => {
     if (loading) return;
@@ -126,10 +134,19 @@ export function useCurrentProject(
     if (currentProject) {
       // Validate project still exists in available projects
       const stillExists = availableProjects.some((p) => p.id === currentProject.id);
-      if (!stillExists && availableProjects.length > 0) {
-        // Project was unregistered - clear selection and default to first active
-        const firstActive = availableProjects.find((p) => p.status === "active");
-        setCurrentProjectState(firstActive || availableProjects[0] || null);
+      if (stillExists) {
+        absentCountRef.current = 0;
+      } else if (availableProjects.length === 0) {
+        // Likely a transient total poll failure; keep current selection
+        absentCountRef.current = 0;
+      } else {
+        absentCountRef.current += 1;
+        if (absentCountRef.current >= CONSECUTIVE_ABSENCE_THRESHOLD) {
+          // Project was sustainably absent - clear selection and default to first active
+          absentCountRef.current = 0;
+          const firstActive = availableProjects.find((p) => p.status === "active");
+          setCurrentProjectState(firstActive || availableProjects[0] || null);
+        }
         return;
       }
 
@@ -139,12 +156,15 @@ export function useCurrentProject(
       updateGlobalSettings({ dashboardCurrentProjectIdByNode: newCache }).catch(() => {
         // Non-critical - persistence failed
       });
-    } else if (availableProjects.length > 0 && !explicitlyClearedRef.current) {
-      // No selection but projects available - default to first active
-      // Skip if user explicitly cleared (navigated to overview)
-      const firstActive = availableProjects.find((p) => p.status === "active");
-      if (firstActive) {
-        setCurrentProjectState(firstActive);
+    } else {
+      absentCountRef.current = 0;
+      if (availableProjects.length > 0 && !explicitlyClearedRef.current) {
+        // No selection but projects available - default to first active
+        // Skip if user explicitly cleared (navigated to overview)
+        const firstActive = availableProjects.find((p) => p.status === "active");
+        if (firstActive) {
+          setCurrentProjectState(firstActive);
+        }
       }
     }
   }, [currentProject, availableProjects, loading, nodeKey]);
@@ -152,6 +172,7 @@ export function useCurrentProject(
   const setCurrentProject = useCallback(
     (project: ProjectInfo | null) => {
       explicitlyClearedRef.current = false;
+      absentCountRef.current = 0;
       setCurrentProjectState(project);
 
       if (project) {
@@ -167,6 +188,7 @@ export function useCurrentProject(
 
   const clearCurrentProject = useCallback(() => {
     explicitlyClearedRef.current = true;
+    absentCountRef.current = 0;
     setCurrentProjectState(null);
 
     // Remove from cache and persist
