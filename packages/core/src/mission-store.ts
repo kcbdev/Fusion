@@ -335,6 +335,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       dependencies: fromJson<string[]>(row.dependencies) || [],
       planningNotes: row.planningNotes || undefined,
       verification: row.verification || undefined,
+      acceptanceCriteria: row.acceptanceCriteria || undefined,
       validationState: (row.validationState as MilestoneValidationState) || "not_started",
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
@@ -1158,14 +1159,15 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       dependencies: input.dependencies || [],
       planningNotes: input.planningNotes,
       verification: input.verification,
+      acceptanceCriteria: input.acceptanceCriteria,
       validationState: "not_started",
       createdAt: now,
       updatedAt: now,
     };
 
     this.db.prepare(`
-      INSERT INTO milestones (id, missionId, title, description, status, orderIndex, interviewState, dependencies, planningNotes, verification, validationState, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO milestones (id, missionId, title, description, status, orderIndex, interviewState, dependencies, planningNotes, verification, acceptanceCriteria, validationState, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       milestone.id,
       milestone.missionId,
@@ -1177,6 +1179,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       toJson(milestone.dependencies),
       milestone.planningNotes ?? null,
       milestone.verification ?? null,
+      milestone.acceptanceCriteria ?? null,
       milestone.validationState as string,
       milestone.createdAt,
       milestone.updatedAt,
@@ -1245,6 +1248,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
         dependencies = ?,
         planningNotes = ?,
         verification = ?,
+        acceptanceCriteria = ?,
         validationState = ?,
         updatedAt = ?
       WHERE id = ?
@@ -1257,6 +1261,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       toJson(updated.dependencies),
       updated.planningNotes ?? null,
       updated.verification ?? null,
+      updated.acceptanceCriteria ?? null,
       updated.validationState || "not_started",
       updated.updatedAt,
       updated.id,
@@ -3340,14 +3345,14 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     }
 
     for (const milestone of snapshot.payload.milestones) {
-      this.db.prepare(`INSERT INTO milestones (id, missionId, title, description, status, orderIndex, interviewState, dependencies, planningNotes, verification, validationState, createdAt, updatedAt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      this.db.prepare(`INSERT INTO milestones (id, missionId, title, description, status, orderIndex, interviewState, dependencies, planningNotes, verification, acceptanceCriteria, validationState, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET title=excluded.title, description=excluded.description, status=excluded.status, orderIndex=excluded.orderIndex,
           interviewState=excluded.interviewState, dependencies=excluded.dependencies, planningNotes=excluded.planningNotes, verification=excluded.verification,
-          validationState=excluded.validationState, updatedAt=excluded.updatedAt`).run(
+          acceptanceCriteria=excluded.acceptanceCriteria, validationState=excluded.validationState, updatedAt=excluded.updatedAt`).run(
         milestone.id, milestone.missionId, milestone.title, milestone.description ?? null, milestone.status, milestone.orderIndex,
         milestone.interviewState, toJsonNullable(milestone.dependencies), milestone.planningNotes ?? null, milestone.verification ?? null,
-        milestone.validationState ?? null, milestone.createdAt, milestone.updatedAt,
+        milestone.acceptanceCriteria ?? null, milestone.validationState ?? null, milestone.createdAt, milestone.updatedAt,
       );
       applied++;
     }

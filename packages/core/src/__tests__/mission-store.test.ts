@@ -790,6 +790,69 @@ describe("MissionStore", () => {
       expect(updated.status).toBe("active");
     });
 
+    it("persists milestone acceptance criteria on create", () => {
+      const mission = store.createMission({ title: "Parent" });
+      const milestone = store.addMilestone(mission.id, {
+        title: "Original",
+        acceptanceCriteria: "Ship all phase outputs",
+      });
+
+      const fetched = store.getMilestone(milestone.id);
+      expect(fetched?.acceptanceCriteria).toBe("Ship all phase outputs");
+    });
+
+    it("updates milestone acceptance criteria and persists across reopen", () => {
+      const fileDb = new Database(fusionDir);
+      fileDb.init();
+      const fileStore = new MissionStore(fusionDir, fileDb);
+
+      const mission = fileStore.createMission({ title: "Parent" });
+      const milestone = fileStore.addMilestone(mission.id, { title: "Original" });
+      fileStore.updateMilestone(milestone.id, { acceptanceCriteria: "All validators pass" });
+
+      fileDb.close();
+
+      const reopenedDb = new Database(fusionDir);
+      reopenedDb.init();
+      const reopenedStore = new MissionStore(fusionDir, reopenedDb);
+      const reopened = reopenedStore.getMilestone(milestone.id);
+
+      expect(reopened?.acceptanceCriteria).toBe("All validators pass");
+      reopenedDb.close();
+    });
+
+    it("partial milestone acceptance criteria update preserves other fields", () => {
+      const mission = store.createMission({ title: "Parent" });
+      const milestone = store.addMilestone(mission.id, {
+        title: "Original",
+        description: "Phase 1",
+        verification: "Run smoke tests",
+      });
+
+      const updated = store.updateMilestone(milestone.id, {
+        acceptanceCriteria: "Phase complete when smoke tests pass",
+      });
+
+      expect(updated.title).toBe("Original");
+      expect(updated.description).toBe("Phase 1");
+      expect(updated.verification).toBe("Run smoke tests");
+      expect(updated.acceptanceCriteria).toBe("Phase complete when smoke tests pass");
+    });
+
+    it("clears milestone acceptance criteria when updated with undefined", () => {
+      const mission = store.createMission({ title: "Parent" });
+      const milestone = store.addMilestone(mission.id, {
+        title: "Original",
+        acceptanceCriteria: "Initial criteria",
+      });
+
+      const updated = store.updateMilestone(milestone.id, { acceptanceCriteria: undefined });
+      const fetched = store.getMilestone(milestone.id);
+
+      expect(updated.acceptanceCriteria).toBeUndefined();
+      expect(fetched?.acceptanceCriteria).toBeUndefined();
+    });
+
     it("deletes a milestone", () => {
       const mission = store.createMission({ title: "Parent" });
       const milestone = store.addMilestone(mission.id, { title: "To Delete" });
