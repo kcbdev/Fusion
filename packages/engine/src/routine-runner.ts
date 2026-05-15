@@ -8,9 +8,7 @@
  */
 
 import { CronExpressionParser } from "cron-parser";
-import { exec } from "node:child_process";
 import { isInProcessBackupCommand, isInProcessMemoryBackupCommand } from "./cron-runner.js";
-import { promisify } from "node:util";
 import type {
   RoutineStore,
   Routine,
@@ -26,12 +24,20 @@ import type { HeartbeatMonitor } from "./agent-heartbeat.js";
 import type { AiPromptExecutor } from "./cron-runner.js";
 import { createLogger } from "./logger.js";
 import { defaultShell } from "./shell-utils.js";
+import { resolveSandboxBackend } from "./sandbox/index.js";
+import type { SandboxBackend } from "./sandbox/types.js";
 
 const log = createLogger("routine-runner");
-const execAsync = promisify(exec);
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 const MAX_BUFFER = 1024 * 1024;
 const MAX_OUTPUT_LENGTH = 10 * 1024;
+
+let routineCommandSandboxBackend: SandboxBackend | null = null;
+
+function getRoutineCommandSandboxBackend(): SandboxBackend {
+  routineCommandSandboxBackend ??= resolveSandboxBackend();
+  return routineCommandSandboxBackend;
+}
 
 /** Options for RoutineRunner constructor */
 export interface RoutineRunnerOptions {
@@ -316,34 +322,33 @@ export class RoutineRunner {
       }
     }
 
-    try {
-      const { stdout, stderr } = await execAsync(command, {
-        timeout: timeoutMs ?? DEFAULT_TIMEOUT_MS,
-        maxBuffer: MAX_BUFFER,
-        shell: defaultShell,
-      });
+    const backend = getRoutineCommandSandboxBackend();
+    const result = await backend.run(command, {
+      cwd: this.options.rootDir,
+      timeoutMs: timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      maxBuffer: MAX_BUFFER,
+      shell: defaultShell,
+    });
 
+    if (result.exitCode === 0 && !result.signal && !result.timedOut && !result.bufferExceeded && !result.spawnError) {
       return {
         success: true,
-        output: truncateOutput(stdout, stderr),
-        startedAt,
-        completedAt: new Date().toISOString(),
-      };
-    } catch (err) {
-      const errObj = err as Record<string, unknown>;
-      const stdout = typeof errObj.stdout === "string" ? errObj.stdout : "";
-      const stderr = typeof errObj.stderr === "string" ? errObj.stderr : "";
-      const error = errObj.killed === true
-        ? `Command timed out after ${(timeoutMs ?? DEFAULT_TIMEOUT_MS) / 1000}s`
-        : (err instanceof Error ? err.message : null) ?? String(err);
-      return {
-        success: false,
-        output: truncateOutput(stdout, stderr),
-        error,
+        output: truncateOutput(result.stdout, result.stderr),
         startedAt,
         completedAt: new Date().toISOString(),
       };
     }
+
+    const error = result.timedOut
+      ? `Command timed out after ${(timeoutMs ?? DEFAULT_TIMEOUT_MS) / 1000}s`
+      : result.spawnError?.message ?? "Command failed";
+    return {
+      success: false,
+      output: truncateOutput(result.stdout, result.stderr),
+      error,
+      startedAt,
+      completedAt: new Date().toISOString(),
+    };
   }
 
   private async executeSteps(routine: Routine, startedAt: string): Promise<AutomationRunResult> {

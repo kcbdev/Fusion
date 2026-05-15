@@ -2,6 +2,7 @@
 import { execSync, exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+// Internal git plumbing intentionally bypasses sandbox backends.
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 import {
@@ -14,6 +15,8 @@ import {
   type VerificationCommandResult,
   type VerificationResult,
 } from "./verification-utils.js";
+import { resolveSandboxBackend } from "./sandbox/index.js";
+import type { SandboxBackend } from "./sandbox/types.js";
 
 // Re-export for backward compatibility (tests import from merger.ts)
 export {
@@ -8935,6 +8938,13 @@ async function runPostMergeWorkflowSteps(
   }
 }
 
+let postMergeScriptSandboxBackend: SandboxBackend | null = null;
+
+function getPostMergeScriptSandboxBackend(): SandboxBackend {
+  postMergeScriptSandboxBackend ??= resolveSandboxBackend();
+  return postMergeScriptSandboxBackend;
+}
+
 /** Execute a script-mode post-merge workflow step in the provided execution directory. */
 async function executePostMergeScriptStep(
   store: TaskStore,
@@ -8951,25 +8961,40 @@ async function executePostMergeScriptStep(
     return { success: false, error: `Script '${scriptName}' not found in project settings` };
   }
 
-  try {
-    await execAsync(scriptCommand, {
-      cwd,
-      encoding: "utf-8",
-      timeout: 120_000,
-      maxBuffer: 10 * 1024 * 1024,
-    });
+  const backend = getPostMergeScriptSandboxBackend();
+  const result = await backend.run(scriptCommand, {
+    cwd,
+    encoding: "utf-8",
+    timeoutMs: 120_000,
+    maxBuffer: 10 * 1024 * 1024,
+  });
+
+  if (result.exitCode === 0 && !result.signal && !result.timedOut && !result.bufferExceeded && !result.spawnError) {
     return { success: true, output: `Script '${scriptName}' completed successfully` };
-  } catch (err: any) {
-    const stderr = err.stderr?.toString()?.trim() || "";
-    const stdout = err.stdout?.toString()?.trim() || "";
-    const exitCode = err.code ?? err.status;
-    const parts: string[] = [];
-    if (exitCode !== undefined) parts.push(`Exit code: ${exitCode}`);
+  }
+
+  const stderr = result.stderr.trim();
+  const stdout = result.stdout.trim();
+  const parts: string[] = [];
+  if (result.spawnError) {
+    parts.push(result.spawnError.message);
+  } else {
+    if (result.exitCode !== null) parts.push(`Exit code: ${result.exitCode}`);
     if (stdout) parts.push(`stdout: ${truncateWorkflowScriptOutput(stdout)}`);
     if (stderr) parts.push(`stderr: ${truncateWorkflowScriptOutput(stderr)}`);
-    if (!parts.length) parts.push(err.message || "Unknown error");
-    return { success: false, error: parts.join("\n") };
   }
+  if (!parts.length) parts.push("Unknown error");
+  return { success: false, error: parts.join("\n") };
+}
+
+export async function __executePostMergeScriptStepForTests(
+  store: TaskStore,
+  taskId: string,
+  workflowStep: WorkflowStep,
+  cwd: string,
+  settings: Settings,
+): Promise<{ success: boolean; output?: string; error?: string }> {
+  return executePostMergeScriptStep(store, taskId, workflowStep, cwd, settings);
 }
 
 /** Execute a prompt-mode post-merge workflow step using an AI agent in the provided execution directory. */

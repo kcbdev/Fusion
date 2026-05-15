@@ -1,6 +1,7 @@
 import { exec, execSync } from "node:child_process";
 import { promisify } from "node:util";
 
+// Internal git plumbing intentionally bypasses sandbox backends.
 const execAsync = promisify(exec);
 import { delimiter, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { existsSync, realpathSync } from "node:fs";
@@ -38,6 +39,8 @@ import {
 } from "./agent-session-helpers.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
 import { reviewStep, type ReviewVerdict } from "./reviewer.js";
+import { resolveSandboxBackend } from "./sandbox/index.js";
+import type { SandboxBackend } from "./sandbox/types.js";
 import { ModelRegistry, SessionManager, type ToolDefinition, type AgentSession } from "@mariozechner/pi-coding-agent";
 import { PRIORITY_EXECUTE, type AgentSemaphore } from "./concurrency.js";
 import { getRegisteredWorktreePaths, isGitRepository, isInsideWorktreesDir, isRegisteredGitWorktree, isUsableTaskWorktree, type WorktreePool } from "./worktree-pool.js";
@@ -362,51 +365,46 @@ function configuredCommandErrorMessage(result: RunCommandResult): string {
   return parts.length ? parts.join("\n") : "Command failed";
 }
 
+let configuredCommandSandboxBackend: SandboxBackend | null = null;
+
+function getConfiguredCommandSandboxBackend(): SandboxBackend {
+  configuredCommandSandboxBackend ??= resolveSandboxBackend();
+  return configuredCommandSandboxBackend;
+}
+
 async function runConfiguredCommand(
   command: string,
   cwd: string,
   timeoutMs: number,
   extraEnv?: NodeJS.ProcessEnv,
 ): Promise<RunCommandResult> {
-  try {
-    const { stdout, stderr } = await execAsync(command, {
-      cwd,
-      timeout: timeoutMs,
-      maxBuffer: 10 * 1024 * 1024,
-      encoding: "utf-8",
-      ...(extraEnv !== undefined && { env: extraEnv }),
-    });
+  const backend = getConfiguredCommandSandboxBackend();
+  const result = await backend.run(command, {
+    cwd,
+    timeoutMs,
+    maxBuffer: 10 * 1024 * 1024,
+    encoding: "utf-8",
+    ...(extraEnv !== undefined && { env: extraEnv }),
+  });
 
-    return {
-      stdout: stdout?.toString?.() ?? "",
-      stderr: stderr?.toString?.() ?? "",
-      exitCode: 0,
-      signal: null,
-      bufferExceeded: false,
-      timedOut: false,
-    };
-  } catch (error) {
-    const errObj = error as Record<string, unknown>;
-    const code = errObj?.code;
-    const status = typeof errObj?.status === "number" ? errObj.status : null;
-    const exitCode = typeof code === "number" ? code : status;
-    const message = String(errObj?.message ?? "");
+  return {
+    stdout: result.stdout,
+    stderr: result.stderr,
+    exitCode: result.exitCode,
+    signal: result.signal,
+    bufferExceeded: result.bufferExceeded,
+    timedOut: result.timedOut,
+    spawnError: result.spawnError,
+  };
+}
 
-    return {
-      stdout: typeof (errObj?.stdout as { toString?: unknown })?.toString === "function" ? String(errObj.stdout) : "",
-      stderr: typeof (errObj?.stderr as { toString?: unknown })?.toString === "function" ? String(errObj.stderr) : "",
-      exitCode,
-      signal: (errObj?.signal as NodeJS.Signals | null | undefined) ?? null,
-      bufferExceeded:
-        code === "ENOBUFS"
-        || code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
-        || message.includes("maxBuffer"),
-      timedOut:
-        code === "ETIMEDOUT"
-        || (errObj?.killed === true && (errObj?.signal === "SIGTERM" || message.includes("timed out"))),
-      spawnError: code === "ENOENT" || code === "EACCES" ? (error as Error) : undefined,
-    };
-  }
+export async function __runConfiguredCommandForTests(
+  command: string,
+  cwd: string,
+  timeoutMs: number,
+  extraEnv?: NodeJS.ProcessEnv,
+): Promise<RunCommandResult> {
+  return runConfiguredCommand(command, cwd, timeoutMs, extraEnv);
 }
 
 // ── Tool parameter schemas (module-level for reuse in ToolDefinition generics) ──
