@@ -120,6 +120,7 @@ When missions are created through the interview planning workflow, Fusion automa
 - **Assertion text source priority**: `acceptanceCriteria` → `feature.description` → fallback text (`"Verify implementation of: {feature.title}"`)
 - **Assertions are linked to features**: Each auto-generated assertion is automatically linked to its feature, enabling mission validation rollup and enriched planning context
 - **Verification fields**: Milestone and slice verification criteria from the interview are stored in dedicated `verification` fields rather than concatenated into descriptions
+- **Milestone acceptanceCriteria derivation**: explicit `milestone.acceptanceCriteria` from interview output is authoritative. When omitted/blank, Fusion derives a deterministic bulleted summary from child features after creation: prefer `feature.acceptanceCriteria`, fall back to `feature.description`, skip empty contributors, and leave milestone acceptance empty when nothing contributes
 - **Partial plans handled**: Auto-generation is robust to partial plans (missing slices/features or empty criteria) without throwing errors
 
 ### Milestone Text Field Semantics
