@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
   detectMissingArtifacts,
   detectMissingOrStaleArtifacts,
@@ -21,6 +24,32 @@ test("ensureTestArtifacts skips build when nothing is missing", () => {
 
   assert.equal(called, false);
   assert.deepEqual(built, []);
+});
+
+test("ensureTestArtifacts resolves workspace root from nested cwd", () => {
+  const originalCwd = process.cwd();
+  const workspaceRoot = mkdtempSync(path.join(tmpdir(), "fn-4605-workspace-"));
+  const nestedPkg = path.join(workspaceRoot, "packages", "dashboard");
+
+  let capturedCwd = null;
+  try {
+    writeFileSync(path.join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - 'packages/*'\n");
+    mkdirSync(nestedPkg, { recursive: true });
+    process.chdir(nestedPkg);
+
+    ensureTestArtifacts(
+      undefined,
+      (_cmd, _args, cwd) => {
+        capturedCwd = cwd;
+      },
+      () => false,
+    );
+  } finally {
+    process.chdir(originalCwd);
+    rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+
+  assert.equal(path.basename(capturedCwd), path.basename(workspaceRoot));
 });
 
 test("ensureTestArtifacts builds only missing packages", () => {

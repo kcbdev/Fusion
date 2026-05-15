@@ -188,21 +188,43 @@ function run(
   }
 }
 
+function resolveWorkspaceRoot(explicitRootDir) {
+  if (process.env.FUSION_PROJECT_DIR) {
+    return path.resolve(process.env.FUSION_PROJECT_DIR);
+  }
+  if (explicitRootDir) {
+    return path.resolve(explicitRootDir);
+  }
+
+  let current = path.resolve(process.cwd());
+  while (true) {
+    if (existsSync(path.join(current, "pnpm-workspace.yaml"))) {
+      return current;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+
+  return path.resolve(process.cwd());
+}
+
 export function ensureTestArtifacts(
-  rootDir = process.cwd(),
+  rootDir,
   runFn = run,
   existsFn = existsSync,
   statFn = statSync,
   readdirFn = readdirSync,
   runOptions = {},
 ) {
-  const missingOrStale = detectMissingOrStaleArtifacts(rootDir, existsFn, statFn, readdirFn);
+  const resolvedRootDir = resolveWorkspaceRoot(rootDir);
+  const missingOrStale = detectMissingOrStaleArtifacts(resolvedRootDir, existsFn, statFn, readdirFn);
   if (missingOrStale.length === 0) return [];
 
   const names = missingOrStale.map((pkg) => pkg.name);
   console.log(`[test-bootstrap] rebuilding workspace dist artifacts (missing or stale): ${names.join(", ")}`);
   if (runFn === run) {
-    runFn("pnpm", [...names.flatMap((name) => ["--filter", name]), "build"], rootDir, {
+    runFn("pnpm", [...names.flatMap((name) => ["--filter", name]), "build"], resolvedRootDir, {
       ...runOptions,
       pkgEntries: missingOrStale,
       existsFn,
@@ -210,7 +232,7 @@ export function ensureTestArtifacts(
       readdirFn,
     });
   } else {
-    runFn("pnpm", [...names.flatMap((name) => ["--filter", name]), "build"], rootDir);
+    runFn("pnpm", [...names.flatMap((name) => ["--filter", name]), "build"], resolvedRootDir);
   }
   return names;
 }
