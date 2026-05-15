@@ -229,6 +229,7 @@ export function MobileNavBar({
 
   const isMoreActive =
     view === "documents"
+    || view === "reliability"
     || (Boolean(experimentalFeatures?.evalsView) && view === "evals")
     || view === "research"
     || view === "insights"
@@ -605,6 +606,16 @@ export function MobileNavBar({
             >
               <FileText />
               <span>Documents</span>
+            </button>
+
+            <button
+              type="button"
+              className="mobile-more-item"
+              data-testid="mobile-more-item-reliability"
+              onClick={() => handleMoreAction(() => onChangeView("reliability"))}
+            >
+              <Activity />
+              <span>Reliability</span>
             </button>
             {experimentalFeatures?.evalsView && (
               <button

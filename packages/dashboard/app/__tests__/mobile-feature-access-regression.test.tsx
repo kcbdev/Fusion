@@ -159,9 +159,28 @@ describe("Mobile Feature Access Regression Guard", () => {
     expect(screen.getByTestId("mobile-more-item-schedules")).toBeDefined();
     expect(screen.getByTestId("mobile-more-item-github")).toBeDefined();
     expect(screen.getByTestId("mobile-more-item-usage")).toBeDefined();
+    expect(screen.getByTestId("mobile-more-item-reliability")).toBeDefined();
     expect(screen.queryByTestId("mobile-more-item-chat")).toBeNull();
     expect(screen.queryByTestId("mobile-more-item-nodes")).toBeNull();
     expect(screen.getByTestId("mobile-more-item-settings")).toBeDefined();
+  });
+
+  it("reliability view is reachable from mobile More sheet", () => {
+    const props = createDefaultMobileNavProps();
+    render(<MobileNavBar {...props} />);
+
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+
+    const reliabilityItem = screen.getByTestId("mobile-more-item-reliability");
+    expect(reliabilityItem).toBeDefined();
+    fireEvent.click(reliabilityItem);
+    expect(props.onChangeView).toHaveBeenCalledWith("reliability");
+  });
+
+  it("more tab is active when reliability view is open", () => {
+    render(<MobileNavBar {...createDefaultMobileNavProps()} view="reliability" />);
+
+    expect(screen.getByTestId("mobile-nav-tab-more").className).toContain("mobile-nav-tab--active");
   });
 
   it("nodes view is reachable from mobile More sheet when enabled", () => {
