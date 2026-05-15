@@ -255,6 +255,17 @@ Sandbox backend precedence is:
 | `recycleWorktrees` | `boolean` | `false` | Reuse worktrees from a pool for faster startup. |
 | `executorAllowSiblingBranchRename` | `boolean` | `false` | Opt back into the legacy executor behavior that silently allocates sibling branches (`fusion/<task-id>-2`, `-2-2`, …) when the canonical task branch is already checked out elsewhere. When disabled (default), branch conflicts fail loudly, leave the task in `todo` with `status: "failed"`, and expose stranded commits for explicit recovery via [`fn task branch-recovery`](./cli-reference.md#fn-task). See [Task Management → Branch conflict recovery](./task-management.md#branch-conflict-recovery). The dashboard Settings modal exposes the same toggle with warning copy because this legacy mode is discouraged. |
 | `worktreeNaming` | `"random" \| "task-id" \| "task-title"` | `"random"` | Naming mode for new worktree directories. |
+
+#### Worktrunk integration
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `worktrunk.enabled` | `boolean` | `false` | Enables worktrunk integration settings. Tier: global + project. Project overrides global field-by-field in merged settings. Backend execution support lands in FN-4622+; currently harmless/no-op. |
+| `worktrunk.binaryPath` | `string \| undefined` | `undefined` | Optional absolute `worktrunk` binary path. Tier: global + project with field-level precedence (project overrides only this field when set). Backend execution support lands in FN-4622+; currently harmless/no-op. |
+| `worktrunk.onFailure` | `"fail" \| "fallback-native"` | `"fail"` | Delegation failure mode. Tier: global + project with field-level precedence. Backend execution support lands in FN-4622+; currently harmless/no-op. |
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
 | `worktreesDir` | `string` | `undefined` | Optional container directory for task worktrees. Supports absolute paths, project-relative paths, `~` expansion, and `{repo}` token substitution (project root basename). Defaults to `<projectRoot>/.worktrees` when unset and applies to newly-created worktrees/pool scans. |
 | `taskPrefix` | `string` | `"FN"` | Prefix used for newly generated task IDs. |
 | `includeTaskIdInCommit` | `boolean` | `true` | Include task ID as commit scope in generated commits. |
