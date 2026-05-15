@@ -403,6 +403,15 @@ interface OwnedLandedCommit {
   deletions?: number;
 }
 
+export type OwnedLandedClassification =
+  | { kind: "owned-commit"; commit: OwnedLandedCommit }
+  | { kind: "proven-no-op"; baseRef: string; ownDiffEmpty: true }
+  | {
+    kind: "unproven";
+    reason: "foreign-start-point" | "no-owned-commit-foreign-deltas" | "missing-evidence";
+    details: Record<string, unknown>;
+  };
+
 function commitOwnedByTask(taskId: string, subject: string, body: string): boolean {
   return body.includes(`${FUSION_TASK_ID_TRAILER_KEY}: ${taskId}`) || subject.includes(taskId);
 }
@@ -459,6 +468,124 @@ async function findOwnedLandedCommitForTask(rootDir: string, task: Task): Promis
   }
 
   return null;
+}
+
+function toTaskToken(value: string): string {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+export async function classifyOwnedLandedEvidence(
+  rootDir: string,
+  task: Task,
+  opts: { mergeTargetBranch: string },
+): Promise<OwnedLandedClassification> {
+  const branch = task.branch || `fusion/${task.id.toLowerCase()}`;
+  const mergeTargetBranch = opts.mergeTargetBranch;
+
+  const ownedCommit = await findOwnedLandedCommitForTask(rootDir, task);
+  if (ownedCommit) {
+    try {
+      await execFileAsync("git", ["merge-base", "--is-ancestor", ownedCommit.sha, mergeTargetBranch], { cwd: rootDir });
+      return { kind: "owned-commit", commit: ownedCommit };
+    } catch {
+      // fall through
+    }
+  }
+
+  let aheadCount: number | null = null;
+  try {
+    const { stdout } = await execFileAsync("git", ["rev-list", "--count", `${mergeTargetBranch}..${branch}`], {
+      cwd: rootDir,
+      encoding: "utf-8",
+    });
+    aheadCount = Number.parseInt(stdout.trim(), 10);
+    if (!Number.isFinite(aheadCount)) aheadCount = null;
+  } catch {
+    aheadCount = null;
+  }
+
+  let baseReachableFromTarget = false;
+  if (task.baseCommitSha) {
+    try {
+      await execFileAsync("git", ["merge-base", "--is-ancestor", task.baseCommitSha, mergeTargetBranch], { cwd: rootDir });
+      baseReachableFromTarget = true;
+    } catch {
+      baseReachableFromTarget = false;
+    }
+  }
+
+  if (aheadCount === 0 && baseReachableFromTarget) {
+    return { kind: "proven-no-op", baseRef: mergeTargetBranch, ownDiffEmpty: true };
+  }
+
+  if (task.baseCommitSha && !baseReachableFromTarget) {
+    try {
+      const { stdout } = await execFileAsync("git", ["for-each-ref", "--format=%(refname:short)", "refs/heads/fusion"], {
+        cwd: rootDir,
+        encoding: "utf-8",
+      });
+      const refs = stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+      for (const ref of refs) {
+        if (ref === branch) continue;
+        try {
+          await execFileAsync("git", ["merge-base", "--is-ancestor", task.baseCommitSha, ref], { cwd: rootDir });
+          return {
+            kind: "unproven",
+            reason: "foreign-start-point",
+            details: { branch, mergeTargetBranch, baseCommitSha: task.baseCommitSha, foreignRef: ref, aheadCount },
+          };
+        } catch {
+          // continue
+        }
+      }
+    } catch {
+      // continue to missing evidence
+    }
+  }
+
+  if (aheadCount !== null && aheadCount > 0) {
+    try {
+      const { stdout } = await execFileAsync("git", ["log", "--format=%s%x1f%b", `${mergeTargetBranch}..${branch}`], {
+        cwd: rootDir,
+        encoding: "utf-8",
+      });
+      const currentToken = toTaskToken(task.id);
+      const lines = stdout.split("\n").filter(Boolean);
+      let foreignCount = 0;
+      for (const line of lines) {
+        const [subject = "", body = ""] = line.split("\x1f");
+        const trailerMatch = body.match(/Fusion-Task-Id:\s*([^\n\r]+)/i);
+        const trailerToken = trailerMatch ? toTaskToken(trailerMatch[1] || "") : "";
+        const subjectTokenMatch = subject.match(/\((FN-[^)]+)\)/i);
+        const subjectToken = subjectTokenMatch ? toTaskToken(subjectTokenMatch[1] || "") : "";
+        if ((trailerToken && trailerToken !== currentToken) || (subjectToken && subjectToken !== currentToken)) {
+          foreignCount += 1;
+        }
+      }
+      if (foreignCount > 0) {
+        return {
+          kind: "unproven",
+          reason: "no-owned-commit-foreign-deltas",
+          details: { branch, mergeTargetBranch, aheadCount, foreignCommitCount: foreignCount },
+        };
+      }
+    } catch {
+      // continue
+    }
+  }
+
+  return {
+    kind: "unproven",
+    reason: "missing-evidence",
+    details: {
+      branch,
+      mergeTargetBranch,
+      aheadCount,
+      baseCommitShaPresent: Boolean(task.baseCommitSha),
+      baseReachableFromTarget,
+      hasOwnedCommit: Boolean(ownedCommit),
+    },
+  };
 }
 
 /**
