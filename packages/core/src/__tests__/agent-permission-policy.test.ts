@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES,
+  AGENT_PERMISSION_POLICY_EXEMPT_TOOL_EXAMPLES,
   DEFAULT_AGENT_PERMISSION_POLICY_PRESET_ID,
   getBuiltInAgentPermissionPolicyPresets,
   isAgentPermissionPolicyPresetId,
@@ -7,6 +9,10 @@ import {
   resolveEffectiveAgentPermissionPolicy,
 } from "../agent-permission-policy.js";
 import { AGENT_PERMISSION_POLICY_ACTION_CATEGORIES } from "../types.js";
+import {
+  ACTION_GATE_TASK_AGENT_MANAGEMENT_TOOLS,
+  COORDINATION_EXEMPT_TOOLS,
+} from "../../../engine/src/gating-classifications.js";
 
 describe("agent-permission-policy", () => {
   it("returns the canonical built-in preset catalog", () => {
@@ -67,5 +73,30 @@ describe("agent-permission-policy", () => {
     expect(isAgentPermissionPolicyPresetId("approval-required")).toBe(true);
     expect(isAgentPermissionPolicyPresetId("locked-down")).toBe(true);
     expect(isAgentPermissionPolicyPresetId("custom")).toBe(true);
+  });
+
+  it("provides non-empty tool examples for every action category", () => {
+    for (const category of AGENT_PERMISSION_POLICY_ACTION_CATEGORIES) {
+      expect(AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES[category].length).toBeGreaterThan(0);
+    }
+  });
+
+  it("includes key discoverability examples", () => {
+    expect(AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES.network_api).toContain("fn_research_run (web/research)");
+    expect(AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES.task_agent_mutation).toContain("fn_task_create");
+    expect(AGENT_PERMISSION_POLICY_EXEMPT_TOOL_EXAMPLES).toContain("fn_send_message");
+  });
+
+  it("keeps task-agent mutation examples aligned with action-gate tool classifications", () => {
+    for (const toolName of AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES.task_agent_mutation) {
+      expect(toolName.startsWith("fn_")).toBe(true);
+      expect(ACTION_GATE_TASK_AGENT_MANAGEMENT_TOOLS.has(toolName)).toBe(true);
+    }
+  });
+
+  it("keeps exempt examples aligned with coordination-exempt classifications", () => {
+    for (const toolName of AGENT_PERMISSION_POLICY_EXEMPT_TOOL_EXAMPLES) {
+      expect(COORDINATION_EXEMPT_TOOLS).toContain(toolName);
+    }
   });
 });

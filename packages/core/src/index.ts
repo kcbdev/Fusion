@@ -61,6 +61,8 @@ export {
 } from "./agent-permissions.js";
 export {
   DEFAULT_AGENT_PERMISSION_POLICY_PRESET_ID,
+  AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES,
+  AGENT_PERMISSION_POLICY_EXEMPT_TOOL_EXAMPLES,
   getBuiltInAgentPermissionPolicyPresets,
   resolveAgentPermissionPolicyPreset,
   normalizeAgentPermissionPolicyFromPreset,
