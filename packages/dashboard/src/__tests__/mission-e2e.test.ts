@@ -193,7 +193,7 @@ function createMockMissionStore() {
       missions.delete(id);
     }),
 
-    addMilestone: vi.fn((missionId: string, input: { title: string; description?: string; dependencies?: string[]; verification?: string }) => {
+    addMilestone: vi.fn((missionId: string, input: { title: string; description?: string; dependencies?: string[]; verification?: string; acceptanceCriteria?: string }) => {
       const milestone: Milestone = {
         id: generateMilestoneId(),
         missionId,
@@ -204,6 +204,7 @@ function createMockMissionStore() {
         interviewState: "not_started",
         dependencies: input.dependencies ?? [],
         verification: input.verification,
+        acceptanceCriteria: input.acceptanceCriteria,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -1346,6 +1347,7 @@ describe("Mission API", () => {
           title: "Milestone A",
           description: "Detailed milestone",
           dependencies: ["MS-UPSTREAM-1"],
+          acceptanceCriteria: "Milestone acceptance bar",
         }),
         { "content-type": "application/json" },
       );
@@ -1354,6 +1356,18 @@ describe("Mission API", () => {
       expect(created.body.title).toBe("Milestone A");
       expect(created.body.description).toBe("Detailed milestone");
       expect(created.body.dependencies).toEqual(["MS-UPSTREAM-1"]);
+      expect(created.body.acceptanceCriteria).toBe("Milestone acceptance bar");
+
+      const afterCreate = await get(app, `/api/missions/${mission.id}/milestones`);
+      expect(afterCreate.status).toBe(200);
+      expect(afterCreate.body).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: created.body.id,
+            acceptanceCriteria: "Milestone acceptance bar",
+          }),
+        ]),
+      );
 
       const missingMission = await request(
         app,
@@ -1439,6 +1453,17 @@ describe("Mission API", () => {
       );
       expect(updateAcceptanceCriteria.status).toBe(200);
       expect(updateAcceptanceCriteria.body.acceptanceCriteria).toBe("Acceptance ready");
+
+      const afterPatch = await get(app, `/api/missions/${mission.id}/milestones`);
+      expect(afterPatch.status).toBe(200);
+      expect(afterPatch.body).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: milestone.id,
+            acceptanceCriteria: "Acceptance ready",
+          }),
+        ]),
+      );
 
       const malformedAcceptanceCriteria = await request(
         app,

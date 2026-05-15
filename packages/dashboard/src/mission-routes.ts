@@ -1145,7 +1145,7 @@ export function createMissionRouter(
     "/:missionId/milestones",
     catchTypedHandler(async (req, res) => {
       const { missionId } = req.params;
-      const { title, description, dependencies } = req.body;
+      const { title, description, dependencies, acceptanceCriteria } = req.body;
 
       if (!validateMissionId(missionId)) {
         throw badRequest("Invalid mission ID format");
@@ -1159,11 +1159,13 @@ export function createMissionRouter(
       const validatedTitle = validateTitle(title);
       const validatedDescription = validateDescription(description);
       const validatedDependencies = validateStringArray(dependencies, "dependencies");
+      const validatedAcceptanceCriteria = validateDescription(acceptanceCriteria);
 
       const input: MilestoneCreateInput = {
         title: validatedTitle,
         description: validatedDescription,
         dependencies: validatedDependencies,
+        acceptanceCriteria: validatedAcceptanceCriteria,
       };
 
       const milestone = missionStore.addMilestone(missionId, input);
