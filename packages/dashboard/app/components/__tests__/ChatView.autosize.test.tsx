@@ -198,6 +198,77 @@ describe("ChatView composer autosize", () => {
     }
   });
 
+  it("grows composer height as direct-chat content grows below cap", async () => {
+    renderChatView();
+
+    const textarea = screen.getByPlaceholderText("Type a message...") as HTMLTextAreaElement;
+    Object.defineProperty(textarea, "scrollHeight", {
+      configurable: true,
+      get: () => 40 + textarea.value.split("\n").length * 20,
+    });
+
+    await userEvent.type(textarea, "one");
+    const oneLineHeight = Number.parseInt(textarea.style.height, 10);
+
+    await userEvent.type(textarea, "\nTwo\nThree");
+    const threeLineHeight = Number.parseInt(textarea.style.height, 10);
+
+    expect(threeLineHeight).toBe(clampChatInputHeight(textarea.scrollHeight));
+    expect(threeLineHeight).toBeGreaterThan(oneLineHeight);
+  });
+
+  it("grows composer height in rooms scope", async () => {
+    localStorage.setItem("fusion:chat-scope", "rooms");
+    renderChatView();
+
+    const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
+    Object.defineProperty(textarea, "scrollHeight", {
+      configurable: true,
+      get: () => 40 + textarea.value.length,
+    });
+
+    await userEvent.type(textarea, "line one\nline two\nline three");
+
+    expect(textarea.style.height).toBe(`${clampChatInputHeight(textarea.scrollHeight)}px`);
+    expect(Number.parseInt(textarea.style.height, 10)).toBeGreaterThan(clampChatInputHeight(40));
+  });
+
+  it("recomputes rooms composer height on room switch", async () => {
+    localStorage.setItem("fusion:chat-scope", "rooms");
+    const roomTwo = { ...roomOne, id: "room-002", name: "Room Two", slug: "room-two" };
+    localStorage.setItem("fusion:chat-draft:rooms:room-001", "this is a much longer room draft");
+    localStorage.setItem("fusion:chat-draft:rooms:room-002", "ok");
+
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "scrollHeight");
+    Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        return (this as HTMLTextAreaElement).value.length > 6 ? 220 : 60;
+      },
+    });
+
+    setup({}, { rooms: [roomOne, roomTwo], activeRoom: roomOne });
+    const { rerender } = renderChatView();
+    const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
+
+    await waitFor(() => {
+      expect(textarea).toHaveValue("this is a much longer room draft");
+      expect(textarea.style.height).toBe(`${clampChatInputHeight(220)}px`);
+    });
+
+    setup({}, { rooms: [roomOne, roomTwo], activeRoom: roomTwo });
+    rerender(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+    await waitFor(() => {
+      expect(textarea).toHaveValue("ok");
+      expect(textarea.style.height).toBe(`${clampChatInputHeight(60)}px`);
+    });
+
+    if (originalScrollHeight) {
+      Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", originalScrollHeight);
+    }
+  });
+
   it("uses the same clamp for direct typing and programmatic resets", async () => {
     const sendMessage = vi.fn();
     setup({ sendMessage });
