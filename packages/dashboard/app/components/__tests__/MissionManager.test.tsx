@@ -4239,6 +4239,7 @@ describe("MissionManager", () => {
 
     it("keeps empty-state nudge when assertions and feature acceptance criteria are both missing", async () => {
       const missionDetail = JSON.parse(JSON.stringify(mockMissionDetail)) as typeof mockMissionDetail;
+      missionDetail.milestones[0].acceptanceCriteria = "";
       missionDetail.milestones[0].slices[0].features = [
         {
           ...missionDetail.milestones[0].slices[0].features[0],
@@ -4255,8 +4256,31 @@ describe("MissionManager", () => {
       expect(screen.getAllByText(emptyAssertionsCopy)).toHaveLength(1);
     });
 
+    it("hides feature acceptance rollup when milestone acceptance criteria already exists", async () => {
+      const missionDetail = JSON.parse(JSON.stringify(mockMissionDetail)) as typeof mockMissionDetail;
+      missionDetail.milestones[0].acceptanceCriteria = "- Session handling: Session refresh succeeds without logout";
+      missionDetail.milestones[0].slices[0].features = [
+        {
+          ...missionDetail.milestones[0].slices[0].features[0],
+          id: "F-DERIVED-1",
+          title: "Session handling",
+          acceptanceCriteria: "Session refresh succeeds without logout",
+        },
+      ];
+
+      globalThis.fetch = createDetailFetchMockForMissionDetail(missionDetail);
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+      fireEvent.click(await screen.findByText("Build Auth System"));
+      await waitForDetailLoaded();
+
+      expect(screen.getAllByText(/Acceptance:/).length).toBeGreaterThan(0);
+      expect(screen.queryByTestId("milestone-feature-acceptance-rollup")).not.toBeInTheDocument();
+    });
+
     it("shows feature acceptance rollup instead of false empty-state when assertions are absent", async () => {
       const missionDetail = JSON.parse(JSON.stringify(mockMissionDetail)) as typeof mockMissionDetail;
+      missionDetail.milestones[0].acceptanceCriteria = "";
       missionDetail.milestones[0].slices[0].features = [
         {
           ...missionDetail.milestones[0].slices[0].features[0],

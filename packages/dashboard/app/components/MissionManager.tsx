@@ -3423,7 +3423,9 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                                   )}
                                 </div>
                               ))}
-                              {(!assertionsByMilestone.get(milestone.id) || assertionsByMilestone.get(milestone.id)?.length === 0) && !isCreatingAssertion && (
+                              {(!assertionsByMilestone.get(milestone.id) || assertionsByMilestone.get(milestone.id)?.length === 0)
+                                && !isCreatingAssertion
+                                && !milestone.acceptanceCriteria?.trim() && (
                                 featuresWithAcceptanceCriteria.length > 0 ? (
                                   // Product contract (2026-05-15 #product): completion criteria canonically
                                   // live on MissionFeature.acceptanceCriteria; MissionContractAssertion rows
