@@ -536,6 +536,8 @@ describe("useTasks", () => {
         status: "planning",
         columnMovedAt: "2026-01-02T00:00:00Z",
         executionStartedAt: "2026-01-01T23:50:00Z",
+        firstExecutionAt: "2026-01-01T23:50:00Z",
+        cumulativeActiveMs: 240_000,
         worktree: "/tmp/fn-001",
         modifiedFiles: ["packages/dashboard/app/components/QuickChatFAB.tsx"],
         timedExecutionMs: 120_000,
@@ -576,6 +578,8 @@ describe("useTasks", () => {
         }),
         columnMovedAt: undefined,
         executionStartedAt: undefined,
+        firstExecutionAt: undefined,
+        cumulativeActiveMs: undefined,
         worktree: undefined,
         modifiedFiles: undefined,
         timedExecutionMs: undefined,
@@ -591,6 +595,8 @@ describe("useTasks", () => {
       expect(result.current.tasks[0].status).toBe("executing");
       expect(result.current.tasks[0].columnMovedAt).toBe("2026-01-02T00:00:00Z");
       expect(result.current.tasks[0].executionStartedAt).toBe("2026-01-01T23:50:00Z");
+      expect(result.current.tasks[0].firstExecutionAt).toBe("2026-01-01T23:50:00Z");
+      expect(result.current.tasks[0].cumulativeActiveMs).toBe(240_000);
       expect(result.current.tasks[0].worktree).toBe("/tmp/fn-001");
       expect(result.current.tasks[0].modifiedFiles).toEqual([
         "packages/dashboard/app/components/QuickChatFAB.tsx",

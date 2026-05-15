@@ -35,6 +35,8 @@ function mergeSameColumnTask(current: Task, incoming: Task): Task {
     columnMovedAt: current.columnMovedAt ?? incoming.columnMovedAt,
     executionStartedAt: current.executionStartedAt ?? incoming.executionStartedAt,
     executionCompletedAt: current.executionCompletedAt ?? incoming.executionCompletedAt,
+    firstExecutionAt: current.firstExecutionAt ?? incoming.firstExecutionAt,
+    cumulativeActiveMs: incoming.cumulativeActiveMs ?? current.cumulativeActiveMs,
     worktree: incoming.worktree ?? current.worktree,
     modifiedFiles: incoming.modifiedFiles ?? current.modifiedFiles,
     timedExecutionMs: incoming.timedExecutionMs ?? current.timedExecutionMs,
