@@ -313,8 +313,8 @@ describe("soft-blocker auto-finalize reliability interactions (real git)", () =>
         id: "FN-4653-SCHED-DOWNSTREAM",
         column: "todo",
         paused: false,
-        status: null,
-        error: null,
+        status: undefined,
+        error: undefined,
         branch: "fusion/fn-4653-scheduler-downstream",
         blockedBy: "FN-4653-SCHED",
       });
