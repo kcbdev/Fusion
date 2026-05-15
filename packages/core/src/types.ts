@@ -4606,6 +4606,41 @@ export const AGENT_PERMISSION_POLICY_ACTION_CATEGORIES: readonly PermanentAgentS
   "task_agent_mutation",
 ] as const;
 
+export const AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES: Record<
+  PermanentAgentSensitiveActionCategory,
+  readonly string[]
+> = {
+  git_write: ["git commit", "git push", "git merge", "git branch -d", "git worktree add", "write", "edit"],
+  file_write_delete: ["write", "edit", "fn_task_attach"],
+  command_execution: ["bash (non-git)", "read", "find", "grep", "ls"],
+  network_api: ["fn_research_run (web/research)"],
+  task_agent_mutation: [
+    "fn_task_create",
+    "fn_delegate_task",
+    "fn_task_import_github",
+    "fn_task_import_github_issue",
+    "fn_spawn_agent",
+    "fn_update_agent_config",
+    "fn_update_identity",
+  ],
+};
+
+export const AGENT_PERMISSION_POLICY_EXEMPT_TOOL_EXAMPLES: readonly string[] = [
+  "fn_send_message",
+  "fn_post_room_message",
+  "fn_read_messages",
+  "fn_task_log",
+  "fn_task_done",
+  "fn_heartbeat_done",
+  "fn_task_document_write",
+  "fn_task_document_read",
+  "fn_memory_search",
+  "fn_memory_get",
+  "fn_memory_append",
+  "fn_read_evaluations",
+  "fn_reflect_on_performance",
+];
+
 export const AGENT_PROVISIONING_APPROVAL_MODES = ["always", "trusted-only", "never"] as const;
 export type AgentProvisioningApprovalMode = (typeof AGENT_PROVISIONING_APPROVAL_MODES)[number];
 
