@@ -15,10 +15,11 @@ function withStoreEvents<T extends Record<string, unknown>>(store: T): T & { on:
 
 function createTriageTask(overrides: Partial<Task> & Pick<Task, "id">): Task {
   const now = "2026-05-15T12:00:00.000Z";
+  const { id, ...rest } = overrides;
   return {
-    id: overrides.id,
-    title: overrides.title ?? overrides.id,
-    description: overrides.description ?? overrides.id,
+    id,
+    title: overrides.title ?? id,
+    description: overrides.description ?? id,
     priority: overrides.priority ?? "normal",
     column: "triage",
     steps: [],
@@ -27,7 +28,7 @@ function createTriageTask(overrides: Partial<Task> & Pick<Task, "id">): Task {
     createdAt: overrides.createdAt ?? now,
     updatedAt: overrides.updatedAt ?? now,
     columnMovedAt: overrides.columnMovedAt ?? now,
-    ...overrides,
+    ...rest,
   } as Task;
 }
 
