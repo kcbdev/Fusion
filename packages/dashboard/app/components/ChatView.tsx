@@ -2571,6 +2571,17 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                 )}
                 <div ref={messagesEndRef} />
               </div>
+              {rooms.activeRoom && isUserScrolling && (
+                <button
+                  type="button"
+                  className="btn btn-sm chat-jump-to-latest"
+                  data-testid="chat-jump-to-latest"
+                  onClick={scrollToBottom}
+                >
+                  <ChevronDown size={14} />
+                  Latest
+                </button>
+              )}
             </>
           ) : (
             <div className="chat-room-empty-pane" data-testid="chat-rooms-empty-pane">Select a room or create one</div>
