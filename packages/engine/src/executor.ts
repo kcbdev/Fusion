@@ -5,7 +5,7 @@ const execAsync = promisify(exec);
 import { delimiter, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { existsSync, realpathSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
-import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode } from "@fusion/core";
+import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings } from "@fusion/core";
 import { RetryStormError, serializeRetryStormError } from "@fusion/core";
 import {
   ApprovalRequestStore,
@@ -70,8 +70,9 @@ import {
 } from "./agent-instructions.js";
 import { buildPromptLayers, collapsePromptLayers } from "./prompt-layers.js";
 import type { AgentReflectionService } from "./agent-reflection.js";
-import { createRunAuditor, generateSyntheticRunId, type EngineRunContext } from "./run-audit.js";
+import { createRunAuditor, generateSyntheticRunId, type EngineRunContext, type RunAuditor } from "./run-audit.js";
 import { AutoRecoveryDispatcher } from "./auto-recovery.js";
+import { createFileScopeAutoRecoveryHandler } from "./auto-recovery-handlers/file-scope.js";
 import { ReadonlyViolationError, filterCustomToolsForReadonly } from "./workflow-step-tool-policy.js";
 import { evaluateSpecStaleness, getPromptPath } from "./spec-staleness.js";
 import {
@@ -830,6 +831,26 @@ export class TaskExecutor {
   private workflowRerunWatchdogs = new Map<string, ReturnType<typeof setTimeout>>();
   /** Set of ephemeral spawned agent IDs with in-flight cleanup (prevents duplicate deletion attempts). */
   private pendingEphemeralDeletions = new Set<string>();
+
+  private getAutoRecoveryDispatcher(audit: RunAuditor): AutoRecoveryDispatcher {
+    if (this.options.autoRecoveryDispatcher) return this.options.autoRecoveryDispatcher;
+    const fileScopeHandler = createFileScopeAutoRecoveryHandler({
+      taskStore: this.store,
+      runAudit: audit,
+      logger: executorLog,
+      spawnAgent: async () => ({ agentId: "unavailable" }),
+      classifyPatchIds: async () => ({ unique: [], alreadyUpstream: [] }),
+      settings: () => ({ autoRecovery: { mode: "deterministic-only", maxRetries: 3 } } as ProjectSettings),
+    });
+    return new AutoRecoveryDispatcher({
+      taskStore: this.store,
+      auditEmitter: audit,
+      handlers: {
+        issueRetry: fileScopeHandler.issueRetry.bind(fileScopeHandler),
+        spawnAiRecovery: fileScopeHandler.spawnAiRecovery.bind(fileScopeHandler),
+      },
+    });
+  }
 
   private async renewTaskLease(
     taskId: string,
@@ -4255,7 +4276,7 @@ export class TaskExecutor {
             await this.store.logEntry(task.id, `[recovery] contamination auto-recovery failed: ${recoveryMessage}`, undefined, this.currentRunContext);
           }
 
-          const autoRecoveryDispatcher = this.options.autoRecoveryDispatcher ?? new AutoRecoveryDispatcher({ taskStore: this.store, auditEmitter: audit });
+          const autoRecoveryDispatcher = this.getAutoRecoveryDispatcher(audit);
           const decision = await autoRecoveryDispatcher.dispatch({
             class: "branch-cross-contamination",
             taskId: task.id,
@@ -4293,7 +4314,7 @@ export class TaskExecutor {
             ].join(" ");
             const tripwireMessage = `Branch conflict tripwire fired after ${conflictCount} events (threshold ${this.BRANCH_CONFLICT_TRIPWIRE_THRESHOLD}). ${details}`;
             await this.store.logEntry(task.id, `[recovery] ${tripwireMessage}`, undefined, this.currentRunContext);
-            const autoRecoveryDispatcher = this.options.autoRecoveryDispatcher ?? new AutoRecoveryDispatcher({ taskStore: this.store, auditEmitter: audit });
+            const autoRecoveryDispatcher = this.getAutoRecoveryDispatcher(audit);
             const decision = await autoRecoveryDispatcher.dispatch({
               class: "branch-conflict-tripwire",
               taskId: task.id,
@@ -4337,7 +4358,7 @@ export class TaskExecutor {
             });
           }
           if (outcome === "retry") {
-            const autoRecoveryDispatcher = this.options.autoRecoveryDispatcher ?? new AutoRecoveryDispatcher({ taskStore: this.store, auditEmitter: audit });
+            const autoRecoveryDispatcher = this.getAutoRecoveryDispatcher(audit);
             const decision = await autoRecoveryDispatcher.dispatch({
               class: "branch-conflict-recovery-exhausted",
               taskId: task.id,
@@ -7267,10 +7288,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
       `Run 'fn task branch-recovery ${task.id}' to inspect candidates, then reclaim the existing branch or discard prior work explicitly.`;
     await this.store.logEntry(task.id, this.formatBranchConflictLifecycleLog(task.id, error), undefined, this.currentRunContext);
     await this.store.appendAgentLog(task.id, "Branch conflict recovery required", "tool_error", this.formatBranchConflictAgentLog(task.id, error), "executor");
-    const autoRecoveryDispatcher = this.options.autoRecoveryDispatcher ?? new AutoRecoveryDispatcher({
-      taskStore: this.store,
-      auditEmitter: createRunAuditor(this.store, this.currentRunContext),
-    });
+    const autoRecoveryDispatcher = this.getAutoRecoveryDispatcher(createRunAuditor(this.store, this.currentRunContext));
     const decision = await autoRecoveryDispatcher.dispatch({
       class: "branch-conflict-unrecoverable",
       taskId: task.id,
