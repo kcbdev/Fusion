@@ -851,6 +851,14 @@ Key server capabilities:
 - Root composition: `packages/dashboard/app/App.tsx`
 - Core board components: `Board.tsx`, `Column.tsx`, `TaskCard.tsx`, `TaskDetailModal.tsx`, `ListView.tsx`
 - **Board column ordering (board view only)**: `todo` cards mirror scheduler pickup order (priority descending, then `createdAt` ascending/FIFO within each priority tier, then task ID ascending). `triage`, `in-progress`, and `archived` use priority descending then task ID ascending, with missing/invalid priority normalized to `normal`. `done` is completion-recency ordered (`columnMovedAt`, then `updatedAt`, then `createdAt`, newest first). In `in-review`, merge-active tasks (`status === "merging"`, `"merging-pr"`, or `"merging-fix"`) are pinned above non-merging tasks, with priority-then-ID ordering within each group.
+
+#### Refinement task routing
+
+- `fn_task_refine` creates child tasks in `column: "triage"` with `sourceType: "task_refine"` and a dependency on the source task. Refinements are never routed directly to `todo`.
+- Refinements still require normal triage specification (PROMPT.md with valid `File Scope`) before execution routing.
+- To prevent starvation under large same-priority planning backlogs (FN-4647 pattern), triage polling now prefers `task_refine` rows over non-refinement rows as an ordering tiebreaker within the same priority band.
+- Approval semantics are unchanged: with `requirePlanApproval=true`, refinements stop at `status: "awaiting-approval"`; otherwise they move to `todo` after spec finalization.
+- Regression coverage lives in `packages/engine/src/__tests__/triage-refinement-routing.test.ts` and locks four guarantees: bounded promotion under backlog pressure, approval-gate preservation, PROMPT-before-`todo` invariant, and unchanged baseline ordering for non-refinement-only triage sets.
 - Task detail surface is shared through `TaskDetailContent` (exported from `TaskDetailModal.tsx`): desktop/tablet `ListView` renders it inline in the split right pane, while mobile and non-list entry points continue using `TaskDetailModal`.
 - In desktop split mode, `ListView` now uses a compact sidebar-first control layout (count/actions/summary chips + collapsible "View options" panel) to keep list controls dense alongside the inline detail pane; mobile keeps the card-first flow with a toolbar "View options" entry point for the same visibility/filter toggles.
 - Chat system UI: `ChatView.tsx`, `QuickChatFAB.tsx`
