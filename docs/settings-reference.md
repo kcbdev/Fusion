@@ -262,9 +262,9 @@ Sandbox backend precedence is:
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `worktrunk.enabled` | `boolean` | `false` | Enables worktrunk integration settings. Tier: global + project. Project overrides global field-by-field in merged settings. Backend execution support lands in FN-4622+; currently harmless/no-op. |
-| `worktrunk.binaryPath` | `string \| undefined` | `undefined` | Optional absolute `worktrunk` binary path. Tier: global + project with field-level precedence (project overrides only this field when set). Backend execution support lands in FN-4622+; currently harmless/no-op. |
-| `worktrunk.onFailure` | `"fail" \| "fallback-native"` | `"fail"` | Delegation failure mode. Tier: global + project with field-level precedence. Backend execution support lands in FN-4622+; currently harmless/no-op. |
+| `worktrunk.enabled` | `boolean` | `false` | Enables `WorktreeBackend` selection in `packages/engine/src/worktree-backend.ts`. Tier: global + project, merged field-by-field with project overrides. |
+| `worktrunk.binaryPath` | `string \| undefined` | `undefined` | Optional absolute `worktrunk` binary path passed to the worktrunk backend. Tier: global + project with field-level precedence (project overrides only this field when set). |
+| `worktrunk.onFailure` | `"fail" \| "fallback-native"` | `"fail"` | Worktrunk failure mode: `fail` rethrows the backend error; `fallback-native` retries with native `git worktree` and records fallback audit telemetry. Auto-install, dashboard UX, and CLI setter ergonomics remain downstream follow-ups. |
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
