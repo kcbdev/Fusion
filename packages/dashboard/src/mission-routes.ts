@@ -2930,7 +2930,8 @@ export function createMissionRouter(
 
       try {
         const ip = req.ip || req.socket.remoteAddress || "unknown";
-        const rootDir = await getRootDirForRequest(req);
+        const { store: scopedStore } = await getProjectContext(req);
+        const rootDir = scopedStore.getRootDir();
 
         // Get mission context for the interview
         const mission = missionStore.getMission(milestone.missionId);
@@ -2946,7 +2947,8 @@ export function createMissionRouter(
           milestoneId,
           milestone.title,
           missionContext,
-          rootDir
+          rootDir,
+          scopedStore,
         );
         res.status(201).json({ sessionId });
       } catch (err: unknown) {
@@ -2998,8 +3000,9 @@ export function createMissionRouter(
       try {
         const { submitTargetInterviewResponse } = await import("./milestone-slice-interview.js");
 
-        const rootDir = await getRootDirForRequest(req);
-        const result = await submitTargetInterviewResponse(sessionId, responses, rootDir);
+        const { store: scopedStore } = await getProjectContext(req);
+        const rootDir = scopedStore.getRootDir();
+        const result = await submitTargetInterviewResponse(sessionId, responses, rootDir, scopedStore);
         res.json(result);
       } catch (err: unknown) {
         const errName = err instanceof Error ? err.name : "";
@@ -3161,8 +3164,9 @@ export function createMissionRouter(
       try {
         const { retryTargetInterviewSession } = await import("./milestone-slice-interview.js");
 
-        const rootDir = await getRootDirForRequest(req);
-        await retryTargetInterviewSession(sessionId, rootDir);
+        const { store: scopedStore } = await getProjectContext(req);
+        const rootDir = scopedStore.getRootDir();
+        await retryTargetInterviewSession(sessionId, rootDir, scopedStore);
         res.json({ success: true, sessionId });
       } catch (err: unknown) {
         const errName = err instanceof Error ? err.name : "";
@@ -3271,7 +3275,8 @@ export function createMissionRouter(
 
       try {
         const ip = req.ip || req.socket.remoteAddress || "unknown";
-        const rootDir = await getRootDirForRequest(req);
+        const { store: scopedStore } = await getProjectContext(req);
+        const rootDir = scopedStore.getRootDir();
 
         // Get mission hierarchy context for the interview
         const milestone = missionStore.getMilestone(slice.milestoneId);
@@ -3290,7 +3295,8 @@ export function createMissionRouter(
           sliceId,
           slice.title,
           missionContext,
-          rootDir
+          rootDir,
+          scopedStore,
         );
         res.status(201).json({ sessionId });
       } catch (err: unknown) {
@@ -3342,8 +3348,9 @@ export function createMissionRouter(
       try {
         const { submitTargetInterviewResponse } = await import("./milestone-slice-interview.js");
 
-        const rootDir = await getRootDirForRequest(req);
-        const result = await submitTargetInterviewResponse(sessionId, responses, rootDir);
+        const { store: scopedStore } = await getProjectContext(req);
+        const rootDir = scopedStore.getRootDir();
+        const result = await submitTargetInterviewResponse(sessionId, responses, rootDir, scopedStore);
         res.json(result);
       } catch (err: unknown) {
         const errName = err instanceof Error ? err.name : "";
@@ -3505,8 +3512,9 @@ export function createMissionRouter(
       try {
         const { retryTargetInterviewSession } = await import("./milestone-slice-interview.js");
 
-        const rootDir = await getRootDirForRequest(req);
-        await retryTargetInterviewSession(sessionId, rootDir);
+        const { store: scopedStore } = await getProjectContext(req);
+        const rootDir = scopedStore.getRootDir();
+        await retryTargetInterviewSession(sessionId, rootDir, scopedStore);
         res.json({ success: true, sessionId });
       } catch (err: unknown) {
         const errName = err instanceof Error ? err.name : "";
