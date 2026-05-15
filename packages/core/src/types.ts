@@ -1884,6 +1884,27 @@ export interface OpenRouterProviderPreferences {
   require_parameters?: boolean;
 }
 
+export type WorktrunkOnFailure = "fail" | "fallback-native";
+
+/** Worktrunk integration settings. Mirrored across global and project tiers
+ *  with field-level project-overrides-global precedence. See
+ *  `resolveWorktrunkSettings` and FN-4621 in docs/settings-reference.md. */
+export interface WorktrunkSettings {
+  /** Master toggle. When true, Fusion delegates worktree create/sync/prune/remove
+   *  to the external `worktrunk` CLI via the WorktreeBackend abstraction (FN-4622).
+   *  Default: false. */
+  enabled?: boolean;
+  /** Absolute path to the `worktrunk` binary. When undefined, Fusion resolves via
+   *  $PATH and falls back to the auto-install flow (FN-4624). */
+  binaryPath?: string;
+  /** Behavior when a delegated worktrunk operation fails.
+   *  - "fail" (default): operation fails, task is paused with
+   *    pausedReason "worktrunk_operation_failed", error surfaces to dashboard.
+   *  - "fallback-native": fall back to Fusion's built-in worktree-pool and
+   *    emit a one-shot dashboard alert. */
+  onFailure?: WorktrunkOnFailure;
+}
+
 export interface GlobalSettings {
   /** Theme mode preference: dark, light, or system (follows OS). Default: "dark". */
   themeMode?: ThemeMode;
@@ -2219,6 +2240,10 @@ export interface GlobalSettings {
    *  Stores both provider configs, active provider selection, token strategy,
    *  and lifecycle restart metadata for remote tunnel orchestration. */
   remoteAccess?: RemoteAccessProjectSettings;
+  /** Global defaults for worktrunk integration.
+   *  Merged with project-level `worktrunk` field-by-field in `getSettings()`/
+   *  `getSettingsFast()` so partial project overrides inherit unspecified fields. */
+  worktrunk?: WorktrunkSettings;
   /** Global-scoped experimental feature toggles.
    *  Each key is a feature flag name, and the value indicates whether it is enabled.
    *  Features not present in this map are considered disabled (fallback to false).
@@ -2439,6 +2464,10 @@ export interface ProjectSettings {
    *  - "task-title": Use a slugified version of the task title (e.g., fix-login-bug)
    *  Default: "random". */
   worktreeNaming?: "random" | "task-id" | "task-title";
+  /** Project-level worktrunk integration overrides.
+   *  Merged with global `worktrunk` field-by-field so partial project values
+   *  override only specified fields and inherit the rest. */
+  worktrunk?: WorktrunkSettings;
   /** Optional container directory for task worktrees.
    *  When unset, worktrees default to `<projectRoot>/.worktrees`.
    *  Supports leading `~` expansion and the `{repo}` token (basename of the project root).
