@@ -120,6 +120,7 @@ describe("FN-4598 TaskCard footer chip alignment", () => {
       expect(textStyle.display).toBe("inline-flex");
       expect(textStyle.alignItems).toBe("center");
       expect(textStyle.lineHeight).toBe("1");
+      expect(textStyle.transform).toMatch(/translateY\(1px\)|matrix\(1,\s*0,\s*0,\s*1,\s*0,\s*1\)/);
     }
   });
 });
