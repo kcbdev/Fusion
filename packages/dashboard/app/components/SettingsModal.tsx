@@ -206,6 +206,14 @@ function formatMemoryFileOptionLabel(file: MemoryFileInfo): string {
   return truncateMiddle(fullLabel, MEMORY_FILE_OPTION_LABEL_MAX_CHARS);
 }
 
+function toCommaSeparatedInput(values?: string[]): string {
+  return values?.join(", ") ?? "";
+}
+
+function fromCommaSeparatedInput(value: string): string[] {
+  return value.split(",").map((item) => item.trim()).filter((item) => item.length > 0);
+}
+
 const SETTINGS_SECTIONS: SettingsSection[] = [
   // Account group (scope-less items — independent of settings storage)
   { id: "__account_header", label: "Account", scope: undefined, isGroupHeader: true },
@@ -2584,6 +2592,202 @@ export function SettingsModal({
                 flow and publishes them under the opencode-go provider in model pickers.
               </small>
             </div>
+            <details>
+              <summary>OpenRouter advanced</summary>
+              <div className="form-group">
+                <label htmlFor="openrouterAppAttributionReferer">OpenRouter HTTP-Referer</label>
+                <input
+                  id="openrouterAppAttributionReferer"
+                  className="input"
+                  placeholder="https://runfusion.ai"
+                  value={form.openrouterAppAttribution?.referer ?? ""}
+                  onChange={(e) => setForm((f) => ({
+                    ...f,
+                    openrouterAppAttribution: {
+                      ...(f.openrouterAppAttribution || {}),
+                      referer: e.target.value,
+                    },
+                  }))}
+                />
+                <small>Leave empty to omit this header. Default: https://runfusion.ai.</small>
+              </div>
+              <div className="form-group">
+                <label htmlFor="openrouterAppAttributionTitle">OpenRouter X-Title</label>
+                <input
+                  id="openrouterAppAttributionTitle"
+                  className="input"
+                  placeholder="Fusion"
+                  value={form.openrouterAppAttribution?.title ?? ""}
+                  onChange={(e) => setForm((f) => ({
+                    ...f,
+                    openrouterAppAttribution: {
+                      ...(f.openrouterAppAttribution || {}),
+                      title: e.target.value,
+                    },
+                  }))}
+                />
+                <small>Leave empty to omit this header. Default: Fusion.</small>
+              </div>
+              <div className="form-group">
+                <label htmlFor="openrouterModelFiltersSupportedParameters">OpenRouter supported_parameters filter</label>
+                <input
+                  id="openrouterModelFiltersSupportedParameters"
+                  className="input"
+                  placeholder="tools, structured_outputs"
+                  value={toCommaSeparatedInput(form.openrouterModelFilters?.supported_parameters)}
+                  onChange={(e) => {
+                    const parsed = fromCommaSeparatedInput(e.target.value);
+                    setForm((f) => ({
+                      ...f,
+                      openrouterModelFilters: {
+                        ...(f.openrouterModelFilters || {}),
+                        supported_parameters: parsed.length > 0 ? parsed : undefined,
+                      },
+                    }));
+                  }}
+                />
+                <small>Comma-separated values sent to OpenRouter model sync.</small>
+              </div>
+              <div className="form-group">
+                <label htmlFor="openrouterModelFiltersOutputModalities">OpenRouter output_modalities filter</label>
+                <input
+                  id="openrouterModelFiltersOutputModalities"
+                  className="input"
+                  placeholder="text"
+                  value={toCommaSeparatedInput(form.openrouterModelFilters?.output_modalities)}
+                  onChange={(e) => {
+                    const parsed = fromCommaSeparatedInput(e.target.value);
+                    setForm((f) => ({
+                      ...f,
+                      openrouterModelFilters: {
+                        ...(f.openrouterModelFilters || {}),
+                        output_modalities: parsed.length > 0 ? parsed : undefined,
+                      },
+                    }));
+                  }}
+                />
+                <small>Comma-separated values sent to OpenRouter model sync.</small>
+              </div>
+              <div className="form-group">
+                <label htmlFor="openrouterProviderPreferencesOrder">OpenRouter routing order</label>
+                <input
+                  id="openrouterProviderPreferencesOrder"
+                  className="input"
+                  placeholder="openai, anthropic"
+                  value={toCommaSeparatedInput(form.openrouterProviderPreferences?.order)}
+                  onChange={(e) => {
+                    const parsed = fromCommaSeparatedInput(e.target.value);
+                    setForm((f) => ({
+                      ...f,
+                      openrouterProviderPreferences: {
+                        ...(f.openrouterProviderPreferences || {}),
+                        order: parsed.length > 0 ? parsed : undefined,
+                      },
+                    }));
+                  }}
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="openrouterProviderPreferencesIgnore">OpenRouter routing ignore</label>
+                <input
+                  id="openrouterProviderPreferencesIgnore"
+                  className="input"
+                  placeholder="provider-name"
+                  value={toCommaSeparatedInput(form.openrouterProviderPreferences?.ignore)}
+                  onChange={(e) => {
+                    const parsed = fromCommaSeparatedInput(e.target.value);
+                    setForm((f) => ({
+                      ...f,
+                      openrouterProviderPreferences: {
+                        ...(f.openrouterProviderPreferences || {}),
+                        ignore: parsed.length > 0 ? parsed : undefined,
+                      },
+                    }));
+                  }}
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="openrouterProviderPreferencesOnly">OpenRouter routing only</label>
+                <input
+                  id="openrouterProviderPreferencesOnly"
+                  className="input"
+                  placeholder="provider-name"
+                  value={toCommaSeparatedInput(form.openrouterProviderPreferences?.only)}
+                  onChange={(e) => {
+                    const parsed = fromCommaSeparatedInput(e.target.value);
+                    setForm((f) => ({
+                      ...f,
+                      openrouterProviderPreferences: {
+                        ...(f.openrouterProviderPreferences || {}),
+                        only: parsed.length > 0 ? parsed : undefined,
+                      },
+                    }));
+                  }}
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="openrouterProviderPreferencesAllowFallbacks">OpenRouter allow fallbacks</label>
+                <select
+                  id="openrouterProviderPreferencesAllowFallbacks"
+                  className="select"
+                  value={form.openrouterProviderPreferences?.allow_fallbacks === undefined ? "default" : form.openrouterProviderPreferences.allow_fallbacks ? "allow" : "deny"}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setForm((f) => ({
+                      ...f,
+                      openrouterProviderPreferences: {
+                        ...(f.openrouterProviderPreferences || {}),
+                        allow_fallbacks: value === "default" ? undefined : value === "allow",
+                      },
+                    }));
+                  }}
+                >
+                  <option value="default">default</option>
+                  <option value="allow">allow</option>
+                  <option value="deny">deny</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label htmlFor="openrouterProviderPreferencesSort">OpenRouter routing sort</label>
+                <select
+                  id="openrouterProviderPreferencesSort"
+                  className="select"
+                  value={form.openrouterProviderPreferences?.sort ?? "default"}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setForm((f) => ({
+                      ...f,
+                      openrouterProviderPreferences: {
+                        ...(f.openrouterProviderPreferences || {}),
+                        sort: value === "default" ? undefined : value as "price" | "throughput" | "latency",
+                      },
+                    }));
+                  }}
+                >
+                  <option value="default">default</option>
+                  <option value="price">price</option>
+                  <option value="throughput">throughput</option>
+                  <option value="latency">latency</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label htmlFor="openrouterProviderPreferencesRequireParameters" className="checkbox-label">
+                  <input
+                    id="openrouterProviderPreferencesRequireParameters"
+                    type="checkbox"
+                    checked={form.openrouterProviderPreferences?.require_parameters === true}
+                    onChange={(e) => setForm((f) => ({
+                      ...f,
+                      openrouterProviderPreferences: {
+                        ...(f.openrouterProviderPreferences || {}),
+                        require_parameters: e.target.checked,
+                      },
+                    }))}
+                  />
+                  Require parameters
+                </label>
+              </div>
+            </details>
 
           </>
         );

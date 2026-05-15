@@ -1024,6 +1024,60 @@ describe("SettingsModal", () => {
       );
     });
 
+    it("renders and saves OpenRouter advanced settings", async () => {
+      mockFetchModels.mockResolvedValue({
+        models: MODEL_FIXTURE,
+        favoriteProviders: [],
+        favoriteModels: [],
+      });
+
+      renderModal();
+      await waitForSettingsModalReady();
+
+      await userEvent.click(screen.getByRole("button", { name: "Models" }));
+      await userEvent.click(screen.getByText("OpenRouter advanced"));
+
+      expect(screen.getByLabelText("OpenRouter HTTP-Referer")).toBeInTheDocument();
+      expect(screen.getByLabelText("OpenRouter X-Title")).toBeInTheDocument();
+
+      await userEvent.type(screen.getByLabelText("OpenRouter HTTP-Referer"), "https://example.app");
+      await userEvent.type(screen.getByLabelText("OpenRouter X-Title"), "Example App");
+      fireEvent.change(screen.getByLabelText("OpenRouter supported_parameters filter"), {
+        target: { value: "tools, structured_outputs" },
+      });
+      fireEvent.change(screen.getByLabelText("OpenRouter output_modalities filter"), { target: { value: "text" } });
+      fireEvent.change(screen.getByLabelText("OpenRouter routing order"), { target: { value: "openai, anthropic" } });
+      fireEvent.change(screen.getByLabelText("OpenRouter routing ignore"), { target: { value: "provider-x" } });
+      fireEvent.change(screen.getByLabelText("OpenRouter routing only"), { target: { value: "provider-y" } });
+      await userEvent.selectOptions(screen.getByLabelText("OpenRouter allow fallbacks"), "deny");
+      await userEvent.selectOptions(screen.getByLabelText("OpenRouter routing sort"), "latency");
+      await userEvent.click(screen.getByLabelText("Require parameters"));
+
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(mockUpdateGlobalSettings).toHaveBeenCalled();
+      });
+
+      expect(mockUpdateGlobalSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          openrouterAppAttribution: { referer: "https://example.app", title: "Example App" },
+          openrouterModelFilters: {
+            supported_parameters: ["tools", "structured_outputs"],
+            output_modalities: ["text"],
+          },
+          openrouterProviderPreferences: {
+            order: ["openai", "anthropic"],
+            ignore: ["provider-x"],
+            only: ["provider-y"],
+            allow_fallbacks: false,
+            sort: "latency",
+            require_parameters: true,
+          },
+        }),
+      );
+    });
+
     it("renders a project-scoped default model lane", async () => {
       mockFetchSettings.mockResolvedValue({
         ...defaultSettings,
