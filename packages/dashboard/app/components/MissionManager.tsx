@@ -2375,6 +2375,9 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                     milestoneRollup && (milestoneRollup.state === "blocked" || milestoneRollup.state === "failed")
                       ? milestoneTelemetry?.validationTelemetry.validationRounds.find((round) => round.blockedReason)?.blockedReason
                       : undefined;
+                  const featuresWithAcceptanceCriteria = milestone.slices
+                    .flatMap((slice) => slice.features)
+                    .filter((feature) => (feature.acceptanceCriteria ?? "").trim().length > 0);
 
                   return (
                   <div key={milestone.id} className="mission-milestone">
@@ -3421,9 +3424,28 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                                 </div>
                               ))}
                               {(!assertionsByMilestone.get(milestone.id) || assertionsByMilestone.get(milestone.id)?.length === 0) && !isCreatingAssertion && (
-                                <div className="mission-manager__empty mission-assertions__empty">
-                                  <span>No assertions defined. Add one to define completion criteria.</span>
-                                </div>
+                                featuresWithAcceptanceCriteria.length > 0 ? (
+                                  // Product contract (2026-05-15 #product): completion criteria canonically
+                                  // live on MissionFeature.acceptanceCriteria; MissionContractAssertion rows
+                                  // are an additive milestone-level structure. Missing assertions do not
+                                  // mean missing criteria when child features already carry acceptance text.
+                                  // If FN-4578/4579/4580 (or successors) change the model, update this.
+                                  <div className="mission-assertions__list" data-testid="milestone-feature-acceptance-rollup">
+                                    <span className="mission-assertions__title">Completion criteria (from features)</span>
+                                    {featuresWithAcceptanceCriteria.map((feature) => (
+                                      <div key={feature.id} className="mission-assertion">
+                                        <span className="mission-assertion__title">{feature.title}</span>
+                                        <p className="mission-assertion__text">
+                                          <strong>Acceptance:</strong> {feature.acceptanceCriteria}
+                                        </p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className="mission-manager__empty mission-assertions__empty">
+                                    <span>No assertions defined. Add one to define completion criteria.</span>
+                                  </div>
+                                )
                               )}
                             </div>
                           </div>
