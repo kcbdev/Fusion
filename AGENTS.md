@@ -657,10 +657,11 @@ See [docs/workflow-steps.md](./docs/workflow-steps.md) for the full reference in
 
 ## Run Audit
 
-The run-audit system records every mutation performed by the engine across three domains:
+The run-audit system records every mutation performed by the engine across four domains:
 - **Database** — task:create, task:update, task:move, etc.
 - **Git** — worktree:create, commit:create, merge:resolve, etc.
 - **Filesystem** — file:write, prompt:write, attachment:create, etc.
+- **Sandbox** — backend lifecycle (`sandbox:prepare`, `sandbox:run`, `sandbox:failure`, `sandbox:fallback`) from `SandboxBackend` wiring in executor/merger/routine-runner.
 
 Events are tied to specific run IDs for end-to-end traceability. See [docs/architecture.md](./docs/architecture.md) for the audit API reference.
 

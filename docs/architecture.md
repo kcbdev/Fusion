@@ -975,17 +975,18 @@ Initial container provisioning and lifecycle routes are registered by `register-
 Mesh configuration and post-provision managed-node operations are registered separately in `register-docker-node-routes.ts` (for example `/api/docker/nodes/:managedId/apply-mesh-config` and `/api/docker/nodes/:managedId/mesh-status`).
 
 ### Run Audit API
-The run-audit system records every mutation performed by the engine across three domains:
+The run-audit system records every mutation performed by the engine across four domains:
 - **Database** — task:create, task:update, task:move, etc.
 - **Git** — worktree:create, commit:create, merge:resolve, merge:audit-failure, etc. Dirty post-merge audit outcomes emit `merge:audit-failure` with metadata `{ mode, strategy, action, reason, issueCount, duplicateSubjectCount, touchedFileOverlapCount, verificationPassed, auditTargetLabel }`.
 - **Git / `merge:file-scope-violation`** — emitted by the merger when `FileScopeViolationError` aborts a squash. `target` is the task ID; metadata includes `stagedFiles`, `declaredScope`, `resetLabel`, `stagedFileCount`, and `declaredScopeCount`. Consumed by `fileScopeInvariantFailuresPerDay` in `GET /api/health/reliability` (FN-4360).
 - **Filesystem** — file:write, prompt:write, attachment:create, etc.
+- **Sandbox** — backend lifecycle events from `SandboxBackend` wiring in executor/merger/routine-runner (`sandbox:prepare`, `sandbox:run`, `sandbox:failure`, `sandbox:fallback`) introduced after FN-4636.
 
 Events are tied to specific run IDs for end-to-end traceability.
 
 **Run audit endpoints:**
 - `GET /api/agents/:id/runs/:runId/audit` — Returns audit trail for a specific agent run
-  - Query params: `?domain=database|git|filesystem` for filtering
+  - Query params: `?domain=database|git|filesystem|sandbox` for filtering
   - Requires agent ownership or admin access
 - `GET /api/health/reliability` — Aggregates rolling reliability metrics from run-audit and task activity signals.
   - Query params: `?windowDays=<1..30>` (default `7`)
