@@ -14,6 +14,11 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-md);
+  min-width: 0;
+}
+
+.research-view__header-actions {
+  flex-shrink: 0;
 }
 
 .research-view__title {
@@ -41,7 +46,16 @@
   flex-direction: column;
   gap: var(--space-md);
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
+}
+
+.research-view__sidebar-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-md);
+  min-height: 0;
 }
 
 .research-view__reader {
@@ -50,7 +64,6 @@
 
 .research-view__reader-content {
   display: flex;
-  flex: 1;
   flex-direction: column;
   gap: var(--space-md);
   min-height: 0;
@@ -67,6 +80,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
+  flex-shrink: 0;
 }
 
 .research-view__form .form-group,
@@ -96,12 +110,14 @@
   flex-direction: column;
   align-items: stretch;
   gap: var(--space-xs);
+  flex-shrink: 0;
 }
 
 .research-view__history-search-row {
   display: flex;
   align-items: center;
   gap: var(--space-xs);
+  min-width: 0;
 }
 
 .research-view__history-search-row .input {
@@ -203,7 +219,7 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-sm);
-  margin-top: auto;
+  margin-top: var(--space-sm);
   padding-top: var(--space-sm);
   border-top: var(--btn-border-width) solid var(--border);
 }
@@ -243,25 +259,21 @@
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-md);
     flex: initial;
+    min-height: auto;
     overflow: visible;
   }
 
   .research-view__sidebar,
-  .research-view__reader {
-    overflow: visible;
-  }
-
-  .research-view__reader {
-    overflow: visible;
-  }
-
+  .research-view__reader,
+  .research-view__sidebar-content,
   .research-view__reader-content {
-    flex: initial;
+    min-height: auto;
+    overflow: visible;
   }
 
   .research-view__history {
     flex: initial;
-    min-height: initial;
+    min-height: auto;
     overflow: visible;
   }
 
@@ -269,7 +281,7 @@
     flex-direction: column;
   }
 
-  .research-view__header .btn {
+  .research-view__header-actions {
     align-self: flex-start;
   }
 
