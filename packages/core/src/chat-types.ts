@@ -263,4 +263,5 @@ export interface ChatRoomMessagesFilter {
   limit?: number;
   offset?: number;
   before?: string;
+  order?: "asc" | "desc";
 }

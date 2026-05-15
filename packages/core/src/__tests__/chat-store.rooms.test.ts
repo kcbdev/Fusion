@@ -146,6 +146,25 @@ describe("ChatStore — rooms (FN-3805..FN-3811 contract)", () => {
       expect(store.listRoomMessagesSince(room.id, new Date().toISOString())).toEqual([]);
     });
 
+    it("returns newest limited room window when order is desc while preserving ascending output", () => {
+      const room = store.createRoom({ name: "window-test" });
+
+      for (let i = 1; i <= 107; i += 1) {
+        store.addRoomMessage(room.id, { role: "user", content: `message-${i}` });
+      }
+
+      const newestWindow = store.getRoomMessages(room.id, { limit: 100, order: "desc" });
+      expect(newestWindow).toHaveLength(100);
+      expect(newestWindow[0]?.content).toBe("message-8");
+      expect(newestWindow.at(-1)?.content).toBe("message-107");
+      expect(newestWindow.some((message) => message.content === "message-1")).toBe(false);
+
+      const legacyWindow = store.getRoomMessages(room.id, { limit: 100 });
+      expect(legacyWindow).toHaveLength(100);
+      expect(legacyWindow[0]?.content).toBe("message-1");
+      expect(legacyWindow.at(-1)?.content).toBe("message-100");
+    });
+
     it("keeps cross-room and direct-vs-room histories isolated", () => {
       const session = store.createSession({ agentId: "agent-1" });
       store.addMessage(session.id, { role: "user", content: "direct" });

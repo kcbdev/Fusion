@@ -926,14 +926,16 @@ export class ChatStore extends EventEmitter<ChatStoreEvents> {
       params.push(filter.before);
     }
 
+    const order = filter?.order === "desc" ? "DESC" : "ASC";
     const rows = this.db.prepare(`
       SELECT * FROM chat_room_messages
       WHERE ${whereClauses.join(" AND ")}
-      ORDER BY createdAt ASC
+      ORDER BY createdAt ${order}
       LIMIT ? OFFSET ?
     `).all(...params, filter?.limit ?? 100, filter?.offset ?? 0) as ChatRoomMessageRow[];
 
-    return rows.map((row) => this.rowToRoomMessage(row));
+    const normalizedRows = filter?.order === "desc" ? [...rows].reverse() : rows;
+    return normalizedRows.map((row) => this.rowToRoomMessage(row));
   }
 
   listRoomMessagesSince(
