@@ -4098,7 +4098,9 @@ export class SelfHealingManager {
    * Recover failed `in-review` retries that point at a missing worktree path.
    *
    * This is a narrow guard for session-start failures thrown by
-   * assertValidWorktreeSession() (`Refusing to start coding agent in missing worktree:`).
+   * assertValidWorktreeSession() (`Refusing to start coding agent in missing worktree:`,
+   * `Refusing to start coding agent in incomplete worktree:`, and
+   * `Refusing to start coding agent in unregistered git worktree:`).
    * We clear stale worktree metadata and failure state, keep step progress and
    * retry counters, then requeue to todo for a clean retry.
    */
