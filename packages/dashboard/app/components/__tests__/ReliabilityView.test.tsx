@@ -38,6 +38,28 @@ describe("ReliabilityView", () => {
     expect(screen.getByText("2026-05-13")).toBeInTheDocument();
   });
 
+  it("FN-4594: root container provides vertical scroll contract", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        windowDays: 7,
+        generatedAt: "2026-05-13T00:00:00.000Z",
+        headline: { inReviewFailureRate7d: 0.2 },
+        perDay: [],
+        duration: { p50Ms: 60_000, p95Ms: 120_000, sampleCount: 3 },
+        mergeAttempts: { mean: 1.2, max: 2, histogram: { "1": 1 } },
+      }),
+    } as Response);
+
+    const { container } = render(<ReliabilityView />);
+    const root = container.querySelector(".reliability-view");
+    expect(root).not.toBeNull();
+
+    const computed = getComputedStyle(root as HTMLElement);
+    expect(computed.overflowY).toBe("auto");
+    expect(computed.height).not.toBe("");
+  });
+
   it("renders null headline reason gracefully", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
