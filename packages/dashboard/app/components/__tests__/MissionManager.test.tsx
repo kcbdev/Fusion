@@ -4339,7 +4339,7 @@ describe("MissionManager", () => {
       expect(within(rollup).getByText("Feature two acceptance criteria", { exact: false })).toBeInTheDocument();
     });
 
-    it("shows feature rollup alongside milestone acceptance criteria", async () => {
+    it("shows feature rollup alongside milestone acceptance criteria (fixes FN-4613 over-suppression)", async () => {
       const missionDetail = createFn4613MissionDetail();
       globalThis.fetch = createDetailFetchMockForMissionDetail(missionDetail);
 
@@ -4427,7 +4427,7 @@ describe("MissionManager", () => {
       expect(screen.getAllByText(emptyAssertionsCopy)).toHaveLength(1);
     });
 
-    it("shows feature acceptance rollup when milestone acceptance criteria already exists", async () => {
+    it("shows feature acceptance rollup when milestone acceptance criteria already exists (flip from prior suppression assertion)", async () => {
       const missionDetail = JSON.parse(JSON.stringify(mockMissionDetail)) as typeof mockMissionDetail;
       missionDetail.milestones[0].acceptanceCriteria = "- Session handling: Session refresh succeeds without logout";
       missionDetail.milestones[0].slices[0].features = [
