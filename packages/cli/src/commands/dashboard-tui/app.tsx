@@ -342,6 +342,9 @@ function SystemPanel({ state, isFocused }: { state: DashboardState; isFocused: b
               wrap onto multiple lines instead of being truncated or pushed
               off-panel. The token in particular MUST always render in
               full so users can copy it (via [c]) or click-drag select it. */}
+          {state.isReady && Number.isFinite(info.startupDurationMs) && (
+            <Text dimColor>{`Ready in ${((info.startupDurationMs ?? 0) / 1000).toFixed(1)}s`}</Text>
+          )}
           <Box flexDirection="row" gap={1} flexShrink={0}>
             <Text dimColor>URL</Text>
             <Text color="cyanBright">{info.baseUrl}</Text>
@@ -4536,6 +4539,8 @@ export function DashboardApp({ controller }: DashboardAppProps) {
   const layoutKey = `${cols}x${rows}#${resizeTick}`;
 
   // Splash: show while systemInfo is not yet set.
+  // isReady mirrors systemInfo presence today; future interactive controls
+  // that must wait for engine-ready should check state.isReady.
   if (!state.systemInfo) {
     return (
       <Box key={layoutKey} flexDirection="column" height={rows} width={cols} overflow="hidden">
