@@ -11,7 +11,15 @@ import {
   type SandboxExecPolicy,
 } from "./sandbox-exec-policy.js";
 import { NativeSandboxBackend } from "./native.js";
-import type { SandboxBackend, SandboxCapabilities, SandboxPolicy, SandboxRunOptions, SandboxRunResult } from "./types.js";
+import type {
+  SandboxBackend,
+  SandboxCapabilities,
+  SandboxPolicy,
+  SandboxRunOptions,
+  SandboxRunResult,
+  SandboxRunStreamingOptions,
+  SandboxStreamingResult,
+} from "./types.js";
 import { createLogger } from "../logger.js";
 
 const execAsync = promisify(exec);
@@ -41,6 +49,7 @@ export class SandboxExecBackend implements SandboxBackend {
       id: "sandbox-exec",
       supportsNetworkPolicy: true,
       supportsFilesystemPolicy: true,
+      supportsStreaming: false,
       platform: ["darwin"],
     };
   }
@@ -171,6 +180,10 @@ export class SandboxExecBackend implements SandboxBackend {
         spawnError: code === "ENOENT" || code === "EACCES" ? (error as Error) : undefined,
       };
     }
+  }
+
+  async runStreaming(command: string, options: SandboxRunStreamingOptions): Promise<SandboxStreamingResult> {
+    return this.nativeBackend.runStreaming(command, options);
   }
 
   async dispose(): Promise<void> {

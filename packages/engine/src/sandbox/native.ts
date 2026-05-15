@@ -1,7 +1,15 @@
-import { exec } from "node:child_process";
+import { exec, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
-import type { SandboxBackend, SandboxCapabilities, SandboxPolicy, SandboxRunOptions, SandboxRunResult } from "./types.js";
+import type {
+  SandboxBackend,
+  SandboxCapabilities,
+  SandboxPolicy,
+  SandboxRunOptions,
+  SandboxRunResult,
+  SandboxRunStreamingOptions,
+  SandboxStreamingResult,
+} from "./types.js";
 
 const execAsync = promisify(exec);
 
@@ -11,6 +19,7 @@ export class NativeSandboxBackend implements SandboxBackend {
       id: "native",
       supportsNetworkPolicy: false,
       supportsFilesystemPolicy: false,
+      supportsStreaming: true,
       platform: "any",
     };
   }
@@ -62,6 +71,136 @@ export class NativeSandboxBackend implements SandboxBackend {
         spawnError: code === "ENOENT" || code === "EACCES" ? (error as Error) : undefined,
       };
     }
+  }
+
+  async runStreaming(command: string, options: SandboxRunStreamingOptions): Promise<SandboxStreamingResult> {
+    if (options.signal?.aborted) {
+      return {
+        outcome: "aborted",
+        phase: "pre-start",
+        stdout: "",
+        stderr: "",
+      };
+    }
+
+    return await new Promise((resolve) => {
+      const useProcessGroup = process.platform !== "win32";
+      const child = spawn(command, {
+        cwd: options.cwd,
+        shell: true,
+        detached: useProcessGroup,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
+          ...(options.env ?? {}),
+        },
+      });
+
+      let stdout = "";
+      let stderr = "";
+      let stdoutOverflow = false;
+      let stderrOverflow = false;
+      let timedOut = false;
+      let aborted = false;
+      let settled = false;
+
+      const killTree = (sig: NodeJS.Signals) => {
+        if (child.pid === undefined) return;
+        try {
+          if (useProcessGroup) {
+            process.kill(-child.pid, sig);
+          } else {
+            child.kill(sig);
+          }
+        } catch {
+          // group may already be gone
+        }
+      };
+
+      const timer = setTimeout(() => {
+        timedOut = true;
+        killTree("SIGTERM");
+        setTimeout(() => {
+          if (settled) return;
+          killTree("SIGKILL");
+        }, 5_000).unref();
+      }, options.timeout);
+      timer.unref();
+
+      const onAbort = () => {
+        aborted = true;
+        killTree("SIGTERM");
+        setTimeout(() => {
+          if (settled) return;
+          killTree("SIGKILL");
+        }, 5_000).unref();
+      };
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+
+      child.stdout?.on("data", (chunk: Buffer) => {
+        if (stdoutOverflow) return;
+        if (stdout.length + chunk.length > options.maxBuffer) {
+          stdoutOverflow = true;
+          stdout += chunk.toString("utf-8", 0, options.maxBuffer - stdout.length);
+          return;
+        }
+        stdout += chunk.toString("utf-8");
+      });
+
+      child.stderr?.on("data", (chunk: Buffer) => {
+        if (stderrOverflow) return;
+        if (stderr.length + chunk.length > options.maxBuffer) {
+          stderrOverflow = true;
+          stderr += chunk.toString("utf-8", 0, options.maxBuffer - stderr.length);
+          return;
+        }
+        stderr += chunk.toString("utf-8");
+      });
+
+      const finish = (err: NodeJS.ErrnoException | null, code: number | null, signal: NodeJS.Signals | null) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        options.signal?.removeEventListener("abort", onAbort);
+
+        if (aborted) {
+          resolve({ outcome: "aborted", phase: "mid-flight", stdout, stderr });
+          return;
+        }
+
+        if (timedOut) {
+          resolve({ outcome: "timeout", timeoutMs: options.timeout, stdout, stderr });
+          return;
+        }
+
+        if (err) {
+          resolve({ outcome: "spawn-error", error: err, stdout, stderr });
+          return;
+        }
+
+        if (code === 0) {
+          resolve({
+            outcome: "success",
+            stdout,
+            stderr,
+            bufferOverflow: stdoutOverflow || stderrOverflow,
+          });
+          return;
+        }
+
+        resolve({
+          outcome: "non-zero-exit",
+          stdout,
+          stderr,
+          exitCode: code,
+          signal,
+        });
+      };
+
+      child.on("error", (err) => finish(err, null, null));
+      child.on("close", (code, signal) => finish(null, code, signal));
+    });
   }
 
   async dispose(): Promise<void> {

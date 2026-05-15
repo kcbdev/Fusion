@@ -4,7 +4,15 @@ import { promisify } from "node:util";
 import { detectBwrap } from "./bubblewrap-detect.js";
 import { policyToBwrapArgs, type BubblewrapPolicy } from "./bubblewrap-policy.js";
 import { NativeSandboxBackend } from "./native.js";
-import type { SandboxBackend, SandboxCapabilities, SandboxPolicy, SandboxRunOptions, SandboxRunResult } from "./types.js";
+import type {
+  SandboxBackend,
+  SandboxCapabilities,
+  SandboxPolicy,
+  SandboxRunOptions,
+  SandboxRunResult,
+  SandboxRunStreamingOptions,
+  SandboxStreamingResult,
+} from "./types.js";
 
 const execAsync = promisify(exec);
 
@@ -29,6 +37,7 @@ export class BubblewrapBackend implements SandboxBackend {
       id: "bubblewrap",
       supportsNetworkPolicy: true,
       supportsFilesystemPolicy: true,
+      supportsStreaming: false,
       platform: ["linux"],
     };
   }
@@ -79,6 +88,10 @@ export class BubblewrapBackend implements SandboxBackend {
 
     const bwrapPath = detect.path ?? "bwrap";
     return this.runBwrapSpawn(bwrapPath, [...policyArgs, "--", "/bin/sh", "-lc", command], options);
+  }
+
+  async runStreaming(command: string, options: SandboxRunStreamingOptions): Promise<SandboxStreamingResult> {
+    return this.nativeBackend.runStreaming(command, options);
   }
 
   async dispose(): Promise<void> {

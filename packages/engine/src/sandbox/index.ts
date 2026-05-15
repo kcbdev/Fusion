@@ -9,6 +9,8 @@ export type {
   SandboxPolicy,
   SandboxRunOptions,
   SandboxRunResult,
+  SandboxRunStreamingOptions,
+  SandboxStreamingResult,
 } from "./types.js";
 
 let sandboxBackendOverrideForTests: SandboxBackend | null = null;
