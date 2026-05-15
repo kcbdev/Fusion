@@ -110,7 +110,7 @@ The engine classifies tool calls by behavior (not namespace alone):
 - `file_write_delete`: built-in `write` / `edit`, plus persistent write helpers like `fn_task_document_write`, `fn_memory_append`, `fn_task_attach`
 - `command_execution`: built-in `bash` when not classified as mutating git
 - `git_write`: mutating git shell commands run via `bash`
-- `network_api`: external/network-facing tools (for example `fn_research_run`, `fn_research_cancel`, `fn_research_retry`)
+- `network_api`: external/network-facing tools (for example `fn_research_run`, `fn_research_cancel`, `fn_research_retry`, `fn_web_fetch`)
 - `task_agent_mutation`: task/agent mutation tools (for example `fn_update_agent_config`, `fn_task_pause`, `fn_spawn_agent`; action-gate task-import/create tools like `fn_task_create`, `fn_delegate_task`, `fn_task_import_github`, and `fn_task_import_github_issue` use this category in action-gate evaluation)
 - Dashboard permission editors now show per-category example tools sourced from `AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES` in `@fusion/core`, plus a read-only exempt-tools panel for coordination/messaging bypass tools.
 - `none`: positively recognized read-only tools (`read`, `grep`, `find`, `ls`, list/show/get-style `fn_*` tools, plus permanent-agent coordination/task-creation helpers like `fn_task_create`, `fn_delegate_task`, `fn_task_import_github`, and `fn_task_import_github_issue`)

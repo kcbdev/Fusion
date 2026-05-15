@@ -309,7 +309,7 @@ The extension has no skills — tool descriptions give the LLM everything it nee
 
 Use `fn_web_fetch` for lightweight URL reads from agent/chat sessions. It performs an HTTP GET, follows redirects, extracts readable text (including HTML→text and JSON pretty-print), and returns bounded content.
 
-`fn_web_fetch` is a universal baseline capability and is available by default across all agent roles/surfaces (executor, step-session, reviewer, merger, triage, and heartbeat, including engineer/custom direct-report paths routed through heartbeat).
+`fn_web_fetch` is a universal baseline capability and is available by default across all agent roles/surfaces (executor, step-session, reviewer, merger, triage, and heartbeat, including engineer/custom direct-report paths routed through heartbeat). It is gated under the `network_api` action-gate category (FN-4603), so projects requiring network approvals will prompt on fetches.
 
 - Default limits: `timeoutMs=30000` and `maxBytes=512000` (500 KB)
 - Security: blocks private/loopback/link-local hosts (including DNS-resolved private addresses) unless explicitly overridden in internal/test contexts
