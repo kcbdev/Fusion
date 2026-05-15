@@ -10,7 +10,9 @@ import {
   buildTriageMemoryInstructions,
   resolveAgentPrompt,
   resolvePersistAgentThinkingLog,
+  compareTaskPriority,
   sortTasksByPriorityThenAgeAndId,
+  compareTaskIdNumeric,
   resolveAgentMemoryInclusionMode,
 } from "@fusion/core";
 import type { ImageContent } from "@mariozechner/pi-ai";
@@ -887,7 +889,26 @@ export class TriageProcessor {
           // Skip tasks with a recovery backoff that hasn't elapsed yet
           && !(t.nextRecoveryAt && new Date(t.nextRecoveryAt).getTime() > now),
       );
-      const triageTasks = sortTasksByPriorityThenAgeAndId(eligibleTriageTasks);
+      const triageTasks = sortTasksByPriorityThenAgeAndId(eligibleTriageTasks).sort((a, b) => {
+        const priorityCmp = compareTaskPriority(a.priority, b.priority);
+        if (priorityCmp !== 0) {
+          return priorityCmp;
+        }
+
+        // Keep the global priority contract intact, but for same-priority tasks,
+        // prefer refinements so follow-up work does not starve behind bulk triage imports.
+        const aIsRefinement = a.sourceType === "task_refine";
+        const bIsRefinement = b.sourceType === "task_refine";
+        if (aIsRefinement !== bIsRefinement) {
+          return aIsRefinement ? -1 : 1;
+        }
+
+        if (a.createdAt !== b.createdAt) {
+          return a.createdAt.localeCompare(b.createdAt);
+        }
+
+        return compareTaskIdNumeric(a.id, b.id);
+      });
 
       // Respect both per-project maxTriageConcurrent and the global semaphore.
       // Only planning tasks count against the triage limit; execution is governed by maxConcurrent.
