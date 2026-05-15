@@ -259,6 +259,17 @@ Update an existing feature's title, description, or acceptance criteria. Partial
 | `description` | string | — | Updated feature description |
 | `acceptanceCriteria` | string | — | Updated acceptance criteria for completing the feature |
 
+### fn_milestone_update
+
+Update an existing milestone's title, description, or acceptance criteria. Partial patches leave untouched fields intact.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | ✓ | Milestone ID to update (e.g., MS-001) |
+| `title` | string | — | Updated milestone title |
+| `description` | string | — | Updated milestone description |
+| `acceptanceCriteria` | string | — | Updated acceptance criteria for completing the milestone |
+
 ## Agent Tools
 
 ### fn_agent_stop
