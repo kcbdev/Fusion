@@ -10,6 +10,16 @@ import { invalidateAllGlobalSettingsCaches } from "../project-store-resolver.js"
 import type { AuthStorageLike } from "../routes.js";
 import type { ApiRouteRegistrar } from "./types.js";
 
+export type DeviceCodeInfo = {
+  userCode: string;
+  verificationUri: string;
+};
+
+export function parseGitHubCopilotDeviceCode(instructions: string): string | undefined {
+  const match = instructions.match(/Enter code:\s*([A-Z0-9-]+)\b/i);
+  return match?.[1];
+}
+
 export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
   const { router, options, store, getScopedStore, rethrowAsApiError } = ctx;
   const authStorage = options?.authStorage;
@@ -172,6 +182,10 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
     }
 
     return undefined;
+  }
+
+  function providerWantsAutoPrompt(providerId: string): boolean {
+    return providerId === "github-copilot";
   }
 
   async function probeDroidCliWithEffectiveBinary(req?: Request) {
@@ -766,20 +780,22 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
         }
       });
       const pendingLogin: PendingLogin = {
-        abortController,
-        inputPromise,
-        resolveInput,
-        rejectInput,
-        inputSubmitted: false,
-        manualCode: getManualCodeConfig(provider, origin),
-      };
-      loginInProgress.set(provider, pendingLogin);
+         abortController,
+         inputPromise,
+         resolveInput,
+         rejectInput,
+         inputSubmitted: false,
+         manualCode: getManualCodeConfig(provider, origin),
+       };
+       loginInProgress.set(provider, pendingLogin);
+
+      let autoPromptConsumed = false;
 
       // We need to get the URL from the onAuth callback before responding.
       // The login() call continues in the background until the user completes OAuth.
-      let authResolve: (info: { url: string; instructions?: string }) => void;
+      let authResolve: (info: { url: string; instructions?: string; deviceCode?: DeviceCodeInfo }) => void;
       let authReject: (err: Error) => void;
-      const authUrlPromise = new Promise<{ url: string; instructions?: string }>((resolve, reject) => {
+      const authUrlPromise = new Promise<{ url: string; instructions?: string; deviceCode?: DeviceCodeInfo }>((resolve, reject) => {
         authResolve = resolve;
         authReject = reject;
       });
@@ -787,12 +803,26 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
       // Start login flow in background — don't await the full login
       const loginPromise = storage.login(provider, {
         onAuth: (info) => {
+          const deviceCode =
+            provider === "github-copilot" && info.instructions
+              ? {
+                  userCode: parseGitHubCopilotDeviceCode(info.instructions),
+                  verificationUri: info.url,
+                }
+              : undefined;
           authResolve({
             url: info.url,
             instructions: appendManualCodeHint(info.instructions, provider, origin),
+            deviceCode: deviceCode?.userCode ? deviceCode : undefined,
           });
         },
-        onPrompt: async () => await pendingLogin.inputPromise,
+        onPrompt: async (_prompt) => {
+          if (providerWantsAutoPrompt(provider) && !autoPromptConsumed) {
+            autoPromptConsumed = true;
+            return "";
+          }
+          return await pendingLogin.inputPromise;
+        },
         // AuthStorage.login() forwards callbacks to provider-specific OAuth
         // implementations verbatim. openai-codex supports this optional hook
         // to race pasted codes against the localhost callback server.
@@ -837,6 +867,7 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
         url: responseUrl,
         instructions: authInfo.instructions,
         manualCode: pendingLogin.manualCode,
+        deviceCode: authInfo.deviceCode,
       });
     } catch (err: unknown) {
       if (err instanceof ApiError) {

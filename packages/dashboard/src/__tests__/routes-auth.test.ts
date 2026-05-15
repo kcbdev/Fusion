@@ -40,6 +40,7 @@ import { resetRuntimeLogSink, setRuntimeLogSink } from "../runtime-logger.js";
 import { resetDiagnosticsSink, setDiagnosticsSink, type LogEntry } from "../ai-session-diagnostics.js";
 import * as updateCheckModule from "../update-check.js";
 import { __setAgentReflectionServiceForTests } from "../routes/register-agent-reflection-rating-routes.js";
+import { parseGitHubCopilotDeviceCode } from "../routes/register-auth-routes.js";
 
 // Mock @fusion/core for gh CLI auth checks
 const mockCentralListProjects = vi.fn().mockResolvedValue([]);
@@ -1201,6 +1202,45 @@ describe("POST /auth/login", () => {
     expect(res.body.instructions).toBe("Open in browser");
   });
 
+  it("returns parsed deviceCode for github-copilot", async () => {
+    (authStorage.login as ReturnType<typeof vi.fn>).mockImplementation((_provider: string, callbacks: any) => {
+      callbacks.onAuth({
+        url: "https://github.com/login/device",
+        instructions: "Enter code: ABCD-1234",
+      });
+      return Promise.resolve();
+    });
+
+    const res = await REQUEST(buildApp(), "POST", "/api/auth/login", JSON.stringify({ provider: "github-copilot" }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.deviceCode).toEqual({
+      userCode: "ABCD-1234",
+      verificationUri: "https://github.com/login/device",
+    });
+  });
+
+  it("auto-resolves first onPrompt invocation for github-copilot with blank input", async () => {
+    let promptValue: string | undefined;
+    (authStorage.login as ReturnType<typeof vi.fn>).mockImplementation(async (_provider: string, callbacks: any) => {
+      promptValue = await callbacks.onPrompt({
+        message: "GitHub Enterprise URL/domain (blank for github.com)",
+        placeholder: "company.ghe.com",
+        allowEmpty: true,
+      });
+      callbacks.onAuth({ url: "https://github.com/login/device", instructions: "Enter code: ABCD-1234" });
+    });
+
+    const res = await REQUEST(buildApp(), "POST", "/api/auth/login", JSON.stringify({ provider: "github-copilot" }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(promptValue).toBe("");
+  });
+
   it("rewrites redirect_uri to dashboard oauth proxy when origin is non-localhost", async () => {
     (authStorage.login as ReturnType<typeof vi.fn>).mockImplementation((_provider: string, callbacks: any) => {
       callbacks.onAuth({
@@ -1322,6 +1362,31 @@ describe("POST /auth/login", () => {
       helpText: "After Claude sign-in, copy the full browser URL (or just the code) and paste it here to finish login from this dashboard host.",
     });
   });
+
+  it("does not auto-resolve prompt for anthropic", async () => {
+    (authStorage.getOAuthProviders as ReturnType<typeof vi.fn>).mockReturnValue([{ id: "anthropic", name: "Anthropic" }]);
+
+    let observedPromptInput: string | undefined;
+    (authStorage.login as ReturnType<typeof vi.fn>).mockImplementation(async (_provider: string, callbacks: any) => {
+      callbacks.onAuth({ url: "https://claude.ai/oauth/authorize?state=s&redirect_uri=http%3A%2F%2Flocalhost%3A3210%2Fcb" });
+      observedPromptInput = await callbacks.onPrompt({ message: "Paste callback" });
+    });
+
+    const app = buildApp();
+    const loginReq = REQUEST(app, "POST", "/api/auth/login", JSON.stringify({ provider: "anthropic", origin: "https://remote.example.com" }), {
+      "Content-Type": "application/json",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const submitRes = await REQUEST(app, "POST", "/api/auth/manual-code", JSON.stringify({ provider: "anthropic", code: "manual-code" }), {
+      "Content-Type": "application/json",
+    });
+    expect(submitRes.status).toBe(200);
+
+    await loginReq;
+    expect(observedPromptInput).toBe("manual-code");
+  });
+
   it("returns 400 when provider is missing", async () => {
     const res = await REQUEST(buildApp(), "POST", "/api/auth/login", JSON.stringify({}), {
       "Content-Type": "application/json",
@@ -1381,6 +1446,16 @@ describe("POST /auth/login", () => {
 
     expect(res.status).toBe(500);
     expect(res.body.error).toBe("OAuth failed");
+  });
+});
+
+describe("parseGitHubCopilotDeviceCode", () => {
+  it("parses a well-formed github copilot instruction string", () => {
+    expect(parseGitHubCopilotDeviceCode("Enter code: ABCD-1234")).toBe("ABCD-1234");
+  });
+
+  it("returns undefined for malformed instruction strings", () => {
+    expect(parseGitHubCopilotDeviceCode("Open browser and continue")).toBeUndefined();
   });
 });
 
