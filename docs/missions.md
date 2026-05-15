@@ -31,6 +31,8 @@ Use the Mission Manager UI to create missions and build hierarchy interactively.
 
 On mobile, Mission Manager surfaces the primary **Plan New Mission** CTA at the top of the mission list for faster access, while desktop keeps the split-layout sidebar CTA anchored in the bottom action region as the primary entry point.
 
+Mission detail refreshes now preserve expanded milestone/slice state and keep the selected milestone expanded, so persisted milestone acceptance criteria remain visible across live updates.
+
 ### CLI
 
 ```bash
