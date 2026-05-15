@@ -103,6 +103,7 @@ export type DatabaseMutationType =
   | "task:auto-recover-finalize-already-on-main"
   | "task:auto-recover-branch-misbound"
   | "task:auto-recover-completion-fanout"
+  | "task:auto-recover-worktree-session-exhausted"
   | "auto-recovery:classify-decision"
   | "auto-recovery:retry-issued"
   | "auto-recovery:ai-session-spawned"
