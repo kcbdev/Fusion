@@ -3783,7 +3783,25 @@ export class TaskExecutor {
             this.options.onComplete?.(task);
           } else {
             let taskDoneSessionRetries = 0;
+            let retryAbortedDueToReclaim = false;
             while (!taskDone && taskDoneSessionRetries < MAX_TASK_DONE_SESSION_RETRIES) {
+              const liveTask = await this.store.getTask(task.id);
+              const worktreeContractIntact = liveTask.worktree === worktreePath
+                && typeof liveTask.branch === "string"
+                && liveTask.branch.length > 0
+                && liveTask.column === "in-progress"
+                && !liveTask.paused;
+              if (!worktreeContractIntact) {
+                const reclaimMessage = `${task.id}: worktree/branch reclaimed during no-fn_task_done retry — aborting retry and requeueing`;
+                executorLog.log(reclaimMessage);
+                await this.store.logEntry(task.id, reclaimMessage, undefined, this.currentRunContext);
+                this.activeSessions.delete(task.id);
+                this.tokenUsageBaselines.delete(task.id);
+                session.dispose();
+                retryAbortedDueToReclaim = true;
+                break;
+              }
+
               taskDoneSessionRetries++;
               executorLog.log(
                 `⚠ ${task.id} finished without fn_task_done — retrying with new session (${taskDoneSessionRetries}/${MAX_TASK_DONE_SESSION_RETRIES})`,
@@ -3972,7 +3990,9 @@ export class TaskExecutor {
             } else {
               const priorRequeues = task.taskDoneRetryCount ?? 0;
               const nextRequeueCount = priorRequeues + 1;
-              const errorMessage = `Agent finished without calling fn_task_done (after ${MAX_TASK_DONE_SESSION_RETRIES} retries)`;
+              const errorMessage = retryAbortedDueToReclaim
+                ? "Worktree/branch reclaimed during no-fn_task_done retry — requeueing"
+                : `Agent finished without calling fn_task_done (after ${MAX_TASK_DONE_SESSION_RETRIES} retries)`;
 
               if (priorRequeues < MAX_TASK_DONE_REQUEUE_RETRIES) {
                 await this.store.updateTask(task.id, {
