@@ -337,15 +337,6 @@ export function createMissionRouter(
   // semaphore, queue depth). Session-lock 409 with { error, lockedByTab } is preserved.
 
   /**
-   * Helper to resolve rootDir for the current request's project scope.
-   */
-  async function getRootDirForRequest(req: Request): Promise<string> {
-    const projectId = getProjectIdFromRequest(req);
-    const scopedStore = projectId ? await getOrCreateProjectStore(projectId) : store;
-    return scopedStore.getRootDir();
-  }
-
-  /**
    * Helper to resolve scoped store for the current request's project scope.
    */
   async function getScopedStoreForRequest(req: Request) {
