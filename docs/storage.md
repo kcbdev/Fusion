@@ -76,6 +76,17 @@ Important execution nuance:
 - Triage spec writers inject this guidance via `TRIAGE_SYSTEM_PROMPT` and `FAST_TRIAGE_SYSTEM_PROMPT` in `packages/engine/src/triage.ts`.
 - Executor-side path normalization remains consistent with this rule through `scopePromptToWorktree` in `packages/engine/src/step-session-executor.ts`, which rewrites accidental worktree-local `.fusion` references back to project-root `.fusion` paths.
 
+## Executor snapshot vs landed diff (FN-4646)
+
+- `task.modifiedFiles` stores the executor's last captured worktree snapshot. During in-progress/in-review this is the primary fallback and may include files later reverted before merge or changed by verification rebuilds.
+- `task.mergeDetails.landedFiles` stores the authoritative landed file list on the merge target:
+  - squash path: `git show --name-only --format= <commitSha>`
+  - rebase/cherry-pick path: `git diff --name-only <rebaseBaseSha>..<commitSha>`
+- After merge (and during self-healing reconciliation), Fusion updates `task.modifiedFiles` to match `landedFiles` when the landed set is available and non-empty.
+- Consumer guidance:
+  - done tasks: prefer `mergeDetails.landedFiles`
+  - in-progress/in-review (or legacy pre-FN-4646 tasks): fall back to `task.modifiedFiles`
+
 ## SQLite write-path lock recovery (FN-4042 / FN-4083)
 
 - Every disk-backed SQLite connection that Fusion opens for project storage (`fusion.db`), the central registry (`fusion-central.db`), archives (`archive.db`), and worktree hydration explicitly sets `PRAGMA busy_timeout = 5000` and `PRAGMA journal_mode = WAL` at connection open time before write work begins.
