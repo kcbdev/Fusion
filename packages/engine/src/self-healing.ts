@@ -17,7 +17,7 @@ import { exec, execSync } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { getInReviewStallReason, getStalePausedReviewSignal, getTaskMergeBlocker, isEphemeralAgent, type AgentStore, type TaskStore, type Settings, type Task, type MergeDetails } from "@fusion/core";
+import { getInReviewStallReason, getStalePausedReviewSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, type AgentStore, type TaskStore, type Settings, type Task, type MergeDetails } from "@fusion/core";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { createLogger } from "./logger.js";
 import { getRegisteredWorktreePaths, isUsableTaskWorktree, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
@@ -2822,7 +2822,6 @@ export class SelfHealingManager {
 
       const mergedButNotDone = tasks.filter((t) =>
         t.column === "in-review" &&
-        !t.paused &&
         t.mergeDetails?.mergeConfirmed === true,
       );
 
@@ -2833,26 +2832,30 @@ export class SelfHealingManager {
       let recovered = 0;
       for (const task of mergedButNotDone) {
         try {
-          const blocker = getTaskMergeBlocker({
+          const hardBlocker = getTaskHardMergeBlocker({
             ...task,
-            status: undefined,
-            error: undefined,
             steps: task.steps ?? [],
             workflowStepResults: task.workflowStepResults,
           });
-          if (blocker) {
+          if (hardBlocker) {
             await this.store.updateTask(task.id, {
               status: "failed",
-              error: `Merge confirmed but finalization blocked: ${blocker}`,
+              error: `Merge confirmed but finalization blocked: ${hardBlocker}`,
             });
             await this.store.logEntry(
               task.id,
-              `Auto-recovery skipped: merge confirmed but finalization blocked — ${blocker}`,
+              `Auto-recovery skipped: merge confirmed but finalization blocked — ${hardBlocker}`,
             );
             continue;
           }
 
+          const clearedFlags = {
+            paused: Boolean(task.paused),
+            status: Boolean(task.status),
+            error: Boolean(task.error),
+          };
           await this.store.updateTask(task.id, {
+            paused: false,
             status: null,
             error: null,
             mergeRetries: 0,
@@ -2860,8 +2863,29 @@ export class SelfHealingManager {
           await this.store.moveTask(task.id, "done");
           await this.store.logEntry(
             task.id,
-            "Auto-recovered: merge already confirmed — moved from in-review to done",
+            `Auto-finalized from in-review/paused: content proven via mergeConfirmed metadata. Cleared soft state paused=${clearedFlags.paused}, status=${clearedFlags.status}, error=${clearedFlags.error}`,
           );
+          try {
+            const auditor = createRunAuditor(this.store, {
+              runId: generateSyntheticRunId("self-heal", task.id),
+              agentId: "self-healing",
+              taskId: task.id,
+              taskLineageId: task.lineageId,
+              phase: "recover-merged-review",
+            });
+            await auditor.database({
+              type: "task:auto-recover-finalize-already-on-main",
+              target: task.id,
+              metadata: {
+                mergeSha: task.mergeDetails?.commitSha ?? null,
+                baseBranch: task.baseBranch || task.executionStartBranch || "main",
+                clearedFlags,
+              },
+            });
+          } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            log.warn(`recoverMergedReviewTasks: failed to record run-audit event for ${task.id}: ${errorMessage}`);
+          }
           log.log(`Recovered merged task ${task.id}: moved to done`);
           recovered++;
         } catch (err: unknown) { const errorMessage = err instanceof Error ? err.message : String(err);
@@ -3043,7 +3067,6 @@ export class SelfHealingManager {
       const tasks = await this.store.listTasks({ column: "in-review", slim: true });
       const candidates = tasks.filter((task) =>
         task.column === "in-review" &&
-        !task.paused &&
         task.status === "failed" &&
         task.scopeOverride !== true &&
         task.mergeDetails?.mergeConfirmed !== true &&
@@ -3094,27 +3117,31 @@ export class SelfHealingManager {
             resolutionStrategy: "orphan-discard-no-op",
           };
 
-          const blocker = getTaskMergeBlocker({
+          const hardBlocker = getTaskHardMergeBlocker({
             ...task,
-            status: undefined,
-            error: undefined,
             steps: task.steps ?? [],
             workflowStepResults: task.workflowStepResults,
           });
-          if (blocker) {
+          if (hardBlocker) {
             await this.store.updateTask(task.id, {
               status: "failed",
-              error: `Merge confirmed but finalization blocked: ${blocker}`,
+              error: `Merge confirmed but finalization blocked: ${hardBlocker}`,
               mergeDetails,
             });
             await this.store.logEntry(
               task.id,
-              `Auto-recovery parked task in in-review: merged content found on ${baseBranch} (${landed.sha.slice(0, 8)}) but finalization blocked — ${blocker}`,
+              `Auto-recovery parked task in in-review: merged content found on ${baseBranch} (${landed.sha.slice(0, 8)}) but finalization blocked — ${hardBlocker}`,
             );
             continue;
           }
 
+          const clearedFlags = {
+            paused: Boolean(task.paused),
+            status: Boolean(task.status),
+            error: Boolean(task.error),
+          };
           await this.store.updateTask(task.id, {
+            paused: false,
             status: null,
             error: null,
             mergeRetries: 0,
@@ -3123,9 +3150,31 @@ export class SelfHealingManager {
           await this.store.moveTask(task.id, "done");
           await this.store.logEntry(
             task.id,
-            `Auto-recovered: FileScopeViolationError treated as orphan-only — task work already on main (commit: ${landed.sha.slice(0, 8)} via ${landed.strategy}; rejected orphans: ${orphanFiles.join(", ")})`,
+            `Auto-finalized from in-review/paused: content proven on ${baseBranch} (${landed.sha.slice(0, 8)}). Cleared soft state paused=${clearedFlags.paused}, status=${clearedFlags.status}, error=${clearedFlags.error}`,
           );
           await this.cleanupWorktreeOnly(task);
+          try {
+            const auditor = createRunAuditor(this.store, {
+              runId: generateSyntheticRunId("self-heal", task.id),
+              agentId: "self-healing",
+              taskId: task.id,
+              taskLineageId: task.lineageId,
+              phase: "recover-orphan-only-scope-violations",
+            });
+            await auditor.database({
+              type: "task:auto-recover-finalize-already-on-main",
+              target: task.id,
+              metadata: {
+                mergeSha: landed.sha,
+                baseBranch,
+                mergeStrategy: landed.strategy,
+                clearedFlags,
+              },
+            });
+          } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            log.warn(`recoverOrphanOnlyScopeViolations: failed to record run-audit event for ${task.id}: ${errorMessage}`);
+          }
           recovered++;
         } catch (err: unknown) {
           const errorMessage = err instanceof Error ? err.message : String(err);
@@ -3204,27 +3253,31 @@ export class SelfHealingManager {
             prNumber: task.prInfo?.number,
           };
 
-          const blocker = getTaskMergeBlocker({
+          const hardBlocker = getTaskHardMergeBlocker({
             ...task,
-            status: undefined,
-            error: undefined,
             steps: task.steps ?? [],
             workflowStepResults: task.workflowStepResults,
           });
-          if (blocker) {
+          if (hardBlocker) {
             await this.store.updateTask(task.id, {
               status: "failed",
-              error: `Merge confirmed but finalization blocked: ${blocker}`,
+              error: `Merge confirmed but finalization blocked: ${hardBlocker}`,
               mergeDetails,
             });
             await this.store.logEntry(
               task.id,
-              `Auto-recovery parked task in in-review: merged content found on ${baseBranch} (${landed.sha.slice(0, 8)}) but finalization blocked — ${blocker}`,
+              `Auto-recovery parked task in in-review: merged content found on ${baseBranch} (${landed.sha.slice(0, 8)}) but finalization blocked — ${hardBlocker}`,
             );
             continue;
           }
 
+          const clearedFlags = {
+            paused: Boolean(task.paused),
+            status: Boolean(task.status),
+            error: Boolean(task.error),
+          };
           await this.store.updateTask(task.id, {
+            paused: false,
             status: null,
             error: null,
             mergeRetries: 0,
@@ -3234,7 +3287,7 @@ export class SelfHealingManager {
           await this.store.moveTask(task.id, "done");
           await this.store.logEntry(
             task.id,
-            `Auto-recovered: phantom-merge-guard false positive — content found on ${baseBranch} at ${landed.sha.slice(0, 8)} via ${landed.strategy}`,
+            `Auto-finalized from in-review/paused: content proven on ${baseBranch} (${landed.sha.slice(0, 8)}). Cleared soft state paused=${clearedFlags.paused}, status=${clearedFlags.status}, error=${clearedFlags.error}`,
           );
           await this.reconcileCompletedTask(task.id, { worktreeHint });
           try {
@@ -3246,13 +3299,14 @@ export class SelfHealingManager {
               phase: "recover-already-merged-review",
             });
             await auditor.database({
-              type: "task:auto-recover-already-merged",
+              type: "task:auto-recover-finalize-already-on-main",
               target: task.id,
               metadata: {
                 mergeSha: landed.sha,
                 mergeStrategy: landed.strategy,
                 baseBranch,
                 mergeRetries: task.mergeRetries ?? 0,
+                clearedFlags,
               },
             });
           } catch (err: unknown) {
