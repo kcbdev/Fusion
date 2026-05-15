@@ -78,9 +78,9 @@ describe("auto-recovery dispatcher", () => {
     expect(decision.action).toBe("pause");
     expect(decision.rationale).toBe("handler-not-registered");
     expect(database).toHaveBeenCalledTimes(1);
-    expect(database.mock.calls[0]?.[0]).toMatchObject({
+    expect(database).toHaveBeenCalledWith(expect.objectContaining({
       type: "auto-recovery:classify-decision",
       metadata: expect.objectContaining({ class: "branch-conflict-unrecoverable", mode: "programmatic", retryCount: 0 }),
-    });
+    }));
   });
 });
