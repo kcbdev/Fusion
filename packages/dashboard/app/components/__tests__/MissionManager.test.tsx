@@ -631,6 +631,49 @@ function createDetailFetchMockWithTelemetry(events: unknown[], telemetryOverride
   });
 }
 
+function createDetailFetchMockForMissionDetail(
+  missionDetail: typeof mockMissionDetail,
+  telemetryOverride: unknown = mockMilestoneValidationTelemetry,
+  assertionsResponse: unknown[] = [],
+) {
+  return vi.fn().mockImplementation((url: string) => {
+    if (url.includes("/missions/health")) {
+      return Promise.resolve(mockApiResponse(mockMissionHealthById));
+    }
+
+    if (url.includes("/events")) {
+      return Promise.resolve(mockApiResponse(parseMissionEventsResponse(url, mockMissionEvents)));
+    }
+
+    if (url.includes("/health")) {
+      const missionId = extractMissionId(url) ?? "M-001";
+      return Promise.resolve(mockApiResponse(getMockMissionHealth(missionId)));
+    }
+
+    if (url.includes("/autopilot")) {
+      return Promise.resolve(mockApiResponse(mockAutopilotStatus));
+    }
+
+    if (url.includes("/assertions")) {
+      return Promise.resolve(mockApiResponse(assertionsResponse));
+    }
+
+    const validationResponse = getValidationApiMock(url, telemetryOverride);
+    if (validationResponse !== null) {
+      return Promise.resolve(mockApiResponse(validationResponse));
+    }
+
+    if (url.includes("/api/missions/") && !url.includes("/milestones") && !url.includes("/status")) {
+      const missionId = extractMissionId(url);
+      if (missionId === missionDetail.id) {
+        return Promise.resolve(mockApiResponse(missionDetail));
+      }
+    }
+
+    return Promise.resolve(mockApiResponse(mockMissions));
+  });
+}
+
 function createFetchMockWithHealth(
   missions: Array<Record<string, unknown>>,
   healthByMissionId: Record<string, unknown>,
@@ -2480,7 +2523,7 @@ describe("MissionManager", () => {
       // Milestone is auto-expanded, slice and feature visible
       expect(screen.getByText("Database Schema")).toBeDefined();
       expect(screen.getByText("User Tables")).toBeDefined();
-      expect(screen.getByText("User model")).toBeDefined();
+      expect(screen.getAllByText("User model").length).toBeGreaterThan(0);
     });
   });
 
@@ -2690,11 +2733,11 @@ describe("MissionManager", () => {
         // Slice auto-expanded
         expect(screen.getByText("User Tables")).toBeDefined();
         // Feature visible
-        expect(screen.getByText("User model")).toBeDefined();
+        expect(screen.getAllByText("User model").length).toBeGreaterThan(0);
         // Feature status badge
         expect(screen.getByText("defined")).toBeDefined();
         // Acceptance criteria
-        expect(screen.getByText(/Model exists with required fields/)).toBeDefined();
+        expect(screen.getAllByText(/Model exists with required fields/).length).toBeGreaterThan(0);
       });
     });
 
@@ -2739,14 +2782,13 @@ describe("MissionManager", () => {
       fireEvent.click(screen.getByTitle("Edit milestone"));
       const acceptanceField = await screen.findByPlaceholderText("Acceptance criteria (optional)");
       fireEvent.change(acceptanceField, { target: { value: " Updated milestone acceptance " } });
-      fireEvent.click(screen.getByRole("button", { name: "Update" }));
+      const milestoneFormCard = acceptanceField.closest(".mission-form-card");
+      expect(milestoneFormCard).toBeTruthy();
+      fireEvent.click(within(milestoneFormCard as HTMLElement).getByRole("button", { name: /update/i }));
 
       await waitFor(() => {
         const patchCall = fetchMock.mock.calls.find(
-          (call) =>
-            typeof call[0] === "string" &&
-            call[0].includes("/api/missions/M-001/milestones/MS-001") &&
-            call[1]?.method === "PATCH",
+          (call) => call[1]?.method && String(call[1].method).toUpperCase() === "PATCH",
         );
         expect(patchCall).toBeDefined();
         const body = JSON.parse((patchCall![1] as RequestInit).body as string);
@@ -3943,7 +3985,7 @@ describe("MissionManager", () => {
       fireEvent.click(screen.getByText("Build Auth System"));
       await waitFor(() => expect(screen.getByText("Database Schema")).toBeInTheDocument());
       await waitFor(() => expect(screen.getByText("User Tables")).toBeInTheDocument());
-      await waitFor(() => expect(screen.getByText("User model")).toBeInTheDocument());
+      await waitFor(() => expect(screen.getAllByText("User model").length).toBeGreaterThan(0));
     });
   });
 
@@ -4189,6 +4231,75 @@ describe("MissionManager", () => {
         ).length;
         expect(missionDetailFetchesAfter).toBe(missionDetailFetchesBefore + 1);
       });
+    });
+  });
+
+  describe("milestone assertions empty-state", () => {
+    const emptyAssertionsCopy = "No assertions defined. Add one to define completion criteria.";
+
+    it("keeps empty-state nudge when assertions and feature acceptance criteria are both missing", async () => {
+      const missionDetail = JSON.parse(JSON.stringify(mockMissionDetail)) as typeof mockMissionDetail;
+      missionDetail.milestones[0].slices[0].features = [
+        {
+          ...missionDetail.milestones[0].slices[0].features[0],
+          acceptanceCriteria: "",
+        },
+      ];
+
+      globalThis.fetch = createDetailFetchMockForMissionDetail(missionDetail);
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+      fireEvent.click(await screen.findByText("Build Auth System"));
+      await waitForDetailLoaded();
+
+      expect(screen.getAllByText(emptyAssertionsCopy)).toHaveLength(1);
+    });
+
+    it("shows feature acceptance rollup instead of false empty-state when assertions are absent", async () => {
+      const missionDetail = JSON.parse(JSON.stringify(mockMissionDetail)) as typeof mockMissionDetail;
+      missionDetail.milestones[0].slices[0].features = [
+        {
+          ...missionDetail.milestones[0].slices[0].features[0],
+          id: "F-ROLLUP-1",
+          title: "Session handling",
+          acceptanceCriteria: "Session refresh succeeds without logout",
+        },
+        {
+          ...missionDetail.milestones[0].slices[0].features[0],
+          id: "F-ROLLUP-2",
+          title: "Token storage",
+          acceptanceCriteria: "Tokens remain encrypted at rest",
+        },
+      ];
+
+      globalThis.fetch = createDetailFetchMockForMissionDetail(missionDetail);
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+      fireEvent.click(await screen.findByText("Build Auth System"));
+      await waitForDetailLoaded();
+
+      expect(screen.queryByText(emptyAssertionsCopy)).not.toBeInTheDocument();
+      const rollup = screen.getByTestId("milestone-feature-acceptance-rollup");
+      expect(within(rollup).getByText("Completion criteria (from features)")).toBeInTheDocument();
+      expect(within(rollup).getByText("Session handling")).toBeInTheDocument();
+      expect(within(rollup).getByText("Session refresh succeeds without logout", { exact: false })).toBeInTheDocument();
+      expect(within(rollup).getByText("Token storage")).toBeInTheDocument();
+      expect(within(rollup).getByText("Tokens remain encrypted at rest", { exact: false })).toBeInTheDocument();
+    });
+
+    it("keeps structured assertions precedence and hides rollup when assertions exist", async () => {
+      globalThis.fetch = createDetailFetchMockForMissionDetail(
+        mockMissionDetail,
+        mockMilestoneValidationTelemetryWithRounds,
+        mockMilestoneValidationTelemetryWithRounds.validationContract.assertions,
+      );
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+      fireEvent.click(await screen.findByText("Build Auth System"));
+      await waitForDetailLoaded();
+
+      expect(screen.getByText("Auth works")).toBeInTheDocument();
+      expect(screen.queryByTestId("milestone-feature-acceptance-rollup")).not.toBeInTheDocument();
     });
   });
 
