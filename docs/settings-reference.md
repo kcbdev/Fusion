@@ -227,7 +227,9 @@ Override precedence for direct merges is:
 
 ### Sandbox settings
 
-Sandbox settings are project-scoped under `sandbox.*` and currently define schema/defaults/validation only (foundation from FN-4635 for FN-4637/FN-4638 backend rollout).
+> **Experimental:** Sandbox settings are inert unless `experimentalFeatures.sandbox: true` is enabled in `~/.fusion/settings.json`.
+
+Sandbox settings are project-scoped under `sandbox.*`. Until the experimental flag is enabled, Fusion always resolves sandbox execution to the default native backend and ignores both project-level sandbox backend settings and per-task PROMPT overrides.
 
 | Setting | Type | Default | Description |
 |---|---|---:|---|
