@@ -1831,6 +1831,21 @@ export interface ResearchProjectSettings {
   limits?: ResearchProjectLimits;
 }
 
+export type SandboxBackendName = "native" | "sandbox-exec" | "bubblewrap" | "docker" | "podman" | "custom";
+
+export type SandboxFailureMode = "fail-hard" | "fallback-native";
+
+export interface SandboxPolicy {
+  allowNetwork?: boolean;
+  allowedPaths?: string[];
+}
+
+export interface SandboxProjectSettings {
+  backend?: SandboxBackendName;
+  policy?: SandboxPolicy;
+  failureMode?: SandboxFailureMode;
+}
+
 export type EvalFollowUpPolicy = "disabled" | "suggest-only" | "auto-create";
 
 export interface EvalProjectSettings {
@@ -2367,6 +2382,9 @@ export interface ProjectSettings {
   unavailableNodePolicy?: UnavailableNodePolicy;
   /** Project-level research configuration overrides. */
   researchSettings?: ResearchProjectSettings;
+  /** Sandbox command-execution settings.
+   *  When omitted, runtime behavior is preserved via native passthrough defaults. */
+  sandbox?: SandboxProjectSettings;
   /** Project-level scheduled eval configuration overrides. */
   evalSettings?: EvalProjectSettings;
   /** Enable scheduled evaluation batches for recently completed tasks. */
