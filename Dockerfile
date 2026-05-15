@@ -11,12 +11,32 @@ RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/cli/package.json ./packages/cli/package.json
+COPY packages/cli-alias/package.json ./packages/cli-alias/package.json
 COPY packages/core/package.json ./packages/core/package.json
 COPY packages/dashboard/package.json ./packages/dashboard/package.json
 COPY packages/desktop/package.json ./packages/desktop/package.json
+COPY packages/droid-cli/package.json ./packages/droid-cli/package.json
 COPY packages/engine/package.json ./packages/engine/package.json
 COPY packages/mobile/package.json ./packages/mobile/package.json
-COPY packages/tui/package.json ./packages/tui/package.json
+COPY packages/pi-claude-cli/package.json ./packages/pi-claude-cli/package.json
+COPY packages/pi-llama-cpp/package.json ./packages/pi-llama-cpp/package.json
+COPY packages/plugin-sdk/package.json ./packages/plugin-sdk/package.json
+COPY plugins/examples/fusion-plugin-auto-label/package.json ./plugins/examples/fusion-plugin-auto-label/package.json
+COPY plugins/examples/fusion-plugin-ci-status/package.json ./plugins/examples/fusion-plugin-ci-status/package.json
+COPY plugins/examples/fusion-plugin-notification/package.json ./plugins/examples/fusion-plugin-notification/package.json
+COPY plugins/examples/fusion-plugin-settings-demo/package.json ./plugins/examples/fusion-plugin-settings-demo/package.json
+COPY plugins/fusion-plugin-paperclip-runtime/package.json ./plugins/fusion-plugin-paperclip-runtime/package.json
+COPY plugins/fusion-plugin-dependency-graph/package.json ./plugins/fusion-plugin-dependency-graph/package.json
+COPY plugins/fusion-plugin-cli-printing-press/package.json ./plugins/fusion-plugin-cli-printing-press/package.json
+COPY plugins/fusion-plugin-openclaw-runtime/package.json ./plugins/fusion-plugin-openclaw-runtime/package.json
+COPY plugins/fusion-plugin-hermes-runtime/package.json ./plugins/fusion-plugin-hermes-runtime/package.json
+COPY plugins/fusion-plugin-droid-runtime/package.json ./plugins/fusion-plugin-droid-runtime/package.json
+COPY plugins/fusion-plugin-cursor-runtime/package.json ./plugins/fusion-plugin-cursor-runtime/package.json
+COPY plugins/fusion-plugin-agent-browser/package.json ./plugins/fusion-plugin-agent-browser/package.json
+COPY plugins/fusion-plugin-whatsapp-chat/package.json ./plugins/fusion-plugin-whatsapp-chat/package.json
+COPY plugins/fusion-plugin-roadmap/package.json ./plugins/fusion-plugin-roadmap/package.json
+COPY plugins/fusion-plugin-even-realities-glasses/package.json ./plugins/fusion-plugin-even-realities-glasses/package.json
+COPY plugins/fusion-plugin-reports/package.json ./plugins/fusion-plugin-reports/package.json
 
 RUN pnpm install --frozen-lockfile
 
