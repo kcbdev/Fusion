@@ -365,11 +365,8 @@ function configuredCommandErrorMessage(result: RunCommandResult): string {
   return parts.length ? parts.join("\n") : "Command failed";
 }
 
-let configuredCommandSandboxBackend: SandboxBackend | null = null;
-
 function getConfiguredCommandSandboxBackend(): SandboxBackend {
-  configuredCommandSandboxBackend ??= resolveSandboxBackend();
-  return configuredCommandSandboxBackend;
+  return resolveSandboxBackend();
 }
 
 async function runConfiguredCommand(

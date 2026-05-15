@@ -8938,11 +8938,8 @@ async function runPostMergeWorkflowSteps(
   }
 }
 
-let postMergeScriptSandboxBackend: SandboxBackend | null = null;
-
 function getPostMergeScriptSandboxBackend(): SandboxBackend {
-  postMergeScriptSandboxBackend ??= resolveSandboxBackend();
-  return postMergeScriptSandboxBackend;
+  return resolveSandboxBackend();
 }
 
 /** Execute a script-mode post-merge workflow step in the provided execution directory. */
