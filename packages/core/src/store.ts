@@ -4511,6 +4511,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       }
       if (!paused) {
         task.pausedByAgentId = undefined;
+        task.userPaused = undefined;
       }
       // When pausing an in-progress/in-review task, set status so the UI can show the state.
       // When unpausing, clear the "paused" status.

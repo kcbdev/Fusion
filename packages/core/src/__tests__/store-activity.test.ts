@@ -449,6 +449,35 @@ describe("TaskStore", () => {
       const bounced = await store.getTask(task.id);
       expect(bounced.userPaused).toBeUndefined();
     });
+
+    it("clears userPaused when pauseTask(false) is called on a todo user-paused task", async () => {
+      const task = await createTestTask();
+      await store.moveTask(task.id, "todo");
+      await store.updateTask(task.id, { userPaused: true });
+
+      const unpaused = await store.pauseTask(task.id, false);
+      expect(unpaused.userPaused).toBeUndefined();
+      expect(unpaused.paused).toBeUndefined();
+    });
+
+    it("clears paused and userPaused when unpausing a paused todo task", async () => {
+      const task = await createTestTask();
+      await store.moveTask(task.id, "todo");
+      await store.updateTask(task.id, { userPaused: true, paused: true });
+
+      const unpaused = await store.pauseTask(task.id, false);
+      expect(unpaused.paused).toBeUndefined();
+      expect(unpaused.userPaused).toBeUndefined();
+    });
+
+    it("pauseTask(true) on todo does not set userPaused", async () => {
+      const task = await createTestTask();
+      await store.moveTask(task.id, "todo");
+
+      const paused = await store.pauseTask(task.id, true);
+      expect(paused.paused).toBe(true);
+      expect(paused.userPaused).toBeUndefined();
+    });
   });
 
   describe("execution timing timestamps", () => {
