@@ -1399,7 +1399,7 @@ describe("TaskCard", () => {
     expect(actionsContainer?.contains(archiveBtn)).toBe(true);
   });
 
-  it("FN-4540 renders in-review Move control in card-bottom-left-row and keeps menu behavior", () => {
+  it("FN-4540 renders in-review Move control in card-bottom-right-row and keeps menu behavior", () => {
     const onMoveTask = vi.fn();
     const { container } = render(
       <TaskCard
@@ -1412,11 +1412,15 @@ describe("TaskCard", () => {
 
     const moveButton = screen.getByRole("button", { name: "Move task" });
     const actionsContainer = container.querySelector(".card-header-actions");
-    const bottomLeft = moveButton.closest(".card-bottom-left-row");
+    const bottomRow = container.querySelector(".card-bottom-row");
+    const bottomRight = moveButton.closest(".card-bottom-right-row");
 
     expect(actionsContainer).not.toBeNull();
     expect(actionsContainer?.contains(moveButton)).toBe(false);
-    expect(bottomLeft).not.toBeNull();
+    expect(bottomRow).not.toBeNull();
+    expect(bottomRight).not.toBeNull();
+    expect(bottomRow?.contains(bottomRight as HTMLElement)).toBe(true);
+    expect(getComputedStyle(bottomRow as HTMLElement).justifyContent).toBe("flex-end");
 
     fireEvent.click(moveButton);
     fireEvent.click(screen.getByRole("menuitem", { name: "Done (no merge)" }));
