@@ -23,6 +23,7 @@ import { createLogger } from "./logger.js";
 import { fetchWebContent, WebFetchError } from "./web-fetch.js";
 import type { RunAuditor } from "./run-audit.js";
 import { computeApprovalDedupeKey } from "./agent-action-gate.js";
+import { MessageDeliveryAutoRecoveryHandler } from "./auto-recovery-handlers/message-delivery.js";
 
 // ── Tool parameter schemas (canonical definitions) ────────────────────────
 
@@ -1830,7 +1831,15 @@ export function createDelegateTaskTool(
  * @param fromAgentId - The agent ID sending the message
  * @returns ToolDefinition for the `fn_send_message` tool
  */
-export function createSendMessageTool(messageStore: MessageStore, fromAgentId: string): ToolDefinition {
+export function createSendMessageTool(
+  messageStore: MessageStore,
+  fromAgentId: string,
+  options?: { autoRecovery?: ProjectSettings["autoRecovery"]; runAudit?: RunAuditor },
+): ToolDefinition {
+  const deliveryHandler = new MessageDeliveryAutoRecoveryHandler({
+    runAudit: options?.runAudit ?? { database: async () => {}, git: async () => {}, filesystem: async () => {} },
+  });
+
   return {
     name: "fn_send_message",
     label: "Send Message",
@@ -1841,7 +1850,6 @@ export function createSendMessageTool(messageStore: MessageStore, fromAgentId: s
     parameters: sendMessageParams,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (_id: string, params: Static<typeof sendMessageParams>, _signal?: any, _onUpdate?: any, _ctx?: any) => {
-      // Validate content length
       const content = params.content.trim();
       if (content.length === 0) {
         return {
@@ -1873,22 +1881,32 @@ export function createSendMessageTool(messageStore: MessageStore, fromAgentId: s
           };
         }
 
-        const message = messageStore.sendMessage({
-          fromId: fromAgentId,
-          fromType: "agent",
-          toId: recipient.id,
-          toType: recipient.type,
-          content,
-          type: messageType,
-          ...(replyToMessageId ? { metadata: { replyTo: { messageId: replyToMessageId } } } : {}),
-        });
+        const result = await deliveryHandler.runWithBoundedRetry({
+          run: async () => Promise.resolve(messageStore.sendMessage({
+            fromId: fromAgentId,
+            fromType: "agent",
+            toId: recipient.id,
+            toType: recipient.type,
+            content,
+            type: messageType,
+            ...(replyToMessageId ? { metadata: { replyTo: { messageId: replyToMessageId } } } : {}),
+          })),
+          correlation: { kind: "direct", fromAgentId, toId: recipient.id },
+        }, options?.autoRecovery ?? { mode: "deterministic-only", maxRetries: 3 });
+
+        if (result.outcome === "parked") {
+          return {
+            content: [{ type: "text" as const, text: `ERROR: Failed to send message: ${result.error.message}` }],
+            details: {},
+          };
+        }
 
         return {
           content: [{
             type: "text" as const,
-            text: `Message sent to ${recipient.id === DASHBOARD_USER_ID ? DASHBOARD_USER_ID : params.to_id} (ID: ${message.id})`,
+            text: `Message sent to ${recipient.id === DASHBOARD_USER_ID ? DASHBOARD_USER_ID : params.to_id} (ID: ${result.value.id})`,
           }],
-          details: { messageId: message.id },
+          details: { messageId: result.value.id },
         };
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err);
@@ -2132,7 +2150,15 @@ export function createResearchTools(options: ResearchToolsOptions): ToolDefiniti
   return [runTool, listTool, getTool, cancelTool];
 }
 
-export function createPostRoomMessageTool(chatStore: ChatStore, fromAgentId: string): ToolDefinition {
+export function createPostRoomMessageTool(
+  chatStore: ChatStore,
+  fromAgentId: string,
+  options?: { autoRecovery?: ProjectSettings["autoRecovery"]; runAudit?: RunAuditor },
+): ToolDefinition {
+  const deliveryHandler = new MessageDeliveryAutoRecoveryHandler({
+    runAudit: options?.runAudit ?? { database: async () => {}, git: async () => {}, filesystem: async () => {} },
+  });
+
   return {
     name: "fn_post_room_message",
     label: "Post Room Message",
@@ -2173,17 +2199,28 @@ export function createPostRoomMessageTool(chatStore: ChatStore, fromAgentId: str
           };
         }
 
-        const message = chatStore.addRoomMessage(params.roomId, {
-          role: "assistant",
-          senderAgentId: fromAgentId,
-          content,
-          mentions: params.mentions ?? [],
-          ...(replyToMessageId ? { metadata: { replyToMessageId } } : {}),
-        });
+        const result = await deliveryHandler.runWithBoundedRetry({
+          run: async () => Promise.resolve(chatStore.addRoomMessage(params.roomId, {
+            role: "assistant",
+            senderAgentId: fromAgentId,
+            content,
+            mentions: params.mentions ?? [],
+            ...(replyToMessageId ? { metadata: { replyToMessageId } } : {}),
+          })),
+          correlation: { kind: "room", fromAgentId, roomId: params.roomId },
+        }, options?.autoRecovery ?? { mode: "deterministic-only", maxRetries: 3 });
+
+        if (result.outcome === "parked") {
+          return {
+            content: [{ type: "text" as const, text: `ERROR: Failed to post room message: ${result.error.message}` }],
+            details: {},
+            isError: true,
+          };
+        }
 
         return {
-          content: [{ type: "text" as const, text: `Room message posted to ${params.roomId} (ID: ${message.id})` }],
-          details: { messageId: message.id },
+          content: [{ type: "text" as const, text: `Room message posted to ${params.roomId} (ID: ${result.value.id})` }],
+          details: { messageId: result.value.id },
         };
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err);
