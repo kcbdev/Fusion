@@ -1312,6 +1312,87 @@ export function ListView({
     </div>
   );
 
+  const renderBulkEditToolbars = () => (
+    <>
+      <div className="bulk-edit-toolbar">
+        <button className="btn btn-sm" onClick={handleBulkPause} disabled={isApplying} title="Pause all selected tasks that are not already paused">
+          <Pause size={14} />
+          Pause selected
+        </button>
+        <button className="btn btn-sm" onClick={handleBulkUnpause} disabled={isApplying} title="Unpause selected tasks that are currently paused">
+          <Play size={14} />
+          Unpause selected
+        </button>
+        <button className="btn btn-sm" onClick={handleBulkArchive} disabled={isApplying} title="Archive selected tasks that are in Done">
+          <Archive size={14} />
+          Archive selected
+        </button>
+        <button className="btn btn-danger btn-sm" onClick={handleBulkDelete} disabled={isApplying} title="Delete selected tasks">
+          <Trash2 size={14} />
+          Delete selected
+        </button>
+      </div>
+      {availableModels && availableModels.length > 0 ? (
+        <div className="bulk-edit-toolbar">
+          <span className="bulk-edit-label">Bulk Edit Models &amp; Node:</span>
+          <div className="bulk-edit-dropdown">
+            <CustomModelDropdown
+              models={availableModels}
+              value={executorModel}
+              onChange={setExecutorModel}
+              label="Executor Model"
+              noChangeValue="__no_change__"
+              noChangeLabel="No change"
+              favoriteProviders={favoriteProviders}
+              onToggleFavorite={onToggleFavorite}
+              favoriteModels={favoriteModels}
+              onToggleModelFavorite={onToggleModelFavorite}
+            />
+          </div>
+          <div className="bulk-edit-dropdown">
+            <CustomModelDropdown
+              models={availableModels}
+              value={validatorModel}
+              onChange={setValidatorModel}
+              label="Reviewer Model"
+              noChangeValue="__no_change__"
+              noChangeLabel="No change"
+              favoriteProviders={favoriteProviders}
+              onToggleFavorite={onToggleFavorite}
+              favoriteModels={favoriteModels}
+              onToggleModelFavorite={onToggleModelFavorite}
+            />
+          </div>
+          <div className="bulk-edit-dropdown bulk-edit-node-wrap">
+            <select
+              className="select bulk-node-select"
+              value={nodeOverride}
+              onChange={(e) => setNodeOverride(e.target.value)}
+              aria-label="Node Override"
+              disabled={isLoadingNodes}
+            >
+              <option value="__no_change__">No change</option>
+              <option value="">Use project default</option>
+              {availableNodes.map((node) => (
+                <option key={node.id} value={node.id}>
+                  {`${getNodeStatusSymbol(node.status)} ${node.name || node.id} (${getNodeStatusLabel(node.status)})`}
+                </option>
+              ))}
+            </select>
+            {selectedOverrideNode ? <NodeHealthDot status={selectedOverrideNode.status} showLabel /> : null}
+          </div>
+          <button
+            className="btn btn-primary btn-sm bulk-edit-apply-btn"
+            onClick={handleApplyBulkUpdate}
+            disabled={isApplying || (executorModel === "__no_change__" && validatorModel === "__no_change__" && nodeOverride === "__no_change__")}
+          >
+            {isApplying ? "Applying..." : "Apply"}
+          </button>
+        </div>
+      ) : null}
+    </>
+  );
+
   return (
     <div className="list-view">
       {isMobile && (
@@ -1342,6 +1423,18 @@ export function ListView({
           </div>
           {viewOptionsOpen ? (
             <div className="list-toolbar-mobile-options">{renderViewOptionsPanel("list-view-options-panel-mobile")}</div>
+          ) : null}
+          {bulkEditEnabled ? (
+            selectedTaskIds.size > 0 ? (
+              <div className="list-mobile-bulk-actions-wrapper">{renderBulkEditToolbars()}</div>
+            ) : (
+              <div className="list-mobile-bulk-actions">
+                <span className="list-mobile-bulk-actions__count">{`${selectedTaskIds.size} selected`}</span>
+                <button className="btn btn-sm" onClick={clearSelection}>
+                  Clear
+                </button>
+              </div>
+            )
           ) : null}
         </>
       )}
@@ -1404,86 +1497,7 @@ export function ListView({
                   View options
                 </button>
                 {viewOptionsOpen && renderViewOptionsPanel("list-view-options-panel")}
-                {bulkEditEnabled && selectedTaskIds.size > 0 ? (
-                  <>
-                    <div className="bulk-edit-toolbar">
-                      <button className="btn btn-sm" onClick={handleBulkPause} disabled={isApplying} title="Pause all selected tasks that are not already paused">
-                        <Pause size={14} />
-                        Pause selected
-                      </button>
-                      <button className="btn btn-sm" onClick={handleBulkUnpause} disabled={isApplying} title="Unpause selected tasks that are currently paused">
-                        <Play size={14} />
-                        Unpause selected
-                      </button>
-                      <button className="btn btn-sm" onClick={handleBulkArchive} disabled={isApplying} title="Archive selected tasks that are in Done">
-                        <Archive size={14} />
-                        Archive selected
-                      </button>
-                      <button className="btn btn-danger btn-sm" onClick={handleBulkDelete} disabled={isApplying} title="Delete selected tasks">
-                        <Trash2 size={14} />
-                        Delete selected
-                      </button>
-                    </div>
-                    {availableModels && availableModels.length > 0 ? (
-                      <div className="bulk-edit-toolbar">
-                        <span className="bulk-edit-label">Bulk Edit Models &amp; Node:</span>
-                        <div className="bulk-edit-dropdown">
-                          <CustomModelDropdown
-                            models={availableModels}
-                            value={executorModel}
-                            onChange={setExecutorModel}
-                            label="Executor Model"
-                            noChangeValue="__no_change__"
-                            noChangeLabel="No change"
-                            favoriteProviders={favoriteProviders}
-                            onToggleFavorite={onToggleFavorite}
-                            favoriteModels={favoriteModels}
-                            onToggleModelFavorite={onToggleModelFavorite}
-                          />
-                        </div>
-                        <div className="bulk-edit-dropdown">
-                          <CustomModelDropdown
-                            models={availableModels}
-                            value={validatorModel}
-                            onChange={setValidatorModel}
-                            label="Reviewer Model"
-                            noChangeValue="__no_change__"
-                            noChangeLabel="No change"
-                            favoriteProviders={favoriteProviders}
-                            onToggleFavorite={onToggleFavorite}
-                            favoriteModels={favoriteModels}
-                            onToggleModelFavorite={onToggleModelFavorite}
-                          />
-                        </div>
-                        <div className="bulk-edit-dropdown bulk-edit-node-wrap">
-                          <select
-                            className="select bulk-node-select"
-                            value={nodeOverride}
-                            onChange={(e) => setNodeOverride(e.target.value)}
-                            aria-label="Node Override"
-                            disabled={isLoadingNodes}
-                          >
-                            <option value="__no_change__">No change</option>
-                            <option value="">Use project default</option>
-                            {availableNodes.map((node) => (
-                              <option key={node.id} value={node.id}>
-                                {`${getNodeStatusSymbol(node.status)} ${node.name || node.id} (${getNodeStatusLabel(node.status)})`}
-                              </option>
-                            ))}
-                          </select>
-                          {selectedOverrideNode ? <NodeHealthDot status={selectedOverrideNode.status} showLabel /> : null}
-                        </div>
-                        <button
-                          className="btn btn-primary btn-sm bulk-edit-apply-btn"
-                          onClick={handleApplyBulkUpdate}
-                          disabled={isApplying || (executorModel === "__no_change__" && validatorModel === "__no_change__" && nodeOverride === "__no_change__")}
-                        >
-                          {isApplying ? "Applying..." : "Apply"}
-                        </button>
-                      </div>
-                    ) : null}
-                  </>
-                ) : null}
+                {bulkEditEnabled && selectedTaskIds.size > 0 ? renderBulkEditToolbars() : null}
               </aside>
             )}
             <div className="list-quick-entry-above-table">
