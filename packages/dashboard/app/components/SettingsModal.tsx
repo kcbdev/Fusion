@@ -457,6 +457,7 @@ export function SettingsModal({
   const [prefixError, setPrefixError] = useState<string | null>(null);
   const [researchLimitError, setResearchLimitError] = useState<string | null>(null);
   const [overlapPathPickerIndex, setOverlapPathPickerIndex] = useState<number | null>(null);
+  const [worktreesDirPickerOpen, setWorktreesDirPickerOpen] = useState(false);
 
   const {
     entries: overlapPathPickerEntries,
@@ -466,6 +467,15 @@ export function SettingsModal({
     error: overlapPathPickerError,
     refresh: refreshOverlapPathPicker,
   } = useWorkspaceFileBrowser("project", overlapPathPickerIndex !== null, projectId);
+
+  const {
+    entries: worktreesDirPickerEntries,
+    currentPath: worktreesDirPickerCurrentPath,
+    setPath: setWorktreesDirPickerPath,
+    loading: worktreesDirPickerLoading,
+    error: worktreesDirPickerError,
+    refresh: refreshWorktreesDirPicker,
+  } = useWorkspaceFileBrowser("project", worktreesDirPickerOpen, projectId);
 
   const { nodes } = useNodes();
   const experimentalFeatures = form.experimentalFeatures ?? {};
@@ -1606,6 +1616,35 @@ export function SettingsModal({
       closeOverlapPathPicker();
     }
   }, [closeOverlapPathPicker]);
+
+  const openWorktreesDirPicker = useCallback(() => {
+    setWorktreesDirPickerPath(".");
+    setWorktreesDirPickerOpen(true);
+  }, [setWorktreesDirPickerPath]);
+
+  const closeWorktreesDirPicker = useCallback(() => {
+    setWorktreesDirPickerOpen(false);
+  }, []);
+
+  const selectWorktreesDirFromPicker = useCallback((path: string) => {
+    const normalizedPath = path.endsWith("/") ? path : `${path}/`;
+    setForm((f) => ({ ...f, worktreesDir: normalizedPath }));
+    closeWorktreesDirPicker();
+  }, [closeWorktreesDirPicker]);
+
+  const selectCurrentWorktreesDir = useCallback(() => {
+    const normalizedPath = worktreesDirPickerCurrentPath === "."
+      ? "./"
+      : (worktreesDirPickerCurrentPath.endsWith("/") ? worktreesDirPickerCurrentPath : `${worktreesDirPickerCurrentPath}/`);
+    setForm((f) => ({ ...f, worktreesDir: normalizedPath }));
+    closeWorktreesDirPicker();
+  }, [worktreesDirPickerCurrentPath, closeWorktreesDirPicker]);
+
+  const handleWorktreesDirPickerOverlayClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    if (event.target === event.currentTarget) {
+      closeWorktreesDirPicker();
+    }
+  }, [closeWorktreesDirPicker]);
 
   const handleOverlapIgnorePathChange = useCallback((index: number, value: string) => {
     setForm((f) => {
@@ -3737,15 +3776,25 @@ export function SettingsModal({
             </div>
             <div className="form-group">
               <label htmlFor="worktreesDir">Worktrees Directory</label>
-              <input
-                id="worktreesDir"
-                type="text"
-                placeholder="~/.fn-worktrees/{repo} or .worktrees"
-                value={form.worktreesDir || ""}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, worktreesDir: e.target.value }))
-                }
-              />
+              <div className="settings-overlap-ignore-path-controls">
+                <input
+                  id="worktreesDir"
+                  type="text"
+                  placeholder="~/.fn-worktrees/{repo} or .worktrees"
+                  value={form.worktreesDir || ""}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, worktreesDir: e.target.value }))
+                  }
+                />
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={openWorktreesDirPicker}
+                  aria-label="Browse worktrees directory"
+                >
+                  Browse
+                </button>
+              </div>
               <small>Optional. Supports <code>~</code> and <code>{"{repo}"}</code>. Defaults to <code>&lt;projectRoot&gt;/.worktrees</code> when unset and only affects newly-created worktrees.</small>
             </div>
             <div className="form-group">
@@ -6588,6 +6637,56 @@ export function SettingsModal({
                   onClick={handleSelectCurrentDirectoryForOverlapIgnore}
                   disabled={overlapPathPickerCurrentPath === "."}
                 >
+                  Select current directory
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {worktreesDirPickerOpen && (
+        <div
+          className="modal-overlay open"
+          onClick={handleWorktreesDirPickerOverlayClick}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Browse worktrees directory"
+        >
+          <div className="modal modal-lg settings-overlap-path-picker-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Select worktrees directory</h3>
+              <button className="modal-close" onClick={closeWorktreesDirPicker} aria-label="Close">
+                &times;
+              </button>
+            </div>
+            <div className="modal-body settings-overlap-path-picker-body">
+              <p className="settings-overlap-path-picker-note">
+                Navigate to the folder where Fusion should create task worktrees, then select the current directory.
+              </p>
+              <FileBrowser
+                entries={worktreesDirPickerEntries}
+                currentPath={worktreesDirPickerCurrentPath}
+                onSelectFile={selectWorktreesDirFromPicker}
+                onNavigate={setWorktreesDirPickerPath}
+                loading={worktreesDirPickerLoading}
+                error={worktreesDirPickerError}
+                onRetry={refreshWorktreesDirPicker}
+                workspace="project"
+                projectId={projectId}
+              />
+            </div>
+            <div className="modal-actions">
+              <div className="modal-actions-left">
+                <small>
+                  Current directory: <code>{worktreesDirPickerCurrentPath === "." ? "(project root)" : worktreesDirPickerCurrentPath}</code>
+                </small>
+              </div>
+              <div className="modal-actions-right">
+                <button className="btn btn-sm" onClick={closeWorktreesDirPicker}>
+                  Cancel
+                </button>
+                <button className="btn btn-primary btn-sm" onClick={selectCurrentWorktreesDir}>
                   Select current directory
                 </button>
               </div>
