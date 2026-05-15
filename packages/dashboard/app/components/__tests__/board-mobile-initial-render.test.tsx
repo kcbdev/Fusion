@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, waitFor, cleanup } from "@testing-library/react";
+import { render, cleanup, act } from "@testing-library/react";
 import { Board } from "../Board";
 import { loadAllAppCss } from "../../test/cssFixture";
 
@@ -87,7 +87,7 @@ describe("Board mobile initial render stabilization (FN-4574)", () => {
     vi.unstubAllGlobals();
   });
 
-  it("normalizes scrollLeft to 0 on initial mobile render and keeps snap style in CSS, not inline", async () => {
+  it("normalizes scrollLeft to 0 on initial mobile render and keeps snap style in CSS, not inline", () => {
     const viewportSpy = mockViewport(375);
     const raf = vi.fn<(cb: FrameRequestCallback) => number>((cb) => {
       setTimeout(() => cb(0), 0);
@@ -102,17 +102,17 @@ describe("Board mobile initial render stabilization (FN-4574)", () => {
     expect(board).not.toBeNull();
     board.scrollLeft = 500;
 
-    vi.advanceTimersByTime(1);
-    await waitFor(() => {
-      expect(board.scrollLeft).toBe(0);
+    act(() => {
+      vi.runAllTimers();
     });
+    expect(board.scrollLeft).toBe(0);
     expect(raf).toHaveBeenCalled();
     expect(board.style.scrollSnapType).toBe("");
 
     viewportSpy.mockRestore();
   });
 
-  it("re-anchors on pageshow persisted restore for mobile", async () => {
+  it("re-anchors on pageshow persisted restore for mobile", () => {
     const viewportSpy = mockViewport(375);
     vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
       setTimeout(() => cb(0), 0);
@@ -123,21 +123,25 @@ describe("Board mobile initial render stabilization (FN-4574)", () => {
     render(<Board {...boardProps} />);
 
     const board = document.querySelector("main.board") as HTMLElement;
-    vi.advanceTimersByTime(1);
-    await waitFor(() => expect(board.scrollLeft).toBe(0));
+    act(() => {
+      vi.runAllTimers();
+    });
+    expect(board.scrollLeft).toBe(0);
 
     board.scrollLeft = 500;
     const pageShow = new Event("pageshow") as PageTransitionEvent;
     Object.defineProperty(pageShow, "persisted", { configurable: true, value: true });
     window.dispatchEvent(pageShow);
 
-    vi.advanceTimersByTime(1);
-    await waitFor(() => expect(board.scrollLeft).toBe(0));
+    act(() => {
+      vi.runAllTimers();
+    });
+    expect(board.scrollLeft).toBe(0);
 
     viewportSpy.mockRestore();
   });
 
-  it("is a desktop no-op and does not force pageshow re-anchor", async () => {
+  it("is a desktop no-op and does not force pageshow re-anchor", () => {
     const viewportSpy = mockViewport(1280);
     const addEventListenerSpy = vi.spyOn(window, "addEventListener");
 
@@ -149,8 +153,10 @@ describe("Board mobile initial render stabilization (FN-4574)", () => {
     Object.defineProperty(pageShow, "persisted", { configurable: true, value: true });
     window.dispatchEvent(pageShow);
 
-    vi.advanceTimersByTime(1);
-    await waitFor(() => expect(board.scrollLeft).toBe(500));
+    act(() => {
+      vi.runAllTimers();
+    });
+    expect(board.scrollLeft).toBe(500);
     expect(addEventListenerSpy).not.toHaveBeenCalledWith("pageshow", expect.any(Function));
 
     viewportSpy.mockRestore();
