@@ -157,6 +157,13 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
     };
   }, [projectId]);
 
+  // FN-4574 + FN-001 diagnosis: on iOS Safari, the mobile board can occasionally
+  // snap against stale layout/visualViewport metrics before flex columns resolve,
+  // both on initial mount and on pageshow/bfcache restore after backgrounding.
+  // We keep the FN-001 baseline (`scroll-snap-type: x proximity` +
+  // `overflow-anchor: none`) and only stabilize via reflow + scroll offset
+  // normalization; do NOT reintroduce `scroll-snap-type: x mandatory`.
+
   // FN-4380: GitHub badge state comes from persisted task fields (`task.prInfo`,
   // `task.issueInfo`, `task.githubTracking.issue`) and live WebSocket `badge:updated`
   // messages. We do NOT eagerly call `/api/github/batch-status` on board load.
