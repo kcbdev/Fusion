@@ -104,7 +104,7 @@ describe("recoverOrphanOnlyScopeViolations (FN-4379 / FN-4350)", () => {
     expect(store.updateTask).toHaveBeenCalledWith("FN-4350", expect.objectContaining({
       mergeDetails: expect.objectContaining({ mergeConfirmed: true, resolutionStrategy: "orphan-discard-no-op" }),
     }));
-    expect(store.logEntry).toHaveBeenCalledWith("FN-4350", expect.stringContaining("Auto-recovered: FileScopeViolationError treated as orphan-only"));
+    expect(store.logEntry).toHaveBeenCalledWith("FN-4350", expect.stringContaining("Auto-finalized from in-review/paused: content proven on main"));
   });
 
   it("does NOT recover when landed commit cannot be verified (FN-4280)", async () => {
@@ -181,12 +181,12 @@ describe("recoverOrphanOnlyScopeViolations (FN-4379 / FN-4350)", () => {
     expect(store.moveTask).not.toHaveBeenCalled();
   });
 
-  it("skips paused failed tasks", async () => {
+  it("still evaluates paused failed tasks for landed-content proof", async () => {
     (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([failedReviewTask({ paused: true })]);
 
     const recovered = await manager.recoverOrphanOnlyScopeViolations();
 
     expect(recovered).toBe(0);
-    expect(store.getAgentLogs).not.toHaveBeenCalled();
+    expect(store.getAgentLogs).toHaveBeenCalled();
   });
 });

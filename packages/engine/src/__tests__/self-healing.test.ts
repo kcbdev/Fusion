@@ -3382,6 +3382,7 @@ describe("SelfHealingManager", () => {
 
       expect(result).toBe(1);
       expect(store.updateTask).toHaveBeenCalledWith("FN-350", {
+        paused: false,
         status: null,
         error: null,
         mergeRetries: 0,
@@ -3389,7 +3390,7 @@ describe("SelfHealingManager", () => {
       expect(store.moveTask).toHaveBeenCalledWith("FN-350", "done");
       expect(store.logEntry).toHaveBeenCalledWith(
         "FN-350",
-        expect.stringContaining("merge already confirmed"),
+        expect.stringContaining("Auto-finalized from in-review/paused: content proven"),
       );
 
       managerWithRecovery.stop();
@@ -3420,7 +3421,7 @@ describe("SelfHealingManager", () => {
       managerWithRecovery.stop();
     });
 
-    it("does not move paused merged tasks to done (respects user pause intent)", async () => {
+    it("auto-finalizes paused merged tasks by clearing soft blocker state", async () => {
       const managerWithRecovery = new SelfHealingManager(store, {
         rootDir: "/tmp/test-project",
       });
@@ -3440,9 +3441,14 @@ describe("SelfHealingManager", () => {
 
       const result = await managerWithRecovery.recoverMergedReviewTasks();
 
-      expect(result).toBe(0);
-      expect(store.updateTask).not.toHaveBeenCalled();
-      expect(store.moveTask).not.toHaveBeenCalled();
+      expect(result).toBe(1);
+      expect(store.updateTask).toHaveBeenCalledWith("FN-352", {
+        paused: false,
+        status: null,
+        error: null,
+        mergeRetries: 0,
+      });
+      expect(store.moveTask).toHaveBeenCalledWith("FN-352", "done");
 
       managerWithRecovery.stop();
     });
@@ -3859,6 +3865,41 @@ describe("SelfHealingManager", () => {
       managerWithRecovery.stop();
     });
 
+    it("auto-finalizes FN-4611-shape paused+failed tasks when landed content is proven", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ globalPause: false, enginePaused: false });
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-4611-shape",
+          column: "in-review",
+          paused: true,
+          status: "failed",
+          error: "stale merge failure",
+          mergeRetries: 3,
+          mergeDetails: undefined,
+          baseBranch: "main",
+          branch: "fusion/fn-4611-shape",
+          steps: [],
+          log: [],
+        },
+      ]);
+      mockedExecSync.mockImplementation((command: string | Buffer) => {
+        if (String(command).includes("Fusion-Task-Id: FN-4611-shape")) return "abc123\n" as any;
+        return "tip\n" as any;
+      });
+
+      const result = await managerWithRecovery.recoverAlreadyMergedReviewTasks();
+
+      expect(result).toBe(1);
+      expect(store.updateTask).toHaveBeenCalledWith(
+        "FN-4611-shape",
+        expect.objectContaining({ paused: false, status: null, error: null, mergeRetries: 0 }),
+      );
+      expect(store.moveTask).toHaveBeenCalledWith("FN-4611-shape", "done");
+
+      managerWithRecovery.stop();
+    });
+
     it("keeps already-landed tasks in-review when merge blocker still reports incomplete steps", async () => {
       const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
       (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ globalPause: false, enginePaused: false });
@@ -3902,7 +3943,7 @@ describe("SelfHealingManager", () => {
   });
 
   describe("recoverAlreadyMergedReviewTasks — run-audit emission", () => {
-    it("emits task:auto-recover-already-merged when recovery succeeds", async () => {
+    it("emits task:auto-recover-finalize-already-on-main when recovery succeeds", async () => {
       const recordRunAuditEvent = vi.fn().mockResolvedValue(undefined);
       const storeWithAudit = createMockStore({
         getSettings: vi.fn().mockResolvedValue({ globalPause: false, enginePaused: false }),
@@ -3932,13 +3973,14 @@ describe("SelfHealingManager", () => {
       expect(recordRunAuditEvent).toHaveBeenCalledWith(
         expect.objectContaining({
           domain: "database",
-          mutationType: "task:auto-recover-already-merged",
+          mutationType: "task:auto-recover-finalize-already-on-main",
           target: "FN-audit",
           metadata: expect.objectContaining({
             mergeSha: "abc1234def5678",
             mergeStrategy: "trailer",
             baseBranch: "main",
             mergeRetries: 4,
+            clearedFlags: { paused: false, status: true, error: false },
           }),
         }),
       );

@@ -131,7 +131,7 @@ describeIfGit("SelfHealingManager recoverAlreadyMergedReviewTasks (real git)", (
     expect((store as any).recordRunAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         domain: "database",
-        mutationType: "task:auto-recover-already-merged",
+        mutationType: "task:auto-recover-finalize-already-on-main",
         target: "FN-TEST-1",
       }),
     );
@@ -204,7 +204,7 @@ describeIfGit("SelfHealingManager recoverAlreadyMergedReviewTasks (real git)", (
     expect(task.mergeRetries).toBe(0);
     expect(task.mergeDetails?.mergeConfirmed).toBe(true);
     expect(task.mergeDetails?.commitSha).toBe(landedSha);
-    expect((store.logEntry as any).mock.calls.some((call: unknown[]) => String(call[1]).includes("tree-equal"))).toBe(true);
+    expect((store.logEntry as any).mock.calls.some((call: unknown[]) => String(call[1]).includes("Auto-finalized from in-review/paused"))).toBe(true);
     expect(existsSync(worktreePath)).toBe(false);
   });
 
@@ -286,10 +286,10 @@ describeIfGit("SelfHealingManager recoverAlreadyMergedReviewTasks (real git)", (
     const manager = new SelfHealingManager(store, { rootDir: repo, getExecutingTaskIds: () => new Set() });
 
     await (manager as any).runMaintenance();
-    const firstRecoveryLogs = (store.logEntry as any).mock.calls.filter((call: unknown[]) => String(call[1]).includes("phantom-merge-guard false positive")).length;
+    const firstRecoveryLogs = (store.logEntry as any).mock.calls.filter((call: unknown[]) => String(call[1]).includes("Auto-finalized from in-review/paused")).length;
     await (manager as any).runMaintenance();
 
-    const secondRecoveryLogs = (store.logEntry as any).mock.calls.filter((call: unknown[]) => String(call[1]).includes("phantom-merge-guard false positive")).length;
+    const secondRecoveryLogs = (store.logEntry as any).mock.calls.filter((call: unknown[]) => String(call[1]).includes("Auto-finalized from in-review/paused")).length;
     expect(firstRecoveryLogs).toBe(1);
     expect(secondRecoveryLogs).toBe(1);
   });

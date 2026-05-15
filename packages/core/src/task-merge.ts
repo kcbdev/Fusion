@@ -121,6 +121,7 @@ export function getTaskHardMergeBlocker(
 ): string | undefined {
   return getTaskMergeBlocker({
     ...task,
+    steps: task.steps ?? [],
     paused: false,
     status: task.status === "failed" ? undefined : task.status,
     error: undefined,

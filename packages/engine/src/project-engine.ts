@@ -1119,7 +1119,7 @@ export class ProjectEngine {
     // checks after clearing transient status/error state. Once that path parks
     // a blocked task as failed, skip future auto-merge retries.
     if (task.mergeDetails?.mergeConfirmed) {
-      return getTaskHardMergeBlocker(task as Task) === undefined;
+      return true;
     }
     if (this.options.getTaskMergeBlocker?.(task as Task)) return false;
     // Terminal failure: don't let the cooldown sweep re-attempt a merge that

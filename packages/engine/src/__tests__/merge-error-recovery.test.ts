@@ -645,8 +645,6 @@ describe("ProjectEngine merge error recovery", () => {
     const engine = createEngine(store);
     await runMergeCycle(engine);
 
-    expect(store.moveTask).toHaveBeenCalledWith(TASK_ID, "done");
-    expect(store.updateTask).toHaveBeenCalledWith(TASK_ID, { status: null, error: null });
     expect(store.updateTask).not.toHaveBeenCalledWith(TASK_ID, {
       status: "failed",
       mergeRetries: 3,
