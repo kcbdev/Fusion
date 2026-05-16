@@ -22,6 +22,10 @@ const {
   installWorktrunk,
   probeWorktrunk,
   clearWorktrunkResolveCache,
+  requestWorktrunkInstallApproval,
+  executeApprovedWorktrunkInstall,
+  WORKTRUNK_PINNED_RELEASE,
+  WorktrunkInstallDeniedError,
   WorktrunkInstallFailedError,
 } = await import("../worktrunk-installer.js");
 
@@ -58,6 +62,8 @@ function makeAuditor(): { auditor: RunAuditor; events: Array<{ type: string; met
 }
 
 describe("worktrunk-installer", () => {
+  const actor = { actorId: "dashboard-user", actorType: "user" as const, actorName: "Dashboard User" };
+
   beforeEach(() => {
     vi.clearAllMocks();
     clearWorktrunkResolveCache();
@@ -66,6 +72,87 @@ describe("worktrunk-installer", () => {
   it("probeWorktrunk returns ok=true with parsed version", async () => {
     mockExecSequence([{ stdout: "worktrunk 0.4.2\n" }]);
     await expect(probeWorktrunk("/usr/local/bin/worktrunk")).resolves.toEqual({ ok: true, version: "0.4.2" });
+  });
+
+  it("requestWorktrunkInstallApproval creates pending request and dedupes", async () => {
+    const created = {
+      id: "apr-1",
+      status: "pending" as const,
+    };
+    const approvalStore = {
+      findLatestByDedupeKey: vi.fn().mockReturnValue(null),
+      create: vi.fn().mockReturnValue(created),
+    } as any;
+
+    await expect(requestWorktrunkInstallApproval({ approvalStore, actor })).resolves.toEqual({
+      approvalRequestId: "apr-1",
+      status: "pending",
+    });
+    expect(approvalStore.create).toHaveBeenCalledTimes(1);
+    expect(approvalStore.create.mock.calls[0][0].targetAction.action).toBe("worktrunk_install");
+
+    approvalStore.findLatestByDedupeKey.mockReturnValue({ id: "apr-1", status: "pending" });
+    await expect(requestWorktrunkInstallApproval({ approvalStore, actor })).resolves.toEqual({
+      approvalRequestId: "apr-1",
+      status: "pending",
+    });
+    expect(approvalStore.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("executeApprovedWorktrunkInstall throws when request is not approved", async () => {
+    const approvalStore = { markCompleted: vi.fn() } as any;
+    await expect(
+      executeApprovedWorktrunkInstall({
+        approvalStore,
+        settings: makeSettings(),
+        request: {
+          id: "apr-2",
+          status: "denied",
+          requester: actor,
+          targetAction: { category: "network_api", action: "worktrunk_install", summary: "", resourceType: "binary", resourceId: "x" },
+          requestedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        } as any,
+      }),
+    ).rejects.toThrow(WorktrunkInstallDeniedError);
+  });
+
+  it("installWorktrunk with pre-approved override emits requested/success and returns path", async () => {
+    const { auditor, events } = makeAuditor();
+    await expect(installWorktrunk({ settings: makeSettings(), auditor, gateOverride: "pre-approved" })).resolves.toEqual({
+      binaryPath: expect.stringContaining("worktrunk"),
+      source: "installed-release",
+    });
+    expect(events.some((event) => event.type === "binary:install-requested" && event.metadata.reason === "pre-approved")).toBe(true);
+    expect(events.some((event) => event.type === "binary:install-success")).toBe(true);
+  });
+
+  it("executeApprovedWorktrunkInstall marks request completed", async () => {
+    const approvalStore = {
+      markCompleted: vi.fn(),
+    } as any;
+    const request = {
+      id: "apr-3",
+      status: "approved",
+      requester: actor,
+      targetAction: {
+        category: "network_api",
+        action: "worktrunk_install",
+        summary: `Install worktrunk v${WORKTRUNK_PINNED_RELEASE.version}`,
+        resourceType: "binary",
+        resourceId: "/tmp/worktrunk",
+      },
+      requestedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as any;
+
+    await expect(executeApprovedWorktrunkInstall({ approvalStore, settings: makeSettings(), request })).resolves.toEqual({
+      binaryPath: expect.stringContaining("worktrunk"),
+      source: "installed-release",
+    });
+    expect(approvalStore.markCompleted).toHaveBeenCalledTimes(1);
   });
 
   it("installWorktrunk throws disabled-path error and emits binary:install-denied", async () => {

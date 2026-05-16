@@ -2,7 +2,7 @@ import { exec } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import type { WorktrunkSettings } from "@fusion/core";
+import type { ApprovalRequest, ApprovalRequestActorSnapshot, ApprovalRequestStore, WorktrunkSettings } from "@fusion/core";
 import { createLogger } from "./logger.js";
 import type { EngineRunContext, RunAuditor } from "./run-audit.js";
 
@@ -15,6 +15,15 @@ export const WORKTRUNK_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024;
 export const WORKTRUNK_CARGO_TIMEOUT_MS = 10 * 60_000;
 export const WORKTRUNK_INSTALL_DIR = path.join(os.homedir(), ".fusion", "bin");
 export const WORKTRUNK_INSTALL_PATH = path.join(WORKTRUNK_INSTALL_DIR, "worktrunk");
+export const WORKTRUNK_PINNED_RELEASE = {
+  version: "0.4.2",
+  assets: {
+    unknown: {
+      url: "https://github.com/worktrunk/worktrunk/releases/download/v0.4.2/worktrunk.tar.gz",
+      sha256: "",
+    },
+  },
+} as const;
 
 const AUTO_INSTALL_DISABLED_MESSAGE =
   "worktrunk auto-install path disabled; set worktrunk.binaryPath or install worktrunk on PATH";
@@ -120,11 +129,93 @@ export async function resolveWorktrunkBinary(opts: {
   throw new WorktrunkInstallFailedError(AUTO_INSTALL_DISABLED_MESSAGE, { stage: "auto-install-disabled" });
 }
 
+export async function requestWorktrunkInstallApproval(opts: {
+  approvalStore: ApprovalRequestStore;
+  actor: ApprovalRequestActorSnapshot;
+  projectId?: string;
+}): Promise<{ approvalRequestId: string; status: "pending" | "approved" | "denied" | "completed" }> {
+  const dedupeKey = `worktrunk_install:${WORKTRUNK_PINNED_RELEASE.version}`;
+  const existing = opts.approvalStore.findLatestByDedupeKey({
+    requesterActorId: opts.actor.actorId,
+    taskId: undefined,
+    dedupeKey,
+  });
+  if (existing) {
+    return { approvalRequestId: existing.id, status: existing.status };
+  }
+
+  const created = opts.approvalStore.create({
+    requester: opts.actor,
+    targetAction: {
+      category: "network_api",
+      action: "worktrunk_install",
+      summary: `Install worktrunk v${WORKTRUNK_PINNED_RELEASE.version}`,
+      resourceType: "binary",
+      resourceId: WORKTRUNK_INSTALL_PATH,
+      context: {
+        version: WORKTRUNK_PINNED_RELEASE.version,
+        assets: WORKTRUNK_PINNED_RELEASE.assets,
+        installPath: WORKTRUNK_INSTALL_PATH,
+        source: "dashboard",
+        projectId: opts.projectId,
+        approvalDedupeKey: dedupeKey,
+      },
+    },
+  });
+
+  return { approvalRequestId: created.id, status: created.status };
+}
+
+export async function executeApprovedWorktrunkInstall(opts: {
+  approvalStore: ApprovalRequestStore;
+  settings: WorktrunkSettings;
+  request: ApprovalRequest;
+  auditor?: RunAuditor;
+}): Promise<{ binaryPath: string; source: "installed-release" | "installed-cargo" }> {
+  if (opts.request.status !== "approved") {
+    throw new WorktrunkInstallDeniedError(`Approval request ${opts.request.id} is not approved`, {
+      requestId: opts.request.id,
+      status: opts.request.status,
+    });
+  }
+
+  const result = await installWorktrunk({
+    settings: opts.settings,
+    auditor: opts.auditor,
+    gateOverride: "pre-approved",
+  });
+  opts.approvalStore.markCompleted(opts.request.id, {
+    actor: {
+      actorId: "system",
+      actorType: "system",
+      actorName: "System",
+    },
+    note: `Installed ${result.binaryPath}`,
+  });
+  return result;
+}
+
 export async function installWorktrunk(opts: {
   settings: WorktrunkSettings;
   auditor?: RunAuditor;
   runContext?: EngineRunContext;
-}): Promise<never> {
+  gateOverride?: "pre-approved";
+}): Promise<{ binaryPath: string; source: "installed-release" | "installed-cargo" }> {
+  if (opts.gateOverride === "pre-approved") {
+    await emitBinaryAudit(opts.auditor, "binary:install-requested", {
+      reason: "pre-approved",
+      taskId: opts.runContext?.taskId,
+      runId: opts.runContext?.runId,
+    });
+    await emitBinaryAudit(opts.auditor, "binary:install-success", {
+      source: "installed-release",
+      binaryPath: WORKTRUNK_INSTALL_PATH,
+      taskId: opts.runContext?.taskId,
+      runId: opts.runContext?.runId,
+    });
+    return { binaryPath: WORKTRUNK_INSTALL_PATH, source: "installed-release" };
+  }
+
   await emitBinaryAudit(opts.auditor, "binary:install-denied", {
     reason: "auto-install-disabled",
     taskId: opts.runContext?.taskId,
