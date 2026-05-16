@@ -3,6 +3,7 @@ import type { Task, Column, TaskCreateInput, MergeResult, GithubIssueAction } fr
 import { normalizeColumn } from "@fusion/core";
 import * as api from "../api";
 import { subscribeSse } from "../sse-bus";
+import { readCache, SWR_CACHE_KEYS, writeCache } from "../utils/swrCache";
 
 function normalizeTask(task: Task): Task {
   return {
@@ -92,7 +93,14 @@ export function useTasks(options?: UseTasksOptions) {
   const projectId = options?.projectId;
   const searchQuery = options?.searchQuery;
   const sseEnabled = options?.sseEnabled ?? true;
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasks, setTasks] = useState<Task[]>(() => {
+    if (!projectId) {
+      return [];
+    }
+    const cachedTasks = readCache<Task[]>(`${SWR_CACHE_KEYS.TASKS_PREFIX}${projectId}`);
+    return Array.isArray(cachedTasks) ? cachedTasks.map(normalizeTask) : [];
+  });
+  const [isStale, setIsStale] = useState(true);
   // Once the user expands the archived column, we keep including archived tasks
   // in subsequent refreshes for the lifetime of this hook instance.
   const [includeArchived, setIncludeArchived] = useState(false);
@@ -139,7 +147,13 @@ export function useTasks(options?: UseTasksOptions) {
       if (fetchVersionRef.current !== requestVersion || projectId !== requestProjectId) {
         return;
       }
-      setTasks(fetchedTasks.map(normalizeTask));
+      const normalizedFetchedTasks = fetchedTasks.map(normalizeTask);
+      setTasks(normalizedFetchedTasks);
+      if (requestProjectId) {
+        const cachedPayload = fetchedTasks.length > 500 ? fetchedTasks.slice(0, 500) : fetchedTasks;
+        writeCache(`${SWR_CACHE_KEYS.TASKS_PREFIX}${requestProjectId}`, cachedPayload, { maxBytes: 500_000 });
+      }
+      setIsStale(false);
       // Record when we received fresh server data for stuck detection
       lastFetchTimeMs.current = Date.now();
     } catch {
@@ -178,8 +192,21 @@ export function useTasks(options?: UseTasksOptions) {
     return () => clearTimeout(timer);
   }, [searchQuery]); // intentionally NOT including refreshTasks in deps
 
+  useEffect(() => {
+    if (!projectId) {
+      return;
+    }
+
+    const cachedTasks = readCache<Task[]>(`${SWR_CACHE_KEYS.TASKS_PREFIX}${projectId}`);
+    if (Array.isArray(cachedTasks)) {
+      setTasks(cachedTasks.map(normalizeTask));
+    }
+    setIsStale(true);
+  }, [projectId]);
+
   // Fetch initial tasks and recover when the tab becomes visible again.
   useEffect(() => {
+    setIsStale(true);
     void refreshTasks({ clearOnError: true });
 
     const handleVisibilityChange = () => {
@@ -499,5 +526,5 @@ export function useTasks(options?: UseTasksOptions) {
     lastFetchTimeMs.current = Date.now();
   }, []);
 
-  return { tasks, createTask, moveTask, pauseTask, unpauseTask, deleteTask, mergeTask, retryTask, resetTask, duplicateTask, updateTask, archiveTask, unarchiveTask, archiveAllDone, loadArchivedTasks, includeArchived, refreshTasks, ingestCreatedTasks, lastFetchTimeMs: lastFetchTimeMs.current };
+  return { tasks, isStale, createTask, moveTask, pauseTask, unpauseTask, deleteTask, mergeTask, retryTask, resetTask, duplicateTask, updateTask, archiveTask, unarchiveTask, archiveAllDone, loadArchivedTasks, includeArchived, refreshTasks, ingestCreatedTasks, lastFetchTimeMs: lastFetchTimeMs.current };
 }

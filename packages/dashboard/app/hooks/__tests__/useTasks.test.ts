@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useTasks } from "../useTasks";
 import * as api from "../../api";
+import * as swrCache from "../../utils/swrCache";
 import type { Task, Column } from "@fusion/core";
 
 // Mock the api module
@@ -49,6 +50,8 @@ const mockCreateTask = vi.mocked(api.createTask);
 const mockDuplicateTask = vi.mocked(api.duplicateTask);
 const mockUpdateTask = vi.mocked(api.updateTask);
 const mockArchiveAllDone = vi.mocked(api.archiveAllDone);
+const mockReadCache = vi.spyOn(swrCache, "readCache");
+const mockWriteCache = vi.spyOn(swrCache, "writeCache");
 
 // Mock EventSource
 class MockEventSource {
@@ -91,6 +94,9 @@ beforeEach(() => {
   MockEventSource.instances = [];
   (globalThis as any).EventSource = MockEventSource;
   mockFetchTasks.mockReset().mockResolvedValue([]);
+  mockReadCache.mockReset();
+  mockWriteCache.mockReset();
+  mockReadCache.mockReturnValue(null);
   
   // Ensure we start with real timers for every test
   vi.useRealTimers();
@@ -138,6 +144,56 @@ describe("useTasks", () => {
     });
 
     expect(result.current.tasks[0].id).toBe("FN-001");
+  });
+
+  it("hydrates per-project cached tasks synchronously", () => {
+    mockReadCache.mockReturnValueOnce([createMockTask({ id: "FN-CACHED" })]);
+    const { result } = renderHook(() => useTasks({ projectId: "proj-1" }));
+
+    expect(result.current.tasks[0]?.id).toBe("FN-CACHED");
+    expect(result.current.isStale).toBe(true);
+  });
+
+  it("isStale flips false after successful fetch", async () => {
+    mockFetchTasks.mockResolvedValueOnce([createMockTask({ id: "FN-LIVE" })]);
+
+    const { result } = renderHook(() => useTasks({ projectId: "proj-1" }));
+
+    expect(result.current.isStale).toBe(true);
+
+    await waitFor(() => {
+      expect(result.current.isStale).toBe(false);
+    });
+  });
+
+  it("writes through task cache on successful fetch", async () => {
+    mockFetchTasks.mockResolvedValueOnce([createMockTask({ id: "FN-LIVE" })]);
+
+    renderHook(() => useTasks({ projectId: "proj-1" }));
+
+    await waitFor(() => {
+      expect(mockWriteCache).toHaveBeenCalledWith(
+        `${swrCache.SWR_CACHE_KEYS.TASKS_PREFIX}proj-1`,
+        expect.any(Array),
+        { maxBytes: 500_000 },
+      );
+    });
+  });
+
+  it("caps task cache writes to first 500 entries", async () => {
+    const manyTasks = Array.from({ length: 550 }, (_, index) =>
+      createMockTask({ id: `FN-${index.toString().padStart(3, "0")}` }),
+    );
+    mockFetchTasks.mockResolvedValueOnce(manyTasks);
+
+    renderHook(() => useTasks({ projectId: "proj-1" }));
+
+    await waitFor(() => {
+      expect(mockWriteCache).toHaveBeenCalled();
+    });
+
+    const writePayload = mockWriteCache.mock.calls.at(-1)?.[1] as Task[];
+    expect(writePayload).toHaveLength(500);
   });
 
   it("normalizes invalid column values from initial fetch to triage", async () => {
