@@ -11,6 +11,15 @@
  *    WAL checkpoint — all on a configurable interval (default 15 min).
  * 4. **Worktree cap enforcement**: Prevents unbounded worktree accumulation
  *    by cleaning oldest idle worktrees when count exceeds 2× maxWorktrees.
+ *
+ * Worktrunk ownership/deference table (`worktrunk.enabled`):
+ * - `pruneWorktrees`: defer to backend prune
+ * - `cleanupOrphans`: defer to backend prune/remove semantics
+ * - `reapUnregisteredOrphans`: defer to backend prune/remove semantics
+ * - `enforceWorktreeCap`: defer to backend prune/remove semantics
+ * - `reclaimSelfOwnedBranchConflicts`: remains native (branch-level)
+ * - `reclaimStaleActiveBranches`: remains native (branch-level)
+ * - `scanOrphanedBranches` rescue: remains native (branch-level)
  */
 
 import { exec, execSync } from "node:child_process";
@@ -1353,6 +1362,8 @@ export class SelfHealingManager {
                   maxBuffer: 10 * 1024 * 1024,
                 });
               }
+              // Branch-level reclaim remains active in worktrunk mode; this is
+              // idempotent git metadata cleanup, not layout ownership.
               await execAsync("git worktree prune", {
                 cwd: this.options.rootDir,
                 timeout: 120_000,
@@ -1448,6 +1459,8 @@ export class SelfHealingManager {
                   timeout: 120_000,
                   maxBuffer: 10 * 1024 * 1024,
                 });
+                // Branch-level reclaim remains active in worktrunk mode; this is
+                // idempotent git metadata cleanup, not layout ownership.
                 await execAsync("git worktree prune", {
                   cwd: this.options.rootDir,
                   timeout: 120_000,
@@ -1694,6 +1707,8 @@ export class SelfHealingManager {
           timeout: 120_000,
           maxBuffer: 10 * 1024 * 1024,
         });
+        // Branch-level reclaim remains active in worktrunk mode; this is
+        // idempotent git metadata cleanup, not layout ownership.
         await execAsync("git worktree prune", {
           cwd: this.options.rootDir,
           timeout: 120_000,
