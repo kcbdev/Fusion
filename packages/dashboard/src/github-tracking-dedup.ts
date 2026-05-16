@@ -31,7 +31,7 @@ function stripTrailingGlob(path: string): string {
 }
 
 function quoteIfNeeded(value: string): string {
-  return /[/.\-]/.test(value) ? `"${value}"` : value;
+  return /[./-]/.test(value) ? `"${value}"` : value;
 }
 
 function toSearchText(candidate: { title: string; body: string | null }): string {
