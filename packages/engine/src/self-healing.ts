@@ -29,7 +29,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { getInReviewStallReason, getStalePausedReviewSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority } from "@fusion/core";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { createLogger } from "./logger.js";
-import { getRegisteredWorktreePaths, isUsableTaskWorktree, removeWorktree, resolveWorktreeBackend, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
+import { RemovalReason, getRegisteredWorktreePaths, isUsableTaskWorktree, removeWorktree, resolveWorktreeBackend, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
 import {
   extractMissingWorktreePathFromSessionStartFailure,
   isMissingWorktreeSessionStartFailure,
@@ -896,6 +896,7 @@ export class SelfHealingManager {
           worktreePath: task.worktree,
           settings,
           taskId: task.id,
+          reason: RemovalReason.SelfHealingReclaim,
         });
       } catch (err: unknown) {
         const errorMessage = err instanceof Error ? err.message : String(err);
@@ -915,6 +916,7 @@ export class SelfHealingManager {
           worktreePath: task.worktree,
           settings,
           taskId: task.id,
+          reason: RemovalReason.SelfHealingReclaim,
         });
       } catch (err: unknown) {
         const errorMessage = err instanceof Error ? err.message : String(err);
@@ -1419,6 +1421,7 @@ export class SelfHealingManager {
                   worktreePath: inspection.livePath,
                   settings,
                   taskId: task.id,
+                  reason: RemovalReason.SelfHealingBranchConflict,
                 });
               }
               // Branch-level reclaim remains active in worktrunk mode; this is
@@ -1519,6 +1522,7 @@ export class SelfHealingManager {
                   worktreePath: inspection.livePath,
                   settings,
                   taskId: task.id,
+                  reason: RemovalReason.SelfHealingBranchConflict,
                 });
                 // Branch-level reclaim remains active in worktrunk mode; this is
                 // idempotent git metadata cleanup, not layout ownership.
@@ -1993,6 +1997,7 @@ export class SelfHealingManager {
             worktreePath,
             settings,
             taskId,
+            reason: RemovalReason.SelfHealingStaleActiveBranch,
           });
           result.worktreeRemoved = true;
         } catch (err: unknown) {
@@ -3765,6 +3770,7 @@ export class SelfHealingManager {
               worktreePath: task.worktree,
               settings,
               taskId: task.id,
+              reason: RemovalReason.SelfHealingOrphanRescue,
             }).catch(() => undefined);
           }
 
@@ -4967,6 +4973,7 @@ export class SelfHealingManager {
             rootDir: this.options.rootDir,
             worktreePath,
             settings,
+            reason: RemovalReason.SelfHealingIdleSweep,
           });
           cleaned++;
         } catch (err: unknown) {
@@ -5301,6 +5308,7 @@ export class SelfHealingManager {
             rootDir: this.options.rootDir,
             worktreePath,
             settings,
+            reason: RemovalReason.SelfHealingIdleSweep,
           });
           removed++;
         } catch (err: unknown) {

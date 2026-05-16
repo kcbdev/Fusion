@@ -4,6 +4,7 @@ import { access } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { Settings } from "@fusion/core";
+import { activeSessionRegistry } from "./active-session-registry.js";
 import type { RunAuditor } from "./run-audit.js";
 import { resolveTaskWorktreePath } from "./worktree-paths.js";
 import { inspectBranchConflict } from "./branch-conflicts.js";
@@ -524,10 +525,60 @@ export class WorktrunkWorktreeBackend implements WorktreeBackend {
   }
 }
 
+export const RemovalReason = {
+  HardCancel: "hard-cancel",
+  ExecutorTransientRetry: "executor-transient-retry",
+  ExecutorStuckKilled: "executor-stuck-killed",
+  ExecutorDispose: "executor-dispose",
+  StepSessionCleanup: "step-session-cleanup",
+  MergerPostMerge: "merger-post-merge",
+  MergerCleanup: "merger-cleanup",
+  SelfHealingReclaim: "self-healing-reclaim",
+  SelfHealingStaleActiveBranch: "self-healing-stale-active-branch",
+  SelfHealingBranchConflict: "self-healing-branch-conflict",
+  SelfHealingOrphanRescue: "self-healing-orphan-rescue",
+  SelfHealingIdleSweep: "self-healing-idle-sweep",
+  PoolPrune: "pool-prune",
+} as const;
+
+export type RemovalReason = typeof RemovalReason[keyof typeof RemovalReason];
+
+const ALLOWED_FORCE_REASONS = new Set<RemovalReason>([
+  RemovalReason.HardCancel,
+  RemovalReason.ExecutorDispose,
+  RemovalReason.ExecutorTransientRetry,
+  RemovalReason.ExecutorStuckKilled,
+]);
+
+export class InvalidForceUsageError extends Error {
+  constructor(reason: RemovalReason) {
+    super(`force=true is not allowed for removal reason '${reason}'`);
+    this.name = "InvalidForceUsageError";
+  }
+}
+
+export class ActiveSessionWorktreeRemovalError extends Error {
+  constructor(public readonly details: {
+    worktreePath: string;
+    taskId: string;
+    kind: string;
+    ownerKey: string;
+    reason: RemovalReason;
+  }) {
+    super(`cannot remove active-session worktree ${details.worktreePath} (${details.taskId}/${details.kind})`);
+    this.name = "ActiveSessionWorktreeRemovalError";
+  }
+}
+
+/**
+ * Remove a worktree via configured backend.
+ * Only executor-owned hard-cancel/dispose paths may use force=true.
+ */
 export async function removeWorktree(input: {
   worktreePath: string;
   rootDir: string;
   settings: Partial<Settings>;
+  reason: RemovalReason;
   taskId?: string;
   audit?: RunAuditor;
   force?: boolean;
@@ -537,6 +588,34 @@ export async function removeWorktree(input: {
     log: (_message: string): void => {},
     warn: (_message: string): void => {},
   };
+
+  if (input.force === true && !ALLOWED_FORCE_REASONS.has(input.reason)) {
+    throw new InvalidForceUsageError(input.reason);
+  }
+
+  const active = activeSessionRegistry.lookupByPath(input.worktreePath);
+  if (active && input.force !== true) {
+    await input.audit?.git({
+      type: "worktree:removal-refused-active-session",
+      target: input.worktreePath,
+      metadata: { taskId: active.taskId, reason: input.reason, kind: active.kind },
+    });
+    throw new ActiveSessionWorktreeRemovalError({
+      worktreePath: input.worktreePath,
+      taskId: active.taskId,
+      kind: active.kind,
+      ownerKey: active.ownerKey,
+      reason: input.reason,
+    });
+  }
+
+  if (active && input.force === true) {
+    await input.audit?.git({
+      type: "worktree:removal-forced-over-active-session",
+      target: input.worktreePath,
+      metadata: { taskId: active.taskId, reason: input.reason, kind: active.kind },
+    });
+  }
 
   const backend = resolveWorktreeBackend(input.settings, { logger });
   const removeInput: WorktreeRemoveInput = {

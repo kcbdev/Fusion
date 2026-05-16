@@ -68,7 +68,8 @@ import { accumulateSessionTokenUsage } from "./session-token-usage.js";
 import { createResolvedAgentSession, extractRuntimeHint, resolveMergerSessionModel } from "./agent-session-helpers.js";
 import { createFallbackModelObserver } from "./fallback-model-observer.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
-import { removeWorktree, type WorktreePool } from "./worktree-pool.js";
+import { RemovalReason, removeWorktree, type WorktreePool } from "./worktree-pool.js";
+import { activeSessionRegistry } from "./active-session-registry.js";
 import { AgentLogger } from "./agent-logger.js";
 import { mergerLog } from "./logger.js";
 import { isUsageLimitError, checkSessionError, type UsageLimitPauser } from "./usage-limit-detector.js";
@@ -5843,6 +5844,7 @@ async function removePostMergeWorktree(
       worktreePath: postMergeWorktree,
       settings,
       taskId,
+      reason: RemovalReason.MergerPostMerge,
     });
   } catch (err: unknown) {
     mergerLog.warn(`${taskId}: failed to remove post-merge worktree ${postMergeWorktree}: ${getCommandErrorMessage(err)}`);
@@ -7653,19 +7655,31 @@ export async function aiMergeTask(
       }
     } else {
       try {
-        await removeWorktree({
-          rootDir,
-          worktreePath,
-          settings,
-          taskId,
-          audit,
-        });
-        result.worktreeRemoved = true;
-        try {
-          await store.updateTask(taskId, { worktree: null, branch: null });
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          mergerLog.warn(`${taskId}: failed to clear worktree pointer after removal: ${msg}`);
+        if (activeSessionRegistry.isPathActive(worktreePath)) {
+          mergerLog.warn(`${taskId}: skipping worktree cleanup for active session path ${worktreePath}`);
+          await audit?.git({
+            type: "worktree:removal-refused-active-session",
+            target: worktreePath,
+            metadata: { taskId, reason: RemovalReason.MergerCleanup, kind: "merger" },
+          });
+        } else {
+          await removeWorktree({
+            rootDir,
+            worktreePath,
+            settings,
+            taskId,
+            audit,
+            reason: RemovalReason.MergerCleanup,
+          });
+          result.worktreeRemoved = true;
+        }
+        if (result.worktreeRemoved) {
+          try {
+            await store.updateTask(taskId, { worktree: null, branch: null });
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            mergerLog.warn(`${taskId}: failed to clear worktree pointer after removal: ${msg}`);
+          }
         }
       } catch { /* non-fatal */ }
     }

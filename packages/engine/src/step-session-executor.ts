@@ -48,7 +48,7 @@ import {
   createTaskDocumentWriteTool,
   createTaskLogTool,
 } from "./agent-tools.js";
-import { removeWorktree } from "./worktree-backend.js";
+import { RemovalReason, removeWorktree } from "./worktree-backend.js";
 import { activeSessionRegistry } from "./active-session-registry.js";
 
 const stepExecLog = createLogger("step-session-executor");
@@ -793,6 +793,7 @@ export class StepSessionExecutor {
             rootDir: this.options.rootDir,
             settings: this.options.settings,
             taskId: this.options.taskDetail.id,
+            reason: RemovalReason.StepSessionCleanup,
           });
         } else {
           stepExecLog.warn(`Parallel worktree for step ${stepIdx} already removed: ${worktreePath}`);
@@ -1285,11 +1286,13 @@ Follow instructions precisely and avoid unrelated changes.`,
       if (worktreePath !== this.options.worktreePath) {
         try {
           if (existsSync(worktreePath)) {
+            this.unregisterParallelWorktree(stepIdx);
             await removeWorktree({
               worktreePath,
               rootDir: this.options.rootDir,
               settings: this.options.settings,
               taskId: this.options.taskDetail.id,
+              reason: RemovalReason.StepSessionCleanup,
             });
           }
           const branch = this.parallelBranches.get(stepIdx);

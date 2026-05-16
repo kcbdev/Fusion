@@ -43,7 +43,7 @@ import { resolveSandboxBackend } from "./sandbox/index.js";
 import type { SandboxBackend } from "./sandbox/types.js";
 import { ModelRegistry, SessionManager, type ToolDefinition, type AgentSession } from "@mariozechner/pi-coding-agent";
 import { PRIORITY_EXECUTE, type AgentSemaphore } from "./concurrency.js";
-import { getRegisteredWorktreePaths, isGitRepository, isInsideWorktreesDir, isRegisteredGitWorktree, isUsableTaskWorktree, removeWorktree, type WorktreePool } from "./worktree-pool.js";
+import { RemovalReason, getRegisteredWorktreePaths, isGitRepository, isInsideWorktreesDir, isRegisteredGitWorktree, isUsableTaskWorktree, removeWorktree, type WorktreePool } from "./worktree-pool.js";
 import { activeSessionRegistry } from "./active-session-registry.js";
 import {
   BranchConflictError,
@@ -3243,6 +3243,7 @@ export class TaskExecutor {
                     settings,
                     taskId: task.id,
                     audit,
+                    reason: RemovalReason.ExecutorTransientRetry,
                   });
                 } catch (wtErr: unknown) {
                   const msg = wtErr instanceof Error ? wtErr.message : String(wtErr);
@@ -3328,6 +3329,7 @@ export class TaskExecutor {
                       rootDir: this.rootDir,
                       settings,
                       taskId: task.id,
+                      reason: RemovalReason.ExecutorStuckKilled,
                     });
                   } catch (wtErr: unknown) {
                     const msg = wtErr instanceof Error ? wtErr.message : String(wtErr);
@@ -4235,6 +4237,7 @@ export class TaskExecutor {
                 settings,
                 taskId: task.id,
                 audit,
+                reason: RemovalReason.ExecutorDispose,
               });
               executorLog.log(`Removed old worktree for paused task: ${worktreePath}`);
             } catch (cleanupErr: unknown) {
@@ -4578,6 +4581,7 @@ export class TaskExecutor {
                   settings,
                   taskId: task.id,
                   audit,
+                  reason: RemovalReason.ExecutorTransientRetry,
                 });
                 executorLog.log(`Removed old worktree for transient retry: ${worktreePath}`);
               } catch (cleanupErr: unknown) {
@@ -4705,6 +4709,7 @@ export class TaskExecutor {
                   settings,
                   taskId: task.id,
                   audit,
+                  reason: RemovalReason.ExecutorStuckKilled,
                 });
                 executorLog.log(`Removed old worktree for stuck-killed retry: ${worktreePath}`);
               } catch (cleanupErr: unknown) {
@@ -5646,6 +5651,7 @@ export class TaskExecutor {
         rootDir: this.rootDir,
         settings,
         taskId,
+        reason: RemovalReason.ExecutorDispose,
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -8396,6 +8402,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         rootDir: this.rootDir,
         settings,
         taskId,
+        reason: RemovalReason.ExecutorDispose,
       });
       await this.store.logEntry(taskId, `Removed conflicting worktree`, worktreePath);
 
@@ -8605,6 +8612,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         rootDir: this.rootDir,
         settings,
         taskId,
+        reason: RemovalReason.ExecutorDispose,
       });
       executorLog.log(`Cleaned up worktree for ${taskId}`);
     } catch (err: unknown) {

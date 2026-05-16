@@ -10,6 +10,7 @@ import {
   resolveWorktrunkBinary,
 } from "./worktrunk-installer.js";
 import {
+  RemovalReason,
   removeWorktree as removeWorktreeViaBackend,
   resolveWorktreeBackend as resolveWorktreeBackendViaSettings,
 } from "./worktree-backend.js";
@@ -21,7 +22,8 @@ export {
   removeWorktree,
   resolveWorktreeBackend,
 } from "./worktree-backend.js";
-export type { WorktreeBackend, WorktreeBackendKind } from "./worktree-backend.js";
+export type { WorktreeBackend, WorktreeBackendKind, RemovalReason } from "./worktree-backend.js";
+export { RemovalReason } from "./worktree-backend.js";
 
 // Re-export worktrunk installer types for convenience.
 export {
@@ -535,6 +537,7 @@ export async function cleanupOrphanedWorktrees(
           rootDir,
           worktreePath,
           settings: settings ?? {},
+          reason: RemovalReason.PoolPrune,
         });
       } else {
         if (!isInsideWorktreesDir(rootDir, worktreePath, settings)) {
