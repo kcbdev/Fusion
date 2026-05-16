@@ -4,10 +4,16 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const { mockSyncStartupModels } = vi.hoisted(() => ({
+const { mockSyncStartupModels, mockShouldUseHybridExecutor, mockHybridExecutorCtor, mockHybridExecutorInitialize, mockHybridExecutorShutdown } = vi.hoisted(() => ({
   mockSyncStartupModels: vi.fn().mockResolvedValue(undefined),
+  mockShouldUseHybridExecutor: vi.fn().mockResolvedValue({ enabled: false, reason: "single-project-local-only" }),
+  mockHybridExecutorInitialize: vi.fn().mockResolvedValue(undefined),
+  mockHybridExecutorShutdown: vi.fn().mockResolvedValue(undefined),
+  mockHybridExecutorCtor: vi.fn().mockImplementation(() => ({
+    initialize: mockHybridExecutorInitialize,
+    shutdown: mockHybridExecutorShutdown,
+  })),
 }));
-
 vi.mock("../startup-model-sync.js", () => ({
   syncStartupModels: mockSyncStartupModels,
 }));
@@ -655,9 +661,10 @@ vi.mock("@fusion/engine", async (importOriginal) => {
   createAiPromptExecutor: mocks.createAiPromptExecutorMock,
   HeartbeatMonitor: mocks.heartbeatMonitorCtor,
   HeartbeatTriggerScheduler: mocks.heartbeatTriggerSchedulerCtor,
+  shouldUseHybridExecutor: mockShouldUseHybridExecutor,
+  HybridExecutor: mockHybridExecutorCtor,
   });
 });
-
 vi.mock("@mariozechner/pi-coding-agent", () => ({
   AuthStorage: {
     create: vi.fn(() => mocks.authStorage),
@@ -845,6 +852,25 @@ describe("runServe", () => {
     expect(mocks.notifierInstances[0].stop).toHaveBeenCalledTimes(1);
     expect(listenCall.server.close).toHaveBeenCalledTimes(1);
     expect(mocks.taskStores[0].close).toHaveBeenCalledTimes(1);
+  });
+
+  it("enables HybridExecutor when env override is set and shuts it down before engine stop", async () => {
+    process.env.FUSION_HYBRID_EXECUTOR = "1";
+    mockShouldUseHybridExecutor.mockResolvedValue({ enabled: true, reason: "env-override" });
+
+    await runServe(4040, {});
+    expect(mockHybridExecutorCtor).toHaveBeenCalledTimes(1);
+    expect(mockHybridExecutorInitialize).toHaveBeenCalledTimes(1);
+
+    await triggerSignal("SIGTERM");
+
+    expect(mockHybridExecutorShutdown).toHaveBeenCalledTimes(1);
+    const shutdownOrder = [
+      mockHybridExecutorShutdown.mock.invocationCallOrder[0],
+      mocks.projectEngineInstances[0].stop.mock.invocationCallOrder[0],
+    ];
+    expect(shutdownOrder[0]).toBeLessThan(shutdownOrder[1]);
+    delete process.env.FUSION_HYBRID_EXECUTOR;
   });
 
   it("listens on 127.0.0.1 by default and respects a custom host", async () => {
