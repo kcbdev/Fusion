@@ -41,7 +41,7 @@ describe("ReliabilityView", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue({ ok: true, json: async () => baseResponse } as Response);
     render(<ReliabilityView />);
 
-    await waitFor(() => expect(screen.getByText("20.0%")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("80.0%")).toBeInTheDocument());
     fireEvent.click(screen.getByText("Details"));
     expect(screen.getByText("2 bounced / 10 entered (last 7d)")).toBeInTheDocument();
   });
@@ -64,7 +64,7 @@ describe("ReliabilityView", () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ ...baseResponse, resetAt: "2026-05-13T01:00:00.000Z" }) } as Response);
 
     render(<ReliabilityView />);
-    await waitFor(() => expect(screen.getByText("20.0%")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("80.0%")).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "Reset stats" }));
     expect(screen.getByText("Reset reliability stats?")).toBeInTheDocument();
@@ -80,7 +80,7 @@ describe("ReliabilityView", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue({ ok: true, json: async () => baseResponse } as Response);
     render(<ReliabilityView />);
 
-    await waitFor(() => expect(screen.getByText("20.0%")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("80.0%")).toBeInTheDocument());
     fireEvent.click(screen.getAllByText("More stats")[0] as HTMLElement);
     expect(screen.getByText("P50 raw: 60000 ms")).toBeInTheDocument();
     expect(screen.getByText("Sample count: 3")).toBeInTheDocument();
@@ -96,6 +96,30 @@ describe("ReliabilityView", () => {
     const computed = getComputedStyle(root as HTMLElement);
     expect(computed.overflowY).toBe("auto");
     expect(computed.height).not.toBe("");
+  });
+
+  it("FN-4716: renders 100.0% when zero bounces", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ...baseResponse,
+        headline: { inReviewFailureRate7d: 0 },
+        perDay: [
+          {
+            date: "2026-05-13",
+            tasksEnteredInReview: 5,
+            tasksBouncedToInProgress: 0,
+            postMergeAuditFailures: null,
+            fileScopeInvariantFailures: null,
+            recoverAlreadyMergedReviewTasksRecoveries: null,
+            hasSamples: true,
+          },
+        ],
+      }),
+    } as Response);
+
+    render(<ReliabilityView />);
+    await waitFor(() => expect(screen.getByText("100.0%")).toBeInTheDocument());
   });
 
   it("renders null headline reason gracefully", async () => {

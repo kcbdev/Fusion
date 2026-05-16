@@ -71,13 +71,18 @@ export function ReliabilityView() {
     return () => clearInterval(pollInterval);
   }, [load]);
 
+  const failureRate = data?.headline.inReviewFailureRate7d;
+  const reliabilityRate = useMemo(() => {
+    if (failureRate === null || failureRate === undefined) return null;
+    return Math.max(0, Math.min(1, 1 - failureRate));
+  }, [failureRate]);
+
   const headlineColorVar = useMemo(() => {
-    const rate = data?.headline.inReviewFailureRate7d;
-    if (rate === null || rate === undefined) return "var(--text-muted)";
-    if (rate < 0.05) return "var(--color-success)";
-    if (rate < 0.1) return "var(--color-warning)";
+    if (reliabilityRate === null) return "var(--text-muted)";
+    if (reliabilityRate >= 0.95) return "var(--color-success)";
+    if (reliabilityRate >= 0.9) return "var(--color-warning)";
     return "var(--color-error)";
-  }, [data]);
+  }, [reliabilityRate]);
 
   const totalEntered = useMemo(() => (data?.perDay ?? []).reduce((sum, row) => sum + row.tasksEnteredInReview, 0), [data?.perDay]);
   const totalBounced = useMemo(() => (data?.perDay ?? []).reduce((sum, row) => sum + row.tasksBouncedToInProgress, 0), [data?.perDay]);
@@ -104,15 +109,17 @@ export function ReliabilityView() {
           <button className="btn btn-danger btn-sm" onClick={() => setShowResetConfirm(true)}>Reset stats</button>
         </div>
         <div className="reliability-headline" style={{ color: headlineColorVar }}>
-          {data?.headline.inReviewFailureRate7d === null || data?.headline.inReviewFailureRate7d === undefined
+          {failureRate === null || failureRate === undefined
             ? `Insufficient data — ${data?.headline.reason ?? "unknown"}`
-            : formatPercent(data.headline.inReviewFailureRate7d)}
+            : formatPercent(reliabilityRate ?? 0)}
         </div>
+        {reliabilityRate !== null ? <div className="reliability-muted">In-review success rate (last 7d)</div> : null}
         {data?.resetAt ? <div className="reliability-muted">{`Counting since ${formatDateTime(data.resetAt)}`}</div> : null}
         <details className="reliability-details">
           <summary>Details</summary>
           <div className="reliability-details-content">
             <div>{`${totalBounced} bounced / ${totalEntered} entered (last ${data?.windowDays ?? 7}d)`}</div>
+            {failureRate !== null && failureRate !== undefined ? <div>{`Failure rate: ${formatPercent(failureRate)}`}</div> : null}
             <div>{`Window: ${windowStartLabel} → ${formatDateTime(data?.generatedAt)}`}</div>
             {data?.resetAt ? <div>{`Reset baseline: ${formatDateTime(data.resetAt)}`}</div> : null}
             {data?.headline.reason ? <div>{`Reason: ${data.headline.reason}`}</div> : null}
