@@ -139,6 +139,33 @@ const WORKFLOW_SCRIPT_OUTPUT_MAX_CHARS = 4_000;
 const PULL_REBASE_TIMEOUT_MS = 120_000;
 const PUSH_TIMEOUT_MS = 60_000;
 
+export async function emitMergeAttemptAuditEvent(params: {
+  audit: RunAuditor;
+  branch: string;
+  attemptNum: 1 | 2 | 3;
+  mergeConflictStrategy: CanonicalMergeConflictStrategy;
+  attemptLabel: string;
+  taskId: string;
+}): Promise<void> {
+  const { audit, branch, attemptNum, mergeConflictStrategy, attemptLabel, taskId } = params;
+  try {
+    await audit.git({
+      type: "merge:start",
+      target: branch,
+      metadata: {
+        phase: `merge-attempt-${attemptNum}`,
+        attemptNum,
+        mergeConflictStrategy,
+        attemptLabel,
+      },
+    });
+  } catch (auditErr: unknown) {
+    mergerLog.warn(
+      `${taskId}: failed to emit run_audit event for merge-attempt-${attemptNum}: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
+    );
+  }
+}
+
 /** Maximum characters for commit log in merge prompt — prevents context overflow on large branches */
 const MERGE_COMMIT_LOG_MAX_CHARS = 5000;
 
@@ -6801,6 +6828,23 @@ export async function aiMergeTask(
       undefined,
       "merger",
     );
+
+    try {
+      await audit.git({
+        type: "merge:start",
+        target: branch,
+        metadata: {
+          phase: `merge-attempt-${attemptNum}`,
+          attemptNum,
+          mergeConflictStrategy,
+          attemptLabel,
+        },
+      });
+    } catch (auditErr: unknown) {
+      mergerLog.warn(
+        `${taskId}: failed to emit run_audit event for merge-attempt-${attemptNum}: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
+      );
+    }
 
     // Capture HEAD before the squash so the verification-fix finalizer can
     // tell whether the AI agent actually created a commit (HEAD moved) or
