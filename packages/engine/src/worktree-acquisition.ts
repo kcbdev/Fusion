@@ -14,6 +14,15 @@ import {
   resolveWorktreeBackend,
   type WorktreeBackend,
 } from "./worktree-backend.js";
+import {
+  WorktrunkBinaryUnavailableError,
+  WorktrunkInstallDeniedError,
+  WorktrunkInstallFailedError,
+} from "./worktrunk-installer.js";
+import {
+  handleWorktrunkOperationFailure,
+  type WorktrunkOpName,
+} from "./worktrunk-failure-handler.js";
 import type { RunAuditor } from "./run-audit.js";
 
 const execAsync = promisify(exec);
@@ -97,7 +106,45 @@ async function maybeWarnForeignTaskStartPoint(
 
 export async function acquireTaskWorktree(opts: AcquireTaskWorktreeOptions): Promise<AcquireTaskWorktreeResult> {
   const { task, rootDir, store, settings, pool, logger, audit, runContext, createWorktree, runConfiguredCommand, runInitCommand, taskEnv } = opts;
-  const backend = opts.backend ?? resolveWorktreeBackend(settings, { logger });
+  const notifyFallback = async (op: WorktrunkOpName, stderr?: string) => {
+    await store.logEntry(task.id, `Worktrunk ${op} failed; continuing with native worktree backend (${stderr ?? "no stderr"})`, undefined, runContext);
+  };
+
+  const handleWorktrunkFailure = async (
+    op: WorktrunkOpName,
+    error: Error,
+    nativeFallback?: () => Promise<unknown>,
+  ) => {
+    const stderr = error instanceof WorktrunkOperationError ? error.stderr : undefined;
+    const exitCode = error instanceof WorktrunkOperationError ? error.exitCode : null;
+    const disposition = await handleWorktrunkOperationFailure({
+      failure: { op, cause: error, stderr, exitCode },
+      task,
+      settings: settings.worktrunk ?? {},
+      store,
+      runContext,
+      runAudit: audit,
+      notify: ({ op: failedOp, stderr: failedStderr }) => notifyFallback(failedOp, failedStderr),
+      nativeFallback: nativeFallback as (() => Promise<any>) | undefined,
+    });
+    if (disposition.kind === "fallback-native") {
+      return disposition.result;
+    }
+    throw error;
+  };
+
+  let backend: WorktreeBackend;
+  try {
+    backend = opts.backend ?? resolveWorktreeBackend(settings, { logger });
+  } catch (error) {
+    if (
+      settings.worktrunk?.enabled
+      && (error instanceof WorktrunkBinaryUnavailableError || error instanceof WorktrunkInstallFailedError || error instanceof WorktrunkInstallDeniedError)
+    ) {
+      await handleWorktrunkFailure("resolve-binary", error);
+    }
+    throw error;
+  }
   const branchName = task.branch || `fusion/${task.id.toLowerCase()}`;
   const naming = settings.worktreeNaming || "random";
   const allowSiblingBranchRename = settings.executorAllowSiblingBranchRename === true;
@@ -232,27 +279,16 @@ export async function acquireTaskWorktree(opts: AcquireTaskWorktreeOptions): Pro
         return created;
       } catch (error) {
         if (backend.kind === "worktrunk" && error instanceof WorktrunkOperationError) {
-          if (settings.worktrunk?.onFailure === "fallback-native") {
-            logger?.warn?.(`${task.id}: worktrunk create failed, falling back to native backend: ${error.stderr ?? error.message}`);
-            await audit?.git({
-              type: "worktree:worktrunk-fallback",
-              target: path,
-              metadata: {
-                branch,
-                operation: "create",
-                stderr: error.stderr,
-              },
-            });
-            const nativeBackend = new NativeWorktreeBackend({ logger: logger ?? undefined });
-            return nativeBackend.create({
-              rootDir,
-              branch,
-              worktreePath: path,
-              startPoint,
-              taskId,
-              allowSiblingBranchRename: allowRename,
-            });
-          }
+          const nativeBackend = new NativeWorktreeBackend({ logger: logger ?? undefined });
+          const fallback = () => nativeBackend.create({
+            rootDir,
+            branch,
+            worktreePath: path,
+            startPoint,
+            taskId,
+            allowSiblingBranchRename: allowRename,
+          });
+          return await handleWorktrunkFailure("create", error, fallback) as { path: string; branch: string };
         }
         throw error;
       }

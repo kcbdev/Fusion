@@ -1293,6 +1293,10 @@ export class SelfHealingManager {
       for (const task of candidates) {
         if (task.checkedOutBy || activeTaskIds.has(task.id.toUpperCase()) || !task.branch || !task.worktree) continue;
         if (task.userPaused) continue;
+        if (task.pausedReason === "worktrunk_operation_failed") {
+          log.log(`[self-healing] skipping worktrunk-paused task ${task.id}`);
+          continue;
+        }
         if (!await isUsableTaskWorktree(this.options.rootDir, task.worktree)) continue;
 
         try {
@@ -1651,6 +1655,10 @@ export class SelfHealingManager {
 
         const task = taskById.get(derivedTaskId.toUpperCase());
         if (!task || task.column === "archived" || task.checkedOutBy || task.userPaused) continue;
+        if (task.pausedReason === "worktrunk_operation_failed") {
+          log.log(`[self-healing] skipping worktrunk-paused task ${task.id}`);
+          continue;
+        }
         if (activeTaskIds.has(task.id.toUpperCase())) continue;
 
         if (task.worktree && await isUsableTaskWorktree(this.options.rootDir, task.worktree)) continue;
