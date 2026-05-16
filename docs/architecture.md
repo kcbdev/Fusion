@@ -1465,6 +1465,7 @@ When a tracked task transitions into `done`, Fusion closes the linked GitHub iss
 - Worktrunk layout is authoritative on create: after `wt switch --create`, Fusion resolves the actual registered worktree path via `git worktree list --porcelain` and uses that path (instead of assuming `resolveTaskWorktreePath` alignment).
 - Delegated operation surface in the interface: `create`, `sync`, `prune`, `remove` (plus backend path resolution via `resolveWorktreePath`).
 - Executor acquisition paths (`worktree-acquisition.ts`) resolve backend selection centrally, so create flow stays backend-agnostic above the pool/acquisition layer.
+- Worktree removal is backend-mediated for merger, self-healing, and worktree-pool cleanup paths via `removeWorktree(...)` (`WorktreeBackend.remove()`); executor.ts and step-session-executor.ts still use native removal paths pending follow-up migration work.
 - Self-healing is worktrunk-aware for failure recovery: tasks paused with `pausedReason: "worktrunk_operation_failed"` are explicitly skipped in reclaim sweeps (`self-healing.ts`) until operator intervention.
 - Failure contract: delegated worktrunk errors preserve stderr context (`WorktrunkOperationError`) and are handled by `worktrunk.onFailure` — `"fail"` pauses the task, while `"fallback-native"` retries on the native backend and emits one-shot fallback telemetry.
 
