@@ -596,6 +596,7 @@ See [Memory Plugin Contract](./memory-plugin-contract.md) for the full plan.
 - The seam now covers both exec-shaped commands (`run`) and spawn-shaped verification commands (`runStreaming`), with `packages/engine/src/verification-utils.ts` delegating `runVerificationCommand`/`execWithProcessGroup` through `runStreaming`.
 - Follow-up chain: FN-4637 (bubblewrap), FN-4638 (sandbox-exec), FN-4639 (settings selection), FN-4640 (run-audit telemetry), FN-4641 (action-gate), FN-4642 (container backends).
 - FN-4641 adds dedicated `sandbox_provisioning` approval-gate plumbing for first-time backend bootstrap. Backends call `requireSandboxProvisioningApproval()` (`packages/engine/src/sandbox/provisioning-gate.ts`) from `prepare()` when prerequisites are missing, and policy is resolved via `resolveSandboxProvisioningPolicy()` (`packages/core/src/sandbox-provisioning-policy.ts`). Initial callers land in FN-4637/FN-4638/FN-4642.
+- FN-4642 adds an experimental `ContainerSandboxBackend` (Podman-first, Docker-compatible) plus `buildContainerArgv()` for rootless container runs. It is opt-in only via explicit `resolveSandboxBackend({ backendId: "podman" | "docker" })` and is not wired through settings yet; known prototype limits are no SELinux `:Z` relabel on bind mounts, no filesystem policy beyond cwd bind-mounting, and a fixed default image (`docker.io/library/alpine:3.20`) with override via `FUSION_SANDBOX_CONTAINER_IMAGE`.
 
 ### Execution context + skills
 - `SkillResolver` (`skill-resolver.ts`) — resolves active skill sets for sessions
