@@ -6,7 +6,9 @@ import { resolveSandboxBackend } from "../index.js";
 
 describe("resolveSandboxBackend", () => {
   it("returns native for undefined backend", () => {
-    expect(resolveSandboxBackend()).toBeInstanceOf(NativeSandboxBackend);
+    const backend = resolveSandboxBackend();
+    expect(backend).toBeInstanceOf(NativeSandboxBackend);
+    expect(backend.capabilities().id).toBe("native");
   });
 
   it("returns native for explicit native backend", () => {
