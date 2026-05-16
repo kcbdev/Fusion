@@ -36,7 +36,10 @@ const _worktrunkBinaryCache = new Map<string, { binaryPath: string; resolvedAt: 
 
 export async function getWorktrunkBinary(
   settings: WorktrunkSettings,
-): Promise<{ binaryPath: string; source: "override" | "path" | "cached" }> {
+): Promise<{
+  binaryPath: string;
+  source: "override" | "path" | "cached" | "installed-release" | "installed-cargo";
+}> {
   const cacheKey = `${process.env.HOME ?? ""}::${settings.binaryPath ?? ""}`;
   const cached = _worktrunkBinaryCache.get(cacheKey);
   if (cached) {
