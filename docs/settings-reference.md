@@ -392,6 +392,7 @@ Default notes:
 | `reflectionAfterTask` | `boolean` | `true` | Trigger reflection after task completion. |
 | `reviewHandoffPolicy` | `"disabled" \| "comment-triggered" \| "always"` | `"disabled"` | Policy for agent-to-user review handoff detection. |
 | `showQuickChatFAB` | `boolean` | `false` | Show floating quick-chat button (chat remains available via More menu). |
+| `chatAutoCleanupDays` | `0 \| 7 \| 14 \| 30 \| 60 \| 90` | `0` | Auto-cleanup retention window for idle chat sessions and chat rooms. `0` is off (default). When enabled, periodic self-healing maintenance deletes rows with `updatedAt` older than the configured day window. |
 | `chatRoomRecentVerbatimMessages` | `number` | `12` | Number of newest chat-room messages kept verbatim in responder context before older entries are compacted. |
 | `chatRoomCompactionFetchLimit` | `number` | `80` | Upper bound on room messages fetched for transcript compaction per responder turn. |
 | `chatRoomSummaryMaxChars` | `number` | `1500` | Hard cap for the synthesized “Earlier room context” summary block. |
