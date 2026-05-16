@@ -1828,13 +1828,13 @@ describe("usage", () => {
       expect(codex.email).toBe("fusion@example.com");
     });
 
-    it("prefers codex auth.json over Fusion openai-codex oauth", async () => {
+    it("prefers Fusion openai-codex oauth over codex auth.json", async () => {
       mockReadFile.mockImplementation((filePath: string) => {
         if (filePath.includes(".codex/auth.json")) {
           return JSON.stringify({
             tokens: {
               access_token: "codex-cli-token",
-              id_token: "header.eyJlbWFpbCI6ImNsaUBleGFtcGxlLmNvbSJ9.signature",
+              id_token: "header.eyJlbWFpbCI6ImNsaUBleGFtcGxlLmNvbSIsImh0dHBzOi8vYXBpLm9wZW5haS5jb20vYXV0aCI6eyJjaGF0Z3B0X3BsYW5fdHlwZSI6InBybyJ9fQ.signature",
             },
           });
         }
@@ -1849,6 +1849,81 @@ describe("usage", () => {
           expires: Date.now() + 60_000,
         },
       });
+
+      const mockReq = { on: vi.fn(), write: vi.fn(), end: vi.fn() };
+      mockRequest.mockImplementation((options: any, callback: any) => {
+        expect(options.headers.authorization).toBe("Bearer fusion-access-token");
+        const mockRes = {
+          statusCode: 200,
+          headers: {},
+          on: vi.fn((event: string, handler: any) => {
+            if (event === "data") handler(Buffer.from('{"email":"fusion@example.com","plan_type":"team"}'));
+            if (event === "end") handler();
+          }),
+        };
+        callback(mockRes);
+        return mockReq;
+      });
+
+      const providers = await fetchAllProviderUsage();
+      const codex = providers.find((p) => p.name === "Codex")!;
+      expect(codex.status).toBe("ok");
+      expect(codex.email).toBe("fusion@example.com");
+      expect(codex.plan).toBe("Team");
+    });
+
+    it("falls back to codex auth.json when Fusion openai-codex oauth is expired", async () => {
+      mockReadFile.mockImplementation((filePath: string) => {
+        if (filePath.includes(".codex/auth.json")) {
+          return JSON.stringify({
+            tokens: {
+              access_token: "codex-cli-token",
+            },
+          });
+        }
+        return Promise.reject(new Error("File not found"));
+      });
+      coreInteropMocks.readStoredCredentialsFromAuthFile.mockReturnValue({
+        "openai-codex": {
+          type: "oauth",
+          access: "fusion-access-token",
+          refresh: "fusion-refresh-token",
+          expires: Date.now() - 60_000,
+        },
+      });
+
+      const mockReq = { on: vi.fn(), write: vi.fn(), end: vi.fn() };
+      mockRequest.mockImplementation((options: any, callback: any) => {
+        expect(options.headers.authorization).toBe("Bearer codex-cli-token");
+        const mockRes = {
+          statusCode: 200,
+          headers: {},
+          on: vi.fn((event: string, handler: any) => {
+            if (event === "data") handler(Buffer.from('{"email":"cli@example.com"}'));
+            if (event === "end") handler();
+          }),
+        };
+        callback(mockRes);
+        return mockReq;
+      });
+
+      const providers = await fetchAllProviderUsage();
+      const codex = providers.find((p) => p.name === "Codex")!;
+      expect(codex.status).toBe("ok");
+    });
+
+    it("falls back to codex auth.json when no Fusion openai-codex entry exists", async () => {
+      mockReadFile.mockImplementation((filePath: string) => {
+        if (filePath.includes(".codex/auth.json")) {
+          return JSON.stringify({
+            tokens: {
+              access_token: "codex-cli-token",
+            },
+          });
+        }
+        return Promise.reject(new Error("File not found"));
+      });
+      coreInteropMocks.readStoredCredentialsFromAuthFile.mockReturnValue({});
 
       const mockReq = { on: vi.fn(), write: vi.fn(), end: vi.fn() };
       mockRequest.mockImplementation((options: any, callback: any) => {
