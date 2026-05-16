@@ -4022,7 +4022,7 @@ export function SettingsModal({
                 <input
                   id="worktreesDir"
                   type="text"
-                  placeholder="~/.fn-worktrees/{repo} or .worktrees"
+                  placeholder="Defaults to .worktrees — leave empty unless overriding"
                   value={form.worktreesDir || ""}
                   disabled={form.worktrunk?.enabled === true}
                   onChange={(e) =>
@@ -4043,7 +4043,7 @@ export function SettingsModal({
                 {form.worktrunk?.enabled === true
                   ? "Disabled because Worktrunk integration is enabled — worktrunk manages the worktree directory layout. Disable worktrunk integration to use a custom directory."
                   : <>
-                      Optional. Supports <code>~</code> and <code>{"{repo}"}</code>. Defaults to <code>&lt;projectRoot&gt;/.worktrees</code> when unset and only affects newly-created worktrees.
+                      Optional. Supports <code>~</code> and <code>{"{repo}"}</code>. Defaults to <code>&lt;projectRoot&gt;/.worktrees</code> when unset. Only affects newly-created worktrees.
                     </>}
               </small>
             </div>
@@ -4121,7 +4121,7 @@ export function SettingsModal({
                 Enable worktrunk integration
               </label>
               <small>
-                When enabled, Fusion shells out to <code>worktrunk</code> for worktree create, sync, prune, and remove operations and follows worktrunk&apos;s directory layout.
+                Disabled by default (opt-in). When enabled, Fusion shells out to <code>worktrunk</code> for worktree create, sync, prune, and remove operations and follows worktrunk&apos;s directory layout.
               </small>
             </div>
             <div className="form-group">

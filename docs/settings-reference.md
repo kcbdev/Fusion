@@ -267,6 +267,11 @@ Sandbox backend precedence is:
 | `worktrunk.enabled` | `boolean` | `false` | Enables the worktrunk backend (`WorktreeBackend`) for worktree operations. When enabled, worktrunk layout supersedes Fusion’s `.worktrees/<task-id>` and `worktreesDir` behavior. This key exists in global and project settings; project values override global values for matching fields. See [Architecture: WorktreeBackend abstraction](./architecture.md#worktreebackend-abstraction). |
 | `worktrunk.binaryPath` | `string \| undefined` | `undefined` | Optional absolute override for the `worktrunk` binary. When unset, Fusion resolves from `$PATH`/cached install path and then falls through to the auto-install flow on first use (guarded by `network_api` action-gate approval for `worktrunk_install`; currently disabled by default). Setting this key bypasses auto-install resolution. |
 | `worktrunk.onFailure` | `"fail" \| "fallback-native"` | `"fail"` | Failure behavior for delegated worktrunk operations. `"fail"` (default) pauses the task with `pausedReason: "worktrunk_operation_failed"` and surfaces worktrunk stderr via `task.worktrunkFailure`. `"fallback-native"` switches to the native backend and emits a one-shot dashboard fallback alert per task (`task.worktrunkFallbackAlertedAt`). |
+
+Default notes:
+- `worktrunk.enabled`: Default: off (opt-in).
+- `worktreesDir`: Default: `<projectRoot>/.worktrees`.
+
 | `taskPrefix` | `string` | `"FN"` | Prefix used for newly generated task IDs. |
 | `includeTaskIdInCommit` | `boolean` | `true` | Include task ID as commit scope in generated commits. |
 | `commitAuthorEnabled` | `boolean` | `true` | Apply explicit `--author` attribution on Fusion commits. |
