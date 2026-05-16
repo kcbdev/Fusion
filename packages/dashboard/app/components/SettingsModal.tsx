@@ -12,8 +12,8 @@ import {
   resolveTitleSummarizerSettingsModel,
 } from "@fusion/core";
 import type { AgentPermissionPolicyRules, Settings, GlobalSettings, ThemeMode, ColorTheme, ModelPreset, NtfyNotificationEvent, AgentPromptsConfig, ThinkingLevel } from "@fusion/core";
-import { fetchSettings, fetchSettingsByScope, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, cancelProviderLogin, saveApiKey, clearApiKey, fetchModels, testNotification, fetchBackups, createBackup, exportSettings, importSettings, fetchMemoryFile, fetchMemoryFiles, saveMemoryFile, compactMemory, fetchGlobalConcurrency, updateGlobalConcurrency, installQmd, testMemoryRetrieval, triggerMemoryDreams, fetchGitRemotesDetailed, fetchDashboardHealth, checkForUpdates, fetchRemoteSettings, updateRemoteSettings, fetchRemoteStatus, installCloudflared, startRemoteTunnel, stopRemoteTunnel, killExternalTunnel, regenerateRemotePersistentToken, generateShortLivedRemoteToken, fetchRemoteQr, fetchRemoteUrl, submitProviderManualCode } from "../api";
-import type { AuthProvider, ManualOAuthCodeInfo, ModelInfo, BackupListResponse, SettingsExportData, MemoryFileInfo, MemoryRetrievalTestResult, GitRemoteDetailed, RemoteSettings, RemoteStatus, UpdateCheckResponse, OAuthDeviceCodeInfo } from "../api";
+import { fetchSettings, fetchSettingsByScope, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, cancelProviderLogin, saveApiKey, clearApiKey, fetchModels, testNotification, fetchBackups, createBackup, exportSettings, importSettings, fetchMemoryFile, fetchMemoryFiles, saveMemoryFile, compactMemory, fetchGlobalConcurrency, updateGlobalConcurrency, installQmd, testMemoryRetrieval, triggerMemoryDreams, fetchGitRemotes, fetchGitRemotesDetailed, fetchProjects, fetchDashboardHealth, checkForUpdates, fetchRemoteSettings, updateRemoteSettings, fetchRemoteStatus, installCloudflared, startRemoteTunnel, stopRemoteTunnel, killExternalTunnel, regenerateRemotePersistentToken, generateShortLivedRemoteToken, fetchRemoteQr, fetchRemoteUrl, submitProviderManualCode } from "../api";
+import type { AuthProvider, ManualOAuthCodeInfo, ModelInfo, BackupListResponse, SettingsExportData, MemoryFileInfo, MemoryRetrievalTestResult, GitRemote, GitRemoteDetailed, ProjectInfo, RemoteSettings, RemoteStatus, UpdateCheckResponse, OAuthDeviceCodeInfo } from "../api";
 import { useMemoryBackendStatus } from "../hooks/useMemoryBackendStatus";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import type { ToastType } from "../hooks/useToast";
@@ -51,6 +51,7 @@ import { useNodes } from "../hooks/useNodes";
 import { useViewportMode } from "../hooks/useViewportMode";
 import { useWorktrunkInstallStatus } from "../hooks/useWorktrunkInstallStatus";
 import { NodeHealthDot } from "./NodeHealthDot";
+import { TrackingRepoSelect, type TrackingRepoOption } from "./TrackingRepoSelect";
 import { filterVisibleOnboardingAndSettingsProviders } from "./providerVisibility";
 
 // ---------------------------------------------------------------------------
@@ -72,6 +73,17 @@ function getNodeStatusLabel(status: "online" | "offline" | "connecting" | "error
   if (status === "connecting") return "Connecting";
   if (status === "error") return "Error";
   return "Offline";
+}
+
+function toTrackingRepoOptions(remotes: GitRemote[]): TrackingRepoOption[] {
+  const byValue = new Map<string, TrackingRepoOption>();
+  for (const remote of remotes) {
+    const value = `${remote.owner}/${remote.repo}`;
+    if (!byValue.has(value)) {
+      byValue.set(value, { value, label: value });
+    }
+  }
+  return [...byValue.values()].sort((a, b) => a.value.localeCompare(b.value));
 }
 
 /**
@@ -595,6 +607,13 @@ export function SettingsModal({
   // Git remotes for the worktree rebase dropdown. Loaded lazily; empty list
   // is a valid state (fresh repo, no remotes configured yet).
   const [gitRemotes, setGitRemotes] = useState<GitRemoteDetailed[]>([]);
+  const [projectTrackingRepoOptions, setProjectTrackingRepoOptions] = useState<TrackingRepoOption[]>([]);
+  const [projectTrackingRepoLoading, setProjectTrackingRepoLoading] = useState(false);
+  const [projectTrackingRepoError, setProjectTrackingRepoError] = useState<string | null>(null);
+  const [globalTrackingRepoOptions, setGlobalTrackingRepoOptions] = useState<TrackingRepoOption[]>([]);
+  const [globalTrackingRepoLoading, setGlobalTrackingRepoLoading] = useState(false);
+  const [globalTrackingRepoError, setGlobalTrackingRepoError] = useState<string | null>(null);
+  const globalTrackingRepoLoadedRef = useRef(false);
   const [memoryFiles, setMemoryFiles] = useState<MemoryFileInfo[]>([]);
   const [selectedMemoryPath, setSelectedMemoryPath] = useState(DEFAULT_MEMORY_EDITOR_PATH);
   const [memoryTestQuery, setMemoryTestQuery] = useState("");
@@ -925,6 +944,109 @@ export function SettingsModal({
     fetchGitRemotesDetailed(projectId)
       .then((remotes) => setGitRemotes(remotes))
       .catch(() => setGitRemotes([]));
+  }, [activeSection, projectId]);
+
+  useEffect(() => {
+    if (activeSection !== "general") {
+      return;
+    }
+
+    let cancelled = false;
+    setProjectTrackingRepoLoading(true);
+    setProjectTrackingRepoError(null);
+
+    fetchGitRemotes(projectId)
+      .then((remotes) => {
+        if (cancelled) {
+          return;
+        }
+        setProjectTrackingRepoOptions(toTrackingRepoOptions(remotes));
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setProjectTrackingRepoOptions([]);
+        setProjectTrackingRepoError("Could not load detected remotes. Enter a custom owner/repo value.");
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setProjectTrackingRepoLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSection, projectId]);
+
+  useEffect(() => {
+    if (activeSection !== "global-general" || globalTrackingRepoLoadedRef.current) {
+      return;
+    }
+
+    let cancelled = false;
+    setGlobalTrackingRepoLoading(true);
+    setGlobalTrackingRepoError(null);
+
+    fetchProjects()
+      .then(async (projects) => {
+        const results = await Promise.allSettled(
+          projects.map(async (project: ProjectInfo) => {
+            const remotes = await fetchGitRemotes(project.id);
+            return remotes.map((remote) => ({
+              value: `${remote.owner}/${remote.repo}`,
+              label: `${remote.owner}/${remote.repo}`,
+              source: project.name,
+            }));
+          }),
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        const optionsByValue = new Map<string, TrackingRepoOption>();
+        let successCount = 0;
+
+        for (const result of results) {
+          if (result.status !== "fulfilled") {
+            continue;
+          }
+          successCount += 1;
+          for (const option of result.value) {
+            if (!optionsByValue.has(option.value)) {
+              optionsByValue.set(option.value, option);
+            }
+          }
+        }
+
+        const flattenedOptions = [...optionsByValue.values()].sort((a, b) => a.value.localeCompare(b.value));
+        setGlobalTrackingRepoOptions(flattenedOptions);
+
+        if (projects.length > 0 && successCount === 0) {
+          setGlobalTrackingRepoError("Could not load remotes from registered projects. Enter a custom owner/repo value.");
+        }
+
+        globalTrackingRepoLoadedRef.current = true;
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setGlobalTrackingRepoOptions([]);
+        setGlobalTrackingRepoError("Could not load project list. Enter a custom owner/repo value.");
+        globalTrackingRepoLoadedRef.current = true;
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setGlobalTrackingRepoLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [activeSection, projectId]);
 
   useEffect(() => {
@@ -2279,14 +2401,16 @@ export function SettingsModal({
             </div>
             <div className="form-group">
               <label htmlFor="projectGithubTrackingDefaultRepoGeneral">Project default tracking repo</label>
-              <input
+              <TrackingRepoSelect
                 id="projectGithubTrackingDefaultRepoGeneral"
-                type="text"
-                className="input"
-                placeholder="owner/repo"
+                ariaLabel="Project default tracking repo"
                 value={form.githubTrackingDefaultRepo ?? ""}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, githubTrackingDefaultRepo: e.target.value || undefined }))
+                options={projectTrackingRepoOptions}
+                loading={projectTrackingRepoLoading}
+                error={projectTrackingRepoError ?? undefined}
+                placeholder="owner/repo"
+                onChange={(nextValue) =>
+                  setForm((f) => ({ ...f, githubTrackingDefaultRepo: nextValue || undefined }))
                 }
               />
               <small>Default repo used when creating GitHub issues for tracked tasks. Falls back to the global default if blank.</small>
@@ -2317,14 +2441,16 @@ export function SettingsModal({
             </div>
             <div className="form-group">
               <label htmlFor="globalGithubTrackingDefaultRepo">Global default tracking repo</label>
-              <input
+              <TrackingRepoSelect
                 id="globalGithubTrackingDefaultRepo"
-                type="text"
-                className="input"
-                placeholder="owner/repo"
+                ariaLabel="Global default tracking repo"
                 value={form.githubTrackingDefaultRepo ?? ""}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, githubTrackingDefaultRepo: e.target.value || undefined }))
+                options={globalTrackingRepoOptions}
+                loading={globalTrackingRepoLoading}
+                error={globalTrackingRepoError ?? undefined}
+                placeholder="owner/repo"
+                onChange={(nextValue) =>
+                  setForm((f) => ({ ...f, githubTrackingDefaultRepo: nextValue || undefined }))
                 }
               />
               <small>Projects inherit this value when they do not set a project default tracking repo.</small>

@@ -38,7 +38,9 @@ const mockUpdateGlobalConcurrency = vi.fn();
 const mockFetchMemoryBackendStatus = vi.fn();
 const mockTestMemoryRetrieval = vi.fn();
 const mockInstallQmd = vi.fn();
+const mockFetchGitRemotes = vi.fn();
 const mockFetchGitRemotesDetailed = vi.fn();
+const mockFetchProjects = vi.fn();
 const mockFetchDashboardHealth = vi.fn();
 const mockCheckForUpdates = vi.fn();
 const mockFetchRemoteSettings = vi.fn();
@@ -95,7 +97,9 @@ vi.mock("../../api", async (importOriginal) => {
     fetchMemoryBackendStatus: (...args: unknown[]) => mockFetchMemoryBackendStatus(...args),
     testMemoryRetrieval: (...args: unknown[]) => mockTestMemoryRetrieval(...args),
     installQmd: (...args: unknown[]) => mockInstallQmd(...args),
+    fetchGitRemotes: (...args: unknown[]) => mockFetchGitRemotes(...args),
     fetchGitRemotesDetailed: (...args: unknown[]) => mockFetchGitRemotesDetailed(...args),
+    fetchProjects: (...args: unknown[]) => mockFetchProjects(...args),
     fetchDashboardHealth: (...args: unknown[]) => mockFetchDashboardHealth(...args),
     checkForUpdates: (...args: unknown[]) => mockCheckForUpdates(...args),
     fetchRemoteSettings: (...args: unknown[]) => mockFetchRemoteSettings(...args),
@@ -409,7 +413,9 @@ describe("SettingsModal", () => {
       qmdAvailable: true,
       qmdInstallCommand: "bun install -g @tobilu/qmd",
     });
+    mockFetchGitRemotes.mockResolvedValue([]);
     mockFetchGitRemotesDetailed.mockResolvedValue([]);
+    mockFetchProjects.mockResolvedValue([]);
     mockUseWorktrunkInstallStatus.mockReturnValue({
       status: "missing",
       requestInstall: vi.fn(),
@@ -697,16 +703,23 @@ describe("SettingsModal", () => {
       renderModal({ initialSection: "global-general" });
       await waitForSettingsModalReady();
 
-      const input = screen.getByLabelText("Global default tracking repo") as HTMLInputElement;
-      expect(input.value).toBe("");
+      const control = screen.getByRole("combobox", { name: "Global default tracking repo" }) as HTMLSelectElement;
+      expect(control).toBeInTheDocument();
       expect(screen.getByText(/Projects inherit this value when they do not set a project default tracking repo/i)).toBeInTheDocument();
     });
 
     it("saves global default tracking repo via global settings payload only", async () => {
+      mockFetchProjects.mockResolvedValueOnce([{ id: "p-1", name: "Alpha" }]);
+      mockFetchGitRemotes.mockResolvedValueOnce([{ name: "origin", owner: "octo", repo: "global-default", url: "https://github.com/octo/global-default.git" }]);
+
       renderModal({ initialSection: "global-general" });
       await waitForSettingsModalReady();
 
-      await userEvent.type(screen.getByLabelText("Global default tracking repo"), "octo/global-default");
+      await waitFor(() => {
+        expect(screen.getByRole("combobox", { name: "Global default tracking repo" })).toHaveValue("__custom__");
+      });
+
+      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Global default tracking repo" }), "octo/global-default");
       await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
@@ -720,6 +733,16 @@ describe("SettingsModal", () => {
         const projectPayload = mockUpdateSettings.mock.calls[0]?.[0] as Record<string, unknown>;
         expect(projectPayload.githubTrackingDefaultRepo).toBeUndefined();
       }
+    });
+
+    it("shows global tracking repo error hint and keeps custom entry when lookups fail", async () => {
+      mockFetchProjects.mockRejectedValueOnce(new Error("no projects"));
+
+      renderModal({ initialSection: "global-general" });
+      await waitForSettingsModalReady();
+
+      expect(await screen.findByText(/Could not load project list/i)).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("owner/repo")).toBeInTheDocument();
     });
   });
 
@@ -917,12 +940,12 @@ describe("SettingsModal", () => {
       expect(screen.getByRole("heading", { name: "GitHub Tracking" })).toBeInTheDocument();
 
       const modeSelect = screen.getByLabelText("Default tracking mode for new tasks") as HTMLSelectElement;
-      const repoInput = screen.getByLabelText("Project default tracking repo") as HTMLInputElement;
+      const repoSelect = screen.getByRole("combobox", { name: "Project default tracking repo" }) as HTMLSelectElement;
       expect(modeSelect.value).toBe("off");
-      expect(repoInput.value).toBe("");
+      expect(repoSelect.value).toBe("__custom__");
 
       await userEvent.selectOptions(modeSelect, "new-tasks");
-      await userEvent.type(repoInput, "octo/repo");
+      await userEvent.type(screen.getByPlaceholderText("owner/repo"), "octo/repo");
       await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
@@ -950,13 +973,13 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
 
       const modeSelect = screen.getByLabelText("Default tracking mode for new tasks") as HTMLSelectElement;
-      const repoInput = screen.getByLabelText("Project default tracking repo") as HTMLInputElement;
+      const repoSelect = screen.getByRole("combobox", { name: "Project default tracking repo" }) as HTMLSelectElement;
 
       expect(modeSelect.value).toBe("new-tasks");
-      expect(repoInput.value).toBe("octo/existing");
+      expect(repoSelect.value).toBe("__custom__");
 
       await userEvent.selectOptions(modeSelect, "off");
-      await userEvent.clear(repoInput);
+      await userEvent.clear(screen.getByPlaceholderText("owner/repo"));
       await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
@@ -989,6 +1012,40 @@ describe("SettingsModal", () => {
       await userEvent.click(screen.getByRole("button", { name: "Project Models" }));
 
       expect(screen.getByText("Title, commit message, and GitHub tracking issue summarization model")).toBeInTheDocument();
+    });
+
+    it("picks a project repo suggestion and preserves label association", async () => {
+      mockFetchGitRemotes.mockResolvedValueOnce([
+        { name: "origin", owner: "octo", repo: "repo", url: "https://github.com/octo/repo.git" },
+      ]);
+
+      renderModal({ initialSection: "general" });
+      await waitForSettingsModalReady();
+
+      const repoSelect = screen.getByRole("combobox", { name: "Project default tracking repo" }) as HTMLSelectElement;
+      await waitFor(() => {
+        expect(within(repoSelect).getByRole("option", { name: "octo/repo" })).toBeInTheDocument();
+      });
+
+      await userEvent.selectOptions(repoSelect, "octo/repo");
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(mockUpdateSettings).toHaveBeenCalled();
+      });
+
+      const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
+      expect(payload.githubTrackingDefaultRepo).toBe("octo/repo");
+    });
+
+    it("shows project tracking repo error hint and keeps custom entry when remotes fail", async () => {
+      mockFetchGitRemotes.mockRejectedValueOnce(new Error("remotes failed"));
+
+      renderModal({ initialSection: "general" });
+      await waitForSettingsModalReady();
+
+      expect(await screen.findByText(/Could not load detected remotes/i)).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("owner/repo")).toBeInTheDocument();
     });
 
     it("always shows GitHub tracking summarization helper copy", async () => {
