@@ -186,6 +186,28 @@ describe("maybeCreateTrackingIssue", () => {
     expect(createIssueMock).not.toHaveBeenCalled();
   });
 
+  it("returns issue_already_linked when store refresh shows a linked issue on a stale task reference", async () => {
+    const staleTask = buildTask({ githubTracking: { enabled: true } });
+    const getTask = vi.fn().mockResolvedValue(buildTask({
+      id: staleTask.id,
+      githubTracking: {
+        enabled: true,
+        issue: { owner: "task", repo: "repo", number: 101, url: "https://github.com/task/repo/issues/101" },
+      },
+    }));
+
+    const result = await maybeCreateTrackingIssue(staleTask, {
+      taskStore: { getTask } as any,
+      projectSettings: { githubTrackingDefaultRepo: "task/repo", githubAuthMode: "token", githubAuthToken: "tok" } as any,
+      globalSettings: {},
+      rootDir,
+    });
+
+    expect(result).toEqual({ created: false, reason: "issue_already_linked" });
+    expect(getTask).toHaveBeenCalledWith(staleTask.id);
+    expect(createIssueMock).not.toHaveBeenCalled();
+  });
+
   it("returns no_repo_configured and records activity", async () => {
     const recordActivity = vi.fn();
     const result = await maybeCreateTrackingIssue(buildTask({ githubTracking: { enabled: true } }), {

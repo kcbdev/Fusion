@@ -21,6 +21,7 @@ vi.mock("../github-auth.js", () => ({
 }));
 
 import { registerGithubTrackingHook } from "../github-tracking-hook.js";
+import { maybeCreateTrackingIssue } from "../github-tracking.js";
 
 function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), "kb-dashboard-github-tracking-hook-test-"));
@@ -126,6 +127,36 @@ describe("registerGithubTrackingHook", () => {
     });
 
     expect(task.id).toMatch(/^FN-/);
+    expect(mockCreateIssue).toHaveBeenCalledTimes(1);
+  });
+
+  it("creates one issue total across hook execution and follow-up stale reference call", async () => {
+    registerGithubTrackingHook();
+
+    await store.updateSettings({
+      githubTrackingDefaultRepo: "o/r",
+      githubAuthMode: "token",
+      githubAuthToken: "tok",
+    });
+
+    const createdTask = await store.createTask({
+      description: "stale follow up",
+      title: "Stale follow up",
+      githubTracking: { enabled: true },
+    });
+
+    const staleTaskRef = { ...createdTask, githubTracking: { enabled: true } };
+    const projectSettings = await store.getSettings();
+
+    const result = await maybeCreateTrackingIssue(staleTaskRef, {
+      taskStore: store,
+      projectSettings,
+      globalSettings: {},
+      rootDir,
+      logger: { warn: vi.fn(), info: vi.fn() },
+    });
+
+    expect(result).toEqual({ created: false, reason: "issue_already_linked" });
     expect(mockCreateIssue).toHaveBeenCalledTimes(1);
   });
 });
