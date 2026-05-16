@@ -257,6 +257,7 @@ export {
   type HybridExecutorOptions,
   type HybridExecutorEvents,
 } from "./hybrid-executor.js";
+export { shouldUseHybridExecutor, type HybridExecutorGateDecision } from "./hybrid-executor-gate.js";
 export { applyUnavailableNodePolicy, type PolicyDecision } from "./node-routing-policy.js";
 export { PeerExchangeService, type PeerExchangeServiceOptions, type SyncResult } from "./peer-exchange-service.js";
 export {
