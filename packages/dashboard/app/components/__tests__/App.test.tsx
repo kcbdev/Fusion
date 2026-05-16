@@ -693,6 +693,19 @@ beforeEach(() => {
 });
 
 describe("FN-4250 FileBrowserProvider coverage", () => {
+  it("FN-4779: renders app shell immediately when project data is ready", () => {
+    mockProjectsState.loading = false;
+    mockProjectsState.projects = [
+      { id: DEFAULT_PROJECT_ID, name: "Test Project", path: "/test", status: "active", isolationMode: "in-process", createdAt: "", updatedAt: "" },
+    ];
+    mockCurrentProjectState.loading = false;
+
+    render(<App />);
+
+    expect(screen.getByTitle("Settings")).toBeInTheDocument();
+    expect(screen.queryByTestId("fb-probe-loader")).not.toBeInTheDocument();
+  });
+
   it("FN-4250: ChatView branch is inside FileBrowserProvider", async () => {
     localStorage.setItem(taskViewStorageKey(), "chat");
 
