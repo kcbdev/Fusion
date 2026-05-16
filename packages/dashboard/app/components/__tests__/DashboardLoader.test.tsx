@@ -1,5 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+
+const mockConsumeVersionUpdateFlag = vi.fn(() => false);
+
+vi.mock("../../versionCheck", () => ({
+  consumeVersionUpdateFlag: () => mockConsumeVersionUpdateFlag(),
+}));
+
 import { DashboardLoader } from "../DashboardLoader";
 
 function getStep(label: string): HTMLElement {
@@ -11,6 +18,11 @@ function getStep(label: string): HTMLElement {
 }
 
 describe("DashboardLoader", () => {
+  beforeEach(() => {
+    mockConsumeVersionUpdateFlag.mockReset();
+    mockConsumeVersionUpdateFlag.mockReturnValue(false);
+  });
+
   it("renders projects stage with active first step and pending remaining steps", () => {
     render(<DashboardLoader stage="projects" />);
 
@@ -43,6 +55,14 @@ describe("DashboardLoader", () => {
     const statusRegion = screen.getByRole("status", { name: "Loading Fusion dashboard" });
     expect(statusRegion).toHaveAttribute("aria-live", "polite");
     expect(screen.getByLabelText("Dashboard loading progress")).toBeInTheDocument();
+  });
+
+  it("shows the version update copy when the flag is consumed", () => {
+    mockConsumeVersionUpdateFlag.mockReturnValue(true);
+    render(<DashboardLoader stage="projects" />);
+
+    expect(screen.getByText("Updating to a new frontend version...")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Updating Fusion dashboard" })).toBeInTheDocument();
   });
 
   it("keeps stage visuals stable across all stages", () => {

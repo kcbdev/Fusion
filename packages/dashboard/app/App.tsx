@@ -18,6 +18,7 @@ import { PageErrorBoundary } from "./components/ErrorBoundary";
 import { AppModals } from "./components/AppModals";
 import { BackendConnectionErrorPage } from "./components/BackendConnectionErrorPage";
 import { DashboardLoader, type DashboardLoaderStage } from "./components/DashboardLoader";
+import { TopProgressBar } from "./components/TopProgressBar";
 import { ExecutorStatusBar } from "./components/ExecutorStatusBar";
 import { SessionNotificationBanner } from "./components/SessionNotificationBanner";
 import { CliBinaryInstallBanner } from "./components/CliBinaryInstallBanner";
@@ -90,7 +91,6 @@ import { AuthTokenRecoveryDialog } from "./components/AuthTokenRecoveryDialog";
 import "./components/ChatView.css";
 
 const IS_TEST_ENV = import.meta.env.MODE === "test";
-const DASHBOARD_READY_SETTLE_DELAY_MS = IS_TEST_ENV ? 0 : 200;
 
 const AgentsView = lazy(() => import("./components/AgentsView").then((m) => ({ default: m.AgentsView })));
 const DocumentsView = lazy(() => import("./components/DocumentsView").then((m) => ({ default: m.DocumentsView })));
@@ -220,6 +220,10 @@ export function requiresNativeShellOnboarding(
   }
 
   return !shellState.activeProfileId;
+}
+
+export function shouldShowFirstEverBootLoader(projectsLoading: boolean, projectCount: number): boolean {
+  return projectsLoading && projectCount === 0;
 }
 
 function AppInner() {
@@ -404,11 +408,11 @@ function AppInner() {
 
   const boardSourceTasks = isRemote && remoteData.tasks.length > 0 ? remoteData.tasks : tasks;
 
-  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const [researchReadinessVersion, setResearchReadinessVersion] = useState(0);
   const mountTimeRef = useRef(performance.now());
   const projectsReadyLoggedRef = useRef(false);
   const projectReadyLoggedRef = useRef(false);
+  const dashboardReadyLoggedRef = useRef(false);
 
   const loadingStage = useMemo<DashboardLoaderStage>(() => {
     if (projectsLoading) return "projects";
@@ -433,28 +437,19 @@ function AppInner() {
     }
   }, [projectsLoading, currentProjectLoading]);
 
+  const initialLoadComplete = !projectsLoading && !currentProjectLoading;
+  const isFirstEverBoot = shouldShowFirstEverBootLoader(projectsLoading, projects.length);
+
   useEffect(() => {
-    if (initialLoadComplete) {
+    if (!initialLoadComplete || dashboardReadyLoggedRef.current) {
       return;
     }
-
-    if (projectsLoading || currentProjectLoading) {
-      return;
+    dashboardReadyLoggedRef.current = true;
+    const msg = `dashboard ready at ${Math.round(performance.now() - mountTimeRef.current)}ms from mount`;
+    if (!IS_TEST_ENV) {
+      console.log(`[App] ${msg}`);
     }
-
-    const settleStart = performance.now();
-    const settleTimer = window.setTimeout(() => {
-      const msg = `dashboard ready at ${Math.round(performance.now() - mountTimeRef.current)}ms from mount (settle delay=${Math.round(performance.now() - settleStart)}ms)`;
-      if (!IS_TEST_ENV) {
-        console.log(`[App] ${msg}`);
-      }
-      setInitialLoadComplete(true);
-    }, DASHBOARD_READY_SETTLE_DELAY_MS);
-
-    return () => {
-      window.clearTimeout(settleTimer);
-    };
-  }, [initialLoadComplete, projectsLoading, currentProjectLoading]);
+  }, [initialLoadComplete]);
 
   const { keyboardOpen } = useMobileKeyboard({ enabled: isMobile });
   // Keyboard visibility controls both MobileNavBar rendering and whether
@@ -1652,13 +1647,14 @@ function AppInner() {
     <NavigationHistoryProvider value={{ pushNav, replaceCurrent }}>
       <FileBrowserProvider openFile={openFileInBrowser}>
         <RetryWarningProvider value={maxTotalRetriesBeforeFail * RETRY_WARNING_RATIO}>
-        {!initialLoadComplete ? (
+        {isFirstEverBoot ? (
           <>
             <DashboardLoader stage={loadingStage} />
             <ToastContainer toasts={toasts} onRemove={removeToast} />
           </>
         ) : (
           <>
+            <TopProgressBar visible={projectsLoading || currentProjectLoading} />
             <Header
         shellHost={shellHost.host}
         onOpenSettings={openSettingsWithNav}
