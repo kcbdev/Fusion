@@ -298,6 +298,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   githubCommentTemplate: undefined,
   githubTrackingEnabledByDefault: false,
   githubTrackingDefaultRepo: undefined,
+  githubTrackingDedupEnabled: true,
   githubAuthMode: "gh-cli",
   githubAuthToken: undefined,
   autoBackupEnabled: false,
