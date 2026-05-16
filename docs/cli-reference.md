@@ -890,6 +890,7 @@ fn settings
 fn settings set maxConcurrent 4
 fn settings set defaultNodeId node_abc123
 fn settings set unavailableNodePolicy fallback-local
+fn settings set worktrunk.enabled true
 fn settings export [--scope global|project|both] [--output <file>]
 fn settings import <file> [--scope global|project|both] [--merge] [--yes]
 ```
