@@ -256,12 +256,30 @@ export async function installWorktrunk(opts: {
   gateOverride?: "pre-approved";
   actionGateContext?: AgentActionGateContext;
 }): Promise<{ binaryPath: string; source: "installed-release" | "installed-cargo" }> {
+  const startedAt = Date.now();
   await applyInstallGate(opts);
   await emitBinaryAudit(opts.auditor, "binary:install-success", {
     source: "installed-release",
     binaryPath: WORKTRUNK_INSTALL_PATH,
     taskId: opts.runContext?.taskId,
     runId: opts.runContext?.runId,
+  });
+
+  // Emit install audit only for true installs; path/cached/override resolutions remain silent.
+  await emitInstallSuccessAudit(
+    opts.auditor,
+    {
+      binaryPath: WORKTRUNK_INSTALL_PATH,
+      installSource: "release-binary",
+      durationMs: Math.max(0, Date.now() - startedAt),
+    },
+    opts.runContext,
+  );
+
+  resolveCache.set(homeKey(opts.settings), {
+    inputBinaryPath: opts.settings.binaryPath ?? null,
+    path: WORKTRUNK_INSTALL_PATH,
+    resolvedAt: Date.now(),
   });
   return { binaryPath: WORKTRUNK_INSTALL_PATH, source: "installed-release" };
 }
