@@ -10,6 +10,7 @@ import {
   type ProjectInfoWithSource,
   type ProjectNodeAvailability,
 } from "../api";
+import { SWR_CACHE_KEYS, clearCache, readCache, writeCache } from "../utils/swrCache";
 
 export interface UseProjectsResult {
   /** List of all registered projects (local + remote) */
@@ -75,8 +76,14 @@ function normalizeProjects(projects: ProjectInfoWithSource[]): ProjectInfoWithSo
  * Provides optimistic updates for UI responsiveness.
  */
 export function useProjects(): UseProjectsResult {
-  const [projects, setProjects] = useState<ProjectInfoWithSource[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [projects, setProjects] = useState<ProjectInfoWithSource[]>(() => {
+    const cached = readCache<ProjectInfoWithSource[]>(SWR_CACHE_KEYS.PROJECTS);
+    if (!Array.isArray(cached)) {
+      return [];
+    }
+    return normalizeProjects(cached);
+  });
+  const [loading, setLoading] = useState(() => projects.length === 0);
   const [error, setError] = useState<string | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastVisibilityRefreshRef = useRef<number>(0);
@@ -85,7 +92,9 @@ export function useProjects(): UseProjectsResult {
     try {
       setError(null);
       const data = await fetchProjectsAcrossNodes();
-      setProjects(normalizeProjects(data));
+      const normalizedData = normalizeProjects(data);
+      setProjects(normalizedData);
+      writeCache(SWR_CACHE_KEYS.PROJECTS, normalizedData);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch projects");
       // Don't clear existing projects on error - keep showing stale data
@@ -97,7 +106,10 @@ export function useProjects(): UseProjectsResult {
     let cancelled = false;
 
     async function load() {
-      setLoading(true);
+      const hadCachedProjects = projects.length > 0;
+      if (!hadCachedProjects) {
+        setLoading(true);
+      }
       const t0 = performance.now();
       try {
         const data = await fetchProjectsAcrossNodes();
@@ -107,6 +119,7 @@ export function useProjects(): UseProjectsResult {
         if (!cancelled) {
           setProjects(normalizedData);
           setError(null);
+          writeCache(SWR_CACHE_KEYS.PROJECTS, normalizedData);
         }
       } catch (err) {
         const elapsed = Math.round(performance.now() - t0);
@@ -143,7 +156,7 @@ export function useProjects(): UseProjectsResult {
       cancelled = true;
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [refresh]);
+  }, [projects.length, refresh]);
 
   // Polling for updates
   useEffect(() => {
@@ -181,7 +194,12 @@ export function useProjects(): UseProjectsResult {
   const unregister = useCallback(async (id: string): Promise<void> => {
     await unregisterProject(id);
     // Optimistically remove from list
-    setProjects((prev) => prev.filter((p) => p.id !== id));
+    setProjects((prev) => {
+      const nextProjects = prev.filter((p) => p.id !== id);
+      writeCache(SWR_CACHE_KEYS.PROJECTS, nextProjects);
+      return nextProjects;
+    });
+    clearCache(`${SWR_CACHE_KEYS.TASKS_PREFIX}${id}`);
   }, []);
 
   return {
