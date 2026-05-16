@@ -265,38 +265,25 @@ Sandbox backend precedence is:
 | `worktrunk.enabled` | `boolean` | `false` | Enables `WorktreeBackend` selection in `packages/engine/src/worktree-backend.ts`. Tier: global + project, merged field-by-field with project overrides. |
 | `worktrunk.binaryPath` | `string \| undefined` | `undefined` | Optional absolute `worktrunk` binary path passed to the worktrunk backend. Tier: global + project with field-level precedence (project overrides only this field when set). |
 | `worktrunk.onFailure` | `"fail" \| "fallback-native"` | `"fail"` | Failure disposition for delegated worktrunk operations (`create`, `sync`, `prune`, `remove`, install/resolve): `fail` (default) pauses the task with `pausedReason: "worktrunk_operation_failed"`, persists `task.worktrunkFailure`, and emits `worktree:worktrunk-failure`; `fallback-native` emits `worktree:worktrunk-fallback-native`, sends a one-shot per-task fallback alert guarded by `task.worktrunkFallbackAlertedAt`, then retries against native `git worktree`. |
-| `worktrunk.installedBinaryPath` | `string \| undefined` | `undefined` | Cached install path set by the auto-install flow. Managed by the engine; not intended for manual editing. Tier: global + project with field-level precedence. |
+| `worktrunk.installedBinaryPath` | `string \| undefined` | `undefined` | Optional cached probe path (`~/.fusion/bin/worktrunk` by default). Managed by the engine; not intended for manual editing. Tier: global + project with field-level precedence. |
 
 ### Worktrunk auto-install flow
 
-When `worktrunk.enabled` is `true` and `worktrunk.binaryPath` is not set, Fusion resolves the `worktrunk` binary via the following ordered chain:
+> ⚠️ Auto-install is currently disabled (FN-4706, following the FN-4704/FN-4705 source-availability investigation).
+
+When `worktrunk.enabled` is `true`, Fusion resolves the `worktrunk` binary via the following ordered chain:
 
 1. **`worktrunk.binaryPath` override** — if set and the binary passes `--version` probe.
 2. **`$PATH` lookup** — `which worktrunk` (POSIX) or `where worktrunk` (Windows).
-3. **Cached install** — `~/.fusion/bin/worktrunk` from a previous auto-install.
-4. **Auto-install** — downloads and verifies a pinned GitHub release binary.
+3. **Cached install probe path** — `~/.fusion/bin/worktrunk` (or `worktrunk.installedBinaryPath` when set).
+4. **Auto-install denied** — `installWorktrunk()` emits `binary:install-denied` with `reason: "auto-install-disabled"` and throws `WorktrunkInstallFailedError`.
 
-#### Release-binary install
+Because the installer path is disabled, users opting into `worktrunk.enabled` must install `worktrunk` manually and either:
 
-Fusion maintains a pinned release version (`WORKTRUNK_PINNED_RELEASE` in `packages/engine/src/worktrunk-installer.ts`) with per-platform SHA-256 verified assets for `darwin-arm64`, `darwin-x64`, `linux-x64`, and `linux-arm64`. The binary is downloaded to `~/.fusion/bin/worktrunk` with atomic rename (`fs.rename`) and `chmod 0o755`.
+- set `worktrunk.binaryPath`, or
+- ensure `worktrunk` is discoverable on `$PATH`.
 
-**Windows** has no release-binary assets; on Windows the flow proceeds directly to the cargo fallback.
-
-#### Cargo fallback
-
-If the platform has no pinned release asset, or if the release download/verification fails, Fusion falls back to `cargo install worktrunk --version <pinned>` when `cargo` is on `$PATH`. After cargo install, Fusion probes `$PATH` and `~/.cargo/bin/worktrunk` for the installed binary.
-
-If both release and cargo paths fail, the install throws `WorktrunkInstallFailedError` and `worktrunk.onFailure` governs disposition (`fail` → pause task, `fallback-native` → native fallback with one-shot alert).
-
-When fail-hard disposition is used, the task carries structured diagnostics:
-
-- `pausedReason: "worktrunk_operation_failed"`
-- `worktrunkFailure: { op, stderr, exitCode, attemptedAt }`
-- `worktrunkFallbackAlertedAt` remains unset unless `fallback-native` is used
-
-#### `network_api` action-gate
-
-All auto-install attempts are gated under the `network_api` action-gate category (the same policy governing `fn_web_fetch` and `fn_research_run`). Install attempts produce run-audit `filesystem` events: `binary:install-requested`, `binary:install-success`, `binary:install-failed`, and `binary:install-denied`, with `target: ~/.fusion/bin/worktrunk` and structured metadata including the pinned version, source, and SHA-256 hash.
+If resolution fails, `worktrunk.onFailure` governs disposition (`fail` → pause task, `fallback-native` → native fallback with one-shot alert), and unresolved tasks surface `WorktrunkBinaryUnavailableError` context through the existing FN-4625 failure-handling pipeline.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
