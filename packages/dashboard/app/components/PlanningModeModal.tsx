@@ -48,6 +48,7 @@ import { useViewportMode } from "../hooks/useViewportMode";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
 import { useNavigationHistoryContext } from "../hooks/useNavigationHistory";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
+import { useAutosizeTextarea } from "../hooks/useAutosizeTextarea";
 import { getSessionTabId } from "../utils/getSessionTabId";
 
 interface PlanningModeModalProps {
@@ -170,7 +171,16 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const [isRetrying, setIsRetrying] = useState(false);
   const [generationStartTime, setGenerationStartTime] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const { ref: initialPlanAutosizeRef } = useAutosizeTextarea({
+    value: initialPlan,
+    minHeight: 120,
+    maxHeight: 320,
+  });
+  const setInitialPlanTextareaRef = useCallback((node: HTMLTextAreaElement | null) => {
+    textareaRef.current = node;
+    initialPlanAutosizeRef(node);
+  }, [initialPlanAutosizeRef]);
   const modalRef = useRef<HTMLDivElement>(null);
   const streamConnectionRef = useRef<{ close: () => void; isConnected: () => boolean } | null>(null);
   const currentSessionIdRef = useRef<string | null>(null);
@@ -1781,9 +1791,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
                 <div className="form-group">
                   <label htmlFor="initial-plan">What do you want to build?</label>
                   <textarea
-                    ref={textareaRef}
+                    ref={setInitialPlanTextareaRef}
                     id="initial-plan"
-                    rows={4}
                     className="planning-textarea"
                     placeholder="e.g., Build a user authentication system with login, signup, and password reset..."
                     value={initialPlan}
@@ -2141,6 +2150,18 @@ function QuestionForm({ question, progress, historyEntries, onSubmit, onBack }: 
   const [response, setResponse] = useState<QuestionResponse>({});
   const [textValue, setTextValue] = useState("");
   const [commentValue, setCommentValue] = useState("");
+  const { ref: textAnswerAutosizeRef } = useAutosizeTextarea({
+    value: textValue,
+    minHeight: 120,
+    maxHeight: 320,
+    deps: [question.id],
+  });
+  const { ref: commentAutosizeRef } = useAutosizeTextarea({
+    value: commentValue,
+    minHeight: 80,
+    maxHeight: 320,
+    deps: [question.id],
+  });
 
   const handleSubmit = useCallback(() => {
     let nextResponse: QuestionResponse;
@@ -2215,8 +2236,8 @@ function QuestionForm({ question, progress, historyEntries, onSubmit, onBack }: 
             <div className="planning-options">
               {question.type === "text" && (
                 <textarea
+                  ref={textAnswerAutosizeRef}
                   className="planning-textarea"
-                  rows={4}
                   placeholder="Type your answer here..."
                   value={textValue}
                   onChange={(e) => setTextValue(e.target.value)}
@@ -2306,9 +2327,9 @@ function QuestionForm({ question, progress, historyEntries, onSubmit, onBack }: 
                   Additional comments (optional)
                 </label>
                 <textarea
+                  ref={commentAutosizeRef}
                   id={`planning-comment-${question.id}`}
                   className="planning-textarea"
-                  rows={2}
                   placeholder="Add any extra context or direction..."
                   value={commentValue}
                   onChange={(e) => setCommentValue(e.target.value)}
@@ -2364,6 +2385,12 @@ function SummaryView({
   const [selectedDependencies, setSelectedDependencies] = useState<string[]>(
     summary.suggestedDependencies
   );
+  const { ref: descriptionAutosizeRef } = useAutosizeTextarea({
+    value: summary.description,
+    minHeight: isExpanded ? 200 : 120,
+    maxHeight: isExpanded ? 480 : 320,
+    deps: [isExpanded],
+  });
   const selectedPriority = normalizeTaskPriority(summary.priority);
 
   const handleDependencyToggle = (taskId: string) => {
@@ -2403,8 +2430,8 @@ function SummaryView({
               </button>
             </label>
             <textarea
+              ref={descriptionAutosizeRef}
               className={`planning-textarea ${isExpanded ? "expanded" : ""}`}
-              rows={isExpanded ? 10 : 4}
               value={summary.description}
               onChange={(e) => onSummaryChange({ ...summary, description: e.target.value })}
             />
