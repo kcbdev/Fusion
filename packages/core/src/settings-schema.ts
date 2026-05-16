@@ -168,6 +168,7 @@ export const DEFAULT_GLOBAL_SETTINGS = {
     installedBinaryPath: undefined,
     onFailure: "fail",
   },
+  owningNodeHandoffPolicy: "reassign-to-local",
   experimentalFeatures: {},
 } satisfies CompleteSettings<GlobalSettings>;
 
@@ -194,6 +195,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   pushAfterMerge: false,
   pushRemote: "origin",
   unavailableNodePolicy: "block",
+  owningNodeHandoffPolicy: "reassign-to-local",
   defaultNodeId: undefined,
   worktreeInitCommand: undefined,
   testCommand: undefined,

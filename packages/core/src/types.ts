@@ -282,6 +282,8 @@ export function normalizeAutoRecovery(value: unknown): AutoRecoverySettings {
 /** Policy for handling task execution when the selected node is unavailable/unhealthy. */
 export type UnavailableNodePolicy = "block" | "fallback-local";
 
+export type OwningNodeHandoffPolicy = "block" | "reassign-to-local" | "reassign-any-healthy";
+
 export interface ModelPreset {
   id: string;
   name: string;
@@ -2049,6 +2051,8 @@ export interface GlobalSettings {
   ntfyDashboardHost?: string;
   /** Optional global fallback per-task token budget defaults. */
   taskTokenBudget?: TaskTokenBudget;
+  /** Policy for recovering tasks whose existing owning node becomes unavailable. */
+  owningNodeHandoffPolicy?: OwningNodeHandoffPolicy;
   /** How long a task must remain in `status='failed'` before a push notification fires.
    *  Set to 0 to dispatch immediately (legacy behavior). Default: 30000 ms. */
   failureNotificationDelayMs?: number;
@@ -2493,6 +2497,11 @@ export interface ProjectSettings {
    *  - "block": prevent execution until the selected node is healthy/available (default)
    *  - "fallback-local": run on the local node when the selected node is unavailable */
   unavailableNodePolicy?: UnavailableNodePolicy;
+  /** Policy for tasks already owned by an unavailable node.
+   *  - "block": keep parked until owner recovers
+   *  - "reassign-to-local": let local node take over (default)
+   *  - "reassign-any-healthy": any healthy node may claim */
+  owningNodeHandoffPolicy?: OwningNodeHandoffPolicy;
   /** Project-level research configuration overrides. */
   researchSettings?: ResearchProjectSettings;
   /** Sandbox command-execution settings.
