@@ -244,6 +244,9 @@ export class WorktrunkWorktreeBackend implements WorktreeBackend {
 
   async create(input: WorktreeCreateInput): Promise<WorktreeCreateResult> {
     // worktrunk mapping: `wt switch --create <branch> [startPoint]`.
+    // NOTE: Worktrunk computes the worktree path via its own template; this
+    // backend currently assumes that template aligns with Fusion's configured
+    // worktree path resolution so callers can keep using `input.worktreePath`.
     const args = ["switch", "--create", input.branch];
     if (input.startPoint) args.push(input.startPoint);
     await this.runWorktrunk("create", input.rootDir, args);

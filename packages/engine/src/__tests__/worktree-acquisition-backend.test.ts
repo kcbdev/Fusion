@@ -68,7 +68,7 @@ describe("acquireTaskWorktree backend wiring", () => {
     });
 
     expect(execMock).toHaveBeenCalledWith(
-      '"worktrunk" --help',
+      '"worktrunk" "switch" "--create" "fusion/fn-1"',
       expect.objectContaining({ cwd: "/repo" }),
     );
     expect(audit.git).toHaveBeenCalledWith(

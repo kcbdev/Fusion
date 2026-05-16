@@ -90,7 +90,10 @@ describe("acquireTaskWorktree worktrunk wiring", () => {
       audit: audit as any,
     });
 
-    expect(execMock).toHaveBeenCalledWith('"worktrunk" --help', expect.any(Object));
+    expect(execMock).toHaveBeenCalledWith(
+      '"worktrunk" "switch" "--create" "fusion/fn-1"',
+      expect.objectContaining({ cwd: "/repo", timeout: 120000, maxBuffer: 10485760 }),
+    );
     expect(execMock).toHaveBeenCalledTimes(1);
     expect(events.filter((event) => event.type === "worktree:worktrunk-create")).toHaveLength(1);
     expect(events.filter((event) => event.type === "worktree:create")).toHaveLength(1);
@@ -112,7 +115,7 @@ describe("acquireTaskWorktree worktrunk wiring", () => {
     ).rejects.toMatchObject({ code: "worktrunk_operation_failed", operation: "create" });
 
     expect(execMock).toHaveBeenCalledTimes(1);
-    expect(execMock.mock.calls[0]?.[0]).toBe('"worktrunk" --help');
+    expect(execMock.mock.calls[0]?.[0]).toBe('"worktrunk" "switch" "--create" "fusion/fn-1"');
     expect(events.some((event) => event.type === "worktree:worktrunk-fallback")).toBe(false);
   });
 
@@ -133,7 +136,7 @@ describe("acquireTaskWorktree worktrunk wiring", () => {
     });
 
     expect(execMock).toHaveBeenCalledTimes(2);
-    expect(execMock.mock.calls[0]?.[0]).toBe('"worktrunk" --help');
+    expect(execMock.mock.calls[0]?.[0]).toBe('"worktrunk" "switch" "--create" "fusion/fn-1"');
     expect(execMock.mock.calls[1]?.[0]).toContain("git worktree add -b");
     expect(events.filter((event) => event.type === "worktree:worktrunk-fallback")).toHaveLength(1);
   });
