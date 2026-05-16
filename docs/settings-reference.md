@@ -267,6 +267,15 @@ Sandbox backend precedence is:
 | `worktrunk.onFailure` | `"fail" \| "fallback-native"` | `"fail"` | Failure disposition for delegated worktrunk operations (`create`, `sync`, `prune`, `remove`, install/resolve): `fail` (default) pauses the task with `pausedReason: "worktrunk_operation_failed"`, persists `task.worktrunkFailure`, and emits `worktree:worktrunk-failure`; `fallback-native` emits `worktree:worktrunk-fallback-native`, sends a one-shot per-task fallback alert guarded by `task.worktrunkFallbackAlertedAt`, then retries against native `git worktree`. |
 | `worktrunk.installedBinaryPath` | `string \| undefined` | `undefined` | Optional cached probe path (`~/.fusion/bin/worktrunk` by default). Managed by the engine; not intended for manual editing. Tier: global + project with field-level precedence. |
 
+### Worktrunk install approval
+
+When dashboard-triggered worktrunk installation is needed (for example after enabling `worktrunk.enabled` and no binary is detected), Fusion creates a `network_api` approval request with action `worktrunk_install`.
+
+- Dashboard clients can probe current install state via `GET /api/worktrunk/status`.
+- Dashboard clients request install approval via `POST /api/worktrunk/install-request`.
+- Pending/decided requests appear in the Approvals mailbox view and approval banner counts.
+- Approving the request through `POST /api/approvals/:id/decision` runs the installer with a pre-approved gate path; denying leaves the binary uninstalled.
+
 ### Worktrunk auto-install flow
 
 > ⚠️ Auto-install is currently disabled (FN-4706, following the FN-4704/FN-4705 source-availability investigation).
