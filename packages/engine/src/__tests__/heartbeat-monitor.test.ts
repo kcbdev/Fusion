@@ -141,6 +141,12 @@ describe("wake-on-message", () => {
       agentId: "agent-1",
       source: "on_demand",
       triggerDetail: "wake-on-message",
+      wakeMessage: expect.objectContaining({
+        messageId: "msg-001",
+        fromType: "user",
+        fromId: "user-1",
+        forced: false,
+      }),
     });
 
     customMonitor.stop();
@@ -255,6 +261,12 @@ describe("wake-on-message", () => {
       agentId: "agent-1",
       source: "on_demand",
       triggerDetail: "wake-on-message-forced",
+      wakeMessage: expect.objectContaining({
+        messageId: "msg-001",
+        fromType: "user",
+        fromId: "user-1",
+        forced: true,
+      }),
     });
 
     customMonitor.stop();
@@ -295,6 +307,12 @@ describe("wake-on-message", () => {
       agentId: "agent-1",
       source: "on_demand",
       triggerDetail: "wake-on-message-forced",
+      wakeMessage: expect.objectContaining({
+        messageId: "msg-001",
+        fromType: "user",
+        fromId: "user-1",
+        forced: true,
+      }),
     });
 
     customMonitor.stop();
