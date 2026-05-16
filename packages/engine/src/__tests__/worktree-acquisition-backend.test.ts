@@ -80,6 +80,9 @@ describe("acquireTaskWorktree backend wiring", () => {
     expect(
       audit.git.mock.calls.filter(([event]) => event?.type === "worktree:worktrunk-create"),
     ).toHaveLength(1);
+    expect(audit.git).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "worktree:create" }),
+    );
   });
 
   it("throws worktrunk_binary_missing with no binaryPath", async () => {

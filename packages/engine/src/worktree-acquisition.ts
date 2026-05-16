@@ -239,7 +239,9 @@ export async function acquireTaskWorktree(opts: AcquireTaskWorktreeOptions): Pro
   worktreePath = created.path;
   branch = created.branch;
   await store.updateTask(task.id, { worktree: created.path, branch: created.branch });
-  await audit?.git({ type: "worktree:create", target: created.path, metadata: { branch: created.branch } });
+  if (backend.kind !== "worktrunk") {
+    await audit?.git({ type: "worktree:create", target: created.path, metadata: { branch: created.branch } });
+  }
   await audit?.git({ type: "branch:create", target: created.branch });
   if (created.branch !== branchName) {
     logger?.log(`Branch conflict resolved: using ${created.branch} instead of ${branchName}`);
