@@ -2211,6 +2211,107 @@ export class GitHubClient {
       .slice(0, limit);
   }
 
+  async searchIssues(
+    owner: string,
+    repo: string,
+    query: string,
+    options?: { limit?: number; state?: "open" | "closed" | "all" },
+  ): Promise<Array<{
+    number: number;
+    title: string;
+    body: string | null;
+    html_url: string;
+    state: "open" | "closed";
+    updatedAt?: string;
+  }>> {
+    const requestedLimit = options?.limit ?? 10;
+    const limit = Math.min(Math.max(1, requestedLimit), 50);
+    const state = options?.state ?? "all";
+
+    if (this.hasGhAuth()) {
+      try {
+        const issues = await runGhJsonAsync<Array<{
+          number: number;
+          title: string;
+          body: string | null;
+          url: string;
+          state: "OPEN" | "CLOSED";
+          updatedAt: string;
+          isPullRequest?: boolean;
+        }>>([
+          "search",
+          "issues",
+          "--repo",
+          `${owner}/${repo}`,
+          "--state",
+          state,
+          "--limit",
+          String(limit),
+          "--json",
+          "number,title,body,url,state,updatedAt,isPullRequest",
+          "--",
+          query,
+        ]);
+
+        return issues
+          .filter((issue) => !issue.isPullRequest)
+          .map((issue) => ({
+            number: issue.number,
+            title: issue.title,
+            body: issue.body,
+            html_url: issue.url,
+            state: this.mapGhIssueState(issue.state),
+            updatedAt: issue.updatedAt,
+          }));
+      } catch (err) {
+        if (!this.token) {
+          throw new Error(getGhErrorMessage(err));
+        }
+      }
+    }
+
+    if (!this.token) {
+      throw new Error("GitHub CLI (gh) is not available or not authenticated, and no GITHUB_TOKEN provided. Run 'gh auth login' to authenticate.");
+    }
+
+    const stateQualifier = state === "all" ? "" : ` state:${state}`;
+    const q = `${query} repo:${owner}/${repo}${stateQualifier} is:issue`;
+    const params = new URLSearchParams();
+    params.set("q", q);
+    params.set("per_page", String(Math.min(limit, 100)));
+
+    const url = `${this.baseUrl}/search/issues?${params.toString()}`;
+    const response = await fetch(url, { headers: this.buildHeaders() });
+
+    if (!response.ok) {
+      throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = (await response.json()) as {
+      items?: Array<{
+        number: number;
+        title: string;
+        body: string | null;
+        html_url: string;
+        state: string;
+        updated_at: string;
+        pull_request?: unknown;
+      }>;
+    };
+
+    return (data.items ?? [])
+      .filter((issue) => !issue.pull_request)
+      .map((issue) => ({
+        number: issue.number,
+        title: issue.title,
+        body: issue.body,
+        html_url: issue.html_url,
+        state: this.mapIssueState(issue.state) ?? "open",
+        updatedAt: issue.updated_at,
+      }))
+      .slice(0, limit);
+  }
+
   /**
    * Fetch a single issue by number.
    * Uses gh CLI if available, otherwise falls back to REST API.
