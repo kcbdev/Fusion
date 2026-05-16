@@ -158,7 +158,10 @@ export class ContainerSandboxBackend implements SandboxBackend {
       const child = spawn(argv[0]!, argv.slice(1), {
         cwd: options.cwd,
         stdio: ["ignore", "pipe", "pipe"],
-        env: options.env,
+        env: {
+          ...process.env,
+          ...(options.env ?? {}),
+        },
       });
 
       let stdout = "";
