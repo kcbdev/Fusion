@@ -629,6 +629,29 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
         const expectedFilesChanged = task.mergeDetails?.filesChanged ?? 0;
         const aggregationLooksComplete = expectedFilesChanged <= 0 || aggregated.stats.filesChanged >= expectedFilesChanged;
 
+        const rebaseBaseShaForAggregation = task.mergeDetails?.rebaseBaseSha?.trim();
+        if (resolvedMergeSha && rebaseBaseShaForAggregation) {
+          const rebaseDiffSpec = await resolveRebaseDiffSpec(rebaseBaseShaForAggregation, resolvedMergeSha, scopedStore.getRootDir());
+          if (rebaseDiffSpec) {
+            const rebaseRangeFiles = await collectDoneRangeFiles(rebaseDiffSpec.range, scopedStore.getRootDir()).catch(() => []);
+            if (rebaseRangeFiles.length > 0) {
+              const files = rebaseRangeFiles.map((file) => ({
+                ...file,
+                status: file.status === "renamed" ? "modified" : file.status,
+              }));
+              res.json({
+                files,
+                stats: {
+                  filesChanged: files.length,
+                  additions: files.reduce((sum, file) => sum + file.additions, 0),
+                  deletions: files.reduce((sum, file) => sum + file.deletions, 0),
+                },
+              });
+              return;
+            }
+          }
+        }
+
         if (aggregated.usedAggregation && aggregated.files.length > 0 && aggregationLooksComplete) {
           res.json({
             files: aggregated.files.map((file) => ({
@@ -641,29 +664,6 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
         }
 
         if (aggregated.usedAggregation && aggregated.files.length > 0) {
-          const rebaseBaseSha = task.mergeDetails?.rebaseBaseSha?.trim();
-          if (resolvedMergeSha && rebaseBaseSha) {
-            const rebaseDiffSpec = await resolveRebaseDiffSpec(rebaseBaseSha, resolvedMergeSha, scopedStore.getRootDir());
-            if (rebaseDiffSpec) {
-              const rebaseRangeFiles = await collectDoneRangeFiles(rebaseDiffSpec.range, scopedStore.getRootDir()).catch(() => []);
-              if (rebaseRangeFiles.length >= aggregated.stats.filesChanged) {
-                const files = rebaseRangeFiles.map((file) => ({
-                  ...file,
-                  status: file.status === "renamed" ? "modified" : file.status,
-                }));
-                res.json({
-                  files,
-                  stats: {
-                    filesChanged: files.length,
-                    additions: files.reduce((sum, file) => sum + file.additions, 0),
-                    deletions: files.reduce((sum, file) => sum + file.deletions, 0),
-                  },
-                });
-                return;
-              }
-            }
-          }
-
           res.json({
             files: aggregated.files.map((file) => ({
               ...file,
@@ -884,24 +884,24 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
         const expectedFilesChanged = task.mergeDetails?.filesChanged ?? 0;
         const aggregationLooksComplete = expectedFilesChanged <= 0 || aggregated.stats.filesChanged >= expectedFilesChanged;
 
+        const rebaseBaseShaForAggregation = task.mergeDetails?.rebaseBaseSha?.trim();
+        if (resolvedMergeSha && rebaseBaseShaForAggregation) {
+          const rebaseDiffSpec = await resolveRebaseDiffSpec(rebaseBaseShaForAggregation, resolvedMergeSha, scopedStore.getRootDir());
+          if (rebaseDiffSpec) {
+            const rebaseRangeFiles = await collectDoneRangeFiles(rebaseDiffSpec.range, scopedStore.getRootDir()).catch(() => []);
+            if (rebaseRangeFiles.length > 0) {
+              res.json(rebaseRangeFiles.map((file) => ({ path: file.path, status: file.status, diff: file.patch })));
+              return;
+            }
+          }
+        }
+
         if (aggregated.usedAggregation && aggregated.files.length > 0 && aggregationLooksComplete) {
           res.json(aggregated.files.map((file) => ({ path: file.path, status: file.status, diff: file.patch })));
           return;
         }
 
         if (aggregated.usedAggregation && aggregated.files.length > 0) {
-          const rebaseBaseSha = task.mergeDetails?.rebaseBaseSha?.trim();
-          if (resolvedMergeSha && rebaseBaseSha) {
-            const rebaseDiffSpec = await resolveRebaseDiffSpec(rebaseBaseSha, resolvedMergeSha, scopedStore.getRootDir());
-            if (rebaseDiffSpec) {
-              const rebaseRangeFiles = await collectDoneRangeFiles(rebaseDiffSpec.range, scopedStore.getRootDir()).catch(() => []);
-              if (rebaseRangeFiles.length >= aggregated.stats.filesChanged) {
-                res.json(rebaseRangeFiles.map((file) => ({ path: file.path, status: file.status, diff: file.patch })));
-                return;
-              }
-            }
-          }
-
           res.json(aggregated.files.map((file) => ({ path: file.path, status: file.status, diff: file.patch })));
           return;
         }

@@ -304,6 +304,29 @@ describe("FN-4308 multi-commit done task aggregation", () => {
     expect(response.body.files.map((f: any) => f.path).sort()).toEqual(["one.ts", "two.ts"]);
   });
 
+  it("FN-4741: prefers rebaseBaseSha..commitSha over single-commit aggregate even when mergeDetails.filesChanged is absent", async () => {
+    const store = new MockStore();
+    store.addTask(createTask({ column: "done", mergeDetails: { commitSha: "tip-sha", rebaseBaseSha: "base-sha" } }));
+
+    gitResponses({
+      "merge-base --is-ancestor tip-sha HEAD": "",
+      "rev-list --parents -n 1 tip-sha": "tip-sha parent-sha",
+      "diff --name-status -M parent-sha..tip-sha": "M\tonly-tip.ts",
+      "diff -M parent-sha..tip-sha -- only-tip.ts": "+tip\n",
+      "merge-base --is-ancestor base-sha tip-sha": "",
+      "diff --name-status -M base-sha..tip-sha": "A\tfile-a.ts\nM\tfile-b.ts\nM\tonly-tip.ts",
+      "diff -M base-sha..tip-sha -- file-a.ts": "+a\n",
+      "diff -M base-sha..tip-sha -- file-b.ts": "+b\n",
+      "diff -M base-sha..tip-sha -- only-tip.ts": "+tip\n",
+    });
+
+    const app = createServer(store as any);
+    const response = await requestDiff(app);
+    expect(response.status).toBe(200);
+    expect(response.body.stats.filesChanged).toBe(3);
+    expect(response.body.files.map((f: any) => f.path).sort()).toEqual(["file-a.ts", "file-b.ts", "only-tip.ts"]);
+  });
+
   it("FN-4726: prefers rebaseBaseSha..commitSha range over partial lineage aggregate for multi-commit rebase done task", async () => {
     const store = new MockStore();
     store.addTask(createTask({
@@ -433,6 +456,29 @@ describe("FN-4308 multi-commit done task aggregation", () => {
     expect(response.status).toBe(200);
     expect(response.body).toHaveLength(2);
     expect(response.body.map((f: any) => f.path).sort()).toEqual(["one.ts", "two.ts"]);
+  });
+
+  it("FN-4741: prefers rebaseBaseSha..commitSha for file-diffs even when mergeDetails.filesChanged is absent", async () => {
+    const store = new MockStore();
+    store.addTask(createTask({ column: "done", mergeDetails: { commitSha: "tip-sha", rebaseBaseSha: "base-sha" } }));
+
+    gitResponses({
+      "merge-base --is-ancestor tip-sha HEAD": "",
+      "rev-list --parents -n 1 tip-sha": "tip-sha parent-sha",
+      "diff --name-status -M parent-sha..tip-sha": "M\tonly-tip.ts",
+      "diff -M parent-sha..tip-sha -- only-tip.ts": "+tip\n",
+      "merge-base --is-ancestor base-sha tip-sha": "",
+      "diff --name-status -M base-sha..tip-sha": "A\tfile-a.ts\nM\tfile-b.ts\nM\tonly-tip.ts",
+      "diff -M base-sha..tip-sha -- file-a.ts": "+a\n",
+      "diff -M base-sha..tip-sha -- file-b.ts": "+b\n",
+      "diff -M base-sha..tip-sha -- only-tip.ts": "+tip\n",
+    });
+
+    const app = createServer(store as any);
+    const response = await requestFileDiffs(app);
+    expect(response.status).toBe(200);
+    expect(response.body).toHaveLength(3);
+    expect(response.body.map((f: any) => f.path).sort()).toEqual(["file-a.ts", "file-b.ts", "only-tip.ts"]);
   });
 
   it("uses parent-to-parent range for merge commits", async () => {
