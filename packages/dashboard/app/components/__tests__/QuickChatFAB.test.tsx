@@ -56,8 +56,8 @@ const modelSession: ChatSession = {
   title: "Model thread",
   status: "active",
   projectId: null,
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
+  createdAt: "2026-05-16T00:00:02.000Z",
+  updatedAt: "2026-05-16T00:00:02.000Z",
 };
 
 const modelSessionAnthropic: ChatSession = {
@@ -76,8 +76,8 @@ const agentSession: ChatSession = {
   title: null,
   status: "active",
   projectId: null,
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
+  createdAt: "2026-05-16T00:00:01.000Z",
+  updatedAt: "2026-05-16T00:00:01.000Z",
 };
 
 const agentTwoSession: ChatSession = {

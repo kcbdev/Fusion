@@ -117,6 +117,7 @@ export async function resolveWorktrunkBinary(opts: {
 
   logger.log("resolve: install path disabled; failing");
   await installWorktrunk(opts);
+  throw new WorktrunkInstallFailedError(AUTO_INSTALL_DISABLED_MESSAGE, { stage: "auto-install-disabled" });
 }
 
 export async function installWorktrunk(opts: {
