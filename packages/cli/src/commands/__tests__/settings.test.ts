@@ -377,11 +377,11 @@ describe("settings commands", () => {
     expect(errorSpy).toHaveBeenCalledWith('Error: Unknown setting "worktrunk.bogus"');
   });
 
-  it("runSettingsShow includes Worktrunk integration section", async () => {
+  it("runSettingsShow includes Worktrunk Integration section and dotted values", async () => {
     const getSettings = vi.fn().mockResolvedValue(makeSettings({
       worktrunk: {
         enabled: true,
-        binaryPath: "/usr/local/bin/worktrunk",
+        binaryPath: undefined,
         onFailure: "fallback-native",
       },
     }));
@@ -396,10 +396,38 @@ describe("settings commands", () => {
     await runSettingsShow("demo-project");
 
     const output = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
-    expect(output).toContain("Worktrunk integration");
+    expect(output).toContain("Worktrunk Integration:");
     expect(output).toContain("Worktrunk Enabled");
-    expect(output).toContain("Worktrunk Binary Path");
+    expect(output).toContain("true");
     expect(output).toContain("Worktrunk On Failure");
+    expect(output).toContain('"fallback-native"');
+    expect(output).toContain("Worktrunk Binary Path");
+    expect(output).toContain("(not set)");
+  });
+
+  it("runSettingsShow omits Worktrunk Integration section when worktrunk is absent", async () => {
+    const getSettings = vi.fn().mockResolvedValue({
+      maxConcurrent: 2,
+      maxWorktrees: 4,
+      autoResolveConflicts: true,
+      smartConflictResolution: true,
+      requirePlanApproval: false,
+      ntfyEnabled: false,
+      taskPrefix: "FN",
+      worktreeNaming: "random",
+    });
+    vi.mocked(resolveProject).mockResolvedValue({
+      projectId: "proj-1",
+      projectName: "demo-project",
+      projectPath: "/projects/demo",
+      isRegistered: true,
+      store: { getSettings } as any,
+    });
+
+    await runSettingsShow("demo-project");
+
+    const output = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+    expect(output).not.toContain("Worktrunk Integration:");
   });
 
   it("runSettingsShow includes Node Routing section", async () => {

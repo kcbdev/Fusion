@@ -142,11 +142,14 @@ export function parseValue(key: ValidSettingKey, value: string): unknown {
 /**
  * Format a setting value for display
  */
-function getDottedValue(obj: unknown, key: string): unknown {
-  return key.split(".").reduce<unknown>((acc, part) => {
-    if (!acc || typeof acc !== "object") return undefined;
-    return (acc as Record<string, unknown>)[part];
-  }, obj);
+function readDottedSetting(settings: GlobalSettings | Settings, key: string): unknown {
+  const parts = key.split(".");
+  let cursor: unknown = settings;
+  for (const part of parts) {
+    if (cursor == null || typeof cursor !== "object") return undefined;
+    cursor = (cursor as Record<string, unknown>)[part];
+  }
+  return cursor;
 }
 
 function applyDottedSetting(key: string, value: unknown, current: Record<string, unknown>): Record<string, unknown> {
@@ -169,8 +172,10 @@ function applyDottedSetting(key: string, value: unknown, current: Record<string,
   };
 }
 
+type CliSettingKey = string;
+
 function formatSettingValue(
-  key: string,
+  key: CliSettingKey,
   value: unknown,
   _settings: GlobalSettings | Settings
 ): string {
@@ -191,7 +196,7 @@ function formatSettingValue(
   }
 
   if (typeof value === "string") {
-    const defaultValue = getDottedValue(DEFAULT_SETTINGS, key);
+    const defaultValue = readDottedSetting(DEFAULT_SETTINGS, key);
     if (value === defaultValue) {
       return `"${value}" (default)`;
     }
@@ -204,7 +209,7 @@ function formatSettingValue(
 /**
  * Get display name for a setting (convert camelCase to readable)
  */
-function getSettingLabel(key: string): string {
+function getSettingLabel(key: CliSettingKey): string {
   if (key === "ntfyEnabled") return "ntfy Enabled";
   if (key === "ntfyTopic") return "ntfy Topic";
   if (key === "worktrunk.enabled") return "Worktrunk Enabled";
@@ -249,7 +254,7 @@ export async function runSettingsShow(projectName?: string): Promise<void> {
       keys: ["worktreeNaming", "worktreesDir", "recycleWorktrees"],
     },
     {
-      title: "Worktrunk integration",
+      title: "Worktrunk Integration",
       keys: ["worktrunk.enabled", "worktrunk.binaryPath", "worktrunk.onFailure"],
     },
     {
@@ -271,14 +276,14 @@ export async function runSettingsShow(projectName?: string): Promise<void> {
   ];
 
   for (const group of settingGroups) {
-    const hasValues = group.keys.some((key) => getDottedValue(settings, key) !== undefined);
+    const hasValues = group.keys.some((key) => readDottedSetting(settings, key) !== undefined);
     if (!hasValues) continue;
 
     console.log();
     console.log(`  ${group.title}:`);
 
     for (const key of group.keys) {
-      const value = getDottedValue(settings, key);
+      const value = readDottedSetting(settings, key);
       const label = getSettingLabel(key);
       const formattedValue = formatSettingValue(key, value, settings);
       console.log(`    ${label.padEnd(25)} ${formattedValue}`);
