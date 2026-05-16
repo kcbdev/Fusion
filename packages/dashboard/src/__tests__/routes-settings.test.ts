@@ -903,6 +903,30 @@ describe("PUT /settings", () => {
     expect(store.updateSettings).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { label: "rejects negative", value: -1, expectedStatus: 400 },
+    { label: "rejects non-integer", value: 1.5, expectedStatus: 400 },
+    { label: "accepts zero", value: 0, expectedStatus: 200 },
+    { label: "accepts thirty", value: 30, expectedStatus: 200 },
+  ])("$label doneAutoArchiveDays", async ({ value, expectedStatus }) => {
+    const res = await REQUEST(
+      buildApp(),
+      "PUT",
+      "/api/settings",
+      JSON.stringify({ doneAutoArchiveDays: value }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(expectedStatus);
+    if (expectedStatus === 400) {
+      expect(res.body.error).toContain("doneAutoArchiveDays");
+      expect(store.updateSettings).not.toHaveBeenCalled();
+      return;
+    }
+
+    expect(store.updateSettings).toHaveBeenCalledWith({ doneAutoArchiveDays: value });
+  });
+
   it("validates archive agent log mode", async () => {
     const res = await REQUEST(
       buildApp(),

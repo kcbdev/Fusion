@@ -445,6 +445,12 @@ export function registerSettingsMemoryRoutes(ctx: ApiRoutesContext, deps: Settin
           throw badRequest("autoArchiveDoneAfterMs must be between 60000 and 315360000000");
         }
       }
+      if (clientSettings.doneAutoArchiveDays !== undefined) {
+        const doneAutoArchiveDays = clientSettings.doneAutoArchiveDays;
+        if (!Number.isInteger(doneAutoArchiveDays) || doneAutoArchiveDays < 0 || doneAutoArchiveDays > 3650) {
+          throw badRequest("doneAutoArchiveDays must be an integer between 0 and 3650");
+        }
+      }
       if (
         clientSettings.archiveAgentLogMode !== undefined &&
         !["none", "compact", "full"].includes(clientSettings.archiveAgentLogMode)
