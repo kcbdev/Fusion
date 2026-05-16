@@ -66,6 +66,23 @@ export type GitMutationType =
   | "worktree:create"
   | "worktree:remove"
   | "worktree:reuse"
+  /**
+   * worktrunk run-audit metadata shape:
+   *
+   * ```ts
+   * metadata: {
+   *   op: "install" | "create" | "sync" | "prune" | "remove" | "failure" | "fallback-native";
+   *   binaryPath?: string; // resolved worktrunk binary path
+   *   worktreePath?: string; // target worktree path (create/sync/remove; prune when single-target)
+   *   durationMs?: number; // wall-clock duration of the worktrunk invocation
+   *   exitCode?: number | null; // only on failure / fallback-native events
+   *   stderrPreview?: string; // truncated to 4 KB; only on failure / fallback-native events
+   *   installSource?: "release-binary" | "cargo"; // only on successful install events
+   *   prunedCount?: number; // only on successful prune events when known
+   * }
+   * ```
+   */
+  | "worktree:worktrunk-install"
   | "worktree:worktrunk-create"
   | "worktree:worktrunk-remove"
   | "worktree:worktrunk-sync"
