@@ -1036,7 +1036,7 @@ export class ChatStore extends EventEmitter<ChatStoreEvents> {
     }
 
     const deleted = this.db.prepare("DELETE FROM chat_room_messages WHERE roomId = ?").run(roomId);
-    const deletedCount = deleted.changes;
+    const deletedCount = Number(deleted.changes);
     if (deletedCount <= 0) {
       return 0;
     }
