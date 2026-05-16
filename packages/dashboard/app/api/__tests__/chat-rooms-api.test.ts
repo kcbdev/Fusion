@@ -3,6 +3,7 @@ import {
   addChatRoomMember,
   createChatRoom,
   deleteChatRoom,
+  clearChatRoomMessages,
   deleteChatRoomMessage,
   fetchChatRoom,
   fetchChatRoomMembers,
@@ -76,6 +77,7 @@ describe("chat room legacy API client", () => {
     await fetchChatRoomMessages("room-1", { limit: 2, offset: 1, before: "2026-01-01", order: "desc" }, "proj-3");
     await postChatRoomMessage("room-1", { content: "hello", mentions: ["agent-x"] }, "proj-3");
     await deleteChatRoomMessage("room-1", "msg-1", "proj-3");
+    await clearChatRoomMessages("room-1", "proj-3");
 
     const [listUrl] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(listUrl).toContain("/api/chat/rooms/room-1/messages?");
@@ -91,6 +93,10 @@ describe("chat room legacy API client", () => {
 
     const [, delInit] = fetchMock.mock.calls[2] as [string, RequestInit];
     expect(delInit.method).toBe("DELETE");
+
+    const [clearUrl, clearInit] = fetchMock.mock.calls[3] as [string, RequestInit];
+    expect(clearUrl).toContain("/api/chat/rooms/room-1/messages?projectId=proj-3");
+    expect(clearInit.method).toBe("DELETE");
   });
 
   it("omits order param when undefined", async () => {

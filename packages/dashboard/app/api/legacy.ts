@@ -8525,6 +8525,16 @@ export function deleteChatRoomMessage(
   );
 }
 
+export function clearChatRoomMessages(
+  id: string,
+  projectId?: string,
+): Promise<{ success: boolean; deletedCount: number }> {
+  return api<{ success: boolean; deletedCount: number }>(
+    withProjectId(`/chat/rooms/${encodeURIComponent(id)}/messages`, projectId),
+    { method: "DELETE" },
+  );
+}
+
 /**
  * Room POST /messages in FN-3808 is persist-only (201 JSON response).
  * Do not add streamChatRoomResponse until FN-3810 introduces AI invocation/streaming.
