@@ -63,14 +63,14 @@ const {
 
 function mockExecOk(stdout: string): void {
   execMock.mockImplementation(((cmd: string, _opts: unknown, cb: unknown) => {
-    const callback = typeof _opts === "function" ? _opts : cb;
+    const callback = typeof _opts === "function" ? _opts as (...args: unknown[]) => void : cb as (...args: unknown[]) => void;
     callback(null, { stdout, stderr: "" });
   }) as unknown as typeof execImport);
 }
 
 function mockExecFail(error: Error): void {
   execMock.mockImplementation(((cmd: string, _opts: unknown, cb: unknown) => {
-    const callback = typeof _opts === "function" ? _opts : cb;
+    const callback = typeof _opts === "function" ? _opts as (...args: unknown[]) => void : cb as (...args: unknown[]) => void;
     callback(error);
   }) as unknown as typeof execImport);
 }
@@ -78,7 +78,7 @@ function mockExecFail(error: Error): void {
 function mockExecSequence(responses: Array<{ stdout?: string; error?: Error }>): void {
   let i = 0;
   execMock.mockImplementation(((_cmd: string, _opts: unknown, cb: unknown) => {
-    const callback = typeof _opts === "function" ? _opts : cb;
+    const callback = typeof _opts === "function" ? _opts as (...args: unknown[]) => void : cb as (...args: unknown[]) => void;
     const resp = responses[Math.min(i++, responses.length - 1)];
     if (resp.error) {
       callback(resp.error);
@@ -155,7 +155,7 @@ function makeGateContext(disposition: "allow" | "block" | "require-approval"): A
     agentName: "Test Agent",
     isEphemeral: false,
     permissionPolicy: {
-      defaultDisposition: disposition,
+      presetId: "custom",
       rules: {
         command_execution: "allow",
         git_write: "allow",
