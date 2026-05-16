@@ -1525,6 +1525,19 @@ function AppInner() {
       );
     }
 
+    if (taskView === "goalsView") {
+      if (!settingsLoaded || !goalsEnabled) {
+        return null;
+      }
+      return (
+        <PageErrorBoundary>
+          <Suspense fallback={null}>
+            <GoalsView />
+          </Suspense>
+        </PageErrorBoundary>
+      );
+    }
+
     if (taskView === "reliability") {
       return (
         <PageErrorBoundary>
