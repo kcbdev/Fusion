@@ -881,6 +881,7 @@ describe("runDaemon", () => {
 
   it("stops engine services during shutdown", async () => {
     await runDaemon({});
+    expect(mockHybridExecutorCtor).not.toHaveBeenCalled();
 
     const listenCall = mocks.listenCalls[0];
     expect(listenCall).toBeDefined();

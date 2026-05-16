@@ -4,10 +4,16 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const { mockSyncStartupModels } = vi.hoisted(() => ({
+const { mockSyncStartupModels, mockShouldUseHybridExecutor, mockHybridExecutorCtor, mockHybridExecutorInitialize, mockHybridExecutorShutdown } = vi.hoisted(() => ({
   mockSyncStartupModels: vi.fn().mockResolvedValue(undefined),
+  mockShouldUseHybridExecutor: vi.fn().mockResolvedValue({ enabled: false, reason: "single-project-local-only" }),
+  mockHybridExecutorInitialize: vi.fn().mockResolvedValue(undefined),
+  mockHybridExecutorShutdown: vi.fn().mockResolvedValue(undefined),
+  mockHybridExecutorCtor: vi.fn().mockImplementation(() => ({
+    initialize: mockHybridExecutorInitialize,
+    shutdown: mockHybridExecutorShutdown,
+  })),
 }));
-
 vi.mock("../startup-model-sync.js", () => ({
   syncStartupModels: mockSyncStartupModels,
 }));
@@ -710,6 +716,8 @@ vi.mock("@fusion/engine", async (importOriginal) => {
       start: vi.fn(),
       stop: vi.fn().mockResolvedValue(undefined),
     })),
+    shouldUseHybridExecutor: mockShouldUseHybridExecutor,
+    HybridExecutor: mockHybridExecutorCtor,
     scanIdleWorktrees: vi.fn().mockResolvedValue([]),
     cleanupOrphanedWorktrees: vi.fn().mockResolvedValue(0),
   });
@@ -2611,6 +2619,7 @@ describe("runDashboard — mesh lifecycle ownership", () => {
     const baselineCalls = peerExchangeCtor.mock.calls.length;
 
     const { dispose } = await runDashboard(0, { open: false });
+    expect(mockHybridExecutorCtor).not.toHaveBeenCalled();
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
 
@@ -2665,6 +2674,46 @@ describe("runDashboard — mesh lifecycle ownership", () => {
       expect(updateNode).toHaveBeenCalledWith("node-local", { status: "offline" });
       expect(exitSpy).toHaveBeenCalledWith(0);
     } finally {
+      exitSpy.mockRestore();
+    }
+  });
+
+  it("enables HybridExecutor with env override and shuts down before engine stop", async () => {
+    const { CentralCore } = await import("@fusion/core");
+
+    process.env.FUSION_HYBRID_EXECUTOR = "1";
+    mockShouldUseHybridExecutor.mockResolvedValue({ enabled: true, reason: "env-override" });
+
+    (CentralCore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      init: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      getProjectByPath: vi.fn().mockResolvedValue({ id: "project-1" }),
+      listProjects: vi.fn().mockResolvedValue([{ id: "project-1", path: process.cwd() }]),
+      listNodes: vi.fn().mockResolvedValue([{ id: "node-local", type: "local", status: "offline" }]),
+      updateNode: vi.fn().mockResolvedValue(undefined),
+      startDiscovery: vi.fn().mockResolvedValue(undefined),
+      stopDiscovery: vi.fn(),
+    }));
+
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const baselineSigtermHandlers = process.listeners("SIGTERM");
+    try {
+      await runDashboard(0, { open: false });
+      expect(mockHybridExecutorCtor).toHaveBeenCalledTimes(1);
+      expect(mockHybridExecutorInitialize).toHaveBeenCalledTimes(1);
+
+      const sigtermHandler = getNewSignalHandler("SIGTERM", baselineSigtermHandlers);
+      sigtermHandler();
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(mockHybridExecutorShutdown).toHaveBeenCalled();
+      const { ProjectEngineManager } = await import("@fusion/engine");
+      const managerInstance = (ProjectEngineManager as unknown as ReturnType<typeof vi.fn>).mock.results.at(-1)?.value;
+      expect(mockHybridExecutorShutdown.mock.invocationCallOrder[0]).toBeLessThan(
+        managerInstance.stopAll.mock.invocationCallOrder[0],
+      );
+    } finally {
+      delete process.env.FUSION_HYBRID_EXECUTOR;
       exitSpy.mockRestore();
     }
   });

@@ -837,6 +837,7 @@ describe("runServe", () => {
 
   it("stops engine services during shutdown", async () => {
     await runServe(4040, {});
+    expect(mockHybridExecutorCtor).not.toHaveBeenCalled();
 
     const listenCall = mocks.listenCalls[0];
     expect(listenCall).toBeDefined();
