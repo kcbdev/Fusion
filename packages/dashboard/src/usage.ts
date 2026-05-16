@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { readFile } from "node:fs/promises";
 import * as https from "node:https";
 import * as child_process from "node:child_process";
+import { choosePreferredStoredCredential, readStoredCredentialsFromAuthFile } from "@fusion/core";
 import { getAuthFileCandidates } from "./auth-paths.js";
 
 function getHomeDir(): string {
@@ -1114,15 +1115,13 @@ async function fetchClaudeUsage(authStorage?: AuthStorageLike): Promise<Provider
 
 // ── Codex fetcher ──────────────────────────────────────────────────────────
 
-async function fetchCodexUsage(): Promise<ProviderUsage> {
-  const usage: ProviderUsage = {
-    name: "Codex",
-    icon: "🟢",
-    status: "no-auth",
-    windows: [],
-  };
+type CodexCredential = {
+  accessToken: string;
+  idToken?: string;
+  source: "codex-cli" | "fusion-auth";
+};
 
-  // Load Codex auth
+async function loadCodexCredential(): Promise<CodexCredential | null> {
   const codexHome = process.env.CODEX_HOME || path.join(getHomeDir(), ".codex");
   const authPath = path.join(codexHome, "auth.json");
 
@@ -1131,19 +1130,64 @@ async function fetchCodexUsage(): Promise<ProviderUsage> {
   try {
     auth = JSON.parse(await readFile(authPath, "utf-8"));
   } catch {
+    auth = null;
+  }
+
+  const codexCliAccessToken = auth?.tokens?.access_token;
+  if (typeof codexCliAccessToken === "string" && codexCliAccessToken.length > 0) {
+    return {
+      accessToken: codexCliAccessToken,
+      idToken: typeof auth?.tokens?.id_token === "string" ? auth.tokens.id_token : undefined,
+      source: "codex-cli",
+    };
+  }
+
+  let preferredCredential: ReturnType<typeof choosePreferredStoredCredential>;
+  for (const candidatePath of getAuthFileCandidates()) {
+    const authEntries = readStoredCredentialsFromAuthFile(candidatePath);
+    preferredCredential = choosePreferredStoredCredential(preferredCredential, authEntries["openai-codex"]);
+  }
+
+  if (
+    preferredCredential?.type !== "oauth"
+    || typeof preferredCredential.access !== "string"
+    || preferredCredential.access.length === 0
+    || typeof preferredCredential.expires !== "number"
+    || !Number.isFinite(preferredCredential.expires)
+    || preferredCredential.expires <= Date.now()
+  ) {
+    return null;
+  }
+
+  return {
+    accessToken: preferredCredential.access,
+    source: "fusion-auth",
+  };
+}
+
+async function fetchCodexUsage(): Promise<ProviderUsage> {
+  const usage: ProviderUsage = {
+    name: "Codex",
+    icon: "🟢",
+    status: "no-auth",
+    windows: [],
+  };
+
+  const credential = await loadCodexCredential();
+  if (!credential) {
     usage.error = "No Codex credentials — run 'codex' to login";
     return usage;
   }
 
-  const accessToken = auth?.tokens?.access_token;
+  const accessToken = credential.accessToken;
   if (!accessToken) {
     usage.error = "No Codex access token found";
     return usage;
   }
 
-  // Extract plan and email from id_token
-  if (auth?.tokens?.id_token) {
-    const claims = decodeJwtPayload(auth.tokens.id_token);
+  // Extract plan and email from id_token when sourced from Codex CLI auth
+  if (credential.source === "codex-cli" && credential.idToken) {
+    const claims = decodeJwtPayload(credential.idToken);
     if (claims) {
       usage.email = claims.email || null;
       const openaiAuth = claims["https://api.openai.com/auth"];
@@ -1163,7 +1207,10 @@ async function fetchCodexUsage(): Promise<ProviderUsage> {
 
     if (res.status === 401 || res.status === 403) {
       usage.status = "error";
-      usage.error = "Auth expired — run 'codex' to re-login";
+      usage.error =
+        credential.source === "fusion-auth"
+          ? "Auth expired — re-login from Fusion Settings or run 'codex'"
+          : "Auth expired — run 'codex' to re-login";
       return usage;
     }
 

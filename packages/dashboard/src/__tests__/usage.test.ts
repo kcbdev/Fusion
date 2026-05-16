@@ -1,4 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+const coreInteropMocks = vi.hoisted(() => ({
+  choosePreferredStoredCredential: vi.fn(),
+  readStoredCredentialsFromAuthFile: vi.fn(),
+}));
+
+vi.mock("@fusion/core", () => ({
+  choosePreferredStoredCredential: coreInteropMocks.choosePreferredStoredCredential,
+  readStoredCredentialsFromAuthFile: coreInteropMocks.readStoredCredentialsFromAuthFile,
+}));
+
 import {
   fetchAllProviderUsage,
   clearUsageCache,
@@ -59,6 +70,10 @@ describe("usage", () => {
     mockExecFileSync.mockImplementation(() => {
       throw new Error("File not found");
     });
+    coreInteropMocks.choosePreferredStoredCredential.mockImplementation((...credentials: any[]) =>
+      credentials.findLast((credential) => credential !== undefined)
+    );
+    coreInteropMocks.readStoredCredentialsFromAuthFile.mockReturnValue({});
     vi.stubEnv("HOME", "/home/testuser");
   });
 
@@ -1774,6 +1789,148 @@ describe("usage", () => {
       const codex = providers.find((p) => p.name === "Codex");
 
       expect(codex).toBeUndefined();
+    });
+
+    it("falls back to Fusion openai-codex oauth when codex auth.json is missing", async () => {
+      mockReadFile.mockRejectedValue(new Error("File not found"));
+      coreInteropMocks.readStoredCredentialsFromAuthFile.mockImplementation((filePath: string) => {
+        if (filePath.includes(".fusion/agent/auth.json")) {
+          return {
+            "openai-codex": {
+              type: "oauth",
+              access: "fusion-access-token",
+              refresh: "fusion-refresh-token",
+              expires: Date.now() + 60_000,
+            },
+          };
+        }
+        return {};
+      });
+
+      const mockReq = { on: vi.fn(), write: vi.fn(), end: vi.fn() };
+      mockRequest.mockImplementation((options: any, callback: any) => {
+        expect(options.headers.authorization).toBe("Bearer fusion-access-token");
+        const mockRes = {
+          statusCode: 200,
+          headers: {},
+          on: vi.fn((event: string, handler: any) => {
+            if (event === "data") handler(Buffer.from('{"email":"fusion@example.com","plan_type":"pro"}'));
+            if (event === "end") handler();
+          }),
+        };
+        callback(mockRes);
+        return mockReq;
+      });
+
+      const providers = await fetchAllProviderUsage();
+      const codex = providers.find((p) => p.name === "Codex")!;
+      expect(codex.status).toBe("ok");
+      expect(codex.email).toBe("fusion@example.com");
+    });
+
+    it("prefers codex auth.json over Fusion openai-codex oauth", async () => {
+      mockReadFile.mockImplementation((filePath: string) => {
+        if (filePath.includes(".codex/auth.json")) {
+          return JSON.stringify({
+            tokens: {
+              access_token: "codex-cli-token",
+              id_token: "header.eyJlbWFpbCI6ImNsaUBleGFtcGxlLmNvbSJ9.signature",
+            },
+          });
+        }
+        return Promise.reject(new Error("File not found"));
+      });
+
+      coreInteropMocks.readStoredCredentialsFromAuthFile.mockReturnValue({
+        "openai-codex": {
+          type: "oauth",
+          access: "fusion-access-token",
+          refresh: "fusion-refresh-token",
+          expires: Date.now() + 60_000,
+        },
+      });
+
+      const mockReq = { on: vi.fn(), write: vi.fn(), end: vi.fn() };
+      mockRequest.mockImplementation((options: any, callback: any) => {
+        expect(options.headers.authorization).toBe("Bearer codex-cli-token");
+        const mockRes = {
+          statusCode: 200,
+          headers: {},
+          on: vi.fn((event: string, handler: any) => {
+            if (event === "data") handler(Buffer.from('{"email":"cli@example.com"}'));
+            if (event === "end") handler();
+          }),
+        };
+        callback(mockRes);
+        return mockReq;
+      });
+
+      const providers = await fetchAllProviderUsage();
+      const codex = providers.find((p) => p.name === "Codex")!;
+      expect(codex.status).toBe("ok");
+    });
+
+    it("returns no-auth when Fusion openai-codex oauth is expired", async () => {
+      mockReadFile.mockRejectedValue(new Error("File not found"));
+      coreInteropMocks.readStoredCredentialsFromAuthFile.mockReturnValue({
+        "openai-codex": {
+          type: "oauth",
+          access: "fusion-access-token",
+          refresh: "fusion-refresh-token",
+          expires: Date.now() - 60_000,
+        },
+      });
+
+      const providers = await fetchAllProviderUsage();
+      const codex = providers.find((p) => p.name === "Codex");
+      expect(codex).toBeUndefined();
+      expect(mockRequest).not.toHaveBeenCalled();
+    });
+
+    it("returns no-auth when Fusion openai-codex entry is non-oauth", async () => {
+      mockReadFile.mockRejectedValue(new Error("File not found"));
+      coreInteropMocks.readStoredCredentialsFromAuthFile.mockReturnValue({
+        "openai-codex": {
+          type: "api_key",
+          key: "not-a-bearer-token",
+        },
+      });
+
+      const providers = await fetchAllProviderUsage();
+      const codex = providers.find((p) => p.name === "Codex");
+      expect(codex).toBeUndefined();
+      expect(mockRequest).not.toHaveBeenCalled();
+    });
+
+    it("surfaces Fusion re-login guidance when Fusion-sourced token gets 401", async () => {
+      mockReadFile.mockRejectedValue(new Error("File not found"));
+      coreInteropMocks.readStoredCredentialsFromAuthFile.mockReturnValue({
+        "openai-codex": {
+          type: "oauth",
+          access: "fusion-access-token",
+          refresh: "fusion-refresh-token",
+          expires: Date.now() + 60_000,
+        },
+      });
+
+      const mockReq = { on: vi.fn(), write: vi.fn(), end: vi.fn() };
+      mockRequest.mockImplementation((_options: any, callback: any) => {
+        const mockRes = {
+          statusCode: 401,
+          headers: {},
+          on: vi.fn((event: string, handler: any) => {
+            if (event === "data") handler(Buffer.from('{"error":"unauthorized"}'));
+            if (event === "end") handler();
+          }),
+        };
+        callback(mockRes);
+        return mockReq;
+      });
+
+      const providers = await fetchAllProviderUsage();
+      const codex = providers.find((p) => p.name === "Codex")!;
+      expect(codex.status).toBe("error");
+      expect(codex.error).toContain("re-login from Fusion Settings");
     });
 
     it("parses usage data from API response", async () => {
