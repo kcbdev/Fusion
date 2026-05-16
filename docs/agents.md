@@ -838,6 +838,17 @@ Heartbeat runs are composed from multiple prompt layers so each wake has full id
 
 This structure ensures every run re-anchors on identity, wake reason, and current context before taking action.
 
+#### Wake reason values (message wakes)
+
+Heartbeat prompts derive wake reason from trigger context plus current inbox snapshot:
+
+- `message_received` — non-forced wake-on-message trigger with unread inbox content still present.
+- `message_received_urgent` — forced/user-urgent wake-on-message trigger with unread inbox content still present.
+- `message_received_already_consumed` — wake-on-message trigger fired, but unread inbox/room/comment snapshot is empty at prompt assembly time (already consumed by an earlier serialized run or in-run mailbox read).
+- `message_received_urgent_already_consumed` — forced wake equivalent of the already-consumed condition.
+
+The Wake Delta block now includes an inbox snapshot line (`- inbox snapshot: <N> message(s)` or `- inbox snapshot: empty (already consumed)`) so agents can distinguish a true message payload from a stale wake trigger.
+
 ### Default Procedure: Bound-Task Scope Discipline
 
 The shipped default `HEARTBEAT_PROCEDURE` (in `packages/engine/src/agent-heartbeat.ts`) now requires bound-task classification on each tick: `executor-class`, `blocked`, or `coordination-class`.
