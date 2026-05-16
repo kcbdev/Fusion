@@ -303,6 +303,7 @@ const KNOWN_EXPERIMENTAL_FEATURES: Record<string, string> = {
   todoView: "Todo List",
   researchView: "Research View",
   evalsView: "Evals View",
+  goalsView: "Goals View",
   sandbox: "Sandbox (command isolation)",
   chatRooms: "Chat Rooms",
   agentOnboarding: "Planning-style Agent Onboarding",
