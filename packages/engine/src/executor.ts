@@ -43,7 +43,7 @@ import { resolveSandboxBackend } from "./sandbox/index.js";
 import type { SandboxBackend } from "./sandbox/types.js";
 import { ModelRegistry, SessionManager, type ToolDefinition, type AgentSession } from "@mariozechner/pi-coding-agent";
 import { PRIORITY_EXECUTE, type AgentSemaphore } from "./concurrency.js";
-import { getRegisteredWorktreePaths, isGitRepository, isInsideWorktreesDir, isRegisteredGitWorktree, isUsableTaskWorktree, type WorktreePool } from "./worktree-pool.js";
+import { getRegisteredWorktreePaths, isGitRepository, isInsideWorktreesDir, isRegisteredGitWorktree, isUsableTaskWorktree, removeWorktree, type WorktreePool } from "./worktree-pool.js";
 import {
   BranchConflictError,
   BranchCrossContaminationError,
@@ -3188,9 +3188,14 @@ export class TaskExecutor {
               }
               if (worktreePath && existsSync(worktreePath)) {
                 try {
-                  await execAsync(`git worktree remove "${worktreePath}" --force`, { cwd: this.rootDir });
-                  // Audit trail: record worktree removal (FN-1404)
-                  await audit.git({ type: "worktree:remove", target: worktreePath });
+                  const settings = await this.store.getSettings();
+                  await removeWorktree({
+                    worktreePath,
+                    rootDir: this.rootDir,
+                    settings,
+                    taskId: task.id,
+                    audit,
+                  });
                 } catch (wtErr: unknown) {
                   const msg = wtErr instanceof Error ? wtErr.message : String(wtErr);
                   executorLog.warn(`${task.id}: worktree removal failed during transient-error retry cleanup (${worktreePath}): ${msg}`);
@@ -3270,7 +3275,12 @@ export class TaskExecutor {
 
                 if (worktreePath && existsSync(worktreePath)) {
                   try {
-                    await execAsync(`git worktree remove "${worktreePath}" --force`, { cwd: this.rootDir });
+                    await removeWorktree({
+                      worktreePath,
+                      rootDir: this.rootDir,
+                      settings,
+                      taskId: task.id,
+                    });
                   } catch (wtErr: unknown) {
                     const msg = wtErr instanceof Error ? wtErr.message : String(wtErr);
                     executorLog.warn(`${task.id}: worktree removal failed during stuck-requeue cleanup (${worktreePath}): ${msg}`);
@@ -4148,10 +4158,15 @@ export class TaskExecutor {
           executorLog.log(`${task.id} paused — moving to todo`);
           if (worktreePath && existsSync(worktreePath)) {
             try {
-              await execAsync(`git worktree remove "${worktreePath}" --force`, { cwd: this.rootDir });
+              const settings = await this.store.getSettings();
+              await removeWorktree({
+                worktreePath,
+                rootDir: this.rootDir,
+                settings,
+                taskId: task.id,
+                audit,
+              });
               executorLog.log(`Removed old worktree for paused task: ${worktreePath}`);
-              // Audit trail: record worktree removal (FN-1404)
-              await audit.git({ type: "worktree:remove", target: worktreePath });
             } catch (cleanupErr: unknown) {
               const cleanupErrMessage = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
               executorLog.warn(`Failed to remove old worktree ${worktreePath}: ${cleanupErrMessage}`);
@@ -4486,10 +4501,15 @@ export class TaskExecutor {
             // Clean up the old worktree so the retry gets a fresh one
             if (worktreePath && existsSync(worktreePath)) {
               try {
-                await execAsync(`git worktree remove "${worktreePath}" --force`, { cwd: this.rootDir });
+                const settings = await this.store.getSettings();
+                await removeWorktree({
+                  worktreePath,
+                  rootDir: this.rootDir,
+                  settings,
+                  taskId: task.id,
+                  audit,
+                });
                 executorLog.log(`Removed old worktree for transient retry: ${worktreePath}`);
-                // Audit trail: record worktree removal (FN-1404)
-                await audit.git({ type: "worktree:remove", target: worktreePath });
               } catch (cleanupErr: unknown) {
                 const cleanupErrMessage = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
                 executorLog.warn(`Failed to remove old worktree ${worktreePath}: ${cleanupErrMessage}`);
@@ -4609,10 +4629,14 @@ export class TaskExecutor {
             // Clean up the old worktree so the retry gets a fresh one
             if (worktreePath && existsSync(worktreePath)) {
               try {
-                await execAsync(`git worktree remove "${worktreePath}" --force`, { cwd: this.rootDir });
+                await removeWorktree({
+                  worktreePath,
+                  rootDir: this.rootDir,
+                  settings,
+                  taskId: task.id,
+                  audit,
+                });
                 executorLog.log(`Removed old worktree for stuck-killed retry: ${worktreePath}`);
-                // Audit trail: record worktree removal (FN-1404)
-                await audit.git({ type: "worktree:remove", target: worktreePath });
               } catch (cleanupErr: unknown) {
                 const cleanupErrMessage = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
                 executorLog.warn(`Failed to remove old worktree ${worktreePath}: ${cleanupErrMessage}`);
@@ -5546,7 +5570,13 @@ export class TaskExecutor {
 
     // Remove worktree
     try {
-      await execAsync(`git worktree remove "${worktreePath}" --force`, { cwd: this.rootDir });
+      const settings = await this.store.getSettings();
+      await removeWorktree({
+        worktreePath,
+        rootDir: this.rootDir,
+        settings,
+        taskId,
+      });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       executorLog.warn(`${taskId}: failed to remove worktree during dep-abort cleanup (${worktreePath}): ${msg}`);
@@ -8218,8 +8248,12 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
       }
 
       // Remove the worktree
-      await execAsync(`git worktree remove "${worktreePath}" --force`, {
-        cwd: this.rootDir,
+      const settings = await this.store.getSettings();
+      await removeWorktree({
+        worktreePath,
+        rootDir: this.rootDir,
+        settings,
+        taskId,
       });
       await this.store.logEntry(taskId, `Removed conflicting worktree`, worktreePath);
 
@@ -8392,7 +8426,13 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
     }
 
     try {
-      await execAsync(`git worktree remove "${worktreePath}" --force`, { cwd: this.rootDir });
+      const settings = await this.store.getSettings();
+      await removeWorktree({
+        worktreePath,
+        rootDir: this.rootDir,
+        settings,
+        taskId,
+      });
       executorLog.log(`Cleaned up worktree for ${taskId}`);
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
