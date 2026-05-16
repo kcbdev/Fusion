@@ -11,13 +11,14 @@ vi.mock("../worktree-db-hydrate.js", () => ({
   hydrateWorktreeDb: vi.fn().mockResolvedValue({ degraded: false, tasksCopied: 1, documentsCopied: 1 }),
 }));
 
-const { execMock } = vi.hoisted(() => {
+const { execMock, existsSyncMock } = vi.hoisted(() => {
   const mock = vi.fn();
   (mock as any)[Symbol.for("nodejs.util.promisify.custom")] = mock;
-  return { execMock: mock };
+  return { execMock: mock, existsSyncMock: vi.fn() };
 });
 
 vi.mock("node:child_process", () => ({ exec: execMock }));
+vi.mock("node:fs", () => ({ existsSync: existsSyncMock }));
 
 describe("acquireTaskWorktree backend wiring", () => {
   const task = { id: "FN-1", title: "Task", description: "Desc", branch: null, worktree: null } as any;
@@ -29,6 +30,8 @@ describe("acquireTaskWorktree backend wiring", () => {
 
   beforeEach(() => {
     execMock.mockReset();
+    existsSyncMock.mockReset();
+    existsSyncMock.mockReturnValue(true);
     store.updateTask.mockClear();
     store.logEntry.mockClear();
     store.pauseTask.mockClear();
@@ -58,7 +61,17 @@ describe("acquireTaskWorktree backend wiring", () => {
   });
 
   it("routes through worktrunk backend when enabled and emits audit once", async () => {
-    execMock.mockResolvedValue({ stdout: "", stderr: "" });
+    execMock.mockImplementation((command: string) => {
+      if (command.includes('"config" "show"')) return Promise.resolve({ stdout: "", stderr: "" });
+      if (command.includes('"switch" "--create"')) return Promise.resolve({ stdout: "", stderr: "" });
+      if (command === "git worktree list --porcelain") {
+        return Promise.resolve({
+          stdout: "worktree /repo/.worktrees/fusion/fn-1\nbranch refs/heads/fusion/fn-1\n",
+          stderr: "",
+        });
+      }
+      return Promise.resolve({ stdout: "", stderr: "" });
+    });
     const audit = { git: vi.fn().mockResolvedValue(undefined) };
 
     await acquireTaskWorktree({
