@@ -120,7 +120,6 @@ export {
   WorktrunkBinaryUnavailableError,
   WorktrunkInstallDeniedError,
   WorktrunkInstallFailedError,
-  WORKTRUNK_PINNED_RELEASE,
   WORKTRUNK_INSTALL_DIR,
   WORKTRUNK_INSTALL_PATH,
   WORKTRUNK_PROBE_TIMEOUT_MS,
