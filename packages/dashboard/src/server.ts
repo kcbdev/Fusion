@@ -193,6 +193,8 @@ export interface ServerOptions {
   /** ProjectEngineManager for uniform multi-project engine lifecycle.
    *  When provided, the server can resolve per-project engines for route handlers. */
   engineManager?: import("@fusion/engine").ProjectEngineManager;
+  /** Optional HybridExecutor orchestration context for multi-project runtime plumbing. */
+  hybridExecutor?: import("@fusion/engine").HybridExecutor;
   /** Shared CentralCore instance used by the engine manager.
    *  Routes that mutate central runtime state should use this instance so
    *  in-process listeners (for example global concurrency changes) are notified. */
@@ -597,6 +599,7 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
   }
 
   const app = express();
+  app.locals.hybridExecutor = options?.hybridExecutor;
   const runtimeLogger = options?.runtimeLogger ?? createRuntimeLogger("server");
   const mutationRateLimit = rateLimit(RATE_LIMITS.mutation);
   const setupRateLimit = rateLimit(RATE_LIMITS.api);

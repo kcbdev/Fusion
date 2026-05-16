@@ -177,6 +177,15 @@ async function flushStartupCleanupTasks(): Promise<void> {
   await Promise.resolve();
 }
 
+describe("createServer options", () => {
+  it("round-trips hybridExecutor on app locals", () => {
+    const store = createMockStore();
+    const hybridExecutor = { initialize: vi.fn(), shutdown: vi.fn() } as unknown as import("@fusion/engine").HybridExecutor;
+    const app = createServer(store, { hybridExecutor });
+    expect(app.locals.hybridExecutor).toBe(hybridExecutor);
+  });
+});
+
 describe("createServer AI session startup cleanup diagnostics", () => {
   const originalNodeEnv = process.env.NODE_ENV;
 

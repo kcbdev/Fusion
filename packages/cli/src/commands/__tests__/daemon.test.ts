@@ -4,10 +4,16 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const { mockSyncStartupModels } = vi.hoisted(() => ({
+const { mockSyncStartupModels, mockShouldUseHybridExecutor, mockHybridExecutorCtor, mockHybridExecutorInitialize, mockHybridExecutorShutdown } = vi.hoisted(() => ({
   mockSyncStartupModels: vi.fn().mockResolvedValue(undefined),
+  mockShouldUseHybridExecutor: vi.fn().mockResolvedValue({ enabled: false, reason: "single-project-local-only" }),
+  mockHybridExecutorInitialize: vi.fn().mockResolvedValue(undefined),
+  mockHybridExecutorShutdown: vi.fn().mockResolvedValue(undefined),
+  mockHybridExecutorCtor: vi.fn().mockImplementation(() => ({
+    initialize: mockHybridExecutorInitialize,
+    shutdown: mockHybridExecutorShutdown,
+  })),
 }));
-
 vi.mock("../startup-model-sync.js", () => ({
   syncStartupModels: mockSyncStartupModels,
 }));
@@ -596,9 +602,10 @@ vi.mock("@fusion/engine", async (importOriginal) => {
   createAiPromptExecutor: mocks.createAiPromptExecutorMock,
   HeartbeatMonitor: mocks.heartbeatMonitorCtor,
   HeartbeatTriggerScheduler: mocks.heartbeatTriggerSchedulerCtor,
+  shouldUseHybridExecutor: mockShouldUseHybridExecutor,
+  HybridExecutor: mockHybridExecutorCtor,
   });
 });
-
 vi.mock("@mariozechner/pi-coding-agent", () => ({
   AuthStorage: {
     create: vi.fn(() => mocks.authStorage),
@@ -888,6 +895,23 @@ describe("runDaemon", () => {
     expect(mocks.cronRunnerInstances[0].stop).toHaveBeenCalledTimes(1);
     expect(listenCall.server.close).toHaveBeenCalledTimes(1);
     expect(mocks.taskStores[0].close).toHaveBeenCalledTimes(1);
+  });
+
+  it("enables HybridExecutor with env override and shuts down before engine stop", async () => {
+    process.env.FUSION_HYBRID_EXECUTOR = "1";
+    mockShouldUseHybridExecutor.mockResolvedValue({ enabled: true, reason: "env-override" });
+
+    await runDaemon({});
+    expect(mockHybridExecutorCtor).toHaveBeenCalledTimes(1);
+    expect(mockHybridExecutorInitialize).toHaveBeenCalledTimes(1);
+
+    await triggerSignal("SIGTERM");
+
+    expect(mockHybridExecutorShutdown).toHaveBeenCalledTimes(1);
+    expect(mockHybridExecutorShutdown.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.projectEngineInstances[0].stop.mock.invocationCallOrder[0],
+    );
+    delete process.env.FUSION_HYBRID_EXECUTOR;
   });
 });
 
