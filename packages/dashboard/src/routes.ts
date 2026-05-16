@@ -34,7 +34,6 @@ import {
 } from "@fusion/core";
 import type { ServerOptions } from "./server.js";
 import { verifyWebhookSignature } from "./github-webhooks.js";
-import { maybeCreateTrackingIssue } from "./github-tracking.js";
 import { AiSessionStore, SESSION_CLEANUP_DEFAULT_MAX_AGE_MS } from "./ai-session-store.js";
 import { getSession as getPlanningSession, cleanupSession as cleanupPlanningSession } from "./planning.js";
 import { getSubtaskSession, cleanupSubtaskSession } from "./subtask-breakdown.js";
@@ -4811,22 +4810,6 @@ async function executeAiPromptStep(
   }
 }
 
-async function maybeCreateTaskTrackingIssue(taskStore: TaskStore, task: Task): Promise<void> {
-  const projectSettings = await taskStore.getSettings();
-  const globalSettings = (await taskStore.getGlobalSettingsStore?.()?.getSettings?.()) ?? {};
-  try {
-    await maybeCreateTrackingIssue(task, {
-      taskStore,
-      projectSettings,
-      globalSettings,
-      rootDir: taskStore.getRootDir(),
-      logger: console,
-    });
-  } catch {
-    // best-effort only
-  }
-}
-
 async function executeCreateTaskStep(
   step: import("@fusion/core").AutomationStep,
   startedAt: string,
@@ -4857,8 +4840,6 @@ async function executeCreateTaskStep(
         sourceMetadata: { stepId: step.id },
       },
     });
-    await maybeCreateTaskTrackingIssue(taskStore, task);
-
     return {
       stepId: step.id,
       stepName: step.name,

@@ -7,27 +7,10 @@ import {
   type TaskStore,
 } from "@fusion/core";
 import { ApiError, badRequest, notFound, rateLimited } from "../api-error.js";
-import { maybeCreateTrackingIssue } from "../github-tracking.js";
 import { writeSSEEvent, type SessionBufferedEvent } from "../sse-buffer.js";
 import type { AiSessionStore } from "../ai-session-store.js";
 import type { ApiRoutesContext } from "./types.js";
 import { derivePerTaskBranch, resolveBranchAssignmentContext, resolveBranchSelection } from "./branch-selection.js";
-
-async function maybeCreateTaskTrackingIssue(taskStore: TaskStore, task: import("@fusion/core").Task): Promise<void> {
-  const projectSettings = await taskStore.getSettings();
-  const globalSettings = (await taskStore.getGlobalSettingsStore?.()?.getSettings?.()) ?? {};
-  try {
-    await maybeCreateTrackingIssue(task, {
-      taskStore,
-      projectSettings,
-      globalSettings,
-      rootDir: taskStore.getRootDir(),
-      logger: console,
-    });
-  } catch {
-    // best-effort only
-  }
-}
 
 interface PlanningSubtaskRouteDeps {
   store: TaskStore;
@@ -261,7 +244,6 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
           baseBranch: resolvedBaseBranch,
           branchContext: planningBranchContext,
         });
-        await maybeCreateTaskTrackingIssue(scopedStore, task);
 
         tempIdToTaskId.set(item.tempId, task.id);
         createdTasks.push(task);
@@ -1096,7 +1078,6 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
         branch: resolvedBranch,
         baseBranch: resolvedBaseBranch,
       });
-      await maybeCreateTaskTrackingIssue(scopedStore, task);
 
       // Update task with suggested size if provided
       if (summary.suggestedSize) {
@@ -1290,7 +1271,6 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
           baseBranch: resolvedBaseBranch,
           branchContext: planningBranchContext,
         });
-        await maybeCreateTaskTrackingIssue(scopedStore, task);
 
         tempIdToTaskId.set(item.id, task.id);
         createdTasks.push(task);

@@ -13,7 +13,7 @@ import {
   getCurrentRepo,
 } from "@fusion/core";
 import { GitHubClient } from "../github.js";
-import { maybeCreateTrackingIssue } from "../github-tracking.js";
+import { createTrackingIssueForTask } from "../github-tracking-hook.js";
 import { parseGitHubBadgeUrl } from "./register-git-github.js";
 import { planTaskWorktreePath } from "@fusion/engine";
 import { ApiError, badRequest, conflict, notFound } from "../api-error.js";
@@ -93,27 +93,6 @@ async function buildDirectTaskReviewData(task: Task, store: TaskStore): Promise<
     summary,
     items: sorted,
   };
-}
-
-async function maybeCreateTaskTrackingIssue(taskStore: TaskStore, task: Task, optionsToken?: string): Promise<void> {
-  const projectSettings = await taskStore.getSettings();
-  const globalSettings = (await taskStore.getGlobalSettingsStore?.()?.getSettings?.()) ?? {};
-  const trackingProjectSettings = {
-    ...projectSettings,
-    githubAuthToken: projectSettings.githubAuthToken ?? optionsToken,
-  };
-
-  try {
-    await maybeCreateTrackingIssue(task, {
-      taskStore,
-      projectSettings: trackingProjectSettings,
-      globalSettings,
-      rootDir: taskStore.getRootDir(),
-      logger: console,
-    });
-  } catch {
-    // best-effort only
-  }
 }
 
 interface TaskWorkflowRouteDeps {
@@ -352,7 +331,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         createInput,
         { onSummarize, settings: { autoSummarizeTitles: settings.autoSummarizeTitles } },
       );
-      await maybeCreateTaskTrackingIssue(scopedStore, task, options?.githubToken);
+      await createTrackingIssueForTask(scopedStore, task, { githubToken: options?.githubToken });
       res.status(201).json(task);
       return;
     } catch (err: unknown) {
@@ -605,7 +584,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const newTask = await scopedStore.duplicateTask(req.params.id);
-      await maybeCreateTaskTrackingIssue(scopedStore, newTask, options?.githubToken);
+      await createTrackingIssueForTask(scopedStore, newTask, { githubToken: options?.githubToken });
       res.status(201).json(newTask);
     } catch (err: unknown) {
       if (err instanceof ApiError) {
@@ -632,7 +611,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       }
 
       const refinedTask = await scopedStore.refineTask(req.params.id, trimmedFeedback);
-      await maybeCreateTaskTrackingIssue(scopedStore, refinedTask, options?.githubToken);
+      await createTrackingIssueForTask(scopedStore, refinedTask, { githubToken: options?.githubToken });
       await scopedStore.logEntry(req.params.id, "Refinement requested", trimmedFeedback);
       res.status(201).json(refinedTask);
     } catch (err: unknown) {
@@ -1919,7 +1898,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         !task.githubTracking?.issue;
 
       if (shouldAttemptTrackingIssueCreate) {
-        await maybeCreateTaskTrackingIssue(scopedStore, task, options?.githubToken);
+        await createTrackingIssueForTask(scopedStore, task, { githubToken: options?.githubToken });
         const refreshedTask = await scopedStore.getTask(req.params.id, {
           activityLogLimit: TASK_DETAIL_ACTIVITY_LOG_LIMIT,
         });
