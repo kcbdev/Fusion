@@ -128,6 +128,15 @@ export {
   WORKTRUNK_DOWNLOAD_MAX_BYTES,
   WORKTRUNK_CARGO_TIMEOUT_MS,
 } from "./worktrunk-installer.js";
+export {
+  handleWorktrunkOperationFailure,
+  truncateWorktrunkStderr,
+  type WorktreeOperationResult,
+  type WorktrunkDisposition,
+  type WorktrunkFailureNotification,
+  type WorktrunkOpName,
+  type WorktrunkOperationFailure,
+} from "./worktrunk-failure-handler.js";
 export { isUsageLimitError, UsageLimitPauser } from "./usage-limit-detector.js";
 export { withRateLimitRetry } from "./rate-limit-retry.js";
 export { ResearchOrchestrator, type ResearchOrchestratorOptions, type ResearchOrchestratorStatus, type ResearchOrchestratorStartOptions } from "./research-orchestrator.js";

@@ -71,6 +71,8 @@ export type GitMutationType =
   | "worktree:worktrunk-sync"
   | "worktree:worktrunk-prune"
   | "worktree:worktrunk-fallback"
+  | "worktree:worktrunk-failure"
+  | "worktree:worktrunk-fallback-native"
   | "branch:create"
   | "branch:delete"
   | "branch:checkout"
