@@ -68,7 +68,7 @@ import { accumulateSessionTokenUsage } from "./session-token-usage.js";
 import { createResolvedAgentSession, extractRuntimeHint, resolveMergerSessionModel } from "./agent-session-helpers.js";
 import { createFallbackModelObserver } from "./fallback-model-observer.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
-import type { WorktreePool } from "./worktree-pool.js";
+import { removeWorktree, type WorktreePool } from "./worktree-pool.js";
 import { AgentLogger } from "./agent-logger.js";
 import { mergerLog } from "./logger.js";
 import { isUsageLimitError, checkSessionError, type UsageLimitPauser } from "./usage-limit-detector.js";
@@ -5808,9 +5808,15 @@ async function removePostMergeWorktree(
   rootDir: string,
   postMergeWorktree: string,
   taskId: string,
+  settings: Partial<Settings>,
 ): Promise<void> {
   try {
-    await execAsync(`git worktree remove --force ${quoteArg(postMergeWorktree)}`, { cwd: rootDir });
+    await removeWorktree({
+      rootDir,
+      worktreePath: postMergeWorktree,
+      settings,
+      taskId,
+    });
   } catch (err: unknown) {
     mergerLog.warn(`${taskId}: failed to remove post-merge worktree ${postMergeWorktree}: ${getCommandErrorMessage(err)}`);
   }
@@ -7582,7 +7588,7 @@ export async function aiMergeTask(
       // Non-fatal — task still moves to done
     } finally {
       if (postMergeWorktree) {
-        await removePostMergeWorktree(rootDir, postMergeWorktree, taskId);
+        await removePostMergeWorktree(rootDir, postMergeWorktree, taskId, settings);
       }
     }
   }
@@ -7607,11 +7613,13 @@ export async function aiMergeTask(
       }
     } else {
       try {
-        await execAsync(`git worktree remove "${worktreePath}" --force`, {
-          cwd: rootDir,
+        await removeWorktree({
+          rootDir,
+          worktreePath,
+          settings,
+          taskId,
+          audit,
         });
-        // Audit trail: record worktree removal (FN-1404)
-        await audit.git({ type: "worktree:remove", target: worktreePath });
         result.worktreeRemoved = true;
         try {
           await store.updateTask(taskId, { worktree: null, branch: null });
