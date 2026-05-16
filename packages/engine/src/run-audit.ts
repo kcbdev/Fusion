@@ -80,6 +80,8 @@ export type GitMutationType =
    *   installSource?: "release-binary" | "cargo"; // only on successful install events
    *   prunedCount?: number; // only on successful prune events when known
    * }
+   *
+   * For `worktree:worktrunk-install`, `target` must be the installed `binaryPath`.
    * ```
    */
   | "worktree:worktrunk-install"
