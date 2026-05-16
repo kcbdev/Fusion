@@ -2436,6 +2436,22 @@ export function SettingsModal({
               />
               <small>Default repo used when creating GitHub issues for tracked tasks. Falls back to the global default if blank.</small>
             </div>
+            <div className="form-group">
+              <label htmlFor="githubTrackingDedupEnabled" className="checkbox-label">
+                <input
+                  id="githubTrackingDedupEnabled"
+                  type="checkbox"
+                  checked={form.githubTrackingDedupEnabled !== false}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, githubTrackingDedupEnabled: e.target.checked }))
+                  }
+                />
+                Search the tracking repo for likely duplicates before opening a new issue
+              </label>
+              <small>
+                When enabled, Fusion checks open and closed issues in the target repo for likely duplicates (using File Scope paths and key symptoms) before creating a new tracking issue. Uncheck to always create a new issue.
+              </small>
+            </div>
           </>
         );
       case "global-general":
