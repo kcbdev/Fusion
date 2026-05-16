@@ -39,6 +39,16 @@ export function resolveWorktrunkSettings(
 }
 
 /** Strict validator used by GlobalSettingsStore writes and CLI parsing. */
+export function requiresWorktrunkInstallVerification(params: {
+  current: WorktrunkSettings | undefined;
+  next: WorktrunkSettings | undefined;
+}): boolean {
+  const currentEnabled = params.current?.enabled ?? DEFAULT_WORKTRUNK_SETTINGS.enabled;
+  const nextEnabled = params.next?.enabled ?? DEFAULT_WORKTRUNK_SETTINGS.enabled;
+  return currentEnabled !== true && nextEnabled === true;
+}
+
+/** Strict validator used by GlobalSettingsStore writes and CLI parsing. */
 export function validateWorktrunkSettings(value: unknown): WorktrunkSettings {
   if (value === undefined || value === null) {
     return {};

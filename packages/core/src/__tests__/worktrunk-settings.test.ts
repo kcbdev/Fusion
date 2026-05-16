@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   resolveWorktrunkSettings,
+  requiresWorktrunkInstallVerification,
   validateWorktrunkSettings,
 } from "../worktrunk-settings.js";
 
@@ -38,6 +39,14 @@ describe("worktrunk-settings", () => {
       enabled: false,
       onFailure: "fail",
     });
+  });
+
+  it("classifies enable transitions that require install verification", () => {
+    expect(requiresWorktrunkInstallVerification({ current: { enabled: false }, next: { enabled: true } })).toBe(true);
+    expect(requiresWorktrunkInstallVerification({ current: { enabled: true }, next: { enabled: true } })).toBe(false);
+    expect(requiresWorktrunkInstallVerification({ current: { enabled: true }, next: { enabled: false } })).toBe(false);
+    expect(requiresWorktrunkInstallVerification({ current: undefined, next: undefined })).toBe(false);
+    expect(requiresWorktrunkInstallVerification({ current: undefined, next: { enabled: true } })).toBe(true);
   });
 
   it("validator rejects invalid values", () => {

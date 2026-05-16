@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_GLOBAL_SETTINGS, DEFAULT_PROJECT_SETTINGS } from "../settings-schema.js";
-import { resolveWorktrunkSettings, validateWorktrunkSettings } from "../worktrunk-settings.js";
+import {
+  resolveWorktrunkSettings,
+  requiresWorktrunkInstallVerification,
+  validateWorktrunkSettings,
+} from "../worktrunk-settings.js";
 
 describe("settings defaults invariants", () => {
   it("keeps worktrunk default off in global and project defaults", () => {
@@ -24,5 +28,16 @@ describe("settings defaults invariants", () => {
 
   it("does not implicitly enable worktrunk when validating undefined", () => {
     expect(validateWorktrunkSettings(undefined)).toEqual({});
+  });
+
+  it("flags off→on transition from fresh defaults", () => {
+    const freshProject = resolveWorktrunkSettings(DEFAULT_GLOBAL_SETTINGS.worktrunk, DEFAULT_PROJECT_SETTINGS.worktrunk);
+    expect(freshProject.enabled).toBe(false);
+    expect(
+      requiresWorktrunkInstallVerification({
+        current: freshProject,
+        next: { ...freshProject, enabled: true },
+      }),
+    ).toBe(true);
   });
 });
