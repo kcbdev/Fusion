@@ -1,6 +1,7 @@
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { consumeVersionUpdateFlag } from "../versionCheck";
+import { SWR_CACHE_KEYS, clearCache } from "../utils/swrCache";
 import "./DashboardLoader.css";
 
 export type DashboardLoaderStage = "projects" | "project" | "tasks" | "ready";
@@ -40,7 +41,15 @@ function getStepState(stepId: LoaderStep["id"], stage: DashboardLoaderStage): "d
 }
 
 export function DashboardLoader({ stage }: DashboardLoaderProps) {
-  const [isVersionUpdate] = useState(() => consumeVersionUpdateFlag());
+  const [isVersionUpdate] = useState(() => {
+    const versionUpdated = consumeVersionUpdateFlag();
+    if (versionUpdated) {
+      clearCache(SWR_CACHE_KEYS.TASKS_PREFIX);
+      clearCache(SWR_CACHE_KEYS.PROJECTS);
+      clearCache(SWR_CACHE_KEYS.CURRENT_PROJECT_ID);
+    }
+    return versionUpdated;
+  });
 
   return (
     <div

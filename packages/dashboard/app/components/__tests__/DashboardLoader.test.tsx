@@ -8,6 +8,24 @@ vi.mock("../../versionCheck", () => ({
 }));
 
 import { DashboardLoader } from "../DashboardLoader";
+import { SWR_CACHE_KEYS, clearCache } from "../../utils/swrCache";
+
+vi.mock("../../versionCheck", () => ({
+  consumeVersionUpdateFlag: vi.fn(() => false),
+}));
+
+vi.mock("../../utils/swrCache", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../utils/swrCache")>();
+  return {
+    ...actual,
+    clearCache: vi.fn(),
+  };
+});
+
+import { consumeVersionUpdateFlag } from "../../versionCheck";
+
+const mockConsumeVersionUpdateFlag = vi.mocked(consumeVersionUpdateFlag);
+const mockClearCache = vi.mocked(clearCache);
 
 function getStep(label: string): HTMLElement {
   const step = screen.getByText(label).closest("li");
