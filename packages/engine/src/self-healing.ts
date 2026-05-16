@@ -29,7 +29,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { getInReviewStallReason, getStalePausedReviewSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, type AgentStore, type ChatStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority } from "@fusion/core";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { createLogger } from "./logger.js";
-import { getRegisteredWorktreePaths, isUsableTaskWorktree, resolveWorktreeBackend, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
+import { getRegisteredWorktreePaths, isUsableTaskWorktree, removeWorktree, resolveWorktreeBackend, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
 import {
   extractMissingWorktreePathFromSessionStartFailure,
   isMissingWorktreeSessionStartFailure,
@@ -888,9 +888,12 @@ export class SelfHealingManager {
   private async cleanupWorktreeOnly(task: Task): Promise<void> {
     if (task.worktree && existsSync(task.worktree)) {
       try {
-        await execAsync(`git worktree remove ${shellQuote(task.worktree)} --force`, {
-          cwd: this.options.rootDir,
-          timeout: 120_000,
+        const settings = await this.store.getSettings();
+        await removeWorktree({
+          rootDir: this.options.rootDir,
+          worktreePath: task.worktree,
+          settings,
+          taskId: task.id,
         });
       } catch (err: unknown) {
         const errorMessage = err instanceof Error ? err.message : String(err);
@@ -904,9 +907,12 @@ export class SelfHealingManager {
   private async cleanupInterruptedMergeArtifacts(task: Task): Promise<void> {
     if (task.worktree && existsSync(task.worktree)) {
       try {
-        await execAsync(`git worktree remove ${shellQuote(task.worktree)} --force`, {
-          cwd: this.options.rootDir,
-          timeout: 120_000,
+        const settings = await this.store.getSettings();
+        await removeWorktree({
+          rootDir: this.options.rootDir,
+          worktreePath: task.worktree,
+          settings,
+          taskId: task.id,
         });
       } catch (err: unknown) {
         const errorMessage = err instanceof Error ? err.message : String(err);
@@ -1390,14 +1396,16 @@ export class SelfHealingManager {
             let reclaimedCleanly = false;
             try {
               if (inspection.livePath && existsSync(inspection.livePath)) {
-                await execAsync(`git worktree remove --force ${JSON.stringify(inspection.livePath)}`, {
-                  cwd: this.options.rootDir,
-                  timeout: 120_000,
-                  maxBuffer: 10 * 1024 * 1024,
+                await removeWorktree({
+                  rootDir: this.options.rootDir,
+                  worktreePath: inspection.livePath,
+                  settings,
+                  taskId: task.id,
                 });
               }
               // Branch-level reclaim remains active in worktrunk mode; this is
               // idempotent git metadata cleanup, not layout ownership.
+              // FN-4742: keep native prune; see WorktreeBackend.prune docs
               await execAsync("git worktree prune", {
                 cwd: this.options.rootDir,
                 timeout: 120_000,
@@ -1488,13 +1496,15 @@ export class SelfHealingManager {
             if (canAutoReclaimLiveZero) {
               let reclaimedCleanly = false;
               try {
-                await execAsync(`git worktree remove --force ${JSON.stringify(inspection.livePath)}`, {
-                  cwd: this.options.rootDir,
-                  timeout: 120_000,
-                  maxBuffer: 10 * 1024 * 1024,
+                await removeWorktree({
+                  rootDir: this.options.rootDir,
+                  worktreePath: inspection.livePath,
+                  settings,
+                  taskId: task.id,
                 });
                 // Branch-level reclaim remains active in worktrunk mode; this is
                 // idempotent git metadata cleanup, not layout ownership.
+                // FN-4742: keep native prune; see WorktreeBackend.prune docs
                 await execAsync("git worktree prune", {
                   cwd: this.options.rootDir,
                   timeout: 120_000,
@@ -1743,6 +1753,7 @@ export class SelfHealingManager {
         });
         // Branch-level reclaim remains active in worktrunk mode; this is
         // idempotent git metadata cleanup, not layout ownership.
+        // FN-4742: keep native prune; see WorktreeBackend.prune docs
         await execAsync("git worktree prune", {
           cwd: this.options.rootDir,
           timeout: 120_000,
@@ -1958,9 +1969,12 @@ export class SelfHealingManager {
       }
       if (worktreePath && existsSync(worktreePath)) {
         try {
-          await execAsync(`git worktree remove --force ${shellQuote(worktreePath)}`, {
-            cwd: this.options.rootDir,
-            timeout: 30_000,
+          const settings = await this.store.getSettings();
+          await removeWorktree({
+            rootDir: this.options.rootDir,
+            worktreePath,
+            settings,
+            taskId,
           });
           result.worktreeRemoved = true;
         } catch (err: unknown) {
@@ -3693,9 +3707,11 @@ export class SelfHealingManager {
           });
 
           if (task.worktree && existsSync(task.worktree)) {
-            await execAsync(`git worktree remove --force ${shellQuote(task.worktree)}`, {
-              cwd: this.options.rootDir,
-              timeout: 30_000,
+            await removeWorktree({
+              rootDir: this.options.rootDir,
+              worktreePath: task.worktree,
+              settings,
+              taskId: task.id,
             }).catch(() => undefined);
           }
 
@@ -4894,9 +4910,10 @@ export class SelfHealingManager {
       let cleaned = 0;
       for (const worktreePath of orphaned) {
         try {
-          await execAsync(`git worktree remove "${worktreePath}" --force`, {
-            cwd: this.options.rootDir,
-            timeout: 30_000,
+          await removeWorktree({
+            rootDir: this.options.rootDir,
+            worktreePath,
+            settings,
           });
           cleaned++;
         } catch (err: unknown) {
@@ -5227,9 +5244,10 @@ export class SelfHealingManager {
       for (const { path: worktreePath } of withMtime) {
         if (removed >= excess) break;
         try {
-          await execAsync(`git worktree remove "${worktreePath}" --force`, {
-            cwd: this.options.rootDir,
-            timeout: 30_000,
+          await removeWorktree({
+            rootDir: this.options.rootDir,
+            worktreePath,
+            settings,
           });
           removed++;
         } catch (err: unknown) {

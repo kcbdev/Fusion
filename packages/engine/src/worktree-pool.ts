@@ -9,6 +9,10 @@ import { isInsideConfiguredWorktreesDir, resolveWorktreesDir } from "./worktree-
 import {
   resolveWorktrunkBinary,
 } from "./worktrunk-installer.js";
+import {
+  removeWorktree as removeWorktreeViaBackend,
+  resolveWorktreeBackend as resolveWorktreeBackendViaSettings,
+} from "./worktree-backend.js";
 
 export {
   NativeWorktreeBackend,
@@ -348,7 +352,8 @@ export class WorktreePool {
         startPoint: base,
       });
       if (inspection.kind === "stale" || inspection.kind === "stale-resolved" || inspection.kind === "tip-already-merged") {
-        await execAsync("git worktree prune", { cwd: worktreePath });
+        const backend = resolveWorktreeBackendViaSettings({}, { logger: worktreePoolLog });
+        await backend.prune({ rootDir: options?.repoDir ?? worktreePath });
         if (inspection.kind === "tip-already-merged") {
           try {
             await execAsync(`git branch -D "${branchName}"`, { cwd: worktreePath });
@@ -526,8 +531,10 @@ export async function cleanupOrphanedWorktrees(
   for (const worktreePath of candidates) {
     try {
       if (registeredWorktrees.has(resolve(worktreePath))) {
-        await execAsync(`git worktree remove "${worktreePath}" --force`, {
-          cwd: rootDir,
+        await removeWorktreeViaBackend({
+          rootDir,
+          worktreePath,
+          settings: settings ?? {},
         });
       } else {
         if (!isInsideWorktreesDir(rootDir, worktreePath, settings)) {

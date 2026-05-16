@@ -113,7 +113,7 @@ describe("self-healing completion fan-out", () => {
 
     const first = await mgr.reconcileCompletedTask("FN-B", { worktreeHint: "/wt/fn-b" });
     expect(first.worktreeRemoved).toBe(true);
-    expect(execMock.mock.calls.some((c) => String(c[0]).includes("git worktree remove --force '/wt/fn-b'"))).toBe(true);
+    expect(execMock.mock.calls.some((c) => String(c[0]).includes("git worktree remove --force") && String(c[0]).includes("/wt/fn-b"))).toBe(true);
 
     existsSyncMock.mockReturnValue(false);
     execMock.mockImplementation((cmd: string, _opts: unknown, cb: (err: unknown, stdout: string, stderr: string) => void) => {
@@ -122,7 +122,7 @@ describe("self-healing completion fan-out", () => {
     });
     const second = await mgr.reconcileCompletedTask("FN-B");
     expect(second.worktreeRemoved).toBe(false);
-    const rmCalls = execMock.mock.calls.filter((c) => String(c[0]).includes("git worktree remove --force"));
+    const rmCalls = execMock.mock.calls.filter((c) => String(c[0]).includes("git worktree remove --force") && String(c[0]).includes("/wt/fn-b"));
     expect(rmCalls).toHaveLength(1);
   });
 
@@ -138,7 +138,7 @@ describe("self-healing completion fan-out", () => {
     const mgr = new SelfHealingManager(store, { rootDir: "/repo" });
     vi.spyOn(mgr as any, "findWorktreePathForBranch").mockResolvedValue("/wt/fn-c");
     const out = await mgr.reconcileCompletedTask("FN-C");
-    expect(execMock.mock.calls.some((c) => String(c[0]).includes("git worktree remove --force '/wt/fn-c'"))).toBe(true);
+    expect(execMock.mock.calls.some((c) => String(c[0]).includes("git worktree remove --force") && String(c[0]).includes("/wt/fn-c"))).toBe(true);
     expect(out.branchRemoved).toBe(false);
     expect(execMock.mock.calls.some((c) => String(c[0]).includes("git branch -D"))).toBe(false);
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("skip deletion"));

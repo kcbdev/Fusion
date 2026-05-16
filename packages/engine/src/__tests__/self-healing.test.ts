@@ -55,6 +55,7 @@ vi.mock("../worktree-pool.js", () => ({
   cleanupOrphanedWorktrees: vi.fn().mockResolvedValue(0),
   scanOrphanedBranches: vi.fn().mockResolvedValue([]),
   isUsableTaskWorktree: vi.fn().mockResolvedValue(true),
+  removeWorktree: vi.fn().mockResolvedValue(undefined),
   resolveWorktreeBackend: vi.fn(),
 }));
 
@@ -83,7 +84,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isUsableTaskWorktree, resolveWorktreeBackend, scanIdleWorktrees, scanOrphanedBranches } from "../worktree-pool.js";
+import { isUsableTaskWorktree, removeWorktree, resolveWorktreeBackend, scanIdleWorktrees, scanOrphanedBranches } from "../worktree-pool.js";
 import * as branchConflictModule from "../branch-conflicts.js";
 import { createLogger } from "../logger.js";
 import { NotificationService } from "../notification/notification-service.js";
@@ -93,6 +94,7 @@ const mockedExecSync = vi.mocked(execSync);
 const mockedExistsSync = vi.mocked(existsSync);
 const mockedScanOrphanedBranches = vi.mocked(scanOrphanedBranches);
 const mockedIsUsableTaskWorktree = vi.mocked(isUsableTaskWorktree);
+const mockedRemoveWorktree = vi.mocked(removeWorktree);
 const mockedResolveWorktreeBackend = vi.mocked(resolveWorktreeBackend);
 const mockedScanIdleWorktrees = vi.mocked(scanIdleWorktrees);
 const mockedReaddirSync = vi.mocked(readdirSync);
@@ -152,6 +154,7 @@ describe("SelfHealingManager", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     store = createMockStore();
     manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+    mockedRemoveWorktree.mockResolvedValue(undefined);
     mockedClassifyOwnedLandedEvidence.mockResolvedValue({ kind: "proven-no-op", baseRef: "main", ownDiffEmpty: true });
   });
 
@@ -1251,10 +1254,8 @@ describe("SelfHealingManager", () => {
 
       mockedExistsSync.mockReset();
       mockedExistsSync.mockReturnValueOnce(true);
-      mockedExecSync.mockReset();
-      mockedExecSync.mockImplementationOnce(() => {
-        throw new Error("cannot remove worktree");
-      });
+      mockedRemoveWorktree.mockReset();
+      mockedRemoveWorktree.mockRejectedValueOnce(new Error("cannot remove worktree"));
 
       await (manager as any).cleanupInterruptedMergeArtifacts(task);
 
@@ -1264,7 +1265,7 @@ describe("SelfHealingManager", () => {
         ),
       );
 
-      mockedExecSync.mockClear();
+      mockedRemoveWorktree.mockClear();
       mockedExistsSync.mockReset();
     });
 
@@ -3803,9 +3804,10 @@ describe("SelfHealingManager", () => {
         mergeDetails: expect.objectContaining({ commitSha: "abc12345", mergeConfirmed: true }),
       }));
       expect(store.updateTask).toHaveBeenCalledWith("FN-dep", { blockedBy: null });
-      expect(
-        mockedExecSync.mock.calls.some((call) => String(call[0]).includes("git worktree remove '/tmp/wt' --force")),
-      ).toBe(true);
+      expect(mockedRemoveWorktree).toHaveBeenCalledWith(expect.objectContaining({
+        rootDir: "/tmp/test-project",
+        worktreePath: "/tmp/wt",
+      }));
       expect(getSelfHealingLogger().log).toHaveBeenCalledWith(expect.stringContaining("self-heal:deadlock-recovered"));
 
       managerWithRecovery.stop();
