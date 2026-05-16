@@ -12,6 +12,8 @@ files:
   - node_modules/@fusion/core/**/*
   - node_modules/@fusion/dashboard/**/*
   - node_modules/better-sqlite3/**/*
+  - node_modules/ms/**/*
+  - node_modules/lodash.escaperegexp/**/*
 
 asarUnpack:
   - node_modules/better-sqlite3/**/*
