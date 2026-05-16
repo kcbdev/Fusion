@@ -945,4 +945,89 @@ describe("Node settings sync routes", () => {
       expect(res.status).toBe(401);
     });
   });
+
+  describe("FN-4747 parity coverage", () => {
+    it("captures push payload contract sent to /settings/sync-receive", async () => {
+      const remoteNode = createMockRemoteNode();
+      mockGetNode.mockResolvedValue(remoteNode);
+      mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ success: true }) });
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/nodes/node-remote-001/settings/push",
+        JSON.stringify({}),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(200);
+      const [, fetchOptions] = mockFetch.mock.calls[0] as [string, { body?: string }];
+      const postedBody = JSON.parse(fetchOptions.body ?? "{}");
+      expect(postedBody).toEqual(expect.objectContaining({
+        global: expect.any(Object),
+        projects: expect.any(Object),
+        exportedAt: expect.any(String),
+        version: 1,
+        checksum: expect.any(String),
+      }));
+      expect(postedBody).not.toHaveProperty("sourceNodeId");
+    });
+
+    it.each([
+      ["GET", "/api/nodes/node-remote-001/settings"],
+      ["POST", "/api/nodes/node-remote-001/settings/push"],
+      ["POST", "/api/nodes/node-remote-001/settings/pull"],
+      ["GET", "/api/nodes/node-remote-001/settings/sync-status"],
+      ["POST", "/api/nodes/node-remote-001/auth/sync"],
+    ])("returns 400 and skips fetch when outbound endpoint lacks node apiKey (%s %s)", async (method, path) => {
+      const remoteNode = createMockRemoteNode({ apiKey: undefined });
+      mockGetNode.mockResolvedValue(remoteNode);
+
+      const res = method === "GET"
+        ? await request(app, method, path)
+        : await request(app, method, path, JSON.stringify({}), { "content-type": "application/json" });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("apiKey");
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["POST", "/api/settings/sync-receive"],
+      ["POST", "/api/settings/auth-receive"],
+      ["GET", "/api/settings/auth-export"],
+    ])("returns 401 for missing header on inbound endpoint (%s %s)", async (method, path) => {
+      const res = method === "GET"
+        ? await request(app, method, path)
+        : await request(app, method, path, JSON.stringify({ sourceNodeId: "node-1", exportedAt: "2026-04-14T10:00:00.000Z" }), { "content-type": "application/json" });
+
+      expect(res.status).toBe(401);
+      expect(res.body.error).toContain("Missing or invalid Authorization header");
+    });
+
+    it.each([
+      ["POST", "/api/settings/sync-receive", JSON.stringify({ sourceNodeId: "node-1", exportedAt: "2026-04-14T10:00:00.000Z" })],
+      ["POST", "/api/settings/auth-receive", JSON.stringify({ authMaterial: {}, sourceNodeId: "node-1", timestamp: "2026-04-14T10:00:00.000Z" })],
+      ["GET", "/api/settings/auth-export", undefined],
+    ])("returns 401 for wrong auth scheme on inbound endpoint (%s %s)", async (method, path, body) => {
+      const res = await request(app, method, path, body, { "content-type": "application/json", Authorization: "Token abc" });
+
+      expect(res.status).toBe(401);
+      expect(res.body.error).toContain("Missing or invalid Authorization header");
+    });
+
+    it.each([
+      ["POST", "/api/settings/sync-receive", JSON.stringify({ sourceNodeId: "node-1", exportedAt: "2026-04-14T10:00:00.000Z" })],
+      ["POST", "/api/settings/auth-receive", JSON.stringify({ authMaterial: {}, sourceNodeId: "node-1", timestamp: "2026-04-14T10:00:00.000Z" })],
+      ["GET", "/api/settings/auth-export", undefined],
+    ])("returns 401 for mismatched bearer token on inbound endpoint (%s %s)", async (method, path, body) => {
+      const localNode = createMockLocalNode();
+      mockListNodes.mockResolvedValue([localNode]);
+
+      const res = await request(app, method, path, body, { "content-type": "application/json", Authorization: "Bearer wrong-token" });
+
+      expect(res.status).toBe(401);
+      expect(res.body.error).toContain("Invalid apiKey");
+    });
+  });
 });
