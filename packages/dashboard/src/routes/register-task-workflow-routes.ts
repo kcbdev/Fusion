@@ -991,6 +991,35 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     }
   });
 
+  router.get("/tasks/stranded-refinements", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const rawFreshnessMinutes = req.query.freshnessMinutes;
+      let freshnessThresholdMs: number | undefined;
+      if (rawFreshnessMinutes !== undefined) {
+        const value = Array.isArray(rawFreshnessMinutes) ? rawFreshnessMinutes[0] : rawFreshnessMinutes;
+        const parsed = Number.parseInt(String(value), 10);
+        if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 1440) {
+          throw badRequest("freshnessMinutes must be a positive integer <= 1440");
+        }
+        freshnessThresholdMs = parsed * 60 * 1000;
+      }
+
+      const items = await scopedStore.listStrandedRefinements({ freshnessThresholdMs });
+      res.json({
+        items: items.map((item) => ({
+          ...item,
+          recommendation: strandedReasonRecommendation(item.reasons),
+        })),
+      });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
   // Get single task with prompt content
   router.get("/tasks/:id", async (req, res) => {
     try {
@@ -1128,35 +1157,6 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     return "safe to expedite";
   };
 
-  router.get("/tasks/stranded-refinements", async (req, res) => {
-    try {
-      const { store: scopedStore } = await getProjectContext(req);
-      const rawFreshnessMinutes = req.query.freshnessMinutes;
-      let freshnessThresholdMs: number | undefined;
-      if (rawFreshnessMinutes !== undefined) {
-        const value = Array.isArray(rawFreshnessMinutes) ? rawFreshnessMinutes[0] : rawFreshnessMinutes;
-        const parsed = Number.parseInt(String(value), 10);
-        if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 1440) {
-          throw badRequest("freshnessMinutes must be a positive integer <= 1440");
-        }
-        freshnessThresholdMs = parsed * 60 * 1000;
-      }
-
-      const items = await scopedStore.listStrandedRefinements({ freshnessThresholdMs });
-      res.json({
-        items: items.map((item) => ({
-          ...item,
-          recommendation: strandedReasonRecommendation(item.reasons),
-        })),
-      });
-    } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        throw err;
-      }
-      rethrowAsApiError(err);
-    }
-  });
-
   router.get("/tasks/:id/stranded-refinement", async (req, res) => {
     try {
       const { existsSync } = await import("node:fs");
@@ -1237,19 +1237,30 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         return res.json({ task, expedited: false, requiresOperatorAction: "retry-stuck" });
       }
 
-      if (!task.nextRecoveryAt) {
+      const stranded = await scopedStore.listStrandedRefinements();
+      const strandedEntry = stranded.find((item) => item.task.id === task.id);
+      const hasExpediteLog = (task.log ?? []).some((entry) => entry.action === "Refinement expedited");
+      const canExpedite = strandedEntry?.reasons.includes("untriaged-stale") || strandedEntry?.reasons.includes("recovery-backoff");
+
+      if (hasExpediteLog && !task.nextRecoveryAt) {
         return res.json({ task, expedited: true, alreadyExpedited: true });
+      }
+
+      if (!canExpedite) {
+        return res.json({ task, expedited: false, alreadyExpedited: false, reason: "not-stranded" });
       }
 
       const updated = await scopedStore.updateTask(task.id, {
         nextRecoveryAt: undefined,
       });
-      await scopedStore.logEntry(task.id, "Refinement expedited", "Cleared nextRecoveryAt");
+      await scopedStore.logEntry(task.id, "Refinement expedited", strandedEntry?.reasons.includes("recovery-backoff")
+        ? "Cleared nextRecoveryAt"
+        : "Expedite request recorded for stale refinement");
 
       res.json({
         task: updated,
         expedited: true,
-        alreadyExpedited: false,
+        alreadyExpedited: hasExpediteLog && !task.nextRecoveryAt,
       });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
