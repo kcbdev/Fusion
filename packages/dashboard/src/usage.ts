@@ -1122,6 +1122,27 @@ type CodexCredential = {
 };
 
 async function loadCodexCredential(): Promise<CodexCredential | null> {
+  // Prefer Fusion-stored openai-codex OAuth credentials; fall back to Codex CLI auth.json.
+  let preferredCredential: ReturnType<typeof choosePreferredStoredCredential>;
+  for (const candidatePath of getAuthFileCandidates()) {
+    const authEntries = readStoredCredentialsFromAuthFile(candidatePath);
+    preferredCredential = choosePreferredStoredCredential(preferredCredential, authEntries["openai-codex"]);
+  }
+
+  if (
+    preferredCredential?.type === "oauth"
+    && typeof preferredCredential.access === "string"
+    && preferredCredential.access.length > 0
+    && typeof preferredCredential.expires === "number"
+    && Number.isFinite(preferredCredential.expires)
+    && preferredCredential.expires > Date.now()
+  ) {
+    return {
+      accessToken: preferredCredential.access,
+      source: "fusion-auth",
+    };
+  }
+
   const codexHome = process.env.CODEX_HOME || path.join(getHomeDir(), ".codex");
   const authPath = path.join(codexHome, "auth.json");
 
@@ -1142,27 +1163,7 @@ async function loadCodexCredential(): Promise<CodexCredential | null> {
     };
   }
 
-  let preferredCredential: ReturnType<typeof choosePreferredStoredCredential>;
-  for (const candidatePath of getAuthFileCandidates()) {
-    const authEntries = readStoredCredentialsFromAuthFile(candidatePath);
-    preferredCredential = choosePreferredStoredCredential(preferredCredential, authEntries["openai-codex"]);
-  }
-
-  if (
-    preferredCredential?.type !== "oauth"
-    || typeof preferredCredential.access !== "string"
-    || preferredCredential.access.length === 0
-    || typeof preferredCredential.expires !== "number"
-    || !Number.isFinite(preferredCredential.expires)
-    || preferredCredential.expires <= Date.now()
-  ) {
-    return null;
-  }
-
-  return {
-    accessToken: preferredCredential.access,
-    source: "fusion-auth",
-  };
+  return null;
 }
 
 async function fetchCodexUsage(): Promise<ProviderUsage> {
