@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { CentralCore, RegisteredProject } from "@fusion/core";
 import { HybridExecutor } from "../hybrid-executor.js";
+import * as engine from "../index.js";
 import type { ProjectRuntimeConfig } from "../project-runtime.js";
 
 // Mock the ProjectManager
@@ -109,6 +110,10 @@ vi.mock("../node-health-monitor.js", () => ({
 }));
 
 describe("HybridExecutor", () => {
+  it("is exported from engine index", () => {
+    expect(engine.HybridExecutor).toBe(HybridExecutor);
+  });
+
   let executor: HybridExecutor;
   let mockCentralCore: CentralCore;
   const mockProject: RegisteredProject = {

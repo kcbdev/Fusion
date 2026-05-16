@@ -252,6 +252,11 @@ export { ProjectManager } from "./project-manager.js";
 export { ProjectEngine, type ProjectEngineOptions } from "./project-engine.js";
 export { ProjectEngineManager, type EngineManagerOptions } from "./project-engine-manager.js";
 export { NodeHealthMonitor } from "./node-health-monitor.js";
+export {
+  HybridExecutor,
+  type HybridExecutorOptions,
+  type HybridExecutorEvents,
+} from "./hybrid-executor.js";
 export { applyUnavailableNodePolicy, type PolicyDecision } from "./node-routing-policy.js";
 export { PeerExchangeService, type PeerExchangeServiceOptions, type SyncResult } from "./peer-exchange-service.js";
 export {
