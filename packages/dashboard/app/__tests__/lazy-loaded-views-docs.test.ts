@@ -55,7 +55,18 @@ function extractBacktickedNamesFromBullets(section: string): string[] {
 
 function extractAppLazyViews(appSource: string): Set<string> {
   const matches = [...appSource.matchAll(/const\s+(\w+)\s*=\s*lazy\(/g)].map((m) => m[1]);
-  return new Set(matches.map((name) => (name === "_TodoView" ? "TodoView" : name)));
+  const normalized = matches
+    .map((name) => {
+      if (name === "_TodoView") {
+        return "TodoView";
+      }
+      if (name.startsWith("_")) {
+        return null;
+      }
+      return name;
+    })
+    .filter((name): name is string => Boolean(name));
+  return new Set(normalized);
 }
 
 describe("AGENTS lazy-loaded views inventory", () => {
