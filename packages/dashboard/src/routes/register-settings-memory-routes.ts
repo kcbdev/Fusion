@@ -26,6 +26,8 @@ import {
   resolveMemoryBackend,
   resolvePlanningSettingsModel,
   resolveTitleSummarizerSettingsModel,
+  resolveWorktrunkSettings,
+  requiresWorktrunkInstallVerification,
   scheduleQmdProjectMemoryRefresh,
   searchProjectMemory,
   syncBackupRoutine,
@@ -42,7 +44,12 @@ import {
   writeProjectMemoryFile,
   updatePiExtensionDisabledIds,
 } from "@fusion/core";
-import { createFnAgent as engineCreateFnAgent, getActiveNotificationService } from "@fusion/engine";
+import {
+  createFnAgent as engineCreateFnAgent,
+  getActiveNotificationService,
+  probeWorktrunk,
+  resolveWorktrunkBinary,
+} from "@fusion/engine";
 import QRCode from "qrcode";
 import crypto from "node:crypto";
 import { execFile } from "node:child_process";
@@ -504,6 +511,31 @@ export function registerSettingsMemoryRoutes(ctx: ApiRoutesContext, deps: Settin
       if (clientSettings.memoryBackendType !== undefined) {
         if (clientSettings.memoryBackendType !== null && typeof clientSettings.memoryBackendType !== "string") {
           throw badRequest("memoryBackendType must be a string or null");
+        }
+      }
+
+      if (clientSettings.worktrunk?.enabled === true) {
+        const currentSettings = await scopedStore.getSettings();
+        const nextWorktrunkSettings = resolveWorktrunkSettings(
+          currentSettings.worktrunk,
+          clientSettings.worktrunk,
+        );
+
+        if (
+          requiresWorktrunkInstallVerification({
+            current: currentSettings.worktrunk,
+            next: nextWorktrunkSettings,
+          })
+        ) {
+          try {
+            const resolved = await resolveWorktrunkBinary({ settings: nextWorktrunkSettings });
+            const probe = await probeWorktrunk(resolved.binaryPath);
+            if (!probe.ok) {
+              throw badRequest("worktrunk integration cannot be enabled until the worktrunk binary is installed and verified — install it from Settings → Worktrunk integration first");
+            }
+          } catch {
+            throw badRequest("worktrunk integration cannot be enabled until the worktrunk binary is installed and verified — install it from Settings → Worktrunk integration first");
+          }
         }
       }
 
