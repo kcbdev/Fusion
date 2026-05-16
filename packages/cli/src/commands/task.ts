@@ -7,7 +7,7 @@ import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
 import { createSession, submitResponse, RateLimitError, SessionNotFoundError, InvalidSessionStateError } from "@fusion/dashboard/planning";
 import { watchFile, unwatchFile, statSync, existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { GitHubClient } from "@fusion/dashboard";
+import { GitHubClient, registerGithubTrackingHook } from "@fusion/dashboard";
 import {
   getGhErrorMessage,
   getCurrentRepo,
@@ -20,6 +20,10 @@ import { findNodeByNameOrId } from "./node.js";
 
 const execAsync = promisify(exec);
 const STEP_STATUSES: StepStatus[] = ["pending", "in-progress", "done", "skipped"];
+
+// Register GitHub tracking hook so CLI task creation paths (add, duplicate,
+// refine, import, delegate) trigger tracking issue creation.
+registerGithubTrackingHook();
 
 function getGitHubIssueUrl(sourceMetadata: unknown): string | undefined {
   if (!sourceMetadata || typeof sourceMetadata !== "object") return undefined;
