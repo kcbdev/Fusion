@@ -39,7 +39,7 @@ describe("reliability interactions: executor no-fn_task_done vs worktree reclaim
     resetExecutorMocks();
   });
 
-  it("pre-retry liveness recheck aborts retry and requeues", async () => {
+  it("pre-retry liveness recheck aborts retry and silently requeues (FN-4806)", async () => {
     const store = createMockStore();
     const state = makeTask();
     let getTaskCalls = 0;
@@ -58,14 +58,29 @@ describe("reliability interactions: executor no-fn_task_done vs worktree reclaim
     await executor.execute(state);
 
     expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
+    // FN-4806: silent requeue — task goes to todo with preserveProgress, no failed status,
+    // no taskDoneRetryCount burn, no onError surface.
     expect(store.moveTask).toHaveBeenCalledWith("FN-4601", "todo", { preserveProgress: true });
     expect(store.logEntry).toHaveBeenCalledWith(
       "FN-4601",
-      expect.stringContaining("worktree/branch reclaimed during no-fn_task_done retry"),
+      expect.stringContaining("engine self-heal, no failure"),
       undefined,
       expect.any(Object),
     );
-    expect(store.updateTask).toHaveBeenCalledWith("FN-4601", expect.objectContaining({ taskDoneRetryCount: 1 }));
+    // Reclaim path must NOT mark task failed and must NOT burn taskDoneRetryCount budget.
+    expect(store.updateTask).not.toHaveBeenCalledWith(
+      "FN-4601",
+      expect.objectContaining({ status: "failed" }),
+    );
+    expect(store.updateTask).not.toHaveBeenCalledWith(
+      "FN-4601",
+      expect.objectContaining({ taskDoneRetryCount: expect.any(Number) }),
+    );
+    // Stale binding must be cleared so the next pickup creates a fresh worktree.
+    expect(store.updateTask).toHaveBeenCalledWith(
+      "FN-4601",
+      expect.objectContaining({ worktree: null, branch: null }),
+    );
   });
 
   it("missing-worktree session-start error during retry clears metadata and requeues", async () => {
@@ -87,7 +102,16 @@ describe("reliability interactions: executor no-fn_task_done vs worktree reclaim
       baseCommitSha: null,
     });
     expect(store.moveTask).toHaveBeenCalledWith("FN-4601", "todo", { preserveProgress: true });
-    expect(store.updateTask).toHaveBeenCalledWith("FN-4601", expect.objectContaining({ taskDoneRetryCount: 1 }));
+    // FN-4806: session-start missing-worktree is engine self-heal, must not burn retry budget
+    // and must not mark the task failed.
+    expect(store.updateTask).not.toHaveBeenCalledWith(
+      "FN-4601",
+      expect.objectContaining({ status: "failed" }),
+    );
+    expect(store.updateTask).not.toHaveBeenCalledWith(
+      "FN-4601",
+      expect.objectContaining({ taskDoneRetryCount: expect.any(Number) }),
+    );
     expect(store.moveTask).not.toHaveBeenCalledWith("FN-4601", "in-review");
   });
 
@@ -107,7 +131,10 @@ describe("reliability interactions: executor no-fn_task_done vs worktree reclaim
     expect(store.updateTask).not.toHaveBeenCalledWith("FN-4601", expect.objectContaining({ baseCommitSha: null, worktree: null, branch: null }));
   });
 
-  it("exhausted requeue budget keeps reclaim path in in-review", async () => {
+  it("reclaim path ignores requeue budget and always silently requeues (FN-4806)", async () => {
+    // FN-4806: reclaim is engine self-heal, not an agent failure, so it must not be subject to
+    // the no-fn_task_done requeue cap. Even at the previously-exhausted budget the task must
+    // still go silently to todo, not in-review.
     const store = createMockStore();
     const state = makeTask({ taskDoneRetryCount: 3 });
     let getTaskCalls = 0;
@@ -125,7 +152,11 @@ describe("reliability interactions: executor no-fn_task_done vs worktree reclaim
     const executor = new TaskExecutor(store as any, "/tmp/test");
     await executor.execute(state);
 
-    expect(store.moveTask).toHaveBeenCalledWith("FN-4601", "in-review");
-    expect(store.moveTask).not.toHaveBeenCalledWith("FN-4601", "todo", { preserveProgress: true });
+    expect(store.moveTask).toHaveBeenCalledWith("FN-4601", "todo", { preserveProgress: true });
+    expect(store.moveTask).not.toHaveBeenCalledWith("FN-4601", "in-review");
+    expect(store.updateTask).not.toHaveBeenCalledWith(
+      "FN-4601",
+      expect.objectContaining({ status: "failed" }),
+    );
   });
 });
