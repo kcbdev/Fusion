@@ -142,6 +142,70 @@ describe("WorktrunkWorktreeBackend", () => {
     });
   });
 
+  it("memoizes successful binary path resolver results", async () => {
+    const binaryPathResolver = vi.fn().mockResolvedValue("/p");
+    execMock
+      .mockResolvedValueOnce({ stdout: "", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "worktree /repo/.worktrees/fn-1\nbranch refs/heads/fusion/fn-1\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" });
+    const backend = new WorktrunkWorktreeBackend({ binaryPath: binaryPathResolver });
+
+    await backend.create({
+      rootDir: "/repo",
+      worktreePath: "/repo/.worktrees/fn-1",
+      branch: "fusion/fn-1",
+      taskId: "FN-1",
+    });
+    await backend.remove({ rootDir: "/repo", worktreePath: "/repo/.worktrees/fn-1", branch: "fusion/fn-1" });
+
+    expect(binaryPathResolver).toHaveBeenCalledTimes(1);
+    expect(execMock).toHaveBeenNthCalledWith(
+      1,
+      '"/p" "switch" "--create" "fusion/fn-1" "--no-hooks" "--no-cd"',
+      expect.objectContaining({ cwd: "/repo" }),
+    );
+    expect(execMock).toHaveBeenNthCalledWith(
+      3,
+      '"/p" "remove" "--foreground" "fusion/fn-1"',
+      expect.objectContaining({ cwd: "/repo" }),
+    );
+  });
+
+  it("does not negative-cache null resolver results", async () => {
+    const binaryPathResolver = vi.fn().mockResolvedValue(null);
+    const backend = new WorktrunkWorktreeBackend({ binaryPath: binaryPathResolver });
+
+    await expect(
+      backend.create({
+        rootDir: "/repo",
+        worktreePath: "/repo/.worktrees/fn-1",
+        branch: "fusion/fn-1",
+        taskId: "FN-1",
+      }),
+    ).rejects.toMatchObject({ code: "worktrunk_binary_missing", operation: "create" });
+
+    await expect(
+      backend.remove({ rootDir: "/repo", worktreePath: "/repo/.worktrees/fn-1", branch: "fusion/fn-1" }),
+    ).rejects.toMatchObject({ code: "worktrunk_binary_missing", operation: "remove" });
+
+    expect(binaryPathResolver).toHaveBeenCalledTimes(2);
+  });
+
+  it("propagates WorktrunkOperationError thrown by resolver", async () => {
+    const resolverError = new WorktrunkOperationError({
+      operation: "remove",
+      code: "worktrunk_timeout",
+      stderr: "timed out",
+      exitCode: null,
+    });
+    const binaryPathResolver = vi.fn().mockRejectedValue(resolverError);
+    const backend = new WorktrunkWorktreeBackend({ binaryPath: binaryPathResolver });
+
+    await expect(
+      backend.remove({ rootDir: "/repo", worktreePath: "/repo/.worktrees/fn-1", branch: "fusion/fn-1" }),
+    ).rejects.toBe(resolverError);
+  });
+
   it("throws operation failed with stderr/exitCode", async () => {
     execMock.mockRejectedValue({ stderr: "bad news", status: 7 });
     const backend = new WorktrunkWorktreeBackend({ binaryPath: "worktrunk" });

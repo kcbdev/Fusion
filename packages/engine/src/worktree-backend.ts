@@ -266,24 +266,46 @@ type WorktrunkOperation = keyof typeof WORKTRUNK_TIMEOUTS_MS;
 
 export class WorktrunkWorktreeBackend implements WorktreeBackend {
   readonly kind: WorktreeBackendKind = "worktrunk";
+  private resolvedBinaryPath: string | null = null;
 
   constructor(
     private readonly deps: {
-      binaryPath: string | null;
+      binaryPath: string | (() => Promise<string | null>) | null;
       logger?: { log: (m: string) => void; warn: (m: string) => void };
     },
   ) {}
 
-  private async getBinaryPath(operation: WorktrunkOperation): Promise<string> {
-    const binaryPath = this.deps.binaryPath?.trim() ?? "";
-    if (!binaryPath) {
-      throw new WorktrunkOperationError({
-        operation: operation === "layout" ? "create" : operation,
-        code: "worktrunk_binary_missing",
-        stderr: "worktrunk binary not configured",
-        exitCode: null,
-      });
+  private async resolveBinaryPathFromDeps(operation: WorktrunkOperation): Promise<string> {
+    if (typeof this.deps.binaryPath === "string") {
+      const literalPath = this.deps.binaryPath.trim();
+      if (literalPath) return literalPath;
     }
+
+    if (typeof this.deps.binaryPath === "function") {
+      if (this.resolvedBinaryPath) return this.resolvedBinaryPath;
+      const resolvedPath = (await this.deps.binaryPath())?.trim() ?? "";
+      if (!resolvedPath) {
+        throw new WorktrunkOperationError({
+          operation: operation === "layout" ? "create" : operation,
+          code: "worktrunk_binary_missing",
+          stderr: "worktrunk binary not configured",
+          exitCode: null,
+        });
+      }
+      this.resolvedBinaryPath = resolvedPath;
+      return resolvedPath;
+    }
+
+    throw new WorktrunkOperationError({
+      operation: operation === "layout" ? "create" : operation,
+      code: "worktrunk_binary_missing",
+      stderr: "worktrunk binary not configured",
+      exitCode: null,
+    });
+  }
+
+  private async getBinaryPath(operation: WorktrunkOperation): Promise<string> {
+    const binaryPath = await this.resolveBinaryPathFromDeps(operation);
     try {
       await access(binaryPath);
     } catch {
