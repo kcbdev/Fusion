@@ -255,6 +255,16 @@ describe("GitHubTrackingStateService", () => {
     expect(mockResolveGithubTrackingAuth).toHaveBeenCalledTimes(2);
   });
 
+  it("closes issue for late-registered project stores after service start", async () => {
+    const lateStore = new MockStore();
+    service.start();
+
+    lateStore.emit("task:moved", { task: createTask({ id: "FN-late" }), from: "todo", to: "done" });
+    await flushAsync();
+
+    expect(mockSetIssueState).toHaveBeenCalledWith("owner", "repo", 42, "closed", "completed");
+  });
+
   it("emits close then reopen in order", async () => {
     service.start();
 
