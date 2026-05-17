@@ -1582,6 +1582,12 @@ The GitHub tracking state listener now attaches to every registered project stor
   - `404` when the task has no associated PR
   - `429` when `githubRateLimiter` denies the repo request window, including `retryAfter`/`resetAt` details
 
+#### PR review ingestion and auto-transition
+- `POST /api/tasks/:id/pr/refresh` and background `refreshPrInBackground()` call `getPrReviewSnapshot()` and sync review data into task comments with idempotency on `(source, externalId)`.
+- Synced comment sources are `github-review` and `github-review-comment`; refinement auto-creation is skipped for these external comments.
+- `GET /api/tasks/:id/pr/reviews` returns the live GitHub review snapshot plus the Fusion-threaded stored review comments for the task.
+- When review decision transitions to `CHANGES_REQUESTED` while the task is in `in-review`, Fusion auto-moves the task back to `todo` with `preserveProgress` and `preserveWorktree`, writes a `review-feedback` task document, and records run-audit mutation `pr:changes-requested-auto-move`.
+
 ---
 
 ## 14) Key Design Decisions

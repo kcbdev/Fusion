@@ -3368,7 +3368,7 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
         const retryAfter = resetTime
           ? Math.max(0, Math.ceil((resetTime.getTime() - Date.now()) / 1000))
           : undefined;
-        throw rateLimited("GitHub API rate limit exceeded for this repository", {
+        throw new ApiError(429, "GitHub API rate limit exceeded for this repository", {
           retryAfter,
           resetAt: resetTime?.toISOString(),
         });
