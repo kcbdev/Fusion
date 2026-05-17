@@ -1773,6 +1773,13 @@ export class SelfHealingManager {
 
         if (task.worktree && await isUsableTaskWorktree(this.options.rootDir, task.worktree)) continue;
 
+        // FN-4811: Defer reclaim when an active executor/merger/step session
+        // owns this worktree — same pattern as reclaimSelfOwnedBranchConflicts().
+        if (task.worktree && activeSessionRegistry.isPathActive(task.worktree)) {
+          log.log(`[self-healing] deferring stale-active-branch reclaim for ${task.id}: worktree ${task.worktree} has active session`);
+          continue;
+        }
+
         const inspection = await this.inspectOrphanedBranch(branch);
         if (!inspection) continue;
 
@@ -5044,6 +5051,13 @@ export class SelfHealingManager {
       const rel = relative(worktreesDir, path);
       if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
         log.warn(`Refusing to remove path outside .worktrees: ${path}`);
+        continue;
+      }
+      // FN-4811: Never rmSync a directory that belongs to an active session.
+      // Unregistered orphans can still be bound to a live executor/merger/step
+      // session whose worktree admin entry was lost but the process is running.
+      if (activeSessionRegistry.isPathActive(path)) {
+        log.log(`[self-healing] deferring unregistered-orphan reap for ${path}: active session present`);
         continue;
       }
       try {
