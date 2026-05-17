@@ -1363,7 +1363,7 @@ describe("ChatView", () => {
     await userEvent.type(textarea, "Room hello{enter}");
 
     await waitFor(() => {
-      expect(sendRoomMessage).toHaveBeenCalledWith("Room hello");
+      expect(sendRoomMessage).toHaveBeenCalledWith("Room hello", { files: [] });
     });
     expect(textarea.value).toBe("");
     localStorage.removeItem("fusion:chat-scope");
@@ -1392,7 +1392,7 @@ describe("ChatView", () => {
     await userEvent.click(screen.getByTestId("chat-send-btn"));
 
     await waitFor(() => {
-      expect(sendRoomMessage).toHaveBeenCalledWith("Room click hello");
+      expect(sendRoomMessage).toHaveBeenCalledWith("Room click hello", { files: [] });
     });
     expect(sendMessage).not.toHaveBeenCalled();
     expect(textarea.value).toBe("");
@@ -3558,7 +3558,7 @@ describe("ChatView mobile behavior", () => {
 
       await waitFor(() => {
         expect(sendRoomMessage).toHaveBeenCalledTimes(1);
-        expect(sendRoomMessage).toHaveBeenCalledWith("Hello mobile room");
+        expect(sendRoomMessage).toHaveBeenCalledWith("Hello mobile room", { files: [] });
       });
       expect(sendMessage).not.toHaveBeenCalled();
       expect(document.activeElement).toBe(input);
