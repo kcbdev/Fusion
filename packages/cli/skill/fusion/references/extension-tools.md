@@ -427,6 +427,15 @@ Lightweight URL fetch (no JS rendering). Use agent-browser skill for JS-heavy pa
 | `timeoutMs` | number | — | Timeout in milliseconds (default: 30000) |
 | `maxBytes` | number | — | Max bytes to return (default: 512000) |
 
+### fn_secret_get
+
+Read a secret by key using per-secret access policy.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `key` | string | ✓ | Secret key |
+| `scope` | union | — | Optional scope |
+
 ### fn_research_run
 
 Cited-research pipeline: create a bounded search/fetch/synthesis run (not an autonomous experiment loop) and optionally wait for completion.

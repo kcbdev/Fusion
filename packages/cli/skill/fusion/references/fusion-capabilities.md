@@ -30,6 +30,7 @@ All skill/extension tool invocations in this catalog use the public `fn_*` names
 | `fn_task_browse_github_issues` | List open GitHub issues from a repository to browse before importing. Returns issue numbers, titles, and URLs for selection. Use with fn_task_import_github_issue to import specific issues by number. |
 | `fn_task_plan` | Create a task via AI-guided planning mode — interactive conversation to refine your idea into a well-specified task. |
 | `fn_web_fetch` | Lightweight URL fetch (no JS rendering). Use agent-browser skill for JS-heavy pages. URL to fetch (http/https) Optional extraction hint for downstream summarization Timeout in milliseconds (default: 30000) Max bytes to return (default: 512000) |
+| `fn_secret_get` | Read a secret by key using per-secret access policy. |
 | `fn_research_run` | Cited-research pipeline: create a bounded search/fetch/synthesis run (not an autonomous experiment loop) and optionally wait for completion. |
 | `fn_research_list` | Cited-research pipeline: list recent search/fetch/synthesis runs (not experiment-loop sessions). |
 | `fn_research_get` | Cited-research pipeline: get one run with structured findings and citations (not experiment-loop state). |

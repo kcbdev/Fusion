@@ -1,9 +1,32 @@
 import { createCipheriv, createDecipheriv, randomBytes, scrypt as scryptCallback } from "node:crypto";
-import { promisify } from "node:util";
 import type { SecretAccessPolicy } from "./types.js";
 import type { SecretScope } from "./secrets-store.js";
 
-const scrypt = promisify(scryptCallback);
+function deriveKey(
+  passphrase: string,
+  salt: Buffer,
+  keyLen: number,
+  params: { N: number; r: number; p: number },
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scryptCallback(
+      passphrase,
+      salt,
+      keyLen,
+      {
+        ...params,
+        maxmem: 64 * 1024 * 1024,
+      },
+      (error, derivedKey) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(derivedKey as Buffer);
+      },
+    );
+  });
+}
 
 export interface WrappedSecretsBundle {
   ciphertext: string;
@@ -37,12 +60,7 @@ const DEFAULT_KDF_PARAMS = { N: 32768, r: 8, p: 1, keyLen: 32 } as const;
 export async function wrapSecretsBundle(records: SecretsSyncRecord[], passphrase: string): Promise<WrappedSecretsBundle> {
   const salt = randomBytes(16);
   const nonce = randomBytes(12);
-  const key = await scrypt(passphrase, salt, DEFAULT_KDF_PARAMS.keyLen, {
-    N: DEFAULT_KDF_PARAMS.N,
-    r: DEFAULT_KDF_PARAMS.r,
-    p: DEFAULT_KDF_PARAMS.p,
-    maxmem: 64 * 1024 * 1024,
-  }) as Buffer;
+  const key = await deriveKey(passphrase, salt, DEFAULT_KDF_PARAMS.keyLen, DEFAULT_KDF_PARAMS);
 
   const cipher = createCipheriv("aes-256-gcm", key, nonce);
   const payload = Buffer.from(JSON.stringify(records), "utf8");
@@ -72,12 +90,7 @@ export async function unwrapSecretsBundle(envelope: WrappedSecretsBundle, passph
     const authTag = packed.subarray(packed.length - 16);
     const encrypted = packed.subarray(0, packed.length - 16);
 
-    const key = await scrypt(passphrase, salt, envelope.kdfParams.keyLen, {
-      N: envelope.kdfParams.N,
-      r: envelope.kdfParams.r,
-      p: envelope.kdfParams.p,
-      maxmem: 64 * 1024 * 1024,
-    }) as Buffer;
+    const key = await deriveKey(passphrase, salt, envelope.kdfParams.keyLen, envelope.kdfParams);
 
     const decipher = createDecipheriv("aes-256-gcm", key, nonce);
     decipher.setAuthTag(authTag);

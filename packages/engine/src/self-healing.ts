@@ -2020,10 +2020,11 @@ export class SelfHealingManager {
           });
           result.worktreeRemoved = true;
           if (task) {
-            const patch: Partial<Task> = { worktree: null };
-            if (task.branch === branchName) patch.branch = null;
-            await this.store.updateTask(task.id, patch);
-            task = { ...task, ...patch } as Task;
+            const patch = {
+              worktree: null as string | null,
+              ...(task.branch === branchName ? { branch: null as string | null } : {}),
+            };
+            await this.store.updateTask(task.id, patch as Partial<Task>);
           }
         } catch (err: unknown) {
           const errorMessage = err instanceof Error ? err.message : String(err);

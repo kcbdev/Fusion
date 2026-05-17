@@ -535,6 +535,13 @@ export interface ReanchorBranchToBaseResult {
   newTipSha: string;
 }
 
+/**
+ * Re-anchor a task branch to base while handling already-at-base worktrees.
+ *
+ * Fast-path: when both worktree HEAD and branch tip already equal baseSha,
+ * avoid detach/rebranch churn (`checkout -B` can fail with worktree-binding
+ * conflicts) and only attempt lightweight branch re-association.
+ */
 export async function reanchorBranchToBase(
   input: ReanchorBranchToBaseInput,
 ): Promise<ReanchorBranchToBaseResult> {
