@@ -2505,7 +2505,7 @@ export class SelfHealingManager {
   }
 
   async autoArchiveResolvedMetaTasks(reboundedTargets?: Set<string>): Promise<number> {
-    const tasks = await this.store.listTasks({ slim: true, includeArchived: false });
+    const tasks = await this.store.listTasks({ slim: true, includeArchived: true });
     const byId = new Map(tasks.map((task) => [task.id.toUpperCase(), task]));
     let archived = 0;
     for (const task of tasks) {
@@ -2699,6 +2699,8 @@ export class SelfHealingManager {
             reason = `blocker ${blockerId} is done`;
           } else if (blocker.column === "archived") {
             reason = `blocker ${blockerId} is archived`;
+          } else if (blocker.column === "todo") {
+            reason = `blocker ${blockerId} is todo`;
           } else if (blocker.column === "in-review" && blocker.paused) {
             reason = `blocker ${blockerId} in-review + paused`;
           } else if (
