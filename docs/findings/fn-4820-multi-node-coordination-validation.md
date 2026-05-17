@@ -124,7 +124,7 @@ This audit does **not** propose implementation work for:
 
 ## 4. Prioritized Follow-Up Backlog
 
-1. **[TBD] Add authoritative central task-claim mutex for cross-node checkout arbitration**  
+1. **[FN-4822] Add authoritative central task-claim mutex for cross-node checkout arbitration**  
    **Severity:** P0  
    Implement FN-4819 §2.2/§2.3 by introducing a central `(projectId, taskId)` claim authority and routing checkout acquisition through it before task-row sync.
 
@@ -134,7 +134,7 @@ This audit does **not** propose implementation work for:
    - Renewal keeps epoch stable; owner change bumps epoch.
    - Add race integration test asserting one winner across concurrent claim attempts (FN-4819 §2.8).
 
-2. **[TBD] Make lease recovery central-claim-aware with reconciliation guarantees**  
+2. **[FN-4823] Make lease recovery central-claim-aware with reconciliation guarantees**  
    **Severity:** P1  
    Align abandoned-lease recovery and release semantics with FN-4819 §2.5 and §3.3 so central authority and task-row views cannot diverge silently.
 
@@ -143,7 +143,7 @@ This audit does **not** propose implementation work for:
    - Split-write failure mode has deterministic repair path before next dispatch.
    - Scheduler + mesh lease recovery tests cover offline/error owner-node handoff behavior (FN-4819 §3.6).
 
-3. **[TBD] Specify and test cross-node assignment wake propagation contract**  
+3. **[FN-4824] Specify and test cross-node assignment wake propagation contract**  
    **Severity:** P1  
    Define explicit push/pull/missed-wake behavior for assignment propagation between nodes, with bounded-latency and recovery expectations.
 
@@ -152,7 +152,7 @@ This audit does **not** propose implementation work for:
    - Add integration tests proving assigned owner receives actionable wake under normal and degraded transport conditions.
    - Define and expose measurable worst-case wake latency behavior consistent with FN-4819 §3 operational intent.
 
-4. **[TBD] Emit typed run-audit telemetry for node-unreachable auto-recovery**  
+4. **[FN-4825] Emit typed run-audit telemetry for node-unreachable auto-recovery**  
    **Severity:** P1  
    Add structured telemetry for unreachable-owner recovery path so conflict handling is queryable and auditable.
 
@@ -161,7 +161,7 @@ This audit does **not** propose implementation work for:
    - Add tests validating event emission metadata for owner node, policy decision, and resulting task transition.
    - Ensure no recovery completion path is silent (must emit either success/failure classified event).
 
-5. **[TBD] Normalize node handoff telemetry taxonomy beyond free-text task logs**  
+5. **[FN-4826] Normalize node handoff telemetry taxonomy beyond free-text task logs**  
    **Severity:** P2  
    Reduce ambiguity by converting key scheduler/lease-manager handoff text logs into typed event classes.
 
