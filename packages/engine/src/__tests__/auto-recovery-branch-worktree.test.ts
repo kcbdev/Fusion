@@ -76,12 +76,17 @@ describe("BranchWorktreeAutoRecoveryHandler", () => {
     expect(f.runAudit.database).toHaveBeenCalledWith(expect.objectContaining({ type: "branch-worktree:auto-requeue", metadata: expect.objectContaining({ prevPausedReason: "branch-conflict-unrecoverable" }) }));
   });
 
-  it("live-foreign emits irreducible pause without mutation", async () => {
+  it("live-foreign discards branch claim and requeues", async () => {
     const f = createFixtures();
-    branchConflictMocks.inspectBranchConflict.mockResolvedValue({ kind: "live-foreign", livePath: "/tmp/wt", error: new Error("foreign") });
+    branchConflictMocks.inspectBranchConflict.mockResolvedValue({
+      kind: "live-foreign",
+      livePath: "/tmp/wt",
+      error: { strandedCommits: [] },
+    });
     await f.handler.issueRetry(f.failure, f.decision, f.ctx);
-    expect(f.taskStore.moveTask).not.toHaveBeenCalled();
-    expect(f.runAudit.database).toHaveBeenCalledWith(expect.objectContaining({ type: "branch-worktree:irreducible-pause", metadata: expect.objectContaining({ reason: "live-foreign" }) }));
+    expect(f.taskStore.moveTask).toHaveBeenCalledWith("FN-4536", "todo", expect.objectContaining({ moveSource: "engine" }));
+    expect(f.runAudit.database).toHaveBeenCalledWith(expect.objectContaining({ type: "branch-worktree:foreign-branch-discarded" }));
+    expect(f.runAudit.database).toHaveBeenCalledWith(expect.objectContaining({ type: "branch-worktree:auto-requeue", metadata: expect.objectContaining({ rationale: "live-foreign-discard-and-recreate" }) }));
   });
 
   it("ai-assisted exhaustion logs spawned and irreducible", async () => {

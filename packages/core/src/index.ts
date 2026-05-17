@@ -1115,3 +1115,12 @@ export type {
   MasterKeyProvider,
   EncryptedSecret,
 } from "./secrets-crypto.js";
+export {
+  SecretsStore,
+  SecretsStoreError,
+} from "./secrets-store.js";
+export type {
+  SecretScope,
+  SecretAccessPolicy,
+  SecretRecord,
+} from "./secrets-store.js";
