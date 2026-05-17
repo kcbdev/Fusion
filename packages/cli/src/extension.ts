@@ -22,6 +22,7 @@ import {
   resolveAgentProvisioningPolicy,
   TASK_PRIORITIES,
   resolveSecretAccessPolicy,
+  getProjectRootFromWorktree,
   type SecretScope,
 } from "@fusion/core";
 import {
@@ -67,6 +68,11 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 function resolveProjectRoot(cwd: string): string {
+  const worktreeProjectRoot = getProjectRootFromWorktree(cwd);
+  if (worktreeProjectRoot && existsSync(join(worktreeProjectRoot, ".fusion"))) {
+    return worktreeProjectRoot;
+  }
+
   let current = resolve(cwd);
   while (true) {
     if (existsSync(join(current, ".fusion"))) {

@@ -74,12 +74,21 @@ describe("resolveProjectRoot", () => {
     expect(resolveProjectRoot(dir)).toBe(dir);
   });
 
-  it("walks up from worktree path to find project root", () => {
+  it("prefers parent repo root for worktree paths when both parent and worktree have .fusion", () => {
     const projectDir = `/tmp/skill-resolver-mock-${++mockDirCounter}`;
     const worktreeDir = `${projectDir}/.worktrees/swift-falcon`;
     mockDirs.add(`${projectDir}/.fusion`);
+    mockDirs.add(`${worktreeDir}/.fusion`);
 
-    expect(resolveProjectRoot(worktreeDir)).toBe(projectDir);
+    expect(resolveProjectRoot(`${worktreeDir}/sub`)).toBe(projectDir);
+  });
+
+  it("falls back to legacy walk when parent repo .fusion is missing", () => {
+    const projectDir = `/tmp/skill-resolver-mock-${++mockDirCounter}`;
+    const worktreeDir = `${projectDir}/.worktrees/swift-falcon`;
+    mockDirs.add(`${worktreeDir}/.fusion`);
+
+    expect(resolveProjectRoot(`${worktreeDir}/sub`)).toBe(worktreeDir);
   });
 
   it("walks up from deeply nested path", () => {

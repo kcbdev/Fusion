@@ -12,20 +12,25 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { ResourceDiagnostic, Skill } from "@mariozechner/pi-coding-agent";
+import { getProjectRootFromWorktree } from "@fusion/core";
 import { piLog } from "./logger.js";
 
 // ── Project Root Resolution ──────────────────────────────────────────────────
 
 /**
- * Resolve the project root directory by walking up from `cwd` looking for
- * a directory containing `.fusion/`. This handles worktree paths (e.g.,
- * `/project/.worktrees/task-branch`) and any other subdirectory by walking
- * up to the actual project root.
+ * Resolve the project root directory by preferring the parent repo when
+ * `cwd` is inside a `.worktrees/<name>/...` path, then falling back to the
+ * legacy `.fusion` ancestor walk.
  *
  * Falls back to `cwd` if no `.fusion/` directory is found (mirrors
  * `resolvePiExtensionProjectRoot` from `@fusion/core`).
  */
 export function resolveProjectRoot(cwd: string): string {
+  const worktreeProjectRoot = getProjectRootFromWorktree(cwd);
+  if (worktreeProjectRoot && existsSync(join(worktreeProjectRoot, ".fusion"))) {
+    return worktreeProjectRoot;
+  }
+
   let current = resolve(cwd);
   while (true) {
     if (existsSync(join(current, ".fusion"))) {
