@@ -810,7 +810,7 @@ describe("Planning Mode Routes", () => {
         expect(streamRes.body).not.toContain("id: 1\nevent: thinking");
       });
 
-      it("skips replay when Last-Event-ID is missing", async () => {
+      it("replays buffered thinking when Last-Event-ID is missing", async () => {
         const startRes = await REQUEST(
           buildApp(),
           "POST",
@@ -830,12 +830,12 @@ describe("Planning Mode Routes", () => {
         const streamRes = await REQUEST(buildApp(), "GET", `/api/planning/${sessionId}/stream`);
 
         expect(streamRes.status).toBe(200);
-        expect(streamRes.body).not.toContain("id: 1\nevent: thinking");
+        expect(streamRes.body).toContain("id: 1\nevent: thinking");
         expect(streamRes.body).toContain("id: 2");
         expect(streamRes.body).toContain("event: complete");
       });
 
-      it("gracefully ignores invalid Last-Event-ID values", async () => {
+      it("treats invalid Last-Event-ID values as first connect", async () => {
         const startRes = await REQUEST(
           buildApp(),
           "POST",
@@ -861,9 +861,54 @@ describe("Planning Mode Routes", () => {
         );
 
         expect(streamRes.status).toBe(200);
-        expect(streamRes.body).not.toContain("id: 1\nevent: thinking");
+        expect(streamRes.body).toContain("id: 1\nevent: thinking");
         expect(streamRes.body).toContain("id: 2");
         expect(streamRes.body).toContain("event: complete");
+      });
+
+      it("replays buffered thinking on first connect when session already has currentQuestion", async () => {
+        const startRes = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start",
+          JSON.stringify({ initialPlan: "Catch-up thinking before question" }),
+          { "Content-Type": "application/json" },
+        );
+        const sessionId = startRes.body.sessionId as string;
+
+        const { planningStreamManager, getSession } = await import("../planning.js");
+        const session = getSession(sessionId);
+        expect(session).toBeDefined();
+
+        planningStreamManager.broadcast(sessionId, { type: "thinking", data: "first buffered thought" });
+
+        const mockQuestion = {
+          id: "q-catchup-thinking",
+          type: "text",
+          question: "What is your preference?",
+          description: "Please choose",
+        };
+        // @ts-expect-error - test setup mutates in-memory session state
+        session!.currentQuestion = mockQuestion;
+
+        planningStreamManager.broadcast(sessionId, { type: "question", data: mockQuestion });
+
+        setTimeout(() => {
+          planningStreamManager.broadcast(sessionId, { type: "complete" });
+        }, 10);
+
+        const streamRes = await REQUEST(
+          buildApp(),
+          "GET",
+          `/api/planning/${sessionId}/stream`,
+        );
+
+        expect(streamRes.status).toBe(200);
+        expect(typeof streamRes.body).toBe("string");
+        expect(streamRes.body).toContain("event: thinking");
+        expect(streamRes.body).toContain("first buffered thought");
+        expect(streamRes.body).toContain("event: question");
+        expect(streamRes.body).toContain("What is your preference?");
       });
 
       it("emits catch-up question event for awaiting_input sessions", async () => {
@@ -1410,6 +1455,7 @@ describe("Planning Mode Routes", () => {
             dependencies: ["FN-500"],
             priority: "normal",
           }),
+          { invokeTaskCreatedHook: false },
         );
         expect(store.updateTask).toHaveBeenCalledWith("FN-099", { size: "S" });
       });
@@ -1473,6 +1519,7 @@ describe("Planning Mode Routes", () => {
             title: "Build resumable planning flow",
             dependencies: ["FN-100"],
           }),
+          { invokeTaskCreatedHook: false },
         );
         expect(store.logEntry).toHaveBeenCalledWith(
           "FN-043",
@@ -1531,6 +1578,7 @@ describe("Planning Mode Routes", () => {
             title: "Priority auth task",
             priority: "high",
           }),
+          { invokeTaskCreatedHook: false },
         );
       });
 
@@ -1625,6 +1673,7 @@ describe("Planning Mode Routes", () => {
         expect(store.createTask).toHaveBeenNthCalledWith(
           1,
           expect.objectContaining({ title: "Auth backend", description: "Implement backend", priority: "urgent" }),
+          { invokeTaskCreatedHook: false },
         );
         expect(store.createTask).toHaveBeenNthCalledWith(
           2,
@@ -1633,6 +1682,7 @@ describe("Planning Mode Routes", () => {
             description: generatedSubtasks[1]!.description,
             priority: "normal",
           }),
+          { invokeTaskCreatedHook: false },
         );
         expect(store.createTask).toHaveBeenNthCalledWith(
           3,
@@ -1641,6 +1691,7 @@ describe("Planning Mode Routes", () => {
             description: generatedSubtasks[2]!.description,
             priority: "normal",
           }),
+          { invokeTaskCreatedHook: false },
         );
         expect(store.updateTask).toHaveBeenCalledWith("FN-201", { size: "L" });
         expect(store.updateTask).toHaveBeenCalledWith("FN-203", { dependencies: ["FN-201", "FN-202"] });
@@ -1726,6 +1777,7 @@ describe("Planning Mode Routes", () => {
             title: generatedSubtasks[0]!.title,
             description: generatedSubtasks[0]!.description,
           }),
+          { invokeTaskCreatedHook: false },
         );
         expect(store.createTask).toHaveBeenNthCalledWith(
           2,
@@ -1734,6 +1786,7 @@ describe("Planning Mode Routes", () => {
             description: "Prepare rollout notes",
             priority: "high",
           }),
+          { invokeTaskCreatedHook: false },
         );
         expect(store.updateTask).toHaveBeenCalledWith("FN-211", { size: "S" });
         expect(store.updateTask).toHaveBeenCalledWith("FN-211", { dependencies: ["FN-210"] });
@@ -1828,6 +1881,7 @@ describe("Planning Mode Routes", () => {
             title: generatedSubtasks[0]!.title,
             description: generatedSubtasks[0]!.description,
           }),
+          { invokeTaskCreatedHook: false },
         );
         expect(store.createTask).toHaveBeenNthCalledWith(
           16,
@@ -1835,6 +1889,7 @@ describe("Planning Mode Routes", () => {
             title: generatedSubtasks[15]!.title,
             description: generatedSubtasks[15]!.description,
           }),
+          { invokeTaskCreatedHook: false },
         );
         expect(store.logEntry).toHaveBeenCalledTimes(16);
       });
@@ -1883,6 +1938,7 @@ describe("Planning Mode Routes", () => {
             branch: "feature/shared-auth",
             baseBranch: "develop",
           }),
+          { invokeTaskCreatedHook: false },
         );
       });
 
@@ -1952,10 +2008,12 @@ describe("Planning Mode Routes", () => {
         expect(store.createTask).toHaveBeenNthCalledWith(
           1,
           expect.objectContaining({ branch: "feature/auth-slice", baseBranch: "main" }),
+          { invokeTaskCreatedHook: false },
         );
         expect(store.createTask).toHaveBeenNthCalledWith(
           2,
           expect.objectContaining({ branch: "feature/auth-slice", baseBranch: "main" }),
+          { invokeTaskCreatedHook: false },
         );
       });
 
