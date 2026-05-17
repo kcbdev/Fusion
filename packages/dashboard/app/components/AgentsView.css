@@ -845,10 +845,6 @@
 }
 .agent-card--error { border-left-color: var(--state-error-border); }
 
-.spin {
-  animation: spin 1s linear infinite;
-}
-
 /* === FN-1167: Agent Org Chart + Chain of Command === */
 .agent-org-chart-shell {
   display: flex;

@@ -583,8 +583,15 @@ describe("PlanningModeModal", () => {
         expect(screen.getByText("Analyzing requirements...")).toBeDefined();
       });
 
+      const loader = document.querySelector(".planning-loading .spin");
+      expect(loader).not.toBeNull();
+
+      const { loadAllAppCss } = await import("../../test/cssFixture");
+      const css = loadAllAppCss();
+      expect(css).toMatch(/\.spin\s*\{[^}]*animation:\s*spin\s+1s\s+linear\s+infinite;/);
+
       expect(screen.getByRole("button", { name: "Hide thinking" })).toBeDefined();
-      expect(document.querySelector(".planning-thinking-output")).not.toBeNull();
+      expect(document.querySelector(".planning-thinking-output")?.textContent).toContain("Analyzing requirements...");
     });
   });
 

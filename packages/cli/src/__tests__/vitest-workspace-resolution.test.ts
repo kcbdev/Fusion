@@ -88,7 +88,7 @@ function restoreInternalPackageDistDirs() {
 
 describe("vitest workspace temp dir cleanup", () => {
   it("cleans stale workspace-resolution temp dirs without touching unrelated tmp dirs", () => {
-    const staleDir = join(workspaceRoot, `${hiddenDistRootPrefix}stale-test`);
+    const staleDir = join(workspaceRoot, `${hiddenDistRootPrefix}stale-test-${process.pid}-${Date.now()}`);
     const staleMarker = join(staleDir, "marker.txt");
     const unrelatedTmpDir = join(workspaceRoot, ".tmp-fn-other-marker-test");
 

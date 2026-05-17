@@ -978,6 +978,7 @@ If you're tempted to add `min-height: calc(var(--space-xl) + var(--space-md))` (
 - **`--surface-hover` is undefined** — This token is referenced in several places but never defined in `:root` or theme blocks. Use a fallback: `var(--surface-hover, rgba(0,0,0,0.03))` or define the token explicitly.
 - **Hardcoded `rgba(...)` for error states** — Use `color-mix(in srgb, var(--color-error) 10%, transparent)` instead of `rgba(248, 81, 73, 0.1)`.
 - **`.form-error` style** — Should use `color-mix(in srgb, var(--color-error) 10%, transparent)` for the background, not hardcoded rgba.
+- **Global `.spin` utility lives in `packages/dashboard/app/styles.css`** — Don't duplicate the generic `.spin { animation: spin 1s linear infinite; }` rule in component stylesheets. Keep per-component `.spin` rules only when they intentionally change keyframes/duration/specificity.
 - **`lucide-react` icon changes** — When adding new icons, update test mocks (`vi.mock("lucide-react")`) immediately. Missing mock exports cascade into runtime failures.
 - **Light-theme overrides** — Components using `var(*)` tokens generally inherit correctly from `[data-theme="light"]` root redefinitions. Only add explicit `[data-theme="light"]` overrides where fine-tuning is needed (opacity, subtle shadows).
 - **CSS regex tests in test files** — When changing mobile CSS values (e.g., `min-height`), update both the CSS and the corresponding test assertions. Use non-greedy `[^}]*` patterns for block-scoped regex, not `[\s\S]*` which can bleed across block boundaries.

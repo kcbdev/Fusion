@@ -1393,8 +1393,20 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
         return;
       }
 
+      // First-connect catch-up should replay buffered thinking chunks so the
+      // loading view can stream immediately even if the client subscribed late.
+      if (lastEventId === undefined) {
+        const bufferedThinking = planningStreamManager
+          .getBufferedEvents(sessionId, 0)
+          .filter((event) => event.event === "thinking");
+        if (!replayBufferedSSE(res, bufferedThinking)) {
+          res.end();
+          return;
+        }
+      }
+
       // Catch-up for awaiting_input sessions: emit current question immediately
-      // so late subscribers don't miss the transition and see the question without delay
+      // so late subscribers don't miss the transition and see the question without delay.
       if (session.currentQuestion) {
         const existing = planningStreamManager.getBufferedEvents(sessionId, 0);
         const lastQuestionEvent = [...existing].reverse().find((event) => event.event === "question");
@@ -1411,18 +1423,6 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
           }
         }
         // Don't return — subscribe to continue receiving events (thinking, next question, etc.)
-      } else if (lastEventId === undefined) {
-        // First-connect catch-up for a session that is still generating its
-        // first response: there is no question or summary yet, but the agent
-        // may already be streaming thinking deltas into the buffer faster
-        // than the client could establish the SSE connection. Replay every
-        // buffered event so the user sees the running thinking output from
-        // the start of generation, especially on slower mobile connections.
-        const buffered = planningStreamManager.getBufferedEvents(sessionId, 0);
-        if (!replayBufferedSSE(res, buffered)) {
-          res.end();
-          return;
-        }
       }
 
       // Subscribe to session events

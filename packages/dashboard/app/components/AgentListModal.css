@@ -221,7 +221,4 @@
 .agent-list-modal .agent-card[data-state="paused"] { border-left-color: var(--state-paused-border); }
 .agent-list-modal .agent-card[data-state="error"] { border-left-color: var(--state-error-border); }
 
-.spin {
-  animation: spin 1s linear infinite;
-}
 

@@ -6,10 +6,10 @@ const CLI_PACKAGE_VERSION = (
   JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf-8")) as { version: string }
 ).version;
 
-const cacheDir = "/tmp/fusion-update-cache-test";
+const cacheDir = `/tmp/fusion-update-cache-test-${process.pid}-${Date.now()}`;
 
 const { mockResolveGlobalDir } = vi.hoisted(() => ({
-  mockResolveGlobalDir: vi.fn().mockReturnValue("/tmp/fusion-update-cache-test"),
+  mockResolveGlobalDir: vi.fn().mockReturnValue(cacheDir),
 }));
 
 vi.mock("@fusion/core", () => ({
