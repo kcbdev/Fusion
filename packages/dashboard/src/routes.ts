@@ -148,9 +148,11 @@ import { registerNodeRoutes } from "./routes/register-node-routes.js";
 import { registerDockerNodeRoutes } from "./routes/register-docker-node-routes.js";
 import { registerDockerProvisioningRoutes } from "./routes/register-docker-provisioning-routes.js";
 import { registerSettingsSyncRoutes } from "./routes/register-settings-sync-routes.js";
+import { registerSecretsSyncRoutes } from "./routes/register-secrets-sync-routes.js";
 import { registerMeshRoutes } from "./routes/register-mesh-routes.js";
 import { registerDiscoveryRoutes } from "./routes/register-discovery-routes.js";
 import { registerSettingsSyncInboundRoutes } from "./routes/register-settings-sync-inbound-routes.js";
+import { registerSecretsSyncInboundRoutes } from "./routes/register-secrets-sync-inbound-routes.js";
 import { registerAgentCoreListCreateRoutes, registerAgentCoreRoutes } from "./routes/register-agent-core-routes.js";
 import { registerAgentRuntimeRoutes } from "./routes/register-agent-runtime-routes.js";
 import { registerAgentReflectionRatingRoutes } from "./routes/register-agent-reflection-rating-routes.js";
@@ -4316,6 +4318,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // ── Remote Node Settings Sync Routes ──────────────────────────────────────
 
   registerSettingsSyncRoutes(routeContext);
+  registerSecretsSyncRoutes(routeContext);
 
   // ── Mesh Topology Routes ────────────────────────────────────────────────
 
@@ -4328,6 +4331,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // ── Inbound Settings/Auth Sync Routes ─────────────────────────────────────
 
   registerSettingsSyncInboundRoutes(routeContext);
+  registerSecretsSyncInboundRoutes(routeContext);
 
   /**
    * GET /api/activity-feed
