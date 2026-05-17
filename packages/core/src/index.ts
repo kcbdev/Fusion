@@ -1154,4 +1154,12 @@ export {
 } from "./secrets-sync.js";
 export type {
   WrappedSecretsBundle,
+  SecretsSyncRecord,
 } from "./secrets-sync.js";
+export {
+  RESERVED_SYNC_PASSPHRASE_KEY,
+  getSyncPassphrase,
+  setSyncPassphrase,
+  clearSyncPassphrase,
+  hasSyncPassphraseConfigured,
+} from "./secrets-sync-passphrase.js";
