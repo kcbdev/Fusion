@@ -589,10 +589,6 @@
   color: var(--text-muted);
 }
 
-.spin {
-  animation: spin 1s linear infinite;
-}
-
 .detail-github-tracking-content {
   margin-top: var(--space-xs);
   padding-top: var(--space-xs);

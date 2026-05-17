@@ -189,6 +189,10 @@ html {
   animation: spin 1s linear infinite;
 }
 
+.spin {
+  animation: spin 1s linear infinite;
+}
+
 :root {
   --bg: #0d1117;
   --surface: #161b22;
