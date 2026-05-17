@@ -8498,6 +8498,19 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
       }
     };
 
+    const installGuardOrCleanup = async () => {
+      try {
+        await installTaskWorktreeIdentityGuard({ worktreePath: path, taskId });
+      } catch (error) {
+        try {
+          await execAsync(`rm -rf "${path}"`, { cwd: this.rootDir });
+        } catch {
+          executorLog.log(`Warning: failed to remove worktree after identity-guard install failure: ${path}`);
+        }
+        throw error;
+      }
+    };
+
     let staleLockRecoveryAttempted = false;
     try {
       await createWithBranch(branch);
