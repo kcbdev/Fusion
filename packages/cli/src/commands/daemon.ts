@@ -366,6 +366,8 @@ export async function runDaemon(opts: DaemonOptions = {}) {
     peerExchangeService = new PeerExchangeService(sharedCentralCore);
     try {
       peerExchangeService.start();
+      const globalSettings = await store.getGlobalSettingsStore().getSettings();
+      peerExchangeService.updateGlobalSettings(globalSettings);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[daemon] Failed to start peer exchange service: ${message}`);
@@ -438,6 +440,13 @@ export async function runDaemon(opts: DaemonOptions = {}) {
   );
 
   const store = primaryEngine.getTaskStore();
+
+  store.on("settings:updated", () => {
+    if (!peerExchangeService) return;
+    void store.getGlobalSettingsStore().getSettings().then((globalSettings) => {
+      peerExchangeService?.updateGlobalSettings(globalSettings);
+    }).catch(() => undefined);
+  });
 
   await store.watch();
 

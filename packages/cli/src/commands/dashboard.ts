@@ -1406,6 +1406,11 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   });
 
   registerHandler(store, "settings:updated", ({ settings, previous }) => {
+    if (peerExchangeService) {
+      void store.getGlobalSettingsStore().getSettings().then((globalSettings) => {
+        peerExchangeService?.updateGlobalSettings(globalSettings);
+      }).catch(() => undefined);
+    }
     const currentProviders = settings.customProviders;
     const previousProviders = previous.customProviders;
     if (JSON.stringify(currentProviders ?? []) === JSON.stringify(previousProviders ?? [])) {
@@ -1549,6 +1554,8 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     peerExchangeService = new PeerExchangeService(centralCoreForEngine);
     try {
       peerExchangeService.start();
+      const globalSettings = await store.getGlobalSettingsStore().getSettings();
+      peerExchangeService.updateGlobalSettings(globalSettings);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logSink.warn(`Failed to start peer exchange service: ${message}`, "dashboard");
@@ -1764,6 +1771,8 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
 
       peerExchangeService = new PeerExchangeService(centralCoreForMesh);
       peerExchangeService.start();
+      const globalSettings = await store.getGlobalSettingsStore().getSettings();
+      peerExchangeService.updateGlobalSettings(globalSettings);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logSink.warn(`Failed to initialize mesh networking: ${message}`, "dashboard");

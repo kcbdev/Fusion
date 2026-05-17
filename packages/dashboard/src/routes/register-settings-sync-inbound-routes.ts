@@ -1,4 +1,5 @@
 import { ApiError, badRequest } from "../api-error.js";
+import { invalidateAllGlobalSettingsCaches } from "../project-store-resolver.js";
 import { getFusionAuthPath } from "../auth-paths.js";
 import { readStoredAuthProvidersFromDisk, toProviderAuthEntries } from "./register-settings-sync-helpers.js";
 import type { ApiRouteRegistrar } from "./types.js";
@@ -63,6 +64,20 @@ export const registerSettingsSyncInboundRoutes: ApiRouteRegistrar = (ctx) => {
 
       // Apply remote settings
       const result = await central.applyRemoteSettings(payload);
+
+      // Apply inbound global settings through TaskStore so process-local caches
+      // and settings listeners receive consistent updates.
+      if (result.success && payload.global && typeof payload.global === "object") {
+        const localGlobal = await store.getGlobalSettingsStore().getSettings() as Record<string, unknown>;
+        const globalPatch = Object.fromEntries(
+          Object.entries(payload.global as Record<string, unknown>)
+            .filter(([key, value]) => value !== undefined && localGlobal[key] === undefined),
+        );
+        if (Object.keys(globalPatch).length > 0) {
+          await store.updateGlobalSettings(globalPatch);
+          invalidateAllGlobalSettingsCaches();
+        }
+      }
 
       // Build applied/skipped field lists
       const appliedFields = [

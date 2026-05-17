@@ -4,6 +4,7 @@ import net from "node:net";
 import type { CustomProvider } from "@fusion/core";
 import { ApiError, badRequest, notFound } from "../api-error.js";
 import type { ApiRouteRegistrar } from "./types.js";
+import { invalidateAllGlobalSettingsCaches } from "../project-store-resolver.js";
 
 /**
  * Masks an API key for safe display, showing only the first 3 and last 4 characters.
@@ -459,6 +460,7 @@ export const registerCustomProviderRoutes: ApiRouteRegistrar = (ctx) => {
       const settings = await store.getGlobalSettingsStore().getSettings();
       const providers = settings.customProviders ?? [];
       await store.updateGlobalSettings({ customProviders: [...providers, provider] });
+      invalidateAllGlobalSettingsCaches();
 
       res.status(201).json(sanitizeProvider(provider));
     } catch (err: unknown) {
@@ -497,6 +499,7 @@ export const registerCustomProviderRoutes: ApiRouteRegistrar = (ctx) => {
       const nextProviders = [...providers];
       nextProviders[targetIndex] = updatedProvider;
       await store.updateGlobalSettings({ customProviders: nextProviders });
+      invalidateAllGlobalSettingsCaches();
 
       res.json(sanitizeProvider(updatedProvider));
     } catch (err: unknown) {
@@ -528,6 +531,7 @@ export const registerCustomProviderRoutes: ApiRouteRegistrar = (ctx) => {
 
       const nextProviders = providers.filter((provider) => provider.id !== providerId);
       await store.updateGlobalSettings({ customProviders: nextProviders });
+      invalidateAllGlobalSettingsCaches();
       res.json({ success: true });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
