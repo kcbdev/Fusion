@@ -105,6 +105,12 @@ export {
   resolveSandboxProvisioningPolicy,
   extractSandboxProvisioningRequest,
 } from "./sandbox-provisioning-policy.js";
+export { SECRET_ACCESS_POLICIES } from "./types.js";
+export {
+  SECRET_ACCESS_POLICY_FALLBACK,
+  isSecretAccessPolicy,
+  resolveSecretAccessPolicy,
+} from "./secret-access-policy.js";
 export type {
   AgentProvisioningTool,
   AgentProvisioningPolicyInput,
@@ -114,6 +120,11 @@ export type {
   SandboxProvisioningPolicyInput,
   SandboxProvisioningPolicyDecision,
 } from "./sandbox-provisioning-policy.js";
+export type { SecretAccessPolicy } from "./types.js";
+export type {
+  ResolveSecretAccessPolicyInput,
+  ResolveSecretAccessPolicyDecision,
+} from "./secret-access-policy.js";
 export { TaskStore } from "./store.js";
 export {
   findDuplicateMatches,
