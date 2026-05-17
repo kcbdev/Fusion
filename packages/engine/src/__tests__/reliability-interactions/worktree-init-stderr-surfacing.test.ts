@@ -17,8 +17,8 @@ describe.skipIf(!hasGit)("reliability interactions: worktree init stderr surfaci
       },
       task: {
         column: "todo",
-        branch: null,
-        worktree: null,
+        branch: undefined,
+        worktree: undefined,
       },
     });
     fixtures.push(fixture);
