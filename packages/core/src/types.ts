@@ -1404,6 +1404,8 @@ export type SourceType =
   | "research"
   | "unknown";
 
+export const DUPLICATE_OF_METADATA_KEY = "duplicateOfTaskIds" as const;
+
 /** Provenance metadata for how a task was created. */
 export interface TaskSource {
   sourceType: SourceType;
@@ -1412,6 +1414,11 @@ export interface TaskSource {
   sourceSessionId?: string;
   sourceMessageId?: string;
   sourceParentTaskId?: string;
+  /**
+   * Reserved metadata keys:
+   * - `duplicateOfTaskIds: string[]` stores structured duplicate lineage captured
+   *   from triage parsing and backfills.
+   */
   sourceMetadata?: Record<string, unknown>;
 }
 
