@@ -34,7 +34,7 @@ import {
   type AgentSession,
   type ToolDefinition,
 } from "@mariozechner/pi-coding-agent";
-import { getEnabledPiExtensionPaths, getFusionAgentDir, getLegacyPiAgentDir, reconcileClaudeCliPaths, reconcileDroidCliPaths, resolvePiExtensionProjectRoot } from "@fusion/core";
+import { getEnabledPiExtensionPaths, getFusionAgentDir, getLegacyPiAgentDir, getProjectRootFromWorktree, reconcileClaudeCliPaths, reconcileDroidCliPaths, resolvePiExtensionProjectRoot } from "@fusion/core";
 import type {
   AgentPermissionPolicyActionCategory,
   PermanentAgentActionCategory,
@@ -1225,41 +1225,7 @@ async function registerExtensionProviders(cwd: string, modelRegistry: ModelRegis
 
 // ── Worktree Path Boundary Helpers ──────────────────────────────────────────
 
-/**
- * Detect if a path is a task worktree under `.worktrees/`.
- * Returns the project root if the path is a worktree, otherwise null.
- *
- * Examples:
- *   `/project/.worktrees/fn-001` → `/project`
- *   `/project/.worktrees/fn-001/src/file.ts` → `/project`
- *   `/project` → null (not a worktree)
- */
-export function getProjectRootFromWorktree(
-  cwd: string,
-  opts?: { worktreesDirCandidates?: string[] },
-): string | null {
-  const legacyMatch = cwd.match(/^(.+?)[\\/]\.worktrees[\\/][^\\/]+(?:[\\/]|$)/);
-  if (legacyMatch) {
-    return legacyMatch[1]!;
-  }
-
-  for (const candidate of opts?.worktreesDirCandidates ?? []) {
-    const normalizedCandidate = resolve(candidate);
-    const normalizedCwd = resolve(cwd);
-    const rel = relative(normalizedCandidate, normalizedCwd);
-    if (rel !== "" && !rel.startsWith("..") && !isAbsolute(rel)) {
-      const firstSegment = rel.split(/[\\/]/).filter(Boolean)[0];
-      if (firstSegment) {
-        const parent = normalizedCandidate.split(/[\\/]/).slice(0, -1).join("/");
-        if (parent) {
-          return parent;
-        }
-      }
-    }
-  }
-
-  return null;
-}
+export { getProjectRootFromWorktree };
 
 async function isRegisteredGitWorktree(projectRoot: string, worktreePath: string): Promise<boolean> {
   try {

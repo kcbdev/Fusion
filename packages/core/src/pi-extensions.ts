@@ -36,7 +36,39 @@ export function getFusionAgentSettingsPath(home?: string): string {
   return join(getFusionAgentDir(home), "settings.json");
 }
 
+export function getProjectRootFromWorktree(
+  cwd: string,
+  opts?: { worktreesDirCandidates?: string[] },
+): string | null {
+  const legacyMatch = cwd.match(/^(.+?)[\\/]\.worktrees[\\/][^\\/]+(?:[\\/]|$)/);
+  if (legacyMatch) {
+    return legacyMatch[1]!;
+  }
+
+  for (const candidate of opts?.worktreesDirCandidates ?? []) {
+    const normalizedCandidate = resolve(candidate);
+    const normalizedCwd = resolve(cwd);
+    const rel = relative(normalizedCandidate, normalizedCwd);
+    if (rel !== "" && !rel.startsWith("..") && !isAbsolute(rel)) {
+      const firstSegment = rel.split(/[\\/]/).filter(Boolean)[0];
+      if (firstSegment) {
+        const parent = normalizedCandidate.split(/[\\/]/).slice(0, -1).join("/");
+        if (parent) {
+          return parent;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
 export function resolvePiExtensionProjectRoot(cwd: string): string {
+  const worktreeProjectRoot = getProjectRootFromWorktree(cwd);
+  if (worktreeProjectRoot && existsSync(join(worktreeProjectRoot, ".fusion"))) {
+    return worktreeProjectRoot;
+  }
+
   let current = resolve(cwd);
   while (true) {
     if (existsSync(join(current, ".fusion"))) {
