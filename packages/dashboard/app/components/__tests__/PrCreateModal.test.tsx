@@ -1,0 +1,142 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ComponentProps } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PrCreateModal } from "../PrCreateModal";
+import type { PrInfo } from "@fusion/core";
+
+const mocks = vi.hoisted(() => ({
+  generatePrMetadata: vi.fn(),
+  fetchPrPreflight: vi.fn(),
+  fetchPrOptions: vi.fn(),
+  createPr: vi.fn(),
+}));
+
+vi.mock("../../api", () => ({
+  generatePrMetadata: mocks.generatePrMetadata,
+  fetchPrPreflight: mocks.fetchPrPreflight,
+  fetchPrOptions: mocks.fetchPrOptions,
+  createPr: mocks.createPr,
+}));
+
+const metadata = { title: "AI title", body: "AI body", templateUsed: true };
+const preflight = {
+  branchOnRemote: true,
+  commitsPresent: true,
+  conflictsWithBase: false,
+  ghAuthOk: true,
+  defaultBaseBranch: "main",
+  head: "fusion/FN-4756",
+  commits: [{ sha: "abcdef1", subject: "feat", author: "dev" }],
+  changedFiles: [{ path: "a.ts", additions: 1, deletions: 0, status: "modified" as const }],
+};
+const options = {
+  baseBranches: ["main", "develop"],
+  reviewers: [{ login: "rev1", name: "Reviewer 1" }],
+  assignees: [{ login: "assign1", name: "Assignee 1" }],
+  labels: [{ name: "bug", color: "ff0000" }],
+};
+
+function renderModal(overrides?: Partial<ComponentProps<typeof PrCreateModal>>) {
+  const onClose = vi.fn();
+  const onCreated = vi.fn();
+  const addToast = vi.fn();
+  render(
+    <PrCreateModal
+      open
+      taskId="FN-4756"
+      onClose={onClose}
+      onCreated={onCreated}
+      addToast={addToast}
+      {...overrides}
+    />,
+  );
+  return { onClose, onCreated, addToast };
+}
+
+describe("PrCreateModal", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.generatePrMetadata.mockResolvedValue(metadata);
+    mocks.fetchPrPreflight.mockResolvedValue(preflight);
+    mocks.fetchPrOptions.mockResolvedValue(options);
+    mocks.createPr.mockResolvedValue({ number: 12, title: "AI title", url: "url", status: "open", headBranch: "h", baseBranch: "main", commentCount: 0 } as PrInfo);
+  });
+
+  it("renders nothing when closed", () => {
+    render(<PrCreateModal open={false} taskId="FN-4756" onClose={vi.fn()} onCreated={vi.fn()} addToast={vi.fn()} />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("loads metadata/preflight/options on open", async () => {
+    renderModal();
+    await waitFor(() => {
+      expect(mocks.generatePrMetadata).toHaveBeenCalledTimes(1);
+      expect(mocks.fetchPrPreflight).toHaveBeenCalledTimes(1);
+      expect(mocks.fetchPrOptions).toHaveBeenCalledTimes(1);
+    });
+    expect(await screen.findByDisplayValue("AI title")).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("AI body")).toBeInTheDocument();
+  });
+
+  it("regenerates and reverts AI content", async () => {
+    mocks.generatePrMetadata.mockResolvedValueOnce(metadata).mockResolvedValueOnce({ title: "New title", body: "New body", templateUsed: false });
+    renderModal();
+    const titleInput = await screen.findByDisplayValue("AI title");
+    fireEvent.change(titleInput, { target: { value: "custom" } });
+    expect(screen.getByRole("button", { name: /revert to ai version/i })).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: /^regenerate$/i })[0]);
+    await screen.findByDisplayValue("New title");
+    fireEvent.change(screen.getByDisplayValue("New title"), { target: { value: "edited" } });
+    fireEvent.click(screen.getByRole("button", { name: /revert to ai version/i }));
+    expect(screen.getByDisplayValue("New title")).toBeInTheDocument();
+  });
+
+  it("disables submit when preflight fails and toggles draft label", async () => {
+    mocks.fetchPrPreflight.mockResolvedValueOnce({ ...preflight, ghAuthOk: false });
+    renderModal();
+    const submitButton = await screen.findByRole("button", { name: "Create PR" });
+    expect(submitButton).toBeDisabled();
+    fireEvent.click(screen.getByLabelText(/create as draft/i));
+    expect(screen.getByRole("button", { name: "Create draft PR" })).toBeInTheDocument();
+  });
+
+  it("adds and removes chips and submits payload", async () => {
+    const { onCreated, addToast, onClose } = renderModal();
+    await screen.findByDisplayValue("AI title");
+
+    fireEvent.change(screen.getByPlaceholderText("Filter reviewers"), { target: { value: "rev" } });
+    fireEvent.click(screen.getByRole("button", { name: /reviewer 1/i }));
+    fireEvent.change(screen.getByPlaceholderText("Filter assignees"), { target: { value: "assign" } });
+    fireEvent.click(screen.getByRole("button", { name: /assignee 1/i }));
+    fireEvent.change(screen.getByPlaceholderText("Filter labels"), { target: { value: "bug" } });
+    fireEvent.click(screen.getByRole("button", { name: "bug" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Create PR" }));
+    await waitFor(() => expect(mocks.createPr).toHaveBeenCalledTimes(1));
+    expect(mocks.createPr.mock.calls[0][1]).toMatchObject({ reviewers: ["rev1"], assignees: ["assign1"], labels: ["bug"] });
+    expect(onCreated).toHaveBeenCalled();
+    expect(addToast).toHaveBeenCalledWith("Created PR #12", "success");
+    expect(onClose).toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /remove reviewer 1/i }));
+  });
+
+  it("shows submit error and retries with same payload", async () => {
+    mocks.createPr.mockRejectedValueOnce(new Error("bad")).mockResolvedValueOnce({ number: 22, title: "ok", url: "u", status: "open", headBranch: "h", baseBranch: "main", commentCount: 0 } as PrInfo);
+    renderModal();
+    await screen.findByDisplayValue("AI title");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create PR" }));
+    expect(await screen.findByText("bad")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(mocks.createPr).toHaveBeenCalledTimes(2));
+    expect(mocks.createPr.mock.calls[0][1]).toEqual(mocks.createPr.mock.calls[1][1]);
+  });
+
+  it("closes on escape", async () => {
+    const { onClose } = renderModal();
+    await screen.findByDisplayValue("AI title");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalled();
+  });
+});
