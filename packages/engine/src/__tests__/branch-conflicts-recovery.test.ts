@@ -267,7 +267,7 @@ describe("branch contamination recovery classification", () => {
       branchName: "feature",
       baseSha,
       taskId: "FN-4428",
-      alreadyUpstreamShas: [foreign.sha],
+      shasToDrop: [foreign.sha],
     });
 
     const history = await run(`git log --format=%s ${baseSha}..feature`, repoDir);
