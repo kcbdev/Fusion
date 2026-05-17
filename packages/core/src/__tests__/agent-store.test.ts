@@ -1848,14 +1848,14 @@ describe("AgentStore", () => {
     });
 
     it("checkoutTask acquires a lease and stamps lease metadata", async () => {
-      const updated = await store.checkoutTask(holderId, taskId, { nodeId: "node-a", runId: "run-1", leaseEpoch: 2 });
+      const updated = await store.checkoutTask(holderId, taskId, { nodeId: "node-a", runId: "run-1", leaseEpoch: 0 });
 
       expect(updated.checkedOutBy).toBe(holderId);
       expect(updated.checkedOutAt).toBeDefined();
       expect(updated.checkoutNodeId).toBe("node-a");
       expect(updated.checkoutRunId).toBe("run-1");
       expect(updated.checkoutLeaseRenewedAt).toBeDefined();
-      expect(updated.checkoutLeaseEpoch).toBe(2);
+      expect(updated.checkoutLeaseEpoch).toBeGreaterThanOrEqual(1);
 
       const persisted = await taskStore.getTask(taskId);
       expect(persisted?.checkedOutBy).toBe(holderId);
@@ -1863,29 +1863,31 @@ describe("AgentStore", () => {
       expect(persisted?.checkoutNodeId).toBe("node-a");
       expect(persisted?.checkoutRunId).toBe("run-1");
       expect(persisted?.checkoutLeaseRenewedAt).toBeDefined();
-      expect(persisted?.checkoutLeaseEpoch).toBe(2);
+      expect(persisted?.checkoutLeaseEpoch).toBe(updated.checkoutLeaseEpoch);
     });
 
     it("checkoutTask is idempotent for same agent/node/epoch and renews lease timestamp", async () => {
-      const first = await store.checkoutTask(holderId, taskId, { nodeId: "node-a", runId: "run-1", leaseEpoch: 2 });
+      const first = await store.checkoutTask(holderId, taskId, { nodeId: "node-a", runId: "run-1", leaseEpoch: 0 });
       await new Promise((resolve) => setTimeout(resolve, 5));
-      const second = await store.checkoutTask(holderId, taskId, { nodeId: "node-a", runId: "run-2", leaseEpoch: 2 });
+      const second = await store.checkoutTask(holderId, taskId, {
+        nodeId: "node-a",
+        runId: "run-2",
+        leaseEpoch: first.checkoutLeaseEpoch ?? 0,
+      });
 
       expect(second.checkedOutBy).toBe(holderId);
       expect(second.checkedOutAt).toBe(first.checkedOutAt);
       expect(second.checkoutNodeId).toBe("node-a");
       expect(second.checkoutRunId).toBe("run-2");
-      expect(second.checkoutLeaseEpoch).toBe(2);
+      expect(second.checkoutLeaseEpoch).toBe(first.checkoutLeaseEpoch);
       expect(second.checkoutLeaseRenewedAt).not.toBe(first.checkoutLeaseRenewedAt);
     });
 
-    it("checkoutTask updates epoch for same holder when lease epoch increases", async () => {
-      await store.checkoutTask(holderId, taskId, { nodeId: "node-a", runId: "run-1", leaseEpoch: 1 });
-      const bumped = await store.checkoutTask(holderId, taskId, { nodeId: "node-a", runId: "run-2", leaseEpoch: 3 });
-
-      expect(bumped.checkedOutBy).toBe(holderId);
-      expect(bumped.checkoutLeaseEpoch).toBe(3);
-      expect(bumped.checkoutRunId).toBe("run-2");
+    it("checkoutTask rejects renewal attempts with a mismatched epoch", async () => {
+      await store.checkoutTask(holderId, taskId, { nodeId: "node-a", runId: "run-1", leaseEpoch: 0 });
+      await expect(
+        store.checkoutTask(holderId, taskId, { nodeId: "node-a", runId: "run-2", leaseEpoch: 3 }),
+      ).rejects.toBeInstanceOf(CheckoutConflictError);
     });
 
     it("checkoutTask throws CheckoutConflictError when already held by another agent", async () => {

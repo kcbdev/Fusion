@@ -226,7 +226,12 @@ describe("settings key parity", () => {
   it("only intentional shared keys appear in both global and project scopes", () => {
     const projectKeySet = new Set(PROJECT_SETTINGS_KEYS as readonly string[]);
     const overlap = (GLOBAL_SETTINGS_KEYS as readonly string[]).filter((key) => projectKeySet.has(key));
-    expect(overlap).toEqual(["taskTokenBudget", "githubTrackingDefaultRepo", "worktrunk"]);
+    expect(overlap).toEqual([
+      "taskTokenBudget",
+      "githubTrackingDefaultRepo",
+      "worktrunk",
+      "owningNodeHandoffPolicy",
+    ]);
   });
 });
 

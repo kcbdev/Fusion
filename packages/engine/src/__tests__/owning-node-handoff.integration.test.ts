@@ -32,7 +32,6 @@ describe("MeshLeaseManager owning-node handoff integration", () => {
 
   async function seedLease(ownerNodeId: string): Promise<void> {
     await taskStore.updateTask(taskId, {
-      column: "in-progress",
       checkedOutBy: "agent-1",
       checkedOutAt: "2026-05-01T00:00:00.000Z",
       checkoutLeaseRenewedAt: "2026-05-01T00:00:00.000Z",

@@ -1029,7 +1029,9 @@ export class Scheduler {
             }
           }
 
-          const nodeHealth = this.options.nodeHealthMonitor.getNodeHealth(effectiveNode.nodeId);
+          const nodeHealth = effectiveNode.nodeId
+            ? this.options.nodeHealthMonitor.getNodeHealth(effectiveNode.nodeId)
+            : undefined;
           const decision = applyUnavailableNodePolicy({
             effectiveNode,
             nodeHealth,

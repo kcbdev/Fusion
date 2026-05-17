@@ -846,7 +846,15 @@ export interface TaskLogEntry {
   runContext?: RunMutationContext;
 }
 
-export type ActivityEventType = "task:created" | "task:moved" | "task:updated" | "task:deleted" | "task:merged" | "task:failed" | "settings:updated";
+export type ActivityEventType =
+  | "task:created"
+  | "task:moved"
+  | "task:updated"
+  | "task:deleted"
+  | "task:merged"
+  | "task:failed"
+  | "settings:updated"
+  | "project:isolation-transition";
 
 export interface ActivityLogEntry {
   id: string;
