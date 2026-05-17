@@ -1793,9 +1793,15 @@ export function QuickChatFAB({
     hasAppliedInitialSessionRef.current = true;
 
     if (selectedSession.modelProvider && selectedSession.modelId) {
+      const targetKey = `${FN_AGENT_ID}::${selectedSession.modelProvider}/${selectedSession.modelId}`;
+      restoredFromExistingSessionRef.current = true;
+      prevSessionTargetRef.current = targetKey;
       setChatMode("model");
       setSelectedModel(`${selectedSession.modelProvider}/${selectedSession.modelId}`);
     } else {
+      const targetKey = `${selectedSession.agentId}::`;
+      restoredFromExistingSessionRef.current = true;
+      prevSessionTargetRef.current = targetKey;
       setChatMode("agent");
       setSelectedAgentId(selectedSession.agentId);
     }
