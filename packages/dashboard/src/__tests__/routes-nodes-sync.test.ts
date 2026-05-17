@@ -523,6 +523,43 @@ describe("Node settings sync routes", () => {
       expect(mockApplyRemoteSettings).not.toHaveBeenCalled();
     });
 
+    it("returns 400 for local node", async () => {
+      const localNode = createMockLocalNode();
+      mockGetNode.mockResolvedValue(localNode);
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/nodes/node-local-001/settings/pull",
+        JSON.stringify({}),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("local node");
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockApplyRemoteSettings).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 for invalid conflictResolution", async () => {
+      const remoteNode = createMockRemoteNode();
+      mockGetNode.mockResolvedValue(remoteNode);
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/nodes/node-remote-001/settings/pull",
+        JSON.stringify({ conflictResolution: "invalid" }),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("conflictResolution");
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockApplyRemoteSettings).not.toHaveBeenCalled();
+      expect(mockUpdateSettingsSyncState).not.toHaveBeenCalled();
+    });
+
     it("returns 404 for unknown node", async () => {
       mockGetNode.mockResolvedValue(null);
 
@@ -535,6 +572,34 @@ describe("Node settings sync routes", () => {
       );
 
       expect(res.status).toBe(404);
+    });
+
+    it("returns skippedFields and error when applyRemoteSettings fails", async () => {
+      const remoteNode = createMockRemoteNode();
+      mockGetNode.mockResolvedValue(remoteNode);
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          global: { defaultProvider: "openai" },
+          project: { maxConcurrent: 3 },
+        }),
+      });
+      mockApplyRemoteSettings.mockResolvedValue({ success: false, error: "checksum mismatch" });
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/nodes/node-remote-001/settings/pull",
+        JSON.stringify({}),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(false);
+      expect(res.body.skippedFields).toEqual(expect.arrayContaining(["defaultProvider"]));
+      expect(res.body.error).toContain("checksum mismatch");
+      expect(mockApplyRemoteSettings).toHaveBeenCalledTimes(1);
+      expect(mockUpdateSettingsSyncState).toHaveBeenCalledTimes(1);
     });
 
     it("records sync state after successful pull", async () => {
@@ -722,6 +787,42 @@ describe("Node settings sync routes", () => {
       expect(res.status).toBe(404);
     });
 
+    it("returns 400 for local node", async () => {
+      const localNode = createMockLocalNode();
+      mockGetNode.mockResolvedValue(localNode);
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/nodes/node-local-001/auth/sync",
+        JSON.stringify({ direction: "push" }),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("local node");
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockUpdateSettingsSyncState).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 for invalid direction", async () => {
+      const remoteNode = createMockRemoteNode();
+      mockGetNode.mockResolvedValue(remoteNode);
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/nodes/node-remote-001/auth/sync",
+        JSON.stringify({ direction: "sideways" }),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("direction");
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockUpdateSettingsSyncState).not.toHaveBeenCalled();
+    });
+
     it("returns 400 for remote node without apiKey", async () => {
       const remoteNode = createMockRemoteNode({ apiKey: undefined });
       mockGetNode.mockResolvedValue(remoteNode);
@@ -783,6 +884,40 @@ describe("Node settings sync routes", () => {
       expect(serialized).not.toContain("\"key\"");
       expect(serialized).not.toContain("\"access\"");
       expect(serialized).not.toContain("\"refresh\"");
+    });
+
+    it("records sync state for pull-mode auth sync", async () => {
+      const remoteNode = createMockRemoteNode();
+      mockGetNode.mockResolvedValue(remoteNode);
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          authMaterial: {
+            version: 1,
+            exportedAt: "2026-04-14T10:00:00.000Z",
+            checksum: "auth-checksum",
+            payload: { providerAuth: { google: { type: "api_key", key: "sk-pull-secret-123" } } },
+          },
+          sourceNodeId: "node-other",
+          timestamp: "2026-04-14T10:00:00.000Z",
+        }),
+      });
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/nodes/node-remote-001/auth/sync",
+        JSON.stringify({ direction: "pull" }),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockUpdateSettingsSyncState).toHaveBeenCalledWith(
+        "node-remote-001",
+        expect.objectContaining({
+          lastSyncedAt: expect.any(String),
+        }),
+      );
     });
 
     it("emits structured redacted diagnostics for pull-mode auth sync", async () => {
@@ -932,6 +1067,24 @@ describe("Node settings sync routes", () => {
 
       expect(res.status).toBe(400);
       expect(res.body.error).toContain("sourceNodeId");
+      expect(mockApplyRemoteSettings).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 when payload is missing exportedAt", async () => {
+      const localNode = createMockLocalNode();
+      mockListNodes.mockResolvedValue([localNode]);
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/settings/sync-receive",
+        JSON.stringify({ sourceNodeId: "node-remote-001" }),
+        { "content-type": "application/json", "Authorization": `Bearer ${localNode.apiKey}` },
+      );
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("exportedAt");
+      expect(mockApplyRemoteSettings).not.toHaveBeenCalled();
     });
   });
 
@@ -998,6 +1151,26 @@ describe("Node settings sync routes", () => {
       );
 
       expect(res.status).toBe(400);
+    });
+
+    it.each([
+      [{ authMaterial: { version: 1, exportedAt: "2026-04-14T10:00:00.000Z", checksum: "auth-checksum", payload: { providerAuth: {} } }, timestamp: "2026-04-14T10:00:00.000Z" }, "sourceNodeId"],
+      [{ authMaterial: { version: 1, exportedAt: "2026-04-14T10:00:00.000Z", checksum: "auth-checksum", payload: { providerAuth: {} } }, sourceNodeId: "node-remote-001" }, "timestamp"],
+    ])("returns 400 when payload is missing %s", async (body, missingField) => {
+      const localNode = createMockLocalNode();
+      mockListNodes.mockResolvedValue([localNode]);
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/settings/auth-receive",
+        JSON.stringify(body),
+        { "content-type": "application/json", "Authorization": `Bearer ${localNode.apiKey}` },
+      );
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain(missingField);
+      expect(mockAuthStorageSet).not.toHaveBeenCalled();
     });
 
     it("emits structured redacted diagnostics for auth-receive", async () => {
@@ -1080,6 +1253,31 @@ describe("Node settings sync routes", () => {
       const res = await get(app, "/api/settings/auth-export");
 
       expect(res.status).toBe(401);
+    });
+
+    it.each([
+      ["POST", "/api/settings/sync-receive", JSON.stringify({ sourceNodeId: "node-remote-001", exportedAt: "2026-04-14T10:00:00.000Z" }), "applyRemoteSettings"],
+      ["POST", "/api/settings/auth-receive", JSON.stringify({ authMaterial: { version: 1, exportedAt: "2026-04-14T10:00:00.000Z", checksum: "auth-checksum", payload: { providerAuth: {} } }, sourceNodeId: "node-remote-001", timestamp: "2026-04-14T10:00:00.000Z" }), "authStorageSet"],
+      ["GET", "/api/settings/auth-export", undefined, "authExport"],
+    ])("returns 401 Local node not configured for inbound endpoint (%s %s)", async (method, path, body, sideEffect) => {
+      mockListNodes.mockResolvedValue([createMockRemoteNode()]);
+
+      const res = await request(
+        app,
+        method,
+        path,
+        body,
+        { "content-type": "application/json", Authorization: "Bearer some-token" },
+      );
+
+      expect(res.status).toBe(401);
+      expect(res.body.error).toContain("Local node not configured");
+      if (sideEffect === "applyRemoteSettings") {
+        expect(mockApplyRemoteSettings).not.toHaveBeenCalled();
+      }
+      if (sideEffect === "authStorageSet") {
+        expect(mockAuthStorageSet).not.toHaveBeenCalled();
+      }
     });
   });
 
