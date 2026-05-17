@@ -221,7 +221,36 @@ function isThinkingReasoningConflictError(message: string): boolean {
   return /cannot specify both\s+['"]?thinking['"]?\s+and\s+['"]?reasoning_effort['"]?/i.test(message);
 }
 
-async function promptSessionAndCheck(session: AgentSession, prompt: string, options?: unknown): Promise<void> {
+function coercePreviewValue(value: unknown): string {
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  if (typeof value === "symbol") {
+    return value.description ? `symbol(${value.description})` : "symbol";
+  }
+  if (typeof value === "function") {
+    return `[function ${value.name || "anonymous"}]`;
+  }
+  return Object.prototype.toString.call(value);
+}
+
+function safePreviewJson(value: unknown): string {
+  const seen = new WeakSet<object>();
+  return JSON.stringify(value, (_key, candidate) => {
+    if (typeof candidate === "object" && candidate !== null) {
+      if (seen.has(candidate)) {
+        return "[Circular]";
+      }
+      seen.add(candidate);
+    }
+    return candidate;
+  });
+}
+
+export async function promptSessionAndCheck(session: AgentSession, prompt: string, options?: unknown): Promise<void> {
   clearSessionStateError(session);
   if (options === undefined) {
     await session.prompt(prompt);
@@ -244,13 +273,13 @@ async function promptSessionAndCheck(session: AgentSession, prompt: string, opti
             const content = m?.content;
             return {
               index: i < 0 ? idx : i,
-              role: m?.role,
+              role: coercePreviewValue(m?.role),
               contentType: Array.isArray(content) ? `array(len=${content.length})` : typeof content,
-              toolName: (m as { toolName?: unknown }).toolName,
-              stopReason: (m as { stopReason?: unknown }).stopReason,
+              toolName: coercePreviewValue((m as { toolName?: unknown }).toolName),
+              stopReason: coercePreviewValue((m as { stopReason?: unknown }).stopReason),
             };
           });
-          piLog.error(`pi state error — transcript tail (${messages.length} msgs total): ${JSON.stringify(recent)}`);
+          piLog.error(`pi state error — transcript tail (${messages.length} msgs total): ${safePreviewJson(recent)}`);
         } else {
           piLog.error(`pi state error — state.messages is not an array: ${typeof messages}`);
         }
