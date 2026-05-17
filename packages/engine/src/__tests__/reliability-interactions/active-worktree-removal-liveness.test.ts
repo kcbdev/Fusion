@@ -166,7 +166,7 @@ describe("FN-4811: active worktree removal liveness gate", () => {
         { id: "FN-DONE", worktree: STALE_PATH, column: "done", paused: false },
       ]);
       // existsSync defaults to true in helpers; this exercises the standard remove path.
-      mockedExistsSync.mockImplementation((p: string) => p === STALE_PATH);
+      mockedExistsSync.mockImplementation((p: Parameters<typeof mockedExistsSync>[0]) => p === STALE_PATH);
 
       const result = await (executor as any).cleanupConflictingWorktree(
         STALE_PATH,
@@ -190,19 +190,19 @@ describe("FN-4811: active worktree removal liveness gate", () => {
       store.listTasks.mockResolvedValue([]);
 
       const execCalls: string[] = [];
-      mockedExec.mockImplementation((cmd: string, _opts: unknown, cb: (err: Error | null, out: { stdout: string; stderr: string }) => void) => {
+      mockedExec.mockImplementation(((cmd: string, _opts: unknown, cb?: (...args: unknown[]) => void) => {
         execCalls.push(cmd);
         if (cmd.includes("git worktree remove")) {
           const err: any = new Error(
             `Command failed: ${cmd}\nfatal: validation failed, cannot remove working tree:`,
           );
           err.stderr = "fatal: validation failed, cannot remove working tree:";
-          cb(err, { stdout: "", stderr: err.stderr });
+          cb?.(err, "", err.stderr);
           return { kill: () => undefined } as any;
         }
-        cb(null, { stdout: "", stderr: "" });
+        cb?.(null, "", "");
         return { kill: () => undefined } as any;
-      });
+      }) as any);
 
       const result = await (executor as any).cleanupConflictingWorktree(
         STALE_PATH,
