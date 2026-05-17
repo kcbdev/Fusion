@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
 import type { Statement } from "./db.js";
 import { resolveGlobalDir } from "./global-settings.js";
+import type { CentralClaimStore, TaskClaimRow } from "./types.js";
 
 // ── JSON Helpers (reused from db.ts) ─────────────────────────────────────
 
@@ -29,7 +30,7 @@ export { toJson, toJsonNullable, fromJson };
 
 // ── Schema Definition ───────────────────────────────────────────────────
 
-const CENTRAL_SCHEMA_VERSION = 12;
+const CENTRAL_SCHEMA_VERSION = 13;
 
 const CENTRAL_SCHEMA_SQL = `
 -- Projects table (project registry)
@@ -282,6 +283,21 @@ CREATE TABLE IF NOT EXISTS secrets_global (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idxSecretsGlobalKey ON secrets_global(key);
 
+-- Authoritative cross-node task claims
+CREATE TABLE IF NOT EXISTS taskClaims (
+  projectId TEXT NOT NULL,
+  taskId TEXT NOT NULL,
+  ownerNodeId TEXT NOT NULL,
+  ownerAgentId TEXT NOT NULL,
+  ownerRunId TEXT,
+  leaseEpoch INTEGER NOT NULL,
+  leaseRenewedAt TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  PRIMARY KEY (projectId, taskId)
+);
+CREATE INDEX IF NOT EXISTS idxTaskClaimsOwner ON taskClaims(ownerNodeId);
+
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS __meta (
   key TEXT PRIMARY KEY,
@@ -491,9 +507,25 @@ CREATE TABLE IF NOT EXISTS secrets_global (
 CREATE UNIQUE INDEX IF NOT EXISTS idxSecretsGlobalKey ON secrets_global(key);
 `;
 
+const CENTRAL_SCHEMA_V13_MIGRATION_SQL = `
+CREATE TABLE IF NOT EXISTS taskClaims (
+  projectId TEXT NOT NULL,
+  taskId TEXT NOT NULL,
+  ownerNodeId TEXT NOT NULL,
+  ownerAgentId TEXT NOT NULL,
+  ownerRunId TEXT,
+  leaseEpoch INTEGER NOT NULL,
+  leaseRenewedAt TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  PRIMARY KEY (projectId, taskId)
+);
+CREATE INDEX IF NOT EXISTS idxTaskClaimsOwner ON taskClaims(ownerNodeId);
+`;
+
 // ── Central Database Class ────────────────────────────────────────────────
 
-export class CentralDatabase {
+export class CentralDatabase implements CentralClaimStore {
   private db: DatabaseSync;
   private readonly dbPath: string;
   private readonly globalDir: string;
@@ -643,6 +675,11 @@ export class CentralDatabase {
       migrated = true;
     }
 
+    if (currentVersion < 13) {
+      this.db.exec(CENTRAL_SCHEMA_V13_MIGRATION_SQL);
+      migrated = true;
+    }
+
     if (migrated) {
       this.db
         .prepare("INSERT INTO __meta (key, value) VALUES ('schemaVersion', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
@@ -740,6 +777,181 @@ export class CentralDatabase {
       throw err;
     } finally {
       this.transactionDepth--;
+    }
+  }
+
+  private mapTaskClaimRow(row: Record<string, unknown> | undefined): TaskClaimRow | null {
+    if (!row) return null;
+    return {
+      projectId: String(row.projectId),
+      taskId: String(row.taskId),
+      ownerNodeId: String(row.ownerNodeId),
+      ownerAgentId: String(row.ownerAgentId),
+      ownerRunId: row.ownerRunId == null ? null : String(row.ownerRunId),
+      leaseEpoch: Number(row.leaseEpoch),
+      leaseRenewedAt: String(row.leaseRenewedAt),
+      createdAt: String(row.createdAt),
+      updatedAt: String(row.updatedAt),
+    };
+  }
+
+  getTaskClaim(projectId: string, taskId: string): TaskClaimRow | null {
+    try {
+      const row = this.db
+        .prepare(
+          `SELECT projectId, taskId, ownerNodeId, ownerAgentId, ownerRunId, leaseEpoch, leaseRenewedAt, createdAt, updatedAt
+           FROM taskClaims
+           WHERE projectId = ? AND taskId = ?`,
+        )
+        .get(projectId, taskId) as Record<string, unknown> | undefined;
+      return this.mapTaskClaimRow(row);
+    } catch (error) {
+      throw new Error(`Failed to fetch task claim for ${projectId}/${taskId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  tryClaimTask(input: {
+    projectId: string;
+    taskId: string;
+    nodeId: string;
+    agentId: string;
+    runId: string | null;
+    renewedAt: string;
+    expectedEpoch?: number | null;
+  }): { ok: true; claim: TaskClaimRow } | { ok: false; reason: "conflict"; current: TaskClaimRow } {
+    try {
+      return this.transaction(() => {
+        const existing = this.getTaskClaim(input.projectId, input.taskId);
+        const now = input.renewedAt;
+        if (!existing) {
+          this.db
+            .prepare(
+              `INSERT INTO taskClaims (projectId, taskId, ownerNodeId, ownerAgentId, ownerRunId, leaseEpoch, leaseRenewedAt, createdAt, updatedAt)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .run(input.projectId, input.taskId, input.nodeId, input.agentId, input.runId, 1, now, now, now);
+          const claim = this.getTaskClaim(input.projectId, input.taskId);
+          if (!claim) {
+            throw new Error("Task claim insert succeeded but row could not be read back");
+          }
+          return { ok: true as const, claim };
+        }
+
+        const sameOwner =
+          existing.ownerNodeId === input.nodeId && existing.ownerAgentId === input.agentId;
+        const expectedEpochMatches = input.expectedEpoch === existing.leaseEpoch;
+
+        if (sameOwner) {
+          if (!expectedEpochMatches) {
+            return { ok: false as const, reason: "conflict" as const, current: existing };
+          }
+          this.db
+            .prepare(
+              `UPDATE taskClaims
+               SET ownerRunId = ?, leaseRenewedAt = ?, updatedAt = ?
+               WHERE projectId = ? AND taskId = ?`,
+            )
+            .run(input.runId, now, now, input.projectId, input.taskId);
+          const claim = this.getTaskClaim(input.projectId, input.taskId);
+          if (!claim) {
+            throw new Error("Task claim renewal succeeded but row could not be read back");
+          }
+          return { ok: true as const, claim };
+        }
+
+        if (input.expectedEpoch == null || !expectedEpochMatches) {
+          return { ok: false as const, reason: "conflict" as const, current: existing };
+        }
+
+        this.db
+          .prepare(
+            `UPDATE taskClaims
+             SET ownerNodeId = ?, ownerAgentId = ?, ownerRunId = ?, leaseEpoch = ?, leaseRenewedAt = ?, updatedAt = ?
+             WHERE projectId = ? AND taskId = ?`,
+          )
+          .run(
+            input.nodeId,
+            input.agentId,
+            input.runId,
+            existing.leaseEpoch + 1,
+            now,
+            now,
+            input.projectId,
+            input.taskId,
+          );
+        const claim = this.getTaskClaim(input.projectId, input.taskId);
+        if (!claim) {
+          throw new Error("Task claim owner change succeeded but row could not be read back");
+        }
+        return { ok: true as const, claim };
+      });
+    } catch (error) {
+      throw new Error(`Failed to claim task ${input.projectId}/${input.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  renewTaskClaim(input: {
+    projectId: string;
+    taskId: string;
+    nodeId: string;
+    agentId: string;
+    runId: string | null;
+    renewedAt: string;
+    expectedEpoch: number;
+  }): { ok: true; claim: TaskClaimRow } | { ok: false; reason: "conflict" | "not_found"; current: TaskClaimRow | null } {
+    try {
+      return this.transaction(() => {
+        const existing = this.getTaskClaim(input.projectId, input.taskId);
+        if (!existing) {
+          return { ok: false as const, reason: "not_found" as const, current: null };
+        }
+        if (
+          existing.ownerNodeId !== input.nodeId ||
+          existing.ownerAgentId !== input.agentId ||
+          existing.leaseEpoch !== input.expectedEpoch
+        ) {
+          return { ok: false as const, reason: "conflict" as const, current: existing };
+        }
+        this.db
+          .prepare(
+            `UPDATE taskClaims
+             SET ownerRunId = ?, leaseRenewedAt = ?, updatedAt = ?
+             WHERE projectId = ? AND taskId = ?`,
+          )
+          .run(input.runId, input.renewedAt, input.renewedAt, input.projectId, input.taskId);
+        const claim = this.getTaskClaim(input.projectId, input.taskId);
+        if (!claim) {
+          throw new Error("Task claim renew succeeded but row could not be read back");
+        }
+        return { ok: true as const, claim };
+      });
+    } catch (error) {
+      throw new Error(`Failed to renew task claim ${input.projectId}/${input.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  releaseTaskClaim(input: {
+    projectId: string;
+    taskId: string;
+    nodeId: string;
+    agentId: string;
+  }): { ok: true } | { ok: false; reason: "not_owner" | "not_found"; current: TaskClaimRow | null } {
+    try {
+      return this.transaction(() => {
+        const existing = this.getTaskClaim(input.projectId, input.taskId);
+        if (!existing) {
+          return { ok: false as const, reason: "not_found" as const, current: null };
+        }
+        if (existing.ownerNodeId !== input.nodeId || existing.ownerAgentId !== input.agentId) {
+          return { ok: false as const, reason: "not_owner" as const, current: existing };
+        }
+        this.db
+          .prepare("DELETE FROM taskClaims WHERE projectId = ? AND taskId = ?")
+          .run(input.projectId, input.taskId);
+        return { ok: true as const };
+      });
+    } catch (error) {
+      throw new Error(`Failed to release task claim ${input.projectId}/${input.taskId}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

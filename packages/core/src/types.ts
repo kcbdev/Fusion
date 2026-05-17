@@ -1270,6 +1270,46 @@ export interface CheckoutClaimPrecondition {
   expectedLeaseEpoch?: number | null;
 }
 
+export interface TaskClaimRow {
+  projectId: string;
+  taskId: string;
+  ownerNodeId: string;
+  ownerAgentId: string;
+  ownerRunId: string | null;
+  leaseEpoch: number;
+  leaseRenewedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CentralClaimStore {
+  tryClaimTask(input: {
+    projectId: string;
+    taskId: string;
+    nodeId: string;
+    agentId: string;
+    runId: string | null;
+    renewedAt: string;
+    expectedEpoch?: number | null;
+  }): { ok: true; claim: TaskClaimRow } | { ok: false; reason: "conflict"; current: TaskClaimRow };
+  renewTaskClaim(input: {
+    projectId: string;
+    taskId: string;
+    nodeId: string;
+    agentId: string;
+    runId: string | null;
+    renewedAt: string;
+    expectedEpoch: number;
+  }): { ok: true; claim: TaskClaimRow } | { ok: false; reason: "conflict" | "not_found"; current: TaskClaimRow | null };
+  releaseTaskClaim(input: {
+    projectId: string;
+    taskId: string;
+    nodeId: string;
+    agentId: string;
+  }): { ok: true } | { ok: false; reason: "not_owner" | "not_found"; current: TaskClaimRow | null };
+  getTaskClaim(projectId: string, taskId: string): TaskClaimRow | null;
+}
+
 /**
  * Durable task-level aggregate token usage totals persisted on the task row.
  *

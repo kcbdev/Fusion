@@ -81,7 +81,7 @@ describe("secrets schema migrations", () => {
       const version = db
         .prepare("SELECT value FROM __meta WHERE key = 'schemaVersion'")
         .get() as { value: string };
-      expect(version.value).toBe("12");
+      expect(version.value).toBe("13");
     } finally {
       db.close();
       rmSync(dir, { recursive: true, force: true });
@@ -129,7 +129,7 @@ describe("secrets schema migrations", () => {
       const version = db
         .prepare("SELECT value FROM __meta WHERE key = 'schemaVersion'")
         .get() as { value: string };
-      expect(version.value).toBe("12");
+      expect(version.value).toBe("13");
     } finally {
       db.close();
       rmSync(dir, { recursive: true, force: true });
@@ -156,7 +156,7 @@ describe("secrets schema migrations", () => {
         .get() as { value: string };
 
       expect(projectVersion.value).toBe("83");
-      expect(centralVersion.value).toBe("12");
+      expect(centralVersion.value).toBe("13");
     } finally {
       projectDb.close();
       centralDb.close();
