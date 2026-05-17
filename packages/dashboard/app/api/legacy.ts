@@ -8560,9 +8560,30 @@ export function fetchChatRoomMessages(
   );
 }
 
+export async function uploadChatRoomAttachment(
+  roomId: string,
+  file: File,
+  projectId?: string,
+): Promise<{ attachment: ChatAttachment }> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(buildApiUrl(withProjectId(`/chat/rooms/${encodeURIComponent(roomId)}/attachments`, projectId)), {
+    method: "POST",
+    headers: withTokenHeader(),
+    body: formData,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error((data as { error?: string }).error || "Upload failed");
+  return data as { attachment: ChatAttachment };
+}
+
+export function attachmentBaseUrlForRoom(roomId: string, projectId?: string): string {
+  return buildApiUrl(withProjectId(`/chat/rooms/${encodeURIComponent(roomId)}/attachments/`, projectId));
+}
+
 export function postChatRoomMessage(
   id: string,
-  input: { content: string; senderAgentId?: null; mentions?: string[]; attachments?: File[] | ChatAttachment[] },
+  input: { content: string; senderAgentId?: null; mentions?: string[]; attachments?: ChatAttachment[] },
   projectId?: string,
 ): Promise<ChatRoomMessageResponse> {
   return api<ChatRoomMessageResponse>(withProjectId(`/chat/rooms/${encodeURIComponent(id)}/messages`, projectId), {
