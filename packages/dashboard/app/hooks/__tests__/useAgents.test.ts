@@ -209,8 +209,18 @@ describe("useAgents", () => {
     renderHook(() => useAgents());
 
     await waitFor(() => {
-      expect(JSON.parse(window.localStorage.getItem(SWR_CACHE_KEYS.AGENTS) ?? "[]")).toEqual(agents);
-      expect(JSON.parse(window.localStorage.getItem(SWR_CACHE_KEYS.AGENT_STATS) ?? "null")).toEqual(stats);
+      const agentsEnvelope = JSON.parse(window.localStorage.getItem(SWR_CACHE_KEYS.AGENTS) ?? "null") as {
+        savedAt?: number;
+        data?: unknown;
+      };
+      const statsEnvelope = JSON.parse(window.localStorage.getItem(SWR_CACHE_KEYS.AGENT_STATS) ?? "null") as {
+        savedAt?: number;
+        data?: unknown;
+      };
+      expect(typeof agentsEnvelope.savedAt).toBe("number");
+      expect(agentsEnvelope.data).toEqual(agents);
+      expect(typeof statsEnvelope.savedAt).toBe("number");
+      expect(statsEnvelope.data).toEqual(stats);
     });
   });
 
