@@ -13,10 +13,12 @@ This document is the canonical contract for Fusion multi-leader mesh replication
 - Support deterministic replay/reconciliation after recovery.
 - Expose read staleness so clients can decide whether to trust last-known global state.
 
-### Non-goals (for v1)
-- Full runtime scheduler failover.
-- Full live-process state migration.
-- Immediate global consistency for every data class.
+### Runtime scope and non-goals (v1, updated for FN-4772/FN-4813)
+- `HybridExecutor` is the canonical multi-project/multi-node runtime orchestration path.
+- Scheduler failover (a peer node taking over another node's live scheduler tick loop) is an explicit non-goal.
+- Live-process state migration (moving in-memory executor/session state between nodes mid-task) is an explicit non-goal.
+- Supported alternative: lease handoff under `OwningNodeHandoffPolicy` (`park`, `reassign-to-local`, `reassign-any-healthy`) so tasks resume from durable state on the picking node.
+- Immediate global consistency for every data class remains a non-goal.
 
 ## 2. Terms
 

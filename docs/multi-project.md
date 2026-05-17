@@ -221,6 +221,39 @@ Gate policy is centralized in `shouldUseHybridExecutor(centralCore)` and evaluat
 
 When enabled, shutdown ordering is deterministic: `hybridExecutor.shutdown()` runs before `engineManager.stopAll()` so runtime orchestration services (including node health monitoring) tear down before project engines.
 
+### Distributed claim mutex
+
+Task checkout now uses an atomic claim path (`TaskStore.tryClaimCheckout`) keyed by a precondition on `(checkedOutBy, checkoutNodeId, checkoutLeaseEpoch)`.
+
+- First claim from unowned state succeeds and bumps `checkoutLeaseEpoch`.
+- Contending claims fail with `CheckoutConflictError` and keep the existing owner row intact.
+- Lease renewal for the current owner requires an exact epoch precondition and updates `checkoutLeaseRenewedAt`/`checkoutRunId` without bumping the epoch.
+
+### Unavailable node handoff
+
+Owning-node outage behavior is explicitly governed by `owningNodeHandoffPolicy` (global and per-project settings):
+
+- `block` → park work until owner recovers.
+- `reassign-to-local` (default) → local node takes over.
+- `reassign-any-healthy` → any healthy node may claim/restart.
+
+`Scheduler` and `MeshLeaseManager` both call `decideOwningNodeHandoff(...)` so dispatch-time routing and lease recovery use the same decision surface.
+
+| Capability | Status |
+|---|---|
+| Distributed checkout claim mutex | Shipped |
+| Owning-node lease handoff policy | Shipped |
+| Scheduler failover across nodes | Not shipped (explicit non-goal) |
+| Live-process state migration | Not shipped (explicit non-goal) |
+
+### Isolation-mode transition
+
+`HybridExecutor.transitionProjectIsolation(projectId, nextMode, { force? })` provides the supported runtime path for isolation-mode changes.
+
+- In HybridExecutor mode, transition persists via `CentralCore.transitionProjectIsolation(...)` then restarts the project runtime.
+- If restart is blocked by active tasks and `force` is not set, the persisted isolation-mode change is rolled back and the call returns `reason: "active_tasks"`.
+- In single-project mode (no HybridExecutor), the dashboard route falls back to `updateProject(...)` and returns `transitionDeferred: true` so callers know the change applies on next engine start.
+
 ## Auto-Migration from Single-Project
 
 On first run after upgrade:
