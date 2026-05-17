@@ -120,7 +120,6 @@ export type {
   SandboxProvisioningPolicyInput,
   SandboxProvisioningPolicyDecision,
 } from "./sandbox-provisioning-policy.js";
-export type { SecretAccessPolicy } from "./types.js";
 export type {
   ResolveSecretAccessPolicyInput,
   ResolveSecretAccessPolicyDecision,
