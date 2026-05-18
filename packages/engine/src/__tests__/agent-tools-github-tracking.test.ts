@@ -30,41 +30,48 @@ describe("agent task creation github-tracking hook integration", () => {
     await rm(globalDir, { recursive: true, force: true });
   });
 
-  it("calls the post-create hook for fn_task_create", async () => {
+  it.each([
+    {
+      name: "fn_task_create",
+      createTool: () => createTaskCreateTool(store, { sourceType: "api" }),
+      params: { description: "agent-created triage task" },
+      expected: { description: "agent-created triage task", column: "triage", sourceType: "api" },
+    },
+    {
+      name: "fn_delegate_task",
+      createTool: () => createDelegateTaskTool({
+        getAgent: vi.fn().mockResolvedValue({ id: "agent-1", name: "Worker", role: "executor", state: "idle" }),
+      } as never, store),
+      params: { agent_id: "agent-1", description: "delegated tracked task" },
+      expected: { description: "delegated tracked task", assignedAgentId: "agent-1", column: "todo", sourceType: "api" },
+    },
+  ])("calls the post-create hook for $name", async ({ createTool, params, expected }) => {
     const hook = vi.fn(async (_task: Task) => {});
     setTaskCreatedHook(hook);
 
-    const tool = createTaskCreateTool(store);
-    const result = await tool.execute("call-1", { description: "agent-created triage task" } as never, undefined, undefined, {} as never);
+    const result = await createTool().execute("call-1", params as never, undefined, undefined, {} as never);
 
     expect(result.details).toHaveProperty("taskId");
     expect(hook).toHaveBeenCalledTimes(1);
-    expect(hook.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
-      description: "agent-created triage task",
-      column: "triage",
-    }));
+    expect(hook.mock.calls[0]?.[0]).toEqual(expect.objectContaining(expected));
   });
 
-  it("calls the post-create hook for fn_delegate_task", async () => {
-    const hook = vi.fn(async (_task: Task) => {});
-    setTaskCreatedHook(hook);
-
-    const agentStore = {
-      getAgent: vi.fn().mockResolvedValue({ id: "agent-1", name: "Worker", role: "executor", state: "idle" }),
-    };
-
-    const tool = createDelegateTaskTool(agentStore as never, store);
-    const result = await tool.execute("call-1", {
-      agent_id: "agent-1",
-      description: "delegated tracked task",
-    } as never, undefined, undefined, {} as never);
-
-    expect(result.details).toEqual(expect.objectContaining({ taskId: expect.any(String), agentId: "agent-1" }));
-    expect(hook).toHaveBeenCalledTimes(1);
-    expect(hook.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
-      description: "delegated tracked task",
-      assignedAgentId: "agent-1",
-      column: "todo",
+  it.each([
+    {
+      name: "fn_task_create",
+      run: async () => createTaskCreateTool(store, { sourceType: "api" }).execute("call-1", { description: "fails softly" } as never, undefined, undefined, {} as never),
+    },
+    {
+      name: "fn_delegate_task",
+      run: async () => createDelegateTaskTool({
+        getAgent: vi.fn().mockResolvedValue({ id: "agent-1", name: "Worker", role: "executor", state: "idle" }),
+      } as never, store).execute("call-1", { agent_id: "agent-1", description: "fails softly" } as never, undefined, undefined, {} as never),
+    },
+  ])("does not throw when hook rejects for $name", async ({ run }) => {
+    setTaskCreatedHook(vi.fn(async () => {
+      throw new Error("hook failed");
     }));
+
+    await expect(run()).resolves.toBeTruthy();
   });
 });
