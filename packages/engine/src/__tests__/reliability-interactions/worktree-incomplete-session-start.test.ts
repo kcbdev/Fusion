@@ -135,8 +135,37 @@ describe("reliability interactions: FN-4917 worktree incomplete session-start", 
     const executor = new TaskExecutor(store, process.cwd());
     await executor.execute(task);
 
-    expect(store.moveTask).toHaveBeenCalledWith("FN-4917-T", "todo", expect.anything());
-    expect(Array.isArray(events)).toBe(true);
+    expect(store.moveTask).not.toHaveBeenCalledWith("FN-4917-T", "todo", expect.anything());
+    expect(store.moveTask.mock.calls).not.toContainEqual(["FN-4917-T", "todo"]);
+
+    const incompleteDetectedIndex = events.findIndex((event) => event.type === "worktree:incomplete-detected" || event.mutationType === "worktree:incomplete-detected");
+    const autoRecoveredIndex = events.findIndex((event) => event.type === "worktree:auto-recovered" || event.mutationType === "worktree:auto-recovered");
+    expect(incompleteDetectedIndex).toBeGreaterThanOrEqual(0);
+    expect(autoRecoveredIndex).toBeGreaterThanOrEqual(0);
+    expect(incompleteDetectedIndex).toBeLessThan(autoRecoveredIndex);
+    expect(events[autoRecoveredIndex]).toEqual(expect.objectContaining({
+      metadata: expect.objectContaining({
+        action: "escalate-exhausted",
+        retries: MAX_WORKTREE_SESSION_RETRIES,
+        maxRetries: MAX_WORKTREE_SESSION_RETRIES,
+        staleWorktree: "/tmp/wt",
+        classification: "incomplete",
+      }),
+    }));
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "task:auto-recover-worktree-session-exhausted",
+      metadata: expect.objectContaining({
+        maxRetries: MAX_WORKTREE_SESSION_RETRIES,
+        source: "executor-session-start",
+      }),
+    }));
+    expect(store.logEntry.mock.calls.some((call) => call.some((arg) => typeof arg === "string" && /Worktree session-start auto-recovery exhausted/.test(arg)))).toBe(true);
+    for (const call of store.logEntry.mock.calls) {
+      const leaked = call.some((arg) => typeof arg === "string" && /Refusing to start coding agent/.test(arg));
+      expect(leaked).toBe(false);
+    }
+    expect(task.column).toBe("in-progress");
   });
 
   it("does not intercept unrelated session-start failures", async () => {
