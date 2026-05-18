@@ -78,8 +78,9 @@ vi.mock("../../api", () => ({
 }));
 
 const mockConfirm = vi.fn<(options: ConfirmOptions) => Promise<boolean>>();
+const mockConfirmWithChoice = vi.fn<(options: ConfirmOptions) => Promise<"primary" | "tertiary" | "cancel">>();
 vi.mock("../../hooks/useConfirm", () => ({
-  useConfirm: () => ({ confirm: mockConfirm }),
+  useConfirm: () => ({ confirm: mockConfirm, confirmWithChoice: mockConfirmWithChoice }),
 }));
 
 import { uploadAttachment, fetchMission, fetchAgent } from "../../api";
@@ -135,6 +136,8 @@ afterEach(() => {
   badgeUpdatesMock.clear();
   subscribeToBadgeMock.mockReset();
   unsubscribeFromBadgeMock.mockReset();
+  mockConfirm.mockReset();
+  mockConfirmWithChoice.mockReset();
 });
 
 describe("TaskCard", () => {
@@ -266,6 +269,44 @@ describe("TaskCard", () => {
     await waitFor(() => {
       expect(onDeleteTask).toHaveBeenNthCalledWith(2, "FN-001", { removeDependencyReferences: true, githubIssueAction: "delete" });
     });
+  });
+
+  it("archives done task when archive-instead is chosen", async () => {
+    const onDeleteTask = vi.fn(async () => makeTask());
+    const onArchiveTask = vi.fn(async () => makeTask({ column: "archived" }));
+    mockConfirmWithChoice.mockResolvedValueOnce("tertiary");
+
+    render(
+      <TaskCard
+        task={makeTask({ column: "done" })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onDeleteTask={onDeleteTask}
+        onArchiveTask={onArchiveTask}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Delete task"));
+    });
+
+    await waitFor(() => {
+      expect(onArchiveTask).toHaveBeenCalledWith("FN-001");
+      expect(onDeleteTask).not.toHaveBeenCalled();
+    });
+  });
+
+  it("keeps two-button delete flow for non-done task", async () => {
+    const onDeleteTask = vi.fn(async () => makeTask());
+    mockConfirm.mockResolvedValueOnce(false);
+
+    render(<TaskCard task={makeTask({ column: "triage" })} onOpenDetail={noop} addToast={noop} onDeleteTask={onDeleteTask} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Delete task"));
+    });
+
+    expect(mockConfirmWithChoice).not.toHaveBeenCalled();
   });
 
   it("keeps legacy delete options for untracked task", async () => {

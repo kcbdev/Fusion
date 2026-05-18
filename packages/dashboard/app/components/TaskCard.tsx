@@ -549,7 +549,7 @@ function TaskCardComponent({
   const sendBackRef = useRef<HTMLDivElement>(null);
   const [isInViewport, setIsInViewport] = useState(false);
   const { badgeUpdates, subscribeToBadge, unsubscribeFromBadge } = useBadgeWebSocket(projectId);
-  const { confirm } = useConfirm();
+  const { confirm, confirmWithChoice } = useConfirm();
   const retryWarningThreshold = useRetryWarning();
 
   // Touch gesture detection refs
@@ -1189,13 +1189,38 @@ function TaskCardComponent({
     e.stopPropagation();
     if (!onDeleteTask) return;
 
-    const shouldDelete = await confirm({
-      title: "Delete Task",
-      message: `Delete ${task.id}?`,
-      danger: true,
-    });
-    if (!shouldDelete) {
-      return;
+    if (task.column === "done" && onArchiveTask) {
+      const deleteChoice = await confirmWithChoice({
+        title: "Delete Task",
+        message: `Delete ${task.id}?`,
+        confirmLabel: "Delete",
+        cancelLabel: "Cancel",
+        tertiaryLabel: "Archive Instead",
+        danger: true,
+      });
+
+      if (deleteChoice === "tertiary") {
+        try {
+          await onArchiveTask(task.id);
+          addToast(`Archived ${task.id}`, "success");
+        } catch (err) {
+          addToast(`Failed to archive ${task.id}: ${getErrorMessage(err)}`, "error");
+        }
+        return;
+      }
+
+      if (deleteChoice !== "primary") {
+        return;
+      }
+    } else {
+      const shouldDelete = await confirm({
+        title: "Delete Task",
+        message: `Delete ${task.id}?`,
+        danger: true,
+      });
+      if (!shouldDelete) {
+        return;
+      }
     }
 
     const trackedIssue = task.githubTracking?.enabled === true ? task.githubTracking.issue : undefined;
@@ -1259,7 +1284,7 @@ function TaskCardComponent({
         addToast(`Failed to delete ${task.id}: ${getErrorMessage(retryErr)}`, "error");
       }
     }
-  }, [addToast, confirm, onDeleteTask, task.githubTracking?.enabled, task.githubTracking?.issue, task.id]);
+  }, [addToast, confirm, confirmWithChoice, onArchiveTask, onDeleteTask, task.column, task.githubTracking?.enabled, task.githubTracking?.issue, task.id]);
 
   const handleOpenFiles = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1614,7 +1639,7 @@ function TaskCardComponent({
               <Pencil size={12} />
             </button>
           )}
-          {task.column === "triage" && onDeleteTask && (
+          {(task.column === "triage" || task.column === "done") && onDeleteTask && (
             <button
               className="card-delete-btn"
               onClick={handleDeleteClick}
