@@ -6,6 +6,8 @@
  * Packages are weighted by discovered test-file count. Oversized packages are
  * rewritten into virtual shard entries `{ name, shardIndex, shardCount }` so
  * one package can execute across multiple CI shards via `vitest --shard`.
+ * Any package above `splitLimit` always splits at least 2 ways (up to shard
+ * count), even when it is smaller than one full per-shard budget.
  * The planner then uses a best-fit-decreasing strategy that packs each entry
  * toward the per-shard budget (or minimizes overshoot when necessary), while
  * keeping slices of the same package on different shards whenever possible.
@@ -104,7 +106,7 @@ export function computeSplitPlan(packages, total, options = {}) {
       perShardBudget > 0 &&
       pkg.testFileCount > splitLimit;
     const sliceCount = shouldConsiderSplit
-      ? Math.min(total, Math.ceil(pkg.testFileCount / perShardBudget))
+      ? Math.min(total, Math.max(2, Math.ceil(pkg.testFileCount / perShardBudget)))
       : 1;
 
     if (sliceCount < 2) {
