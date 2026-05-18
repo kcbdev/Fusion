@@ -6,7 +6,6 @@ import { activeSessionRegistry } from "../active-session-registry.js";
 import {
   classifyForeignOnlyContamination,
   reanchorBranchToBase,
-  type ClassifyForeignOnlyContaminationResult,
 } from "../branch-conflicts.js";
 import type { RunAuditor } from "../run-audit.js";
 import { isUsableTaskWorktree } from "../worktree-pool.js";
@@ -63,7 +62,7 @@ export async function recoverForeignOnlyContamination(
     return { recovered: false, reason: "ambiguous" };
   }
 
-  if (await isUsableTaskWorktree(task.worktree)) {
+  if (await isUsableTaskWorktree(deps.repoDir, task.worktree)) {
     await reanchorBranchToBase({
       repoDir: deps.repoDir,
       worktreePath: task.worktree,
