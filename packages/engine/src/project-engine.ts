@@ -1573,10 +1573,33 @@ export class ProjectEngine {
               const shortSha = typeof commitSha === "string" && commitSha.length > 0
                 ? commitSha.slice(0, 8)
                 : "unknown";
+              const failedCommand = err instanceof VerificationError
+                ? err.verificationResult?.testResult?.command ?? err.verificationResult?.buildResult?.command ?? null
+                : null;
+              const exitCode = err instanceof VerificationError
+                ? err.verificationResult?.testResult?.exitCode ?? err.verificationResult?.buildResult?.exitCode ?? null
+                : null;
               const errorTail = errorMsg.length > 200 ? `${errorMsg.slice(0, 200)}…` : errorMsg;
               const message = `[verification] post-finalize verification failed for already-on-main fast-path; no action (commit=${shortSha}, error=${errorTail})`;
               await store.logEntry(taskId, message, "VerificationError").catch(() => undefined);
               runtimeLog.log(`Auto-merge: ${taskId} ${message}`);
+              const auditor = createRunAuditor(store, {
+                runId: generateSyntheticRunId("auto-merge", taskId),
+                agentId: "auto-merge",
+                taskId,
+                phase: "merge",
+              });
+              await auditor.database({
+                type: "task:post-finalize-verification-no-op",
+                target: taskId,
+                metadata: {
+                  taskId,
+                  commitSha,
+                  failedCommand,
+                  exitCode,
+                  errorTail,
+                },
+              }).catch(() => undefined);
               continue;
             }
 

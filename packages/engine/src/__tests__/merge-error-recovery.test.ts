@@ -72,6 +72,7 @@ type MockTaskStore = {
   logEntry: ReturnType<typeof vi.fn>;
   getActiveMergingTask: ReturnType<typeof vi.fn>;
   createTask: ReturnType<typeof vi.fn>;
+  recordRunAuditEvent: ReturnType<typeof vi.fn>;
   on: ReturnType<typeof vi.fn>;
   off: ReturnType<typeof vi.fn>;
 };
@@ -129,6 +130,7 @@ function makeStore({
       id: "FN-9999",
       description: input.description,
     })),
+    recordRunAuditEvent: vi.fn(async () => undefined),
     on: vi.fn(),
     off: vi.fn(),
   };
@@ -765,6 +767,17 @@ describe("ProjectEngine merge error recovery", () => {
       expect.stringContaining("[verification] post-finalize verification failed for already-on-main fast-path; no action"),
       "VerificationError",
     );
+    expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      domain: "database",
+      mutationType: "task:post-finalize-verification-no-op",
+      target: TASK_ID,
+      metadata: expect.objectContaining({
+        taskId: TASK_ID,
+        commitSha: "abcdef1234567890",
+        failedCommand: null,
+        exitCode: null,
+      }),
+    }));
   });
 
   it("moves task back to in-progress with merge-remediation status on verification errors", async () => {
