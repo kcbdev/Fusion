@@ -152,6 +152,45 @@ test("planShardAssignments: FN-5002 regression fixture keeps 4-shard variance be
   assert.ok(varianceRatio < 0.02, `expected <2% variance but got ${(varianceRatio * 100).toFixed(2)}% (${totals.join("/")})`);
 });
 
+test("planShardAssignments: FN-5036 keeps split engine slices from co-locating with heavy core and stays within 5% variance", () => {
+  const packages = [
+    { name: "@fusion/dashboard", testFileCount: 606 },
+    { name: "@fusion/engine", testFileCount: 365 },
+    { name: "@fusion/core", testFileCount: 200 },
+    { name: "@runfusion/fusion", testFileCount: 71 },
+    { name: "tail-a", testFileCount: 39 },
+    { name: "tail-b", testFileCount: 35 },
+    { name: "tail-c", testFileCount: 31 },
+    { name: "tail-d", testFileCount: 19 },
+    { name: "tail-e", testFileCount: 18 },
+    { name: "tail-f", testFileCount: 18 },
+    { name: "tail-g", testFileCount: 17 },
+    { name: "tail-h", testFileCount: 16 },
+    { name: "tail-i", testFileCount: 15 },
+    { name: "tail-j", testFileCount: 12 },
+  ];
+
+  const shards = planShardAssignments(packages, 4);
+  const totals = shards.map((entries) => entries.reduce((sum, entry) => sum + entry.weight, 0));
+  const mean = totals.reduce((sum, weight) => sum + weight, 0) / totals.length;
+  const varianceRatio = (Math.max(...totals) - Math.min(...totals)) / mean;
+
+  assert.ok(
+    varianceRatio <= 0.05,
+    `expected <=5% variance but got ${(varianceRatio * 100).toFixed(2)}% (${totals.join("/")})`,
+  );
+
+  for (const entries of shards) {
+    const hasCore = entries.some((entry) => entry.name === "@fusion/core");
+    if (!hasCore) continue;
+    const engineSliceCount = entries.filter((entry) => entry.name === "@fusion/engine" && entry.shardCount).length;
+    assert.ok(
+      engineSliceCount < 2,
+      "expected @fusion/core to not share a shard with both @fusion/engine virtual slices",
+    );
+  }
+});
+
 test("planShardAssignments: best-fit places unsplit large package on tightest under-budget shard", () => {
   const packages = [
     { name: "anchor", testFileCount: 290 },
