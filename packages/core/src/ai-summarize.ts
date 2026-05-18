@@ -12,6 +12,7 @@
  */
 
 import { getFnAgent, type AgentMessage } from "./ai-engine-loader.js";
+import { stripEmptyPlaceholders } from "./task-title-id-drift.js";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -879,6 +880,8 @@ export function sanitizeTitle(raw: string | undefined | null): string | null {
   if (/^created\s+(?:task\s+)?(?:fn-\d+\b|\*\*\s*fn-\d+\s*\*\*)/i.test(title)) {
     return null;
   }
+
+  title = stripEmptyPlaceholders(title);
 
   // Drop trailing punctuation that summary-like sentences leave behind.
   title = title.replace(/[.!?,;:]+$/, "").trim();

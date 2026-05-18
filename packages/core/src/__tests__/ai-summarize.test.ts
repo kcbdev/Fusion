@@ -305,6 +305,13 @@ describe("ai-summarize", () => {
       expect(sanitizeTitle("Why?")).toBe("Why");
     });
 
+    it("strips empty placeholder groups (FN-4978 regression)", () => {
+      expect(sanitizeTitle("Fix executor.ts stale session deadlock ( )")).toBe("Fix executor.ts stale session deadlock");
+      expect(sanitizeTitle("Add feature []")).toBe("Add feature");
+      expect(sanitizeTitle("Refactor (hotfix)")).toBe("Refactor (hotfix)");
+      expect(sanitizeTitle("( )")).toBeNull();
+    });
+
     it("hard-caps at MAX_TITLE_LENGTH", () => {
       const long = "x".repeat(100);
       const out = sanitizeTitle(long)!;

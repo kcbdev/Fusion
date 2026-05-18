@@ -48,9 +48,36 @@ describe("task-title-id-drift", () => {
     expect(normalizeTitleForTaskId("Foo FN-100:", "FN-999")).toEqual({ title: "Foo", changed: true });
   });
 
+  it("strips empty placeholder left by fn-token removal (FN-4978 regression)", () => {
+    const normalized = normalizeTitleForTaskId("Fix executor.ts stale session deadlock (FN-1234)", "FN-9999");
+    expect(normalized).toEqual({ title: "Fix executor.ts stale session deadlock", changed: true });
+    expect(normalized.title).not.toContain("(");
+    expect(normalized.title).not.toContain(")");
+  });
+
+  it("strips empty square and curly bracket placeholders", () => {
+    expect(normalizeTitleForTaskId("Bug [FN-1] thing", "FN-9")).toEqual({ title: "Bug thing", changed: true });
+    expect(normalizeTitleForTaskId("Bug {FN-1} thing", "FN-9")).toEqual({ title: "Bug thing", changed: true });
+  });
+
+  it("preserves valid qualifiers and matching row id token", () => {
+    expect(normalizeTitleForTaskId("Refactor parser (hotfix)", "FN-9")).toEqual({
+      title: "Refactor parser (hotfix)",
+      changed: false,
+    });
+    expect(normalizeTitleForTaskId("Add docs (FN-9)", "FN-9")).toEqual({
+      title: "Add docs (FN-9)",
+      changed: false,
+    });
+  });
+
   it("is idempotent", () => {
     const first = normalizeTitleForTaskId("Refinement: FN-100: foo", "FN-200");
     const second = normalizeTitleForTaskId(first.title ?? "", "FN-200");
     expect(second.changed).toBe(false);
+
+    const firstPlaceholderPass = normalizeTitleForTaskId("Fix executor.ts stale session deadlock (FN-1234)", "FN-9999");
+    const secondPlaceholderPass = normalizeTitleForTaskId(firstPlaceholderPass.title ?? "", "FN-9999");
+    expect(secondPlaceholderPass.changed).toBe(false);
   });
 });
