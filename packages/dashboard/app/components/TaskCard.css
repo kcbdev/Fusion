@@ -737,7 +737,8 @@
 
 .card-time-indicator,
 .card-github-tracking-chip,
-.card-retry-badge {
+.card-retry-badge,
+.card-create-pr-action {
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
@@ -756,7 +757,8 @@
 
 .card-time-indicator > span,
 .card-github-tracking-chip > span,
-.card-retry-badge > span {
+.card-retry-badge > span,
+.card-create-pr-action > span {
   display: inline-flex;
   align-items: center;
   line-height: 1;
@@ -766,6 +768,7 @@
 .card-time-indicator svg,
 .card-github-tracking-chip svg,
 .card-retry-badge svg,
+.card-create-pr-action svg,
 .card-source-provenance svg {
   display: block;
   flex-shrink: 0;
@@ -805,6 +808,29 @@
 .card-github-tracking-chip .provider-icon svg {
   width: 12px;
   height: 12px;
+}
+
+.card-create-pr-action {
+  border-color: color-mix(in srgb, var(--text-muted) 30%, transparent);
+  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+  color: var(--text);
+  text-decoration: none;
+  cursor: pointer;
+  appearance: none;
+  background-image: none;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.card-create-pr-action:hover {
+  background: var(--card-hover);
+}
+
+.card-create-pr-action:focus-visible {
+  box-shadow: var(--focus-ring-strong);
+  outline: none;
 }
 
 .card-progress-bar {
@@ -1317,7 +1343,8 @@
 
   .card-time-indicator,
   .card-github-tracking-chip,
-  .card-retry-badge {
+  .card-retry-badge,
+  .card-create-pr-action {
     padding: var(--space-xs) var(--space-sm);
     font-size: 0.625rem;
     height: var(--card-chip-height-mobile);
