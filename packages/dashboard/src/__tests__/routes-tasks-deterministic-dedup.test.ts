@@ -228,7 +228,10 @@ describe("task deterministic dedup", () => {
     expect(res.status).toBe(200);
     expect((res.body as Task).id).toBe("FN-1");
     expect(store.moveTask).toHaveBeenCalledWith("FN-101", "archived");
-    expect(store.recordActivity).toHaveBeenCalledWith(expect.objectContaining({ type: "task:auto-archived-deterministic-duplicate" }));
+    expect(store.recordActivity).toHaveBeenCalledWith(expect.objectContaining({
+      type: "task:auto-archived-deterministic-duplicate",
+      metadata: { canonicalTaskId: "FN-1", contentFingerprint: FINGERPRINT },
+    }));
   });
 
   it("fails open when reconciliation archive fails", async () => {
