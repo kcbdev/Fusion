@@ -3033,6 +3033,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           if (sanitizedTitle) {
             const currentTask = this.readTaskFromDb(id);
             if (currentTask && !currentTask.title) {
+              // FN-5077: normalizeTitleForTaskId may return null for dangling fragments; only persist usable titles.
               const normalizedTitle = normalizeTitleForTaskId(sanitizedTitle, id);
               if (normalizedTitle.title) {
                 await this.updateTask(id, { title: normalizedTitle.title });
@@ -3196,6 +3197,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     },
   ): Promise<Task> {
     const now = options?.createdAt ?? new Date().toISOString();
+    // FN-5077: null normalized titles are treated as "no title" and allow standard fallback/summarization behavior.
     const normalizedTitle = normalizeTitleForTaskId(title, id);
     const task: Task = {
       id,
@@ -3348,6 +3350,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     return this.createTaskWithDistributedReservation({ description: sourceTask.description }, {
       createTaskWithId: async (newId) => {
+        // FN-5077: duplicated drift-stripped fragments may normalize to null and should remain unset.
         const normalizedTitle = normalizeTitleForTaskId(sourceTask.title, newId);
         if (normalizedTitle.changed) {
           const removed = extractTaskIdTokens(sourceTask.title ?? "").filter((token) => token !== newId.toUpperCase());
@@ -3429,6 +3432,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     return this.createTaskWithDistributedReservation({ description: feedback.trim() }, {
       createTaskWithId: async (newId) => {
+        // FN-5077: keep deterministic "Refinement" fallback when normalized refinement label is unusable (null).
         const normalizedTitle = normalizeTitleForTaskId(`Refinement: ${sourceLabel}`, newId);
         if (normalizedTitle.changed) {
           const removed = extractTaskIdTokens(`Refinement: ${sourceLabel}`).filter((token) => token !== newId.toUpperCase());
@@ -4496,6 +4500,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       let titleNormalized = false;
       if (updates.title !== undefined) {
         task.title = updates.title;
+        // FN-5077: load-time repair tolerates null normalized titles (title cleared instead of fragment persisted).
         const normalizedTitle = normalizeTitleForTaskId(task.title, id);
         if (normalizedTitle.changed) {
           titleNormalized = true;
