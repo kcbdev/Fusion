@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "./executor-test-helpers.js";
 import { TaskExecutor } from "../executor.js";
+import { executorLog } from "../logger.js";
 import { reviewStep } from "../reviewer.js";
 import { createMockStore, mockedCreateFnAgent, mockedExecSync, resetExecutorMocks } from "./executor-test-helpers.js";
 
@@ -23,6 +24,15 @@ function makeTask(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function refusal() {
+  return {
+    ok: false as const,
+    refusalClass: "pending-code-review-revise" as const,
+    reason: "Step 1 has pending REVISE",
+    message: "fn_task_done refused (pending-code-review-revise): Step 1 has pending REVISE",
+  };
+}
+
 describe("FN-4946 implicit completion + REVISE verdict interaction", () => {
   beforeEach(() => {
     resetExecutorMocks();
@@ -33,6 +43,21 @@ describe("FN-4946 implicit completion + REVISE verdict interaction", () => {
       if (cmd.includes("rev-parse HEAD")) return Buffer.from("def456\n");
       return Buffer.from("");
     });
+  });
+
+  it("requeues with implicit-completion refusal shape and retry count", async () => {
+    const store = createMockStore();
+    const executor = new TaskExecutor(store as any, "/repo");
+
+    await (executor as any).handleImplicitTaskDoneRefusal(makeTask({ id: "FN-4946-R1" }), "/repo/.worktrees/swift-falcon", refusal());
+
+    expect(store.updateTask).toHaveBeenCalledWith("FN-4946-R1", expect.objectContaining({ taskDoneRetryCount: 1, status: "failed" }));
+    expect(store.moveTask).toHaveBeenCalledWith("FN-4946-R1", "todo", { preserveProgress: true });
+    const refusalLogCall = store.logEntry.mock.calls.find(
+      ([id, message]: [string, string]) => id === "FN-4946-R1" && message.includes("pending-code-review-revise"),
+    );
+    expect(refusalLogCall).toBeTruthy();
+    expect(executorLog.error).toHaveBeenCalledWith(expect.stringContaining("(implicit completion)"));
   });
 
   it("does not refuse implicit completion when REVISE is on an already done step", async () => {
@@ -68,5 +93,18 @@ describe("FN-4946 implicit completion + REVISE verdict interaction", () => {
 
     expect(store.moveTask).toHaveBeenCalledWith("FN-4946-R", "in-review");
     expect(store.moveTask).not.toHaveBeenCalledWith("FN-4946-R", "todo", { preserveProgress: true });
+  });
+
+  it("does not double-burn retry count when refusal is already handled", async () => {
+    const store = createMockStore();
+    const executor = new TaskExecutor(store as any, "/repo");
+
+    await (executor as any).handleImplicitTaskDoneRefusal(makeTask({ id: "FN-4946-R2" }), "/repo/.worktrees/swift-falcon", refusal());
+
+    const retryCountUpdates = store.updateTask.mock.calls.filter(
+      ([id, patch]: [string, Record<string, unknown>]) => id === "FN-4946-R2" && "taskDoneRetryCount" in patch,
+    );
+    expect(retryCountUpdates).toHaveLength(1);
+    expect(retryCountUpdates[0]?.[1]).toEqual(expect.objectContaining({ taskDoneRetryCount: 1 }));
   });
 });

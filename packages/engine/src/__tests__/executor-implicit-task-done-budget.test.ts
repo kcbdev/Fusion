@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import "./executor-test-helpers.js";
 import { TaskExecutor } from "../executor.js";
 import { executorLog } from "../logger.js";
-import { createMockStore, resetExecutorMocks } from "./executor-test-helpers.js";
+import { reviewStep } from "../reviewer.js";
+import { createMockStore, mockedCreateFnAgent, resetExecutorMocks } from "./executor-test-helpers.js";
 
 function refusal() {
   return {
@@ -57,5 +58,67 @@ describe("FN-4946 implicit refusal budget handling", () => {
     expect(store.updateTask).toHaveBeenCalledWith("FN-4946-B", expect.objectContaining({ status: "failed" }));
     expect(store.moveTask).toHaveBeenCalledWith("FN-4946-B", "in-review");
     expect(persistSpy).toHaveBeenCalledWith("FN-4946-B");
+  });
+
+  it("shares retry budget with explicit fn_task_done refusals", async () => {
+    const store = createMockStore();
+    let currentTask: any = {
+      ...task(2),
+      id: "FN-4946-B2",
+      steps: [{ name: "Step 1", status: "in-progress" }],
+    };
+    let doneTool: any;
+    let reviewTool: any;
+
+    store.getTask.mockImplementation(async () => ({ ...currentTask, steps: currentTask.steps.map((s: any) => ({ ...s })) }));
+    store.updateTask.mockImplementation(async (_id: string, patch: any) => {
+      currentTask = { ...currentTask, ...patch };
+    });
+    vi.mocked(reviewStep).mockResolvedValue({ verdict: "REVISE", summary: "fix", review: "fix" } as any);
+
+    mockedCreateFnAgent.mockImplementation(async ({ customTools }: any) => {
+      doneTool = customTools.find((t: any) => t.name === "fn_task_done");
+      reviewTool = customTools.find((t: any) => t.name === "fn_review_step");
+      return { session: { prompt: vi.fn().mockResolvedValue(undefined), dispose: vi.fn(), subscribe: vi.fn(), on: vi.fn(), state: {} } } as any;
+    });
+
+    const executor = new TaskExecutor(store as any, "/repo");
+    await executor.execute(currentTask);
+
+    await reviewTool.execute("r", { step: 0, type: "code", step_name: "Step 1", baseline: "abc123" });
+    await doneTool.execute("d", { summary: "done" });
+
+    expect(store.moveTask).toHaveBeenCalledWith("FN-4946-B2", "in-review");
+  });
+
+  it("resets taskDoneRetryCount after later clean completion", async () => {
+    const store = createMockStore();
+    let currentTask: any = { ...task(1), id: "FN-4946-B3", steps: [{ name: "Step 1", status: "in-progress" }] };
+    store.getTask.mockImplementation(async () => ({ ...currentTask, steps: currentTask.steps.map((s: any) => ({ ...s })) }));
+    store.updateTask.mockImplementation(async (_id: string, patch: any) => {
+      currentTask = { ...currentTask, ...patch };
+    });
+
+    mockedCreateFnAgent.mockImplementation(async ({ customTools }: any) => {
+      const doneTool = customTools.find((t: any) => t.name === "fn_task_done");
+      return {
+        session: {
+          prompt: vi.fn().mockImplementation(async () => {
+            await doneTool.execute("done", { summary: "complete" });
+          }),
+          dispose: vi.fn(),
+          subscribe: vi.fn(),
+          on: vi.fn(),
+          state: {},
+        },
+      } as any;
+    });
+
+    const executor = new TaskExecutor(store as any, "/repo");
+    await executor.execute(currentTask);
+
+    expect(store.moveTask).toHaveBeenCalledWith("FN-4946-B3", "in-review");
+    const retryBumpCalls = store.updateTask.mock.calls.filter(([, patch]: [string, Record<string, unknown>]) => typeof patch.taskDoneRetryCount === "number");
+    expect(retryBumpCalls).toHaveLength(0);
   });
 });
