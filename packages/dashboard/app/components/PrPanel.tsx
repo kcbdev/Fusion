@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { GitPullRequest, ExternalLink, RefreshCw, Plus, MessageSquare, CircleDot, XCircle, GitMerge } from "lucide-react";
+import { GitPullRequest, ExternalLink, RefreshCw, Plus, MessageSquare, CircleDot, XCircle, GitMerge, ChevronDown, ChevronUp } from "lucide-react";
 import { getErrorMessage, type DirectMergeCommitStrategy, type StructuredGhError } from "@fusion/core";
 import { fetchPrReviews, mergePr, reclaimPrConflict, refreshPrStatus, setAutoMergeOnGreen, type PrCheckStatus, type PrInfo, type PrRefreshResponse, type PrReviewsResponse } from "../api";
 import { usePrChecksStream } from "../hooks/usePrChecksStream";
@@ -62,6 +62,8 @@ export function PrPanel({
   const [isMerging, setIsMerging] = useState(false);
   const [lastGhError, setLastGhError] = useState<(StructuredGhError & { operation: "refresh" }) | null>(null);
   const [isReclaimingConflict, setIsReclaimingConflict] = useState(false);
+  const [conflictsExpanded, setConflictsExpanded] = useState(false);
+  const [copiedConflicts, setCopiedConflicts] = useState(false);
   const [mergeStrategy, setMergeStrategy] = useState<"merge" | "squash" | "rebase">(
     directMergeCommitStrategy === "always-rebase"
       ? "rebase"
@@ -217,6 +219,11 @@ export function PrPanel({
   const showMergeControls = prInfo.status === "open" && (prInfo.draft ?? prInfo.isDraft) !== true;
   const hasConflictBlockingReason = blockingReasons.some((reason) => reason.toLowerCase().includes("conflict"));
   const showConflictHint = prInfo.mergeable === "conflicting" || hasConflictBlockingReason;
+  const conflictDiagnostics = refreshState?.conflictDiagnostics ?? prInfo.conflictDiagnostics;
+
+  useEffect(() => {
+    setConflictsExpanded((conflictDiagnostics?.conflictingFiles.length ?? 0) > 0);
+  }, [conflictDiagnostics?.capturedAt, conflictDiagnostics?.conflictingFiles.length]);
 
   return (
     <div className="pr-section">
@@ -358,6 +365,43 @@ export function PrPanel({
             >
               Retry conflict reclaim
             </button>
+          </div>
+        ) : null}
+
+        {conflictDiagnostics && (prInfo.mergeable === "conflicting" || hasConflictBlockingReason) ? (
+          <div className="pr-conflict-section">
+            <div className="pr-conflict-section__header">
+              <button type="button" className="btn btn-sm" onClick={() => setConflictsExpanded((value) => !value)}>
+                {conflictsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />} Conflicts
+              </button>
+              <button type="button" className="btn btn-sm" onClick={() => void handleRefresh()} disabled={isRefreshing}>Re-check conflicts</button>
+            </div>
+            {conflictsExpanded ? (
+              <>
+                {conflictDiagnostics.conflictingFiles.length > 0 ? (
+                  <ul className="pr-conflict-files">
+                    {conflictDiagnostics.conflictingFiles.map((file) => <li key={file}>{linkifyFilePaths(file, { keyPrefix: `pr-conflict-${file}` })}</li>)}
+                  </ul>
+                ) : (
+                  <div className="pr-panel-tone-muted">File list unavailable — run the suggested commands locally.</div>
+                )}
+                <pre className="pr-conflict-commands"><code>{conflictDiagnostics.suggestedCommands.join("\n")}</code></pre>
+                <div className="pr-conflict-section__header">
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(conflictDiagnostics.suggestedCommands.join("\n"));
+                      setCopiedConflicts(true);
+                      setTimeout(() => setCopiedConflicts(false), 1200);
+                    }}
+                  >
+                    {copiedConflicts ? "Copied" : "Copy"}
+                  </button>
+                  <span className="pr-panel-tone-muted">Captured: {new Date(conflictDiagnostics.capturedAt).toLocaleString()}</span>
+                </div>
+              </>
+            ) : null}
           </div>
         ) : null}
 
