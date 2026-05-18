@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BranchAttributionError, filterFilesToOwnTaskCommits } from "../branch-attribution";
+import { BranchAttributionError, filterFilesToOwnTaskCommits } from "../branch-attribution.js";
 
 describe("FN-5039 branch-attribution", () => {
   it("returns empty attribution for empty range", async () => {

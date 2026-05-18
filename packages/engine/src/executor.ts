@@ -65,6 +65,7 @@ import {
   reanchorBranchToBase,
   inspectBranchConflict,
 } from "./branch-conflicts.js";
+import { BranchAttributionError, filterFilesToOwnTaskCommits } from "./branch-attribution.js";
 import { AgentLogger } from "./agent-logger.js";
 import { createLogger, executorLog, reviewerLog, formatError } from "./logger.js";
 import { TokenCapDetector } from "./token-cap-detector.js";
@@ -2413,7 +2414,7 @@ export class TaskExecutor {
 
       // Capture modified files if the worktree still exists
       if (task.worktree && existsSync(task.worktree)) {
-        const modifiedFiles = await this.captureModifiedFiles(task.worktree, task.baseCommitSha);
+        const modifiedFiles = await this.captureModifiedFiles(task.worktree, task.baseCommitSha, task.id, undefined, "recovery");
         if (modifiedFiles.length > 0) {
           await this.store.updateTask(task.id, { modifiedFiles });
           executorLog.log(`${task.id}: recovered ${modifiedFiles.length} modified files`);
@@ -3212,7 +3213,7 @@ export class TaskExecutor {
           const allSuccess = results.every(r => r.success);
           if (allSuccess) {
             const updatedTask = await this.store.getTask(task.id);
-            const modifiedFiles = await this.captureModifiedFiles(worktreePath, updatedTask.baseCommitSha);
+            const modifiedFiles = await this.captureModifiedFiles(worktreePath, updatedTask.baseCommitSha, task.id, audit, "post-session");
             if (modifiedFiles.length > 0) {
               await this.store.updateTask(task.id, { modifiedFiles });
               executorLog.log(`${task.id}: captured ${modifiedFiles.length} modified files`);
@@ -3997,7 +3998,7 @@ export class TaskExecutor {
           if (taskDone) {
             // Capture modified files before running workflow steps
             const updatedTask = await this.store.getTask(task.id);
-            const modifiedFiles = await this.captureModifiedFiles(worktreePath, updatedTask.baseCommitSha);
+            const modifiedFiles = await this.captureModifiedFiles(worktreePath, updatedTask.baseCommitSha, task.id, audit, "workflow-fanout");
             if (modifiedFiles.length > 0) {
               await this.store.updateTask(task.id, { modifiedFiles });
               executorLog.log(`${task.id}: captured ${modifiedFiles.length} modified files`);
@@ -4235,7 +4236,7 @@ export class TaskExecutor {
 
             if (taskDone) {
               const updatedTask = await this.store.getTask(task.id);
-              const modifiedFiles = await this.captureModifiedFiles(worktreePath, updatedTask.baseCommitSha);
+              const modifiedFiles = await this.captureModifiedFiles(worktreePath, updatedTask.baseCommitSha, task.id, audit, "no-task-done-retry");
               if (modifiedFiles.length > 0) {
                 await this.store.updateTask(task.id, { modifiedFiles });
                 executorLog.log(`${task.id}: captured ${modifiedFiles.length} modified files`);
@@ -5420,6 +5421,7 @@ export class TaskExecutor {
     worktreePath: string,
     promptContent: string,
     settings: Settings,
+    audit?: RunAuditor,
   ): Promise<{ blocked: false } | { blocked: true; message: string }> {
     if (task.scopeOverride === true) {
       executorLog.log(`${task.id}: scope-leak guard bypassed (scopeOverride=true)`);
@@ -5444,7 +5446,7 @@ export class TaskExecutor {
 
     const [uncommittedTouchedFiles, branchCommittedFiles] = await Promise.all([
       this.captureUncommittedModifiedFiles(worktreePath),
-      this.captureModifiedFiles(worktreePath, task.baseCommitSha),
+      this.captureModifiedFiles(worktreePath, task.baseCommitSha, task.id, audit, "scope-leak-guard"),
     ]);
 
     const touchedFiles = [...new Set([...uncommittedTouchedFiles, ...branchCommittedFiles])];
@@ -6869,25 +6871,55 @@ ${failureFeedback}
     }
   }
 
-  private async captureModifiedFiles(worktreePath: string, baseCommitSha?: string): Promise<string[]> {
+  private async captureModifiedFiles(
+    worktreePath: string,
+    baseCommitSha: string | undefined,
+    taskId: string,
+    audit?: RunAuditor,
+    source = "unspecified",
+  ): Promise<string[]> {
     try {
       const baseRef = await this.resolveDiffBaseRef(worktreePath, baseCommitSha);
       if (!baseRef) {
         return [];
       }
 
-      // Get list of modified files using git diff --name-only
-      const { stdout } = await execAsync(`git diff --name-only ${baseRef}..HEAD`, {
-        cwd: worktreePath,
-        encoding: "utf-8",
-      });
-      const output = stdout.trim();
-
-      if (!output) {
-        return [];
+      try {
+        const attributed = await filterFilesToOwnTaskCommits({
+          worktreePath,
+          baseRef,
+          taskId,
+        });
+        const divergence = attributed.rawDiffFileCount - attributed.files.length;
+        if (divergence > 0) {
+          await audit?.database({
+            type: "task:worktree-contamination-detected",
+            target: taskId,
+            metadata: {
+              rawDiffFileCount: attributed.rawDiffFileCount,
+              attributedFileCount: attributed.files.length,
+              foreignCommitCount: attributed.foreignCommits.length,
+              foreignCommitShas: attributed.foreignCommits.slice(0, 5).map((commit) => commit.sha),
+              source,
+            },
+          });
+          executorLog.warn(
+            `${taskId}: contamination detected — raw diff ${attributed.rawDiffFileCount} files, attributed ${attributed.files.length} (foreign commits: ${attributed.foreignCommits.length})`,
+          );
+        }
+        return attributed.files;
+      } catch (error) {
+        if (error instanceof BranchAttributionError) {
+          executorLog.warn(`${taskId}: branch-attribution failed (${error.message}); falling back to raw diff`);
+          const { stdout } = await execAsync(`git diff --name-only ${baseRef}..HEAD`, {
+            cwd: worktreePath,
+            encoding: "utf-8",
+          });
+          const output = stdout.trim();
+          return output ? output.split("\n").filter(Boolean) : [];
+        }
+        throw error;
       }
-
-      return output.split("\n").filter(Boolean);
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       executorLog.log(`Failed to capture modified files: ${errorMessage}`);
@@ -6996,7 +7028,7 @@ ${failureFeedback}
 
       if (this.isFrontendUxStep(ws)) {
         try {
-          const diffScopedFiles = await this.captureModifiedFiles(worktreePath, currentTask.baseCommitSha);
+          const diffScopedFiles = await this.captureModifiedFiles(worktreePath, currentTask.baseCommitSha, task.id, undefined, "workflow-step-frontend-ux");
           const declaredScopedFiles = await this.store.parseFileScopeFromPrompt(task.id).catch(() => [] as string[]);
           const diffHasSignal = diffScopedFiles.length > 0;
           const declaredHasSignal = declaredScopedFiles.length > 0;
@@ -7050,7 +7082,7 @@ ${failureFeedback}
         && stepMode === "prompt"
         && workflowStepScopeEnforcement !== "off";
       const preStepModifiedFiles = shouldCheckWorkflowStepScope
-        ? await this.captureModifiedFiles(worktreePath, currentTask.baseCommitSha)
+        ? await this.captureModifiedFiles(worktreePath, currentTask.baseCommitSha, task.id, undefined, "workflow-step-pre")
         : [];
 
       // Push pending entry BEFORE execution so dashboard can show live status
@@ -7077,7 +7109,7 @@ ${failureFeedback}
             const declaredScope = await this.store.parseFileScopeFromPrompt(task.id).catch(() => [] as string[]);
             const refreshedTask = await this.store.getTask(task.id);
             if (declaredScope.length > 0 && refreshedTask?.scopeOverride !== true) {
-              const postStepModifiedFiles = await this.captureModifiedFiles(worktreePath, currentTask.baseCommitSha);
+              const postStepModifiedFiles = await this.captureModifiedFiles(worktreePath, currentTask.baseCommitSha, task.id, undefined, "workflow-step-post");
               const preStepSet = new Set(preStepModifiedFiles);
               const stepCommittedFiles = postStepModifiedFiles.filter((filePath) => !preStepSet.has(filePath));
               const stepUncommittedFiles = await this.captureUncommittedModifiedFiles(worktreePath);
@@ -7375,7 +7407,7 @@ ${failureFeedback}
     // open-ended review prompts (e.g. "verify visual polish") have been
     // observed to spend the entire timeout budget reading pre-existing files
     // that match the task description's keywords. See FN-3327 post-mortem.
-    const scopedFiles = await this.captureModifiedFiles(worktreePath, task.baseCommitSha);
+    const scopedFiles = await this.captureModifiedFiles(worktreePath, task.baseCommitSha, task.id, undefined, "workflow-step-handler");
     let diffShortstat: string | undefined;
     try {
       const baseRef = await this.resolveDiffBaseRef(worktreePath, task.baseCommitSha);
