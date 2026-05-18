@@ -15,6 +15,7 @@ import {
 import { createServer } from "../server.js";
 import { request } from "../test-request.js";
 import * as helpers from "../routes/register-settings-sync-helpers.js";
+import { MISSING_REMOTE_NODE_API_KEY_MESSAGE } from "../routes/register-settings-sync-helpers.js";
 import * as core from "@fusion/core";
 
 vi.mock("../routes/register-settings-sync-helpers.js", async () => {
@@ -101,6 +102,21 @@ describe("routes secrets sync", () => {
     vi.spyOn(CentralCore.prototype, "getNode").mockResolvedValue({ ...localNode } as any);
     const res = await request(fixture.app, "POST", "/api/nodes/node-local-001/secrets/push", JSON.stringify({}), { "content-type": "application/json" });
     expect(res.status).toBe(400);
+  });
+
+  it.each([
+    ["undefined", undefined],
+    ["empty string", ""],
+    ["null", null],
+  ])("POST /api/nodes/:id/secrets/push rejects missing remote apiKey (%s)", async (_shape, apiKey) => {
+    vi.spyOn(CentralCore.prototype, "getNode").mockResolvedValue({ ...remoteNode, url: "http://remote.test", apiKey: apiKey as string } as any);
+
+    const res = await request(fixture.app, "POST", "/api/nodes/node-remote-001/secrets/push", JSON.stringify({}), { "content-type": "application/json" });
+
+    expect(res.status).toBe(400);
+    expect((res.body as any).error).toBe(MISSING_REMOTE_NODE_API_KEY_MESSAGE);
+    expect(mockedFetchFromRemoteNode).not.toHaveBeenCalled();
+    expect(/(forbidden-pass|forbidden-value|"salt"\s*:|"nonce"\s*:|"ciphertext"\s*:)/.test(JSON.stringify(res.body))).toBe(false);
   });
 
   it("POST /api/nodes/:id/secrets/pull happy path and skip reserved", async () => {
