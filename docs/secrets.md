@@ -148,6 +148,8 @@ Envelope format is `WrappedSecretsBundle` from `packages/core/src/secrets-sync.t
 
 Sync passphrase storage is local-only: reserved key `__sync_passphrase__` in `secrets_global` with `access_policy="deny"` and `env_exportable=false`, encrypted under the local master key. The passphrase is never transmitted and never returned by HTTP endpoints.
 
+Dashboard UX now exposes this through SecretsView → **Cross-Node Sync Passphrase**. The panel uses `GET/PUT/DELETE /api/secrets/sync-passphrase`; the GET route returns only `{ configured: boolean }` (no plaintext readback), and the reserved `__sync_passphrase__` row is filtered from the regular `GET /api/secrets` list.
+
 Error mapping:
 
 - `SecretsSyncError` codes (`wrong-passphrase`, `version-mismatch`, `malformed`) return HTTP `400` with `{ "error": <code> }`.
