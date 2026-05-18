@@ -704,19 +704,20 @@
   color: var(--text-muted);
 }
 
-.card-footer-row > .card-source-provenance:first-of-type {
+.card-footer-row > .card-source-provenance:first-of-type,
+.card-footer-row > .card-github-tracking-chip:first-of-type,
+.card-footer-row > .card-retry-badge:first-of-type,
+.card-footer-row > .card-time-indicator:first-of-type {
   margin-left: auto;
 }
 
-.card-footer-row > .card-github-tracking-chip:first-of-type {
-  margin-left: auto;
-}
-
-.card-source-provenance + .card-source-provenance {
-  margin-left: 0;
-}
-
-.card-footer-row > .card-source-provenance + .card-github-tracking-chip:first-of-type {
+.card-source-provenance + .card-source-provenance,
+.card-footer-row > .card-source-provenance + .card-github-tracking-chip:first-of-type,
+.card-footer-row > .card-source-provenance + .card-retry-badge,
+.card-footer-row > .card-source-provenance + .card-time-indicator,
+.card-footer-row > .card-github-tracking-chip + .card-retry-badge,
+.card-footer-row > .card-github-tracking-chip + .card-time-indicator,
+.card-footer-row > .card-retry-badge + .card-time-indicator {
   margin-left: 0;
 }
 
@@ -796,7 +797,6 @@
 }
 
 .card-time-indicator {
-  margin-left: auto;
   border-color: color-mix(in srgb, var(--text-muted) 30%, transparent);
   background: color-mix(in srgb, var(--text-muted) 12%, transparent);
   color: var(--text-muted);
