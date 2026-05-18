@@ -43,7 +43,8 @@ import { resolveSandboxBackend } from "./sandbox/index.js";
 import type { SandboxBackend } from "./sandbox/types.js";
 import { ModelRegistry, SessionManager, type ToolDefinition, type AgentSession } from "@mariozechner/pi-coding-agent";
 import { PRIORITY_EXECUTE, type AgentSemaphore } from "./concurrency.js";
-import { ActiveSessionWorktreeRemovalError, RemovalReason, classifyTaskWorktree, describeRegisteredWorktrees, getRegisteredWorktreePaths, isGitRepository, isInsideWorktreesDir, isRegisteredGitWorktree, removeWorktree, type WorktreePool } from "./worktree-pool.js";
+import { RemovalReason, classifyTaskWorktree, describeRegisteredWorktrees, getRegisteredWorktreePaths, isGitRepository, isInsideWorktreesDir, isRegisteredGitWorktree, removeWorktree, type WorktreePool } from "./worktree-pool.js";
+import { ActiveSessionWorktreeRemovalError } from "./worktree-backend.js";
 import { activeSessionRegistry, executingTaskLock } from "./active-session-registry.js";
 import {
   StaleWorktreeIndexLockError,
