@@ -2471,13 +2471,21 @@ export interface RemoteAccessProjectSettings {
 /** GitHub authentication strategy used by project issue-tracking settings (FN-3868). */
 export type GithubAuthMode = "gh-cli" | "token";
 
-export interface SecretsEnvConfig {
-  enabled: boolean;
-  filename: string;
-  overwritePolicy: "skip" | "merge" | "replace";
+export interface SecretsEnvSettings {
+  /** Default: false. When true, materialize env_exportable secrets into the worktree on creation. */
+  enabled?: boolean;
+  /** Default: ".env". Must be a relative path with no separators, "..", or null bytes. */
+  filename?: string;
+  /** Default: "merge". skip = leave existing file untouched; merge = preserve non-managed lines, overlay Fusion-managed block; replace = overwrite with managed block only. */
+  overwritePolicy?: "skip" | "merge" | "replace";
+  /** Optional case-sensitive key prefix filter — only secrets whose `key` starts with this prefix are exported. */
   keyPrefix?: string;
-  requireGitignored: boolean;
+  /** Default: true. When true, refuse to write if `git check-ignore <filename>` reports the path is NOT ignored. */
+  requireGitignored?: boolean;
 }
+
+/** @deprecated Use SecretsEnvSettings. */
+export type SecretsEnvConfig = SecretsEnvSettings;
 
 /**
  * Project-level settings stored in `.fusion/config.json`.
@@ -2586,7 +2594,7 @@ export interface ProjectSettings {
   /** Project-level research configuration overrides. */
   researchSettings?: ResearchProjectSettings;
   /** Optional per-project `.env` materialization settings for exportable secrets. */
-  secretsEnv?: SecretsEnvConfig;
+  secretsEnv?: SecretsEnvSettings;
   /**
    * Encrypted shared-passphrase blob used for cross-node secrets sync.
    * The stored value MUST already be ciphertext wrapped under the local
