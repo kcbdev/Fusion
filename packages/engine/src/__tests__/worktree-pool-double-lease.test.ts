@@ -10,25 +10,42 @@ vi.mock("node:fs", () => ({
 
 import { WorktreePool } from "../worktree-pool.js";
 
-// FN-4954: deterministic repro for the rehydrate collision race.
-describe("WorktreePool double-lease reproduction", () => {
+// FN-4954 deterministic race backstop.
+describe("WorktreePool double-lease guard", () => {
   let pool: WorktreePool;
 
   beforeEach(() => {
     pool = new WorktreePool();
   });
 
-  it("reproduces rehydrate re-adding a path that is already leased", () => {
-    pool.release("/tmp/wt-race");
+  it("prevents rehydrate from re-adding a leased path", () => {
+    const violations: Array<{ phase: string; existingHolder: string }> = [];
+    pool.setInvariantViolationHandler((violation) => {
+      violations.push({ phase: violation.phase, existingHolder: violation.existingHolder });
+    });
 
-    const firstLease = pool.acquire();
+    pool.release("/tmp/wt-race");
+    const firstLease = pool.acquire("FN-A");
     expect(firstLease).toBe("/tmp/wt-race");
 
-    // Simulates scan/rehydrate colliding with an in-flight lease.
     pool.rehydrate(["/tmp/wt-race"]);
 
-    // Expected invariant: leased paths must never be re-added to idle.
-    // Current behavior (pre-fix) returns the same path again here.
-    expect(pool.acquire()).toBeNull();
+    expect(pool.acquire("FN-B")).toBeNull();
+    expect(pool.size).toBe(0);
+    expect(pool.getLeasedPaths().get("/tmp/wt-race")).toBe("FN-A");
+    expect(violations).toEqual([{ phase: "rehydrate", existingHolder: "FN-A" }]);
+  });
+
+  it("keeps release best-effort when releasing task differs", () => {
+    const violations: Array<{ phase: string; requestingTaskId: string }> = [];
+    pool.setInvariantViolationHandler((violation) => violations.push({ phase: violation.phase, requestingTaskId: violation.requestingTaskId }));
+
+    pool.release("/tmp/wt-race");
+    expect(pool.acquire("FN-A")).toBe("/tmp/wt-race");
+
+    pool.release("/tmp/wt-race", "FN-B");
+    expect(pool.has("/tmp/wt-race")).toBe(true);
+    expect(pool.getLeasedPaths().size).toBe(0);
+    expect(violations).toEqual([{ phase: "release", requestingTaskId: "FN-B" }]);
   });
 });

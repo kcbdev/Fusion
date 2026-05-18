@@ -54,7 +54,7 @@ describe("acquireTaskWorktree", () => {
       store,
       settings: { recycleWorktrees: true } as any,
       pool: {
-        acquire: () => "/tmp/pooled",
+        acquire: (_taskId: string) => "/tmp/pooled",
         prepareForTask,
         release,
       } as any,
@@ -79,7 +79,7 @@ describe("acquireTaskWorktree", () => {
       store,
       settings: { recycleWorktrees: true } as any,
       pool: {
-        acquire: () => "/tmp/pooled",
+        acquire: (_taskId: string) => "/tmp/pooled",
         prepareForTask: vi.fn().mockResolvedValue({
           branch: "fusion/fn-1",
           worktreePath: "/tmp/live-existing",
@@ -92,7 +92,7 @@ describe("acquireTaskWorktree", () => {
       createWorktree: vi.fn(),
     });
 
-    expect(release).toHaveBeenCalledWith("/tmp/pooled");
+    expect(release).toHaveBeenCalledWith("/tmp/pooled", "FN-1");
   });
 
   it("falls through to fresh creation when pooled worktree is incomplete and emits detection audit", async () => {
@@ -107,7 +107,7 @@ describe("acquireTaskWorktree", () => {
       store,
       settings: { recycleWorktrees: true } as any,
       pool: {
-        acquire: () => "/tmp/pooled",
+        acquire: (_taskId: string) => "/tmp/pooled",
         prepareForTask: vi.fn().mockResolvedValue({ branch: "fusion/fn-1", worktreePath: "/tmp/pooled", reclaimed: false }),
         release: vi.fn(),
       } as any,

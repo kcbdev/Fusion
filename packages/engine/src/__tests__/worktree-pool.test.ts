@@ -66,6 +66,7 @@ const mockedExistsSync = vi.mocked(existsSync);
 const mockedLstatSync = vi.mocked(lstatSync);
 const mockedReaddirSync = vi.mocked(readdirSync);
 const mockedRmSync = vi.mocked(rmSync);
+const TEST_TASK_ID = "FN-test";
 
 let errorSpy: ReturnType<typeof vi.spyOn>;
 let warnSpy: ReturnType<typeof vi.spyOn>;
@@ -91,12 +92,12 @@ describe("WorktreePool", () => {
 
   describe("acquire", () => {
     it("returns null when pool is empty", () => {
-      expect(pool.acquire()).toBeNull();
+      expect(pool.acquire(TEST_TASK_ID)).toBeNull();
     });
 
     it("returns a released path on acquire", () => {
       pool.release("/tmp/worktree-1");
-      const result = pool.acquire();
+      const result = pool.acquire(TEST_TASK_ID);
       expect(result).toBe("/tmp/worktree-1");
     });
 
@@ -106,7 +107,7 @@ describe("WorktreePool", () => {
       // First path doesn't exist, second does
       mockedExistsSync.mockImplementation((p) => p === "/tmp/good-worktree");
 
-      const result = pool.acquire();
+      const result = pool.acquire(TEST_TASK_ID);
       expect(result).toBe("/tmp/good-worktree");
       expect(pool.size).toBe(0);
     });
@@ -116,8 +117,27 @@ describe("WorktreePool", () => {
       pool.release("/tmp/stale-2");
       mockedExistsSync.mockReturnValue(false);
 
-      expect(pool.acquire()).toBeNull();
+      expect(pool.acquire(TEST_TASK_ID)).toBeNull();
       expect(pool.size).toBe(0);
+    });
+  });
+
+  describe("double-lease invariant", () => {
+    it("skips rehydrate entries that are already leased", () => {
+      const handler = vi.fn();
+      pool.setInvariantViolationHandler(handler);
+      pool.release("/tmp/wt-lease");
+      expect(pool.acquire(TEST_TASK_ID)).toBe("/tmp/wt-lease");
+
+      pool.rehydrate(["/tmp/wt-lease"]);
+
+      expect(pool.size).toBe(0);
+      expect(pool.getLeasedPaths().get("/tmp/wt-lease")).toBe(TEST_TASK_ID);
+      expect(handler).toHaveBeenCalledWith(expect.objectContaining({
+        path: "/tmp/wt-lease",
+        existingHolder: TEST_TASK_ID,
+        phase: "rehydrate",
+      }));
     });
   });
 
@@ -141,9 +161,9 @@ describe("WorktreePool", () => {
       pool.release("/tmp/a");
       pool.release("/tmp/b");
       expect(pool.size).toBe(2);
-      pool.acquire();
+      pool.acquire(TEST_TASK_ID);
       expect(pool.size).toBe(1);
-      pool.acquire();
+      pool.acquire(TEST_TASK_ID);
       expect(pool.size).toBe(0);
     });
   });
@@ -160,7 +180,7 @@ describe("WorktreePool", () => {
 
     it("returns false after path is acquired", () => {
       pool.release("/tmp/wt");
-      pool.acquire();
+      pool.acquire(TEST_TASK_ID);
       expect(pool.has("/tmp/wt")).toBe(false);
     });
   });

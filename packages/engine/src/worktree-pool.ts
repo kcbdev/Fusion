@@ -241,8 +241,31 @@ export type PrepareForTaskResult = {
   strandedCommitCount?: number;
 };
 
+export type PoolInvariantPhase = "acquire" | "rehydrate" | "release";
+
+export type PoolInvariantViolation = {
+  path: string;
+  existingHolder: string;
+  requestingTaskId: string;
+  phase: PoolInvariantPhase;
+};
+
+export class PoolDoubleLeaseError extends Error {
+  constructor(
+    public readonly path: string,
+    public readonly existingHolder: string,
+    public readonly requestingTaskId: string,
+    public readonly phase: PoolInvariantPhase,
+  ) {
+    super(`Pool double lease detected for ${path}: held by ${existingHolder}, requested by ${requestingTaskId} during ${phase}`);
+    this.name = "PoolDoubleLeaseError";
+  }
+}
+
 export class WorktreePool {
   private idle = new Set<string>();
+  private leased = new Map<string, string>();
+  private invariantViolationHandler?: (violation: PoolInvariantViolation) => void;
 
   /**
    * Acquire an idle worktree from the pool.
@@ -251,12 +274,15 @@ export class WorktreePool {
    * is empty. Before returning, verifies the directory still exists on disk
    * and prunes any stale entries.
    */
-  acquire(): string | null {
+  acquire(taskId: string): string | null {
     for (const path of this.idle) {
+      this.assertNotDoubleLeased(path, taskId, "acquire");
       this.idle.delete(path);
+      this.leased.set(path, taskId);
       if (existsSync(path)) {
         return path;
       }
+      this.leased.delete(path);
       worktreePoolLog.log(`Pruned stale entry: ${path}`);
     }
     return null;
@@ -270,7 +296,22 @@ export class WorktreePool {
    *
    * @param worktreePath — Absolute path to the worktree directory
    */
-  release(worktreePath: string): void {
+  release(worktreePath: string, releasingTaskId?: string): void {
+    const existingHolder = this.leased.get(worktreePath);
+    if (!existingHolder) {
+      worktreePoolLog.warn(`release called for non-leased worktree: ${worktreePath}`);
+    } else if (releasingTaskId && existingHolder !== releasingTaskId) {
+      this.notifyInvariantViolation({
+        path: worktreePath,
+        existingHolder,
+        requestingTaskId: releasingTaskId,
+        phase: "release",
+      });
+      worktreePoolLog.warn(
+        `release task mismatch for ${worktreePath}: leased holder=${existingHolder}, releasingTaskId=${releasingTaskId}`,
+      );
+    }
+    this.leased.delete(worktreePath);
     this.idle.add(worktreePath);
   }
 
@@ -284,6 +325,33 @@ export class WorktreePool {
     return this.idle.has(path);
   }
 
+  setInvariantViolationHandler(handler: (violation: PoolInvariantViolation) => void): void {
+    this.invariantViolationHandler = handler;
+  }
+
+  /** @internal test-only visibility */
+  getLeasedPaths(): ReadonlyMap<string, string> {
+    return this.leased;
+  }
+
+  private notifyInvariantViolation(violation: PoolInvariantViolation): void {
+    try {
+      this.invariantViolationHandler?.(violation);
+    } catch (error) {
+      worktreePoolLog.warn(`Invariant violation handler failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private assertNotDoubleLeased(path: string, requestingTaskId: string, phase: PoolInvariantPhase): void {
+    const existingHolder = this.leased.get(path);
+    if (!existingHolder || existingHolder === requestingTaskId) {
+      return;
+    }
+    const violation: PoolInvariantViolation = { path, existingHolder, requestingTaskId, phase };
+    this.notifyInvariantViolation(violation);
+    throw new PoolDoubleLeaseError(path, existingHolder, requestingTaskId, phase);
+  }
+
   /**
    * Remove and return all idle worktree paths.
    *
@@ -293,6 +361,7 @@ export class WorktreePool {
   drain(): string[] {
     const paths = Array.from(this.idle);
     this.idle.clear();
+    this.leased.clear();
     return paths;
   }
 
@@ -306,11 +375,22 @@ export class WorktreePool {
    */
   rehydrate(idlePaths: string[]): void {
     for (const path of idlePaths) {
-      if (existsSync(path)) {
-        this.idle.add(path);
-      } else {
+      if (!existsSync(path)) {
         worktreePoolLog.log(`Rehydrate skipped (not on disk): ${path}`);
+        continue;
       }
+      const existingHolder = this.leased.get(path);
+      if (existingHolder) {
+        this.notifyInvariantViolation({
+          path,
+          existingHolder,
+          requestingTaskId: existingHolder,
+          phase: "rehydrate",
+        });
+        worktreePoolLog.warn(`Rehydrate skipped leased worktree ${path} (holder=${existingHolder})`);
+        continue;
+      }
+      this.idle.add(path);
     }
   }
 

@@ -1577,7 +1577,7 @@ describe("Edge case: worktree deleted between scan and acquire", () => {
     mockedExistsSync.mockReturnValue(false);
 
     // acquire() checks existsSync and prunes the stale entry
-    const result = pool.acquire();
+    const result = pool.acquire("FN-test");
     expect(result).toBeNull();
     expect(pool.size).toBe(0);
   });

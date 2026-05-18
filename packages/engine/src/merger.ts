@@ -7776,15 +7776,34 @@ export async function aiMergeTask(
       mergerLog.log(`Worktree retained — still needed by ${otherUser}`);
       result.worktreeRemoved = false;
     } else if (options.pool && settings.recycleWorktrees) {
-      options.pool.release(worktreePath);
-      result.worktreeRemoved = false;
-      // Detach the path from this task so future diff queries don't read
-      // a foreign branch's state once the pool reassigns this worktree.
-      try {
-        await store.updateTask(taskId, { worktree: null, branch: null });
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        mergerLog.warn(`${taskId}: failed to clear worktree pointer after pool release: ${msg}`);
+      if (activeSessionRegistry.isPathActive(worktreePath)) {
+        mergerLog.warn(`${taskId}: skipping pooled release for active session path ${worktreePath}`);
+        await audit?.git({
+          type: "worktree:removal-refused-active-session",
+          target: worktreePath,
+          metadata: { taskId, reason: RemovalReason.MergerCleanup, kind: "merger" },
+        });
+        result.worktreeRemoved = false;
+      } else {
+        try {
+          const onBranch = await execAsync("git symbolic-ref --quiet HEAD", { cwd: worktreePath, timeout: 5_000, encoding: "utf-8" })
+            .then(() => true)
+            .catch(() => false);
+          if (onBranch) {
+            await execAsync("git checkout --detach HEAD", { cwd: worktreePath, timeout: 10_000, encoding: "utf-8" });
+          }
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          mergerLog.warn(`${taskId}: failed to detach pooled worktree before release: ${msg}`);
+        }
+        try {
+          await store.updateTask(taskId, { worktree: null, branch: null });
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          mergerLog.warn(`${taskId}: failed to clear worktree pointer before pool release: ${msg}`);
+        }
+        options.pool.release(worktreePath, taskId);
+        result.worktreeRemoved = false;
       }
     } else {
       try {

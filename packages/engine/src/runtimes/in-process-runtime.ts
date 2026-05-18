@@ -16,7 +16,7 @@ import { Scheduler } from "../scheduler.js";
 import type { PrMonitor, PrComment } from "../pr-monitor.js";
 import type { PrInfo } from "@fusion/core";
 import { TaskExecutor, type TaskExecutorOptions } from "../executor.js";
-import { WorktreePool, isGitRepository } from "../worktree-pool.js";
+import { WorktreePool, isGitRepository, type PoolInvariantViolation } from "../worktree-pool.js";
 import { AgentSemaphore } from "../concurrency.js";
 import { HeartbeatMonitor, HeartbeatTriggerScheduler, type WakeContext } from "../agent-heartbeat.js";
 import { AutoClaimSnapshotManager } from "../auto-claim-snapshot.js";
@@ -43,6 +43,7 @@ import { TriageProcessor } from "../triage.js";
 import { EphemeralWorkerManager } from "../ephemeral-worker-manager.js";
 import { validateProjectNodeMapping } from "../node-dispatch-validation.js";
 import { attachAgentLinkSync } from "../task-agent-sync.js";
+import { createRunAuditor, generateSyntheticRunId } from "../run-audit.js";
 
 /**
  * InProcessRuntime runs a project within the main process.
@@ -468,6 +469,33 @@ export class InProcessRuntime
         this.config.workingDirectory,
         executorOptions
       );
+
+      this.worktreePool.setInvariantViolationHandler((violation: PoolInvariantViolation) => {
+        void (async () => {
+          try {
+            runtimeLog.warn(
+              `[worktree-pool] invariant violation detected (${violation.phase}) path=${violation.path} holder=${violation.existingHolder} requester=${violation.requestingTaskId}`,
+            );
+            const audit = createRunAuditor(this.taskStore, {
+              runId: generateSyntheticRunId("worktree-pool-invariant", violation.requestingTaskId),
+              taskId: violation.requestingTaskId,
+              agentId: "system",
+              phase: "execute",
+            });
+            await audit.db({
+              type: "worktree:pool-double-lease-detected",
+              target: violation.path,
+              metadata: violation,
+            });
+            await this.taskStore.logEntry(
+              violation.requestingTaskId,
+              `Worktree pool invariant violation (${violation.phase}): ${violation.path} is held by ${violation.existingHolder}`,
+            );
+          } catch (error) {
+            runtimeLog.warn(`Failed to process worktree pool invariant violation: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        })();
+      });
 
       // 6. Initialize HeartbeatMonitor (reuses AgentStore from step 5a)
       if (this.heartbeatMonitor) {

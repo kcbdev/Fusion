@@ -13,6 +13,7 @@ import {
   isInsideWorktreesDir,
   removeWorktree,
   RemovalReason,
+  PoolDoubleLeaseError,
 } from "./worktree-pool.js";
 import {
   NativeWorktreeBackend,
@@ -257,7 +258,18 @@ export async function acquireTaskWorktree(opts: AcquireTaskWorktreeOptions): Pro
   let branch = branchName;
 
   if (!isResume && pool && settings.recycleWorktrees) {
-    const pooled = pool.acquire();
+    let pooled: string | null = null;
+    try {
+      pooled = pool.acquire(task.id);
+    } catch (poolErr) {
+      if (poolErr instanceof PoolDoubleLeaseError) {
+        const poolErrMessage = poolErr instanceof Error ? poolErr.message : String(poolErr);
+        logger?.warn(`${task.id}: ${poolErrMessage}; skipping pool and creating fresh worktree`);
+        await store.logEntry(task.id, `Pool double-lease guard triggered (${poolErrMessage}), creating fresh worktree`, undefined, runContext);
+      } else {
+        throw poolErr;
+      }
+    }
     if (pooled) {
       try {
         const preparedRaw = await pool.prepareForTask(pooled, branchName, baseBranch ?? undefined, {
@@ -269,7 +281,7 @@ export async function acquireTaskWorktree(opts: AcquireTaskWorktreeOptions): Pro
           ? { branch: preparedRaw, worktreePath: pooled, reclaimed: false as const }
           : preparedRaw;
         if (prepared.reclaimed && prepared.worktreePath !== pooled) {
-          pool.release(pooled);
+          pool.release(pooled, task.id);
         }
         worktreePath = prepared.worktreePath;
         branch = prepared.branch;
@@ -341,8 +353,12 @@ export async function acquireTaskWorktree(opts: AcquireTaskWorktreeOptions): Pro
           };
         }
       } catch (poolErr) {
-        pool.release(pooled);
-        if (isBranchConflictError(poolErr)) throw poolErr;
+        pool.release(pooled, task.id);
+        if (poolErr instanceof PoolDoubleLeaseError) {
+          const poolErrMessage = poolErr instanceof Error ? poolErr.message : String(poolErr);
+          logger?.warn(`${task.id}: ${poolErrMessage}; skipping pool and creating fresh worktree`);
+          await store.logEntry(task.id, `Pool double-lease guard triggered (${poolErrMessage}), creating fresh worktree`, undefined, runContext);
+        } else if (isBranchConflictError(poolErr)) throw poolErr;
         const poolErrMessage = poolErr instanceof Error ? poolErr.message : String(poolErr);
         logger?.log(`Pool prepareForTask failed, falling through to fresh worktree: ${poolErrMessage}`);
         await store.logEntry(task.id, `Pool worktree preparation failed (${poolErrMessage}), creating fresh worktree`, undefined, runContext);
