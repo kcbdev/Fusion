@@ -4626,7 +4626,7 @@ describe("SelfHealingManager", () => {
     it("logs FN-4110 stale transient merge status once without moving task", async () => {
       vi.setSystemTime(new Date("2026-01-01T00:10:00.000Z"));
       const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
-      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ taskStuckTimeoutMs: 60_000 });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ taskStuckTimeoutMs: 60_000, autoMerge: true });
       (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([staleMergingTask()]);
 
       const result = await managerWithRecovery.surfaceInReviewStalls();
@@ -4641,10 +4641,27 @@ describe("SelfHealingManager", () => {
       managerWithRecovery.stop();
     });
 
+    it("skips entirely when autoMerge is disabled", async () => {
+      vi.setSystemTime(new Date("2026-01-01T00:10:00.000Z"));
+      const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ taskStuckTimeoutMs: 60_000, autoMerge: false });
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([staleMergingTask()]);
+
+      expect(await managerWithRecovery.surfaceInReviewStalls()).toBe(0);
+      expect(store.logEntry).not.toHaveBeenCalledWith(
+        "FN-4110",
+        expect.stringContaining("In-review stall surfaced ["),
+      );
+      expect(store.recordRunAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "task:in-review-stall-deadlock-disposed",
+      }));
+      managerWithRecovery.stop();
+    });
+
     it("deduplicates same code inside stuck-timeout window", async () => {
       vi.setSystemTime(new Date("2026-01-01T00:10:00.000Z"));
       const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
-      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ taskStuckTimeoutMs: 60_000 });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ taskStuckTimeoutMs: 60_000, autoMerge: true });
       (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
         staleMergingTask({
           log: [{
@@ -4662,7 +4679,7 @@ describe("SelfHealingManager", () => {
     it("re-logs after window expiry and on code transitions", async () => {
       vi.setSystemTime(new Date("2026-01-01T00:10:00.000Z"));
       const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
-      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ taskStuckTimeoutMs: 60_000 });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ taskStuckTimeoutMs: 60_000, autoMerge: true });
       (store.listTasks as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce([
           staleMergingTask({
@@ -4699,7 +4716,7 @@ describe("SelfHealingManager", () => {
         getActiveMergeTaskId: () => "FN-ACTIVE",
         getExecutingTaskIds: () => new Set(["FN-EXEC"]),
       });
-      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ taskStuckTimeoutMs: 60_000 });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ taskStuckTimeoutMs: 60_000, autoMerge: true });
       (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
         staleMergingTask({ id: "FN-CYCLE", updatedAt: "2026-01-01T00:10:00.000Z" }),
         staleMergingTask({ id: "FN-PAUSED", paused: true }),
@@ -4720,6 +4737,7 @@ describe("SelfHealingManager", () => {
       const reason = "task is marked 'failed': Failed to create worktree after 3 attempts: Branch fusion/fn-9999 conflict could not be auto-resolved";
       (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
         taskStuckTimeoutMs: 60_000,
+        autoMerge: true,
         inReviewStallDeadlockThreshold: 3,
       });
       (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
@@ -4768,7 +4786,7 @@ describe("SelfHealingManager", () => {
       vi.setSystemTime(new Date("2026-01-01T00:10:00.000Z"));
       const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
       const reason = "task is marked 'failed': Failed to create worktree after 3 attempts: Branch fusion/fn-9999 conflict could not be auto-resolved";
-      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ taskStuckTimeoutMs: 60_000, inReviewStallDeadlockThreshold: 3 });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ taskStuckTimeoutMs: 60_000, autoMerge: true, inReviewStallDeadlockThreshold: 3 });
       (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
         staleMergingTask({
           id: "FN-9999",
@@ -4790,7 +4808,7 @@ describe("SelfHealingManager", () => {
       vi.setSystemTime(new Date("2026-01-01T00:10:00.000Z"));
       const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
       const reason = "task is marked 'failed': Failed to create worktree after 3 attempts: Branch fusion/fn-9999 conflict could not be auto-resolved";
-      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ taskStuckTimeoutMs: 60_000, inReviewStallDeadlockThreshold: 0 });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ taskStuckTimeoutMs: 60_000, autoMerge: true, inReviewStallDeadlockThreshold: 0 });
       (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
         staleMergingTask({
           id: "FN-9999",
@@ -4817,7 +4835,7 @@ describe("SelfHealingManager", () => {
       const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
       const baseError = "Failed to create worktree after 3 attempts: Branch fusion/fn-9999 conflict could not be auto-resolved";
       const currentReason = `task is marked 'failed': ${baseError}`;
-      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ taskStuckTimeoutMs: 60_000, inReviewStallDeadlockThreshold: 3 });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ taskStuckTimeoutMs: 60_000, autoMerge: true, inReviewStallDeadlockThreshold: 3 });
       (store.listTasks as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce([
           staleMergingTask({
