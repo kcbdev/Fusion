@@ -1,4 +1,13 @@
-import { isSecretAccessPolicy, isSecretScope, SecretsStoreError, type SecretScope } from "@fusion/core";
+import {
+  RESERVED_SYNC_PASSPHRASE_KEY,
+  clearSyncPassphrase,
+  hasSyncPassphraseConfigured,
+  isSecretAccessPolicy,
+  isSecretScope,
+  SecretsStoreError,
+  setSyncPassphrase,
+  type SecretScope,
+} from "@fusion/core";
 import { ApiError, badRequest } from "../api-error.js";
 import type { ApiRouteRegistrar } from "./types.js";
 
@@ -29,6 +38,22 @@ function assertObject(value: unknown): asserts value is Record<string, unknown> 
   }
 }
 
+function emitSecretsAudit(
+  req: unknown,
+  ctx: Parameters<ApiRouteRegistrar>[0],
+  type: "secret:create" | "secret:update" | "secret:delete",
+  metadata: Record<string, unknown>,
+): void {
+  const requestWithAuditor = req as {
+    runAuditor?: { filesystem?: (input: { type: string; target: string; metadata?: Record<string, unknown> }) => void };
+  };
+  if (requestWithAuditor.runAuditor?.filesystem) {
+    requestWithAuditor.runAuditor.filesystem({ type, target: "secrets", metadata });
+    return;
+  }
+  ctx.runtimeLogger.child("secrets").info("Secrets audit event", { type, ...metadata });
+}
+
 export const registerSecretsRoutes: ApiRouteRegistrar = (ctx) => {
   const { router, getProjectContext, rethrowAsApiError } = ctx;
 
@@ -37,11 +62,65 @@ export const registerSecretsRoutes: ApiRouteRegistrar = (ctx) => {
       const { store: scopedStore } = await getProjectContext(req);
       const secretsStore = await scopedStore.getSecretsStore();
       const secrets = await secretsStore.listSecrets();
-      res.json({ secrets });
+      const visibleSecrets = secrets.filter(
+        (secret) => !(secret.scope === "global" && secret.key === RESERVED_SYNC_PASSPHRASE_KEY),
+      );
+      res.json({ secrets: visibleSecrets });
     } catch (err: unknown) {
       if (err instanceof ApiError) throw err;
       if (err instanceof SecretsStoreError) mapSecretsError(err);
       rethrowAsApiError(err, "Failed to list secrets");
+    }
+  });
+
+  router.get("/secrets/sync-passphrase", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const secretsStore = await scopedStore.getSecretsStore();
+      const configured = await hasSyncPassphraseConfigured(secretsStore);
+      res.json({ configured });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      if (err instanceof SecretsStoreError) mapSecretsError(err);
+      rethrowAsApiError(err, "Failed to read sync passphrase status");
+    }
+  });
+
+  router.put("/secrets/sync-passphrase", async (req, res) => {
+    try {
+      assertObject(req.body);
+      const passphrase = req.body.passphrase;
+      if (typeof passphrase !== "string" || passphrase.trim().length === 0) {
+        res.status(400).json({ error: "invalid-passphrase" });
+        return;
+      }
+      const { store: scopedStore } = await getProjectContext(req);
+      const secretsStore = await scopedStore.getSecretsStore();
+      const hadConfiguredPassphrase = await hasSyncPassphraseConfigured(secretsStore);
+      await setSyncPassphrase(secretsStore, passphrase);
+      emitSecretsAudit(req, ctx, hadConfiguredPassphrase ? "secret:update" : "secret:create", {
+        key: RESERVED_SYNC_PASSPHRASE_KEY,
+        scope: "global",
+      });
+      res.json({ success: true });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      if (err instanceof SecretsStoreError) mapSecretsError(err);
+      rethrowAsApiError(err, "Failed to set sync passphrase");
+    }
+  });
+
+  router.delete("/secrets/sync-passphrase", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const secretsStore = await scopedStore.getSecretsStore();
+      await clearSyncPassphrase(secretsStore);
+      emitSecretsAudit(req, ctx, "secret:delete", { key: RESERVED_SYNC_PASSPHRASE_KEY, scope: "global" });
+      res.json({ success: true });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      if (err instanceof SecretsStoreError) mapSecretsError(err);
+      rethrowAsApiError(err, "Failed to clear sync passphrase");
     }
   });
 
