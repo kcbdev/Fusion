@@ -1979,11 +1979,11 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     // before lock applies. Done in a microtask so iOS finishes its
     // own scroll-into-view first.
     if (typeof window !== "undefined" && window.innerWidth <= 768) {
-      window.setTimeout(() => {
+      queueMicrotask(() => {
         if (window.scrollY !== 0 || window.scrollX !== 0) {
           window.scrollTo(0, 0);
         }
-      }, 0);
+      });
     }
   }, []);
 
