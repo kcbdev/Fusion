@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
 import { AlertTriangle, CheckCircle2, RefreshCw, Sparkles, X, XCircle } from "lucide-react";
 import { getErrorMessage, type PrInfo, type StructuredGhError } from "@fusion/core";
 import {
@@ -67,11 +67,16 @@ function OptionChips<T extends { login?: string; name?: string; color?: string }
       <div className="pr-create-modal__chips">
         {selected.map((item) => {
           const key = getKey(item);
-          const chipStyle = includeColor && item.color
-            ? { background: `color-mix(in srgb, #${item.color} 25%, transparent)` }
+          const hasColor = Boolean(includeColor && item.color);
+          const chipStyle = hasColor
+            ? ({ "--pr-chip-label-color": `#${item.color}` } as CSSProperties)
             : undefined;
           return (
-            <span key={key} className="pr-create-modal__chip" style={chipStyle}>
+            <span
+              key={key}
+              className={`pr-create-modal__chip${hasColor ? " pr-create-modal__chip--colored" : ""}`}
+              style={chipStyle}
+            >
               {getLabel(item)}
               <button
                 type="button"
