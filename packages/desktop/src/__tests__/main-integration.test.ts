@@ -314,10 +314,13 @@ describe("main integration", () => {
     await initializeApp();
 
     const [{ instance }] = mocks.windowInstances;
-    expect(mocks.buildAppMenu).toHaveBeenCalledWith({
-      mainWindow: instance,
-      appName: "Fusion",
-    });
+    expect(mocks.buildAppMenu).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mainWindow: instance,
+        appName: "Fusion",
+        onChangeLaunchMode: expect.any(Function),
+      }),
+    );
   });
 
   it("setupTray is called with mainWindow and tray instance", async () => {
