@@ -18,12 +18,23 @@ export interface ShellConnectionProfileInput {
 export interface ShellConnectionState {
   host: "web" | "mobile-shell" | "desktop-shell";
   desktopMode?: "local" | "remote";
+  desktopModeState?: {
+    isFirstRun: boolean;
+    desktopMode: "local" | "remote" | null;
+  };
   activeProfileId: string | null;
   profiles: ShellConnectionProfile[];
   localServer?: {
     status: "idle" | "starting" | "ready" | "error";
     port?: number;
     error?: string | null;
+  };
+  localRuntime?: {
+    source: "embedded-local" | "external-cli" | "none";
+    state: "stopped" | "starting" | "running" | "error";
+    port?: number;
+    baseUrl?: string;
+    error?: string;
   };
 }
 

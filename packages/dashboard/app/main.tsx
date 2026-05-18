@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { RootErrorBoundary } from "./components/ErrorBoundary";
+import { DesktopLaunchGate } from "./components/DesktopLaunchGate";
 import { App } from "./App";
 import { installAuthFetch } from "./auth";
 import { installVersionCheck } from "./versionCheck";
@@ -21,7 +22,9 @@ registerBundledPluginViews();
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <RootErrorBoundary>
-      <App />
+      <DesktopLaunchGate>
+        <App />
+      </DesktopLaunchGate>
     </RootErrorBoundary>
   </StrictMode>,
 );

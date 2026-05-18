@@ -1,0 +1,42 @@
+.desktop-launch-gate {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-primary, #0f1117);
+  color: var(--text-primary, #e5e7eb);
+  z-index: 9999;
+  padding: 1.5rem;
+}
+
+.desktop-launch-gate__panel {
+  max-width: 420px;
+  width: 100%;
+  text-align: center;
+  background: var(--bg-elevated, #1a1d27);
+  border: 1px solid var(--border-subtle, #2a2f3a);
+  border-radius: 12px;
+  padding: 2rem 1.75rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.desktop-launch-gate__panel h1,
+.desktop-launch-gate__panel h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.desktop-launch-gate__panel p {
+  margin: 0 0 1.25rem;
+  color: var(--text-secondary, #9ca3af);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.desktop-launch-gate__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
