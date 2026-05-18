@@ -79,6 +79,22 @@ describe("ConfirmDialog", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
+  it("renders and handles tertiary action when configured", () => {
+    const onTertiary = vi.fn();
+    render(
+      <ConfirmDialog
+        isOpen={true}
+        options={{ title: "Delete Done", message: "Delete or archive?", tertiaryLabel: "Archive Instead" }}
+        onConfirm={vi.fn()}
+        onTertiary={onTertiary}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive Instead" }));
+    expect(onTertiary).toHaveBeenCalledTimes(1);
+  });
+
   it("focuses cancel button on mount", () => {
     render(
       <ConfirmDialog

@@ -13,6 +13,7 @@
 .confirm-dialog__actions {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: var(--space-sm);
 }
 
@@ -34,5 +35,10 @@
     padding-top: 0;
     padding-bottom: 0;
     overflow: hidden;
+  }
+
+  .confirm-dialog__actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

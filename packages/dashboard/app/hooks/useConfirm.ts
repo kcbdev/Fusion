@@ -9,15 +9,20 @@ export interface ConfirmOptions {
   confirmLabel?: string;
   cancelLabel?: string;
   danger?: boolean;
+  tertiaryLabel?: string;
+  tertiaryDanger?: boolean;
 }
+
+export type ConfirmChoice = "primary" | "tertiary" | "cancel";
 
 interface PendingConfirm {
   options: ConfirmOptions;
-  resolve: (value: boolean) => void;
+  resolve: (value: ConfirmChoice) => void;
 }
 
 interface ConfirmContextValue {
   confirm: (options: ConfirmOptions) => Promise<boolean>;
+  confirmWithChoice: (options: ConfirmOptions) => Promise<ConfirmChoice>;
 }
 
 const ConfirmContext = createContext<ConfirmContextValue | null>(null);
@@ -34,13 +39,18 @@ export function ConfirmDialogProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const confirm = useCallback((options: ConfirmOptions) => {
-    return new Promise<boolean>((resolve) => {
+  const confirmWithChoice = useCallback((options: ConfirmOptions) => {
+    return new Promise<ConfirmChoice>((resolve) => {
       updateQueue((current) => [...current, { options, resolve }]);
     });
   }, [updateQueue]);
 
-  const resolveCurrent = useCallback((value: boolean) => {
+  const confirm = useCallback(async (options: ConfirmOptions) => {
+    const choice = await confirmWithChoice(options);
+    return choice === "primary";
+  }, [confirmWithChoice]);
+
+  const resolveCurrent = useCallback((value: ConfirmChoice) => {
     const current = queueRef.current[0];
     if (!current) {
       return;
@@ -52,7 +62,7 @@ export function ConfirmDialogProvider({ children }: { children: ReactNode }) {
 
   const active = queue[0] ?? null;
 
-  const contextValue = useMemo<ConfirmContextValue>(() => ({ confirm }), [confirm]);
+  const contextValue = useMemo<ConfirmContextValue>(() => ({ confirm, confirmWithChoice }), [confirm, confirmWithChoice]);
 
   return React.createElement(
     ConfirmContext.Provider,
@@ -61,8 +71,9 @@ export function ConfirmDialogProvider({ children }: { children: ReactNode }) {
     React.createElement(ConfirmDialog, {
       isOpen: active !== null,
       options: active?.options ?? null,
-      onConfirm: () => resolveCurrent(true),
-      onCancel: () => resolveCurrent(false),
+      onConfirm: () => resolveCurrent("primary"),
+      onTertiary: () => resolveCurrent("tertiary"),
+      onCancel: () => resolveCurrent("cancel"),
     })
   );
 }
@@ -75,5 +86,6 @@ export function useConfirm(): ConfirmContextValue {
 
   return {
     confirm: async (_options: ConfirmOptions) => false,
+    confirmWithChoice: async (_options: ConfirmOptions) => "cancel",
   };
 }

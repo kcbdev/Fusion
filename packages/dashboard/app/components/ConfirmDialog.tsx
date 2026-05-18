@@ -6,10 +6,11 @@ export interface ConfirmDialogProps {
   isOpen: boolean;
   options: ConfirmOptions | null;
   onConfirm: () => void;
+  onTertiary?: () => void;
   onCancel: () => void;
 }
 
-export function ConfirmDialog({ isOpen, options, onConfirm, onCancel }: ConfirmDialogProps) {
+export function ConfirmDialog({ isOpen, options, onConfirm, onTertiary, onCancel }: ConfirmDialogProps) {
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -56,6 +57,11 @@ export function ConfirmDialog({ isOpen, options, onConfirm, onCancel }: ConfirmD
           <button ref={cancelButtonRef} className="btn" onClick={onCancel}>
             {options.cancelLabel ?? "Cancel"}
           </button>
+          {options.tertiaryLabel && onTertiary ? (
+            <button className={`btn ${options.tertiaryDanger ? "btn-danger" : ""}`.trim()} onClick={onTertiary}>
+              {options.tertiaryLabel}
+            </button>
+          ) : null}
           <button className={`btn ${options.danger ? "btn-danger" : "btn-primary"}`} onClick={onConfirm}>
             {options.confirmLabel ?? "Confirm"}
           </button>
