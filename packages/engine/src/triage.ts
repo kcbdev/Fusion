@@ -48,8 +48,10 @@ import { isTransientError, isSilentTransientError } from "./transient-error-dete
 import { withRateLimitRetry } from "./rate-limit-retry.js";
 import { computeRecoveryDecision, formatDelay, MAX_RECOVERY_RETRIES } from "./recovery-policy.js";
 import type { StuckTaskDetector } from "./stuck-task-detector.js";
+import { exec } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import {
   createAgentTask,
   createDelegateTaskTool,
@@ -64,6 +66,9 @@ import {
   getResearchGuidanceForSurface,
   isResearchToolSurfaceEnabled,
 } from "./tool-availability.js";
+import { runGhostBugPreflight } from "./triage-preflight.js";
+import { archiveAsGhostBug } from "./self-healing.js";
+import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
 
 export const TRIAGE_SYSTEM_PROMPT = `You are a task specification agent for "fn", an AI-orchestrated task board.
 
@@ -2208,6 +2213,44 @@ export class TriageProcessor {
     const shouldApplyPromptDeclaredTitle = shouldReplaceTaskTitleFromPrompt(task, promptDeclaredTitle);
 
     await this.store.updateTask(task.id, taskUpdates);
+
+    try {
+      const preflightDecision = await Promise.race([
+        runGhostBugPreflight(
+          { title: task.title ?? "", description: task.description ?? "" },
+          written,
+          {
+            cwd: this.rootDir,
+            exec: promisify(exec),
+          },
+        ),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000)),
+      ]);
+
+      if (preflightDecision && preflightDecision.decision === "archive") {
+        await archiveAsGhostBug(this.store, task.id, task.title ?? "", preflightDecision);
+        const auditor = createRunAuditor(this.store, {
+          taskId: task.id,
+          agentId: task.assignedAgentId ?? "triage",
+          runId: generateSyntheticRunId("triage", task.id),
+          phase: "triage",
+          source: "triage",
+        });
+        await auditor.database({
+          type: "task:auto-archived-ghost-bug",
+          target: task.id,
+          metadata: {
+            reason: preflightDecision.reason,
+            findings: preflightDecision.findings.slice(0, 10),
+          },
+        });
+        planLog.log(`${task.id} auto-archived as ghost bug`);
+        return;
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      planLog.warn(`${task.id}: ghost-bug preflight failed open: ${message}`);
+    }
 
     if (settings.requirePlanApproval) {
       const approvalUpdates: Record<string, unknown> = { status: "awaiting-approval" };

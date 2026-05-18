@@ -52,6 +52,7 @@ import {
   sendNtfyNotification,
   type NtfyNotifier,
 } from "./notifier.js";
+import type { GhostBugDecision } from "./triage-preflight.js";
 
 const log = createLogger("self-healing");
 const worktreeMetadataReconcileLog = createLogger("worktree-metadata-reconcile");
@@ -59,6 +60,30 @@ const execAsync = promisify(exec);
 const DONE_TASK_INTEGRITY_SWEEP_LIMIT = 50;
 const BOARD_STALL_NOTIFICATION_COOLDOWN_MS = 60 * 60_000;
 export const STALE_ACTIVE_BRANCH_EXECUTION_GRACE_MS = 10 * 60_000;
+
+export async function archiveAsGhostBug(
+  store: TaskStore,
+  taskId: string,
+  taskTitle: string,
+  decision: GhostBugDecision,
+): Promise<void> {
+  await store.moveTask(taskId, "archived");
+  await store.logEntry(
+    taskId,
+    "Auto-archived as ghost bug — cited code construct not present on main",
+    JSON.stringify({ reason: decision.reason, findings: decision.findings }, null, 2),
+  );
+  await store.recordActivity({
+    type: "task:auto-archived-ghost-bug",
+    taskId,
+    taskTitle,
+    details: "Cited construct not found on main",
+    metadata: {
+      reason: decision.reason,
+      findings: decision.findings.slice(0, 10),
+    },
+  });
+}
 
 async function classifyOwnedLandedEvidenceForSelfHealing(rootDir: string, task: Task, mergeTargetBranch: string): Promise<OwnedLandedClassification> {
   const { classifyOwnedLandedEvidence } = await import("./merger.js");
