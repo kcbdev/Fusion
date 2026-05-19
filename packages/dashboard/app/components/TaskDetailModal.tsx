@@ -1566,7 +1566,7 @@ export function TaskDetailContent({
   }, [task.id, onDuplicateTask, requestClose, addToast, confirm]);
 
   const isTaskPaused = task.paused || task.userPaused;
-  const showRecoverBranchBindingBanner = task.column === "in-review" && (!task.branch || !task.worktree);
+  const showRecoverBranchBindingBanner = task.column === "in-review" && !task.branch;
 
   const handleRecoverBranchBinding = useCallback(async () => {
     setIsRecoveringBranchBinding(true);
@@ -1574,10 +1574,10 @@ export function TaskDetailContent({
       const outcome = await recoverBranchBinding(task.id, projectId);
       setRecoverBranchBindingOutcome(outcome);
       if (outcome.result === "applied") {
-        addToast(`Recovered branch binding for ${task.id} (${outcome.branch})`, "success");
+        addToast(`Reattached branch for ${task.id} (${outcome.branch})`, "success");
         onTaskUpdated?.({ ...task, branch: outcome.branch, worktree: undefined });
       } else {
-        addToast(`Branch recovery skipped for ${task.id}: ${outcome.reason}`, "info");
+        addToast(`Branch reattachment skipped for ${task.id}: ${outcome.reason}`, "info");
       }
     } catch (err) {
       addToast(getErrorMessage(err), "error");
@@ -3402,16 +3402,16 @@ export function TaskDetailContent({
           <div className="detail-section rebind-banner" role="status">
             <div className="rebind-banner-header">
               <GitBranch aria-hidden="true" />
-              <span className="rebind-banner-headline">Branch binding lost</span>
+              <span className="rebind-banner-headline">Branch needs reattachment</span>
             </div>
             <p className="rebind-banner-copy">
-              This in-review task is missing branch or worktree metadata. A live fusion branch may still exist and can be rebound.
+              This in-review task isn't currently attached to a fusion branch. If a live fusion branch still exists for it, you can reattach it here.
             </p>
             {recoverBranchBindingOutcome && (
               <div className="rebind-banner-result">
                 {recoverBranchBindingOutcome.result === "applied"
-                  ? `Recovered ${recoverBranchBindingOutcome.branch} (${recoverBranchBindingOutcome.aheadCount} commits ahead of ${recoverBranchBindingOutcome.integrationBase}).`
-                  : `Recovery skipped: ${recoverBranchBindingOutcome.reason}`}
+                  ? `Reattached ${recoverBranchBindingOutcome.branch} (${recoverBranchBindingOutcome.aheadCount} commits ahead of ${recoverBranchBindingOutcome.integrationBase}).`
+                  : `Reattachment skipped: ${recoverBranchBindingOutcome.reason}`}
                 {recoverBranchBindingOutcome.result === "skipped" && recoverBranchBindingOutcome.candidates?.length ? (
                   <span>
                     {` Candidates: ${recoverBranchBindingOutcome.candidates.map((entry) => `${entry.branch} (${entry.aheadCount})`).join(", ")}`}
@@ -3429,9 +3429,9 @@ export function TaskDetailContent({
                 {isRecoveringBranchBinding ? (
                   <>
                     <Loader2 size={16} className="spin" aria-hidden="true" />
-                    Recovering…
+                    Reattaching…
                   </>
-                ) : "Recover from branch"}
+                ) : "Reattach branch"}
               </button>
             </div>
           </div>
