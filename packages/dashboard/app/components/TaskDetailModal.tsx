@@ -625,6 +625,7 @@ export function TaskDetailContent({
   const [inlineNoCommitsExpected, setInlineNoCommitsExpected] = useState<boolean>(task.noCommitsExpected === true);
   const [isSavingInlineNoCommitsExpected, setIsSavingInlineNoCommitsExpected] = useState(false);
   const mountedRef = useRef(false);
+  const activeTaskIdRef = useRef(task.id);
 
   // Split-menu dropdown state for footer actions
   const [showMoveMenu, setShowMoveMenu] = useState(false);
@@ -662,6 +663,10 @@ export function TaskDetailContent({
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    activeTaskIdRef.current = task.id;
+  }, [task.id]);
 
   // Merged project settings for effective model resolution in Agent Log header
   const [settings, setSettings] = useState<Settings | undefined>(undefined);
@@ -930,6 +935,7 @@ export function TaskDetailContent({
 
   const handleToggleGithubTracking = useCallback(async () => {
     if (!canEditGithubTracking || isSavingGithubTracking) return;
+    const requestTaskId = task.id;
     const nextEnabled = !githubTrackingEnabled;
     setGithubTrackingEnabledDraft(nextEnabled);
     setIsSavingGithubTracking(true);
@@ -939,20 +945,27 @@ export function TaskDetailContent({
           enabled: nextEnabled,
         },
       }, projectId);
+      if (activeTaskIdRef.current !== requestTaskId) {
+        return;
+      }
       setFullDetail((prev) => prev
         ? ({ ...prev, ...updatedTask, githubTracking: updatedTask.githubTracking } as TaskDetail)
         : (updatedTask as TaskDetail));
       onTaskUpdated?.(updatedTask);
     } catch (err) {
+      if (activeTaskIdRef.current !== requestTaskId) {
+        return;
+      }
       setGithubTrackingEnabledDraft(workingTask.githubTracking?.enabled === true);
       addToast(`Failed to update ${task.id}: ${getErrorMessage(err)}`, "error");
     } finally {
-      if (mountedRef.current) setIsSavingGithubTracking(false);
+      if (mountedRef.current && activeTaskIdRef.current === requestTaskId) setIsSavingGithubTracking(false);
     }
   }, [addToast, canEditGithubTracking, githubTrackingEnabled, isSavingGithubTracking, onTaskUpdated, projectId, workingTask.githubTracking?.enabled, task.id]);
 
   const handleSaveGithubRepoOverride = useCallback(async () => {
     if (!canEditGithubTracking || isSavingGithubTracking) return;
+    const requestTaskId = task.id;
     if (githubRepoOverrideTrimmed.length > 0 && !REPO_OVERRIDE_RE.test(githubRepoOverrideTrimmed)) {
       setGithubRepoOverrideError("Repository override must be in owner/repo format");
       return;
@@ -965,14 +978,20 @@ export function TaskDetailContent({
           repoOverride: githubRepoOverrideTrimmed.length > 0 ? githubRepoOverrideTrimmed : null,
         },
       }, projectId);
+      if (activeTaskIdRef.current !== requestTaskId) {
+        return;
+      }
       setFullDetail((prev) => prev
         ? ({ ...prev, ...updatedTask, githubTracking: updatedTask.githubTracking } as TaskDetail)
         : (updatedTask as TaskDetail));
       onTaskUpdated?.(updatedTask);
     } catch (err) {
+      if (activeTaskIdRef.current !== requestTaskId) {
+        return;
+      }
       addToast(`Failed to update ${task.id}: ${getErrorMessage(err)}`, "error");
     } finally {
-      if (mountedRef.current) setIsSavingGithubTracking(false);
+      if (mountedRef.current && activeTaskIdRef.current === requestTaskId) setIsSavingGithubTracking(false);
     }
   }, [addToast, canEditGithubTracking, githubRepoOverrideTrimmed, isSavingGithubTracking, onTaskUpdated, projectId, task.id]);
 
@@ -982,6 +1001,7 @@ export function TaskDetailContent({
       addToast("Add a title before creating a tracking issue", "info");
       return;
     }
+    const requestTaskId = task.id;
     setIsSavingGithubTracking(true);
     try {
       const updatedTask = await updateTask(task.id, {
@@ -989,15 +1009,21 @@ export function TaskDetailContent({
           enabled: true,
         },
       }, projectId);
+      if (activeTaskIdRef.current !== requestTaskId) {
+        return;
+      }
       setFullDetail((prev) => prev
         ? ({ ...prev, ...updatedTask, githubTracking: updatedTask.githubTracking } as TaskDetail)
         : (updatedTask as TaskDetail));
       onTaskUpdated?.(updatedTask);
       addToast("Requested GitHub tracking issue creation", "info");
     } catch (err) {
+      if (activeTaskIdRef.current !== requestTaskId) {
+        return;
+      }
       addToast(`Failed to update ${task.id}: ${getErrorMessage(err)}`, "error");
     } finally {
-      if (mountedRef.current) setIsSavingGithubTracking(false);
+      if (mountedRef.current && activeTaskIdRef.current === requestTaskId) setIsSavingGithubTracking(false);
     }
   }, [addToast, githubTrackedIssue, githubTrackingEnabled, isSavingGithubTracking, onTaskUpdated, projectId, task]);
 
