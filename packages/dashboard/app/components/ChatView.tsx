@@ -444,6 +444,64 @@ function getMentionTriggerMatch(
   };
 }
 
+type DefaultModelSelection = {
+  provider: string | null;
+  modelId: string | null;
+};
+
+type SessionModelSelection = {
+  modelProvider?: string | null;
+  modelId?: string | null;
+};
+
+function getRuntimeConfigModelSelection(agent?: Agent): { provider: string; modelId: string } | null {
+  const runtimeConfig = agent?.runtimeConfig;
+  if (!runtimeConfig || typeof runtimeConfig !== "object") {
+    return null;
+  }
+
+  const modelProvider = Reflect.get(runtimeConfig, "modelProvider");
+  const modelId = Reflect.get(runtimeConfig, "modelId");
+  if (typeof modelProvider !== "string" || modelProvider.trim().length === 0) {
+    return null;
+  }
+  if (typeof modelId !== "string" || modelId.trim().length === 0) {
+    return null;
+  }
+
+  return {
+    provider: modelProvider,
+    modelId,
+  };
+}
+
+export function resolveSessionProvider(
+  session: SessionModelSelection | null | undefined,
+  agent: Agent | null | undefined,
+  defaults: DefaultModelSelection,
+): { provider: string; modelId: string } | null {
+  if (session?.modelProvider && session?.modelId) {
+    return {
+      provider: session.modelProvider,
+      modelId: session.modelId,
+    };
+  }
+
+  const runtimeSelection = getRuntimeConfigModelSelection(agent ?? undefined);
+  if (runtimeSelection) {
+    return runtimeSelection;
+  }
+
+  if (defaults.provider && defaults.modelId) {
+    return {
+      provider: defaults.provider,
+      modelId: defaults.modelId,
+    };
+  }
+
+  return null;
+}
+
 interface NewChatDialogProps {
   projectId?: string;
   onClose: () => void;
@@ -916,6 +974,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   const [sidebarWidth, setSidebarWidth] = useState(CHAT_SIDEBAR_DEFAULT_WIDTH);
   const [createRoomOpen, setCreateRoomOpen] = useState(false);
   const [agentsMap, setAgentsMap] = useState<Map<string, Agent>>(new Map());
+  const [defaultModel, setDefaultModel] = useState<DefaultModelSelection>({ provider: null, modelId: null });
   const [discoveredSkills, setDiscoveredSkills] = useState<DiscoveredSkill[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(true);
   const [showSkillMenu, setShowSkillMenu] = useState(false);
@@ -1488,6 +1547,31 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       cancelled = true;
     };
   }, [projectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetchModels()
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+        setDefaultModel({
+          provider: response.defaultProvider ?? null,
+          modelId: response.defaultModelId ?? null,
+        });
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setDefaultModel({ provider: null, modelId: null });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Fetch discovered skills for slash command autocomplete
   useEffect(() => {
@@ -2123,8 +2207,13 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     );
   };
 
-  const activeModelTag = formatModelTag(activeSession?.modelProvider, activeSession?.modelId);
-  const activeModelProvider = activeSession?.modelProvider ?? null;
+  const activeResolvedModel = resolveSessionProvider(
+    activeSession,
+    activeSession?.agentId ? (agentsMap.get(activeSession.agentId) ?? null) : null,
+    defaultModel,
+  );
+  const activeModelTag = formatModelTag(activeResolvedModel?.provider, activeResolvedModel?.modelId);
+  const activeModelProvider = activeResolvedModel?.provider ?? null;
   const hasThreadInView = Boolean(activeSession || isStreaming || messages.length > 0);
   const hasMobileDetailSelection = chatScope === "rooms" ? roomThreadActive : Boolean(activeSession);
   const previousHasMobileDetailSelectionRef = useRef(hasMobileDetailSelection);
@@ -2359,57 +2448,60 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                 filteredSessions.map((session) => {
                   const isActive = activeSession?.id === session.id;
                   const showUnreadDot = !isActive && isUnread("direct", session.id, session.lastMessageAt ?? session.updatedAt);
+                  const sessionResolvedModel = resolveSessionProvider(
+                    session,
+                    agentsMap.get(session.agentId) ?? null,
+                    defaultModel,
+                  );
+                  const sessionModelTag = formatModelTag(sessionResolvedModel?.provider, sessionResolvedModel?.modelId) ?? "Fusion";
+
                   return (
-                  <div
-                    key={session.id}
-                    className={`chat-session-item${isActive ? " chat-session-item--active" : ""}`}
-                    onClick={() => handleSessionClick(session.id)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      setContextMenu({ sessionId: session.id, x: e.clientX, y: e.clientY });
-                    }}
-                    data-testid={`chat-session-${session.id}`}
-                  >
-                    <button
-                      className="chat-session-delete-btn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setConfirmDelete(session.id);
+                    <div
+                      key={session.id}
+                      className={`chat-session-item${isActive ? " chat-session-item--active" : ""}`}
+                      onClick={() => handleSessionClick(session.id)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setContextMenu({ sessionId: session.id, x: e.clientX, y: e.clientY });
                       }}
-                      data-testid="chat-session-delete-btn"
-                      aria-label="Delete conversation"
+                      data-testid={`chat-session-${session.id}`}
                     >
-                      <Trash2 size={14} />
-                    </button>
-                    <div className="chat-session-title">
-                      {session.title || "Untitled"}
-                      {showUnreadDot ? (
-                        <span
-                          className="chat-unread-dot"
-                          data-testid={`chat-unread-dot-${session.id}`}
-                          aria-label="Unread messages"
-                        />
-                      ) : null}
-                    </div>
-                    <div className="chat-session-preview">
-                      {session.lastMessagePreview || "No messages"}
-                    </div>
-                    <div className="chat-session-meta">
-                      <span className="chat-session-meta-model">
-                        {session.modelProvider && (
-                          <ProviderIcon provider={session.modelProvider} size="sm" />
-                        )}
-                        <span>
-                          {agentsMap.get(session.agentId)?.name ||
-                            (session.agentId === FN_AGENT_ID
-                              ? (formatModelTag(session.modelProvider, session.modelId) ?? "Fusion")
-                              : session.agentId.slice(0, 30))}
+                      <button
+                        className="chat-session-delete-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmDelete(session.id);
+                        }}
+                        data-testid="chat-session-delete-btn"
+                        aria-label="Delete conversation"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                      <div className="chat-session-title">
+                        {session.title || "Untitled"}
+                        {showUnreadDot ? (
+                          <span
+                            className="chat-unread-dot"
+                            data-testid={`chat-unread-dot-${session.id}`}
+                            aria-label="Unread messages"
+                          />
+                        ) : null}
+                      </div>
+                      <div className="chat-session-preview">
+                        {session.lastMessagePreview || "No messages"}
+                      </div>
+                      <div className="chat-session-meta">
+                        <span className="chat-session-meta-model">
+                          {sessionResolvedModel?.provider ? <ProviderIcon provider={sessionResolvedModel.provider} size="sm" /> : null}
+                          <span>
+                            {agentsMap.get(session.agentId)?.name ||
+                              (session.agentId === FN_AGENT_ID ? sessionModelTag : session.agentId.slice(0, 30))}
+                          </span>
                         </span>
-                      </span>
-                      <span>{session.updatedAt ? formatRelativeTime(session.updatedAt) : ""}</span>
+                        <span>{session.updatedAt ? formatRelativeTime(session.updatedAt) : ""}</span>
+                      </div>
                     </div>
-                  </div>
-                );
+                  );
                 })
               )}
             </div>
