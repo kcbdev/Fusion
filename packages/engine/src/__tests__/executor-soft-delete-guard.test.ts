@@ -1,10 +1,11 @@
 import "./executor-test-helpers.js";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Task } from "@fusion/core";
 import { TaskExecutor } from "../executor.js";
 import { executingTaskLock } from "../active-session-registry.js";
 import { executorLog } from "../logger.js";
 import * as childProcess from "node:child_process";
+import { resetExecutorMocks } from "./executor-test-helpers.js";
 
 function makeTask(overrides: Partial<Task> & Pick<Task, "id">): Task {
   return {
@@ -42,6 +43,10 @@ function createStore(overrides?: { tasks?: Task[] }) {
 }
 
 describe("TaskExecutor soft-delete guards", () => {
+  beforeEach(() => {
+    resetExecutorMocks();
+  });
+
   it("refuses to execute soft-deleted tasks and releases execution lock", async () => {
     const store = createStore();
     const executor = new TaskExecutor(store, "/tmp/test");
