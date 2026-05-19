@@ -329,9 +329,11 @@ export const SecretsView = ({ addToast }: SecretsViewProps) => {
               <h3>{syncPassphraseConfigured ? "Rotate sync passphrase" : "Set sync passphrase"}</h3>
               <button className="modal-close" onClick={closeSyncModal} aria-label="Close">×</button>
             </div>
-            <div className="form-group"><label>Passphrase</label><input aria-label="Passphrase" className="input" type="password" autoComplete="new-password" value={syncPassphrase} onChange={(e) => setSyncPassphrase(e.target.value)} /></div>
-            <div className="form-group"><label>Confirm passphrase</label><input aria-label="Confirm passphrase" className="input" type="password" autoComplete="new-password" value={syncPassphraseConfirm} onChange={(e) => setSyncPassphraseConfirm(e.target.value)} /></div>
-            {!syncPassphraseMatches && syncPassphraseConfirm.length > 0 ? <div className="form-error">Passphrases must match.</div> : null}
+            <div className="secrets-modal-body">
+              <div className="form-group"><label>Passphrase</label><input aria-label="Passphrase" className="input" type="password" autoComplete="new-password" value={syncPassphrase} onChange={(e) => setSyncPassphrase(e.target.value)} /></div>
+              <div className="form-group"><label>Confirm passphrase</label><input aria-label="Confirm passphrase" className="input" type="password" autoComplete="new-password" value={syncPassphraseConfirm} onChange={(e) => setSyncPassphraseConfirm(e.target.value)} /></div>
+              {!syncPassphraseMatches && syncPassphraseConfirm.length > 0 ? <div className="form-error">Passphrases must match.</div> : null}
+            </div>
             <div className="modal-actions"><div className="modal-actions-right"><button className="btn" onClick={closeSyncModal}>Cancel</button><button className="btn btn-primary" onClick={() => void submitSyncPassphrase()} disabled={!syncPassphraseMatches || syncSaving}>{syncPassphraseConfigured ? "Rotate" : "Set passphrase"}</button></div></div>
           </div>
         </div>
@@ -344,14 +346,16 @@ export const SecretsView = ({ addToast }: SecretsViewProps) => {
               <h3>{editing ? "Edit secret" : "Add secret"}</h3>
               <button className="modal-close" onClick={() => setShowModal(false)} aria-label="Close">×</button>
             </div>
-            <div className="form-group"><label>Key</label><input className="input" value={form.key} onChange={(e) => setForm((c) => ({ ...c, key: e.target.value }))} /></div>
-            <div className="form-group"><label>Value</label><div className="secrets-value-row"><input className="input" type={showValue ? "text" : "password"} autoComplete="off" spellCheck={false} value={form.value} onChange={(e) => setForm((c) => ({ ...c, value: e.target.value }))} /><button className="btn btn-icon" onClick={() => setShowValue((s) => !s)}>{showValue ? <EyeOff size={14} /> : <Eye size={14} />}</button></div></div>
-            <div className="form-group"><label>Description</label><textarea className="input" value={form.description} onChange={(e) => setForm((c) => ({ ...c, description: e.target.value }))} /></div>
-            <div className="form-group"><label>Scope</label><div className="secrets-radio-row"><label><input type="radio" checked={form.scope === "project"} onChange={() => setForm((c) => ({ ...c, scope: "project" }))} disabled={Boolean(editing)} /> Project</label><label><input type="radio" checked={form.scope === "global"} onChange={() => setForm((c) => ({ ...c, scope: "global" }))} disabled={Boolean(editing)} /> Global</label></div></div>
-            <div className="form-group"><label>Access policy</label><select className="select" value={form.accessPolicy} onChange={(e) => setForm((c) => ({ ...c, accessPolicy: e.target.value as SecretPolicy }))}><option value="auto">auto</option><option value="prompt">prompt</option><option value="deny">deny</option></select></div>
-            <div className="form-group"><label className="checkbox-label"><input type="checkbox" checked={form.envExportable} onChange={(e) => setForm((c) => ({ ...c, envExportable: e.target.checked }))} /> Export to env</label></div>
-            {form.envExportable ? <div className="form-group"><label>Env key</label><input className="input" value={form.envExportKey} onChange={(e) => setForm((c) => ({ ...c, envExportKey: e.target.value }))} /></div> : null}
-            {formError ? <div className="form-error">{formError}</div> : null}
+            <div className="secrets-modal-body">
+              <div className="form-group"><label>Key</label><input className="input" value={form.key} onChange={(e) => setForm((c) => ({ ...c, key: e.target.value }))} /></div>
+              <div className="form-group"><label>Value</label><div className="secrets-value-row"><input className="input" type={showValue ? "text" : "password"} autoComplete="off" spellCheck={false} value={form.value} onChange={(e) => setForm((c) => ({ ...c, value: e.target.value }))} /><button className="btn btn-icon" onClick={() => setShowValue((s) => !s)}>{showValue ? <EyeOff size={14} /> : <Eye size={14} />}</button></div></div>
+              <div className="form-group"><label>Description</label><textarea className="input" value={form.description} onChange={(e) => setForm((c) => ({ ...c, description: e.target.value }))} /></div>
+              <div className="form-group"><label>Scope</label><div className="secrets-radio-row"><label><input type="radio" checked={form.scope === "project"} onChange={() => setForm((c) => ({ ...c, scope: "project" }))} disabled={Boolean(editing)} /> Project</label><label><input type="radio" checked={form.scope === "global"} onChange={() => setForm((c) => ({ ...c, scope: "global" }))} disabled={Boolean(editing)} /> Global</label></div></div>
+              <div className="form-group"><label>Access policy</label><select className="select" value={form.accessPolicy} onChange={(e) => setForm((c) => ({ ...c, accessPolicy: e.target.value as SecretPolicy }))}><option value="auto">auto</option><option value="prompt">prompt</option><option value="deny">deny</option></select></div>
+              <div className="form-group"><label className="checkbox-label"><input type="checkbox" checked={form.envExportable} onChange={(e) => setForm((c) => ({ ...c, envExportable: e.target.checked }))} /> Export to env</label></div>
+              {form.envExportable ? <div className="form-group"><label>Env key</label><input className="input" value={form.envExportKey} onChange={(e) => setForm((c) => ({ ...c, envExportKey: e.target.value }))} /></div> : null}
+              {formError ? <div className="form-error">{formError}</div> : null}
+            </div>
             <div className="modal-actions"><div className="modal-actions-right"><button className="btn" onClick={() => setShowModal(false)}>Cancel</button><button className="btn btn-primary" onClick={() => void submit()}>{editing ? "Save" : "Create"}</button></div></div>
           </div>
         </div>
