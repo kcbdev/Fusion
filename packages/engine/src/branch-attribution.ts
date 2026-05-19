@@ -5,11 +5,28 @@ const execAsync = promisify(exec);
 const GIT_TIMEOUT_MS = 30_000;
 const GIT_MAX_BUFFER = 10 * 1024 * 1024;
 
+export const CONVENTIONAL_COMMIT_TYPES = [
+  "feat",
+  "fix",
+  "test",
+  "chore",
+  "docs",
+  "refactor",
+  "perf",
+  "build",
+  "ci",
+  "style",
+  "revert",
+] as const;
+
+type AttributionSource = "trailer" | "subject-prefix" | "bracketed-prefix" | "none";
+
 export interface AttributionResult {
   files: string[];
   foreignCommits: { sha: string; subject: string; attributedTaskId: string | null }[];
   ownCommitCount: number;
   rawDiffFileCount: number;
+  commitAttributions: { sha: string; subject: string; source: AttributionSource; attributed: boolean; attributedTaskId: string | null }[];
 }
 
 export class BranchAttributionError extends Error {
@@ -26,6 +43,7 @@ export interface BranchAttributionOptions {
   worktreePath: string;
   baseRef: string;
   taskId: string;
+  requireTrailer?: boolean;
   execAsyncImpl?: typeof execAsync;
 }
 
@@ -105,12 +123,13 @@ export async function filterFilesToOwnTaskCommits(opts: BranchAttributionOptions
   );
 
   if (!logOutput.trim()) {
-    return { files: [], foreignCommits: [], ownCommitCount: 0, rawDiffFileCount };
+    return { files: [], foreignCommits: [], ownCommitCount: 0, rawDiffFileCount, commitAttributions: [] };
   }
 
   const fileSet = new Set<string>();
   const foreignCommits: { sha: string; subject: string; attributedTaskId: string | null }[] = [];
   const ownCommitShas: string[] = [];
+  const commitAttributions: AttributionResult["commitAttributions"] = [];
 
   const records = logOutput.split("\x1e").map((record) => record.trim()).filter(Boolean);
   for (const record of records) {
@@ -129,7 +148,7 @@ export async function filterFilesToOwnTaskCommits(opts: BranchAttributionOptions
       ownCommitShas.push(sha);
       continue;
     }
-    foreignCommits.push({ sha, subject, attributedTaskId });
+    foreignCommits.push({ sha, subject, attributedTaskId: attribution.attributedTaskId });
   }
 
   for (const sha of ownCommitShas) {
@@ -147,5 +166,6 @@ export async function filterFilesToOwnTaskCommits(opts: BranchAttributionOptions
     foreignCommits,
     ownCommitCount: ownCommitShas.length,
     rawDiffFileCount,
+    commitAttributions,
   };
 }
