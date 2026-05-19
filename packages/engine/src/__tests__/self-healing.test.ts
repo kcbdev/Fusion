@@ -522,6 +522,7 @@ describe("SelfHealingManager", () => {
       const recoverAgentsRunningOnInactiveTasks = vi.spyOn(manager, "recoverAgentsRunningOnInactiveTasks").mockResolvedValue(1);
       const clearStaleBlockedBy = vi.spyOn(manager, "clearStaleBlockedBy").mockResolvedValue(1);
       const surfaceInReviewStalls = vi.spyOn(manager, "surfaceInReviewStalls").mockResolvedValue(1);
+      const surfaceInReviewStalled = vi.spyOn(manager, "surfaceInReviewStalled").mockResolvedValue(1);
       const surfaceStalePausedReviews = vi.spyOn(manager, "surfaceStalePausedReviews").mockResolvedValue(1);
       const surfaceStalePausedTodos = vi.spyOn(manager, "surfaceStalePausedTodos").mockResolvedValue(1);
 
@@ -538,6 +539,7 @@ describe("SelfHealingManager", () => {
       expect(recoverAgentsRunningOnInactiveTasks).toHaveBeenCalledTimes(1);
       expect(clearStaleBlockedBy).toHaveBeenCalledTimes(1);
       expect(surfaceInReviewStalls).toHaveBeenCalledTimes(1);
+      expect(surfaceInReviewStalled).toHaveBeenCalledTimes(1);
       expect(surfaceStalePausedReviews).toHaveBeenCalledTimes(1);
       expect(surfaceStalePausedTodos).toHaveBeenCalledTimes(1);
     });
@@ -4905,6 +4907,101 @@ describe("SelfHealingManager", () => {
       (managerWithRecovery as unknown as { dependencyBlockedTodoReporter: { report: typeof reportSpy } }).dependencyBlockedTodoReporter = { report: reportSpy };
 
       expect(await managerWithRecovery.surfaceDependencyBlockedTodos()).toBe(0);
+      managerWithRecovery.stop();
+    });
+  });
+
+  describe("surfaceInReviewStalled", () => {
+    function inReviewTask(overrides: Record<string, unknown> = {}) {
+      return {
+        id: "FN-5093",
+        column: "in-review",
+        paused: false,
+        status: "in-review",
+        mergeDetails: {},
+        columnMovedAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        log: [],
+        ...overrides,
+      };
+    }
+
+    it("logs for quiet in-review tasks beyond threshold", async () => {
+      vi.setSystemTime(new Date("2026-01-02T01:00:00.000Z"));
+      const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ inReviewStalledThresholdMs: 24 * 60 * 60_000, autoMerge: true });
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([inReviewTask()]);
+
+      expect(await managerWithRecovery.surfaceInReviewStalled()).toBe(1);
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-5093",
+        expect.stringContaining("In-review stalled surfaced [in-review-stalled]: quiet"),
+      );
+      expect(store.logEntry).toHaveBeenCalledWith("FN-5093", expect.stringContaining("lastActivitySource=column-moved"));
+      managerWithRecovery.stop();
+    });
+
+    it("skips for recent activity, paused, global pause, engine pause, autoMerge off, threshold off, executing, and active merge", async () => {
+      vi.setSystemTime(new Date("2026-01-02T01:00:00.000Z"));
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        getExecutingTaskIds: () => new Set(["FN-EXEC"]),
+        getActiveMergeTaskId: () => "FN-MERGE",
+      });
+      (store.getSettings as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ inReviewStalledThresholdMs: 24 * 60 * 60_000, autoMerge: true })
+        .mockResolvedValueOnce({ inReviewStalledThresholdMs: 24 * 60 * 60_000, autoMerge: true, globalPause: true })
+        .mockResolvedValueOnce({ inReviewStalledThresholdMs: 24 * 60 * 60_000, autoMerge: true, enginePaused: true })
+        .mockResolvedValueOnce({ inReviewStalledThresholdMs: 24 * 60 * 60_000, autoMerge: false })
+        .mockResolvedValueOnce({ inReviewStalledThresholdMs: 0, autoMerge: true });
+      (store.listTasks as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce([
+          inReviewTask({ id: "FN-RECENT", log: [{ timestamp: "2026-01-02T00:59:59.000Z", action: "recent" }] }),
+          inReviewTask({ id: "FN-PAUSED", paused: true }),
+          inReviewTask({ id: "FN-EXEC" }),
+          inReviewTask({ id: "FN-MERGE" }),
+        ]);
+
+      expect(await managerWithRecovery.surfaceInReviewStalled()).toBe(0);
+      expect(await managerWithRecovery.surfaceInReviewStalled()).toBe(0);
+      expect(await managerWithRecovery.surfaceInReviewStalled()).toBe(0);
+      expect(await managerWithRecovery.surfaceInReviewStalled()).toBe(0);
+      expect(await managerWithRecovery.surfaceInReviewStalled()).toBe(0);
+      expect(store.logEntry).not.toHaveBeenCalled();
+      managerWithRecovery.stop();
+    });
+
+    it("dedupes within threshold window and re-emits after window", async () => {
+      vi.setSystemTime(new Date("2026-01-02T01:00:00.000Z"));
+      const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ inReviewStalledThresholdMs: 24 * 60 * 60_000, autoMerge: true });
+      (store.listTasks as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce([
+          inReviewTask({
+            log: [{ timestamp: "2026-01-01T12:00:00.000Z", action: "In-review stalled surfaced [in-review-stalled]: recent" }],
+          }),
+        ])
+        .mockResolvedValueOnce([
+          inReviewTask({
+            log: [{ timestamp: "2025-12-29T00:00:00.000Z", action: "In-review stalled surfaced [in-review-stalled]: old" }],
+          }),
+        ]);
+
+      expect(await managerWithRecovery.surfaceInReviewStalled()).toBe(0);
+      expect(await managerWithRecovery.surfaceInReviewStalled()).toBe(1);
+      managerWithRecovery.stop();
+    });
+
+    it("suppresses while recent reason-driven in-review stall exists", async () => {
+      vi.setSystemTime(new Date("2026-01-02T01:00:00.000Z"));
+      const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ inReviewStalledThresholdMs: 24 * 60 * 60_000, autoMerge: true });
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        inReviewTask({ log: [{ timestamp: "2026-01-02T00:10:00.000Z", action: "In-review stall surfaced [merge-blocker]: blocked" }] }),
+      ]);
+
+      expect(await managerWithRecovery.surfaceInReviewStalled()).toBe(0);
+      expect(store.logEntry).not.toHaveBeenCalled();
       managerWithRecovery.stop();
     });
   });

@@ -28,7 +28,7 @@ import { exec, execSync } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, countRecentIdenticalStallEntries, detectSelfDefeatingDependency, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult } from "@fusion/core";
+import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, countRecentIdenticalStallEntries, detectSelfDefeatingDependency, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult } from "@fusion/core";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { createLogger } from "./logger.js";
 import { RemovalReason, getRegisteredWorktreeBranchMap, getRegisteredWorktreePaths, isUsableTaskWorktree, removeWorktree, resolveWorktreeBackend, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
@@ -665,6 +665,7 @@ export class SelfHealingManager {
       { name: "reconcile-in-review-branch-rebind", fn: () => this.reconcileInReviewBranchRebind().then(() => undefined) },
       { name: "reclaim-stale-active-branches", fn: () => this.reclaimStaleActiveBranches().then(() => undefined) },
       { name: "surface-in-review-stalls", fn: () => this.surfaceInReviewStalls().then(() => undefined) },
+      { name: "surface-in-review-stalled", fn: () => this.surfaceInReviewStalled().then(() => undefined) },
       { name: "surface-stale-paused-reviews", fn: () => this.surfaceStalePausedReviews().then(() => undefined) },
       { name: "surface-stale-paused-todos", fn: () => this.surfaceStalePausedTodos().then(() => undefined) },
       { name: "audit-no-commits-expected-candidates", fn: () => this.auditNoCommitsExpectedCandidates().then(() => undefined) },
@@ -1252,6 +1253,7 @@ export class SelfHealingManager {
           { name: "reconcile-in-review-branch-rebind", fn: () => this.reconcileInReviewBranchRebind().then(() => undefined) },
           { name: "reclaim-stale-active-branches", fn: () => this.reclaimStaleActiveBranches() },
           { name: "surface-in-review-stalls", fn: () => this.surfaceInReviewStalls() },
+          { name: "surface-in-review-stalled", fn: () => this.surfaceInReviewStalled() },
           { name: "surface-stale-paused-reviews", fn: () => this.surfaceStalePausedReviews() },
           { name: "surface-stale-paused-todos", fn: () => this.surfaceStalePausedTodos() },
           { name: "audit-no-commits-expected-candidates", fn: () => this.auditNoCommitsExpectedCandidates() },
@@ -4074,6 +4076,73 @@ export class SelfHealingManager {
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       log.error(`Dependency-blocked todo surfacing failed: ${errorMessage}`);
+      return 0;
+    }
+  }
+
+  /**
+   * Surface quiet-window backlog-health diagnostics for unpaused in-review tasks.
+   *
+   * Non-overlap contract:
+   * - `surfaceStalePausedReviews()` owns paused in-review tasks.
+   * - `surfaceInReviewStalls()` owns reason-driven in-review stalls.
+   */
+  async surfaceInReviewStalled(): Promise<number> {
+    try {
+      const settings = await this.store.getSettings();
+      if (settings.globalPause || settings.enginePaused) return 0;
+      if (!settings.autoMerge) return 0;
+
+      const cycleStartMs = Date.now();
+      const thresholdMs = settings.inReviewStalledThresholdMs;
+      if (!thresholdMs || thresholdMs <= 0) return 0;
+
+      const tasks = await this.store.listTasks({ column: "in-review", slim: false });
+      const activeMergeTaskId = this.options.getActiveMergeTaskId?.() ?? null;
+      const executingTaskIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
+      let surfaced = 0;
+
+      for (const task of tasks) {
+        if (task.paused === true) continue;
+        if (task.id === activeMergeTaskId || executingTaskIds.has(task.id)) continue;
+
+        const signal = getInReviewStalledSignal(task, {
+          now: cycleStartMs,
+          thresholdMs,
+          autoMerge: true,
+          activeMergeTaskId,
+          executingTaskIds,
+        });
+        if (!signal) continue;
+
+        if (Date.parse(task.updatedAt) >= cycleStartMs) {
+          continue;
+        }
+
+        const previous = [...(task.log ?? [])]
+          .reverse()
+          .find((entry) => entry.action.startsWith("In-review stalled surfaced ["));
+        if (previous) {
+          const parsed = /^In-review stalled surfaced \[([^\]]+)\]/.exec(previous.action);
+          const previousCode = parsed?.[1];
+          const previousAt = Date.parse(previous.timestamp);
+          if (Number.isFinite(previousAt) && previousAt >= cycleStartMs - thresholdMs && previousCode === signal.code) {
+            continue;
+          }
+        }
+
+        const hours = (signal.quietMs / 3_600_000).toFixed(1);
+        await this.store.logEntry(
+          task.id,
+          `In-review stalled surfaced [${signal.code}]: quiet ${hours}h beyond ${(thresholdMs / 3_600_000).toFixed(1)}h threshold; disposition options — nudge review, retry, archive, or create follow-up task. lastActivitySource=${signal.lastActivitySource}`,
+        );
+        surfaced += 1;
+      }
+
+      return surfaced;
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      log.error(`In-review stalled surfacing failed: ${errorMessage}`);
       return 0;
     }
   }
