@@ -6,7 +6,7 @@ import { DEFAULT_TASK_PRIORITY, TASK_PRIORITIES, type Task, type TaskCreateInput
 import { getErrorMessage } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
 import { checkDuplicateTasks, fetchModels, uploadAttachment, fetchSettings, updateGlobalSettings, fetchAgents, DuplicateCandidatesError } from "../api";
-import type { ModelInfo, Agent, NodeInfo, DuplicateMatch } from "../api";
+import type { CreateTaskInput, ModelInfo, Agent, NodeInfo, DuplicateMatch } from "../api";
 import { useNodes } from "../hooks/useNodes";
 import { ModelSelectionModal } from "./ModelSelectionModal";
 import { NodeHealthDot } from "./NodeHealthDot";
@@ -120,7 +120,7 @@ export function InlineCreateCard({
   // Track textarea focus for expand button visibility
   const [isDescriptionFocused, setIsDescriptionFocused] = useState(false);
   const [duplicateMatches, setDuplicateMatches] = useState<DuplicateMatch[] | null>(null);
-  const [pendingSubmit, setPendingSubmit] = useState<TaskCreateInput | null>(null);
+  const [pendingSubmit, setPendingSubmit] = useState<CreateTaskInput | null>(null);
   const justResetRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -333,7 +333,7 @@ export function InlineCreateCard({
     });
   }, []);
 
-  const submitTask = useCallback(async (input: TaskCreateInput) => {
+  const submitTask = useCallback(async (input: CreateTaskInput) => {
     setSubmitting(true);
     try {
       const task = await onSubmit(input);
@@ -405,7 +405,7 @@ export function InlineCreateCard({
   const handleSubmit = useCallback(async () => {
     if (!description.trim() || submitting) return;
 
-    const input: TaskCreateInput = {
+    const input: CreateTaskInput = {
       description: description.trim(),
       column: "triage",
       dependencies: dependencies.length ? dependencies : undefined,

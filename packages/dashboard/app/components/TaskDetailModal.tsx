@@ -1575,7 +1575,7 @@ export function TaskDetailContent({
       setRecoverBranchBindingOutcome(outcome);
       if (outcome.result === "applied") {
         addToast(`Recovered branch binding for ${task.id} (${outcome.branch})`, "success");
-        onTaskUpdated?.({ ...task, branch: outcome.branch, worktree: null } as Task);
+        onTaskUpdated?.({ ...task, branch: outcome.branch, worktree: undefined });
       } else {
         addToast(`Branch recovery skipped for ${task.id}: ${outcome.reason}`, "info");
       }
