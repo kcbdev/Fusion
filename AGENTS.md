@@ -395,6 +395,7 @@ Structured logging via `createLogger()` from `packages/engine/src/logger.ts`. Al
 
 `AgentSemaphore` (`packages/engine/src/concurrency.ts`) has defensive guards: `limit` getter returns minimum 1; `availableCount` returns 0 for invalid limits.
 - `[executor] FN-XXX: fn_task_done refused (<class>) — <reason>` (explicit tool path) and `[executor] FN-XXX: fn_task_done refused (<class>) — <reason> (implicit completion)` (implicit all-steps-done path) now share refusal-class diagnostics for `summary-claims-incomplete` (explicit only), `bulk-step-completion-without-review`, and `pending-code-review-revise`; both paths consume the same `MAX_TASK_DONE_REQUEUE_RETRIES` budget and escalate to `in-review` with `status: "failed"` on exhaustion.
+- Done/archived transitions must clear stale pause metadata (`paused`, `userPaused`, `pausedByAgentId`, `pausedReason`), and `formatTaskLine` suppresses `(paused)` for terminal columns even if stale storage state exists.
 
 ## Dashboard UI Styling Guide
 
