@@ -148,4 +148,32 @@ describe("reliability interactions: near-duplicate intake", () => {
     const updatedNewer = await fx.store.getTask(newer.id);
     expect(updatedNewer.column).toBe("todo");
   });
+
+  it("archives at most one sibling when both near-duplicates finalize in the same millisecond", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-19T12:00:00.000Z"));
+
+    const fx = await createFixture();
+    fixtures.push(fx);
+
+    const first = await fx.store.createTask({
+      title: "Create PR routes missing handlers",
+      description: "Missing /api/tasks/:id/pr/options and /api/tasks/:id/pr/preflight and /api/tasks/:id/pr/generate-metadata",
+    });
+    const second = await fx.store.createTask({
+      title: "Missing handlers for create PR routes",
+      description: "GET /api/tasks/:id/pr/options and GET /api/tasks/:id/pr/preflight and POST /api/tasks/:id/pr/generate-metadata all fail",
+    });
+
+    const settings = await fx.store.getSettings();
+    await Promise.all([
+      (fx.triage as any).finalizeApprovedTask(first, basePrompt, settings, {}),
+      (fx.triage as any).finalizeApprovedTask(second, basePrompt, settings, {}),
+    ]);
+
+    const refreshed = await fx.store.listTasks({ includeArchived: true });
+    const archived = refreshed.filter((task) => task.id === first.id || task.id === second.id).filter((task) => task.column === "archived");
+    expect(archived.length).toBeLessThanOrEqual(1);
+    vi.useRealTimers();
+  });
 });

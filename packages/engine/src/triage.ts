@@ -2367,19 +2367,24 @@ export class TriageProcessor {
 
           const taskCreatedAt = Date.parse(task.createdAt);
           const candidatesById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+          const isStrictlyOlderOrTieCanonical = (candidate: NearDuplicateCandidate): boolean => {
+            if (candidate.createdAt < taskCreatedAt) return true;
+            if (candidate.createdAt > taskCreatedAt) return false;
+            return candidate.id.localeCompare(task.id, undefined, { numeric: true }) < 0;
+          };
           const olderMatches = matches.filter((match) => {
             const candidate = candidatesById.get(match.id);
-            return candidate ? candidate.createdAt <= taskCreatedAt : false;
+            return candidate ? isStrictlyOlderOrTieCanonical(candidate) : false;
           });
-          const canonical = (olderMatches[0] ?? matches[0]);
+          const canonical = olderMatches[0] ?? matches[0];
           const canonicalTask = candidatesById.get(canonical.id);
           if (!canonicalTask) {
             return;
           }
 
-          // FN-5152: only archive the task being finalized when it is the newer-or-equal
-          // sibling. Older tasks never lose to a newer near-duplicate candidate.
-          if (taskCreatedAt >= canonicalTask.createdAt) {
+          // FN-5152: only archive the task being finalized when it is the newer sibling,
+          // or the tie-loser when both rows share the same millisecond timestamp.
+          if (isStrictlyOlderOrTieCanonical(canonicalTask)) {
             await this.store.updateTask(task.id, {
               sourceMetadataPatch: {
                 nearDuplicateOf: canonical.id,
