@@ -16,6 +16,7 @@ import {
   COLUMNS,
   TASK_PRIORITIES,
   VALID_TRANSITIONS,
+  computeContentFingerprint,
   isTaskPriority,
   REPO_OVERRIDE_RE,
   resolveTitleSummarizerSettingsModel,
@@ -157,6 +158,8 @@ async function buildDirectTaskReviewData(task: Task, store: TaskStore): Promise<
   };
 }
 
+export const __fingerprintCreateLocksForTests = new Map<string, Promise<void>>();
+
 interface TaskWorkflowRouteDeps {
   runtimeLogger: { error: (message: string, data?: Record<string, unknown>) => void; warn: (message: string, data?: Record<string, unknown>) => void };
   upload: { single: (name: string) => unknown };
@@ -183,6 +186,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     runGitCommand,
     trimTaskDetailActivityLog,
     triggerCommentWakeForAssignedAgent,
+    resolveSelfHealingManager,
   } = deps;
   const TASK_DETAIL_ACTIVITY_LOG_LIMIT = taskDetailActivityLogLimit;
 
@@ -415,20 +419,46 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       const normalizedTitle = typeof title === "string" ? title : undefined;
       const acknowledgedDuplicateIds = acknowledgedDuplicates ?? [];
 
-      const deterministicGuard = await runDeterministicDuplicateGuard(
-        scopedStore,
-        {
-          title: normalizedTitle,
-          description: normalizedDescription,
-        },
-        {
-          lockScope: projectId,
-          acknowledgedDuplicates: acknowledgedDuplicateIds,
-          bypass: bypassDuplicateCheck === true,
-          logger: runtimeLogger,
-        },
-      );
-      const contentFingerprint = deterministicGuard.fingerprint;
+      const contentFingerprintSeed = computeContentFingerprint({
+        title: normalizedTitle,
+        description: normalizedDescription,
+      });
+      const preexistingLockKey = contentFingerprintSeed ? `${projectId}:${contentFingerprintSeed}` : null;
+
+      let deterministicGuard: Awaited<ReturnType<typeof runDeterministicDuplicateGuard>>;
+      let contentFingerprint: string | null = null;
+      if (preexistingLockKey) {
+        const preexistingLock = __fingerprintCreateLocksForTests.get(preexistingLockKey);
+        if (preexistingLock) {
+          await preexistingLock;
+        }
+      }
+      try {
+        deterministicGuard = await runDeterministicDuplicateGuard(
+          scopedStore,
+          {
+            title: normalizedTitle,
+            description: normalizedDescription,
+          },
+          {
+            lockScope: projectId,
+            acknowledgedDuplicates: acknowledgedDuplicateIds,
+            bypass: bypassDuplicateCheck === true,
+            logger: runtimeLogger,
+          },
+        );
+      } catch (error) {
+        runtimeLogger.warn("FN-5084 deterministic duplicate guard failed; proceeding with create", {
+          contentFingerprint,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        deterministicGuard = {
+          action: "proceed",
+          fingerprint: contentFingerprint,
+          releaseLock: () => {},
+        };
+      }
+      contentFingerprint = deterministicGuard.fingerprint;
 
       try {
         if (deterministicGuard.action === "duplicate" && deterministicGuard.existing) {
@@ -1249,6 +1279,35 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       }
       const updated = await scopedStore.pauseTask(req.params.id, false);
       res.json(updated);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  router.post("/tasks/:id/recover-branch-binding", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const task = await scopedStore.getTask(req.params.id);
+      if (!task) {
+        throw notFound("Task not found");
+      }
+      if (task.column !== "in-review") {
+        throw badRequest("Task must be in-review");
+      }
+
+      const selfHealing = resolveSelfHealingManager(scopedStore);
+      if (!selfHealing) {
+        throw notFound("Self-healing manager unavailable");
+      }
+
+      const result = await selfHealing.reconcileInReviewBranchRebind({
+        includeTaskIds: new Set([task.id]),
+      });
+      const outcome = result.outcomes.find((entry) => entry.taskId === task.id);
+      res.json(outcome ?? { taskId: task.id, result: "skipped", reason: "no-outcome" });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;

@@ -22,6 +22,8 @@ interface PendingImage {
   previewUrl: string;
 }
 
+type InlineCreateTaskInput = TaskCreateInput & { acknowledgedDuplicates?: string[] };
+
 interface InlineCreateCardProps {
   tasks: Task[];
   onSubmit: (input: TaskCreateInput) => Promise<Task>;

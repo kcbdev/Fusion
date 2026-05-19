@@ -143,6 +143,7 @@ export {
   __getDeterministicGuardMutexSize,
   runDeterministicDuplicateGuard,
   reconcileDeterministicDuplicate,
+  __deterministicGuardLocksForTests,
   type DeterministicGuardOptions,
   type DeterministicGuardOutcome,
 } from "./duplicate-guard.js";

@@ -6,6 +6,9 @@ const DEFAULT_WINDOW_MS = 60_000;
 const MAX_WINDOW_MS = 300_000;
 const deterministicGuardLocks = new Map<string, Promise<void>>();
 
+// Test-only compatibility hook used by dashboard deterministic-dedup route tests.
+export const __deterministicGuardLocksForTests = deterministicGuardLocks;
+
 export interface DeterministicGuardOptions {
   windowMs?: number;
   lockScope?: string;

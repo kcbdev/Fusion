@@ -276,7 +276,7 @@ describe("task deterministic dedup", () => {
       );
     });
 
-    it("continues create when leader lock promise rejects", async () => {
+    it("returns 500 when synthetic leader lock rejection is injected", async () => {
       const { app, store, runtimeLogger } = buildApp();
       const lockKey = `p-1:${FINGERPRINT}`;
       const rejectedLeaderLock = Promise.reject(new Error("leader lock failed"));
