@@ -288,6 +288,30 @@ describe("ListView", () => {
     matchMediaSpy.mockRestore();
   });
 
+  it("keeps done status badge in table view when stale paused metadata exists", () => {
+    const tasks = [
+      createMockTask({ id: "FN-001", column: "done", status: "paused", paused: true, pausedByAgentId: "agent-1" }),
+    ];
+
+    renderListView({ tasks });
+    expect(screen.queryByText("paused by agent")).toBeNull();
+    expect(screen.queryByText("paused")).toBeNull();
+    expect(screen.getByText("done")).toBeDefined();
+  });
+
+  it("keeps done status badge in mobile card view when stale paused metadata exists", () => {
+    const matchMediaSpy = mockMobileViewport();
+    const tasks = [
+      createMockTask({ id: "FN-001", column: "done", status: "paused", paused: true, pausedByAgentId: "agent-1" }),
+    ];
+
+    renderListView({ tasks });
+    expect(screen.queryByText("paused by agent")).toBeNull();
+    expect(screen.queryByText("paused")).toBeNull();
+    expect(screen.getByText("done")).toBeDefined();
+    matchMediaSpy.mockRestore();
+  });
+
   it("shows empty state when no tasks", () => {
     renderListView({ tasks: [] });
     expect(screen.getByText("No tasks yet")).toBeDefined();

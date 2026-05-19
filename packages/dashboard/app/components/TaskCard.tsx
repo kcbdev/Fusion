@@ -782,9 +782,11 @@ function TaskCardComponent({
     }
   }, [onOpenDetail, addToast]);
 
-  const isFailed = task.status === "failed";
-  const isPaused = task.paused === true || task.userPaused === true;
-  const pausedByAgent = Boolean(task.paused && task.pausedByAgentId);
+  const isDoneColumn = task.column === "done";
+  const visualStatus = isDoneColumn ? "done" : task.status;
+  const isFailed = !isDoneColumn && task.status === "failed";
+  const isPaused = !isDoneColumn && (task.paused === true || task.userPaused === true);
+  const pausedByAgent = Boolean(!isDoneColumn && task.paused && task.pausedByAgentId);
   const normalizedPriority = normalizeTaskPriorityValue(task.priority);
   const showPriorityBadge = normalizedPriority !== DEFAULT_TASK_PRIORITY;
   const isStuck = isTaskStuck(task, taskStuckTimeoutMs, lastFetchTimeMs);
@@ -803,7 +805,7 @@ function TaskCardComponent({
   const taskAgeStalenessCopy = getTaskAgeStalenessCopy(task.ageStaleness);
   const isAwaitingApproval = task.column === "triage" && task.status === "awaiting-approval";
   const isArchived = task.column === "archived";
-  const isAgentActive = !globalPaused && !queued && !isFailed && !isPaused && !isStuck && !isAwaitingApproval && (task.column === "in-progress" || ACTIVE_STATUSES.has(task.status as string));
+  const isAgentActive = !globalPaused && !queued && !isFailed && !isPaused && !isStuck && !isAwaitingApproval && (task.column === "in-progress" || ACTIVE_STATUSES.has(visualStatus as string));
   const isDraggable = !disableDrag && !queued && !isPaused && !isEditing && !isArchived; // Disable drag during edit/archived or host embedding
 
   // Check if this card can be edited inline
@@ -1552,11 +1554,11 @@ function TaskCardComponent({
             {pausedByAgent ? "paused by agent" : "paused"}
           </span>
         )}
-        {!isPaused && task.status && task.status !== "queued" && (
+        {!isPaused && visualStatus && visualStatus !== "queued" && (
           <span
-            className={`card-status-badge card-status-badge--${task.column}${isAwaitingApproval ? " awaiting-approval" : ""}${ACTIVE_STATUSES.has(task.status) ? " pulsing" : ""}${isFailed ? " failed" : ""}${isStuck ? " stuck" : ""}`}
+            className={`card-status-badge card-status-badge--${task.column}${isAwaitingApproval ? " awaiting-approval" : ""}${ACTIVE_STATUSES.has(visualStatus) ? " pulsing" : ""}${isFailed ? " failed" : ""}${isStuck ? " stuck" : ""}`}
           >
-            {isStuck ? "Stuck" : isAwaitingApproval ? "Awaiting Approval" : getTaskStatusLabel(task.status)}
+            {isStuck ? "Stuck" : isAwaitingApproval ? "Awaiting Approval" : getTaskStatusLabel(visualStatus)}
           </span>
         )}
         {hasInReviewStall && stallCopy && (

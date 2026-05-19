@@ -1611,16 +1611,18 @@ export function ListView({
                         <div className="list-empty-cell list-card-empty">No tasks</div>
                       ) : (
                         columnTasks.map((task) => {
-                          const isFailed = task.status === "failed";
-                          const isPaused = task.paused === true;
+                          const isDoneColumn = task.column === "done";
+                          const visualStatus = isDoneColumn ? "done" : task.status;
+                          const isFailed = !isDoneColumn && task.status === "failed";
+                          const isPaused = !isDoneColumn && task.paused === true;
                           const isStuckState = isTaskStuck(task, taskStuckTimeoutMs, lastFetchTimeMs);
                           const isAgentActive =
                             !globalPaused &&
                             !isFailed &&
                             !isPaused &&
                             !isStuckState &&
-                            (task.column === "in-progress" || ACTIVE_STATUSES.has(task.status as string));
-                          const hasStatus = typeof task.status === "string" && task.status.trim().length > 0;
+                            (task.column === "in-progress" || ACTIVE_STATUSES.has(visualStatus as string));
+                          const hasStatus = typeof visualStatus === "string" && visualStatus.trim().length > 0;
                           const hasDependencies = Boolean(task.dependencies && task.dependencies.length > 0);
                           const taskProgress = getTaskProgress(task);
                           const hasProgress = taskProgress.hasProgress;
@@ -1668,7 +1670,7 @@ export function ListView({
                                   <span className="list-status-badge stuck">Stuck</span>
                                 ) : hasStatus ? (
                                   <span className={`list-status-badge list-status-badge--${task.column}${isFailed ? " failed" : ""}${isAgentActive ? " pulsing" : ""}`}>
-                                    {getTaskStatusLabel(task.status ?? "")}
+                                    {getTaskStatusLabel(visualStatus ?? "")}
                                   </span>
                                 ) : null}
                               </div>
@@ -1801,15 +1803,17 @@ export function ListView({
                           </tr>
                         ) : (
                           columnTasks.map((task) => {
-                            const isFailed = task.status === "failed";
-                            const isPaused = task.paused === true;
+                            const isDoneColumn = task.column === "done";
+                            const visualStatus = isDoneColumn ? "done" : task.status;
+                            const isFailed = !isDoneColumn && task.status === "failed";
+                            const isPaused = !isDoneColumn && task.paused === true;
                             const isStuckState = isTaskStuck(task, taskStuckTimeoutMs, lastFetchTimeMs);
                             const isAgentActive =
                               !globalPaused &&
                               !isFailed &&
                               !isPaused &&
                               !isStuckState &&
-                              (task.column === "in-progress" || ACTIVE_STATUSES.has(task.status as string));
+                              (task.column === "in-progress" || ACTIVE_STATUSES.has(visualStatus as string));
                             const isDragging = draggingTaskId === task.id;
 
                             return (
@@ -1869,13 +1873,13 @@ export function ListView({
                                       <span className="list-status-badge stuck">
                                         Stuck
                                       </span>
-                                    ) : task.status ? (
+                                    ) : visualStatus ? (
                                       <span
                                         className={`list-status-badge list-status-badge--${task.column}${isFailed ? " failed" : ""}${
                                           isAgentActive ? " pulsing" : ""
                                         }`}
                                       >
-                                        {getTaskStatusLabel(task.status ?? "")}
+                                        {getTaskStatusLabel(visualStatus ?? "")}
                                       </span>
                                     ) : (
                                       <span className="list-status-badge">-</span>

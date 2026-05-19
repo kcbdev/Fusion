@@ -969,6 +969,30 @@ describe("TaskCard", () => {
     expect(screen.queryByText("paused by agent")).toBeNull();
   });
 
+  it("keeps done status badge when stale paused metadata exists", () => {
+    const { container } = render(
+      <TaskCard
+        task={makeTask({ column: "done", status: "paused", paused: true, userPaused: true, pausedByAgentId: "agent-1" })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.queryByText("paused by agent")).toBeNull();
+    expect(screen.queryByText("paused")).toBeNull();
+    expect(screen.getByText("done")).toBeDefined();
+    expect(container.querySelector(".card")?.className).not.toContain("paused");
+  });
+
+  it("keeps done status badge when done task status is paused", () => {
+    render(
+      <TaskCard task={makeTask({ column: "done", status: "paused", paused: false, userPaused: false })} onOpenDetail={noop} addToast={noop} />,
+    );
+
+    expect(screen.queryByText("paused")).toBeNull();
+    expect(screen.getByText("done")).toBeDefined();
+  });
+
   it("renders decision-only badge when noCommitsExpected is true", () => {
     render(<TaskCard task={makeTask({ noCommitsExpected: true })} onOpenDetail={noop} addToast={noop} />);
     expect(screen.getByText("decision-only")).toBeTruthy();
