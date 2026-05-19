@@ -442,13 +442,14 @@ Breakpoints: 768px (primary mobile), 1024px (tablet `min-width: 769px and max-wi
 
 ### Lazy-Loaded Heavy Views
 
-These 18 views are lazy-loaded via `React.lazy()` with `<Suspense fallback={null}>`. `prefetchLazyViews()` warms chunks once on mount via `requestIdleCallback`. **Do not make these eager.**
+These 19 views are lazy-loaded via `React.lazy()` with `<Suspense fallback={null}>`. `prefetchLazyViews()` warms chunks once on mount via `requestIdleCallback`. **Do not make these eager.**
 
 - `AgentsView`
 - `NodesView`
 - `ChatView`
 - `MemoryView`
 - `DevServerView`
+- `SecretsView`
 - `InsightsView`
 - `DocumentsView`
 - `SkillsView`
