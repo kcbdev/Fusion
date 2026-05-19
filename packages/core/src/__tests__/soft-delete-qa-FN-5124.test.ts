@@ -13,7 +13,7 @@ describe("soft-delete QA boundary audit (FN-5124)", () => {
     await harness.afterEach();
   });
 
-  it("re-delete is deterministic: second delete fails not-found and does not emit duplicate task:deleted", async () => {
+  it("re-delete is deterministic: repeated deletes are no-op and do not emit duplicate task:deleted", async () => {
     const store = harness.store();
     const task = await store.createTask({ column: "todo", description: "redelete target" });
 
@@ -24,7 +24,7 @@ describe("soft-delete QA boundary audit (FN-5124)", () => {
     const firstDeletedAt = ((store as any).db.prepare("SELECT deletedAt FROM tasks WHERE id = ?").get(task.id) as { deletedAt: string | null })
       .deletedAt;
 
-    await expect(store.deleteTask(task.id)).rejects.toThrow(`Task ${task.id} not found`);
+    await expect(store.deleteTask(task.id)).resolves.toMatchObject({ id: task.id, deletedAt: firstDeletedAt });
 
     const secondDeletedAt = ((store as any).db.prepare("SELECT deletedAt FROM tasks WHERE id = ?").get(task.id) as { deletedAt: string | null })
       .deletedAt;
