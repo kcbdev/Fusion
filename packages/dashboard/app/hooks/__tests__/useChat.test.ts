@@ -1181,6 +1181,46 @@ describe("useChat", () => {
     });
   });
 
+  it("FN-5104 does not reattach after stopStreaming cancels active generation", async () => {
+    const session = {
+      ...makeSession({ id: "session-001", agentId: "agent-001" }),
+      isGenerating: true,
+      inFlightGeneration: {
+        status: "generating" as const,
+        streamingText: "partial",
+        streamingThinking: "thinking",
+        toolCalls: [],
+        replayFromEventId: 8,
+        updatedAt: "2026-04-08T00:00:00.000Z",
+      },
+    };
+    mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
+    mockFetchChatSession.mockResolvedValue({ session: { ...session, isGenerating: false, inFlightGeneration: null } });
+
+    const { result } = renderHook(() => useChat());
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.selectSession("session-001");
+    });
+
+    await waitFor(() => {
+      expect(mockAttachChatStream).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      result.current.stopStreaming();
+    });
+
+    await waitFor(() => {
+      expect(mockAttachChatStream).toHaveBeenCalledTimes(1);
+      expect(result.current.isStreaming).toBe(false);
+    });
+  });
+
   it("fetches session on visible return only when no live stream and swallows reconnect failures", async () => {
     const session = {
       ...makeSession({ id: "session-001", agentId: "agent-001" }),
@@ -2164,6 +2204,51 @@ describe("useChat", () => {
 
       await waitFor(() => {
         expect(result.current.sessions[0]?.title).toBe("New Title");
+      });
+    });
+
+    it("FN-5104 ignores replay checkpoint bumps while attach stream is already active", async () => {
+      const generating = {
+        ...makeSession({ id: "session-001", agentId: "agent-001", title: "Gen" }),
+        isGenerating: true,
+        inFlightGeneration: {
+          status: "generating" as const,
+          streamingText: "partial",
+          streamingThinking: "",
+          toolCalls: [],
+          replayFromEventId: 5,
+          updatedAt: "2026-04-08T00:00:00.000Z",
+        },
+      };
+      mockFetchChatSessions.mockResolvedValueOnce({ sessions: [generating] });
+      mockFetchChatSession.mockResolvedValue({ session: generating });
+
+      const { result } = renderHook(() => useChat("proj-123"));
+
+      await waitFor(() => {
+        expect(result.current.sessions).toHaveLength(1);
+      });
+
+      act(() => {
+        result.current.selectSession("session-001");
+      });
+
+      await waitFor(() => {
+        expect(mockAttachChatStream).toHaveBeenCalledTimes(1);
+      });
+
+      const updatedSession = {
+        ...generating,
+        inFlightGeneration: { ...generating.inFlightGeneration, replayFromEventId: 9 },
+      };
+      act(() => {
+        subscribeHandler["chat:session:updated"]?.({
+          data: JSON.stringify(updatedSession),
+        } as MessageEvent);
+      });
+
+      await waitFor(() => {
+        expect(mockAttachChatStream).toHaveBeenCalledTimes(1);
       });
     });
 
