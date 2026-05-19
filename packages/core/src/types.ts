@@ -1246,6 +1246,29 @@ export interface MergeDetails {
    * Use `/api/tasks/:id/diff` for lineage-backed landed totals.
    */
   deletions?: number;
+  /**
+   * True when rebase-strategy capture found zero commits attributable to this
+   * task — the branch's work was already on main (verified-short-circuit /
+   * already-on-main path). When true, `landedFiles` will be `[]` and stats
+   * will be 0. Squash-strategy merges never set this flag.
+   */
+  noOpVerifiedShortCircuit?: boolean;
+  /**
+   * True when `landedFiles` / `filesChanged` / `insertions` / `deletions` were
+   * captured from task-attributable commits only (rebase-strategy success path
+   * via `filterFilesToOwnTaskCommits`). Self-healing `recoverDoneTaskMergeMetadata`
+   * must NOT overwrite these values with the full `rebaseBaseSha..sha` range,
+   * which would re-inflate them.
+   */
+  landedFilesAttributionRestricted?: boolean;
+  /**
+   * Set ONLY when `filterFilesToOwnTaskCommits` threw and the merger fell back
+   * to the legacy unrestricted `<rebaseBaseSha>..<sha>` walk. Stored
+   * `landedFiles` / stats may include foreign commits; this flag opts
+   * self-healing back into reconcile (the inflated values are NOT intentional).
+   * Never set on success paths.
+   */
+  landedFilesCaptureFallback?: "attribution-failed";
   mergeCommitMessage?: string;
   mergedAt?: string;
   mergeConfirmed?: boolean;
