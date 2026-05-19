@@ -555,6 +555,27 @@ export function useChat(
       const session = sessionOverride ?? sessions.find((s) => s.id === id);
       setActiveSession(session || null);
 
+      if (id) {
+        void fetchChatSession(id, projectId)
+          .then(({ session: refreshedSession }) => {
+            if (!refreshedSession.isGenerating || !refreshedSession.inFlightGeneration) {
+              return;
+            }
+            setActiveSession((prev) => {
+              if (!prev || prev.id !== id) {
+                return prev;
+              }
+              return {
+                ...prev,
+                ...refreshedSession,
+              };
+            });
+          })
+          .catch(() => {
+            // Ignore stale-cache recovery fetch failures.
+          });
+      }
+
       // Reset transient state
       resetTransientComposerState();
       setHasMoreMessages(true);

@@ -1134,6 +1134,53 @@ describe("useChat", () => {
     });
   });
 
+  it("FN-5104 reattaches once when selectSession refresh reveals in-flight generation from stale cache", async () => {
+    const staleSession = {
+      ...makeSession({ id: "session-001", agentId: "agent-001" }),
+      isGenerating: false,
+      inFlightGeneration: null,
+    };
+    const generatingSession = {
+      ...staleSession,
+      isGenerating: true,
+      inFlightGeneration: {
+        status: "generating" as const,
+        streamingText: "partial text",
+        streamingThinking: "thinking",
+        toolCalls: [{ id: "tool-1", type: "function", function: { name: "search", arguments: "{}" } }],
+        replayFromEventId: 19,
+        updatedAt: "2026-04-08T00:00:00.000Z",
+      },
+    };
+
+    mockFetchChatSessions.mockResolvedValueOnce({ sessions: [staleSession] });
+    mockFetchChatSession.mockResolvedValueOnce({ session: generatingSession });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+
+    const { result } = renderHook(() => useChat());
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.selectSession("session-001");
+    });
+
+    await waitFor(() => {
+      expect(mockAttachChatStream).toHaveBeenCalledTimes(1);
+      expect(mockAttachChatStream).toHaveBeenCalledWith(
+        "session-001",
+        expect.any(Object),
+        undefined,
+        { lastEventId: 19 },
+      );
+      expect(result.current.streamingText).toBe("partial text");
+      expect(result.current.streamingThinking).toBe("thinking");
+      expect(result.current.streamingToolCalls).toHaveLength(1);
+    });
+  });
+
   it("fetches session on visible return only when no live stream and swallows reconnect failures", async () => {
     const session = {
       ...makeSession({ id: "session-001", agentId: "agent-001" }),
