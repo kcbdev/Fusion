@@ -153,6 +153,8 @@ function createMockStore(overrides: Record<string, unknown> = {}): TaskStore & E
     updateTask: vi.fn().mockResolvedValue({} as Task),
     logEntry: vi.fn().mockResolvedValue(undefined),
     moveTask: vi.fn().mockResolvedValue(undefined),
+    handoffToReview: vi.fn().mockResolvedValue(undefined),
+    enqueueMergeQueue: vi.fn().mockResolvedValue(undefined),
     mergeTask: vi.fn().mockResolvedValue(undefined),
     archiveTaskAndCleanup: vi.fn().mockResolvedValue({} as Task),
     walCheckpoint: vi.fn().mockReturnValue({ busy: 0, log: 5, checkpointed: 5 }),
@@ -398,7 +400,10 @@ describe("SelfHealingManager", () => {
         status: "failed",
         error: "STUCK_LOOP_EXHAUSTED: stuck kill budget exhausted (7/6) after last reason=loop.",
       });
-      expect(store.moveTask).toHaveBeenLastCalledWith("FN-001", "in-review");
+      expect(store.handoffToReview).toHaveBeenLastCalledWith("FN-001", expect.objectContaining({
+        ownerAgentId: null,
+        evidence: expect.objectContaining({ reason: "stuck-loop-exhausted", agentId: "self-healing" }),
+      }));
       expect(store.logEntry).toHaveBeenLastCalledWith(
         "FN-001",
         "STUCK_LOOP_EXHAUSTED: stuck kill budget exhausted (7/6), last reason=loop. No further automatic retries will run. Manually retry, pause, or move the task to triage to resume work.",
@@ -423,7 +428,10 @@ describe("SelfHealingManager", () => {
         status: "failed",
         error: "STUCK_NO_PROGRESS_CHURN: detected 25 ignored step-update rebuffs after compact-and-resume failed to recover progress. Task is likely too large; decompose via fn_task_create child tasks or rescope. No further automatic retries will run.",
       });
-      expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-review");
+      expect(store.handoffToReview).toHaveBeenCalledWith("FN-001", expect.objectContaining({
+        ownerAgentId: null,
+        evidence: expect.objectContaining({ reason: "stuck-no-progress-churn", agentId: "self-healing" }),
+      }));
       expect(store.logEntry).toHaveBeenCalledWith(
         "FN-001",
         "STUCK_NO_PROGRESS_CHURN: detected 25 ignored step-update rebuffs after compact-and-resume failed to recover progress. No further automatic retries will run. Pause the task, manually decompose the work via fn_task_create child tasks, or move it to triage to rescope.",
@@ -477,7 +485,7 @@ describe("SelfHealingManager", () => {
         id: "FN-001",
         stuckKillCount: 6,
       } as unknown as Task);
-      (store.moveTask as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("concurrent move"));
+      (store.handoffToReview as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("concurrent move"));
 
       manager.start();
 
@@ -490,7 +498,7 @@ describe("SelfHealingManager", () => {
         error: "STUCK_LOOP_EXHAUSTED: stuck kill budget exhausted (7/6) after last reason=loop.",
       });
       expect(getSelfHealingLogger().warn).toHaveBeenCalledWith(
-        expect.stringContaining("moveTask(\"in-review\") failed (concurrent move)"),
+        expect.stringContaining("handoffTaskToReview failed (concurrent move)"),
       );
     });
 
@@ -7424,7 +7432,9 @@ describe("SelfHealingManager reclaimSelfOwnedBranchConflicts", () => {
       paused: true,
       pausedReason: "branch-conflict-unrecoverable",
     }));
-    expect(store.moveTask).toHaveBeenCalledWith("FN-503", "in-review");
+    expect(store.handoffToReview).toHaveBeenCalledWith("FN-503", expect.objectContaining({
+      evidence: expect.objectContaining({ reason: "branch-conflict-unrecoverable-repromote" }),
+    }));
   });
 
   it("preserves dirty worktree as recovery patch before unrecoverable escalation", async () => {
@@ -7448,7 +7458,9 @@ describe("SelfHealingManager reclaimSelfOwnedBranchConflicts", () => {
 
     const recovered = await manager.reclaimSelfOwnedBranchConflicts();
     expect(recovered).toBe(0);
-    expect(store.moveTask).toHaveBeenCalledWith("FN-504", "in-review");
+    expect(store.handoffToReview).toHaveBeenCalledWith("FN-504", expect.objectContaining({
+      evidence: expect.objectContaining({ reason: "branch-conflict-unrecoverable-repromote" }),
+    }));
 
     const recoveryDir = join(fixtureRoot, ".fusion", "recovery");
     const files = await readdir(recoveryDir);
@@ -7472,7 +7484,9 @@ describe("SelfHealingManager reclaimSelfOwnedBranchConflicts", () => {
       paused: true,
       pausedReason: "branch-conflict-unrecoverable",
     }));
-    expect(store.moveTask).toHaveBeenCalledWith("FN-502", "in-review");
+    expect(store.handoffToReview).toHaveBeenCalledWith("FN-502", expect.objectContaining({
+      evidence: expect.objectContaining({ reason: "branch-conflict-unrecoverable-repromote" }),
+    }));
   });
 });
 

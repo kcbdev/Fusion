@@ -31,6 +31,11 @@ function createStore(task: Task, settings: Record<string, unknown> = {}): TaskSt
     task.column = column as any;
     task.updatedAt = new Date(Date.now()).toISOString();
   });
+  (emitter as any).handoffToReview = vi.fn().mockImplementation(async (_taskId: string, _opts: any) => {
+    task.column = "in-review" as any;
+    task.updatedAt = new Date(Date.now()).toISOString();
+    return task;
+  });
   (emitter as any).logEntry = vi.fn().mockImplementation(async (_taskId: string, action: string) => {
     task.log = task.log ?? [];
     task.log.push({ timestamp: new Date(Date.now()).toISOString(), action });
@@ -126,7 +131,10 @@ describe("reliability interactions: non-progress churn", () => {
     expect(task.status).toBe("failed");
     expect(task.column).toBe("in-review");
     expect(task.error).toMatch(/^STUCK_NO_PROGRESS_CHURN:/);
-    expect(store.moveTask).toHaveBeenCalledWith(task.id, "in-review");
+    expect(store.handoffToReview).toHaveBeenCalledWith(task.id, expect.objectContaining({
+      ownerAgentId: null,
+      evidence: expect.objectContaining({ reason: "stuck-no-progress-churn", agentId: "self-healing" }),
+    }));
 
     manager.stop();
   });

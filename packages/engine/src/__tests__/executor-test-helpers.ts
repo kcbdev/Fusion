@@ -321,6 +321,7 @@ export function createMockStore() {
     }),
     updateTask: vi.fn().mockResolvedValue({}),
     moveTask: vi.fn().mockResolvedValue({}),
+    handoffToReview: vi.fn().mockImplementation(async (id: string) => store.moveTask(id, "in-review")),
     mergeTask: vi.fn().mockResolvedValue({}),
     createTask: vi.fn().mockImplementation(async (input: Record<string, unknown>) => ({
       id: "FN-002",

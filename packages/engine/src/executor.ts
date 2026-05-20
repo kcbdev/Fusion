@@ -1208,6 +1208,27 @@ export class TaskExecutor {
     return this.currentRunContexts.get(taskId);
   }
 
+  /**
+   * Stable handoff reasons used on task:handoff audit events.
+   * Keep values greppable for executor/self-healing forensics: review-handoff-requested,
+   * completed-task-recovered, worktree-liveness-failed, step-session-completed,
+   * step-session-failed, transient-retries-exhausted, paused-after-completion,
+   * fn_task_done, fn_task_done-retry-completed, max-task-done-retries-exhausted,
+   * execution-failed, implicit-fn_task_done-refused, invariant-check-failed,
+   * fn_task_done-refused.
+   */
+  private async handoffTaskToReview(task: Task, reason: string, runId = this.getRunContextFor(task.id)?.runId): Promise<Task> {
+    const agentId = this.getRunContextFor(task.id)?.agentId;
+    return this.store.handoffToReview(task.id, {
+      ownerAgentId: agentId ?? null,
+      evidence: {
+        reason,
+        runId,
+        agentId,
+      },
+    });
+  }
+
   private get modelRegistry(): ModelRegistry {
     if (!this._modelRegistry) {
       const authStorage = createFusionAuthStorage();
@@ -2366,7 +2387,7 @@ export class TaskExecutor {
       // Move the task to in-review column (this will also emit task:moved event)
       // The task:moved handler will clean up activeSessions
       await this.persistTokenUsage(task.id);
-      await this.store.moveTask(task.id, "in-review");
+      await this.handoffTaskToReview(task, "review-handoff-requested");
 
       // Dispose the agent session (this may already be done by task:moved handler)
       // but we do it here to be explicit
@@ -2455,7 +2476,7 @@ export class TaskExecutor {
         this.recoveringCompleted.add(task.id);
         await this.store.moveTask(task.id, "in-progress");
       }
-      await this.store.moveTask(task.id, "in-review");
+      await this.handoffTaskToReview(task, "completed-task-recovered");
       if (promotedFromTodo) {
         this.recoveringCompleted.delete(task.id);
       }
@@ -3050,7 +3071,7 @@ export class TaskExecutor {
           });
           await this.store.logEntry(task.id, `${failureMessage} — moved to in-review for inspection`, undefined, this.getRunContextFor(task.id));
           await this.persistTokenUsage(task.id);
-          await this.store.moveTask(task.id, "in-review");
+          await this.handoffTaskToReview(task, "worktree-liveness-failed");
           executorLog.log(`✗ ${task.id} worktree liveness failed — moved to in-review`);
         }
         this.options.onError?.(task, new Error(failureMessage));
@@ -3367,17 +3388,15 @@ export class TaskExecutor {
               return;
             }
 
-            await this.store.moveTask(task.id, "in-review");
+            await this.handoffTaskToReview(task, "step-session-completed");
             this.clearCompletedTaskWatchdog(task.id);
-            // Audit trail: record task move (FN-1404)
-            await audit.database({ type: "task:move", target: task.id, metadata: { to: "in-review" } });
             executorLog.log(`✓ ${task.id} completed (step-session) → in-review`);
             this.options.onComplete?.(task);
           } else {
             const failedSteps = results.filter(r => !r.success);
             const errorSummary = failedSteps.map(r => `Step ${r.stepIndex}: ${r.error || "unknown error"}`).join("; ");
             await this.store.updateTask(task.id, { status: "failed", error: errorSummary });
-            await this.store.moveTask(task.id, "in-review");
+            await this.handoffTaskToReview(task, "step-session-failed");
             executorLog.log(`✗ ${task.id} step-session failed → in-review: ${errorSummary}`);
             this.options.onError?.(task, new Error(errorSummary));
           }
@@ -3474,7 +3493,7 @@ export class TaskExecutor {
             if (accumulatedStepTokenUsage) {
               await this.store.updateTask(task.id, { tokenUsage: accumulatedStepTokenUsage });
             }
-            await this.store.moveTask(task.id, "in-review");
+            await this.handoffTaskToReview(task, "transient-retries-exhausted");
             executorLog.log(`✗ ${task.id} transient retries exhausted → in-review`);
             this.options.onError?.(task, err instanceof Error ? err : new Error(errorMessage));
           } else {
@@ -3484,7 +3503,7 @@ export class TaskExecutor {
             if (accumulatedStepTokenUsage) {
               await this.store.updateTask(task.id, { tokenUsage: accumulatedStepTokenUsage });
             }
-            await this.store.moveTask(task.id, "in-review");
+            await this.handoffTaskToReview(task, "step-session-failed");
             executorLog.log(`✗ ${task.id} step-session execution failed → in-review`);
             this.options.onError?.(task, err instanceof Error ? err : new Error(errorMessage));
           }
@@ -3956,7 +3975,7 @@ export class TaskExecutor {
               executorLog.log(`${task.id} paused after completion (graceful session exit) — finalizing to in-review`);
               await this.store.logEntry(task.id, "Execution paused after completion — finalizing to in-review");
               await this.persistTokenUsage(task.id);
-              await this.store.moveTask(task.id, "in-review");
+              await this.handoffTaskToReview(task, "paused-after-completion");
               this.clearCompletedTaskWatchdog(task.id);
               this.options.onComplete?.(task);
             } else {
@@ -4064,7 +4083,7 @@ export class TaskExecutor {
             }
 
             await this.persistTokenUsage(task.id);
-            await this.store.moveTask(task.id, "in-review");
+            await this.handoffTaskToReview(task, "fn_task_done");
             this.clearCompletedTaskWatchdog(task.id);
             executorLog.log(`✓ ${task.id} completed → in-review`);
             this.options.onComplete?.(task);
@@ -4294,7 +4313,7 @@ export class TaskExecutor {
               }
 
               await this.persistTokenUsage(task.id);
-              await this.store.moveTask(task.id, "in-review");
+              await this.handoffTaskToReview(task, "fn_task_done-retry-completed");
               this.clearCompletedTaskWatchdog(task.id);
               executorLog.log(`✓ ${task.id} completed on retry → in-review`);
               this.options.onComplete?.(task);
@@ -4347,7 +4366,7 @@ export class TaskExecutor {
                 await this.store.updateTask(task.id, { status: "failed", error: errorMessage });
                 await this.store.logEntry(task.id, `${errorMessage} — moved to in-review for inspection`, undefined, this.getRunContextFor(task.id));
                 await this.persistTokenUsage(task.id);
-                await this.store.moveTask(task.id, "in-review");
+                await this.handoffTaskToReview(task, "max-task-done-retries-exhausted");
                 executorLog.log(`✗ ${task.id} failed after ${MAX_TASK_DONE_SESSION_RETRIES} retries — no fn_task_done → in-review`);
               }
               this.options.onError?.(task, new Error(errorMessage));
@@ -4442,7 +4461,7 @@ export class TaskExecutor {
           executorLog.log(`${task.id} paused after completion — finalizing to in-review`);
           await this.store.logEntry(task.id, "Execution paused after completion — finalizing to in-review", undefined, this.getRunContextFor(task.id));
           await this.persistTokenUsage(task.id);
-          await this.store.moveTask(task.id, "in-review");
+          await this.handoffTaskToReview(task, "paused-after-completion");
           this.options.onComplete?.(task);
         } else {
           executorLog.log(`${task.id} paused — moving to todo`);
@@ -4889,7 +4908,7 @@ export class TaskExecutor {
             nextRecoveryAt: null,
           });
           await this.persistTokenUsage(task.id);
-          await this.store.moveTask(task.id, "in-review");
+          await this.handoffTaskToReview(task, "transient-retries-exhausted");
           executorLog.log(`✗ ${task.id} transient retries exhausted → in-review`);
           this.options.onError?.(task, err instanceof Error ? err : new Error(errorMessage));
           return;
@@ -4901,7 +4920,7 @@ export class TaskExecutor {
         await this.store.logEntry(task.id, `Execution failed: ${terminalError}`, errorStack ?? errorDetail, this.getRunContextFor(task.id));
         await this.store.updateTask(task.id, { status: "failed", error: terminalError });
         await this.persistTokenUsage(task.id);
-        await this.store.moveTask(task.id, "in-review");
+        await this.handoffTaskToReview(task, "execution-failed");
         executorLog.log(`✗ ${task.id} execution failed → in-review`);
         this.options.onError?.(task, err instanceof Error ? err : new Error(errorMessage));
       }
@@ -5578,7 +5597,7 @@ export class TaskExecutor {
       });
       await this.store.logEntry(task.id, `${refusal.message} — moved to in-review for inspection`, undefined, this.getRunContextFor(task.id));
       await this.persistTokenUsage(task.id);
-      await this.store.moveTask(task.id, "in-review");
+      await this.handoffTaskToReview(task, "implicit-fn_task_done-refused");
     }
 
     this.deleteActiveSession(task.id);
@@ -5659,7 +5678,14 @@ export class TaskExecutor {
             });
             await store.logEntry(taskId, `${refusalMessage} — moved to in-review for inspection`, undefined, this.getRunContextFor(task.id));
             await this.persistTokenUsage(taskId);
-            await store.moveTask(taskId, "in-review");
+            await store.handoffToReview(taskId, {
+              ownerAgentId: this.getRunContextFor(task.id)?.agentId ?? null,
+              evidence: {
+                reason: "invariant-check-failed",
+                runId: this.getRunContextFor(task.id)?.runId,
+                agentId: this.getRunContextFor(task.id)?.agentId,
+              },
+            });
             executorLog.log(`✗ ${taskId} failed invariant check — moved to in-review`);
           }
 
@@ -5710,7 +5736,14 @@ export class TaskExecutor {
             });
             await store.logEntry(taskId, `${refusalMessage} — moved to in-review for inspection`, undefined, this.getRunContextFor(task.id));
             await this.persistTokenUsage(taskId);
-            await store.moveTask(taskId, "in-review");
+            await store.handoffToReview(taskId, {
+              ownerAgentId: this.getRunContextFor(task.id)?.agentId ?? null,
+              evidence: {
+                reason: "fn_task_done-refused",
+                runId: this.getRunContextFor(task.id)?.runId,
+                agentId: this.getRunContextFor(task.id)?.agentId,
+              },
+            });
             executorLog.log(`✗ ${taskId} fn_task_done refusal (${taskDoneRefusal.refusalClass}) — moved to in-review for inspection`);
           }
 

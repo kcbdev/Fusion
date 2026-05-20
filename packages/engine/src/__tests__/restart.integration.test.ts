@@ -270,7 +270,7 @@ const DEFAULT_SETTINGS: Settings = {
 
 function createMockStore(overrides: Record<string, any> = {}) {
   const listeners = new Map<string, Function[]>();
-  return {
+  const store = {
     on: vi.fn((event: string, fn: Function) => {
       const existing = listeners.get(event) || [];
       existing.push(fn);
@@ -307,6 +307,8 @@ function createMockStore(overrides: Record<string, any> = {}) {
     _listeners: listeners,
     ...overrides,
   } as any;
+  store.handoffToReview ??= vi.fn().mockImplementation(async (id: string) => store.moveTask(id, "in-review"));
+  return store;
 }
 
 function makeTask(id: string, column: Column, overrides: Partial<Task> = {}): Task {

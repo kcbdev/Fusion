@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync, watch, type FSWatcher } from "node:fs";
-import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, CheckoutClaimPrecondition, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate, Agent, AutostashOrphanRecord, TaskCommitAssociation, TaskCommitAssociationMatchSource, TaskCommitAssociationConfidence, GithubIssueAction, MergeQueueEntry, MergeQueueEnqueueOptions, MergeQueueAcquireOptions, MergeQueueReleaseOutcome } from "./types.js";
+import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, CheckoutClaimPrecondition, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate, Agent, AutostashOrphanRecord, TaskCommitAssociation, TaskCommitAssociationMatchSource, TaskCommitAssociationConfidence, GithubIssueAction, MergeQueueEntry, MergeQueueEnqueueOptions, MergeQueueAcquireOptions, MergeQueueReleaseOutcome, HandoffToReviewOptions } from "./types.js";
 import { createActivityLogSnapshot, createRunAuditSnapshot, createTaskMetadataSnapshot, toTaskMetadataRecord, validateSnapshotEnvelope, type ActivityLogSnapshot, type RunAuditSnapshot, type TaskMetadataSnapshot } from "./shared-mesh-state.js";
 import { VALID_TRANSITIONS, DEFAULT_SETTINGS, isGlobalOnlySettingsKey, WORKFLOW_STEP_TEMPLATES, validateDocumentKey } from "./types.js";
 import { DEFAULT_PROJECT_SETTINGS } from "./settings-schema.js";
@@ -832,6 +832,36 @@ export class InvalidMergeQueueLeaseDurationError extends Error {
     super(`merge queue leaseDurationMs must be > 0 (received ${leaseDurationMs})`);
     this.name = "InvalidMergeQueueLeaseDurationError";
   }
+}
+
+export class HandoffInvariantViolationError extends Error {
+  constructor(
+    public readonly taskId: string,
+    public readonly fromColumn: Column,
+    message: string,
+  ) {
+    super(message);
+    this.name = "HandoffInvariantViolationError";
+  }
+}
+
+interface MoveTaskOptions {
+  preserveResumeState?: boolean;
+  preserveProgress?: boolean;
+  preserveWorktree?: boolean;
+  preserveStatus?: boolean;
+  allocateWorktree?: (reservedNames: Set<string>) => string | null;
+  moveSource?: "user" | "engine";
+  skipMergeBlocker?: boolean;
+  allowDirectInReviewMove?: boolean;
+}
+
+interface MoveTaskInternalOptions {
+  fromHandoff: boolean;
+  runContext?: Pick<RunMutationContext, "runId" | "agentId"> | { runId?: string; agentId?: string };
+  ownerAgentId?: string | null;
+  evidence?: HandoffToReviewOptions["evidence"];
+  now?: string;
 }
 
 export class TaskStore extends EventEmitter<TaskStoreEvents> {
@@ -4461,264 +4491,355 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     });
   }
 
+  private async readTaskForMove(id: string): Promise<Task> {
+    const dir = this.taskDir(id);
+    try {
+      return await this.readTaskJson(dir);
+    } catch (error) {
+      const archived = this.archiveDb.get(id);
+      if (!archived) {
+        throw error;
+      }
+      return this.archiveEntryToTask(archived, false);
+    }
+  }
+
   async moveTask(
     id: string,
     toColumn: Column,
-    options?: {
-      /**
-       * Mark this transition as an internal bounce/pause hop rather than a
-       * user-initiated reset. On in-progress/done/in-review → todo/triage,
-       * skip the destructive cleanup that would otherwise discard resume
-       * state: leave step statuses intact (no resetAllStepsToPending), do
-       * not rewrite PROMPT.md checkboxes, and keep `worktree` +
-       * `executionStartedAt` so the resumed run reattaches to the same
-       * checkout and preserves wall-clock execution time. `status`,
-       * `error`, and `blockedBy` are still cleared because those are
-       * per-run failure state that the next run will rebuild.
-       *
-       * Used by the workflow-rerun bounce, the pause→todo paths, and
-       * other executor-internal requeues. NOT used by user-initiated
-       * "move back to todo" actions, which still want a clean slate.
-       */
-      preserveResumeState?: boolean;
-      /**
-       * Preserve step progress (step statuses + currentStep) when reopening
-       * to todo/triage, while still clearing per-run execution state
-       * (worktree and wall-clock timing fields).
-       */
-      preserveProgress?: boolean;
-      /**
-       * Skip the default "release worktree on requeue" behavior. Used by
-       * internal bounce paths (e.g. workflow-rerun) that immediately
-       * promote the task back to in-progress on the same checkout, where
-       * publishing an interim `worktree=null` state to listeners would be
-       * misleading. Has no effect on transitions that don't otherwise
-       * clear the worktree.
-       */
-      preserveWorktree?: boolean;
-      /**
-       * When true, do not clear task.status/task.error/task.pausedReason on
-       * reopen-to-todo/triage transitions. Required so recovery handlers that
-       * bounce through todo can keep sticky failed state context.
-       */
-      preserveStatus?: boolean;
-      /**
-       * When transitioning to in-progress on a task that has no worktree
-       * assigned, invoke this allocator to pick a path. The store calls
-       * the allocator with a fresh `reservedNames` set (built from every
-       * other task's current `worktree`) inside a cross-task allocation
-       * lock, so two concurrent moves cannot pick the same name. The
-       * allocator should return an absolute path or `null` to skip
-       * allocation. Provided by callers (the manual-move route, the
-       * scheduler) so the store stays free of worktree-naming policy.
-       */
-      allocateWorktree?: (reservedNames: Set<string>) => string | null;
-      /** Distinguishes user-initiated moves from engine-internal transitions. */
-      moveSource?: "user" | "engine";
-      /** Bypass in-review merge blocker checks for explicit engine-owned transitions. */
-      skipMergeBlocker?: boolean;
-    },
+    options?: MoveTaskOptions,
   ): Promise<Task> {
-    return this.withTaskLock(id, async () => {
-      const dir = this.taskDir(id);
+    return this.withTaskLock(id, () => this.moveTaskInternal(id, toColumn, options, { fromHandoff: false }));
+  }
+
+  async handoffToReview(taskId: string, opts: HandoffToReviewOptions): Promise<Task> {
+    return this.withTaskLock(taskId, async () => {
       let task: Task;
       try {
-        task = await this.readTaskJson(dir);
+        task = await this.readTaskForMove(taskId);
       } catch (error) {
-        const archived = this.archiveDb.get(id);
-        if (!archived) {
-          // Public API: propagate TaskDeletedError (and other typed failures)
-          // instead of silently treating soft-deleted live rows as missing.
-          throw error;
+        if (error instanceof TaskDeletedError) {
+          const deletedTask = this.readTaskFromDb(taskId, { includeDeleted: true });
+          throw new HandoffInvariantViolationError(
+            taskId,
+            deletedTask?.column ?? "todo",
+            `Cannot hand off ${taskId} to in-review because the task is deleted`,
+          );
         }
-        task = this.archiveEntryToTask(archived, false);
+        throw error;
       }
 
-      if (task.column === toColumn) {
-        if (toColumn === "done" && this.clearDoneTransientFields(task)) {
-          task.updatedAt = new Date().toISOString();
-          await this.atomicWriteTaskJson(dir, task);
-          if (this.isWatching) this.taskCache.set(id, { ...task });
-          this.emit("task:updated", task);
-        }
-        return task;
-      }
-
-      const validTargets = VALID_TRANSITIONS[task.column];
-      if (!validTargets.includes(toColumn)) {
-        throw new Error(
-          `Invalid transition: '${task.column}' → '${toColumn}'. ` +
-            `Valid targets: ${validTargets.join(", ") || "none"}`,
+      if (task.column === "archived" || task.deletedAt != null) {
+        throw new HandoffInvariantViolationError(
+          taskId,
+          task.column,
+          `Cannot hand off ${taskId} to in-review from ${task.column}`,
         );
       }
 
-      const moveSource = options?.moveSource ?? "engine";
-      const fromColumn = task.column;
-      if (fromColumn === "in-review" && toColumn === "done" && !options?.skipMergeBlocker) {
-        const mergeBlocker = getTaskMergeBlocker(task);
-        if (mergeBlocker) {
-          throw new Error(`Cannot move ${id} to done: ${mergeBlocker}`);
-        }
-      }
-      task.column = toColumn;
-      task.columnMovedAt = new Date().toISOString();
-      task.updatedAt = task.columnMovedAt;
+      return this.moveTaskInternal(
+        taskId,
+        "in-review",
+        {
+          ...opts.moveOptions,
+          skipMergeBlocker: true,
+        },
+        {
+          fromHandoff: true,
+          runContext: {
+            runId: opts.evidence.runId,
+            agentId: opts.evidence.agentId,
+          },
+          ownerAgentId: opts.ownerAgentId,
+          evidence: opts.evidence,
+          now: opts.now,
+        },
+        task,
+      );
+    });
+  }
 
-      if (fromColumn === "in-progress" && toColumn !== "in-progress") {
-        const segmentStartMs = Date.parse(task.executionStartedAt ?? task.columnMovedAt);
-        const segmentEndMs = Date.parse(task.columnMovedAt);
-        const segmentDeltaMs =
-          Number.isFinite(segmentStartMs) && Number.isFinite(segmentEndMs)
-            ? Math.max(0, segmentEndMs - segmentStartMs)
-            : 0;
-        task.cumulativeActiveMs = Math.max(0, task.cumulativeActiveMs ?? 0) + segmentDeltaMs;
+  private async moveTaskInternal(
+    id: string,
+    toColumn: Column,
+    options: MoveTaskOptions | undefined,
+    internal: MoveTaskInternalOptions,
+    currentTask?: Task,
+  ): Promise<Task> {
+    const dir = this.taskDir(id);
+    const task = currentTask ?? await this.readTaskForMove(id);
+    const moveSource = options?.moveSource ?? "engine";
+
+    if (task.column === toColumn) {
+      if (internal.fromHandoff && toColumn === "in-review") {
+        this.db.transactionImmediate(() => {
+          const liveRow = this.readTaskFromDb(id, { includeDeleted: true });
+          if (liveRow?.deletedAt) {
+            throw new HandoffInvariantViolationError(
+              id,
+              task.column,
+              `Cannot hand off ${id} to in-review because the task is deleted`,
+            );
+          }
+          const existing = this.db.prepare("SELECT 1 FROM mergeQueue WHERE taskId = ?").get(id) as { 1: number } | undefined;
+          this.insertRunAuditEventRow({
+            taskId: id,
+            agentId: internal.runContext?.agentId,
+            runId: internal.runContext?.runId,
+            domain: "database",
+            mutationType: "task:move",
+            target: id,
+            metadata: {
+              from: task.column,
+              to: toColumn,
+              moveSource,
+            },
+          });
+          this.enqueueMergeQueue(id, { priority: task.priority, now: internal.now });
+          this.insertRunAuditEventRow({
+            taskId: id,
+            agentId: internal.runContext?.agentId,
+            runId: internal.runContext?.runId,
+            domain: "database",
+            mutationType: "task:handoff",
+            target: id,
+            metadata: {
+              taskId: id,
+              fromColumn: task.column,
+              ownerAgentId: internal.ownerAgentId ?? null,
+              reason: internal.evidence?.reason,
+              runId: internal.runContext?.runId,
+              agentId: internal.runContext?.agentId,
+              alreadyEnqueued: Boolean(existing),
+            },
+          });
+        });
+        return task;
       }
 
-      // Wall-clock end-to-end runtime: set on first transition into in-progress
-      // and first transition into done. Never overwritten — see retry-clear
-      // logic below for the path that resets these for a fresh run.
-      if (toColumn === "in-progress") {
-        task.cumulativeActiveMs ??= 0;
-        if (!task.firstExecutionAt) {
-          task.firstExecutionAt = task.columnMovedAt;
-        }
-        if (!task.executionStartedAt) {
-          task.executionStartedAt = task.columnMovedAt;
-        }
+      if (toColumn === "done" && this.clearDoneTransientFields(task)) {
+        task.updatedAt = new Date().toISOString();
+        await this.atomicWriteTaskJson(dir, task);
+        if (this.isWatching) this.taskCache.set(id, { ...task });
+        this.emit("task:updated", task);
+      }
+      return task;
+    }
+
+    const validTargets = VALID_TRANSITIONS[task.column];
+    if (!validTargets.includes(toColumn)) {
+      throw new Error(
+        `Invalid transition: '${task.column}' → '${toColumn}'. ` +
+          `Valid targets: ${validTargets.join(", ") || "none"}`,
+      );
+    }
+
+    const fromColumn = task.column;
+    if (fromColumn === "in-review" && toColumn === "done" && !options?.skipMergeBlocker) {
+      const mergeBlocker = getTaskMergeBlocker(task);
+      if (mergeBlocker) {
+        throw new Error(`Cannot move ${id} to done: ${mergeBlocker}`);
+      }
+    }
+
+    const movedAt = internal.now ?? new Date().toISOString();
+    task.column = toColumn;
+    task.columnMovedAt = movedAt;
+    task.updatedAt = movedAt;
+
+    if (fromColumn === "in-progress" && toColumn !== "in-progress") {
+      const segmentStartMs = Date.parse(task.executionStartedAt ?? task.columnMovedAt);
+      const segmentEndMs = Date.parse(task.columnMovedAt);
+      const segmentDeltaMs =
+        Number.isFinite(segmentStartMs) && Number.isFinite(segmentEndMs)
+          ? Math.max(0, segmentEndMs - segmentStartMs)
+          : 0;
+      task.cumulativeActiveMs = Math.max(0, task.cumulativeActiveMs ?? 0) + segmentDeltaMs;
+    }
+
+    if (toColumn === "in-progress") {
+      task.cumulativeActiveMs ??= 0;
+      if (!task.firstExecutionAt) {
+        task.firstExecutionAt = task.columnMovedAt;
+      }
+      if (!task.executionStartedAt) {
+        task.executionStartedAt = task.columnMovedAt;
+      }
+      task.userPaused = undefined;
+    }
+    if (toColumn === "done" && !task.executionCompletedAt) {
+      task.executionCompletedAt = task.columnMovedAt;
+    }
+
+    if (toColumn === "done") {
+      this.clearDoneTransientFields(task);
+    }
+
+    const isReopenToTodoOrTriage =
+      (fromColumn === "in-progress" || fromColumn === "done" || fromColumn === "in-review")
+      && (toColumn === "todo" || toColumn === "triage");
+
+    if (isReopenToTodoOrTriage) {
+      if (!options?.preserveStatus) {
+        task.status = undefined;
+        task.error = undefined;
+        task.pausedReason = undefined;
+      }
+      task.blockedBy = undefined;
+      task.overlapBlockedBy = undefined;
+      task.paused = undefined;
+      task.pausedByAgentId = undefined;
+      if (moveSource === "user" && toColumn === "todo") {
+        task.userPaused = true;
+      } else {
         task.userPaused = undefined;
       }
-      if (toColumn === "done" && !task.executionCompletedAt) {
-        task.executionCompletedAt = task.columnMovedAt;
+
+      const hasNonPendingStepProgress = task.steps.some((step) => step.status !== "pending");
+      const preserveStepProgress =
+        options?.preserveResumeState || (options?.preserveProgress === true && hasNonPendingStepProgress);
+
+      if (!options?.preserveWorktree) {
+        task.worktree = undefined;
       }
 
-      // Clear transient fields when moving to done (matches moveToDone behavior)
-      if (toColumn === "done") {
-        this.clearDoneTransientFields(task);
+      if (!options?.preserveResumeState) {
+        task.executionStartedAt = undefined;
+        task.executionCompletedAt = undefined;
+      } else {
+        task.executionCompletedAt = undefined;
       }
 
-      // Clear transient fields when reopening/resetting a task into todo/triage.
-      // This ensures failed tasks don't show failed status after being moved for retry.
-      // Note: recovery metadata (recoveryRetryCount, nextRecoveryAt) is intentionally
-      // preserved here — the recovery-policy module manages those fields. They are
-      // only cleared on terminal transitions (in-review, done, archived).
-      const isReopenToTodoOrTriage =
-        (fromColumn === "in-progress" || fromColumn === "done" || fromColumn === "in-review")
-        && (toColumn === "todo" || toColumn === "triage");
+      if (!preserveStepProgress) {
+        this.resetAllStepsToPending(task);
+        await this.resetPromptCheckboxes(dir);
+      }
+    }
 
-      if (isReopenToTodoOrTriage) {
-        if (!options?.preserveStatus) {
-          task.status = undefined;
-          task.error = undefined;
-          task.pausedReason = undefined;
+    if (toColumn === "in-review") {
+      task.recoveryRetryCount = undefined;
+      task.nextRecoveryAt = undefined;
+    }
+
+    if (
+      (fromColumn === "in-review" && (toColumn === "todo" || toColumn === "in-progress" || toColumn === "triage"))
+      || (fromColumn === "done" && (toColumn === "todo" || toColumn === "triage"))
+    ) {
+      task.workflowStepResults = undefined;
+    }
+
+    if (fromColumn === "in-review" && (toColumn === "todo" || toColumn === "triage")) {
+      task.branch = undefined;
+      task.executionStartBranch = undefined;
+      task.baseCommitSha = undefined;
+      task.summary = undefined;
+      task.recoveryRetryCount = undefined;
+      task.nextRecoveryAt = undefined;
+    }
+
+    if (toColumn === "in-progress" && !task.worktree && options?.allocateWorktree) {
+      const allocator = options.allocateWorktree;
+      const allocated = await this.withWorktreeAllocationLock(async () => {
+        const others = await this.listTasks({ slim: true, includeArchived: false });
+        const reservedNames = new Set<string>();
+        for (const other of others) {
+          if (other.id === id || !other.worktree) continue;
+          const name = other.worktree.split("/").filter(Boolean).pop();
+          if (name) reservedNames.add(name);
         }
-        task.blockedBy = undefined;
-        task.overlapBlockedBy = undefined;
-        task.paused = undefined;
-        task.pausedByAgentId = undefined;
-        if (moveSource === "user" && toColumn === "todo") {
-          task.userPaused = true;
-        } else {
-          task.userPaused = undefined;
-        }
+        return allocator(reservedNames);
+      });
+      if (allocated) {
+        task.worktree = allocated;
+      }
+    }
 
-        const hasNonPendingStepProgress = task.steps.some((step) => step.status !== "pending");
-        const preserveStepProgress =
-          options?.preserveResumeState || (options?.preserveProgress === true && hasNonPendingStepProgress);
-
-        // Default: release the on-disk worktree directory on requeue. The
-        // checkout may have been removed, may now collide with another
-        // task's allocation, or may simply be abandoned by the bounce.
-        // `task.branch` is intentionally left intact so the next run can
-        // reattach to the same line of work — the executor's worktree
-        // creation path falls back to `git worktree add <path> <branch>`
-        // when the branch already exists, so any committed progress is
-        // preserved even though a fresh directory is allocated.
-        //
-        // Opt-out: internal bounces that immediately re-promote the task
-        // to in-progress on the same checkout (e.g. workflow-rerun) pass
-        // `preserveWorktree: true` so listeners never observe an interim
-        // `worktree=null` state.
-        if (!options?.preserveWorktree) {
-          task.worktree = undefined;
-        }
-
-        if (!options?.preserveResumeState) {
-          // Reset wall-clock runtime so the next run gets a fresh timer.
-          task.executionStartedAt = undefined;
-          task.executionCompletedAt = undefined;
-        } else {
-          // executionCompletedAt is never set on an in-progress task; clear
-          // it defensively in case we are bouncing from done/in-review.
-          task.executionCompletedAt = undefined;
-        }
-
-        if (!preserveStepProgress) {
-          this.resetAllStepsToPending(task);
-          await this.resetPromptCheckboxes(dir);
-        }
+    let deletedAt: string | undefined;
+    let alreadyEnqueued = false;
+    this.db.transactionImmediate(() => {
+      deletedAt = this.getSoftDeletedWriteConflict(id, task);
+      if (deletedAt) {
+        return;
       }
 
-      // Clear recovery metadata when task reaches in-review (successful completion)
-      if (toColumn === "in-review") {
-        task.recoveryRetryCount = undefined;
-        task.nextRecoveryAt = undefined;
-      }
+      this.upsertTaskWithFtsRecovery(task);
+      this.insertRunAuditEventRow({
+        taskId: id,
+        agentId: internal.runContext?.agentId,
+        runId: internal.runContext?.runId,
+        domain: "database",
+        mutationType: "task:move",
+        target: id,
+        metadata: {
+          from: fromColumn,
+          to: toColumn,
+          moveSource,
+        },
+      });
 
-      // Clear workflow step results when reopening from review/completed states.
-      // This ensures fresh workflow step runs on retry
-      if (
-        (fromColumn === "in-review" && (toColumn === "todo" || toColumn === "in-progress" || toColumn === "triage"))
-        || (fromColumn === "done" && (toColumn === "todo" || toColumn === "triage"))
-      ) {
-        task.workflowStepResults = undefined;
-      }
-
-      // Full reset when sending an in-review task back to todo or triage
-      // (respec): discard prior branch/summary/recovery state so the next run
-      // starts from scratch.
-      if (fromColumn === "in-review" && (toColumn === "todo" || toColumn === "triage")) {
-        task.branch = undefined;
-        task.executionStartBranch = undefined;
-        task.baseCommitSha = undefined;
-        task.summary = undefined;
-        task.recoveryRetryCount = undefined;
-        task.nextRecoveryAt = undefined;
-      }
-
-      // Atomic worktree allocation on transition to in-progress.
-      // Wrapped in withWorktreeAllocationLock so the read-tasks → pick-name
-      // sequence cannot interleave with another concurrent moveTask. The
-      // caller supplies the naming policy via the `allocateWorktree`
-      // callback; the store builds `reservedNames` here so the snapshot
-      // is fresh under the global lock.
-      if (toColumn === "in-progress" && !task.worktree && options?.allocateWorktree) {
-        const allocator = options.allocateWorktree;
-        const allocated = await this.withWorktreeAllocationLock(async () => {
-          const others = await this.listTasks({ slim: true, includeArchived: false });
-          const reservedNames = new Set<string>();
-          for (const other of others) {
-            if (other.id === id || !other.worktree) continue;
-            const name = other.worktree.split("/").filter(Boolean).pop();
-            if (name) reservedNames.add(name);
-          }
-          return allocator(reservedNames);
+      if (toColumn === "in-review" && !internal.fromHandoff && options?.allowDirectInReviewMove !== true) {
+        this.insertRunAuditEventRow({
+          taskId: id,
+          agentId: internal.runContext?.agentId,
+          runId: internal.runContext?.runId,
+          domain: "database",
+          mutationType: "task:handoff-invariant-violation",
+          target: id,
+          metadata: {
+            taskId: id,
+            fromColumn,
+            callerStack: new Error().stack?.split("\n").slice(0, 8).join("\n"),
+          },
         });
-        if (allocated) {
-          task.worktree = allocated;
-        }
       }
 
-      await this.atomicWriteTaskJson(dir, task);
-      if (toColumn === "done") {
-        this.clearLinkedAgentTaskIds(id, task.updatedAt);
+      if (internal.fromHandoff) {
+        alreadyEnqueued = Boolean(this.db.prepare("SELECT 1 FROM mergeQueue WHERE taskId = ?").get(id));
+        this.enqueueMergeQueue(id, { priority: task.priority, now: internal.now });
+        this.insertRunAuditEventRow({
+          taskId: id,
+          agentId: internal.runContext?.agentId,
+          runId: internal.runContext?.runId,
+          domain: "database",
+          mutationType: "task:handoff",
+          target: id,
+          metadata: {
+            taskId: id,
+            fromColumn,
+            ownerAgentId: internal.ownerAgentId ?? null,
+            reason: internal.evidence?.reason,
+            runId: internal.runContext?.runId,
+            agentId: internal.runContext?.agentId,
+            alreadyEnqueued,
+          },
+        });
       }
-
-      // Update cache if watcher is active
-      if (this.isWatching) this.taskCache.set(id, { ...task });
-
-      this.emit("task:moved", { task, from: fromColumn, to: toColumn, source: moveSource });
-      return task;
     });
+
+    if (deletedAt) {
+      if (internal.fromHandoff) {
+        throw new HandoffInvariantViolationError(
+          id,
+          fromColumn,
+          `Cannot hand off ${id} to in-review because the task is deleted`,
+        );
+      }
+      this.throwSoftDeletedWriteBlocked(id, deletedAt, "moveTaskInternal", {
+        agentId: internal.runContext?.agentId,
+        runId: internal.runContext?.runId,
+        timestamp: movedAt,
+      });
+    }
+
+    await this.writeTaskJsonFile(dir, task);
+    if (toColumn === "done") {
+      this.clearLinkedAgentTaskIds(id, task.updatedAt);
+    }
+
+    if (this.isWatching) this.taskCache.set(id, { ...task });
+
+    this.emit("task:moved", { task, from: fromColumn, to: toColumn, source: moveSource });
+    return task;
   }
 
   private resetAllStepsToPending(task: Task): void {

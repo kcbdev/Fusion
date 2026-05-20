@@ -569,6 +569,17 @@ export class SelfHealingManager {
     } as MergeResult);
   }
 
+  private async handoffTaskToReview(taskId: string, reason: string): Promise<Task> {
+    return this.store.handoffToReview(taskId, {
+      ownerAgentId: null,
+      evidence: {
+        reason,
+        runId: generateSyntheticRunId("self-heal-handoff", taskId),
+        agentId: "self-healing",
+      },
+    });
+  }
+
   // ── Lifecycle ───────────────────────────────────────────────────────
 
   start(): void {
@@ -842,10 +853,10 @@ export class SelfHealingManager {
           error: churnError,
         });
         try {
-          await this.store.moveTask(taskId, "in-review");
+          await this.handoffTaskToReview(taskId, "stuck-no-progress-churn");
         } catch (moveErr: unknown) {
           const moveErrMessage = moveErr instanceof Error ? moveErr.message : String(moveErr);
-          log.warn(`${taskId} moveTask("in-review") failed (${moveErrMessage}) after STUCK_NO_PROGRESS_CHURN terminalization — task already marked failed, not re-queuing`);
+          log.warn(`${taskId} handoffTaskToReview failed (${moveErrMessage}) after STUCK_NO_PROGRESS_CHURN terminalization — task already marked failed, not re-queuing`);
         }
         await this.store.logEntry(
           taskId,
@@ -885,12 +896,12 @@ export class SelfHealingManager {
           error: exhaustedError,
         });
         try {
-          await this.store.moveTask(taskId, "in-review");
+          await this.handoffTaskToReview(taskId, "stuck-loop-exhausted");
         } catch (moveErr: unknown) {
           // moveTask may fail if task was concurrently moved (e.g., dep-abort).
           // The task is already marked failed — don't allow requeue.
           const moveErrMessage = moveErr instanceof Error ? moveErr.message : String(moveErr);
-          log.warn(`${taskId} moveTask("in-review") failed (${moveErrMessage}) after STUCK_LOOP_EXHAUSTED terminalization — task already marked failed, not re-queuing`);
+          log.warn(`${taskId} handoffTaskToReview failed (${moveErrMessage}) after STUCK_LOOP_EXHAUSTED terminalization — task already marked failed, not re-queuing`);
         }
         await this.store.logEntry(
           taskId,
@@ -1746,7 +1757,7 @@ export class SelfHealingManager {
           paused: true,
           pausedReason: "branch-conflict-unrecoverable",
         });
-        await this.store.moveTask(task.id, "in-review");
+        await this.handoffTaskToReview(task.id, "branch-conflict-unrecoverable-repromote");
         await this.store.logEntry(task.id, `Auto-recovery failed: branch conflict unrecoverable — ${message}`);
       }
       return withPerPr({ outcome: "paused-unrecoverable", reason: message });
@@ -2122,7 +2133,7 @@ export class SelfHealingManager {
               paused: true,
               pausedReason: "branch-conflict-unrecoverable",
             });
-            await this.store.moveTask(task.id, "in-review");
+            await this.handoffTaskToReview(task.id, "branch-conflict-unrecoverable-repromote");
             await this.store.logEntry(task.id, `Auto-recovery failed: branch conflict unrecoverable — ${message}`);
           }
         }
@@ -5257,6 +5268,13 @@ export class SelfHealingManager {
 
       await this.store.logEntry(task.id, "Auto-recovered (FN-4999): task in 'in-review' past handoff grace with no merge fan-out — re-emitting auto-merge handoff");
       if (this.options.requeueForAutoMerge) {
+        try {
+          await this.store.enqueueMergeQueue(task.id);
+        } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          log.warn(`recoverCompletionHandoffLimbo: enqueue failed for ${task.id}: ${errorMessage}`);
+          continue;
+        }
         await this.options.requeueForAutoMerge(task.id);
       } else {
         log.warn(`recoverCompletionHandoffLimbo: requeueForAutoMerge callback missing for ${task.id}`);

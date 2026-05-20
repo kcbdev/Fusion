@@ -63,6 +63,30 @@ export type MergeQueueReleaseOutcome =
   | { kind: "success" }
   | { kind: "failure"; error: string };
 
+export interface HandoffEvidence {
+  /** Reason text recorded on the run-audit event (for example "fn_task_done"). */
+  reason: string;
+  /** Optional run id captured for forensics. */
+  runId?: string;
+  /** Optional agent id captured for forensics. */
+  agentId?: string;
+}
+
+export interface HandoffToReviewOptions {
+  ownerAgentId: string | null;
+  evidence: HandoffEvidence;
+  moveOptions?: {
+    preserveResumeState?: boolean;
+    preserveProgress?: boolean;
+    preserveWorktree?: boolean;
+    preserveStatus?: boolean;
+    moveSource?: "user" | "engine";
+    skipMergeBlocker?: boolean;
+  };
+  /** Inject a clock for tests. */
+  now?: string;
+}
+
 /**
  * Dashboard high-fan-out blocker threshold. A blocker is considered high impact
  * when at least this many active todo tasks are waiting on it.
@@ -4974,6 +4998,8 @@ export type RunAuditMutationType =
   | "mergeQueue:lease-acquired"
   | "mergeQueue:lease-released"
   | "mergeQueue:lease-expired"
+  | "task:handoff"
+  | "task:handoff-invariant-violation"
   | (string & {});
 
 /** Input for recording a run-audit event. */
@@ -4988,7 +5014,7 @@ export interface RunAuditEventInput {
   runId: string;
   /** The domain/category of the mutation. */
   domain: RunAuditDomain;
-  /** Type of mutation (e.g., "task:update", "git:commit", "file:write"). */
+  /** Type of mutation (for example "task:update", "task:move", "task:handoff", "task:handoff-invariant-violation", "mergeQueue:enqueue", "git:commit", or "file:write"). */
   mutationType: RunAuditMutationType;
   /** Target of the mutation (e.g., task ID, file path, branch name). */
   target: string;
