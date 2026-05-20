@@ -17,6 +17,15 @@ function mockJsonResponse({ ok, status = ok ? 200 : 400, body }: JsonResponse): 
   } as unknown as Response;
 }
 
+function expectVisibleEyeIcon(svg: SVGElement) {
+  const style = getComputedStyle(svg);
+  expect(svg).toBeInTheDocument();
+  expect(svg.getAttribute("width")).toBeTruthy();
+  expect(svg.getAttribute("height")).toBeTruthy();
+  expect(style.display).toBe("block");
+  expect(style.stroke).not.toBe("none");
+}
+
 describe("SecretsView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -144,5 +153,51 @@ describe("SecretsView", () => {
 
     expect(await screen.findByText("VISIBLE")).toBeInTheDocument();
     expect(screen.queryByText("__sync_passphrase__")).not.toBeInTheDocument();
+  });
+
+  it("renders a visible row reveal icon", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJsonResponse({
+            ok: true,
+            body: {
+              secrets: [
+                { id: "secret-1", key: "VISIBLE", scope: "project", description: null, accessPolicy: "prompt", envExportable: false, envExportKey: null, lastReadAt: null },
+              ],
+            },
+          }),
+        )
+        .mockResolvedValueOnce(mockJsonResponse({ ok: true, body: { configured: false } })),
+    );
+
+    render(<SecretsView addToast={vi.fn()} />);
+
+    const revealButton = await screen.findByRole("button", { name: "Reveal" });
+    const svg = revealButton.querySelector("svg");
+    expect(svg).not.toBeNull();
+    expectVisibleEyeIcon(svg as SVGElement);
+  });
+
+  it("renders a visible modal value toggle icon", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(mockJsonResponse({ ok: true, body: { secrets: [] } }))
+        .mockResolvedValueOnce(mockJsonResponse({ ok: true, body: { configured: false } })),
+    );
+
+    render(<SecretsView addToast={vi.fn()} />);
+    await screen.findByText("Not configured");
+
+    await userEvent.click(screen.getByRole("button", { name: "Add Secret" }));
+
+    const toggleButton = screen.getByRole("button", { name: "Show value" });
+    const svg = toggleButton.querySelector("svg");
+    expect(svg).not.toBeNull();
+    expectVisibleEyeIcon(svg as SVGElement);
   });
 });

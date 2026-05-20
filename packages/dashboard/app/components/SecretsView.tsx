@@ -301,8 +301,13 @@ export const SecretsView = ({ addToast }: SecretsViewProps) => {
               <div className="secrets-row-side">
                 <span className="secrets-row-read">{secret.lastReadAt ? new Date(secret.lastReadAt).toLocaleString() : "Never read"}</span>
                 <div className="secrets-row-actions">
-                  <button className="btn btn-icon" onClick={() => void revealSecret(secret)} aria-label="Reveal">
-                    {revealed ? <EyeOff size={14} /> : <Eye size={14} />}
+                  <button
+                    type="button"
+                    className="btn btn-icon secrets-visibility-toggle"
+                    onClick={() => void revealSecret(secret)}
+                    aria-label={revealed ? "Hide" : "Reveal"}
+                  >
+                    {revealed ? <EyeOff size={14} aria-hidden="true" /> : <Eye size={14} aria-hidden="true" />}
                   </button>
                   <button className="btn btn-icon" onClick={() => void copySecret(secret)} aria-label="Copy" disabled={!revealed}>
                     {copiedId === secret.id ? <Check size={14} /> : <Copy size={14} />}
@@ -348,7 +353,7 @@ export const SecretsView = ({ addToast }: SecretsViewProps) => {
             </div>
             <div className="secrets-modal-body">
               <div className="form-group"><label>Key</label><input className="input" value={form.key} onChange={(e) => setForm((c) => ({ ...c, key: e.target.value }))} /></div>
-              <div className="form-group"><label>Value</label><div className="secrets-value-row"><input className="input" type={showValue ? "text" : "password"} autoComplete="off" spellCheck={false} value={form.value} onChange={(e) => setForm((c) => ({ ...c, value: e.target.value }))} /><button className="btn btn-icon" onClick={() => setShowValue((s) => !s)}>{showValue ? <EyeOff size={14} /> : <Eye size={14} />}</button></div></div>
+              <div className="form-group"><label>Value</label><div className="secrets-value-row"><input className="input" type={showValue ? "text" : "password"} autoComplete="off" spellCheck={false} value={form.value} onChange={(e) => setForm((c) => ({ ...c, value: e.target.value }))} /><button type="button" className="btn btn-icon secrets-visibility-toggle" onClick={() => setShowValue((s) => !s)} aria-label={showValue ? "Hide value" : "Show value"}>{showValue ? <EyeOff size={14} aria-hidden="true" /> : <Eye size={14} aria-hidden="true" />}</button></div></div>
               <div className="form-group"><label>Description</label><textarea className="input" value={form.description} onChange={(e) => setForm((c) => ({ ...c, description: e.target.value }))} /></div>
               <div className="form-group"><label>Scope</label><div className="secrets-radio-row"><label><input type="radio" checked={form.scope === "project"} onChange={() => setForm((c) => ({ ...c, scope: "project" }))} disabled={Boolean(editing)} /> Project</label><label><input type="radio" checked={form.scope === "global"} onChange={() => setForm((c) => ({ ...c, scope: "global" }))} disabled={Boolean(editing)} /> Global</label></div></div>
               <div className="form-group"><label>Access policy</label><select className="select" value={form.accessPolicy} onChange={(e) => setForm((c) => ({ ...c, accessPolicy: e.target.value as SecretPolicy }))}><option value="auto">auto</option><option value="prompt">prompt</option><option value="deny">deny</option></select></div>
