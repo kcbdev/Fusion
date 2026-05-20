@@ -1138,6 +1138,44 @@ describe("Scheduler", () => {
       expect(auditCalls[0]?.[0]?.metadata?.bindingGates).toEqual(["maxConcurrent"]);
     });
 
+    it("dedupes queued-concurrency logs when only non-binding semaphore counts change", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
+
+      const semaphore = new AgentSemaphore(40);
+      const tasks = [
+        createMockTask({ id: "FN-A", column: "in-progress" }),
+        createMockTask({ id: "FN-B", column: "in-progress" }),
+        createMockTask({ id: "FN-C", column: "todo", dependencies: [] }),
+        createMockTask({ id: "FN-D", column: "todo", dependencies: [] }),
+      ];
+      const store = createMockStore({
+        listTasks: vi.fn().mockResolvedValue(tasks),
+        getSettings: vi.fn().mockResolvedValue({ maxConcurrent: 15, maxWorktrees: 3 }),
+      });
+
+      const scheduler = new Scheduler(store, { semaphore });
+      (scheduler as any).running = true;
+
+      await semaphore.acquire();
+      await semaphore.acquire();
+      await scheduler.schedule();
+      semaphore.release();
+      semaphore.release();
+      await scheduler.schedule();
+
+      const concurrencyReasonCalls = (store.logEntry as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (call: unknown[]) => call[0] === "FN-D" && String(call[1]).includes("queued — concurrency limit reached"),
+      );
+      expect(concurrencyReasonCalls).toHaveLength(1);
+
+      const auditCalls = (store.recordRunAuditEvent as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (call: unknown[]) => (call[0] as { mutationType?: string } | undefined)?.mutationType === "scheduler:dispatch-queued-concurrency",
+      );
+      expect(auditCalls).toHaveLength(1);
+      expect(auditCalls[0]?.[0]?.metadata?.bindingGates).toEqual(["maxWorktrees"]);
+    });
+
     it("re-logs and re-audits when binding gate changes", async () => {
       vi.mocked(existsSync).mockReturnValue(true);
       vi.mocked(readFile).mockResolvedValue("# Task\nDo something");

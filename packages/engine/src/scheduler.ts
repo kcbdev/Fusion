@@ -189,6 +189,24 @@ function formatConcurrencyLimitReason(diagnostic: ConcurrencyGateDiagnostic): st
   return `queued — concurrency limit reached: gate=${gateLabel}; ${details.join("; ")}`;
 }
 
+function formatConcurrencyLimitMemoKey(diagnostic: ConcurrencyGateDiagnostic): string {
+  const gates = diagnostic.bindingGates.join(",");
+  const gateDetails = diagnostic.bindingGates.map((gate) => {
+    const snapshot = gate === "maxConcurrent"
+      ? diagnostic.maxConcurrentGate
+      : gate === "maxWorktrees"
+        ? diagnostic.maxWorktreesGate
+        : diagnostic.semaphoreGate;
+    const holders = diagnostic.holders[gate];
+    const holderKey = holders && holders.length > 0 ? holders.join(",") : "none";
+    if (!snapshot) {
+      return `${gate}:missing:${holderKey}`;
+    }
+    return `${gate}:${snapshot.used}/${snapshot.limit}:${holderKey}`;
+  });
+  return `queued-concurrency:${gates}:${gateDetails.join("|")}`;
+}
+
 export interface SchedulerOptions {
   /** Max concurrent in-progress tasks. Default: 2 */
   maxConcurrent?: number;
@@ -509,6 +527,8 @@ export class Scheduler {
       this.failedTaskIds.delete(task.id);
       this.wasNodeDispatchValidationBlocked.delete(task.id);
       this.wasNodeBlocked.delete(task.id);
+      this.wasPermanentAgentUnavailable.delete(task.id);
+      this.clearDispatchQueuedReasonMemo(task.id);
     });
   }
 
@@ -602,8 +622,8 @@ export class Scheduler {
     }
   }
 
-  private async logDispatchQueuedReason(taskId: string, reason: string): Promise<boolean> {
-    const key = `${taskId}:${reason}`;
+  private async logDispatchQueuedReason(taskId: string, reason: string, memoKey?: string): Promise<boolean> {
+    const key = `${taskId}:${memoKey ?? reason}`;
     if (this.wasDispatchQueuedReasonLogged.has(key)) {
       return false;
     }
@@ -1137,7 +1157,11 @@ export class Scheduler {
         // Dependencies met — check concurrency
         if (started >= available) {
           const reason = formatConcurrencyLimitReason(concurrencyGateDiagnostic);
-          const didLog = await this.logDispatchQueuedReason(task.id, reason);
+          const didLog = await this.logDispatchQueuedReason(
+            task.id,
+            reason,
+            formatConcurrencyLimitMemoKey(concurrencyGateDiagnostic),
+          );
           if (didLog) {
             await this.emitDispatchQueuedConcurrencyAudit(task, concurrencyGateDiagnostic);
           }
