@@ -4171,13 +4171,15 @@ export async function enforceSquashFileScopeInvariant(params: {
     if (!(error instanceof FileScopeViolationError)) {
       throw error;
     }
+    const warningMessage = `${error.message} Warning only — continuing merge.`;
     await params.store.appendAgentLog(
       params.taskId,
-      error.message,
-      "tool_error",
+      warningMessage,
+      "text",
       formatFileScopeViolationAgentLog(error),
       "merger",
     );
+    mergerLog.warn(`${params.taskId}: ${warningMessage}`);
     if (params.auditor) {
       try {
         await params.auditor.git({
@@ -4189,14 +4191,13 @@ export async function enforceSquashFileScopeInvariant(params: {
             declaredScope: error.declaredScope,
             stagedFileCount: error.stagedFiles.length,
             declaredScopeCount: error.declaredScope.length,
+            warningOnly: true,
           },
         });
       } catch (auditErr) {
         mergerLog.warn(`${params.taskId}: failed to emit run_audit event for FileScopeViolationError: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`);
       }
     }
-    resetMergeWithWarn(params.rootDir, params.taskId, params.resetLabel);
-    throw error;
   }
 }
 
