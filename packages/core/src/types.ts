@@ -57,6 +57,9 @@ export interface MergeQueueEnqueueOptions {
 export interface MergeQueueAcquireOptions {
   leaseDurationMs: number;
   now?: string;
+  /** If provided, the lease attempt targets this specific task first.
+   *  The task must be unexpired/available; otherwise falls back to normal queue-head selection. */
+  targetTaskId?: string;
 }
 
 export type MergeQueueReleaseOutcome =

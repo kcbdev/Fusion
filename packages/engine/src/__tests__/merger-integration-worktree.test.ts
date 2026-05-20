@@ -189,7 +189,7 @@ describe("acquireReuseHandoff", () => {
     });
     expect(store.acquireMergeQueueLease).toHaveBeenCalledWith(
       "merger-reuse-handoff",
-      expect.objectContaining({ leaseDurationMs: 900000 }),
+      expect.objectContaining({ leaseDurationMs: 900000, targetTaskId: "FN-5279" }),
     );
 
     await releaseReuseHandoff({ handoff, outcome: "success", auditEmit });
@@ -435,6 +435,30 @@ describe("acquireReuseHandoff", () => {
       }),
       "lease-handoff-failed",
       "no-lease",
+    );
+  });
+
+  // FN-5363 regression: when the merge queue head is polluted with unrelated tasks
+  // (e.g. FN-5329, FN-5321, FN-5349), acquiring a lease for a different task (FN-5279)
+  // via targetTaskId must succeed — not grab the queue head and then fail with
+  // "no-lease" because the returned taskId didn't match.
+  it("targets specific task via targetTaskId even when queue head is a different task", async () => {
+    const store = createStore();
+    // Simulate queue head = different task (polluted queue scenario)
+    store.acquireMergeQueueLease = vi.fn().mockReturnValue({ taskId: "FN-5279" });
+
+    const handoff = await acquireReuseHandoff({
+      task: await store.getTask("FN-5279"),
+      store,
+      projectRoot: "/tmp/project-root",
+      settings: {} as any,
+      worktreePath: "/tmp/task-worktree",
+    });
+
+    expect(handoff.taskId).toBe("FN-5279");
+    expect(store.acquireMergeQueueLease).toHaveBeenCalledWith(
+      "merger-reuse-handoff",
+      expect.objectContaining({ targetTaskId: "FN-5279" }),
     );
   });
 });
