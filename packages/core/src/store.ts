@@ -4911,6 +4911,15 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     if (toColumn === "in-review") {
       task.recoveryRetryCount = undefined;
       task.nextRecoveryAt = undefined;
+      // Clear scheduler-side dispatch state: `queued`, `blockedBy`, and
+      // `overlapBlockedBy` are stamped while the task waits in `todo`. If
+      // they survive the transition into `in-review` they permanently block
+      // the merge gate (see getTaskMergeBlocker's BLOCKING_TASK_STATUSES).
+      if (task.status === "queued") {
+        task.status = undefined;
+      }
+      task.blockedBy = undefined;
+      task.overlapBlockedBy = undefined;
     }
 
     if (
