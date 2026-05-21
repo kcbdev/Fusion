@@ -11,6 +11,7 @@ import type {
   GithubIssueAction,
   DuplicateCandidate,
   DuplicateMatch,
+  RunAuditEvent,
 } from "@fusion/core";
 import {
   COLUMNS,
@@ -48,6 +49,90 @@ const REVIEW_BLOCK_RE = /##\s+(Code|Plan)\s+Review:[\s\S]*?(?=\n##\s+(?:Code|Pla
 const REVIEW_VERDICT_RE = /###\s+Verdict:\s*(APPROVE|REVISE|RETHINK|UNAVAILABLE)\b/i;
 const REVIEW_STEP_RE = /^(plan|code) review Step (\d+): (APPROVE|REVISE|RETHINK|UNAVAILABLE)\b/i;
 const DUPLICATE_STOPWORDS = new Set(["a", "an", "the", "and", "or", "of", "to", "for", "in", "is", "on", "with", "fn"]);
+
+interface MergeAdvanceEvent {
+  taskId: string;
+  integrationBranch: string;
+  refName: string;
+  toSha: string;
+  fromSha: string | null;
+  advanceMode: "fast-forward" | "non-fast-forward" | "update-ref" | string;
+  succeeded: boolean;
+  advancedAt: string;
+  userCheckout: {
+    worktreePath: string;
+    dirty: boolean;
+    untrackedCount: number;
+  } | null;
+}
+
+interface MergeAdvanceEventsResponse {
+  events: MergeAdvanceEvent[];
+}
+
+function parseMergeAdvanceLimit(rawLimit: unknown): number {
+  if (rawLimit === undefined) {
+    return 20;
+  }
+  const parsed = Number.parseInt(String(rawLimit), 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw badRequest("limit must be a positive integer");
+  }
+  return Math.min(parsed, 100);
+}
+
+function extractUserCheckout(metadata: unknown): MergeAdvanceEvent["userCheckout"] {
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+  const raw = (metadata as { userCheckout?: unknown }).userCheckout;
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const candidate = raw as { worktreePath?: unknown; dirty?: unknown; untrackedCount?: unknown };
+  if (typeof candidate.worktreePath !== "string" || candidate.worktreePath.length === 0) {
+    return null;
+  }
+  return {
+    worktreePath: candidate.worktreePath,
+    dirty: candidate.dirty === true,
+    untrackedCount: typeof candidate.untrackedCount === "number" ? candidate.untrackedCount : 0,
+  };
+}
+
+function extractMergeAdvanceEvent(event: RunAuditEvent): Omit<MergeAdvanceEvent, "userCheckout"> | null {
+  const metadata = event.metadata;
+  if (!metadata || typeof metadata !== "object") {
+    console.warn(`[merge-advance-events] dropping run-audit event ${event.id}: missing metadata`);
+    return null;
+  }
+  const candidate = metadata as {
+    integrationBranch?: unknown;
+    refName?: unknown;
+    toSha?: unknown;
+    fromSha?: unknown;
+    advanceMode?: unknown;
+    succeeded?: unknown;
+  };
+  if (typeof candidate.integrationBranch !== "string" || candidate.integrationBranch.length === 0 || typeof candidate.toSha !== "string" || candidate.toSha.length === 0) {
+    console.warn(`[merge-advance-events] dropping run-audit event ${event.id}: missing integrationBranch or toSha`);
+    return null;
+  }
+  if (typeof event.taskId !== "string" || event.taskId.length === 0) {
+    console.warn(`[merge-advance-events] dropping run-audit event ${event.id}: missing taskId`);
+    return null;
+  }
+  return {
+    taskId: event.taskId,
+    integrationBranch: candidate.integrationBranch,
+    refName: typeof candidate.refName === "string" ? candidate.refName : `refs/heads/${candidate.integrationBranch}`,
+    toSha: candidate.toSha,
+    fromSha: typeof candidate.fromSha === "string" ? candidate.fromSha : null,
+    advanceMode: typeof candidate.advanceMode === "string" ? candidate.advanceMode : "update-ref",
+    succeeded: candidate.succeeded !== false,
+    advancedAt: event.timestamp,
+  };
+}
 
 export const __fingerprintCreateLocksForTests = deterministicGuardLocks;
 
@@ -274,7 +359,66 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
   } = deps;
   const TASK_DETAIL_ACTIVITY_LOG_LIMIT = taskDetailActivityLogLimit;
 
-  // List all tasks
+  // Get recent integration-branch advance events for post-merge notice
+  router.get("/tasks/merge-advance-events", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const limit = parseMergeAdvanceLimit(req.query.limit);
+      const getRunAuditEvents = (scopedStore as TaskStore & {
+        getRunAuditEvents?: (filters: {
+          taskId?: string;
+          domain?: "database" | "git" | "filesystem" | "sandbox";
+          mutationType?: string;
+          limit?: number;
+        }) => RunAuditEvent[];
+      }).getRunAuditEvents;
+      if (typeof getRunAuditEvents !== "function") {
+        throw notFound("run-audit unavailable");
+      }
+
+      const advanceEvents = getRunAuditEvents({
+        domain: "git",
+        mutationType: "merge:integration-ref-advance",
+        limit,
+      });
+
+      const events: MergeAdvanceEvent[] = [];
+      for (const advanceEvent of advanceEvents) {
+        const extracted = extractMergeAdvanceEvent(advanceEvent);
+        if (!extracted) {
+          continue;
+        }
+
+        let userCheckout: MergeAdvanceEvent["userCheckout"] = null;
+        const stateEvents = getRunAuditEvents({
+          taskId: extracted.taskId,
+          domain: "git",
+          mutationType: "merge:integration-worktree-state",
+          limit,
+        });
+        const matchingState = stateEvents.find((stateEvent) => stateEvent.timestamp <= advanceEvent.timestamp);
+        if (matchingState) {
+          userCheckout = extractUserCheckout(matchingState.metadata);
+        }
+
+        events.push({
+          ...extracted,
+          userCheckout,
+        });
+      }
+
+      const response: MergeAdvanceEventsResponse = {
+        events: events.sort((a, b) => Date.parse(b.advancedAt) - Date.parse(a.advancedAt)),
+      };
+      res.json(response);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
   router.get("/tasks", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);

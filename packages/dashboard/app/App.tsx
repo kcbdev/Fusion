@@ -27,6 +27,7 @@ import { CapacityRiskBanner } from "./components/CapacityRiskBanner";
 import { TaskIdIntegrityBanner } from "./components/TaskIdIntegrityBanner";
 import { DbCorruptionBanner } from "./components/DbCorruptionBanner";
 import { UpdateAvailableBanner } from "./components/UpdateAvailableBanner";
+import MergeAdvanceNotice from "./components/MergeAdvanceNotice";
 import { ApprovalNotificationBanner } from "./components/ApprovalNotificationBanner";
 import { OnboardingResumeCard } from "./components/OnboardingResumeCard";
 import { PostOnboardingRecommendations } from "./components/PostOnboardingRecommendations";
@@ -1804,6 +1805,9 @@ function AppInner() {
           currentVersion={currentVersion}
           onDismiss={dismissUpdateBanner}
         />
+      )}
+      {viewMode === "project" && currentProject && (
+        <MergeAdvanceNotice projectId={currentProject.id} />
       )}
       {viewMode === "project" && currentProject && dashboardHealth?.taskIdIntegrity?.status === "anomaly" && dashboardHealth.taskIdIntegrity.recommendedAction && (
         <TaskIdIntegrityBanner

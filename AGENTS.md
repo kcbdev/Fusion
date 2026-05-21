@@ -475,6 +475,8 @@ The dashboard's CSS is split into a global stylesheet (`packages/dashboard/app/s
 
 **Rule:** New CSS for a component goes in `app/components/ComponentName.css`, NOT `styles.css`. Only design tokens, primitives (`.btn`, `.card`, `.modal`, `.form-input`), and cross-component `@media` overrides belong in the global file.
 
+`MergeAdvanceNotice` (FN-5352) is a chrome-level banner mounted in `App.tsx` that reacts to `task:merged` SSE events and hydrates state from run-audit reads. It consumes FN-5351 git mutation events `merge:integration-worktree-state` and `merge:integration-ref-advance` (and intentionally ignores `merge:cwd-integration-fallback-refused`) via `GET /api/tasks/merge-advance-events`; keep branch names dynamic from audit payloads and never hardcode `main`/`master` in banner source.
+
 The `index.html` shell is templated server-side: the server injects a per-user `<link rel="modulepreload">` for the last-used `taskView` chunk, sourced from Vite's `dist/client/.vite/manifest.json` and `kb:<projectId>:kb-dashboard-task-view` in localStorage.
 
 ### Design tokens
