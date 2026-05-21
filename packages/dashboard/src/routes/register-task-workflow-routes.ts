@@ -1059,8 +1059,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         await scopedStore.updateTask(req.params.id, {
           status: null,
           error: null,
-          ...buildManualRetryResetPatch(),
-          mergeRetries: 0,
+          ...buildManualRetryResetPatch({ resetMergeRetries: true }),
         });
         await scopedStore.logEntry(req.params.id, "Retry requested from dashboard (in-review merge retry, mergeRetries reset)");
         const updated = await scopedStore.getTask(req.params.id);
@@ -1075,9 +1074,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         branch: null,
         baseBranch: null,
         baseCommitSha: null,
-        recoveryRetryCount: null,
-        nextRecoveryAt: null,
-        ...buildManualRetryResetPatch(),
+        ...buildManualRetryResetPatch({ resetMergeRetries: true }),
       });
 
       if (retrySpecification) {

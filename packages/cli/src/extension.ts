@@ -1016,8 +1016,7 @@ export default function kbExtension(pi: ExtensionAPI) {
         await store.updateTask(params.id, {
           status: null,
           error: null,
-          ...buildManualRetryResetPatch(),
-          mergeRetries: 0,
+          ...buildManualRetryResetPatch({ resetMergeRetries: true }),
         });
         await store.logEntry(params.id, "Retry requested via Fusion extension (in-review merge retry, mergeRetries reset)");
         return {
@@ -1030,7 +1029,7 @@ export default function kbExtension(pi: ExtensionAPI) {
       await store.updateTask(params.id, {
         status: null,
         error: null,
-        ...buildManualRetryResetPatch(),
+        ...buildManualRetryResetPatch({ resetMergeRetries: true }),
       });
       
       // Move to todo column

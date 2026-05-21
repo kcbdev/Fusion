@@ -1009,9 +1009,7 @@ export async function runTaskRetry(id: string, projectName?: string) {
     branch: null,
     baseBranch: null,
     baseCommitSha: null,
-    recoveryRetryCount: null,
-    nextRecoveryAt: null,
-    ...buildManualRetryResetPatch(),
+    ...buildManualRetryResetPatch({ resetMergeRetries: true }),
   });
   
   // Move to todo column

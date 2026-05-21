@@ -201,7 +201,8 @@ export {
   hasTitleIdDrift,
   normalizeTitleForTaskId,
 } from "./task-title-id-drift.js";
-export { getPrimaryPrInfo, buildManualRetryResetPatch } from "./task-helpers.js";
+export { getPrimaryPrInfo } from "./task-helpers.js";
+export { MANUAL_RETRY_RESET_COUNTER_KEYS, buildManualRetryResetPatch } from "./manual-retry-reset.js";
 export type {
   TaskIdIntegrityAnomaly,
   TaskIdIntegrityAnomalyKind,

@@ -153,7 +153,7 @@ vi.mock("@fusion/engine", async () => {
   });
 });
 
-import { AgentStore, Database, RoutineStore, TaskStore as CoreTaskStore, isGhAvailable, isGhAuthenticated } from "@fusion/core";
+import { AgentStore, Database, RoutineStore, TaskStore as CoreTaskStore, buildManualRetryResetPatch, isGhAvailable, isGhAuthenticated } from "@fusion/core";
 import { createFnAgent } from "@fusion/engine";
 
 const mockIsGhAvailable = vi.mocked(isGhAvailable);
@@ -341,11 +341,7 @@ describe("POST /tasks/:id/retry", () => {
       branch: null,
       baseBranch: null,
       baseCommitSha: null,
-      stuckKillCount: 0,
-      taskDoneRetryCount: 0,
-      workflowStepRetries: 0,
-      recoveryRetryCount: null,
-      nextRecoveryAt: null,
+      ...buildManualRetryResetPatch({ resetMergeRetries: true }),
     });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo");
   });
@@ -381,11 +377,7 @@ describe("POST /tasks/:id/retry", () => {
       branch: null,
       baseBranch: null,
       baseCommitSha: null,
-      stuckKillCount: 0,
-      taskDoneRetryCount: 0,
-      workflowStepRetries: 0,
-      recoveryRetryCount: null,
-      nextRecoveryAt: null,
+      ...buildManualRetryResetPatch({ resetMergeRetries: true }),
     });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo");
   });
@@ -409,11 +401,7 @@ describe("POST /tasks/:id/retry", () => {
       branch: null,
       baseBranch: null,
       baseCommitSha: null,
-      stuckKillCount: 0,
-      taskDoneRetryCount: 0,
-      workflowStepRetries: 0,
-      recoveryRetryCount: null,
-      nextRecoveryAt: null,
+      ...buildManualRetryResetPatch({ resetMergeRetries: true }),
     });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo");
     expect(store.logEntry).toHaveBeenCalledWith("KB-001", "Retry requested from dashboard (stuck kill budget reset)");
@@ -440,9 +428,7 @@ describe("POST /tasks/:id/retry", () => {
     expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
       status: null,
       error: null,
-      stuckKillCount: 0,
-      taskDoneRetryCount: 0,
-      workflowStepRetries: 0,
+      ...buildManualRetryResetPatch(),
     });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo", { preserveProgress: true });
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -473,9 +459,7 @@ describe("POST /tasks/:id/retry", () => {
     expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
       status: null,
       error: null,
-      stuckKillCount: 0,
-      taskDoneRetryCount: 0,
-      workflowStepRetries: 0,
+      ...buildManualRetryResetPatch(),
     });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo", { preserveProgress: true });
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -510,8 +494,8 @@ describe("POST /tasks/:id/retry", () => {
     expect(updateCall).not.toHaveProperty("branch");
     expect(updateCall).not.toHaveProperty("baseBranch");
     expect(updateCall).not.toHaveProperty("baseCommitSha");
-    expect(updateCall).not.toHaveProperty("recoveryRetryCount");
-    expect(updateCall).not.toHaveProperty("nextRecoveryAt");
+    expect(updateCall.recoveryRetryCount).toBe(0);
+    expect(updateCall.nextRecoveryAt).toBeNull();
   });
 
   it("retries execution-failed in-review task by moving to todo with progress preserved", async () => {
@@ -538,9 +522,7 @@ describe("POST /tasks/:id/retry", () => {
     expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
       status: null,
       error: null,
-      stuckKillCount: 0,
-      taskDoneRetryCount: 0,
-      workflowStepRetries: 0,
+      ...buildManualRetryResetPatch(),
     });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo", { preserveProgress: true });
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -573,10 +555,7 @@ describe("POST /tasks/:id/retry", () => {
     expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
       status: null,
       error: null,
-      stuckKillCount: 0,
-      taskDoneRetryCount: 0,
-      workflowStepRetries: 0,
-      mergeRetries: 0,
+      ...buildManualRetryResetPatch({ resetMergeRetries: true }),
     });
     expect(store.moveTask).not.toHaveBeenCalled();
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -606,10 +585,7 @@ describe("POST /tasks/:id/retry", () => {
     expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
       status: null,
       error: null,
-      stuckKillCount: 0,
-      taskDoneRetryCount: 0,
-      workflowStepRetries: 0,
-      mergeRetries: 0,
+      ...buildManualRetryResetPatch({ resetMergeRetries: true }),
     });
     expect(store.moveTask).not.toHaveBeenCalled();
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -688,11 +664,7 @@ describe("POST /tasks/:id/retry", () => {
         branch: null,
         baseBranch: null,
         baseCommitSha: null,
-        stuckKillCount: 0,
-        taskDoneRetryCount: 0,
-        workflowStepRetries: 0,
-        recoveryRetryCount: null,
-        nextRecoveryAt: null,
+        ...buildManualRetryResetPatch({ resetMergeRetries: true }),
       });
       expect(store.moveTask).not.toHaveBeenCalled();
       expect(existsSync(join(taskDir, "PROMPT.md"))).toBe(false);

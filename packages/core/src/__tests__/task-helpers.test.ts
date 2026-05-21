@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildManualRetryResetPatch, getPrimaryPrInfo } from "../task-helpers.js";
+import { getPrimaryPrInfo } from "../task-helpers.js";
+
 describe("getPrimaryPrInfo", () => {
   it("returns prInfo when only legacy field is set", () => {
     const prInfo = { number: 1 } as any;
@@ -23,12 +24,3 @@ describe("getPrimaryPrInfo", () => {
   });
 });
 
-describe("buildManualRetryResetPatch", () => {
-  it("resets only manual retry counters", () => {
-    expect(buildManualRetryResetPatch()).toEqual({
-      taskDoneRetryCount: 0,
-      workflowStepRetries: 0,
-      stuckKillCount: 0,
-    });
-  });
-});
