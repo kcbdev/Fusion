@@ -227,6 +227,13 @@ function getHeartbeatAgeMs(agent: Agent, now: number = Date.now()): number {
   return Number.isFinite(lastTs) ? Math.max(0, now - lastTs) : Number.NaN;
 }
 
+function resolveHeartbeatMultiplier(rawMultiplier: unknown): number {
+  if (typeof rawMultiplier !== "number" || !Number.isFinite(rawMultiplier) || rawMultiplier <= 0) {
+    return 1;
+  }
+  return rawMultiplier;
+}
+
 async function terminatePersistedHeartbeatRun(
   store: AgentStore,
   agentId: string,
@@ -812,6 +819,8 @@ export class HeartbeatMonitor {
   private agentStartLocks: Map<string, Promise<unknown>> = new Map();
   private pollInterval: NodeJS.Timeout | null = null;
   private isRunning = false;
+  private cachedHeartbeatMultiplier = 1;
+  private cachedHeartbeatMultiplierAt = 0;
 
   /** Tasks created per agent during heartbeat runs (keyed by agentId) */
   private runCreatedTasks: Map<string, Array<{ id: string; description: string }>> = new Map();
@@ -1098,6 +1107,8 @@ export class HeartbeatMonitor {
     if (this.messageStore) {
       this.messageStore.setMessageToAgentHook(this.handleMessageToAgent.bind(this));
     }
+    // Warm heartbeat multiplier cache for sync health paths before reconcile.
+    void this.warmHeartbeatMultiplierCache();
     // Reconcile any agents stuck in `state="running"` with no active run.
     // Past versions of governance-skip paths (budget/global-pause) called
     // completeRun with skipStateTransition=true after startRun had already
@@ -3235,7 +3246,24 @@ export class HeartbeatMonitor {
       heartbeatLog.warn(`getAgentConfig(${agentId}) agent lookup failed: ${agentLookupErr instanceof Error ? agentLookupErr.message : String(agentLookupErr)} — using monitor defaults`);
     }
 
+    // Sync health checks (isAgentHealthy / orphan reconcile / reports-health)
+    // are best-effort and use the most recent async-loaded multiplier cache.
+    const multiplier = this.cachedHeartbeatMultiplierAt > 0 ? this.cachedHeartbeatMultiplier : 1;
+    result.pollIntervalMs = Math.max(1000, Math.round(result.pollIntervalMs * multiplier));
+    result.heartbeatTimeoutMs = Math.max(5000, Math.round(result.heartbeatTimeoutMs * multiplier));
+
     return result;
+  }
+
+  private async warmHeartbeatMultiplierCache(): Promise<void> {
+    if (!this.taskStore) return;
+    try {
+      const settings = await getHeartbeatMemorySettings(this.taskStore);
+      this.cachedHeartbeatMultiplier = resolveHeartbeatMultiplier(settings?.heartbeatMultiplier);
+      this.cachedHeartbeatMultiplierAt = Date.now();
+    } catch {
+      // Keep existing cache value on warm failures.
+    }
   }
 
   private async getAgentConfig(agentId: string): Promise<ResolvedHeartbeatConfig> {
@@ -3247,13 +3275,12 @@ export class HeartbeatMonitor {
 
     try {
       const settings = await getHeartbeatMemorySettings(this.taskStore);
-      const rawMultiplier = settings?.heartbeatMultiplier;
-      const multiplier =
-        typeof rawMultiplier === "number" && Number.isFinite(rawMultiplier) && rawMultiplier > 0
-          ? rawMultiplier
-          : 1;
+      const multiplier = resolveHeartbeatMultiplier(settings?.heartbeatMultiplier);
+      this.cachedHeartbeatMultiplier = multiplier;
+      this.cachedHeartbeatMultiplierAt = Date.now();
 
       result.pollIntervalMs = Math.max(1000, Math.round(result.pollIntervalMs * multiplier));
+      result.heartbeatTimeoutMs = Math.max(5000, Math.round(result.heartbeatTimeoutMs * multiplier));
     } catch (settingsErr) {
       heartbeatLog.warn(`getAgentConfig(${agentId}) settings lookup failed: ${settingsErr instanceof Error ? settingsErr.message : String(settingsErr)} — using base interval`);
     }
@@ -3739,10 +3766,7 @@ export class HeartbeatTriggerScheduler {
   }
 
   private static resolveHeartbeatMultiplier(rawMultiplier: unknown): number {
-    if (typeof rawMultiplier !== "number" || !Number.isFinite(rawMultiplier) || rawMultiplier <= 0) {
-      return 1;
-    }
-    return rawMultiplier;
+    return resolveHeartbeatMultiplier(rawMultiplier);
   }
 
   /**

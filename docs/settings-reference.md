@@ -186,7 +186,7 @@ Defaults from `DEFAULT_PROJECT_SETTINGS`; key scope from `PROJECT_SETTINGS_KEYS`
 | `globalMaxConcurrent` | `number` | `4` | System-wide max concurrent agents across all projects. |
 | `maxWorktrees` | `number` | `4` | Max git worktrees. |
 | `pollIntervalMs` | `number` | `15000` | Scheduler poll interval (ms). |
-| `heartbeatMultiplier` | `number` | `1` | Global multiplier applied to all agent heartbeat intervals. Configured from the Agents screen (not Settings). |
+| `heartbeatMultiplier` | `number` | `1` | Global multiplier applied to agent heartbeat timing: both heartbeat intervals and unresponsive timeout bases. Configured from the Agents screen (not Settings). |
 | `heartbeatScopeDiscipline` | `"strict" \| "lite" \| "off"` | `"strict"` | Heartbeat prompt procedure mode. `strict` keeps coordination-heavy scope discipline, `lite` restores pre-2026-05-11 wording, and `off` uses a minimal procedure. Per-agent `runtimeConfig.heartbeatScopeDiscipline` can override this default. |
 | `heartbeatPromptTemplate` | `"default" \| "compact"` | `"default"` | Heartbeat execution-prompt trim template default. Per-agent `runtimeConfig.heartbeatPromptTemplate` overrides this value. Role fallback when unset everywhere is `executor`→`default`, non-executor coordination roles→`compact`. |
 | `autoClaimCandidatesInPrompt` | `number` | `5` | Default no-task heartbeat candidate list length. Integer range `0-10`; `0` suppresses candidate prompt injection. |

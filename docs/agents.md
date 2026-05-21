@@ -527,7 +527,7 @@ The `runtimeConfig` field on agents supports the following options:
 | `budgetConfig` | `AgentBudgetConfig` | — | Token budget governance settings |
 
 Heartbeat values are validated and minimum-clamped to 5 minutes (300,000 ms).
-Project setting `heartbeatMultiplier` (default `1`) scales resolved heartbeat intervals globally; per-agent `heartbeatIntervalMs` remains the base interval before multiplier scaling. This setting is configured from the **Agents** screen's **Controls** popup under "Heartbeat Speed".
+Project setting `heartbeatMultiplier` (default `1`) scales resolved heartbeat timing globally: both the heartbeat interval (`pollIntervalMs`) and unresponsive timeout base (`heartbeatTimeoutMs`) are multiplied. Per-agent `heartbeatIntervalMs`/`heartbeatTimeoutMs` remain base values before multiplier scaling. This setting is configured from the **Agents** screen's **Controls** popup under "Heartbeat Speed".
 
 Project setting `heartbeatScopeDiscipline` defaults to `strict`; set per-agent `runtimeConfig.heartbeatScopeDiscipline` to `strict`, `lite`, or `off` in **Agent Detail → Settings → Heartbeat Settings** to override.
 Project setting `heartbeatPromptTemplate` defaults to `default`; per-agent `runtimeConfig.heartbeatPromptTemplate` overrides it. Role defaults are `executor` → `default`, and coordination roles (`triage`, `reviewer`, `merger`) → `compact`.
@@ -1185,7 +1185,7 @@ Lifecycle notes:
 
 ### Unresponsive Recovery (FN-3475)
 
-When a tracked agent misses heartbeat for `2 × heartbeatTimeoutMs`, the monitor now performs recovery (not termination):
+When a tracked agent misses heartbeat for `2 × heartbeatTimeoutMs`, the monitor now performs recovery (not termination). The base `heartbeatTimeoutMs` is already multiplier-scaled (`heartbeatMultiplier`) before applying this `× 2` window:
 
 1. Dispose the stuck session and untrack the stale run
 2. `pauseAgent(agentId, { pauseReason: "heartbeat-unresponsive", stopActiveRun: false })`
@@ -1193,6 +1193,7 @@ When a tracked agent misses heartbeat for `2 × heartbeatTimeoutMs`, the monitor
 
 Effects:
 - Agent state transitions `running/active → paused → active`
+- Orphan reconcile uses `3 × heartbeatTimeoutMs` where the timeout is likewise multiplier-scaled first
 - `pauseReason` is set to `heartbeat-unresponsive` during recovery and cleared on resume
 - Assigned tasks are auto-paused with `pausedByAgentId` during pause, then only those same tasks are auto-unpaused on resume
 - Resume triggers one on-demand heartbeat restart only when `runtimeConfig.enabled !== false`
