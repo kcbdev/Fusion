@@ -438,7 +438,7 @@ describe("FN-5279 reliability interactions: merge reuse task worktree", () => {
     }
   }, 30_000);
 
-  it.skipIf(!hasGit)("worktrunk override records deferred-to-worktrunk without acquiring reuse handoff", async () => {
+  it.skipIf(!hasGit)("worktrunk-enabled reuse mode still acquires reuse handoff", async () => {
     const fixture = await makeReliabilityFixture({
       taskId: "FN-5279-RI-WORKTRUNK",
       settings: {
@@ -452,6 +452,8 @@ describe("FN-5279 reliability interactions: merge reuse task worktree", () => {
       const { rootDir, store, task } = fixture;
       const actualTask = await store.getTask(task.id);
       const branch = `fusion/${actualTask!.id.toLowerCase()}`;
+      const worktreeRoot = `${rootDir}-worktrees`;
+      const worktreePath = join(worktreeRoot, actualTask!.id.toLowerCase());
 
       git(rootDir, "git branch -m main master");
       const completedSteps = (actualTask?.steps ?? []).map((step) => ({ ...step, status: "done" as const }));
@@ -464,12 +466,16 @@ describe("FN-5279 reliability interactions: merge reuse task worktree", () => {
       await fixture.createBranch(branch);
       await fixture.writeAndCommit("packages/engine/src/fn-5279-ri-worktrunk.ts", "export const deferred = true;\n", "feat: add worktrunk merge content");
       await fixture.checkout("master");
+      await mkdir(worktreeRoot, { recursive: true });
+      git(rootDir, `git worktree add ${JSON.stringify(worktreePath)} ${JSON.stringify(branch)}`);
+      await store.updateTask(task.id, { worktree: worktreePath, branch } as any);
+      store.enqueueMergeQueue(task.id);
 
       const result = await aiMergeTask(store, rootDir, task.id);
       expect(result.merged).toBe(true);
       const auditTypes = store.getRunAuditEvents({ taskId: task.id }).map((event) => event.mutationType);
       expect(auditTypes).toContain("merge:reuse-handoff-deferred-to-worktrunk");
-      expect(auditTypes).not.toContain("merge:reuse-handoff-acquired");
+      expect(auditTypes).toContain("merge:reuse-handoff-acquired");
     } finally {
       await fixture.cleanup();
     }

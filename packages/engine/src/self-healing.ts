@@ -46,7 +46,7 @@ import { activeSessionRegistry } from "./active-session-registry.js";
 import { findAlreadyMergedTaskCommit } from "./already-merged-detector.js";
 import { resolveWorktreesDir } from "./worktree-paths.js";
 import { canonicalFusionBranchName } from "./worktree-names.js";
-import { resolveIntegrationBranch, resolveIntegrationBranchSync } from "./integration-branch.js";
+import { resolveIntegrationBranch } from "./integration-branch.js";
 import type { OwnedLandedClassification } from "./merger.js";
 import { recoverForeignOnlyContamination } from "./recovery/foreign-only-contamination.js";
 import {

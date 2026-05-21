@@ -34,7 +34,21 @@ describe("resolveMergeIntegrationRoot", () => {
     });
   });
 
-  it("preserves the legacy cwd-main mode when explicitly selected", () => {
+  it("maps explicit opt-in to canonical cwd-integration-branch mode", () => {
+    expect(
+      resolveMergeIntegrationRoot({
+        task: { id: "FN-5279", worktree: "/tmp/task-worktree" } as any,
+        settings: { mergeIntegrationWorktree: "cwd-integration-branch" as const, worktrunk: { enabled: false } } as any,
+        projectRoot: "/tmp/project-root",
+      }),
+    ).toEqual({
+      mode: "cwd-integration-branch",
+      rootDir: "/tmp/project-root",
+      branchName: "fusion/fn-5279",
+    });
+  });
+
+  it("maps legacy cwd-main input to canonical cwd-integration-branch mode", () => {
     expect(
       resolveMergeIntegrationRoot({
         task: { id: "FN-5279", worktree: "/tmp/task-worktree" } as any,
@@ -42,7 +56,7 @@ describe("resolveMergeIntegrationRoot", () => {
         projectRoot: "/tmp/project-root",
       }),
     ).toEqual({
-      mode: "cwd-main",
+      mode: "cwd-integration-branch",
       rootDir: "/tmp/project-root",
       branchName: "fusion/fn-5279",
     });
@@ -62,7 +76,7 @@ describe("resolveMergeIntegrationRoot", () => {
     });
   });
 
-  it("defers to the project root when worktrunk owns merge orchestration", () => {
+  it("keeps reuse-task-worktree mode when worktrunk is enabled", () => {
     expect(
       resolveMergeIntegrationRoot({
         task: { id: "FN-5279", worktree: "/tmp/task-worktree" } as any,
@@ -70,8 +84,8 @@ describe("resolveMergeIntegrationRoot", () => {
         projectRoot: "/tmp/project-root",
       }),
     ).toEqual({
-      mode: "cwd-main",
-      rootDir: "/tmp/project-root",
+      mode: "reuse-task-worktree",
+      rootDir: "/tmp/task-worktree",
       branchName: "fusion/fn-5279",
     });
   });

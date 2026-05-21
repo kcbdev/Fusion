@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
+import {
+  normalizeMergeIntegrationWorktreeMode,
+} from "@fusion/core";
 import type {
   MergeIntegrationWorktreeMode,
   MergeQueueReleaseOutcome,
@@ -44,17 +47,9 @@ export function resolveMergeIntegrationRoot(
 ): MergeIntegrationRootResolution {
   const branchName = canonicalFusionBranchName(input.task.id);
 
-  if (input.settings.worktrunk?.enabled === true) {
-    return {
-      mode: "cwd-main",
-      rootDir: input.projectRoot,
-      branchName,
-    };
-  }
-
-  const mode = input.settings.mergeIntegrationWorktree === "cwd-main"
-    ? "cwd-main"
-    : "reuse-task-worktree";
+  const mode = normalizeMergeIntegrationWorktreeMode(
+    input.settings.mergeIntegrationWorktree,
+  );
 
   return {
     mode,

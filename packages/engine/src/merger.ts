@@ -48,6 +48,7 @@ import {
   normalizeMergeStrategyOverlapBehavior,
   normalizePostMergeAuditMode,
   resolveTaskMergeTarget,
+  normalizeMergeIntegrationWorktreeMode,
   resolveTitleSummarizerSettingsModel,
   resolveAgentPrompt,
   resolvePersistAgentThinkingLog,
@@ -6721,8 +6722,9 @@ export async function aiMergeTask(
   //     still go through the standard reuse-handoff path so the existing
   //     handoff lease lifecycle and FN-5083 branch-rebind invariants are
   //     preserved.
-  //   - cwd-main integration mode (legacy / unit-test default) is unchanged.
-  if (settings.mergeIntegrationWorktree !== "cwd-main") {
+  //   - cwd-integration-branch mode (explicit opt-in) is unchanged.
+  const requestedIntegrationMode = normalizeMergeIntegrationWorktreeMode(settings.mergeIntegrationWorktree);
+  if (requestedIntegrationMode !== "cwd-integration-branch") {
     try {
       const earlyResult = await tryEarlyEmptyOwnDiffFinalize({
         task,
@@ -6742,9 +6744,12 @@ export async function aiMergeTask(
     }
   }
 
-  const requestedIntegrationMode = settings.mergeIntegrationWorktree === "cwd-main"
-    ? "cwd-main"
-    : "reuse-task-worktree";
+  if (requestedIntegrationMode === "cwd-integration-branch") {
+    mergerLog.warn(
+      `${taskId}: mergeIntegrationWorktree=cwd-integration-branch is explicit opt-in and runs merge operations in the user's working directory (FN-5348). The engine assumes the integration branch is checked out there.`,
+    );
+  }
+
   let integrationRoot = resolveMergeIntegrationRoot({
     task,
     settings,
@@ -6967,7 +6972,6 @@ export async function aiMergeTask(
   if (
     settings.worktrunk?.enabled === true
     && requestedIntegrationMode === "reuse-task-worktree"
-    && integrationRoot.mode === "cwd-main"
   ) {
     await emitReuseHandoffAuditEvent(
       "merge:reuse-handoff-deferred-to-worktrunk",
@@ -7020,6 +7024,11 @@ export async function aiMergeTask(
         reuseHandoff.worktreePath,
       );
     } catch (error: unknown) {
+      // FN-5348 invariant: a reuse-task-worktree handoff refusal MUST NOT fall back to
+      // cwd-main / cwd-<integration-branch>. Acceptable outcomes: reacquire a fresh task
+      // worktree (below) or rethrow MergeHandoffRefusedError so upstream parks the task
+      // in-review with status: "failed". Any new branch added here must NOT assign
+      // the legacy cwd-main mode to integrationRoot.
       if (!(error instanceof MergeHandoffRefusedError)) {
         throw error;
       }
@@ -7384,7 +7393,7 @@ export async function aiMergeTask(
 
   // 3c. Pre-merge remote rebase.
   // `rootDir` is the resolved integration root for this merge attempt: either
-  // the project root (`cwd-main`) or the reused task worktree after the FN-5279
+  // the project root (`cwd-integration-branch`) or the reused task worktree after the FN-5279
   // handoff gates. All fetch/rebase commands below intentionally stay on that
   // resolved root so the full conflict cascade runs in one place.
   //

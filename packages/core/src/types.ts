@@ -182,14 +182,33 @@ export type ColorTheme = (typeof COLOR_THEMES)[number];
 
 export type PrStatus = "open" | "closed" | "merged" | "draft";
 export type MergeStrategy = "direct" | "pull-request";
-export type MergeIntegrationWorktreeMode = "reuse-task-worktree" | "cwd-main";
+export type MergeIntegrationWorktreeMode =
+  | "reuse-task-worktree"
+  | "cwd-integration-branch" // explicit opt-in; surfaces a warning at startup. See FN-5348.
+  | "cwd-main"; // legacy alias for cwd-integration-branch; deprecated. Normalized at read time.
+
+let warnedLegacyCwdMain = false;
+
+export function __resetLegacyCwdMainWarningForTests(): void {
+  warnedLegacyCwdMain = false;
+}
 
 export function normalizeMergeIntegrationWorktreeMode(
   value: unknown,
 ): MergeIntegrationWorktreeMode {
-  return value === "cwd-main" || value === "reuse-task-worktree"
-    ? value
-    : "reuse-task-worktree";
+  if (value === "reuse-task-worktree" || value === "cwd-integration-branch") {
+    return value;
+  }
+
+  if (value === "cwd-main") {
+    if (!warnedLegacyCwdMain) {
+      warnedLegacyCwdMain = true;
+      console.warn("[merger] settings.mergeIntegrationWorktree=cwd-main is legacy; normalized to cwd-integration-branch");
+    }
+    return "cwd-integration-branch";
+  }
+
+  return "reuse-task-worktree";
 }
 
 export const DIRECT_MERGE_COMMIT_STRATEGIES = ["auto", "always-squash", "always-rebase"] as const;
@@ -2707,7 +2726,10 @@ export interface ProjectSettings {
   directMergeCommitStrategy?: DirectMergeCommitStrategy;
   /** Auto-merge integration-root mode.
    *  - "reuse-task-worktree" (default): run the auto-merge cascade in the task worktree
-   *  - "cwd-main": preserve the legacy project-root integration flow
+   *  - "cwd-integration-branch": explicit opt-in only. Runs merge operations in the user's
+   *    checked-out integration-branch worktree, violating the FN-5349 invariant unless the user
+   *    explicitly accepts that risk.
+   *  - "cwd-main": legacy alias for "cwd-integration-branch" (normalized at read time)
    *  Auto-merge only; manual/direct merge entrypoints outside auto-merge are unchanged. */
   mergeIntegrationWorktree?: MergeIntegrationWorktreeMode;
   /** Explicit integration branch name (e.g. `main`, `master`, `trunk`, `develop`).
