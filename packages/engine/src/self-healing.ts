@@ -25,7 +25,7 @@
 
 import { exec, execSync } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, countRecentIdenticalStallEntries, detectSelfDefeatingDependency, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getStalePausedTodoSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, parseExplicitDuplicateMarker, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult } from "@fusion/core";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
@@ -2576,7 +2576,10 @@ export class SelfHealingManager {
 
   private async emitWorktreeMetadataAuditEvent(input: {
     taskId: string;
-    mutationType: "task:auto-recover-worktree-metadata-rebound" | "task:auto-recover-worktree-metadata-cleared";
+    mutationType:
+      | "task:auto-recover-worktree-metadata-rebound"
+      | "task:auto-recover-worktree-metadata-cleared"
+      | "task:auto-recover-worktree-metadata-skipped-active";
     previousWorktree: string | null;
     newWorktree: string | null;
     previousBranch: string | null;
@@ -2809,7 +2812,20 @@ export class SelfHealingManager {
 
       const allTasks = await this.store.listTasks({ slim: true, includeArchived: false });
       const branchMap = await getRegisteredWorktreeBranchMap(this.options.rootDir);
-      const registeredPaths = new Set(branchMap.values());
+      // FN-5256: macOS git surfaces realpath-normalized worktree paths (/private/var/...)
+      // while task.worktree may be persisted as the symlinked path. Compare on realpath
+      // to avoid false-stale flagging that yanks a live worktree.
+      const safeRealpath = (path: string): string => {
+        try {
+          return realpathSync(path);
+        } catch {
+          return path;
+        }
+      };
+      const registeredRealpaths = new Set<string>();
+      for (const path of branchMap.values()) {
+        registeredRealpaths.add(safeRealpath(path));
+      }
       let repaired = 0;
 
       for (const task of allTasks) {
@@ -2823,8 +2839,9 @@ export class SelfHealingManager {
         if (activeSessionRegistry.isPathActive(task.worktree)) continue;
 
         const normalizedBranch = canonicalFusionBranchName(task.id);
-        const canonicalTaskWorktree = resolve(task.worktree);
-        const stale = !existsSync(task.worktree) || !registeredPaths.has(canonicalTaskWorktree);
+        const resolvedTaskWorktree = resolve(task.worktree);
+        const realpathTaskWorktree = safeRealpath(resolvedTaskWorktree);
+        const stale = !existsSync(task.worktree) || !registeredRealpaths.has(realpathTaskWorktree);
         if (!stale) continue;
 
         const previousWorktree = task.worktree;
@@ -2845,6 +2862,25 @@ export class SelfHealingManager {
             `rebound ${task.id}: ${previousWorktree} -> ${liveWorktree} (${previousBranch ?? "<none>"} -> ${normalizedBranch})`,
           );
           repaired++;
+          continue;
+        }
+
+        // FN-5256: never null out worktree/branch metadata for an active task. If a
+        // live task's worktree looks stale here (and we couldn't rebind to a live
+        // fusion/<id>), the executor's own recovery paths will detect and recreate
+        // it. Clearing here yanks the worktree from a still-running shell.
+        if (task.column === "in-progress" || task.column === "in-review") {
+          await this.emitWorktreeMetadataAuditEvent({
+            taskId: task.id,
+            mutationType: "task:auto-recover-worktree-metadata-skipped-active",
+            previousWorktree,
+            newWorktree: previousWorktree,
+            previousBranch,
+            newBranch: previousBranch,
+          });
+          worktreeMetadataReconcileLog.warn(
+            `[FN-5256] skipped clearing worktree metadata for active ${task.column} task ${task.id}: ${previousWorktree} (${previousBranch ?? "<none>"})`,
+          );
           continue;
         }
 

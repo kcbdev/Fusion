@@ -1939,7 +1939,10 @@ describe("TaskExecutor task:updated listener guards", () => {
     } satisfies Task)).resolves.toBeUndefined();
 
     expect(terminateAllSessions).toHaveBeenCalledTimes(1);
-    expect(executorLog.error).toHaveBeenCalledWith("Uncaught error in task:updated listener:", terminateError);
+    // FN-5256: the pause handler now routes through awaitAbortInFlightTaskWork,
+    // which internally catches/logs the per-surface failure. The error still hits
+    // executorLog.error but via the granular message path.
+    expect(executorLog.error).toHaveBeenCalledWith("Failed to terminate step sessions for FN-001:", terminateError);
   });
 });
 

@@ -873,6 +873,9 @@ describe("removeWorktree", () => {
       reason: RemovalReason.ExecutorDispose,
       expectedOwnerTaskId: "FN-1",
       liveOwnerProbe: () => false,
+      // FN-5256: opt out of the min-idle window so this defensive-reconcile test
+      // is unaffected by the new warm-up gate.
+      reconcileMinIdleMs: 0,
     });
 
     expect(activeSessionRegistry.lookupByPath("/repo/.worktrees/fn-1")).toBeNull();

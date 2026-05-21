@@ -8,6 +8,7 @@ import {
   activeSessionRegistry,
   reconcileSelfOwnedActiveSessionForRemoval,
   type LiveBindingProbe,
+  type ProcessActiveProbe,
 } from "./active-session-registry.js";
 import type { RunAuditor } from "./run-audit.js";
 import { resolveTaskWorktreePath } from "./worktree-paths.js";
@@ -782,6 +783,8 @@ export async function removeWorktree(input: {
   timeout?: number;
   expectedOwnerTaskId?: string;
   liveOwnerProbe?: LiveBindingProbe;
+  processActiveProbe?: ProcessActiveProbe;
+  reconcileMinIdleMs?: number;
 }): Promise<void> {
   const logger = {
     log: (_message: string): void => {},
@@ -798,6 +801,10 @@ export async function removeWorktree(input: {
       input.worktreePath,
       input.expectedOwnerTaskId,
       input.liveOwnerProbe,
+      {
+        processActiveProbe: input.processActiveProbe,
+        minIdleMs: input.reconcileMinIdleMs,
+      },
     );
     if (reconciled.action === "reconciled") {
       await input.audit?.git({

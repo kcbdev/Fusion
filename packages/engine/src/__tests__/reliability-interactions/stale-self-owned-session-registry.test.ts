@@ -25,6 +25,8 @@ describe("FN-4976: stale self-owned activeSessionRegistry deadlock backstop", ()
     const store = createMockStore();
     store.listTasks.mockResolvedValue([]);
     activeSessionRegistry.registerPath(PATH, { taskId: TASK_ID, kind: "executor", ownerKey: TASK_ID });
+    // FN-5256: backdate so the new min-idle window doesn't refuse the reconcile.
+    (activeSessionRegistry.lookupByPath(PATH) as any).registeredAt = 0;
 
     const executor = new TaskExecutor(store, ROOT);
     const removeSpy = vi.spyOn(worktreePoolModule, "removeWorktree").mockResolvedValue(undefined);

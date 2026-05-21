@@ -208,6 +208,7 @@ export type DatabaseMutationType =
   | "task:auto-recover-node-unreachable"
   | "task:auto-recover-worktree-metadata-rebound"
   | "task:auto-recover-worktree-metadata-cleared"
+  | "task:auto-recover-worktree-metadata-skipped-active"
   // task:auto-archived-ghost-bug metadata: { findings: Array<{ construct: { kind: string; raw: string; filePath?: string; line?: number }; matched: boolean; probeError?: string; output?: string }>; reason: string }
   // task:auto-archived-duplicate metadata: { siblingTaskIds: string[]; scores: Record<string, number> }
   // task:broad-scope-flagged-at-triage metadata: { score: number; reasons: string[]; signals: { size: "S"|"M"|"L"|null; stepCount: number; fileScopeCount: number; failingFileMentions: number }; thresholds: { stepsHigh: number; fileScopeHigh: number; failingFileMentionsHigh: number; sizeLStepsThreshold: number }; version: number }
