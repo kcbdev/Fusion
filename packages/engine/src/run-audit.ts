@@ -228,8 +228,62 @@ export type GitMutationType =
   // reserved; refusal currently thrown pre-audit
   | "project:bootstrap-refused-linked-worktree"
   | "branch:reanchor"
+  /**
+   * Metadata shape:
+   * ```ts
+   * {
+   *   taskId?: string;
+   *   worktreePath: string;
+   *   stashSha: string;
+   *   stashLabel: string;
+   *   untrackedIncluded: true;
+   * }
+   * ```
+   */
   | "stash:push"
-  | "stash:pop";
+  /**
+   * Metadata shape:
+   * ```ts
+   * {
+   *   taskId?: string;
+   *   worktreePath: string;
+   *   stashSha: string;
+   *   stashLabel: string;
+   *   manualResolution?: boolean;
+   * }
+   * ```
+   */
+  | "stash:pop"
+  /**
+   * Metadata shape:
+   * ```ts
+   * {
+   *   taskId?: string;
+   *   worktreePath: string;
+   *   integrationBranch: string;
+   *   fromSha: string;
+   *   toSha: string;
+   *   durationMs: number;
+   *   succeeded: boolean;
+   *   error?: string;
+   * }
+   * ```
+   */
+  | "pull:fast-forward"
+  /**
+   * Metadata shape:
+   * ```ts
+   * {
+   *   taskId?: string;
+   *   worktreePath: string;
+   *   stashSha: string;
+   *   stashLabel: string;
+   *   conflictedFiles: string[];
+   *   advice: string;
+   * }
+   * ```
+   */
+  | "stash:pop-conflict";
 
 // ── Database mutation types ────────────────────────────────────────────────────
 

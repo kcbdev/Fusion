@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TaskStore, RunAuditEventInput } from "@fusion/core";
-import { createRunAuditor, type DatabaseMutationType } from "../run-audit.js";
+import { createRunAuditor, type DatabaseMutationType, type GitMutationType } from "../run-audit.js";
 
 class AuditStoreStub {
   events: RunAuditEventInput[] = [];
@@ -86,6 +86,18 @@ describe("run-audit provisioning mutation types", () => {
       "merge:cwd-integration-fallback-refused",
       "merge:integration-ref-advance",
     ]);
+  });
+
+  it("accepts smart-pull git mutation types", async () => {
+    const store = new AuditStoreStub();
+    const auditor = createRunAuditor(store as unknown as TaskStore, { runId: "r1", agentId: "a1", taskId: "FN-5358" });
+
+    const types: GitMutationType[] = ["pull:fast-forward", "stash:pop-conflict"];
+    for (const type of types) {
+      await auditor.git({ type, target: "feature/worktree", metadata: { taskId: "FN-5358" } });
+    }
+
+    expect(store.events.map((event) => event.mutationType)).toEqual(types);
   });
 
   it("records merge:scope:auto-widen git events", async () => {

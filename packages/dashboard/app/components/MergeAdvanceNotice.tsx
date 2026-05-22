@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { api, ApiRequestError } from "../api";
 import { subscribeSse } from "../sse-bus";
+import StashConflictModal from "./StashConflictModal";
 import "./MergeAdvanceNotice.css";
 
 interface MergeAdvanceEvent {
@@ -24,9 +25,10 @@ interface MergeAdvanceEventsResponse {
   events: MergeAdvanceEvent[];
 }
 
-interface PullResponse {
-  message?: string;
-}
+type SmartPullResponse =
+  | { kind: "clean-pull"; toSha: string }
+  | { kind: "stash-pull-pop"; toSha: string }
+  | { kind: "stash-pop-conflict"; toSha: string; stashSha: string; stashLabel: string; conflictedFiles: string[] };
 
 interface MergeAdvanceNoticeProps {
   projectId?: string;
@@ -70,6 +72,11 @@ export default function MergeAdvanceNotice({ projectId, apiBase = "/api" }: Merg
   const [dismissedShas, setDismissedShas] = useState<string[]>(() => readDismissedShas(projectId));
   const [pulling, setPulling] = useState(false);
   const [pullError, setPullError] = useState<string | null>(null);
+  const [conflictState, setConflictState] = useState<{
+    stashSha: string;
+    stashLabel: string;
+    conflictedFiles: string[];
+  } | null>(null);
 
   useEffect(() => {
     setDismissedShas(readDismissedShas(projectId));
@@ -109,11 +116,7 @@ export default function MergeAdvanceNotice({ projectId, apiBase = "/api" }: Merg
     && event.userCheckout.worktreePath.trim().length > 0
   )), [events]);
 
-  if (!notice || dismissedShas.includes(notice.toSha)) {
-    return null;
-  }
-
-  if (!notice.userCheckout) {
+  if (!notice || dismissedShas.includes(notice.toSha) || !notice.userCheckout) {
     return null;
   }
 
@@ -131,10 +134,22 @@ export default function MergeAdvanceNotice({ projectId, apiBase = "/api" }: Merg
     setPullError(null);
     try {
       const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
-      await api<PullResponse>(`/git/pull${query}`, {
+      const response = await api<SmartPullResponse>(`/git/smart-pull${query}`, {
         method: "POST",
-        body: JSON.stringify({ rebase: false }),
+        body: JSON.stringify({
+          worktreePath: checkout.worktreePath,
+          integrationBranch: notice.integrationBranch,
+          taskId: notice.taskId,
+        }),
       });
+      if (response.kind === "stash-pop-conflict") {
+        setConflictState({
+          stashSha: response.stashSha,
+          stashLabel: response.stashLabel,
+          conflictedFiles: response.conflictedFiles,
+        });
+        return;
+      }
       dismiss();
     } catch (error: unknown) {
       if (error instanceof ApiRequestError) {
@@ -150,29 +165,44 @@ export default function MergeAdvanceNotice({ projectId, apiBase = "/api" }: Merg
   };
 
   return (
-    <div className="merge-advance-notice" role="status" aria-live="polite">
-      <div className="merge-advance-notice__content">
-        <strong>{notice.integrationBranch} advanced to {shortSha(notice.toSha)}.</strong>{" "}
-        Your checked-out copy at {checkout.worktreePath} is behind.
-        {localChangesPreserved ? " (local changes preserved)" : ""}
-        {pullError ? <span className="merge-advance-notice__error"> {pullError}</span> : null}
-        {pulling ? <span className="merge-advance-notice__hint"> Pulling…</span> : null}
-      </div>
-      <div className="merge-advance-notice__actions">
-        {!localChangesPreserved ? (
-          <button type="button" className="btn btn-sm" disabled={pulling} onClick={handlePull}>
-            Pull
+    <>
+      <div className="merge-advance-notice" role="status" aria-live="polite">
+        <div className="merge-advance-notice__content">
+          <strong>{notice.integrationBranch} advanced to {shortSha(notice.toSha)}.</strong>{" "}
+          Your checked-out copy at {checkout.worktreePath} is behind.
+          {localChangesPreserved ? " (local changes will be auto-stashed and restored)" : ""}
+          {pullError ? <span className="merge-advance-notice__error"> {pullError}</span> : null}
+          {pulling ? <span className="merge-advance-notice__hint"> Pulling…</span> : null}
+        </div>
+        <div className="merge-advance-notice__actions">
+          {conflictState ? null : (
+            <button type="button" className="btn btn-sm" disabled={pulling} onClick={handlePull}>
+              Pull
+            </button>
+          )}
+          <button
+            type="button"
+            className="merge-advance-notice__dismiss touch-target"
+            aria-label="Dismiss merge advance notice"
+            onClick={dismiss}
+          >
+            <X aria-hidden="true" />
           </button>
-        ) : null}
-        <button
-          type="button"
-          className="merge-advance-notice__dismiss touch-target"
-          aria-label="Dismiss merge advance notice"
-          onClick={dismiss}
-        >
-          <X aria-hidden="true" />
-        </button>
+        </div>
       </div>
-    </div>
+      <StashConflictModal
+        open={conflictState !== null}
+        onClose={() => {
+          setConflictState(null);
+          dismiss();
+        }}
+        worktreePath={checkout.worktreePath}
+        integrationBranch={notice.integrationBranch}
+        stashSha={conflictState?.stashSha ?? ""}
+        stashLabel={conflictState?.stashLabel ?? ""}
+        conflictedFiles={conflictState?.conflictedFiles ?? []}
+        taskId={notice.taskId}
+      />
+    </>
   );
 }

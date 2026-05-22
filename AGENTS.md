@@ -438,6 +438,9 @@ Every engine mutation is recorded across four domains:
   - `merge:cwd-integration-fallback-refused` — terminal reuse-handoff refusal path that parks in-review without cwd fallback.
   - `merge:integration-ref-advance` — typed integration ref update outcome (`succeeded`/`error`) with resolved ref metadata.
   - `merge:integration-worktree-state` — per-merge snapshot of resolved integration branch checkout and dirty/untracked state.
+  - `pull:fast-forward` — dashboard Smart Pull audit for `git pull --ff-only` attempts (success/failure metadata).
+  - `stash:pop-conflict` — dashboard Smart Pull audit for stash apply/pop conflict surfaces.
+- **Dashboard Git endpoints** — `POST /api/git/smart-pull`, `POST /api/git/stash-resolve`, `POST /api/git/stash-drop`, `POST /api/git/stash-restore`.
 - **Filesystem** — file:write, prompt:write, attachment:create, `secret:read|create|update|delete|approval-requested|approval-granted|approval-denied|sync-push|sync-pull`, `secret:env-*`, etc.
 - **Sandbox** — `sandbox:prepare`, `sandbox:run`, `sandbox:failure`, `sandbox:fallback`.
 

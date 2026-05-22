@@ -6,6 +6,7 @@ import { ApiRequestError } from "../../api";
 const mocked = vi.hoisted(() => ({
   api: vi.fn(),
   mergedHandler: undefined as (() => void) | undefined,
+  stashModalProps: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("../../api", async () => {
@@ -23,11 +24,18 @@ vi.mock("../../sse-bus", () => ({
   }),
 }));
 
+vi.mock("../StashConflictModal", () => ({
+  default: (props: Record<string, unknown>) => {
+    mocked.stashModalProps.push(props);
+    return props.open ? <div data-testid="stash-conflict-modal">stash-conflict-modal</div> : null;
+  },
+}));
+
 function makeEvent(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     taskId: "FN-1",
-    integrationBranch: "master",
-    refName: "refs/heads/master",
+    integrationBranch: "release",
+    refName: "refs/heads/release",
     toSha: "abcdef123456",
     fromSha: "1234567",
     advanceMode: "update-ref",
@@ -46,6 +54,7 @@ describe("MergeAdvanceNotice", () => {
   beforeEach(() => {
     mocked.api.mockReset();
     mocked.mergedHandler = undefined;
+    mocked.stashModalProps = [];
     window.localStorage.clear();
   });
 
@@ -63,32 +72,80 @@ describe("MergeAdvanceNotice", () => {
   it("renders notice with dynamic branch name", async () => {
     mocked.api.mockResolvedValueOnce({ events: [makeEvent()] });
     render(<MergeAdvanceNotice projectId="proj-1" />);
-    expect(await screen.findByText(/master advanced to abcdef1\./)).toBeInTheDocument();
+    expect(await screen.findByText(/release advanced to abcdef1\./)).toBeInTheDocument();
     expect(screen.getByText(/Your checked-out copy at \/repo is behind\./)).toBeInTheDocument();
   });
 
   it.each([
     { dirty: true, untrackedCount: 0 },
     { dirty: false, untrackedCount: 2 },
-  ])("shows local changes preserved and hides pull when dirty markers present", async ({ dirty, untrackedCount }) => {
-    mocked.api.mockResolvedValueOnce({ events: [makeEvent({ userCheckout: { worktreePath: "/repo", dirty, untrackedCount } })] });
+  ])("shows auto-stash copy and keeps pull visible for dirty state", async ({ dirty, untrackedCount }) => {
+    mocked.api
+      .mockResolvedValueOnce({ events: [makeEvent({ userCheckout: { worktreePath: "/repo", dirty, untrackedCount } })] })
+      .mockResolvedValueOnce({ kind: "clean-pull", toSha: "abcdef123456" });
     render(<MergeAdvanceNotice projectId="proj-1" />);
-    expect(await screen.findByText(/local changes preserved/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Pull" })).toBeNull();
+
+    expect(await screen.findByText(/local changes will be auto-stashed and restored/)).toBeInTheDocument();
+    const pullButton = screen.getByRole("button", { name: "Pull" });
+    fireEvent.click(pullButton);
+
+    await waitFor(() => expect(mocked.api).toHaveBeenNthCalledWith(2, "/git/smart-pull?projectId=proj-1", {
+      method: "POST",
+      body: JSON.stringify({
+        worktreePath: "/repo",
+        integrationBranch: "release",
+        taskId: "FN-1",
+      }),
+    }));
   });
 
-  it("pull posts rebase false and dismisses on success", async () => {
+  it("clean smart-pull dismisses notice", async () => {
     mocked.api
       .mockResolvedValueOnce({ events: [makeEvent()] })
-      .mockResolvedValueOnce({ ok: true });
+      .mockResolvedValueOnce({ kind: "clean-pull", toSha: "abcdef123456" });
     render(<MergeAdvanceNotice projectId="proj-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pull" }));
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+  });
+
+  it("dirty smart-pull stash-pull-pop dismisses notice", async () => {
+    mocked.api
+      .mockResolvedValueOnce({ events: [makeEvent({ userCheckout: { worktreePath: "/repo", dirty: true, untrackedCount: 0 } })] })
+      .mockResolvedValueOnce({ kind: "stash-pull-pop", toSha: "abcdef123456" });
+    render(<MergeAdvanceNotice projectId="proj-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pull" }));
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+  });
+
+  it("stash-pop-conflict opens modal and passes payload", async () => {
+    mocked.api
+      .mockResolvedValueOnce({ events: [makeEvent({ userCheckout: { worktreePath: "/repo", dirty: true, untrackedCount: 1 } })] })
+      .mockResolvedValueOnce({
+        kind: "stash-pop-conflict",
+        toSha: "abcdef123456",
+        stashSha: "stashsha123",
+        stashLabel: "fusion-auto-stash-FN-1",
+        conflictedFiles: ["src/a.ts"],
+      });
+    render(<MergeAdvanceNotice projectId="proj-1" />);
+
     fireEvent.click(await screen.findByRole("button", { name: "Pull" }));
 
-    await waitFor(() => expect(mocked.api).toHaveBeenNthCalledWith(2, "/git/pull?projectId=proj-1", {
-      method: "POST",
-      body: JSON.stringify({ rebase: false }),
-    }));
-    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+    expect(await screen.findByTestId("stash-conflict-modal")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pull" })).toBeNull();
+
+    const props = mocked.stashModalProps.at(-1);
+    expect(props).toMatchObject({
+      open: true,
+      worktreePath: "/repo",
+      integrationBranch: "release",
+      stashSha: "stashsha123",
+      stashLabel: "fusion-auto-stash-FN-1",
+      conflictedFiles: ["src/a.ts"],
+      taskId: "FN-1",
+    });
   });
 
   it("shows inline pull failure and keeps notice visible", async () => {
@@ -102,7 +159,6 @@ describe("MergeAdvanceNotice", () => {
 
     expect(await screen.findByText(/Merge conflict detected/)).toBeInTheDocument();
     expect(screen.getByRole("status")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Pull" })).not.toBeDisabled();
   });
 
   it("dismisses current sha and stays hidden when same advance is refetched", async () => {
@@ -129,7 +185,7 @@ describe("MergeAdvanceNotice", () => {
     await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
 
     mocked.mergedHandler?.();
-    expect(await screen.findByText(/master advanced to bbbbbbb\./)).toBeInTheDocument();
+    expect(await screen.findByText(/release advanced to bbbbbbb\./)).toBeInTheDocument();
   });
 
   it("renders nothing for failed advance or null checkout", async () => {
