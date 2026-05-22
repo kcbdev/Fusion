@@ -454,6 +454,18 @@ export class WorktreePool {
     await removeDesktopBuildArtifacts(worktreePath, worktreePoolLog);
 
     const base = startPoint || await resolveIntegrationBranch(options?.repoDir ?? worktreePath, undefined);
+    // Reject base values that would cause the new branch to inherit the
+    // worktree's current HEAD instead of the intended start point. Historical
+    // contamination ("branch: Created from HEAD") landed FN-5472's tip on
+    // freshly-created fn-5432/fn-5255 branches because the recycled worktree
+    // was still pointing at the previous occupant's commit and base silently
+    // collapsed onto HEAD.
+    if (!base || !base.trim() || base.trim().toUpperCase() === "HEAD") {
+      throw new Error(
+        `prepareForTask: refusing to create branch ${branchName} from base ${JSON.stringify(base)} (worktree=${worktreePath}, startPoint=${String(startPoint)})`,
+      );
+    }
+
     await execAsync(`git checkout --detach ${base}`, {
       cwd: worktreePath,
     });
@@ -461,6 +473,22 @@ export class WorktreePool {
     // Create or force-reset the branch from the start point (or main)
     const checkoutCmd = `git checkout -B "${branchName}" ${base}`;
     const resolvedBase = (await execAsync(`git rev-parse --verify "${base}^{commit}"`, { cwd: worktreePath, encoding: "utf-8" })).stdout.trim();
+
+    // Verify HEAD actually landed at the resolved base after --detach. If
+    // detach silently leaves HEAD elsewhere (e.g. the base ref didn't exist
+    // and git fell through to current HEAD), creating the branch now would
+    // pin it to the wrong tip — exactly the FN-5432 / FN-5255 contamination
+    // pattern ("branch: Created from HEAD" pointing at the previous occupant's
+    // tip). Only enforced when we have real SHAs to compare; mock-driven
+    // unit tests that return empty buffers fall through harmlessly.
+    if (/^[0-9a-f]{40}$/i.test(resolvedBase)) {
+      const detachedHead = (await execAsync("git rev-parse HEAD", { cwd: worktreePath, encoding: "utf-8" })).stdout.trim();
+      if (detachedHead !== resolvedBase) {
+        throw new Error(
+          `prepareForTask: post-detach HEAD ${detachedHead} does not match resolved base ${resolvedBase} (${base}) for ${branchName} — refusing to create branch`,
+        );
+      }
+    }
     const taskId = deriveTaskIdFromBranch(branchName);
     try {
       await execAsync(checkoutCmd, {

@@ -1850,6 +1850,9 @@ export class SelfHealingManager {
       return withPerPr({ outcome: "reclaimed" });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
+      if (await this.tryReanchorForeignOnlyContamination(task)) {
+        return withPerPr({ outcome: "reclaimed" });
+      }
       const patchPath = await preserveWorktreeChanges(this.options.rootDir, task.worktree, task.id);
       if (patchPath) {
         await this.store.logEntry(task.id, `Preserved uncommitted worktree changes before pause: ${patchPath}`);
@@ -1885,6 +1888,63 @@ export class SelfHealingManager {
         await this.store.logEntry(task.id, `Auto-recovery failed: branch conflict unrecoverable — ${message}`);
       }
       return withPerPr({ outcome: "paused-unrecoverable", reason: message });
+    }
+  }
+
+  /**
+   * Last-resort recovery for self-owned task branches whose tip carries only
+   * foreign commits (no own work). This is the FN-5432 / FN-5255 pattern:
+   * the worktree pool created `fusion/fn-XXXX` from a stale HEAD that still
+   * pointed at the previous occupant's tip, so the branch inherited another
+   * task's commit. There is nothing to preserve — reanchor to base.
+   *
+   * Returns true when recovery succeeded (caller should treat as reclaimed
+   * and skip the unrecoverable-pause path).
+   */
+  private async tryReanchorForeignOnlyContamination(
+    task: Task,
+  ): Promise<boolean> {
+    if (!task.branch || !task.worktree) return false;
+    try {
+      const integrationBranch = await resolveIntegrationBranch(this.options.rootDir, undefined);
+      const baseSha = task.baseCommitSha ?? task.baseBranch ?? task.executionStartBranch ?? integrationBranch;
+      if (!baseSha) return false;
+      const classification = await classifyForeignOnlyContamination({
+        repoDir: this.options.rootDir,
+        branchName: task.branch,
+        baseSha,
+        taskId: task.id,
+      }).catch(() => null);
+      if (!classification) return false;
+      if (
+        classification.kind !== "foreign-only-no-own-work" &&
+        classification.kind !== "foreign-only-already-upstream"
+      ) {
+        return false;
+      }
+      const auditor = createRunAuditor(this.store, {
+        runId: generateSyntheticRunId("self-heal", task.id),
+        agentId: "self-healing",
+        taskId: task.id,
+        taskLineageId: task.lineageId,
+        phase: "reanchor-foreign-only-contamination",
+      });
+      const recovered = await recoverForeignOnlyContamination(task, {
+        repoDir: this.options.rootDir,
+        taskStore: this.store,
+        runAudit: auditor,
+        integrationBranch,
+      });
+      if (!recovered.recovered) return false;
+      await this.store.logEntry(
+        task.id,
+        `Auto-reanchored ${task.branch} to base (${classification.kind}, ${classification.foreignCommitCount} foreign commit(s) discarded — no own work to preserve)`,
+      );
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.store.logEntry(task.id, `Foreign-only reanchor attempt failed: ${message}`).catch(() => undefined);
+      return false;
     }
   }
 
@@ -2249,6 +2309,10 @@ export class SelfHealingManager {
           recovered++;
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : String(err);
+          if (await this.tryReanchorForeignOnlyContamination(task)) {
+            recovered++;
+            continue;
+          }
           const patchPath = await preserveWorktreeChanges(this.options.rootDir, task.worktree, task.id);
           if (patchPath) {
             await this.store.logEntry(task.id, `Preserved uncommitted worktree changes before pause: ${patchPath}`);
