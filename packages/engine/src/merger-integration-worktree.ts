@@ -17,6 +17,7 @@ import {
   reconcileSelfOwnedActiveSessionForRemoval,
 } from "./active-session-registry.js";
 import { attemptBranchAutocorrect } from "./branch-autocorrect.js";
+import { isBranchAuthoritativeForTask } from "./branch-conflicts.js";
 import { MeshLeaseManager } from "./mesh-lease-manager.js";
 import {
   canonicalizePath,
@@ -352,12 +353,56 @@ export async function acquireReuseHandoff(input: ReuseHandoffInput): Promise<Han
     }
   }
   if (observedBranch !== expectedBranch) {
-    throw new MergeHandoffRefusedError("head-branch-mismatch", "unexpected-branch", {
-      taskId: input.task.id,
-      worktreePath,
-      observedBranch,
+    // The worktree's HEAD points elsewhere (detached or different branch) but
+    // the expected branch ref may still hold this task's authoritative work.
+    // If the branch tip carries the task's Fusion-Task-Id trailer and the
+    // range against base is contamination-free, re-attach via plain checkout
+    // (worktree was already asserted clean above, so this is safe and
+    // non-destructive — unlike `checkout -B` which would clobber the ref).
+    const authority = await isBranchAuthoritativeForTask(
+      input.projectRoot,
       expectedBranch,
-    });
+      input.task.id,
+    );
+    if (authority.ok) {
+      const reattach = await execAsync(`git checkout ${expectedBranch}`, {
+        cwd: worktreePath,
+        encoding: "utf-8",
+        timeout: 30_000,
+        maxBuffer: 1024 * 1024,
+      }).then(
+        () => ({ ok: true as const }),
+        (err: unknown) => ({ ok: false as const, reason: err instanceof Error ? err.message : String(err) }),
+      );
+      if (reattach.ok) {
+        const { stdout: reattachedHead } = await execAsync("git rev-parse --abbrev-ref HEAD", {
+          cwd: worktreePath,
+          encoding: "utf-8",
+          timeout: 10_000,
+          maxBuffer: 1024 * 1024,
+        });
+        observedBranch = reattachedHead.trim();
+        await input.auditEmit?.({
+          type: "branch:auto-reattach-authoritative",
+          target: worktreePath,
+          metadata: {
+            taskId: input.task.id,
+            previousHead: observedBranch === expectedBranch ? undefined : observedBranch,
+            expectedBranch,
+            worktreePath,
+          },
+        });
+      }
+    }
+    if (observedBranch !== expectedBranch) {
+      throw new MergeHandoffRefusedError("head-branch-mismatch", "unexpected-branch", {
+        taskId: input.task.id,
+        worktreePath,
+        observedBranch,
+        expectedBranch,
+        authorityProbe: authority.ok ? "ok" : authority.reason,
+      });
+    }
   }
 
   const activeRecord = activeSessionRegistry.lookupByPath(worktreePath);

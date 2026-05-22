@@ -275,6 +275,62 @@ async function summarizeTaskAttributedCommits(repoDir: string, range: string, ta
   return { ownCount, foreignCount };
 }
 
+/**
+ * True iff `branch`'s tip commit carries a `Fusion-Task-Id: <taskId>` trailer.
+ * Used as the cheap "is this branch ref authoritative for this task" probe
+ * at merge handoff so that HEAD drift (detached, wrong branch) can recover
+ * via a safe re-attach instead of refusing the handoff outright.
+ */
+export async function branchTipCarriesTaskIdTrailer(
+  repoDir: string,
+  branch: string,
+  taskId: string,
+): Promise<boolean> {
+  try {
+    const body = await runGit(repoDir, `git log -1 --pretty=%B ${quoteShellArg(branch)}`);
+    const escaped = taskId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`(?:^|\\n)${FUSION_TASK_ID_TRAILER_KEY}: ${escaped}\\s*(?:\\n|$)`);
+    return pattern.test(body);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whole-branch authority check: the branch ref exists, its tip carries the
+ * task's Fusion-Task-Id trailer, and (when a base is supplied) the range
+ * `base..branch` has no foreign FN-attributed commits.
+ *
+ * Returns `{ ok: true }` when safe to treat the branch ref as authoritative
+ * for `taskId`. On failure, returns `{ ok: false, reason }` so callers can
+ * log/audit why the gentle recovery was refused.
+ */
+export async function isBranchAuthoritativeForTask(
+  repoDir: string,
+  branch: string,
+  taskId: string,
+  baseSha?: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  try {
+    await revParse(repoDir, `refs/heads/${branch}`);
+  } catch {
+    return { ok: false, reason: "branch-ref-missing" };
+  }
+  const tipCarriesTrailer = await branchTipCarriesTaskIdTrailer(repoDir, branch, taskId);
+  if (!tipCarriesTrailer) {
+    return { ok: false, reason: "tip-missing-task-trailer" };
+  }
+  if (baseSha) {
+    try {
+      await assertCleanBranchAtBase(repoDir, branch, baseSha, taskId);
+    } catch (err) {
+      const reason = err instanceof BranchCrossContaminationError ? "foreign-contamination" : "clean-branch-check-failed";
+      return { ok: false, reason };
+    }
+  }
+  return { ok: true };
+}
+
 export async function assertCleanBranchAtBase(
   repoDir: string,
   branchName: string,

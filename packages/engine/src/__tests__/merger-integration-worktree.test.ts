@@ -410,6 +410,75 @@ describe("acquireReuseHandoff", () => {
     );
   });
 
+  it("re-attaches a detached HEAD when the branch ref carries the task's trailer", async () => {
+    vi.spyOn(branchAutocorrect, "attemptBranchAutocorrect").mockResolvedValue({ status: "failed", reason: "case-not-applicable" });
+    const store = createStore();
+    const auditEmit = vi.fn();
+    let headReads = 0;
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const command = String(cmd);
+      if (command === "git rev-parse --abbrev-ref HEAD") {
+        headReads += 1;
+        // First read sees the detached state, post-checkout read sees the branch.
+        return Buffer.from(headReads === 1 ? "HEAD\n" : "fusion/fn-5279\n");
+      }
+      if (command === "git diff -z --name-only") return Buffer.from("");
+      if (command === "git diff -z --cached --name-only") return Buffer.from("");
+      if (command === "git status -z --porcelain") return Buffer.from("");
+      if (command === "git diff HEAD") return Buffer.from("");
+      if (command.startsWith("git rev-parse --verify")) return Buffer.from("abc123\n");
+      if (command.startsWith("git log -1 --pretty=%B")) {
+        return Buffer.from("feat(FN-5279): step 3\n\nFusion-Task-Id: FN-5279\n");
+      }
+      if (command === "git checkout fusion/fn-5279") return Buffer.from("");
+      return Buffer.from("");
+    });
+
+    const handoff = await acquireReuseHandoff({
+      task: await store.getTask("FN-5279"),
+      store,
+      projectRoot: "/tmp/project-root",
+      settings: {} as any,
+      worktreePath: "/tmp/task-worktree",
+      auditEmit,
+    });
+
+    expect(handoff.ok).toBe(true);
+    expect(auditEmit).toHaveBeenCalledWith(expect.objectContaining({
+      type: "branch:auto-reattach-authoritative",
+      metadata: expect.objectContaining({ taskId: "FN-5279", expectedBranch: "fusion/fn-5279" }),
+    }));
+  });
+
+  it("still refuses when HEAD is wrong AND the branch ref is not authoritative", async () => {
+    vi.spyOn(branchAutocorrect, "attemptBranchAutocorrect").mockResolvedValue({ status: "failed", reason: "case-not-applicable" });
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const command = String(cmd);
+      if (command === "git rev-parse --abbrev-ref HEAD") return Buffer.from("feature/elsewhere\n");
+      if (command === "git diff -z --name-only") return Buffer.from("");
+      if (command === "git diff -z --cached --name-only") return Buffer.from("");
+      if (command === "git status -z --porcelain") return Buffer.from("");
+      if (command === "git diff HEAD") return Buffer.from("");
+      if (command.startsWith("git rev-parse --verify")) return Buffer.from("abc123\n");
+      // Trailer absent => not authoritative.
+      if (command.startsWith("git log -1 --pretty=%B")) return Buffer.from("feat(FN-9999): unrelated\n");
+      return Buffer.from("");
+    });
+
+    const refusal = await expectRefusal(
+      acquireReuseHandoff({
+        task: await createStore().getTask("FN-5279"),
+        store: createStore(),
+        projectRoot: "/tmp/project-root",
+        settings: {} as any,
+        worktreePath: "/tmp/task-worktree",
+      }),
+      "head-branch-mismatch",
+      "unexpected-branch",
+    );
+    expect(refusal.payload).toMatchObject({ authorityProbe: "tip-missing-task-trailer" });
+  });
+
   it("reconciles stale same-task activeSessionRegistry entries before proceeding", async () => {
     const store = createStore();
     activeSessionRegistry.registerPath("/tmp/task-worktree", {
