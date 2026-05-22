@@ -105,6 +105,7 @@ FN-5416 extends resume-correlation coverage to stream-focused hooks and their pr
   - `useDevServerLogs`: `project-context-change`, `sse-open`, `sse-reconnect`
   - `useResearch`: `sse-open`, `sse-reconnect`
   - `useBackgroundSessions`: `sse-open`, `sse-reconnect`
+  - `useAgentLogs`: `project-context-change`, `sse-open`, `sse-reconnect` on `/api/tasks/:id/logs/stream`
 - Route shells
   - `DevServerView`: `remount` / `route-active` / `route-inactive`
   - `ResearchView`: `remount` / `route-active` / `route-inactive`
