@@ -146,10 +146,6 @@ Per-task opt-out exists: `task.scopeOverride = true` (log the reason).
 
 When `settings.autoMerge: false`, `in-review` is terminal-until-merged by a human. Lifecycle-mutating self-healing must not move these tasks backward, pause/fail them, or re-enqueue them for execution.
 
-### Archived-task delete contract (FN-5196)
-
-`TaskStore.deleteTask(id)` on a hard-archived task (row moved to `archive.db` via `archiveTask`) throws `TaskAlreadyHardArchivedError`. The dashboard `DELETE /api/tasks/:id` route maps this to HTTP 410 Gone with `{ code: "TASK_ALREADY_HARD_ARCHIVED", taskId, archivedAt }`. No silent no-op; callers must `unarchiveTask` first or use archive-cleanup APIs for forensic removal.
-
 ### Mock provider (test mode)
 
 `testMode?: boolean` is now available in both project and global settings. If project `testMode === true` (or the resolved default provider is `"mock"` at any tier), every AI lane is forced to `mock/scripted`, overriding per-task and per-lane model selections. The dashboard exposes this via the Settings Modal "Enable test mode" toggle and a persistent "Test mode — no real AI calls" banner.

@@ -1258,49 +1258,6 @@ describe("DELETE /tasks/:id", () => {
     });
   });
 
-  it("returns 410 TASK_ALREADY_HARD_ARCHIVED when deleteTask throws TaskAlreadyHardArchivedError", async () => {
-    const err = new Error("Task KB-001 is already hard-archived (moved to archive.db) and cannot be soft-deleted.");
-    err.name = "TaskAlreadyHardArchivedError";
-    (err as Error & { taskId: string; archivedAt: string | null }).taskId = "KB-001";
-    (err as Error & { taskId: string; archivedAt: string | null }).archivedAt = "2026-05-20T10:00:00.000Z";
-    (store.deleteTask as ReturnType<typeof vi.fn>).mockRejectedValue(err);
-
-    const res = await REQUEST(buildApp(), "DELETE", "/api/tasks/KB-001");
-
-    expect(res.status).toBe(410);
-    expect(res.body).toEqual({
-      code: "TASK_ALREADY_HARD_ARCHIVED",
-      taskId: "KB-001",
-      archivedAt: "2026-05-20T10:00:00.000Z",
-      message: err.message,
-    });
-  });
-
-  it("does not call releaseExecutionAgentBindings when delete fails against a hard-archived task", async () => {
-    const agentStore = {
-      listAgents: vi.fn().mockResolvedValue([{ id: "agent-1", taskId: "KB-001" }]),
-      syncExecutionTaskLink: vi.fn().mockResolvedValue(undefined),
-      deleteAgent: vi.fn().mockResolvedValue(undefined),
-    };
-    const engine = {
-      getTaskStore: () => store,
-      getAgentStore: () => agentStore,
-    };
-
-    const err = new Error("Task KB-001 is already hard-archived");
-    err.name = "TaskAlreadyHardArchivedError";
-    (err as Error & { taskId: string; archivedAt: string | null }).taskId = "KB-001";
-    (err as Error & { taskId: string; archivedAt: string | null }).archivedAt = "2026-05-20T10:00:00.000Z";
-    (store.deleteTask as ReturnType<typeof vi.fn>).mockRejectedValue(err);
-
-    const res = await REQUEST(buildApp(engine), "DELETE", "/api/tasks/KB-001");
-
-    expect(res.status).toBe(410);
-    expect(agentStore.listAgents).not.toHaveBeenCalled();
-    expect(agentStore.syncExecutionTaskLink).not.toHaveBeenCalled();
-    expect(agentStore.deleteAgent).not.toHaveBeenCalled();
-  });
-
   it("rejects invalid githubIssueAction values", async () => {
     const res = await REQUEST(buildApp(), "DELETE", "/api/tasks/KB-001?githubIssueAction=bad-value");
 

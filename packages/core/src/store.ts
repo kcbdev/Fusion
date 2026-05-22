@@ -621,21 +621,6 @@ export class TaskDeletedError extends Error {
   }
 }
 
-export class TaskAlreadyHardArchivedError extends Error {
-  readonly taskId: string;
-  readonly archivedAt: string | null;
-
-  constructor(taskId: string, archivedAt: string | null) {
-    super(
-      `Task ${taskId} is already hard-archived (moved to archive.db) and cannot be soft-deleted. `
-      + "Use unarchiveTask first, or call the archive-cleanup APIs for forensic removal.",
-    );
-    this.name = "TaskAlreadyHardArchivedError";
-    this.taskId = taskId;
-    this.archivedAt = archivedAt;
-  }
-}
-
 export class TaskHasLineageChildrenError extends Error {
   readonly taskId: string;
   readonly childIds: string[];
@@ -6647,15 +6632,6 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       this.flushAgentLogBuffer();
       const task = this.readTaskFromDb(id, { includeDeleted: true });
       if (!task) {
-        // FN-5196: keep legacy archivedTasks probe first because archiveDb.get()
-        // only sees modern archive.db rows and does not include legacy entries.
-        if (this.isTaskIdPresentInArchivedTasksTable(id)) {
-          throw new TaskAlreadyHardArchivedError(id, null);
-        }
-        const archived = this.archiveDb.get(id);
-        if (archived) {
-          throw new TaskAlreadyHardArchivedError(id, archived.archivedAt);
-        }
         throw new Error(`Task ${id} not found`);
       }
 

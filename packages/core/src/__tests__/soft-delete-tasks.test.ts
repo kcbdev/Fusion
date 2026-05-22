@@ -4,7 +4,6 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { createTaskStoreTestHarness } from "./store-test-helpers.js";
 import { createDistributedTaskIdAllocator, reconcileTaskIdState } from "../distributed-task-id.js";
-import { TaskAlreadyHardArchivedError } from "../store.js";
 
 describe("TaskStore soft delete", () => {
   const harness = createTaskStoreTestHarness();
@@ -148,99 +147,6 @@ describe("TaskStore soft delete", () => {
     expect(secondRow.column).toBe("archived");
 
     await expect(store.deleteTask("FN-DOES-NOT-EXIST")).rejects.toThrow("Task FN-DOES-NOT-EXIST not found");
-  });
-
-  it("throws TaskAlreadyHardArchivedError when deleting a hard-archived task", async () => {
-    const store = harness.store();
-    const doneTask = await store.createTask({ column: "done", description: "hard archive delete target" });
-
-    await store.archiveTask(doneTask.id);
-
-    const row = (store as any).db
-      .prepare('SELECT id FROM tasks WHERE id = ?')
-      .get(doneTask.id) as { id: string } | undefined;
-    expect(row).toBeUndefined();
-
-    const archived = (store as any).archiveDb.get(doneTask.id);
-    expect(archived?.id).toBe(doneTask.id);
-
-    let thrown: unknown;
-    try {
-      await store.deleteTask(doneTask.id);
-    } catch (error) {
-      thrown = error;
-    }
-
-    expect(thrown).toBeInstanceOf(TaskAlreadyHardArchivedError);
-    expect((thrown as TaskAlreadyHardArchivedError).taskId).toBe(doneTask.id);
-    expect((thrown as TaskAlreadyHardArchivedError).archivedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-  });
-
-  it("preserves task id reservation after archive+delete attempt", async () => {
-    const store = harness.store();
-    const doneTask = await store.createTask({ column: "done", description: "hard archive reservation target" });
-
-    await store.archiveTask(doneTask.id);
-    await expect(store.deleteTask(doneTask.id)).rejects.toBeInstanceOf(TaskAlreadyHardArchivedError);
-
-    expect((store as any).taskIdExistsAnywhere(doneTask.id)).toBe(true);
-    expect(() => (store as any).assertTaskIdAvailable(doneTask.id)).toThrow();
-  });
-
-  it("does not re-emit task:deleted when delete fails against a hard-archived task", async () => {
-    const store = harness.store();
-    const doneTask = await store.createTask({ column: "done", description: "hard archive event target" });
-
-    const deletedEvents: string[] = [];
-    store.on("task:deleted", (event) => deletedEvents.push(event.id));
-
-    await store.archiveTask(doneTask.id);
-    await expect(store.deleteTask(doneTask.id)).rejects.toBeInstanceOf(TaskAlreadyHardArchivedError);
-    expect(deletedEvents).toEqual([]);
-  });
-
-  it("still throws generic Error when target id has never existed", async () => {
-    const store = harness.store();
-
-    await expect(store.deleteTask("FN-999999")).rejects.toMatchObject({
-      name: "Error",
-      message: expect.stringContaining("not found"),
-    });
-  });
-
-  it("throws TaskAlreadyHardArchivedError for a legacy in-db archivedTasks row", async () => {
-    const store = harness.store();
-    const archivedAt = new Date().toISOString();
-    (store as any).db.prepare("INSERT INTO archivedTasks (id, data, archivedAt) VALUES (?, ?, ?)").run(
-      "FN-888888",
-      JSON.stringify({ id: "FN-888888", description: "legacy row" }),
-      archivedAt,
-    );
-
-    await expect(store.deleteTask("FN-888888")).rejects.toMatchObject({
-      name: "TaskAlreadyHardArchivedError",
-      taskId: "FN-888888",
-      archivedAt: null,
-    });
-  });
-
-  it("keeps FN-5127 idempotent re-delete short-circuit ahead of any archive probe", async () => {
-    const store = harness.store();
-    const task = await store.createTask({ column: "todo", description: "idempotent archive probe guard" });
-
-    const firstResult = await store.deleteTask(task.id);
-    const firstRow = (store as any).db
-      .prepare("SELECT deletedAt FROM tasks WHERE id = ?")
-      .get(task.id) as { deletedAt: string | null };
-    expect(firstRow.deletedAt).toBeTruthy();
-
-    await store.findInArchive(task.id);
-    const getSpy = vi.spyOn((store as any).archiveDb, "get");
-    const legacySpy = vi.spyOn(store as any, "isTaskIdPresentInArchivedTasksTable");
-
-    const secondResult = await store.deleteTask(task.id);
-    expect(secondResult.deletedAt).toBe(firstRow.deletedAt);    expect(getSpy).not.toHaveBeenCalled();
-    expect(legacySpy).not.toHaveBeenCalled();
   });
 
   it("unlinks mission feature task references when task is soft-deleted", async () => {

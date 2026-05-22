@@ -1,13 +1,8 @@
 import "../executor-test-helpers.js";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { TaskStore } from "@fusion/core";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AutoClaimSnapshotManager } from "../../auto-claim-snapshot.js";
 import { Scheduler } from "../../scheduler.js";
 import { TaskExecutor } from "../../executor.js";
-import { TriageProcessor } from "../../triage.js";
 import { executorLog } from "../../logger.js";
 import { createMockStore, resetExecutorMocks } from "../executor-test-helpers.js";
 
@@ -43,19 +38,12 @@ function createEventedSoftDeleteStore(initialTasks: TestTask[] = []) {
   const nextTimestamp = () => new Date(1_716_000_000_000 + sequence++).toISOString();
 
   return {
-    emitEvent: emit,
     on: vi.fn((event: string, listener: (payload: any) => void) => {
       const existing = listeners.get(event) ?? [];
       existing.push(listener);
       listeners.set(event, existing);
     }),
-    off: vi.fn((event: string, listener: (payload: any) => void) => {
-      const existing = listeners.get(event) ?? [];
-      listeners.set(
-        event,
-        existing.filter((entry) => entry !== listener),
-      );
-    }),
+    off: vi.fn(),
     getSettings: vi.fn().mockResolvedValue({ globalPause: false, enginePaused: false, maxConcurrent: 2, maxWorktrees: 4 }),
     getRootDir: vi.fn().mockReturnValue("/test/project"),
     getTasksDir: vi.fn().mockReturnValue("/test/project/.fusion/tasks"),
@@ -139,104 +127,9 @@ function createEventedSoftDeleteStore(initialTasks: TestTask[] = []) {
   };
 }
 
-async function createProjectEngineHarness() {
-  vi.resetModules();
-  const mocks = {
-    runtimeStart: vi.fn(async () => undefined),
-    runtimeStop: vi.fn(async () => undefined),
-    runtimeResumeAfterUnpause: vi.fn(async () => undefined),
-    runtimeConfigurePrMonitoring: vi.fn(),
-    aiMergeTask: vi.fn(),
-    execFile: vi.fn(),
-    currentStore: null as Record<string, unknown> | null,
-  };
-
-  vi.doMock("@fusion/core", async (importOriginal) => {
-    const { createEngineCoreMock } = await import("../../test/mockCore.js");
-    return createEngineCoreMock(() => importOriginal<typeof import("@fusion/core")>(), {});
-  });
-  vi.doMock("../../merger.js", () => ({ aiMergeTask: mocks.aiMergeTask, sweepStaleAutostashes: vi.fn(async () => undefined) }));
-  vi.doMock("node:child_process", async (importOriginal) => {
-    const actual = await importOriginal<typeof import("node:child_process")>();
-    return { ...actual, execFile: mocks.execFile };
-  });
-  vi.doMock("../../pr-monitor.js", () => ({ PrMonitor: vi.fn().mockImplementation(() => ({ onNewComments: vi.fn() })) }));
-  vi.doMock("../../pr-comment-handler.js", () => ({ PrCommentHandler: vi.fn().mockImplementation(() => ({ handleNewComments: vi.fn() })) }));
-  vi.doMock("../../auth-storage.js", () => ({
-    createFusionAuthStorage: vi.fn(() => ({ reload: vi.fn(), getOAuthProviders: vi.fn(() => []), get: vi.fn(() => undefined) })),
-  }));
-  vi.doMock("../../notifier.js", () => ({ NtfyNotifier: vi.fn().mockImplementation(() => ({ start: vi.fn(), stop: vi.fn() })) }));
-  vi.doMock("../../notification/index.js", () => ({
-    NotificationService: vi.fn().mockImplementation(() => ({ start: vi.fn(), stop: vi.fn() })),
-    OAuthExpiryMonitor: vi.fn().mockImplementation(() => ({ start: vi.fn(), stop: vi.fn() })),
-  }));
-  vi.doMock("../../cron-runner.js", () => ({
-    CronRunner: vi.fn().mockImplementation(() => ({ start: vi.fn(), stop: vi.fn() })),
-    createAiPromptExecutor: vi.fn(async () => vi.fn()),
-  }));
-  vi.doMock("../../runtimes/in-process-runtime.js", () => ({
-    InProcessRuntime: vi.fn().mockImplementation(() => ({
-      start: mocks.runtimeStart,
-      stop: mocks.runtimeStop,
-      resumeAfterUnpause: mocks.runtimeResumeAfterUnpause,
-      getTaskStore: () => mocks.currentStore,
-      getAgentStore: vi.fn(),
-      getMessageStore: vi.fn(),
-      getRoutineStore: vi.fn(),
-      getRoutineRunner: vi.fn(),
-      getHeartbeatMonitor: vi.fn(),
-      getTriggerScheduler: vi.fn(),
-      configurePrMonitoring: mocks.runtimeConfigurePrMonitoring,
-      setActiveMergeTaskIdProvider: vi.fn(),
-      setMergeEnqueuer: vi.fn(),
-      setMergeActiveClearer: vi.fn(),
-    })),
-  }));
-
-  const { ProjectEngine } = await import("../../project-engine.js");
-  const mockStore = createEventedSoftDeleteStore() as any;
-  mockStore.getActiveMergingTask = vi.fn(() => null);
-  mockStore.addTaskComment = vi.fn(async () => undefined);
-  mocks.currentStore = mockStore;
-
-  const engine = new ProjectEngine(
-    {
-      projectId: "proj_test",
-      workingDirectory: "/tmp/proj_test",
-      isolationMode: "in-process",
-      maxConcurrent: 2,
-      maxWorktrees: 2,
-    },
-    {} as never,
-    { skipNotifier: true },
-  );
-
-  return { engine, mockStore };
-}
-
-async function createCoreStoreForTest() {
-  const rootDir = await mkdtemp(join(tmpdir(), "kb-engine-soft-delete-"));
-  const globalDir = await mkdtemp(join(tmpdir(), "kb-engine-soft-delete-global-"));
-  const store = new TaskStore(rootDir, globalDir, { inMemoryDb: true });
-  await store.init();
-  return {
-    store,
-    async cleanup() {
-      store.stopWatching();
-      store.close();
-      await rm(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-      await rm(globalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-    },
-  };
-}
-
 describe("reliability interactions: FN-5153 soft-delete end-to-end", () => {
-  beforeEach(async () => {
+  beforeEach(() => {
     resetExecutorMocks();
-  });
-
-  afterEach(async () => {
-    vi.doUnmock("@fusion/core");
   });
 
   it("keeps live readers and scheduler snapshots converged after task:deleted", async () => {
@@ -288,156 +181,55 @@ describe("reliability interactions: FN-5153 soft-delete end-to-end", () => {
     expect(executeSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("FN-5142 — abort in-flight executor session on task:deleted", async () => {
-    const store = createEventedSoftDeleteStore();
-    const stuckTaskDetector = { untrackTask: vi.fn() };
-    const executor = new TaskExecutor(store as any, "/tmp/test", { stuckTaskDetector } as any);
-    const abort = vi.fn().mockResolvedValue(undefined);
-    const dispose = vi.fn();
-    const task = await store.createTask({ column: "in-progress" });
-    const taskId = task.id;
-
-    (executor as any).activeSessions.set(taskId, { session: { abort, dispose }, seenSteeringIds: new Set<string>() });
-
-    await store.deleteTask(taskId);
-    await (executor as any).pendingTaskDisposals.get(taskId);
-
-    expect(abort).toHaveBeenCalledTimes(1);
-    expect(dispose).toHaveBeenCalledTimes(1);
-    expect((executor as any).activeSessions.has(taskId)).toBe(false);
-    expect((executor as any).pausedAborted.has(taskId)).toBe(true);
-    expect((executor as any).userCanceledTaskIds.has(taskId)).toBe(true);
-    expect(stuckTaskDetector.untrackTask).toHaveBeenCalledWith(taskId);
+  it.skip("FN-5142 — abort in-flight executor session on task:deleted", async () => {
+    // Owning FN: FN-5142.
+    // Assertion blueprint: register a fake active executor session for the task,
+    // emit/store-delete `task:deleted`, then assert `session.abort()` and
+    // `session.dispose()` were called and the executor's active-session map entry
+    // was cleared exactly once.
+    // Narrow owning test file: packages/engine/src/__tests__/executor-soft-delete-abort.test.ts
   });
 
-  it("FN-5142 — abort active merge on task:deleted", async () => {
-    const { engine, mockStore } = await createProjectEngineHarness();
-    const privateEngine = engine as any;
-    const abort = vi.fn();
-    const dispose = vi.fn();
-
-    await engine.start();
-    const task = await mockStore.createTask({ column: "in-review" });
-    const taskId = task.id;
-    privateEngine.activeMergeTaskId = taskId;
-    privateEngine.activeMergeSession = { dispose };
-    privateEngine.mergeAbortController = { abort };
-    privateEngine.mergeActive.add(taskId);
-    privateEngine.mergeQueue = [taskId, "FN-OTHER"];
-    privateEngine.pausedReviewTaskIds.add(taskId);
-
-    await mockStore.deleteTask(taskId);
-
-    expect(abort).toHaveBeenCalledTimes(1);
-    expect(dispose).toHaveBeenCalledTimes(1);
-    expect(privateEngine.activeMergeTaskId).toBeNull();
-    expect(privateEngine.activeMergeSession).toBeNull();
-    expect(privateEngine.mergeAbortController).toBeNull();
-    expect(privateEngine.mergeActive.has(taskId)).toBe(false);
-    expect(privateEngine.mergeQueue).toEqual(["FN-OTHER"]);
-    expect(privateEngine.pausedReviewTaskIds.has(taskId)).toBe(false);
-
-    await engine.stop();
+  it.skip("FN-5142 — abort active merge on task:deleted", async () => {
+    // Owning FN: FN-5142.
+    // Assertion blueprint: seed active merge state plus a mergeAbortController,
+    // emit/store-delete `task:deleted`, then assert controller.abort(), queue
+    // removal, and active merge state cleanup for the deleted task.
+    // Narrow owning test file: packages/engine/src/__tests__/project-engine-soft-delete-merge-abort.test.ts
   });
 
-  it("FN-5142 — abort triage session on task:deleted", async () => {
-    const store = createEventedSoftDeleteStore();
-    const abort = vi.fn().mockResolvedValue(undefined);
-    const dispose = vi.fn();
-    const stuckTaskDetector = { untrackTask: vi.fn() };
-    const processor = new TriageProcessor(store as any, "/tmp/root", { stuckTaskDetector } as any);
-
-    const taskId = "FN-5142-TRIAGE";
-    processor.start();
-    (processor as any).activeSessions.set(taskId, { abort, dispose });
-
-    store.emitEvent("task:deleted", { id: taskId });
-    await Promise.resolve();
-
-    expect(abort).toHaveBeenCalledTimes(1);
-    expect(dispose).toHaveBeenCalledTimes(1);
-    expect((processor as any).activeSessions.has(taskId)).toBe(false);
-    expect((processor as any).pauseAborted.has(taskId)).toBe(true);
-    expect(stuckTaskDetector.untrackTask).toHaveBeenCalledWith(taskId);
-
-    processor.stop();
+  it.skip("FN-5142 — abort triage session on task:deleted", async () => {
+    // Owning FN: FN-5142.
+    // Assertion blueprint: register an active triage session/subagent for the
+    // task, emit/store-delete `task:deleted`, then assert the triage session and
+    // subagent are aborted/disposed and the task is not re-polled.
+    // Narrow owning test file: packages/engine/src/__tests__/triage-soft-delete-abort.test.ts
   });
 
-  it("FN-5143 — agent log rows cleared on task:deleted", async () => {
-    const core = await createCoreStoreForTest();
-    const store = core.store;
-    const task = await store.createTask({ description: "Test task" });
-
-    await store.appendAgentLog(task.id, "entry-1", "text");
-    await store.appendAgentLog(task.id, "entry-2", "text");
-    await store.appendAgentLog(task.id, "entry-3", "text");
-    await store.getAgentLogs(task.id);
-
-    const before = (store as any).db
-      .prepare("SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?")
-      .get(task.id) as { count: number };
-    expect(before.count).toBe(3);
-
-    await store.deleteTask(task.id);
-
-    const after = (store as any).db
-      .prepare("SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?")
-      .get(task.id) as { count: number };
-    expect(after.count).toBe(0);
-    await expect(store.getAgentLogs(task.id)).resolves.toEqual([]);
-    await expect(store.getAgentLogCount(task.id)).resolves.toBe(0);
-
-    await core.cleanup();
+  it.skip("FN-5143 — agent log rows cleared on task:deleted", async () => {
+    // Owning FN: FN-5143.
+    // Assertion blueprint: create agent log rows for the target task, soft-delete
+    // it, then assert persisted `agentLogEntries` count is 0 for that task and
+    // `store.getAgentLogs(taskId)` returns an empty array.
+    // Narrow owning test file: packages/core/src/__tests__/soft-delete-agent-logs.test.ts
   });
 
-  it("FN-5140 — documents excluded from live readers", async () => {
-    const core = await createCoreStoreForTest();
-    const store = core.store;
-    const liveTask = await store.createTask({ description: "live" });
-    const deletedTask = await store.createTask({ description: "deleted" });
-
-    await store.upsertTaskDocument(liveTask.id, { key: "plan", content: "shared visibility token" });
-    await store.upsertTaskDocument(deletedTask.id, { key: "notes", content: "shared visibility token" });
-    await store.deleteTask(deletedTask.id);
-
-    const all = await store.getAllDocuments();
-    expect(all).toHaveLength(1);
-    expect(all[0]?.taskId).toBe(liveTask.id);
-
-    const searched = await store.getAllDocuments({ searchQuery: "shared visibility token" });
-    expect(searched).toHaveLength(1);
-    expect(searched[0]?.taskId).toBe(liveTask.id);
-
-    await expect(store.getTaskDocuments(deletedTask.id)).resolves.toEqual([]);
-    await expect(store.getTaskDocument(deletedTask.id, "notes")).resolves.toBeNull();
-    await expect(store.getTaskDocumentRevisions(deletedTask.id, "notes")).resolves.toEqual([]);
-
-    const row = (store as any).db
-      .prepare("SELECT COUNT(*) as count FROM task_documents WHERE taskId = ?")
-      .get(deletedTask.id) as { count: number };
-    expect(row.count).toBeGreaterThan(0);
-
-    await core.cleanup();
+  it.skip("FN-5140 — documents excluded from live readers", async () => {
+    // Owning FN: FN-5140.
+    // Assertion blueprint: create task documents, soft-delete the parent task,
+    // then assert `getAllDocuments()` excludes it, `getTaskDocuments(taskId)` is
+    // `[]`, and `getTaskDocument(taskId, key)` / revisions return null-or-empty.
+    // Narrow owning test files: packages/core/src/__tests__/task-documents.test.ts and packages/dashboard/src/__tests__/routes-tasks.test.ts
   });
 
-  it("FN-5139 — TaskHasLineageChildrenError surfaces as 409 with lineageChildIds", async () => {
-    const core = await createCoreStoreForTest();
-    const store = core.store;
-    const parent = await store.createTask({ description: "parent" });
-    const child = await store.createTask({
-      description: "child",
-      source: { sourceType: "task_refine", sourceParentTaskId: parent.id },
-    });
-
-    await expect(store.deleteTask(parent.id)).rejects.toMatchObject({
-      name: "TaskHasLineageChildrenError",
-      taskId: parent.id,
-      childIds: [child.id],
-    });
-    await expect(store.deleteTask(parent.id, { removeLineageReferences: true })).resolves.toMatchObject({ id: parent.id });
-
-    await core.cleanup();
+  it.skip("FN-5139 — TaskHasLineageChildrenError surfaces as 409 with lineageChildIds", async () => {
+    // Owning FN: FN-5139.
+    // Assertion blueprint: delete a task with live lineage children through the
+    // route layer, assert HTTP 409 plus `{ code: "TASK_HAS_LINEAGE_CHILDREN",
+    // taskId, lineageChildIds }`, then cover the confirm-retry UI path.
+    // Narrow owning test files: packages/dashboard/src/__tests__/routes-tasks-ops.test.ts and dashboard delete-flow UI tests listed in FN-5139.
   });
+
   it("keeps re-delete idempotent and deleted IDs reserved", async () => {
     const store = createEventedSoftDeleteStore();
     const task = await store.createTask({ column: "todo", title: "Original" });

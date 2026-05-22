@@ -3144,20 +3144,6 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         });
       }
 
-      const isTaskAlreadyHardArchivedError =
-        err instanceof Error
-        && err.name === "TaskAlreadyHardArchivedError";
-
-      if (isTaskAlreadyHardArchivedError) {
-        const archivedAt = (err as { archivedAt?: string | null }).archivedAt ?? null;
-        return res.status(410).json({
-          code: "TASK_ALREADY_HARD_ARCHIVED",
-          taskId: req.params.id,
-          archivedAt,
-          message: err.message,
-        });
-      }
-
       rethrowAsApiError(err);
     }
   });
