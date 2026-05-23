@@ -92,7 +92,7 @@ describe("run-audit provisioning mutation types", () => {
     const store = new AuditStoreStub();
     const auditor = createRunAuditor(store as unknown as TaskStore, { runId: "r1", agentId: "a1", taskId: "FN-5358" });
 
-    const types: GitMutationType[] = ["pull:fast-forward", "stash:pop-conflict"];
+    const types: GitMutationType[] = ["pull:fast-forward", "stash:pop-conflict", "push:origin"];
     for (const type of types) {
       await auditor.git({ type, target: "feature/worktree", metadata: { taskId: "FN-5358" } });
     }

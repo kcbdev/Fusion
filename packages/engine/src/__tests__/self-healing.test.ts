@@ -7914,6 +7914,15 @@ describe("FN-5335 triple-proof no-action unit coverage", () => {
     expect((store as any).recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ mutationType: "task:reclaim-self-owned-branch-conflict-no-action" }));
   });
 
+  it("returns active merge task id via public accessor", () => {
+    const manager = new SelfHealingManager(createMockStore(), {
+      rootDir: "/tmp/test-project",
+      getActiveMergeTaskId: () => "FN-MERGE",
+    });
+
+    expect(manager.getActiveMergeTaskId()).toBe("FN-MERGE");
+  });
+
   it("emits finalize-no-op-review no-action when unproven fallback fails triple proof", async () => {
     const store = createMockStore({
       getSettings: vi.fn().mockResolvedValue({ autoMerge: true, globalPause: false, enginePaused: false } as any),

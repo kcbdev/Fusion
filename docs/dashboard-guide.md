@@ -992,3 +992,16 @@ Reuse `packages/dashboard/app/utils/filePathLinkify.tsx` and `FileBrowserContext
 - **Mobile board scroll-snap (FN-001)** — `scroll-snap-type: x mandatory` on mobile `.board` causes iOS Safari to compress the viewport when switching from ListView. Use `x proximity` + `overflow-anchor: none`.
 - **`lucide-react` icon adds** — update `vi.mock("lucide-react")` test mocks immediately; missing exports cascade.
 - **`.spin` is global** — don't redefine the generic spin keyframes in component CSS.
+
+## Integration Branch Push to Origin
+
+The merge-advance notice includes an explicit **Push to origin** action for the dynamically resolved integration branch.
+
+- The branch name is resolved from project settings, then `origin/HEAD`, then fallback; UI copy and API behavior must remain dynamic.
+- Push status probes compute ahead/behind counts and disable push when there is no `origin`, no upstream tracking ref, the branch is not ahead, or a Fusion merge lock is active.
+- The mutating route performs a TOCTOU merge-lock recheck immediately before building push argv.
+- Standard push is `git push origin refs/heads/<branch>:refs/heads/<branch>` with no plain `--force` path.
+- Advanced mode enables opt-in `--force-with-lease=refs/heads/<branch>:<localSha>` only.
+- Non-fast-forward and lease-stale failures surface actionable messaging with Smart Pull.
+- Every attempt records `mutationType: "push:origin"` run-audit metadata: `integrationBranch`, `remote`, `localSha`, `remoteSha`, `aheadCount`, `behindCount`, `forceWithLease`, `outcome`, optional `stderrPreview`, and `durationMs`.
+- Push remains explicit user authorization only through dashboard HTTP routes (no scheduler/heartbeat auto-push).

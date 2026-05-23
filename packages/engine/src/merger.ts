@@ -899,7 +899,7 @@ export function packageNamesForFiles(rootDir: string, files: string[]): string[]
  *
  * @internal Exported for testing only.
  */
-export function deriveScopedPnpmTestCommand(rootDir: string, baseBranch: string, branch: string): string | null {
+export function deriveScopedPnpmTestCommand(rootDir: string, baseBranch: string, _branch: string): string | null {
   // 1. Read and parse pnpm-workspace.yaml
   const workspacePath = join(rootDir, "pnpm-workspace.yaml");
   let workspaceContent: string;

@@ -555,6 +555,10 @@ export class SelfHealingManager {
     private options: SelfHealingOptions,
   ) {}
 
+  public getActiveMergeTaskId(): string | null {
+    return this.options.getActiveMergeTaskId?.() ?? null;
+  }
+
   private emitTaskMerged(task: Task | undefined | null, overrides: Partial<MergeResult> = {}): void {
     if (!task) return;
     this.store.emit("task:merged", {

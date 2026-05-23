@@ -277,6 +277,24 @@ export type GitMutationType =
    * Metadata shape:
    * ```ts
    * {
+   *   integrationBranch: string;
+   *   remote: "origin";
+   *   localSha: string;
+   *   remoteSha: string | null;
+   *   aheadCount: number;
+   *   behindCount: number;
+   *   forceWithLease: boolean;
+   *   outcome: "ok" | "rejected-non-ff" | "rejected-other" | "no-upstream" | "no-remote" | "merge-locked" | "failed";
+   *   stderrPreview?: string;
+   *   durationMs: number;
+   * }
+   * ```
+   */
+  | "push:origin"
+  /**
+   * Metadata shape:
+   * ```ts
+   * {
    *   taskId?: string;
    *   worktreePath: string;
    *   stashSha: string;

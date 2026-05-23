@@ -70,6 +70,155 @@ interface MergeAdvanceEventsResponse {
   events: MergeAdvanceEvent[];
 }
 
+type PushDisabledReason = "no-remote" | "no-upstream" | "not-ahead" | "merge-locked" | "not-a-git-repo";
+
+interface PushOriginStatus {
+  integrationBranch: string;
+  branchSource: "settings" | "origin-head" | "fallback";
+  hasOriginRemote: boolean;
+  hasUpstream: boolean;
+  localSha: string | null;
+  remoteSha: string | null;
+  aheadCount: number;
+  behindCount: number;
+  mergeActive: boolean;
+  canPush: boolean;
+  disabledReason?: PushDisabledReason;
+}
+
+function parseRevListCounts(raw: string): { behindCount: number; aheadCount: number } {
+  const [behindRaw, aheadRaw] = raw.trim().split(/\s+/);
+  const behindCount = Number.parseInt(behindRaw ?? "0", 10);
+  const aheadCount = Number.parseInt(aheadRaw ?? "0", 10);
+  return {
+    behindCount: Number.isFinite(behindCount) ? behindCount : 0,
+    aheadCount: Number.isFinite(aheadCount) ? aheadCount : 0,
+  };
+}
+
+function truncateStderr(stderr: string | undefined, max = 4_096): string | undefined {
+  if (!stderr) return undefined;
+  return stderr.length <= max ? stderr : stderr.slice(0, max);
+}
+
+function parsePushOriginBody(body: unknown): { forceWithLease: boolean; expectedLocalSha?: string } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { forceWithLease: false };
+  }
+  const candidate = body as { forceWithLease?: unknown; expectedLocalSha?: unknown };
+  if (candidate.forceWithLease !== undefined && typeof candidate.forceWithLease !== "boolean") {
+    throw badRequest("forceWithLease must be boolean");
+  }
+  if (candidate.expectedLocalSha !== undefined && typeof candidate.expectedLocalSha !== "string") {
+    throw badRequest("expectedLocalSha must be string");
+  }
+  return {
+    forceWithLease: candidate.forceWithLease === true,
+    expectedLocalSha: candidate.expectedLocalSha,
+  };
+}
+
+function parsePushOutcome(stderr: string): { outcome: "rejected-non-ff" | "rejected-other"; message?: string } {
+  const lowered = stderr.toLowerCase();
+  if (lowered.includes("stale info")) {
+    return { outcome: "rejected-non-ff", message: "Remote moved since you previewed — fetch and retry." };
+  }
+  if (lowered.includes("non-fast-forward") || lowered.includes("fetch first") || lowered.includes("[rejected]")) {
+    return { outcome: "rejected-non-ff", message: "Remote diverged — pull or fetch first." };
+  }
+  return { outcome: "rejected-other" };
+}
+
+function parseBranchSourceFromSettings(settings: unknown): "settings" | "fallback" {
+  if (!settings || typeof settings !== "object") return "fallback";
+  const integrationBranch = (settings as { integrationBranch?: unknown }).integrationBranch;
+  const baseBranch = (settings as { baseBranch?: unknown }).baseBranch;
+  if (typeof integrationBranch === "string" && integrationBranch.trim().length > 0) return "settings";
+  if (typeof baseBranch === "string" && baseBranch.trim().length > 0) return "settings";
+  return "fallback";
+}
+
+function parseGitErrorStderr(error: unknown): string {
+  if (error instanceof Error && typeof (error as Error & { stderr?: unknown }).stderr === "string") {
+    return String((error as Error & { stderr?: string }).stderr ?? "");
+  }
+  if (error instanceof Error) return error.message;
+  return String(error ?? "");
+}
+
+function parseDisabledOutcome(reason?: PushDisabledReason): "no-upstream" | "no-remote" | "merge-locked" | "not-ahead" | "failed" {
+  if (!reason) return "failed";
+  if (reason === "no-upstream" || reason === "no-remote" || reason === "merge-locked" || reason === "not-ahead") {
+    return reason;
+  }
+  return "failed";
+}
+
+async function buildPushOriginStatus(input: {
+  scopedStore: TaskStore;
+  runGitCommand: (args: string[], cwd: string, timeoutMs: number) => Promise<string>;
+  isGitRepo: (cwd: string) => Promise<boolean>;
+  resolveIntegrationBranch: (rootDir: string, settings: unknown) => Promise<string>;
+  resolveSelfHealingManager: (scopedStore: TaskStore) => { getActiveMergeTaskId: () => string | null } | undefined;
+}): Promise<PushOriginStatus> {
+  const rootDir = input.scopedStore.getRootDir();
+  const settings = await input.scopedStore.getSettingsFast();
+  const integrationBranch = await input.resolveIntegrationBranch(rootDir, settings);
+  const baseStatus: PushOriginStatus = {
+    integrationBranch,
+    branchSource: parseBranchSourceFromSettings(settings),
+    hasOriginRemote: false,
+    hasUpstream: false,
+    localSha: null,
+    remoteSha: null,
+    aheadCount: 0,
+    behindCount: 0,
+    mergeActive: false,
+    canPush: false,
+  };
+
+  if (!(await input.isGitRepo(rootDir))) {
+    return { ...baseStatus, disabledReason: "not-a-git-repo" };
+  }
+
+  const selfHealing = input.resolveSelfHealingManager(input.scopedStore);
+  const mergeActive = Boolean(selfHealing?.getActiveMergeTaskId?.());
+
+  try {
+    await input.runGitCommand(["remote", "get-url", "origin"], rootDir, 15_000);
+  } catch {
+    return { ...baseStatus, mergeActive, disabledReason: "no-remote" };
+  }
+
+  try {
+    await input.runGitCommand(["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${integrationBranch}`], rootDir, 15_000);
+  } catch {
+    return { ...baseStatus, hasOriginRemote: true, mergeActive, disabledReason: "no-upstream" };
+  }
+
+  const [localSha, remoteSha, counts] = await Promise.all([
+    input.runGitCommand(["rev-parse", `refs/heads/${integrationBranch}`], rootDir, 15_000),
+    input.runGitCommand(["rev-parse", `refs/remotes/origin/${integrationBranch}`], rootDir, 15_000),
+    input.runGitCommand(["rev-list", "--left-right", "--count", `refs/remotes/origin/${integrationBranch}...refs/heads/${integrationBranch}`], rootDir, 15_000),
+  ]);
+  const { behindCount, aheadCount } = parseRevListCounts(counts);
+  const canPush = aheadCount > 0 && !mergeActive;
+  const disabledReason = mergeActive ? "merge-locked" : aheadCount > 0 ? undefined : "not-ahead";
+
+  return {
+    ...baseStatus,
+    hasOriginRemote: true,
+    hasUpstream: true,
+    localSha: localSha.trim() || null,
+    remoteSha: remoteSha.trim() || null,
+    behindCount,
+    aheadCount,
+    mergeActive,
+    canPush,
+    disabledReason,
+  };
+}
+
 function parseMergeAdvanceLimit(rawLimit: unknown): number {
   if (rawLimit === undefined) {
     return 20;
@@ -336,11 +485,14 @@ interface TaskWorkflowRouteDeps {
   validateOptionalModelField: (value: unknown, name: string) => string | undefined;
   normalizeModelSelectionPair: (provider: string | undefined, modelId: string | undefined) => { provider?: string | null; modelId?: string | null };
   runGitCommand: (args: string[], cwd: string, timeoutMs: number) => Promise<string>;
+  isGitRepo: (cwd: string) => Promise<boolean>;
+  resolveIntegrationBranch: (rootDir: string, settings: unknown) => Promise<string>;
   trimTaskDetailActivityLog: (task: TaskDetail) => TaskDetail;
   triggerCommentWakeForAssignedAgent: (scopedStore: TaskStore, task: Task, wake: { triggeringCommentType: "steering" | "task" | "pr"; triggeringCommentIds?: string[]; triggerDetail: string }) => Promise<void>;
   resolveSelfHealingManager: (scopedStore: TaskStore) => {
     rootDir: string;
     reconcileInReviewBranchRebind: (opts?: { includeTaskIds?: Set<string> }) => Promise<import("@fusion/engine").RebindResult>;
+    getActiveMergeTaskId: () => string | null;
   } | undefined;
 }
 
@@ -353,6 +505,8 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     validateOptionalModelField,
     normalizeModelSelectionPair,
     runGitCommand,
+    isGitRepo,
+    resolveIntegrationBranch,
     trimTaskDetailActivityLog,
     triggerCommentWakeForAssignedAgent,
     resolveSelfHealingManager: _resolveSelfHealingManager,
@@ -416,6 +570,101 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         throw err;
       }
       rethrowAsApiError(err);
+    }
+  });
+
+  router.get("/projects/:projectId/merge-advance/push-status", async (req, res) => {
+    const { store: scopedStore } = await getProjectContext(req);
+    const status = await buildPushOriginStatus({
+      scopedStore,
+      runGitCommand,
+      isGitRepo,
+      resolveIntegrationBranch,
+      resolveSelfHealingManager: _resolveSelfHealingManager,
+    });
+    res.json(status);
+  });
+
+  router.post("/projects/:projectId/merge-advance/push-origin", async (req, res) => {
+    const startedAt = Date.now();
+    const { store: scopedStore } = await getProjectContext(req);
+    const body = parsePushOriginBody(req.body);
+    const status = await buildPushOriginStatus({
+      scopedStore,
+      runGitCommand,
+      isGitRepo,
+      resolveIntegrationBranch,
+      resolveSelfHealingManager: _resolveSelfHealingManager,
+    });
+
+    const recordRunAuditEvent = (scopedStore as TaskStore & { recordRunAuditEvent?: (input: RunAuditEventInput) => Promise<void> }).recordRunAuditEvent;
+    const emit = async (outcome: string, extra?: Record<string, unknown>) => {
+      if (typeof recordRunAuditEvent !== "function") return;
+      await recordRunAuditEvent({
+        domain: "git",
+        mutationType: "push:origin",
+        target: `origin/${status.integrationBranch}`,
+        taskId: "FN-5359",
+        agentId: "user",
+        runId: `dashboard-push-origin-${Date.now()}`,
+        metadata: {
+          integrationBranch: status.integrationBranch,
+          remote: "origin",
+          localSha: status.localSha,
+          remoteSha: status.remoteSha,
+          aheadCount: status.aheadCount,
+          behindCount: status.behindCount,
+          forceWithLease: body.forceWithLease,
+          outcome,
+          durationMs: Date.now() - startedAt,
+          ...extra,
+        },
+      });
+    };
+
+    if (!status.canPush) {
+      const outcome = parseDisabledOutcome(status.disabledReason);
+      await emit(outcome);
+      return res.json({ ok: false, outcome, integrationBranch: status.integrationBranch, aheadCount: status.aheadCount, localSha: status.localSha, remoteSha: status.remoteSha, forceWithLease: body.forceWithLease });
+    }
+
+    if (body.expectedLocalSha && body.expectedLocalSha !== status.localSha) {
+      await emit("failed", { outcome: "sha-mismatch" });
+      return res.json({ ok: false, outcome: "sha-mismatch", integrationBranch: status.integrationBranch, aheadCount: status.aheadCount, localSha: status.localSha, remoteSha: status.remoteSha, forceWithLease: body.forceWithLease });
+    }
+
+    const mergeCheck = _resolveSelfHealingManager(scopedStore);
+    if (mergeCheck?.getActiveMergeTaskId()) {
+      await emit("merge-locked");
+      return res.json({ ok: false, outcome: "merge-locked", integrationBranch: status.integrationBranch, aheadCount: status.aheadCount, localSha: status.localSha, remoteSha: status.remoteSha, forceWithLease: body.forceWithLease });
+    }
+
+    const refspec = `refs/heads/${status.integrationBranch}:refs/heads/${status.integrationBranch}`;
+    const args = ["push", "origin", refspec];
+    if (body.forceWithLease && status.localSha) {
+      args.splice(1, 0, `--force-with-lease=refs/heads/${status.integrationBranch}:${status.localSha}`);
+    }
+
+    try {
+      await runGitCommand(args, scopedStore.getRootDir(), 60_000);
+      const remoteSha = (await runGitCommand(["rev-parse", `refs/remotes/origin/${status.integrationBranch}`], scopedStore.getRootDir(), 15_000)).trim() || status.remoteSha;
+      await emit("ok", { remoteSha });
+      return res.json({ ok: true, outcome: "ok", integrationBranch: status.integrationBranch, aheadCount: status.aheadCount, localSha: status.localSha, remoteSha, forceWithLease: body.forceWithLease });
+    } catch (error: unknown) {
+      const stderr = parseGitErrorStderr(error);
+      const parsed = parsePushOutcome(stderr);
+      await emit(parsed.outcome, { stderrPreview: truncateStderr(stderr) });
+      return res.json({
+        ok: false,
+        outcome: parsed.outcome,
+        message: parsed.message,
+        stderrPreview: truncateStderr(stderr),
+        integrationBranch: status.integrationBranch,
+        aheadCount: status.aheadCount,
+        localSha: status.localSha,
+        remoteSha: status.remoteSha,
+        forceWithLease: body.forceWithLease,
+      });
     }
   });
 
