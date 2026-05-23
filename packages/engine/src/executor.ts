@@ -72,6 +72,10 @@ import {
   inspectBranchConflict,
   reportBranchAttribution,
 } from "./branch-conflicts.js";
+import {
+  classifyOrphanOurAdvance,
+  rehomeOrphanOntoIntegration,
+} from "./merger-orphan-rehome.js";
 import { BranchAttributionError, filterFilesToOwnTaskCommits } from "./branch-attribution.js";
 import { resolveIntegrationBranch } from "./integration-branch.js";
 import { AgentLogger } from "./agent-logger.js";
@@ -4884,7 +4888,7 @@ export class TaskExecutor {
             });
 
             const misrouted: Array<{ commit: (typeof classified.unique)[number]; foreignTaskId: string; paths: string[] }> = [];
-            const genuinelyUnique: typeof classified.unique = [];
+            const preOrphanUnique: typeof classified.unique = [];
             for (const commit of classified.unique) {
               const misroutedResult = await classifyMisroutedForeignCommit({
                 repoDir: this.rootDir,
@@ -4896,16 +4900,79 @@ export class TaskExecutor {
               if (misroutedResult.misrouted && misroutedResult.foreignTaskId) {
                 misrouted.push({ commit, foreignTaskId: misroutedResult.foreignTaskId, paths: misroutedResult.paths ?? [] });
               } else {
+                preOrphanUnique.push(commit);
+              }
+            }
+
+            // Orphan-our-advance: a "unique" foreign commit attributed to a
+            // task that's already `done` is a stranded merge from the pre-FF
+            // ref-advance bug. FF-rehomeable orphans are advanced onto the
+            // integration branch and then dropped from this task's branch
+            // alongside already-upstream commits. Non-FF orphans (diverged
+            // from current integration tip) are logged with a cherry-pick
+            // hint and left as `genuinelyUnique` for human adjudication.
+            const rehomedOrphans: typeof classified.unique = [];
+            const genuinelyUnique: typeof classified.unique = [];
+            const integrationBranchForOrphan = task.mergeDetails?.mergeTargetBranch
+              ?? task.baseBranch
+              ?? "main";
+            for (const commit of preOrphanUnique) {
+              const orphanBody = await execAsync(`git log -1 --format=%b ${commit.sha}`, { cwd: this.rootDir, encoding: "utf-8" })
+                .then((r) => r.stdout)
+                .catch(() => "");
+              const orphanClass = await classifyOrphanOurAdvance({
+                repoDir: this.rootDir,
+                taskStore: this.store,
+                integrationBranch: integrationBranchForOrphan,
+                currentTaskId: task.id,
+                commitSha: commit.sha,
+                commitSubject: commit.subject,
+                commitBody: orphanBody,
+              });
+              if (!orphanClass.orphan) {
+                genuinelyUnique.push(commit);
+                continue;
+              }
+              const rehome = await rehomeOrphanOntoIntegration({
+                rootDir: this.rootDir,
+                projectRootDir: this.rootDir,
+                integrationBranch: integrationBranchForOrphan,
+                orphanSha: commit.sha,
+                taskId: task.id,
+                audit,
+              }).catch((rehomeError: unknown): { rehomed: false; reason: string } => ({
+                rehomed: false,
+                reason: rehomeError instanceof Error ? rehomeError.message : String(rehomeError),
+              }));
+              if (rehome.rehomed) {
+                rehomedOrphans.push(commit);
+                await this.store.logEntry(
+                  task.id,
+                  `[recovery] rehomed orphan-our-advance commit ${commit.sha.slice(0, 12)} (source ${orphanClass.sourceTaskId}) onto ${integrationBranchForOrphan} via fast-forward; dropping from branch`,
+                  undefined,
+                  this.getRunContextFor(task.id),
+                );
+              } else {
+                const hint = "cherryPickHint" in rehome && rehome.cherryPickHint
+                  ? ` — manual rehome: \`${rehome.cherryPickHint}\``
+                  : "";
+                await this.store.logEntry(
+                  task.id,
+                  `[recovery] orphan-our-advance commit ${commit.sha.slice(0, 12)} (source ${orphanClass.sourceTaskId}) refused auto-rehome: ${rehome.reason}${hint}`,
+                  undefined,
+                  this.getRunContextFor(task.id),
+                );
                 genuinelyUnique.push(commit);
               }
             }
 
             const alreadyShas = classified.alreadyUpstream.map((commit) => commit.sha.slice(0, 12)).join(", ") || "none";
             const misroutedShas = misrouted.map(({ commit }) => commit.sha.slice(0, 12)).join(", ") || "none";
+            const rehomedShas = rehomedOrphans.map((commit) => commit.sha.slice(0, 12)).join(", ") || "none";
             const uniqueShas = genuinelyUnique.map((commit) => commit.sha.slice(0, 12)).join(", ") || "none";
             await this.store.logEntry(
               task.id,
-              `[recovery] contamination classification: already-upstream=[${alreadyShas}] misrouted=[${misroutedShas}] unique=[${uniqueShas}]`,
+              `[recovery] contamination classification: already-upstream=[${alreadyShas}] misrouted=[${misroutedShas}] rehomed-orphan=[${rehomedShas}] unique=[${uniqueShas}]`,
               undefined,
               this.getRunContextFor(task.id),
             );
@@ -4928,6 +4995,7 @@ export class TaskExecutor {
                 shasToDrop: [
                   ...classified.alreadyUpstream.map((commit) => commit.sha),
                   ...misrouted.map(({ commit }) => commit.sha),
+                  ...rehomedOrphans.map((commit) => commit.sha),
                 ],
               });
 

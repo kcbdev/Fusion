@@ -220,6 +220,30 @@ export type GitMutationType =
    * ```
    */
   | "merge:integration-ref-advance"
+  /**
+   * Emitted when contamination recovery detects a foreign commit attributable
+   * to a `done` task that is not reachable from the integration branch — an
+   * orphan produced by a pre-fix non-FF ref advance. `merger:orphan-rehome-ff`
+   * fires after a successful fast-forward rehome; `merger:orphan-rehome-refused`
+   * fires when the orphan diverges from the integration tip and would require
+   * a cherry-pick (refused as too high-blast-radius for automated recovery).
+   *
+   * Metadata shape:
+   * ```ts
+   * {
+   *   taskId: string;
+   *   integrationBranch: string;
+   *   orphanSha: string;
+   *   integrationTipSha?: string;
+   *   previousTipSha?: string;
+   *   newTipSha?: string;
+   *   reason?: "non-fast-forward";
+   *   cherryPickHint?: string;
+   * }
+   * ```
+   */
+  | "merger:orphan-rehome-ff"
+  | "merger:orphan-rehome-refused"
   | "merge:audit-failure"
   | "branch:auto-reclaim"
   | "branch:auto-canonicalize-case"
