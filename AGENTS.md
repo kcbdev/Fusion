@@ -150,6 +150,10 @@ When `settings.autoMerge: false`, `in-review` is terminal-until-merged by a huma
 
 `testMode?: boolean` is now available in both project and global settings. If project `testMode === true` (or the resolved default provider is `"mock"` at any tier), every AI lane is forced to `mock/scripted`, overriding per-task and per-lane model selections. The dashboard exposes this via the Settings Modal "Enable test mode" toggle and a persistent "Test mode — no real AI calls" banner.
 
+### Architecture invariants
+
+- FN-5482: self-healing reclaim paths must never leave a `todo` row stranded with preserved commits plus stale ownership metadata (`assignedAgentId`/`worktree`/`branch`); route to `in-review` for explicit handoff.
+
 ### Reliability Mechanism Coverage
 
 - FN-5432 backstop: `packages/engine/src/__tests__/reliability-interactions/dependency-cycle-reconcile.test.ts` extends FN-5256 coverage with long-cycle ambiguous sweep, write-boundary/sweep race, self-defeating+cycle non-contradiction across one maintenance flow, and audit-event shape regression; core regression cases (long cycle, self-loop via update, incremental-update closes a loop, moveTask seam invariant, DependencyCycleError shape) live in `packages/core/src/__tests__/store-dependency-cycle.test.ts`.
