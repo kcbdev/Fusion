@@ -26,6 +26,15 @@ export default defineConfig({
     fileParallelism: true,
     // Enable isolate to allow parallel execution of tests with conflicting mocks
     isolate: true,
+    // Engine real-git tests spawn many subprocesses; under full-suite concurrent
+    // load even 60 s can fire prematurely. Bump to 120 s — the guard only fires
+    // on hangs, so healthy tests pay nothing.
+    env: {
+      FUSION_TEST_SUBPROCESS_TIMEOUT_MS: "120000",
+    },
+    // Real-git integration tests need more than the default 5 s under concurrent
+    // load (other packages run tests at the same time via pnpm recursive).
+    testTimeout: 30_000,
     coverage: {
       enabled: false,
       reporter: ["text", "html", "json"],

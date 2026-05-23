@@ -90,7 +90,7 @@ describe("AgentErrorDetailsModal", () => {
       expect(errorRegion?.compareDocumentPosition(actions as Node)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
       const allCss = await loadAllAppCss();
-      const mobileBlockStart = allCss.indexOf("@media (max-width: 768px) {\n  .agent-error-modal {");
+      const mobileBlockStart = allCss.indexOf("@media[^{]*(max-width: 768px)[^{]*{\n  .agent-error-modal {");
       expect(mobileBlockStart).toBeGreaterThanOrEqual(0);
       const mobileBlockEnd = allCss.indexOf("}\n", mobileBlockStart + 1);
       const mobileBlock = allCss.slice(mobileBlockStart, mobileBlockEnd > mobileBlockStart ? mobileBlockEnd : undefined);

@@ -2977,7 +2977,7 @@ describe("TaskCard", () => {
     expect(baseCss).toMatch(/\.card-github-badge\s*\{[^}]*font-family:\s*var\(--font-mono\);[^}]*\}/);
 
     const fullCss = loadAllAppCss();
-    expect(fullCss).toMatch(/@media\s*\(max-width:\s*768px\)\s*\{[\s\S]*?\.card-github-badge\s*\{[^}]*font-size:\s*0\.625rem;[^}]*\}/);
+    expect(fullCss).toMatch(/@media[^{]*\(max-width:\s*768px\)[^{]*\{[\s\S]*?\.card-github-badge\s*\{[^}]*font-size:\s*0\.625rem;[^}]*\}/);
   });
 
   it("FN-4525 defines shared card-chip height tokens and applies them to badges and chips", () => {
@@ -2991,8 +2991,8 @@ describe("TaskCard", () => {
   it("FN-4525 applies shared mobile card-chip height token to badges and chips", () => {
     const fullCss = loadAllAppCss();
 
-    expect(fullCss).toMatch(/@media\s*\(max-width:\s*768px\)\s*\{[\s\S]*?\.card-github-badge\s*\{[^}]*height:\s*var\(--card-chip-height-mobile\);[^}]*\}/);
-    expect(fullCss).toMatch(/@media\s*\(max-width:\s*768px\)\s*\{[\s\S]*?\.card-time-indicator\s*,\s*\.card-github-tracking-chip\s*,\s*\.card-retry-badge\s*,\s*\.card-create-pr-action\s*\{[^}]*height:\s*var\(--card-chip-height-mobile\);[^}]*\}/);
+    expect(fullCss).toMatch(/@media[^{]*\(max-width:\s*768px\)[^{]*\{[\s\S]*?\.card-github-badge\s*\{[^}]*height:\s*var\(--card-chip-height-mobile\);[^}]*\}/);
+    expect(fullCss).toMatch(/@media[^{]*\(max-width:\s*768px\)[^{]*\{[\s\S]*?\.card-time-indicator\s*,\s*\.card-github-tracking-chip\s*,\s*\.card-retry-badge\s*,\s*\.card-create-pr-action\s*\{[^}]*height:\s*var\(--card-chip-height-mobile\);[^}]*\}/);
   });
 
   it("keeps Create PR action on shared chip height tokens", () => {
@@ -3000,7 +3000,7 @@ describe("TaskCard", () => {
     const fullCss = loadAllAppCss();
 
     expect(baseCss).toMatch(/\.card-create-pr-action\s*\{[^}]*height:\s*var\(--card-chip-height\);[^}]*\}/);
-    expect(fullCss).toMatch(/@media\s*\(max-width:\s*768px\)\s*\{[\s\S]*?\.card-create-pr-action\s*\{[^}]*height:\s*var\(--card-chip-height-mobile\);[^}]*\}/);
+    expect(fullCss).toMatch(/@media[^{]*\(max-width:\s*768px\)[^{]*\{[\s\S]*?\.card-create-pr-action\s*\{[^}]*height:\s*var\(--card-chip-height-mobile\);[^}]*\}/);
   });
 
   it("FN-4511 keeps GitHub badge and timer chip geometry in parity", () => {

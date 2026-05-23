@@ -51,7 +51,7 @@ function getMainMobileSection(css: string): string {
   // owns its own @media (max-width: 768px) block) instead of one monolith
   // section in styles.css. Concatenate every <=768px media block in the
   // bundle so these assertions remain location-agnostic.
-  const re = /@media\s*\([^)]*max-width:\s*768px[^)]*\)\s*\{/g;
+  const re = /@media\s*\([^)]*max-width:\s*768px[^)]*\)[^{]*\{/g;
   const blocks: string[] = [];
 
   for (const match of css.matchAll(re)) {

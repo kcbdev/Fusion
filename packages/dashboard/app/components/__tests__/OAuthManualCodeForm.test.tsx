@@ -7,7 +7,7 @@ function mockMatchMedia({ mobile = false, coarse = false, reducedMotion = false 
     writable: true,
     value: vi.fn().mockImplementation((query: string) => ({
       matches:
-        (query === "(max-width: 768px)" && mobile)
+        (query === "(max-width: 768px)" || query === "(max-width: 768px), (max-height: 480px)" && mobile)
         || (query === "(pointer: coarse)" && coarse)
         || (query === "(prefers-reduced-motion: reduce)" && reducedMotion),
       media: query,

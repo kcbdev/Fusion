@@ -2986,7 +2986,7 @@ describe("GitManagerModal", () => {
       expect(css).toContain(".gm-remote-detail");
       expect(css).toContain(".gm-remote-sync-card");
       expect(css).toContain(".gm-remote-detail-card");
-      expect(css).toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.gm-remotes-layout[\s\S]*?\.gm-remote-selector[\s\S]*?\}/);
+      expect(css).toMatch(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*?\.gm-remotes-layout[\s\S]*?\.gm-remote-selector[\s\S]*?\}/);
     });
 
     it("keeps remotes-specific status/surface styles tokenized", () => {
@@ -3000,9 +3000,9 @@ describe("GitManagerModal", () => {
     it("includes mobile wrapping rules for changes file rows and section actions", () => {
       const css = loadAllAppCss();
 
-      expect(css).toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.gm-file-section-actions\s*\{[\s\S]*?flex-wrap:\s*wrap;[\s\S]*?flex:\s*1 1 100%;/);
-      expect(css).toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.gm-file-item\s*\{[\s\S]*?min-width:\s*0;[\s\S]*?flex-wrap:\s*wrap;/);
-      expect(css).toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.gm-file-section\s*\{[\s\S]*?max-width:\s*100%;/);
+      expect(css).toMatch(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*?\.gm-file-section-actions\s*\{[\s\S]*?flex-wrap:\s*wrap;[\s\S]*?flex:\s*1 1 100%;/);
+      expect(css).toMatch(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*?\.gm-file-item\s*\{[\s\S]*?min-width:\s*0;[\s\S]*?flex-wrap:\s*wrap;/);
+      expect(css).toMatch(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*?\.gm-file-section\s*\{[\s\S]*?max-width:\s*100%;/);
     });
   });
 });

@@ -718,8 +718,11 @@ describe("FN-5279 reliability interactions: merge reuse task worktree", () => {
       expect(orderedFreshAcquireIndex).toBeGreaterThanOrEqual(0);
       expect(orderedFreshAcquiredIndex).toBeGreaterThanOrEqual(0);
       expect(orderedFallbackIndex).toBeGreaterThanOrEqual(0);
-      expect(orderedFreshAcquireIndex).toBeLessThan(orderedFreshAcquiredIndex);
-      expect(orderedFreshAcquiredIndex).toBeLessThan(orderedFallbackIndex);
+      // getRunAuditEvents() returns newest-first (timestamp DESC, rowid DESC), so the
+      // later-emitted fallback event should appear before fresh-acquired, which should
+      // appear before the earlier fresh-acquire marker.
+      expect(orderedFallbackIndex).toBeLessThan(orderedFreshAcquiredIndex);
+      expect(orderedFreshAcquiredIndex).toBeLessThan(orderedFreshAcquireIndex);
     } finally {
       await fixture.cleanup();
     }

@@ -243,7 +243,7 @@ function mockViewportMode(mode: "mobile" | "desktop") {
   const isMobile = mode === "mobile";
   Object.defineProperty(window, "innerWidth", { value: isMobile ? 375 : 1280, configurable: true });
   return vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
-    matches: isMobile && query === "(max-width: 768px)",
+    matches: isMobile && query === "(max-width: 768px)" || query === "(max-width: 768px), (max-height: 480px)",
     media: query,
     onchange: null,
     addListener: vi.fn(),
@@ -2670,7 +2670,7 @@ describe("Chat Session Delete Button CSS", () => {
   });
 
   it("FN-4352: mobile delete button stays visible without min-size inflation", () => {
-    const mobileRegex = /@media\s*\(max-width:\s*768px\)\s*\{([\s\S]*?)\n\}/g;
+    const mobileRegex = /@media[^{]*\(max-width:\s*768px\)[^{]*\{([\s\S]*?)\n\}/g;
     let match;
     let deleteRule = "";
     while ((match = mobileRegex.exec(css)) !== null) {
@@ -3458,7 +3458,7 @@ describe("ChatView mobile behavior", () => {
     ensureMatchMedia();
     Object.defineProperty(window, "innerWidth", { value: 375, configurable: true });
     return vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
-      matches: query === "(max-width: 768px)",
+      matches: query === "(max-width: 768px)" || query === "(max-width: 768px), (max-height: 480px)",
       media: query,
       onchange: null,
       addListener: vi.fn(),
@@ -4815,7 +4815,7 @@ describe("ChatView mobile CSS contract", () => {
 
   // Helper to find a selector rule within any mobile media query block
   function findMobileRule(selector: string): string | null {
-    const mobileRegex = /@media\s*\(max-width:\s*768px\)\s*\{([\s\S]*?)\n\}/g;
+    const mobileRegex = /@media[^{]*\(max-width:\s*768px\)[^{]*\{([\s\S]*?)\n\}/g;
     let match;
     while ((match = mobileRegex.exec(css)) !== null) {
       const mediaContent = match[1];
@@ -4835,7 +4835,7 @@ describe("ChatView mobile CSS contract", () => {
 
   // Helper to check if a selector does NOT contain a property in any mobile media query
   function mobileRuleNotContains(selector: string, property: string): boolean {
-    const mobileRegex = /@media\s*\(max-width:\s*768px\)\s*\{([\s\S]*?)\n\}/g;
+    const mobileRegex = /@media[^{]*\(max-width:\s*768px\)[^{]*\{([\s\S]*?)\n\}/g;
     let match;
     while ((match = mobileRegex.exec(css)) !== null) {
       const mediaContent = match[1];
