@@ -56,7 +56,7 @@
   background: color-mix(in srgb, var(--color-warning) 8%, transparent);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .native-shell-connection-manager__profile {
     flex-direction: column;
     align-items: flex-start;

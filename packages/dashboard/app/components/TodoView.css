@@ -366,7 +366,7 @@
   }
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .todo-view {
     padding: var(--space-md);
     min-height: 0;

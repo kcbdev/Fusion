@@ -440,7 +440,7 @@
 /* === Memory View Styles === */
 
 /* Mobile responsive for memory view */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .memory-view {
     padding: var(--space-md);
   }

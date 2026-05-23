@@ -930,7 +930,7 @@
   color: var(--logo-accent);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Reduce header padding to reclaim horizontal space */
   .header {
     padding: var(--space-md);

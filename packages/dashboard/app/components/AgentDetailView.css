@@ -1619,7 +1619,7 @@
 }
 
 /* === Agent Detail View Mobile Responsive === */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .agent-heartbeat-preset-row {
     flex-direction: column;
     align-items: stretch;
@@ -1981,7 +1981,7 @@
 }
 
 /* === Agent Dialog Mobile Responsive === */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .agent-avatar-editor {
     flex-direction: column;
     align-items: flex-start;

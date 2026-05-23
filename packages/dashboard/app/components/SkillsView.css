@@ -357,7 +357,7 @@
   font-style: italic;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .skills-view-header {
     padding: var(--space-sm) var(--space-md);
   }

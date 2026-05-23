@@ -175,7 +175,7 @@
   font-size: 14px;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .changes-diff-modal {
     /* Reset the desktop min-width: 720px / min-height: 420px — they pin the
        modal wider/taller than narrow phone viewports and can push the sheet

@@ -28,7 +28,7 @@
   resize: vertical;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .research-task-action-modal {
     width: min(100%, calc(100vw - (var(--space-md) * 2)));
   }

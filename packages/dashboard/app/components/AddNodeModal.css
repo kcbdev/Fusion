@@ -208,7 +208,7 @@
   margin: 0;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .add-node-modal {
     width: calc(100vw - (var(--space-md) * 2));
   }

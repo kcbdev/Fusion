@@ -568,7 +568,7 @@
   }
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .dev-server-view {
     display: flex;
     flex-direction: column;

@@ -169,7 +169,7 @@
   grid-column: 1 / -1;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .docker-onboarding {
     width: calc(100vw - (var(--space-md) * 2));
   }

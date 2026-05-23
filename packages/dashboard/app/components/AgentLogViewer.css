@@ -359,7 +359,7 @@
   overflow-y: auto;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .agent-log-return-to-live {
     right: var(--space-sm);
     bottom: var(--space-sm);

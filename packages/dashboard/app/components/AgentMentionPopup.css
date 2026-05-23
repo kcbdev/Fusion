@@ -103,7 +103,7 @@
   }
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .agent-mention-popup {
     min-width: 200px;
     max-width: min(280px, 100%);

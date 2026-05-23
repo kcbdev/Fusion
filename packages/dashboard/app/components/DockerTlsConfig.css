@@ -19,7 +19,7 @@
   color: var(--text-muted);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .docker-tls-config .input {
     min-height: calc(var(--mobile-nav-height) - var(--space-sm));
   }

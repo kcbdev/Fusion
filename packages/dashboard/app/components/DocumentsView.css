@@ -617,7 +617,7 @@
 }
 
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Documents View mobile */
   .documents-view-header {
     padding: var(--space-md);

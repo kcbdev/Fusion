@@ -188,7 +188,7 @@
   color: var(--text-dim);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .detail-provenance {
     align-items: flex-start;
   }
@@ -830,7 +830,7 @@
   font-size: calc(var(--space-sm) + var(--space-xs) * 0.75);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .detail-move-btn__arrow {
     padding: var(--space-xs);
   }
@@ -1284,7 +1284,7 @@
 }
 
 /* Mobile responsive for changed-files modal */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .changed-files-modal .changed-files-layout {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr;
@@ -1674,7 +1674,7 @@
   box-shadow: var(--shadow-sm);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .detail-tab {
     min-height: 36px;
   }
@@ -1881,7 +1881,7 @@
   transition: outline-color var(--transition-slow);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .detail-in-review-stall-meta {
     flex-direction: column;
     align-items: flex-start;
@@ -1927,7 +1927,7 @@
   gap: var(--space-sm);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .rebind-banner-actions {
     flex-direction: column;
     align-items: flex-start;

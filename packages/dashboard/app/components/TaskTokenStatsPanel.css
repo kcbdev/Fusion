@@ -160,7 +160,7 @@
   padding: var(--space-md);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .task-token-stats-panel {
     padding: var(--space-sm);
   }

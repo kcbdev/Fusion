@@ -74,6 +74,8 @@ describe("MergeAdvanceNotice", () => {
     render(<MergeAdvanceNotice projectId="proj-1" />);
     expect(await screen.findByText(/release advanced to abcdef1\./)).toBeInTheDocument();
     expect(screen.getByText(/Your checked-out copy at \/repo is behind\./)).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByRole("button", { name: "Dismiss merge advance notice" })).toBeInTheDocument();
   });
 
   it.each([
@@ -157,7 +159,8 @@ describe("MergeAdvanceNotice", () => {
     const pullButton = await screen.findByRole("button", { name: "Pull" });
     fireEvent.click(pullButton);
 
-    expect(await screen.findByText(/Merge conflict detected/)).toBeInTheDocument();
+    const error = await screen.findByRole("alert");
+    expect(error).toHaveTextContent("Merge conflict detected");
     expect(screen.getByRole("status")).toBeInTheDocument();
   });
 
@@ -167,8 +170,12 @@ describe("MergeAdvanceNotice", () => {
       .mockResolvedValueOnce({ events: [makeEvent()] });
     render(<MergeAdvanceNotice projectId="proj-1" />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /dismiss merge advance notice/i }));
+    const dismissButton = await screen.findByRole("button", { name: /dismiss merge advance notice/i });
+    dismissButton.focus();
+    fireEvent.click(dismissButton);
+
     await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+    expect(document.activeElement).toBe(document.body);
 
     mocked.mergedHandler?.();
     await waitFor(() => expect(mocked.api).toHaveBeenCalledTimes(2));

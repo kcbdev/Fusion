@@ -32,7 +32,7 @@
   }
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .top-progress-bar {
     height: 3px;
   }

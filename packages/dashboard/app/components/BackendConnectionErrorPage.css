@@ -10,7 +10,7 @@
   margin: 0 auto;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .project-overview-empty {
     padding: var(--space-lg);
   }

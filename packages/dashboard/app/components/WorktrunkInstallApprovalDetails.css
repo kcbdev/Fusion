@@ -32,7 +32,7 @@
   overflow-wrap: anywhere;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .worktrunk-install-approval-details__row {
     grid-template-columns: minmax(0, 1fr);
   }

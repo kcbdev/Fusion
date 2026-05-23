@@ -249,7 +249,7 @@
 }
 
 /* === Mobile Responsive Overrides === */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Dropdown items touch target */
   .dep-dropdown-item {
     min-height: 36px;

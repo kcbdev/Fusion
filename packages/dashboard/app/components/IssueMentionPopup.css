@@ -84,7 +84,7 @@
   animation: spin var(--transition-slow) linear infinite;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .issue-mention-popup {
     left: var(--space-md) !important;
     right: var(--space-md);

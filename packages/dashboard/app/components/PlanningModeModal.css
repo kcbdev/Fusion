@@ -335,7 +335,7 @@
 }
 
 /* Mobile: stack — only one pane visible at a time */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Full-screen sheet — drop overlay padding so the modal fills the
      viewport instead of being pushed below it, and disable resize since
      touchscreen users can't drag the corner grip anyway. */
@@ -1308,7 +1308,7 @@
 }
 
 /* Responsive */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .planning-modal {
     width: 100vw;
     height: 100vh;

@@ -60,7 +60,7 @@
   margin-bottom: 0;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .agents-overview-bar {
     padding: var(--space-sm) var(--space-md);
   }

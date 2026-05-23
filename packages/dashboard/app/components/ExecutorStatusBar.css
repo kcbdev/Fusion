@@ -181,7 +181,7 @@
 
 /* Mobile keeps a tappable 40-ish px target. Desktop collapses to the icon
    so it aligns on the same baseline as the surrounding status-bar text. */
-@media (pointer: coarse), (max-width: 768px), (max-height: 480px) {
+@media (pointer: coarse), (max-width: 768px) {
   .executor-status-bar__folder-toggle {
     min-width: var(--executor-status-touch-size);
     min-height: var(--executor-status-touch-size);
@@ -276,7 +276,7 @@
 }
 
 /* Responsive: collapse on small screens */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .executor-status-bar__fanout-summary {
     max-width: 14ch;
   }

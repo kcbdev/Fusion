@@ -10,7 +10,7 @@
   overflow-y: auto;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .scripts-modal-body {
     max-height: none;
     flex: 1;
@@ -792,7 +792,7 @@
   z-index: 1;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .schedule-modal-content {
     max-height: none;
     padding: var(--space-md) var(--space-lg);
@@ -1133,7 +1133,7 @@
 }
 
 /* Routine mobile responsive */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .routine-card {
     margin: 0;
     padding: var(--space-md);
@@ -1597,7 +1597,7 @@
 
 /* ── Activity Log — Mobile (≤ 768px) ─────────────────────────────── */
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Full-screen modal on mobile, matching .modal/.modal-lg pattern */
   .activity-log-modal {
     max-height: 100vh;
@@ -3432,7 +3432,7 @@
 
 /* ── Responsive ── */
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .gm-changes-split {
     grid-template-columns: 1fr;
   }
@@ -3521,7 +3521,7 @@
   }
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Full-screen sheet on mobile — drop overlay padding so the modal
      actually fills the viewport instead of being pushed below it. */
   .modal-overlay.git-manager-modal-overlay,
@@ -4023,7 +4023,7 @@
   color: var(--text);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Git manager: align breakpoint behavior with global 768px mobile modal rules */
   .gm-layout {
     flex-direction: column;

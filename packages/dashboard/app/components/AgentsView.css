@@ -1189,7 +1189,7 @@
 }
 
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .agent-org-chart-shell {
     min-height: 0;
     overflow: hidden;
@@ -1248,7 +1248,7 @@
   color: var(--text-muted);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Stats cards: drop to a 2x2 grid with tighter padding so they
      don't squeeze the labels off the card on narrow phones. */
   .agent-metrics-bar {
@@ -1363,7 +1363,7 @@
 
 
 /* === AgentsView mobile header (cleaner stacked layout) ==================== */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Single-row header: keep a compact textual title visible while lower-
      priority actions move into the Controls popup so narrow phones keep a
      stable single-row layout. */

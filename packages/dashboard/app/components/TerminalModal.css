@@ -846,7 +846,7 @@
 }
 
 /* === Terminal Modal Mobile Responsive === */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .modal.terminal-modal {
     /* Reset the desktop min-width: 480px / min-height: 320px — they pin the
        modal at 480×320 on phones narrower than 480px and force horizontal

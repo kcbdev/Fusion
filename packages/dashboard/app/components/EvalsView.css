@@ -79,7 +79,7 @@
   white-space: pre-wrap;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .evals-view {
     grid-template-columns: 1fr;
   }

@@ -83,7 +83,7 @@
   text-align: center;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .create-room-modal {
     width: 100%;
   }

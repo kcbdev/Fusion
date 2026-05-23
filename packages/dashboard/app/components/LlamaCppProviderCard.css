@@ -16,7 +16,7 @@
   color: var(--color-success);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .llama-cpp-provider-card--full {
     gap: var(--space-xs);
   }

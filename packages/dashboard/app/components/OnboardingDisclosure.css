@@ -60,7 +60,7 @@
   }
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .onboarding-disclosure-trigger {
     min-height: calc(var(--space-lg) + var(--space-lg) + var(--space-xs));
     padding: var(--space-sm) 0;

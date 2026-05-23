@@ -353,7 +353,7 @@
   gap: var(--space-sm);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .node-detail-modal__grid,
   .node-detail-modal__docker-grid {
     grid-template-columns: 1fr;

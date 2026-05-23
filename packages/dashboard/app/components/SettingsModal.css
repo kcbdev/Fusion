@@ -26,7 +26,7 @@
   align-items: center;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* FN-4375: keep heading, actions, and close in one row on mobile; supersedes FN-4281/FN-4331/FN-4363 wrap/order behavior. */
   .settings-modal .modal-header {
     flex-wrap: nowrap;
@@ -112,7 +112,7 @@
    `height: 80vh` left awkward strips of overlay above and below. Drop the
    overlay's default top padding so the modal actually fills the viewport,
    and disable resize (touchscreen users can't drag the grip anyway). */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .modal-overlay.settings-modal-overlay,
   .modal-overlay:has(.settings-modal) {
     padding: 0;
@@ -338,7 +338,7 @@
   white-space: nowrap;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .backup-stats {
     flex-direction: column;
     align-items: stretch;
@@ -435,7 +435,7 @@
   grid-column: 1 / -1;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .settings-research-source-grid,
   .settings-research-limits-grid {
     grid-template-columns: 1fr;
@@ -968,7 +968,7 @@
   gap: var(--space-sm);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .settings-research-provider-advanced-details {
     margin-left: 0;
   }
@@ -1076,7 +1076,7 @@
   margin: var(--space-lg) var(--space-xl);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .settings-note {
     padding: 0 var(--space-lg);
   }
@@ -1239,7 +1239,7 @@
   color: var(--color-error);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .notification-provider-actions {
     flex-direction: column;
   }
@@ -1692,7 +1692,7 @@
 }
 
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Settings modal: use the section picker as the only mobile navigation */
   .settings-layout {
     flex-direction: column;
@@ -2030,7 +2030,7 @@
   margin-right: var(--space-xs);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .auth-custom-provider-item {
     flex-direction: column;
     align-items: flex-start;

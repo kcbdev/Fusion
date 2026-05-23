@@ -58,7 +58,7 @@
   color: var(--color-error);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .stash-conflict-row {
     align-items: flex-start;
     flex-direction: column;

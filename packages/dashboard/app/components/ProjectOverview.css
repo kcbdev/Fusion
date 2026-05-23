@@ -531,7 +531,7 @@
 
 /* === ProjectOverview Mobile Responsive (FN-1316) === */
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Overview container */
   .project-overview {
     padding: var(--space-md);

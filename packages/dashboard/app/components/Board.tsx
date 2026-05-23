@@ -193,7 +193,7 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
   // `overflow-anchor: none`) and only stabilize via reflow + scroll offset
   // normalization; do NOT reintroduce `scroll-snap-type: x mandatory`.
   useEffect(() => {
-    if (!window.matchMedia("(max-width: 768px), (max-height: 480px)").matches) {
+    if (!window.matchMedia("(max-width: 768px)").matches) {
       return;
     }
 

@@ -72,7 +72,7 @@
   box-shadow: var(--focus-ring-strong);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .setup-warning-banner--compact {
     padding: var(--space-xs) var(--space-sm);
   }

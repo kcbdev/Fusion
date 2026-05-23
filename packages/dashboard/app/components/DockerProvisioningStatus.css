@@ -90,7 +90,7 @@
   font-size: 0.7rem;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .provisioning-status {
     padding: var(--space-lg);
   }

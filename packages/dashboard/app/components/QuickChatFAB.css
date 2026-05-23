@@ -851,7 +851,7 @@
 
 
 /* === Quick Chat Mobile (FN: full-screen) =================================== */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .quick-chat-panel {
     /* Full-screen sheet that ignores drag position on mobile. We pin
        every edge with !important so any stray inline value cannot pull

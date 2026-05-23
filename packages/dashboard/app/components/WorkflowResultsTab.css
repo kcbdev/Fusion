@@ -588,7 +588,7 @@
   background: color-mix(in srgb, var(--bg) 50%, transparent);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Workflow results edit toggle: touch target on mobile */
   .workflow-results-edit-toggle {
     min-width: calc(var(--space-lg) * 2 + var(--space-xs));

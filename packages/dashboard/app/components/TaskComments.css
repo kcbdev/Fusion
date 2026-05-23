@@ -103,7 +103,7 @@
   letter-spacing: 0.02em;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .comments-textarea {
     font-size: 1rem;
   }

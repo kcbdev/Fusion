@@ -164,7 +164,7 @@
   color: var(--text);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .task-review-tab__row {
     grid-template-columns: auto 1fr;
   }

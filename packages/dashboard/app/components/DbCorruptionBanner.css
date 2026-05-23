@@ -84,7 +84,7 @@
   color: var(--color-error);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .db-corruption-banner {
     padding: var(--space-md);
   }

@@ -55,7 +55,7 @@
   justify-content: flex-end;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .duplicate-warning-modal {
     width: 100%;
   }

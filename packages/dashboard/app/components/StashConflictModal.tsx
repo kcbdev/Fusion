@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Copy } from "lucide-react";
 import { ApiRequestError, api } from "../api";
 import { useFileBrowser } from "../context/FileBrowserContext";
@@ -43,6 +43,26 @@ function getErrorMessage(error: unknown): string {
   return "Request failed";
 }
 
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  const selectors = [
+    "button",
+    "[href]",
+    "input",
+    "select",
+    "textarea",
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(",");
+  return Array.from(container.querySelectorAll<HTMLElement>(selectors)).filter((element) => {
+    if (element.hasAttribute("disabled")) {
+      return false;
+    }
+    if (element.getAttribute("aria-hidden") === "true") {
+      return false;
+    }
+    return true;
+  });
+}
+
 export default function StashConflictModal({
   open,
   onClose,
@@ -54,6 +74,8 @@ export default function StashConflictModal({
   taskId,
 }: StashConflictModalProps) {
   const fileBrowser = useFileBrowser();
+  const modalRef = useRef<HTMLDivElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
   const [remainingConflicts, setRemainingConflicts] = useState<string[]>(conflictedFiles);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,6 +88,71 @@ export default function StashConflictModal({
       setCopyState("idle");
     }
   }, [conflictedFiles, open]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    const modalElement = modalRef.current;
+    if (modalElement) {
+      const focusable = getFocusableElements(modalElement);
+      const preferred = focusable.find((element) => element.getAttribute("aria-label") === "Copy stash reference") ?? focusable[0];
+      if (preferred) {
+        preferred.focus();
+      } else {
+        modalElement.focus();
+      }
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (event.key !== "Tab") {
+        return;
+      }
+
+      const container = modalRef.current;
+      if (!container) {
+        return;
+      }
+
+      const focusable = getFocusableElements(container);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        container.focus();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+
+      if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      const previous = previousFocusRef.current;
+      if (previous && previous.isConnected) {
+        previous.focus();
+      }
+      previousFocusRef.current = null;
+    };
+  }, [open, onClose]);
 
   const stashDescriptor = useMemo(() => `Stash ref: ${shortSha(stashSha)} (${stashLabel})`, [stashLabel, stashSha]);
 
@@ -135,10 +222,10 @@ export default function StashConflictModal({
   };
 
   return (
-    <div className="modal-overlay open" role="dialog" aria-modal="true" aria-label="Resolve stash conflicts">
-      <div className="modal stash-conflict-modal">
+    <div className="modal-overlay open" role="dialog" aria-modal="true" aria-labelledby="stash-conflict-modal-title">
+      <div className="modal stash-conflict-modal" ref={modalRef} tabIndex={-1}>
         <div className="modal-header">
-          <h3>Resolve auto-stash conflicts</h3>
+          <h3 id="stash-conflict-modal-title">Resolve auto-stash conflicts</h3>
         </div>
         <p className="stash-conflict-modal__summary">
           Pulled <strong>{integrationBranch}</strong>, but restoring local edits from stash produced conflicts.
@@ -149,8 +236,8 @@ export default function StashConflictModal({
             <Copy aria-hidden="true" />
           </button>
         </div>
-        {copyState === "copied" ? <p className="stash-conflict-modal__hint">Stash SHA copied.</p> : null}
-        {copyState === "failed" ? <p className="stash-conflict-modal__error">Could not copy stash SHA.</p> : null}
+        {copyState === "copied" ? <p className="stash-conflict-modal__hint" role="status">Stash SHA copied.</p> : null}
+        {copyState === "failed" ? <p className="stash-conflict-modal__error" role="alert">Could not copy stash SHA.</p> : null}
         <div className="stash-conflict-modal__list" role="list">
           {remainingConflicts.map((file) => (
             <div key={file} className="stash-conflict-row" role="listitem">
@@ -174,7 +261,7 @@ export default function StashConflictModal({
             </div>
           ))}
         </div>
-        {error ? <p className="stash-conflict-modal__error">{error}</p> : null}
+        {error ? <p className="stash-conflict-modal__error" role="alert">{error}</p> : null}
         <div className="modal-actions">
           <div className="modal-actions-left">
             <button type="button" className="btn" disabled={submitting} onClick={() => void restoreStash()}>

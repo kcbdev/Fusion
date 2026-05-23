@@ -1672,7 +1672,7 @@
    open), the sidebar is collapsed via .chat-sidebar--hidden and the
    thread takes the full viewport. The thread already renders a back
    button (ChevronLeft) on mobile to flip back to the session list. */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .chat-view {
     flex-direction: column;
   }

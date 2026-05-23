@@ -68,7 +68,7 @@
   word-break: break-word;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .stash-row {
     display: flex;
     flex-direction: column;

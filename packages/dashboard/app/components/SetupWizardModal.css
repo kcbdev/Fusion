@@ -422,7 +422,7 @@
   cursor: not-allowed;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .setup-wizard-overlay {
     padding:
       max(var(--space-md), env(safe-area-inset-top, 0px))

@@ -1657,7 +1657,7 @@ input[type="range"]:focus-visible {
   color: var(--text-muted);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .settings-note {
     padding: 0 var(--space-lg);
   }
@@ -2013,7 +2013,7 @@ input[type="range"]:focus-visible {
   transition: box-shadow var(--transition-fast), border-color var(--transition-fast), filter var(--transition-fast);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .card-github-badge {
     padding: var(--space-xs) var(--space-sm);
     font-size: 0.625rem;
@@ -2634,7 +2634,7 @@ input[type="range"]:focus-visible {
   background: var(--color-info);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .toast-container {
     top: calc(var(--header-height, 57px) + env(safe-area-inset-top, 0px) + var(--space-sm));
     bottom: auto;
@@ -3203,7 +3203,7 @@ input[type="range"]:focus-visible {
    Cross-cutting mobile rules only. Component-specific overrides have been
    moved into co-located @media blocks at the bottom of each component's
    .css file in app/components/. */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Prevent iOS Safari auto-zoom on focus: all inputs must be >= 16px */
   input[type="text"],
   input[type="search"],
@@ -3512,7 +3512,7 @@ input[type="range"]:focus-visible {
    mobile the content area can fail to scroll because flex children default to
    min-height:auto, which prevents the inner area from being smaller than its
    intrinsic content. Force min-height:0 so overflow-y:auto actually kicks in. */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Wrapped in :is() so legacy CSS-regression tests that match per-selector
      base rules (e.g. /\.mailbox-view\s*\{[^}]*\}/) don't pick this up as the
      "first" definition for any individual selector. */

@@ -71,7 +71,7 @@
   margin: var(--space-sm) 0;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .agent-policy-row {
     grid-template-columns: 1fr;
   }

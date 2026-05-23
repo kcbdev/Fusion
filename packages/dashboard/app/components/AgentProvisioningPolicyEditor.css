@@ -22,7 +22,7 @@
   resize: vertical;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .agent-provisioning-policy-editor {
     padding: var(--space-md);
   }

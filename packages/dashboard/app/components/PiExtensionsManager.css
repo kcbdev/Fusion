@@ -399,7 +399,7 @@
 }
 
 /* Mobile responsive overrides */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Pi Extensions list items - mobile adjustments */
   .pi-ext-list {
     gap: var(--space-xs);

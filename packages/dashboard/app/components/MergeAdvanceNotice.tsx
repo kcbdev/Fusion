@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { api, ApiRequestError } from "../api";
 import { subscribeSse } from "../sse-bus";
@@ -68,6 +68,7 @@ function persistDismissedShas(projectId: string | undefined, values: string[]): 
 }
 
 export default function MergeAdvanceNotice({ projectId, apiBase = "/api" }: MergeAdvanceNoticeProps) {
+  const bannerRef = useRef<HTMLDivElement | null>(null);
   const [events, setEvents] = useState<MergeAdvanceEvent[]>([]);
   const [dismissedShas, setDismissedShas] = useState<string[]>(() => readDismissedShas(projectId));
   const [pulling, setPulling] = useState(false);
@@ -129,6 +130,15 @@ export default function MergeAdvanceNotice({ projectId, apiBase = "/api" }: Merg
     persistDismissedShas(projectId, next);
   };
 
+  const dismissWithFocusGuard = () => {
+    const activeElement = document.activeElement;
+    const focusedInsideBanner = activeElement instanceof HTMLElement && bannerRef.current?.contains(activeElement);
+    dismiss();
+    if (focusedInsideBanner) {
+      document.body.focus();
+    }
+  };
+
   const handlePull = async () => {
     setPulling(true);
     setPullError(null);
@@ -150,7 +160,7 @@ export default function MergeAdvanceNotice({ projectId, apiBase = "/api" }: Merg
         });
         return;
       }
-      dismiss();
+      dismissWithFocusGuard();
     } catch (error: unknown) {
       if (error instanceof ApiRequestError) {
         setPullError(error.message || "Pull failed");
@@ -166,12 +176,12 @@ export default function MergeAdvanceNotice({ projectId, apiBase = "/api" }: Merg
 
   return (
     <>
-      <div className="merge-advance-notice" role="status" aria-live="polite">
+      <div ref={bannerRef} className="merge-advance-notice" role="status" aria-live="polite">
         <div className="merge-advance-notice__content">
           <strong>{notice.integrationBranch} advanced to {shortSha(notice.toSha)}.</strong>{" "}
           Your checked-out copy at {checkout.worktreePath} is behind.
           {localChangesPreserved ? " (local changes will be auto-stashed and restored)" : ""}
-          {pullError ? <span className="merge-advance-notice__error"> {pullError}</span> : null}
+          {pullError ? <span className="merge-advance-notice__error" role="alert"> {pullError}</span> : null}
           {pulling ? <span className="merge-advance-notice__hint"> Pulling…</span> : null}
         </div>
         <div className="merge-advance-notice__actions">
@@ -184,7 +194,7 @@ export default function MergeAdvanceNotice({ projectId, apiBase = "/api" }: Merg
             type="button"
             className="merge-advance-notice__dismiss touch-target"
             aria-label="Dismiss merge advance notice"
-            onClick={dismiss}
+            onClick={dismissWithFocusGuard}
           >
             <X aria-hidden="true" />
           </button>
@@ -194,7 +204,7 @@ export default function MergeAdvanceNotice({ projectId, apiBase = "/api" }: Merg
         open={conflictState !== null}
         onClose={() => {
           setConflictState(null);
-          dismiss();
+          dismissWithFocusGuard();
         }}
         worktreePath={checkout.worktreePath}
         integrationBranch={notice.integrationBranch}

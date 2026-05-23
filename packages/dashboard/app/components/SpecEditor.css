@@ -178,7 +178,7 @@
 }
 
 /* Mobile responsive */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .spec-editor-content {
     padding: 8px 0;
   }

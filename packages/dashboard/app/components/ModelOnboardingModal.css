@@ -503,7 +503,7 @@
   line-height: 1.5;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .auth-provider-card--cli .auth-provider-info {
     flex-wrap: wrap;
   }
@@ -1169,7 +1169,7 @@
   background: var(--bg-hover);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .model-onboarding-modal {
     /* Reset the desktop min-width/min-height — they pin the modal at 640×480
        and force horizontal overflow on phones (≤414px). The fullscreen
@@ -1482,7 +1482,7 @@
   align-self: stretch;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .auth-device-code-panel {
     width: 100%;
   }

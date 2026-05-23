@@ -837,7 +837,7 @@
 }
 
 /* === List View Mobile Responsive === */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .list-toolbar {
     padding: var(--space-md);
     flex-wrap: wrap;
@@ -904,7 +904,7 @@
 }
 
 /* === List View Mobile Cards (FN-1140) === */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Hide the table on mobile — card layout is rendered via JS */
   .list-table {
     display: none;

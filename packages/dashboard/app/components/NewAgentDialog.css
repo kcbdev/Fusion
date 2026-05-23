@@ -580,7 +580,7 @@
 }
 
 /* === Mobile: fullscreen + scroll === */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Drop the overlay padding so the dialog can fill the viewport edge-to-edge.
      The desktop padding (20px on all sides) + max-height clamp left ~40px of
      unusable gutter on phones and pushed the body content off-screen on

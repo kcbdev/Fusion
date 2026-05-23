@@ -288,7 +288,7 @@
 }
 
 /* Mobile responsive model dropdown */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .model-combobox-dropdown {
     max-height: 50vh;
     max-height: 50dvh; /* Use dynamic viewport height where supported */

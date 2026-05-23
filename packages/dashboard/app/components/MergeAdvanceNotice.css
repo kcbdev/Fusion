@@ -52,7 +52,7 @@
   color: var(--text-muted);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .merge-advance-notice {
     flex-direction: column;
     align-items: stretch;

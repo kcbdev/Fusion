@@ -21,7 +21,7 @@
   gap: var(--space-sm);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .native-shell-onboarding-modal {
     width: calc(100% - var(--space-lg));
   }

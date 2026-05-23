@@ -173,7 +173,7 @@
   animation: spin var(--transition-slow) linear infinite;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .file-mention-popup {
     /* Anchored to relative chat input wrappers; bottom: 100% tracks input height on mobile. */
     top: auto !important;
@@ -381,7 +381,7 @@
   overflow: visible;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .quick-chat-fab {
     right: var(--space-xs);
     bottom: calc(var(--space-xs) + var(--executor-footer-height-mobile, var(--executor-footer-height, 0px)) + var(--mobile-nav-height, 44px) + env(safe-area-inset-bottom, 0px));

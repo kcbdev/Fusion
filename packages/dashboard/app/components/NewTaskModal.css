@@ -396,7 +396,7 @@
   color: var(--text);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .workflow-step-order-actions .btn-icon {
     width: 36px;
     height: 36px;
@@ -424,7 +424,7 @@
   width: 100%;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* TaskForm: cap description textarea height on mobile, restore in fullscreen */
   .task-form-primary-section .description-with-refine textarea {
     max-height: 200px;

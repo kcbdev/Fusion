@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import StashConflictModal from "../StashConflictModal";
@@ -140,7 +141,8 @@ describe("StashConflictModal", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Keep mine" })[0]);
     await waitFor(() => expect(screen.getByRole("button", { name: "Drop stash" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Drop stash" }));
-    expect(await screen.findByText("drop failed")).toBeInTheDocument();
+    const dropError = await screen.findByText("drop failed");
+    expect(dropError).toHaveAttribute("role", "alert");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
@@ -152,5 +154,59 @@ describe("StashConflictModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Copy stash reference" }));
 
     await waitFor(() => expect(mocked.writeText).toHaveBeenCalledWith("1234567890abcdef"));
+    expect(screen.getByText("Stash SHA copied.")).toHaveAttribute("role", "status");
+  });
+
+  it("supports Escape close, initial focus, focus return, and tab wrapping", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const trigger = document.createElement("button");
+    trigger.textContent = "open modal";
+    document.body.appendChild(trigger);
+    trigger.focus();
+
+    const view = render(
+      <StashConflictModal
+        open
+        onClose={onClose}
+        worktreePath="/repo"
+        integrationBranch="release"
+        stashSha="1234567890abcdef"
+        stashLabel="fusion-auto-stash-FN-1"
+        conflictedFiles={["src/a.ts", "src/b.ts"]}
+        taskId="FN-1"
+      />,
+    );
+
+    const dialog = screen.getByRole("dialog");
+    const title = screen.getByRole("heading", { name: "Resolve auto-stash conflicts" });
+    expect(dialog).toHaveAttribute("aria-labelledby", "stash-conflict-modal-title");
+    expect(title).toHaveAttribute("id", "stash-conflict-modal-title");
+
+    const copyButton = screen.getByRole("button", { name: "Copy stash reference" });
+    expect(document.activeElement).toBe(copyButton);
+
+    const focusable = Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((element) => !element.hasAttribute("disabled") && element.getAttribute("aria-hidden") !== "true");
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    first.focus();
+    await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(document.activeElement).toBe(last);
+
+    last.focus();
+    await user.keyboard("{Tab}");
+    expect(document.activeElement).toBe(first);
+
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    view.unmount();
+    expect(document.activeElement).toBe(trigger);
+    trigger.remove();
   });
 });

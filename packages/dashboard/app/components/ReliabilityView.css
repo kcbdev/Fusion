@@ -108,7 +108,7 @@
   background: var(--color-info);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .reliability-view {
     padding-bottom: calc(var(--space-lg) + var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + var(--standalone-bottom-gap));
   }

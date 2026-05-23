@@ -110,7 +110,7 @@
   gap: var(--space-md);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .theme-grid {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -950,7 +950,7 @@
   text-transform: capitalize;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Model combobox dropdown: mobile-friendly sizing */
   .model-combobox-dropdown {
     max-height: 50vh;

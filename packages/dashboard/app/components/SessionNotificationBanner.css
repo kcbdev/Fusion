@@ -197,7 +197,7 @@
   border-color: var(--border);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .session-notification-banner {
     padding: var(--space-sm) var(--space-md);
     gap: var(--space-sm);

@@ -229,7 +229,7 @@
   box-shadow: var(--focus-ring-strong);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .pr-create-modal {
     min-width: 0;
     width: 100%;

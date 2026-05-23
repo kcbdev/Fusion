@@ -486,7 +486,7 @@
 }
 
 /* Mobile responsive: stack panes vertically; sidebar becomes a horizontal scroller */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .insights-view-header {
     flex-wrap: nowrap;
     gap: var(--space-sm);

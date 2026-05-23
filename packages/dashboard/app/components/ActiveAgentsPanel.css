@@ -157,7 +157,7 @@
   border-color: var(--border-strong, var(--border));
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .active-agents-grid {
     grid-template-columns: 1fr;
   }

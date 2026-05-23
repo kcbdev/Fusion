@@ -10,7 +10,7 @@
   color: var(--text);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .test-mode-banner {
     padding: var(--space-sm);
     align-items: flex-start;

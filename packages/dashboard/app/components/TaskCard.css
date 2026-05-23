@@ -416,7 +416,7 @@
   cursor: not-allowed;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .card-error-retry-btn {
     min-height: 36px;
   }
@@ -634,7 +634,7 @@
   }
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .card-agent-badge-text {
     display: none;
   }
@@ -1258,7 +1258,7 @@
 }
 
 /* === Mobile Responsive Overrides === */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Card edit button: always visible on mobile (no hover) */
   .card-edit-btn {
     opacity: 1;

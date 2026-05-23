@@ -22,7 +22,7 @@
   font-size: calc(var(--space-sm) + var(--space-xs));
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .shell-connection-status {
     width: 100%;
     justify-content: flex-start;

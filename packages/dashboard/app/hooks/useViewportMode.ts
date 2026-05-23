@@ -6,7 +6,7 @@ export type ViewportMode = "mobile" | "tablet" | "desktop";
 // 768 CSS px wide but stay short. Without it, landscape phones fall out of
 // mobile mode and lose the bottom nav bar + get the desktop horizontally-
 // scrollable board.
-export const MOBILE_MEDIA_QUERY = "(max-width: 768px), (max-height: 480px)";
+export const MOBILE_MEDIA_QUERY = "(max-width: 768px)";
 
 export function getViewportMode(): ViewportMode {
   if (typeof window === "undefined") return "desktop";

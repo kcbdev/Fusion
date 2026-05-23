@@ -275,7 +275,7 @@
   font-size: 0.875rem;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .reflections-header {
     flex-wrap: wrap;
     align-items: flex-start;

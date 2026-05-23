@@ -453,7 +453,7 @@
 }
 
 /* Compact styles for mobile-project-switch (mobile + tablet) */
-@media (max-width: 768px), (max-height: 480px), (min-width: 769px) and (max-width: 1024px) {
+@media (max-width: 768px), (min-width: 769px) and (max-width: 1024px) {
   .mobile-project-switch {
     display: inline-flex;
     align-items: center;
@@ -486,7 +486,7 @@
   padding-bottom: var(--executor-footer-height);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Hide project selector on mobile (belt-and-suspenders with conditional rendering) */
   .project-selector {
     display: none;

@@ -330,7 +330,7 @@
 }
 
 /* Mobile responsive */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .file-editor-line-numbers {
     width: calc(var(--space-xl) * 1.75);
     padding-left: var(--space-xs);

@@ -278,7 +278,7 @@
   box-shadow: var(--focus-ring-strong);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .pr-panel-checks-rollup {
     align-items: flex-start;
     display: flex;

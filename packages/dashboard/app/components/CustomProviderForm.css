@@ -33,7 +33,7 @@
   gap: var(--space-sm);
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .custom-provider-form__model-row {
     grid-template-columns: 1fr;
   }

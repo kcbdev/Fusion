@@ -32,7 +32,7 @@
   min-height: 80px;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .quick-entry-input--expanded {
     min-height: 60px;
   }
@@ -429,7 +429,7 @@
 }
 
 /* === Quick Entry Mobile Touch + Overflow Fixes (FN-1140) === */
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .quick-entry-actions .btn {
     min-height: 36px;
   }
@@ -447,7 +447,7 @@
   }
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .agent-list-modal {
     width: 100%;
     max-width: 100%;
@@ -528,7 +528,7 @@
   }
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   /* Quick entry toggle: touch target on mobile */
   .quick-entry-toggle {
     min-width: 36px;

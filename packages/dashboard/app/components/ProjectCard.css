@@ -276,7 +276,7 @@
   font-size: calc(var(--space-sm) + var(--space-xs));
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .project-card-availability__row {
     grid-template-columns: minmax(0, 1fr);
   }

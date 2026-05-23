@@ -42,7 +42,7 @@
   min-height: 0;
 }
 
-@media (max-width: 768px), (max-height: 480px) {
+@media (max-width: 768px) {
   .modal-overlay:has(.todo-modal) {
     padding-top: 0;
     align-items: stretch;
