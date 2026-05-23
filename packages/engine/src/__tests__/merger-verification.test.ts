@@ -146,10 +146,13 @@ import {
   resolveTaskDiffBaseRef,
   commitOrAmendMergeWithFixes,
   MergeAbortedError,
+  OutOfScopeVerificationError,
   parsePnpmWorkspaceGlobs,
   resolveWorkspacePackageRoots,
   mapChangedFilesToPackageNames,
   deriveScopedPnpmTestCommand,
+  parseFailingFilesFromOutput,
+  getBranchChangedFiles,
   type ConflictCategory,
 } from "../merger.js";
 import { mergerLog } from "../logger.js";
@@ -2955,3 +2958,81 @@ describe("inferDefaultTestCommand — pnpm workspace scoping", () => {
   });
 });
 
+// ── parseFailingFilesFromOutput ──────────────────────────────────────────
+
+describe("parseFailingFilesFromOutput", () => {
+  it("parses FAIL lines from jest/vitest output", () => {
+    const output = [
+      "FAIL packages/engine/src/__tests__/reliability-interactions/foo.test.ts",
+      "FAIL packages/engine/src/__tests__/bar.test.ts",
+      "● some test name",
+    ].join("\n");
+    const files = parseFailingFilesFromOutput(output);
+    expect(files).toContain("packages/engine/src/__tests__/reliability-interactions/foo.test.ts");
+    expect(files).toContain("packages/engine/src/__tests__/bar.test.ts");
+    expect(files.length).toBe(2);
+  });
+
+  it("parses vitest summary ❯ lines", () => {
+    const output = [
+      " ❯ packages/engine/src/__tests__/merger.test.ts (5 tests | 2 failed)",
+    ].join("\n");
+    const files = parseFailingFilesFromOutput(output);
+    expect(files).toContain("packages/engine/src/__tests__/merger.test.ts");
+  });
+
+  it("returns empty array when output has no file paths", () => {
+    const output = "● some test title\n● another test\n";
+    expect(parseFailingFilesFromOutput(output)).toEqual([]);
+  });
+
+  it("deduplicates repeated file paths", () => {
+    const output = [
+      "FAIL packages/engine/src/__tests__/foo.test.ts",
+      "FAIL packages/engine/src/__tests__/foo.test.ts",
+    ].join("\n");
+    expect(parseFailingFilesFromOutput(output)).toHaveLength(1);
+  });
+});
+
+// ── getBranchChangedFiles ────────────────────────────────────────────────
+
+describe("getBranchChangedFiles", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns changed files from git diff output", () => {
+    mockedExecSync.mockReturnValue("packages/dashboard/src/a.ts\npackages/dashboard/src/b.ts\n" as any);
+    const files = getBranchChangedFiles("/repo", "main", "fusion/fn-123");
+    expect(files).toEqual(["packages/dashboard/src/a.ts", "packages/dashboard/src/b.ts"]);
+  });
+
+  it("returns empty array when git diff fails", () => {
+    mockedExecSync.mockImplementation(() => { throw new Error("not a git repo"); });
+    const files = getBranchChangedFiles("/repo", "main", "fusion/fn-123");
+    expect(files).toEqual([]);
+  });
+
+  it("filters out empty lines", () => {
+    mockedExecSync.mockReturnValue("\npackages/engine/src/merger.ts\n\n" as any);
+    const files = getBranchChangedFiles("/repo", "main", "fusion/fn-123");
+    expect(files).toEqual(["packages/engine/src/merger.ts"]);
+  });
+});
+
+// ── OutOfScopeVerificationError ─────────────────────────────────────────
+
+describe("OutOfScopeVerificationError", () => {
+  it("is constructable with message, failingFiles, and branchFiles", () => {
+    const err = new OutOfScopeVerificationError(
+      "test failure outside branch scope",
+      ["packages/engine/src/__tests__/reliability-interactions/foo.test.ts"],
+      ["packages/dashboard/src/index.ts"],
+    );
+    expect(err.name).toBe("OutOfScopeVerificationError");
+    expect(err.message).toContain("outside branch scope");
+    expect(err.failingFiles).toHaveLength(1);
+    expect(err.branchFiles).toHaveLength(1);
+  });
+});

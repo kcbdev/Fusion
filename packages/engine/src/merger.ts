@@ -1030,6 +1030,25 @@ export class MergeAbortedError extends Error {
   }
 }
 
+/**
+ * Raised when fix agent made no changes and the failing test files are all
+ * outside the branch's diff. This signals that the failure is pre-existing on
+ * the base branch (e.g. a flaky engine test) and retrying cannot help.
+ *
+ * The merger catches this and marks the task `failed` with a clear error
+ * message, bypassing limbo recovery so the user sees an actionable status.
+ */
+export class OutOfScopeVerificationError extends Error {
+  constructor(
+    message: string,
+    public readonly failingFiles: string[],
+    public readonly branchFiles: string[],
+  ) {
+    super(message);
+    this.name = "OutOfScopeVerificationError";
+  }
+}
+
 export class SquashAuditError extends Error {
   constructor(
     taskId: string,
@@ -1044,6 +1063,68 @@ export class SquashAuditError extends Error {
 export function throwIfAborted(signal: AbortSignal | undefined, taskId: string): void {
   if (!signal?.aborted) return;
   throw new MergeAbortedError(`Merge aborted for ${taskId}: engine shutdown requested`);
+}
+
+/**
+ * Parse failing test file paths from vitest/jest output.
+ *
+ * Looks for lines matching:
+ *   - `FAIL <path>` (jest/vitest)
+ *   - ` × <path>` / ` ✕ <path>` (vitest unicode markers)
+ *   - `● <test suite> › <test name>` is NOT a file path — skip those
+ *
+ * Returns an array of unique relative file paths. Returns an empty array when
+ * no file paths can be parsed (callers treat this as "unknown", not "in-scope").
+ *
+ * @internal Exported for testing only.
+ */
+export function parseFailingFilesFromOutput(output: string): string[] {
+  const paths = new Set<string>();
+  for (const line of output.split("\n")) {
+    // jest/vitest: "FAIL packages/engine/src/__tests__/foo.test.ts"
+    const failMatch = line.match(/^FAIL\s+(\S+)/);
+    if (failMatch && failMatch[1]) {
+      paths.add(failMatch[1]);
+      continue;
+    }
+    // vitest summary: " ❯ packages/engine/src/__tests__/foo.test.ts (2 tests | 1 failed)"
+    const vitestSummaryMatch = line.match(/^\s*[❯>]\s+(\S+\.(?:test|spec)\.[jt]sx?)\s/);
+    if (vitestSummaryMatch && vitestSummaryMatch[1]) {
+      paths.add(vitestSummaryMatch[1]);
+      continue;
+    }
+    // vitest: " × src/__tests__/foo.test.ts > some test name"
+    const crossMatch = line.match(/^\s*[×✕✗]\s+(\S+\.(?:test|spec)\.[jt]sx?)\s/);
+    if (crossMatch && crossMatch[1]) {
+      paths.add(crossMatch[1]);
+    }
+  }
+  return Array.from(paths);
+}
+
+/**
+ * Get the set of files changed in the branch relative to the base branch.
+ * Uses `git diff --name-only <baseBranch>...HEAD` (three-dot range so it
+ * computes the diff from the merge-base, not the current HEAD of baseBranch).
+ *
+ * Returns an empty array on git errors (callers treat this as "unknown").
+ *
+ * @internal Exported for testing only.
+ */
+export function getBranchChangedFiles(rootDir: string, baseBranch: string, branch: string): string[] {
+  try {
+    // Use the branch ref directly when it's not HEAD
+    const range = branch === "HEAD"
+      ? `${baseBranch}...HEAD`
+      : `${baseBranch}...${branch}`;
+    const output = execSync(
+      `git diff --name-only ${range}`,
+      { cwd: rootDir, stdio: "pipe", encoding: "utf-8" },
+    ).toString();
+    return output.split("\n").map((f) => f.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -1444,13 +1525,20 @@ async function runVerificationCommand(
 /**
  * Attempt an in-merge verification fix by spawning an AI agent on the main branch.
  * Returns true if verification passes after the fix, false otherwise.
- * Never throws — errors are caught and logged, and the function returns false.
+ *
+ * Throws OutOfScopeVerificationError when the fix agent made no changes AND the
+ * failing files are all outside the branch's diff — meaning the failure is
+ * pre-existing on the base branch and cannot be fixed by this task's agent.
  *
  * @param fixModifiedFiles - Mutable set that this function populates with every
  *   path that changed during the fix agent's run (post-snapshot minus
  *   pre-snapshot). The caller passes this set across all fix attempts so that
  *   `commitOrAmendMergeWithFixes` can build an allowlist that covers every file
  *   the fix agent touched, regardless of how many retries were needed.
+ * @param baseBranch - Integration branch name (e.g. "main"). Used for
+ *   out-of-scope detection; pass undefined to skip detection.
+ * @param branch - Feature branch name being merged. Used for out-of-scope
+ *   detection; pass undefined to skip detection.
  */
 async function attemptInMergeVerificationFix(
   store: TaskStore,
@@ -1471,6 +1559,8 @@ async function attemptInMergeVerificationFix(
   testSource?: "explicit" | "inferred" | "inferred-scoped",
   buildSource?: "explicit" | "inferred",
   fixModifiedFiles?: Set<string>,
+  baseBranch?: string,
+  branch?: string,
 ): Promise<boolean> {
   // Snapshot the working tree before doing anything so the diff reflects only
   // what the fix agent touched, not pre-existing dirty state.
@@ -1649,6 +1739,32 @@ ${failureContext.output.slice(0, VERIFICATION_LOG_MAX_CHARS)}
           undefined,
           "merger",
         );
+
+        // Out-of-scope detection: if we have git context and can parse failing
+        // file paths, check whether ALL failing files are outside the branch
+        // diff. If so, throw OutOfScopeVerificationError so the caller can mark
+        // the task failed immediately rather than retrying into limbo.
+        if (baseBranch && branch) {
+          const failingFiles = parseFailingFilesFromOutput(failureContext.output);
+          if (failingFiles.length > 0) {
+            const branchFiles = getBranchChangedFiles(rootDir, baseBranch, branch);
+            if (branchFiles.length > 0) {
+              const allOutOfScope = failingFiles.every((ff) =>
+                !branchFiles.some((bf) => bf === ff || ff.startsWith(`${bf}/`) || bf.startsWith(`${ff}/`)),
+              );
+              if (allOutOfScope) {
+                const msg =
+                  `Merge verification failed in files outside branch scope — likely pre-existing flake on ${baseBranch}. ` +
+                  `Failing files: [${failingFiles.join(", ")}]. Branch diff files: [${branchFiles.slice(0, 10).join(", ")}${branchFiles.length > 10 ? ", ..." : ""}].`;
+                mergerLog.warn(`${taskId}: ${msg}`);
+                await store.logEntry(taskId, msg);
+                await store.appendAgentLog(taskId, "Out-of-scope verification failure detected — not retrying", "text", undefined, "merger");
+                throw new OutOfScopeVerificationError(msg, failingFiles, branchFiles);
+              }
+            }
+          }
+        }
+
         return false;
       }
 
@@ -1689,6 +1805,11 @@ ${failureContext.output.slice(0, VERIFICATION_LOG_MAX_CHARS)}
     }
   } catch (err: unknown) {
     rethrowIfMergeAborted(err);
+    // OutOfScopeVerificationError must propagate so the caller can mark the
+    // task failed without entering the limbo-recovery cycle.
+    if (err instanceof OutOfScopeVerificationError) {
+      throw err;
+    }
     // Even on failure, try to surface any paths the agent partially touched.
     if (fixModifiedFiles) {
       try {
@@ -8597,6 +8718,28 @@ export async function aiMergeTask(
         throw error;
       }
 
+      // Out-of-scope verification failure: the failing tests are in files that
+      // this branch never touched. Retrying will not help. Mark the task failed
+      // immediately with a clear message so it does not enter limbo recovery.
+      if (error instanceof OutOfScopeVerificationError || error?.name === "OutOfScopeVerificationError") {
+        try {
+          execSync("git reset --merge", { cwd: rootDir, stdio: "pipe" });
+        } catch {
+          // best-effort cleanup
+        }
+        const outOfScopeMsg =
+          `Merge verification failed in files outside branch scope — likely pre-existing flake on ${mergeTarget.branch}. ` +
+          `Fix the base-branch test breakage separately and retry.`;
+        mergerLog.error(`${taskId}: ${outOfScopeMsg}`);
+        await store.updateTask(taskId, {
+          status: "failed",
+          error: outOfScopeMsg,
+        });
+        await store.logEntry(taskId, outOfScopeMsg, "OutOfScopeVerificationError");
+        // Re-throw so the outer merge runner does not attempt further retries.
+        throw error;
+      }
+
       if (
         error instanceof DiffVolumeRegressionError
         || error?.name === "DiffVolumeRegressionError"
@@ -8665,6 +8808,8 @@ export async function aiMergeTask(
                 effectiveTestSource,
                 effectiveBuildSource,
                 verificationFixModifiedFiles,
+                mergeTarget.branch,
+                branch,
               );
 
               const fixAttemptDurationMs = Date.now() - fixAttemptStartedAt;
@@ -8816,6 +8961,8 @@ export async function aiMergeTask(
               effectiveTestSource,
               effectiveBuildSource,
               buildFixModifiedFiles,
+              mergeTarget.branch,
+              branch,
             );
 
             const fixAttemptDurationMs = Date.now() - fixAttemptStartedAt;
