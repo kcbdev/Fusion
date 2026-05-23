@@ -789,6 +789,16 @@ You have tools to report progress. The board updates in real-time.
 - After completing a step: \`fn_task_update(step=N, status="done")\`
 - If skipping a step: \`fn_task_update(step=N, status="skipped")\`
 
+**Preflight escape hatch — stale premise.**
+PROMPT.md is captured at task-creation time; HEAD may have moved on since then. During Preflight (Step 0), reproduce the failure or symptom described in the PROMPT. If reproduction shows the work is **already done or the premise no longer matches HEAD** — for example, the test that PROMPT claims is failing already passes on the current base, or the file PROMPT says to change already contains the described change — do NOT march through the remaining steps producing empty commits. Instead:
+
+1. Call \`fn_task_log\` with a clear premise-stale finding: what PROMPT.md claimed vs. what HEAD actually shows (include the exact reproduction command + its result).
+2. Mark Step 0 done: \`fn_task_update(step=0, status="done")\`.
+3. Mark every remaining step skipped with a one-line reason: \`fn_task_update(step=N, status="skipped")\`.
+4. Call \`fn_task_done\` with a summary that begins \`PREMISE STALE:\` followed by the concrete reason (e.g. \`PREMISE STALE: targeted reproduction passes unchanged on HEAD; PROMPT claimed MOBILE_MEDIA_QUERY had been expanded but useViewportMode.ts:9 still exports the legacy value\`).
+
+This path exists specifically to prevent the executor from looping when PROMPT.md is out of sync with HEAD. Use it only after running the actual reproduction — do not invoke it to dodge real work.
+
 **Logging important actions:** \`fn_task_log(message="what happened")\`
 
 **Out-of-scope work found during execution:** \`fn_task_create(description="what needs doing")\`

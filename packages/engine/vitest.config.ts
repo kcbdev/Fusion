@@ -35,6 +35,36 @@ export default defineConfig({
     // Real-git integration tests need more than the default 5 s under concurrent
     // load (other packages run tests at the same time via pnpm recursive).
     testTimeout: 30_000,
+    // Split into two projects so the reliability-interactions suite (real
+    // worktrees + real git, contention-sensitive event ordering) runs
+    // single-threaded without throttling the rest of the engine suite.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "engine-default",
+          include: ["src/**/*.test.ts"],
+          exclude: [
+            "src/__tests__/reliability-interactions/**/*.test.ts",
+            "node_modules/**",
+            "dist/**",
+          ],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "engine-reliability",
+          include: ["src/__tests__/reliability-interactions/**/*.test.ts"],
+          // These tests assert event ordering across real worktrees. Parallel
+          // execution under merger load caused subprocess-guard timeouts and
+          // SQLite rowid interleaving (e.g. FN-5521 hit
+          // `expected 24 to be less than 19` in merge-reuse-task-worktree).
+          // Serialize at the file level; within-file order is already linear.
+          poolOptions: { threads: { singleThread: true } },
+        },
+      },
+    ],
     coverage: {
       enabled: false,
       reporter: ["text", "html", "json"],
