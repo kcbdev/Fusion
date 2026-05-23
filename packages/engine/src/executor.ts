@@ -84,7 +84,6 @@ import { computeRecoveryDecision, formatDelay, MAX_RECOVERY_RETRIES } from "./re
 import type { StuckTaskDetector, StuckTaskEvent } from "./stuck-task-detector.js";
 import type { PluginRunner } from "./plugin-runner.js";
 import { isContextLimitError } from "./context-limit-detector.js";
-import { isMockProviderId } from "./runtime-resolution.js";
 import { StepSessionExecutor } from "./step-session-executor.js";
 import { acquireTaskWorktree } from "./worktree-acquisition.js";
 import { installTaskWorktreeIdentityGuard } from "./worktree-hooks.js";
@@ -7835,31 +7834,18 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
     // fallback is the per-step override's missing-counterpart settings, then
     // the global validator/fallback pair, then the executor's `fallbackProvider`.
     const defaultModel = resolveProjectDefaultModel(settings);
-    let primaryProvider = workflowStep.modelProvider || defaultModel.provider;
-    let primaryModelId = workflowStep.modelId || defaultModel.modelId;
-    let useOverride = !!(workflowStep.modelProvider && workflowStep.modelId);
-    const testMode = (settings as { testMode?: boolean }).testMode === true
-      || isMockProviderId(primaryProvider)
-      || isMockProviderId(settings.defaultProvider);
-
-    if (testMode) {
-      primaryProvider = "mock";
-      primaryModelId = "scripted";
-      useOverride = false;
-      executorLog.log(`${task.id}: workflow step '${workflowStep.name}' using model: mock/scripted (test mode)`);
-      await this.store.logEntry(task.id, `Workflow step '${workflowStep.name}' using model: mock/scripted (test mode)`);
-    }
+    const primaryProvider = workflowStep.modelProvider || defaultModel.provider;
+    const primaryModelId = workflowStep.modelId || defaultModel.modelId;
+    const useOverride = !!(workflowStep.modelProvider && workflowStep.modelId);
 
     type ModelTuple = { provider?: string; modelId?: string };
     const fallbackCandidates: Array<ModelTuple & { label: string }> = [
       { provider: settings.validatorFallbackProvider, modelId: settings.validatorFallbackModelId, label: "validatorFallback" },
       { provider: settings.fallbackProvider, modelId: settings.fallbackModelId, label: "globalFallback" },
     ];
-    const fallback = testMode
-      ? undefined
-      : fallbackCandidates.find(
-        (c) => c.provider && c.modelId && (c.provider !== primaryProvider || c.modelId !== primaryModelId),
-      );
+    const fallback = fallbackCandidates.find(
+      (c) => c.provider && c.modelId && (c.provider !== primaryProvider || c.modelId !== primaryModelId),
+    );
 
     const timeoutMs = Math.max(60_000, settings.workflowStepTimeoutMs ?? 360_000);
 
@@ -7895,10 +7881,6 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         );
       }
 
-      const workflowRuntimeContext = {
-        workflowStepId: workflowStep.id,
-        workflowStepTemplateId: workflowStep.templateId ?? workflowStep.id,
-      };
       const { session } = await createResolvedAgentSession({
         sessionPurpose: "executor",
         runtimeHint: workflowRuntimeHint,
@@ -7908,15 +7890,13 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         tools: toolMode,
         defaultProvider: provider,
         defaultModelId: modelId,
-        fallbackProvider: testMode ? undefined : settings.fallbackProvider,
-        fallbackModelId: testMode ? undefined : settings.fallbackModelId,
+        fallbackProvider: settings.fallbackProvider,
+        fallbackModelId: settings.fallbackModelId,
         defaultThinkingLevel: settings.defaultThinkingLevel,
         taskEnv,
         // Skill selection: use assigned agent skills if available, otherwise role fallback
         ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
         ...(readonlyCustomTools.allowed.length > 0 ? { customTools: readonlyCustomTools.allowed } : {}),
-        // Test-mode routing (FN-5205): mock dispatcher keys on workflowStepTemplateId; real providers ignore.
-        runtimeContext: workflowRuntimeContext,
       });
 
       executorLog.log(`${task.id}: workflow step '${workflowStep.name}' using model ${describeModel(session)}${useOverride && attemptLabel === "primary" ? " (workflow step override)" : ""}${attemptLabel === "fallback" ? " (fallback after timeout)" : ""}`);

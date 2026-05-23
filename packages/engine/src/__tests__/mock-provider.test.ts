@@ -27,7 +27,6 @@ import {
   clearMockScript,
   resetMockScripts,
   setMockScript,
-  resolveMockScript,
 } from "../providers/mock-provider.js";
 
 function createTool(name: string, execute = vi.fn().mockResolvedValue({ content: [], details: {} })): ToolDefinition {
@@ -68,7 +67,6 @@ describe("MockAgentRuntime", () => {
     ["merger", []],
     ["heartbeat", []],
     ["validation", []],
-    ["workflow-step", []],
   ] as const)("runs the default %s script deterministically", async (sessionPurpose, expectedCalls) => {
     const runtime = new MockAgentRuntime();
     const { cwd, taskDir, taskId } = await createWorkspace();
@@ -130,34 +128,6 @@ describe("MockAgentRuntime", () => {
     if (sessionPurpose === "reviewer" || sessionPurpose === "validation") {
       expect(onText).toHaveBeenCalledWith(expect.stringContaining("Verdict: APPROVE"));
     }
-    if (sessionPurpose === "workflow-step") {
-      expect(onText).toHaveBeenCalledWith(expect.stringContaining('{"verdict":"APPROVE","notes":""}'));
-    }
-  });
-
-  it("resolves mock script overrides by specificity precedence", async () => {
-    const defaultScript = resolveMockScript({ sessionPurpose: "workflow-step" });
-    const purposeOnly = { run: vi.fn(async () => undefined) };
-    const templateOnly = { run: vi.fn(async () => undefined) };
-    const taskOnly = { run: vi.fn(async () => undefined) };
-    const taskAndTemplate = { run: vi.fn(async () => undefined) };
-
-    setMockScript({ sessionPurpose: "workflow-step" }, purposeOnly);
-    setMockScript({ sessionPurpose: "workflow-step", workflowStepTemplateId: "browser-verification" }, templateOnly);
-    setMockScript({ sessionPurpose: "workflow-step", taskId: "FN-1" }, taskOnly);
-    setMockScript({ sessionPurpose: "workflow-step", taskId: "FN-1", workflowStepTemplateId: "browser-verification" }, taskAndTemplate);
-
-    expect(resolveMockScript({ sessionPurpose: "workflow-step", taskId: "FN-1", workflowStepTemplateId: "browser-verification" })).toBe(taskAndTemplate);
-    expect(resolveMockScript({ sessionPurpose: "workflow-step", taskId: "FN-1", workflowStepTemplateId: "other-template" })).toBe(taskOnly);
-    expect(resolveMockScript({ sessionPurpose: "workflow-step", taskId: "FN-2", workflowStepTemplateId: "browser-verification" })).toBe(templateOnly);
-    expect(resolveMockScript({ sessionPurpose: "workflow-step", taskId: "FN-2", workflowStepTemplateId: "other-template" })).toBe(purposeOnly);
-    expect(resolveMockScript({ sessionPurpose: "workflow-step" })).toBe(purposeOnly);
-
-    clearMockScript({ sessionPurpose: "workflow-step", taskId: "FN-1", workflowStepTemplateId: "browser-verification" });
-    clearMockScript({ sessionPurpose: "workflow-step", taskId: "FN-1" });
-    clearMockScript({ sessionPurpose: "workflow-step", workflowStepTemplateId: "browser-verification" });
-    clearMockScript({ sessionPurpose: "workflow-step" });
-    expect(resolveMockScript({ sessionPurpose: "workflow-step" })).toBe(defaultScript);
   });
 
   it("prefers a task-scoped override over the default script", async () => {
@@ -230,7 +200,7 @@ describe("MockAgentRuntime", () => {
       throw new Error("https.request should not be called");
     });
 
-    for (const sessionPurpose of ["executor", "triage", "reviewer", "merger", "heartbeat", "validation", "workflow-step"] as const) {
+    for (const sessionPurpose of ["executor", "triage", "reviewer", "merger", "heartbeat", "validation"] as const) {
       const { cwd, taskId } = await createWorkspace(`FN-${sessionPurpose}`);
       const { session } = await runtime.createSession({
         cwd,

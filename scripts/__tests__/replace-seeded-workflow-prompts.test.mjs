@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -79,12 +79,6 @@ test("replaces seeded workflow prompts and remains idempotent", async () => {
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
-});
-
-test("pins FN-5205 test-mode rationale comment", () => {
-  const source = readFileSync(scriptPath, "utf8");
-  assert.match(source, /FN-5205/);
-  assert.match(source, /Do not branch seeded prompt bodies\s*\n\/\/ on testMode\./);
 });
 
 test("reports skipped when seeded rows are absent", () => {

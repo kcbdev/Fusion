@@ -150,17 +150,6 @@ When `settings.autoMerge: false`, `in-review` is terminal-until-merged by a huma
 
 `testMode?: boolean` is now available in both project and global settings. If project `testMode === true` (or the resolved default provider is `"mock"` at any tier), every AI lane is forced to `mock/scripted`, overriding per-task and per-lane model selections. The dashboard exposes this via the Settings Modal "Enable test mode" toggle and a persistent "Test mode — no real AI calls" banner.
 
-Set `defaultProvider: "mock"` at any tier in that hierarchy (or the per-task lane override) to force planning, executor, reviewer/validator, merger, and heartbeat sessions onto the deterministic zero-network mock runtime.
-Default scripts are scripted by session purpose: executor marks unfinished steps done, triage writes a minimal PROMPT.md and calls `fn_review_spec` when available, reviewer/validation emit `Verdict: APPROVE`, and merger/heartbeat no-op safely.
-Per-task and global script overrides live in `mockScriptRegistry` (`setMockScript`, `clearMockScript`, `resetMockScripts`) exported from `@fusion/engine`.
-Workflow-step test-mode routing uses `MockSessionPurpose: "workflow-step"` keyed by `workflowStepTemplateId`, dispatched from both executor `executeWorkflowStep` and the post-merge merger workflow-step call site.
-The mock runtime never registers with pi's `ModelRegistry` and is guarded by tests that fail on any `fetch`, `http.request`, or `https.request` usage.
-Activation UX/settings affordances are handled separately in FN-5204.
-
-### Architecture invariants
-
-- FN-5482: self-healing reclaim paths must never leave a `todo` row stranded with preserved commits plus stale ownership metadata (`assignedAgentId`/`worktree`/`branch`); route to `in-review` for explicit handoff.
-
 ### Reliability Mechanism Coverage
 
 - FN-5432 backstop: `packages/engine/src/__tests__/reliability-interactions/dependency-cycle-reconcile.test.ts` extends FN-5256 coverage with long-cycle ambiguous sweep, write-boundary/sweep race, self-defeating+cycle non-contradiction across one maintenance flow, and audit-event shape regression; core regression cases (long cycle, self-loop via update, incremental-update closes a loop, moveTask seam invariant, DependencyCycleError shape) live in `packages/core/src/__tests__/store-dependency-cycle.test.ts`.

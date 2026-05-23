@@ -1,10 +1,4 @@
 #!/usr/bin/env node
-// Test-mode note (FN-5205):
-// Seeded prompt bodies (including WS-004 / browser-verification) are NOT
-// altered for test mode. Test-mode determinism is delivered at the provider
-// layer via the FN-5203 mock-provider script registry; the seeded prompt
-// remains the production canonical text. Do not branch seeded prompt bodies
-// on testMode.
 /**
  * Rollback prompts captured before replacement (from local worktree DB):
  * WS-004: not present in .fusion/fusion.db at capture time.

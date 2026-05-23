@@ -126,26 +126,6 @@ describe("createResolvedAgentSession", () => {
       }),
     );
   });
-
-  it("forwards workflow step runtime context fields to mock sessions", async () => {
-    const { createResolvedAgentSession } = await import("../agent-session-helpers.js");
-
-    const result = await createResolvedAgentSession({
-      sessionPurpose: "executor",
-      pluginRunner: undefined,
-      cwd: "/tmp/project",
-      systemPrompt: "system",
-      defaultProvider: "mock",
-      runtimeContext: {
-        workflowStepId: "WS-004",
-        workflowStepTemplateId: "browser-verification",
-      },
-    });
-
-    const mockMeta = (result.session as unknown as { __mock?: { workflowStepId?: string; workflowStepTemplateId?: string } }).__mock;
-    expect(mockMeta?.workflowStepId).toBe("WS-004");
-    expect(mockMeta?.workflowStepTemplateId).toBe("browser-verification");
-  });
 });
 
 describe("resolveMergerSessionModel", () => {
