@@ -919,7 +919,7 @@ export function deriveScopedPnpmTestCommand(rootDir: string, baseBranch: string,
   let changedFilesOutput: string;
   try {
     changedFilesOutput = execSync(
-      `git diff --name-only ${quoteArg(baseBranch)}...${quoteArg(branch)}`,
+      `git diff --name-only ${quoteArg(baseBranch)}...HEAD`,
       { cwd: rootDir, stdio: "pipe", encoding: "utf-8" },
     ).toString();
   } catch {
