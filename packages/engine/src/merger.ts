@@ -899,11 +899,7 @@ export function packageNamesForFiles(rootDir: string, files: string[]): string[]
  *
  * @internal Exported for testing only.
  */
-export function deriveScopedPnpmTestCommand(
-  rootDir: string,
-  baseBranch: string,
-  branch: string,
-): string | null {
+export function deriveScopedPnpmTestCommand(rootDir: string, baseBranch: string): string | null {
   // 1. Read and parse pnpm-workspace.yaml
   const workspacePath = join(rootDir, "pnpm-workspace.yaml");
   let workspaceContent: string;
@@ -992,7 +988,7 @@ export function inferDefaultTestCommand(
     if (existsSync(join(rootDir, "pnpm-workspace.yaml"))) {
       if (baseBranch?.trim() && branch?.trim()) {
         try {
-          const scoped = deriveScopedPnpmTestCommand(rootDir, baseBranch.trim(), branch.trim());
+          const scoped = deriveScopedPnpmTestCommand(rootDir, baseBranch.trim());
           if (scoped) {
             mergerLog.log(
               `Scoped inferred test command to changed packages: ${scoped}`,
