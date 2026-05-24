@@ -497,6 +497,14 @@ export type DatabaseMutationType =
   | "session:runtime-resolved"
   | "task:in-review-stall-deadlock-disposed"
   | "task:finalize-unproven-blocked"
+  /**
+   * FN-5490/FN-5517/FN-5526/FN-5540 lost-work guard: the merger or self-heal
+   * sweep refused to finalize a task as no-op because its record claimed
+   * `modifiedFiles` while no commit landed. Task is moved back to todo with
+   * progress preserved instead of silently clearing modifiedFiles to [].
+   * Metadata: { modifiedFilesCount, classification, baseRef? }
+   */
+  | "task:finalize-lost-work-blocked"
   | "task:integrity-reconcile-modified-files"
   | "task:integrity-warning"
   /** FN-5092 watchdog: stale `status: "merging"` / `"merging-pr"` cleared on a done/archived task. Metadata: { previousColumn, previousStatus, ageMs, mergeConfirmed?: boolean } */

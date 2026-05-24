@@ -621,8 +621,23 @@ export type OwnedLandedClassification =
     details: Record<string, unknown>;
   };
 
+function escapeRegexForOwnership(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Decide whether a git commit belongs to a given task. Line-anchored trailers
+ * and subject-anchored conventional commits only — prose mentions never count.
+ * Mirrors `commitOwnedByTask` in self-healing.ts (FN-5441/FN-5446 regression).
+ */
 function commitOwnedByTask(taskId: string, subject: string, body: string): boolean {
-  return body.includes(`${FUSION_TASK_ID_TRAILER_KEY}: ${taskId}`) || subject.includes(taskId);
+  if (new RegExp(`(?:^|\\n)${escapeRegexForOwnership(FUSION_TASK_ID_TRAILER_KEY)}: ${escapeRegexForOwnership(taskId)}\\s*(?:\\n|$)`).test(body)) {
+    return true;
+  }
+  const subjectAnchor = new RegExp(
+    `^(?:[A-Za-z]+(?:\\([^)]*\\b${escapeRegexForOwnership(taskId)}\\b[^)]*\\))?:|${escapeRegexForOwnership(taskId)}:)`,
+  );
+  return subjectAnchor.test(subject);
 }
 
 async function findOwnedLandedCommitForTask(rootDir: string, task: Task): Promise<OwnedLandedCommit | null> {
@@ -7886,6 +7901,44 @@ export async function aiMergeTask(
     }
 
     if (classification.kind === "proven-no-op" || classification.kind === "no-changes-finalized") {
+      // FN-5490/FN-5517/FN-5526/FN-5540 guard: the classifier only sees git
+      // evidence, but the task itself can attest that work happened. When
+      // modifiedFiles is non-empty AND no commit landed, that's lost work
+      // (uncommitted in the worktree, or the squash committed the wrong tree)
+      // — NOT a legitimate no-op. Demote to the unproven-recovery path which
+      // moves the task back to todo with progress preserved instead of
+      // clearing modifiedFiles to [].
+      if (task.modifiedFiles && task.modifiedFiles.length > 0) {
+        const reason = `lost-work-detected: ${task.modifiedFiles.length} modifiedFiles claimed but no commit landed`;
+        await store.updateTask(taskId, { error: reason });
+        await store.logEntry(
+          taskId,
+          `Finalize blocked (lost-work guard): task claims ${task.modifiedFiles.length} modifiedFiles but classification would finalize as no-op — moving back to todo with progress preserved`,
+          JSON.stringify({
+            modifiedFilesSample: task.modifiedFiles.slice(0, 5),
+            classification: classification.kind,
+          }, null, 2),
+        );
+        await (store as any).recordRunAuditEvent?.({
+          domain: "database",
+          mutationType: "task:finalize-lost-work-blocked",
+          target: taskId,
+          metadata: {
+            modifiedFilesCount: task.modifiedFiles.length,
+            classification: classification.kind,
+          },
+        });
+        await store.moveTask(taskId, "todo", { preserveProgress: true, moveSource: "engine" } as any);
+        await releaseReuseHandoffEarly("lost-work-blocked");
+        return {
+          task,
+          branch,
+          merged: false,
+          worktreeRemoved: false,
+          branchDeleted: false,
+          error: reason,
+        };
+      }
       const noOpReason = classification.kind === "proven-no-op"
         ? `branch has zero commits ahead of ${classification.baseRef}`
         : "verification-only finalize: no branch and no owned commits";

@@ -3989,7 +3989,7 @@ export class SelfHealingManager {
     return recovered;
   }
 
-  private async recordIntegrityAudit(taskId: string, mutationType: "task:finalize-unproven-blocked" | "task:integrity-reconcile-modified-files" | "task:integrity-warning" | "task:auto-recover-stale-merger-status", metadata: Record<string, unknown>): Promise<void> {
+  private async recordIntegrityAudit(taskId: string, mutationType: "task:finalize-unproven-blocked" | "task:finalize-lost-work-blocked" | "task:integrity-reconcile-modified-files" | "task:integrity-warning" | "task:auto-recover-stale-merger-status", metadata: Record<string, unknown>): Promise<void> {
     const auditor = createRunAuditor(this.store, {
       runId: generateSyntheticRunId("self-healing-integrity", taskId),
       agentId: "self-healing",
@@ -4159,6 +4159,32 @@ export class SelfHealingManager {
           await this.store.updateTask(task.id, { mergeDetails });
           await this.store.logEntry(task.id, `Auto-finalized: recovered owned landed commit ${classification.commit.sha.slice(0, 8)}`);
         } else {
+          // FN-5490/FN-5517/FN-5526/FN-5540 guard: same lost-work check as
+          // merger.ts:aiMergeTask. The self-heal path was the historical
+          // primary site of the bug — it would clear `modifiedFiles: []`
+          // (line below) while moving the task to Done, silently destroying
+          // the audit trail of the lost work. Now we refuse to finalize and
+          // move the task back to todo with progress preserved so the next
+          // executor run can re-attempt.
+          if (task.modifiedFiles && task.modifiedFiles.length > 0) {
+            await this.store.logEntry(
+              task.id,
+              `Finalize blocked (lost-work guard): task claims ${task.modifiedFiles.length} modifiedFiles but classification would finalize as no-op — moving back to todo with progress preserved`,
+              JSON.stringify({
+                modifiedFilesSample: task.modifiedFiles.slice(0, 5),
+                classification: "proven-no-op",
+                baseRef: classification.baseRef,
+              }, null, 2),
+            );
+            await this.recordIntegrityAudit(task.id, "task:finalize-lost-work-blocked", {
+              modifiedFilesCount: task.modifiedFiles.length,
+              classification: "proven-no-op",
+              baseRef: classification.baseRef,
+            });
+            await this.store.moveTask(task.id, "todo", { preserveProgress: true, moveSource: "engine" });
+            recovered++;
+            continue;
+          }
           const noOpReason = `branch has zero commits ahead of ${classification.baseRef}`;
           const mergeDetails: MergeDetails = {
             ...(task.mergeDetails || {}),
