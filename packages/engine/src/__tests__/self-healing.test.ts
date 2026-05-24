@@ -6172,7 +6172,7 @@ describe("clearStaleBlockedBy", () => {
       column: "in-review",
       status: "failed",
       mergeRetries: 0,
-      error: "Refusing to start coding agent in missing worktree: /Users/eclipxe/Projects/kb/.worktrees/bright-wren",
+      error: "Refusing to start coding agent in missing worktree: /tmp/test-project/.worktrees/bright-wren",
       steps: [{ status: "done" }, { status: "pending" }] as any,
     });
     mockSweepTasks(store, { todo: [taskA], inReview: [taskB], all: [taskA, taskB] });
