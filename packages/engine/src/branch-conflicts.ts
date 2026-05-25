@@ -400,6 +400,28 @@ export async function isBranchAuthoritativeForTask(
   return { ok: true };
 }
 
+/**
+ * Cheap ancestry check: is `commitSha` reachable from `ref`?
+ *
+ * Used to recognize "promoted" commits during contamination audits: when
+ * the engine fast-forwards local `main` with a sibling task's commit, that
+ * commit's `Fusion-Task-Id` trailer still points at the sibling, but the
+ * commit itself is now integrated. Treating it as foreign contamination
+ * for downstream tasks branched from the same main tip is incorrect — the
+ * commit is, by definition, ancestral on the integration target.
+ *
+ * Returns `false` on any git error (missing ref, repo unreadable, etc.)
+ * so the caller falls back to the conservative trailer-only judgement.
+ */
+async function isAncestorOf(repoDir: string, commitSha: string, ref: string): Promise<boolean> {
+  try {
+    await runGit(repoDir, `git merge-base --is-ancestor ${quoteShellArg(commitSha)} ${quoteShellArg(ref)}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function assertCleanBranchAtBase(
   repoDir: string,
   branchName: string,
@@ -412,15 +434,28 @@ export async function assertCleanBranchAtBase(
 
   const subjectPattern = /^(feat|fix|test|chore|docs|refactor|perf|build)\((FN-\d+)\):/i;
   const trailerPattern = /(?:^|\n)Fusion-Task-Id:\s*(FN-\d+)\s*(?:\n|$)/i;
-  const foreignCommits: BranchCrossContaminationCommit[] = [];
+  const candidateForeign: BranchCrossContaminationCommit[] = [];
   for (const line of output.split("\n").map((entry) => entry.trim()).filter(Boolean)) {
     const [sha, subject, body] = line.split("\u001f");
     const subjectMatch = (subject ?? "").match(subjectPattern);
     const trailerMatch = (body ?? "").match(trailerPattern);
     const attributedTaskId = (trailerMatch?.[1] ?? subjectMatch?.[2] ?? "").toUpperCase();
     if (attributedTaskId && attributedTaskId !== taskId.toUpperCase()) {
-      foreignCommits.push({ sha, subject: subject ?? "", foreignTaskId: attributedTaskId });
+      candidateForeign.push({ sha, subject: subject ?? "", foreignTaskId: attributedTaskId });
     }
+  }
+
+  if (candidateForeign.length === 0) return;
+
+  // FN-5475: a commit attributed to another task that's already reachable
+  // from local `main` was promoted through integration. Treat it as
+  // ancestral, not contamination. This closes the race where a sibling
+  // task's commit briefly sat at local-main's tip while a downstream
+  // worktree was created (cross-task tip absorption).
+  const foreignCommits: BranchCrossContaminationCommit[] = [];
+  for (const commit of candidateForeign) {
+    if (await isAncestorOf(repoDir, commit.sha, "main")) continue;
+    foreignCommits.push(commit);
   }
 
   if (foreignCommits.length > 0) {
@@ -433,25 +468,34 @@ export interface ClassifyBootstrapMisbindingInput {
   branchName: string;
   baseSha: string;
   taskId: string;
-  foreignCommits: BranchCrossContaminationCommit[];
+  /**
+   * Optional and advisory only. The classifier derives the foreign-commit
+   * count from its own `git log baseSha..branchName` walk because callers
+   * such as the auto-recovery fallback in `branch-worktree.ts` only have a
+   * `BranchConflictInspectionResult` (no foreign-commit list) and used to
+   * pass `[]`, which silently disabled the predicate.
+   */
+  foreignCommits?: BranchCrossContaminationCommit[];
 }
 
 export interface ClassifyBootstrapMisbindingResult {
   isBootstrapMisbinding: boolean;
   ownCommitCount: number;
+  foreignCommitCount: number;
   nonAttributedCount: number;
 }
 
 export async function classifyBootstrapMisbinding(
   input: ClassifyBootstrapMisbindingInput,
 ): Promise<ClassifyBootstrapMisbindingResult> {
-  const { repoDir, branchName, baseSha, taskId, foreignCommits } = input;
+  const { repoDir, branchName, baseSha, taskId } = input;
   const output = await runGit(repoDir, `git log --format=%H%x1f%s%x1f%b ${quoteShellArg(`${baseSha}..${branchName}`)}`)
     .catch(() => "");
   if (!output) {
     return {
       isBootstrapMisbinding: false,
       ownCommitCount: 0,
+      foreignCommitCount: 0,
       nonAttributedCount: 0,
     };
   }
@@ -464,6 +508,7 @@ export async function classifyBootstrapMisbinding(
 
   let ownCommitCount = 0;
   let nonAttributedCount = 0;
+  let foreignCommitCount = 0;
   for (const line of output.split("\n").map((entry) => entry.trim()).filter(Boolean)) {
     const [, subject = "", body = ""] = line.split("\u001f");
     if (ownSubjectPattern.test(subject) || ownTrailerPattern.test(body)) {
@@ -476,12 +521,15 @@ export async function classifyBootstrapMisbinding(
     const attributedTaskId = (trailerMatch?.[1] ?? subjectMatch?.[2] ?? "").toUpperCase();
     if (!attributedTaskId) {
       nonAttributedCount += 1;
+    } else {
+      foreignCommitCount += 1;
     }
   }
 
   return {
-    isBootstrapMisbinding: foreignCommits.length > 0 && ownCommitCount === 0 && nonAttributedCount === 0,
+    isBootstrapMisbinding: foreignCommitCount > 0 && ownCommitCount === 0 && nonAttributedCount === 0,
     ownCommitCount,
+    foreignCommitCount,
     nonAttributedCount,
   };
 }

@@ -1,9 +1,46 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterAll } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
 import { advanceIntegrationBranchRef } from "../merger-ref-update-advance.js";
+
+// Signal-safe sweep for fusion-test-ref-advance-* tmp dirs. Vitest's forks pool
+// SIGTERMs a fork when a test times out, which skips `finally { rmSync(...) }`
+// and leaks dirs that scripts/check-test-isolation.mjs then fails merge
+// verification on.
+const TMP_DIR_RM_OPTIONS = { recursive: true, force: true, maxRetries: 5, retryDelay: 50 } as const;
+const TMP_DIR_CLEANUP_HOOK_KEY = Symbol.for(
+  "fusion.engine.merger-ref-update-advance-test.tmp-cleanup-hooks-installed",
+);
+const trackedTmpDirs = new Set<string>();
+
+function removeTmpDirSync(dir: string): void {
+  try {
+    rmSync(dir, TMP_DIR_RM_OPTIONS);
+  } catch {
+    // best-effort fallback during teardown
+  } finally {
+    trackedTmpDirs.delete(dir);
+  }
+}
+
+function cleanupTmpDirsSync(): void {
+  for (const dir of Array.from(trackedTmpDirs)) removeTmpDirSync(dir);
+}
+
+const processWithCleanupFlag = process as typeof process & {
+  [TMP_DIR_CLEANUP_HOOK_KEY]?: boolean;
+};
+if (!processWithCleanupFlag[TMP_DIR_CLEANUP_HOOK_KEY]) {
+  process.once("beforeExit", cleanupTmpDirsSync);
+  process.once("exit", cleanupTmpDirsSync);
+  processWithCleanupFlag[TMP_DIR_CLEANUP_HOOK_KEY] = true;
+}
+
+afterAll(() => {
+  cleanupTmpDirsSync();
+});
 
 function git(cwd: string, cmd: string): string {
   return execSync(cmd, { cwd, stdio: "pipe", encoding: "utf-8" }).trim();
@@ -11,6 +48,7 @@ function git(cwd: string, cmd: string): string {
 
 function setupRepo(defaultBranch: "main" | "master" = "main") {
   const dir = mkdtempSync(join(tmpdir(), "fusion-test-ref-advance-"));
+  trackedTmpDirs.add(dir);
   git(dir, `git init -b ${defaultBranch}`);
   git(dir, "git config user.name tester");
   git(dir, "git config user.email tester@example.com");
@@ -52,7 +90,7 @@ describe("advanceIntegrationBranchRef", () => {
       expect(events[0]?.metadata?.refName).toBe(`refs/heads/${integrationBranch}`);
       expect(events[0]?.target).toBe(integrationBranch);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeTmpDirSync(dir);
     }
   });
 
@@ -94,7 +132,7 @@ describe("advanceIntegrationBranchRef", () => {
       expect(events[0]?.type).toBe("merge:integration-ref-advance");
       expect(events[0]?.metadata?.succeeded).toBe(false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeTmpDirSync(dir);
     }
   });
 
@@ -132,7 +170,90 @@ describe("advanceIntegrationBranchRef", () => {
       expect(status).toContain("tracked.txt");
       expect(status).toContain("untracked.txt");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeTmpDirSync(dir);
+    }
+  });
+
+  it("refuses non-fast-forward advance even when expectedCurrentSha matches (sibling-commit orphan guard)", async () => {
+    const dir = setupRepo("main");
+    const events: Array<{ type: string; metadata?: Record<string, unknown> }> = [];
+    try {
+      const baseSha = git(dir, "git rev-parse refs/heads/main");
+
+      // First sibling — legitimate prior merger output that advanced main.
+      git(dir, "git checkout -b sibling-a");
+      writeFileSync(join(dir, "a.txt"), "a\n");
+      git(dir, "git add a.txt");
+      git(dir, "git commit -m a");
+      const siblingASha = git(dir, "git rev-parse HEAD");
+      git(dir, "git checkout main");
+      git(dir, `git update-ref refs/heads/main ${siblingASha} ${baseSha}`);
+
+      // Second sibling — built off the stale base (the bug shape). Both
+      // shas have the same parent, so siblingA is NOT an ancestor of
+      // siblingB. CAS alone would happily move main from siblingA to
+      // siblingB and orphan siblingA.
+      git(dir, `git checkout ${baseSha}`);
+      git(dir, "git checkout -b sibling-b");
+      writeFileSync(join(dir, "b.txt"), "b\n");
+      git(dir, "git add b.txt");
+      git(dir, "git commit -m b");
+      const siblingBSha = git(dir, "git rev-parse HEAD");
+
+      const result = await advanceIntegrationBranchRef({
+        rootDir: dir,
+        projectRootDir: dir,
+        integrationBranch: "main",
+        newSha: siblingBSha,
+        expectedCurrentSha: siblingASha,
+        taskId: "FN-5419",
+        audit: {
+          git: async (event: any) => events.push(event),
+        } as any,
+      });
+
+      expect(result.advanced).toBe(false);
+      if (result.advanced) throw new Error("expected refusal");
+      expect(result.reason).toBe("non-fast-forward-advance");
+      // Ref must NOT have moved — siblingA is still reachable from main.
+      expect(git(dir, "git rev-parse refs/heads/main")).toBe(siblingASha);
+      expect(events[0]?.type).toBe("merge:integration-ref-advance");
+      expect(events[0]?.metadata?.succeeded).toBe(false);
+      expect(String(events[0]?.metadata?.error ?? "")).toContain(
+        "non-fast-forward-advance",
+      );
+    } finally {
+      removeTmpDirSync(dir);
+    }
+  });
+
+  it("allows multi-commit fast-forward advance", async () => {
+    const dir = setupRepo("main");
+    try {
+      const baseSha = git(dir, "git rev-parse refs/heads/main");
+      git(dir, "git checkout -b feat");
+      writeFileSync(join(dir, "f1.txt"), "f1\n");
+      git(dir, "git add f1.txt");
+      git(dir, "git commit -m f1");
+      writeFileSync(join(dir, "f2.txt"), "f2\n");
+      git(dir, "git add f2.txt");
+      git(dir, "git commit -m f2");
+      const newSha = git(dir, "git rev-parse HEAD");
+
+      const result = await advanceIntegrationBranchRef({
+        rootDir: dir,
+        projectRootDir: dir,
+        integrationBranch: "main",
+        newSha,
+        expectedCurrentSha: baseSha,
+        taskId: "FN-5419",
+        audit: { git: async () => undefined } as any,
+      });
+
+      expect(result.advanced).toBe(true);
+      expect(git(dir, "git rev-parse refs/heads/main")).toBe(newSha);
+    } finally {
+      removeTmpDirSync(dir);
     }
   });
 
@@ -159,7 +280,7 @@ describe("advanceIntegrationBranchRef", () => {
         audit: { git: async () => undefined } as any,
       })).rejects.toThrow("expectedCurrentSha");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeTmpDirSync(dir);
     }
   });
 });

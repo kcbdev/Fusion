@@ -31,6 +31,13 @@ const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 const MERGE_HANDOFF_WORKER_ID = "merger-reuse-handoff";
 
+/** Shell-quote a value for safe interpolation into `git` command strings.
+ *  Mirrors the `quoteArg` helper in merger.ts; kept local to avoid an
+ *  import cycle. */
+function quoteAutostashArg(value: string): string {
+  return `"${value.replace(/(["\\$`])/g, "\\$1")}"`;
+}
+
 export interface MergeIntegrationRootResolution {
   mode: MergeIntegrationWorktreeMode;
   // Sentinel: empty string means reuse mode is requested but no reusable
@@ -309,11 +316,67 @@ export async function acquireReuseHandoff(input: ReuseHandoffInput): Promise<Han
   const dirtyPaths = Array.from(await snapshotDirtyFilesLocal(worktreePath)).sort();
   const dirtyFingerprint = await gitDirtyFingerprintLocal(worktreePath);
   if (dirtyPaths.length > 0 || dirtyFingerprint) {
-    throw new MergeHandoffRefusedError("working-tree-dirty", "dirty-worktree", {
-      taskId: input.task.id,
-      worktreePath,
-      dirtyPaths,
-      dirtyFingerprint,
+    // Previously this refused the handoff and parked the task as
+    // in-review:failed. Instead, autostash the dirty state so the merge can
+    // proceed; the stash survives in the repo's stash list even after the
+    // worktree is later torn down, so the developer can always recover.
+    const stashLabel = `fusion-reuse-handoff-autostash:${input.task.id}:${Date.now()}`;
+    let stashSha: string | null = null;
+    let stashError: string | null = null;
+    try {
+      // Stage everything (including untracked) so `git stash create`
+      // captures the full dirty tree.
+      await execAsync("git add -A", { cwd: worktreePath });
+      const { stdout: createOut } = await execAsync("git stash create", {
+        cwd: worktreePath,
+        encoding: "utf-8",
+      });
+      stashSha = String(createOut).trim() || null;
+      if (stashSha) {
+        await execAsync(
+          `git stash store -m ${quoteAutostashArg(stashLabel)} ${stashSha}`,
+          { cwd: worktreePath },
+        );
+        // Only reset/clean once the dirty content is safely captured by the
+        // stash. If the stash failed (no SHA), leaving the working tree as-is
+        // preserves the user's edits for manual recovery.
+        await execAsync("git reset --hard HEAD", { cwd: worktreePath });
+        await execAsync("git clean -fd", { cwd: worktreePath });
+      }
+    } catch (err: unknown) {
+      stashError = err instanceof Error ? err.message : String(err);
+    }
+
+    if (!stashSha || stashError) {
+      // Stash creation failed: do NOT proceed (the merge's destructive ops
+      // would wipe the user's edits). Best-effort unstage so the worktree
+      // isn't left with a half-staged index from the `git add -A` above.
+      try {
+        await execAsync("git reset", { cwd: worktreePath });
+      } catch {
+        // Nothing more we can do.
+      }
+      throw new MergeHandoffRefusedError("working-tree-dirty", "dirty-worktree-autostash-failed", {
+        taskId: input.task.id,
+        worktreePath,
+        dirtyPaths,
+        dirtyFingerprint,
+        stashError,
+      });
+    }
+
+    await input.auditEmit?.({
+      type: "merge:reuse-handoff-autostash",
+      target: worktreePath,
+      metadata: {
+        taskId: input.task.id,
+        worktreePath,
+        stashSha,
+        stashLabel,
+        dirtyPathCount: dirtyPaths.length,
+        dirtyPathSample: dirtyPaths.slice(0, 20),
+        recoverCommand: `cd ${worktreePath} && git stash apply ${stashSha}`,
+      },
     });
   }
 

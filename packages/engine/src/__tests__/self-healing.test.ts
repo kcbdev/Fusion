@@ -616,7 +616,7 @@ describe("SelfHealingManager", () => {
       await manager.runStartupRecovery();
 
       expect(store.updateTask).toHaveBeenCalledWith("A", { blockedBy: null, overlapBlockedBy: null, status: null });
-      expect(store.logEntry).toHaveBeenCalledWith("A", expect.stringContaining("Auto-recovered: cleared stale blockedBy"));
+      expect(store.logEntry).toHaveBeenCalledWith("A", expect.stringContaining("Auto-recovered (FN-5488): cleared stale blockedBy"));
     });
 
     it("runStartupRecovery skips while enginePaused is active", async () => {
@@ -3820,6 +3820,9 @@ describe("SelfHealingManager", () => {
       mockedExecSync.mockImplementation((command: string | Buffer) => {
         const cmd = String(command);
         if (cmd.includes("Fusion-Task-Id: FN-stuck")) return "abc12345\x1fRecovered subject\n" as any;
+        // FN-5441 ownership verification: post-grep body fetch must contain
+        // the anchored trailer so commitOwnedByTask accepts the candidate.
+        if (cmd.includes("--format=%b") && cmd.includes("abc12345")) return "Fusion-Task-Id: FN-stuck\n" as any;
         if (cmd.includes("--shortstat")) return " 2 files changed, 3 insertions(+), 1 deletions(-)\n" as any;
         return "" as any;
       });
@@ -3958,6 +3961,50 @@ describe("SelfHealingManager", () => {
       managerWithRecovery.stop();
     });
 
+    // FN-5441/FN-5446 regression: a deadlock-recovery sweep mis-attributed
+    // both to e3dbfaae, an FN-5483 commit whose body merely *mentioned* them
+    // by name. findLandedTaskCommit step (4) used `git log --grep=FN-XXXX`
+    // which matches the entire commit message (not just subject) and the
+    // previous code blindly accepted the first hit. The fix anchors ownership
+    // on trailer/subject so prose mentions can never claim a task.
+    it("FN-5441/FN-5446: does not attribute to a commit that only mentions the task ID in prose", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue(baseSettings);
+      (store.listTasks as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce([
+          { id: "FN-5441", column: "in-review", paused: false, status: "failed", mergeRetries: 3, mergeDetails: undefined, worktree: "/tmp/wt-a", log: [] },
+        ])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+      mockedExecSync.mockImplementation((command: string | Buffer) => {
+        const cmd = String(command);
+        // grep step finds the unrelated FN-5483 commit whose body mentions FN-5441 in prose
+        if (cmd.includes("FN-5441") && cmd.includes("--grep")) return "e3dbfaae\x1ffix(FN-5483): allow merger commits past identity-guard\n" as any;
+        // ownership-verification body fetch returns prose-mention body, no anchored trailer
+        if (cmd.includes("--format=%b") && cmd.includes("e3dbfaae")) {
+          return "The refusal surfaced as merge-deadlock-detected on FN-5441 and FN-5446. ...\n" as any;
+        }
+        return "" as any;
+      });
+
+      const result = await managerWithRecovery.recoverStuckMergeDeadlocks();
+
+      // No attribution → no recovery → no move to done.
+      expect(store.moveTask).not.toHaveBeenCalledWith("FN-5441", "done");
+      // result of 0 OR a "paused-for-manual" path (proof gate) is acceptable;
+      // the load-bearing assertion is that we did NOT advance the task to done
+      // against the wrong commit.
+      expect(result).toBeLessThanOrEqual(1);
+      const updateCalls = (store.updateTask as ReturnType<typeof vi.fn>).mock.calls;
+      const movedToDone = updateCalls.some(([id, patch]) =>
+        id === "FN-5441" && (patch as any)?.mergeDetails?.commitSha === "e3dbfaae",
+      );
+      expect(movedToDone).toBe(false);
+
+      managerWithRecovery.stop();
+    });
+
     it("recovers worktree-only orphans and reproduces three-task incident", async () => {
       const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
       (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue(baseSettings);
@@ -3975,6 +4022,11 @@ describe("SelfHealingManager", () => {
         if (cmd.includes("Fusion-Task-Id: FN-3794")) return "278a2825\x1fone\n" as any;
         if (cmd.includes("Fusion-Task-Id: FN-3814")) return "69c25e2b\x1ftwo\n" as any;
         if (cmd.includes("Fusion-Task-Id: FN-3829")) return "0d3f51b6\x1fthree\n" as any;
+        // FN-5441 ownership verification: post-grep body fetch must contain
+        // the anchored trailer so commitOwnedByTask accepts each candidate.
+        if (cmd.includes("--format=%b") && cmd.includes("278a2825")) return "Fusion-Task-Id: FN-3794\n" as any;
+        if (cmd.includes("--format=%b") && cmd.includes("69c25e2b")) return "Fusion-Task-Id: FN-3814\n" as any;
+        if (cmd.includes("--format=%b") && cmd.includes("0d3f51b6")) return "Fusion-Task-Id: FN-3829\n" as any;
         return "" as any;
       });
 
@@ -5837,6 +5889,103 @@ describe("clearStaleBlockedBy", () => {
     manager.stop();
   });
 
+  it("clears stale blockedBy with explicit reason when blocker is soft-deleted", async () => {
+    const store = createRunningStore();
+    const deletedAt = "2026-05-22T00:00:00.000Z";
+    (store.getTask as ReturnType<typeof vi.fn>).mockImplementation(async (id: string, options?: { includeDeleted?: boolean }) => {
+      if (id === "FN-DELETED" && options?.includeDeleted) {
+        return createTask("FN-DELETED", { deletedAt }) as unknown as Task;
+      }
+      throw new Error(`Task ${id} not found`);
+    });
+
+    const taskA = createTask("A", { blockedBy: "FN-DELETED" });
+    mockSweepTasks(store, { todo: [taskA] });
+
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+    const recovered = await manager.clearStaleBlockedBy();
+
+    expect(recovered).toBe(1);
+    expect(store.updateTask).toHaveBeenCalledWith("A", { blockedBy: null, overlapBlockedBy: null, status: null });
+    expect(store.logEntry).toHaveBeenCalledWith("A", expect.stringContaining("soft-deleted at 2026-05-22T00:00:00.000Z"));
+    manager.stop();
+  });
+
+  it("clears stale blockedBy for in-progress task when blocker is soft-deleted", async () => {
+    const store = createRunningStore();
+    const deletedAt = "2026-05-22T00:00:00.000Z";
+    (store.getTask as ReturnType<typeof vi.fn>).mockImplementation(async (id: string, options?: { includeDeleted?: boolean }) => {
+      if (id === "FN-DELETED" && options?.includeDeleted) {
+        return createTask("FN-DELETED", { deletedAt }) as unknown as Task;
+      }
+      throw new Error(`Task ${id} not found`);
+    });
+
+    const taskA = createTask("A", { column: "in-progress", blockedBy: "FN-DELETED" });
+    mockSweepTasks(store, { inProgress: [taskA], all: [taskA] });
+
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+    const recovered = await manager.clearStaleBlockedBy();
+
+    expect(recovered).toBe(1);
+    expect(store.updateTask).toHaveBeenCalledWith("A", { blockedBy: null });
+    expect(store.logEntry).toHaveBeenCalledWith("A", expect.stringContaining("Auto-recovered (FN-4091): cleared stale blockedBy — blocker FN-DELETED soft-deleted at 2026-05-22T00:00:00.000Z"));
+    manager.stop();
+  });
+
+  it("refreshes to next live dependency when one dependency is soft-deleted", async () => {
+    const store = createRunningStore();
+    const deletedAt = "2026-05-22T00:00:00.000Z";
+    (store.getTask as ReturnType<typeof vi.fn>).mockImplementation(async (id: string, options?: { includeDeleted?: boolean }) => {
+      if (id === "FN-DELETED" && options?.includeDeleted) {
+        return createTask("FN-DELETED", { deletedAt }) as unknown as Task;
+      }
+      throw new Error(`Task ${id} not found`);
+    });
+
+    const taskA = createTask("A", { blockedBy: "FN-DELETED", status: "queued", dependencies: ["FN-DELETED", "FN-LIVE"] });
+    const liveBlocker = createTask("FN-LIVE", { column: "todo" });
+    mockSweepTasks(store, { todo: [taskA, liveBlocker], all: [taskA, liveBlocker] });
+
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+    const recovered = await manager.clearStaleBlockedBy();
+
+    expect(recovered).toBe(1);
+    expect(store.updateTask).toHaveBeenCalledWith("A", { blockedBy: "FN-LIVE", status: "queued" });
+    expect(store.logEntry).toHaveBeenCalledWith("A", expect.stringContaining("soft-deleted"));
+    expect(store.logEntry).toHaveBeenCalledWith("A", expect.stringContaining("now blocked by FN-LIVE"));
+    manager.stop();
+  });
+
+  it("is idempotent after recovering soft-deleted blockers", async () => {
+    const store = createRunningStore();
+    const deletedAt = "2026-05-22T00:00:00.000Z";
+    (store.getTask as ReturnType<typeof vi.fn>).mockImplementation(async (id: string, options?: { includeDeleted?: boolean }) => {
+      if (id === "FN-DELETED" && options?.includeDeleted) {
+        return createTask("FN-DELETED", { deletedAt }) as unknown as Task;
+      }
+      throw new Error(`Task ${id} not found`);
+    });
+
+    const taskA = createTask("A", { blockedBy: "FN-DELETED" });
+    mockSweepTasks(store, { todo: [taskA], all: [taskA] });
+
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+    const firstRecovered = await manager.clearStaleBlockedBy();
+    expect(firstRecovered).toBe(1);
+
+    const healedTask = createTask("A", { blockedBy: null, status: null });
+    mockSweepTasks(store, { todo: [healedTask], all: [healedTask] });
+    (store.updateTask as ReturnType<typeof vi.fn>).mockClear();
+    (store.logEntry as ReturnType<typeof vi.fn>).mockClear();
+
+    const secondRecovered = await manager.clearStaleBlockedBy();
+    expect(secondRecovered).toBe(0);
+    expect(store.updateTask).not.toHaveBeenCalled();
+    expect(store.logEntry).not.toHaveBeenCalled();
+    manager.stop();
+  });
+
   it.each(["done", "archived"] as const)("clears stale blockedBy when blocker is %s", async (column) => {
     const store = createRunningStore();
     const blockerId = "FN-100";
@@ -5950,8 +6099,8 @@ describe("clearStaleBlockedBy", () => {
 
     expect(recovered).toBe(1);
     expect(store.updateTask).toHaveBeenCalledWith("A", { blockedBy: null, overlapBlockedBy: null, status: null });
-    expect(store.logEntry).toHaveBeenCalledWith("A", expect.stringContaining(`blocker ${blockerId}`));
-    expect(store.logEntry).toHaveBeenCalledWith("A", expect.stringContaining("stale for"));
+    expect(store.logEntry).toHaveBeenCalledWith("A", expect.stringContaining(`blocker=${blockerId}`));
+    expect(store.logEntry).toHaveBeenCalledWith("A", expect.stringContaining("reason=unbacked-merging"));
     manager.stop();
     vi.useRealTimers();
   });
@@ -5964,7 +6113,7 @@ describe("clearStaleBlockedBy", () => {
       column: "in-review",
       paused: false,
       status: "merging",
-      updatedAt: "2026-01-01T00:00:01.000Z",
+      updatedAt: "2026-01-01T00:09:31.000Z",
     });
     mockSweepTasks(store, { todo: [taskA], inReview: [taskB], all: [taskA, taskB] });
 
@@ -6023,7 +6172,7 @@ describe("clearStaleBlockedBy", () => {
       column: "in-review",
       status: "failed",
       mergeRetries: 0,
-      error: "Refusing to start coding agent in missing worktree: /Users/eclipxe/Projects/kb/.worktrees/bright-wren",
+      error: "Refusing to start coding agent in missing worktree: /tmp/test-project/.worktrees/bright-wren",
       steps: [{ status: "done" }, { status: "pending" }] as any,
     });
     mockSweepTasks(store, { todo: [taskA], inReview: [taskB], all: [taskA, taskB] });
@@ -7815,6 +7964,15 @@ describe("FN-5335 triple-proof no-action unit coverage", () => {
     expect(result).toBeGreaterThanOrEqual(0);
     expect(store.moveTask).not.toHaveBeenCalled();
     expect((store as any).recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ mutationType: "task:reclaim-self-owned-branch-conflict-no-action" }));
+  });
+
+  it("returns active merge task id via public accessor", () => {
+    const manager = new SelfHealingManager(createMockStore(), {
+      rootDir: "/tmp/test-project",
+      getActiveMergeTaskId: () => "FN-MERGE",
+    });
+
+    expect(manager.getActiveMergeTaskId()).toBe("FN-MERGE");
   });
 
   it("emits finalize-no-op-review no-action when unproven fallback fails triple proof", async () => {

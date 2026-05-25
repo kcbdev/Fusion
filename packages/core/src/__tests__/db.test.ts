@@ -47,6 +47,7 @@ async function removeTrackedTmpDir(dir: string | undefined): Promise<void> {
 }
 
 async function cleanupTmpDirsAsync(): Promise<void> {
+  killLockChildrenSync();
   const cleanup = Array.from(createdTmpDirs);
   await Promise.all(cleanup.map((dir) => removeTrackedTmpDir(dir)));
 }
@@ -62,7 +63,26 @@ function removeTrackedTmpDirSync(dir: string | undefined): void {
   }
 }
 
+// Lock-helper child processes hold open WAL/SHM file handles on the test db.
+// If a test is force-killed (timeout → fork recycle → SIGTERM) before its
+// `lock.release()` finally runs, those children outlive the test process and
+// block recursive removal of the parent tmp dir on macOS, leaking
+// `kb-db-test-*` directories. Track them so cleanup can kill stragglers.
+const activeLockChildren = new Set<ChildProcessWithoutNullStreams>();
+
+function killLockChildrenSync(): void {
+  for (const child of activeLockChildren) {
+    try {
+      if (child.exitCode === null && !child.killed) child.kill("SIGKILL");
+    } catch {
+      // best-effort
+    }
+  }
+  activeLockChildren.clear();
+}
+
 function cleanupTmpDirsSync(): void {
+  killLockChildrenSync();
   const cleanup = Array.from(createdTmpDirs);
   for (const dir of cleanup) {
     removeTrackedTmpDirSync(dir);
@@ -71,6 +91,10 @@ function cleanupTmpDirsSync(): void {
 
 // Full-suite worker shutdown can skip Vitest's normal afterAll timing if the worker
 // is already draining, so keep a process-level sync cleanup backstop for kb-db-test-*.
+// (Signal handlers were tried here but vitest forks deliver SIGHUP/SIGTERM during
+// the suite — re-raising killed the runner. The lock-child kill in
+// `cleanupTmpDirsAsync`/`afterEach` covers the macOS file-handle case that was
+// the actual leak driver.)
 const processWithCleanupFlag = process as typeof process & {
   [TMP_DIR_CLEANUP_HOOK_KEY]?: boolean;
 };
@@ -117,6 +141,10 @@ async function holdWriteLock(
 
   const child = spawn(process.execPath, ["-e", script], {
     stdio: ["pipe", "pipe", "pipe"],
+  });
+  activeLockChildren.add(child);
+  child.once("exit", () => {
+    activeLockChildren.delete(child);
   });
 
   const ready = new Promise<void>((resolve, reject) => {

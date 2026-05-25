@@ -327,7 +327,7 @@ delegate, and route work to the right place. Think in single-pass interventions,
 Your job:
 1. Check your assigned task context — review its state, blockedBy field, and any new comments.
 2. Do ONE useful coordination action.
-3. Use fn_task_create to spawn follow-up work, fn_task_log to record observations, and fn_task_document_write for durable artifacts.
+3. Use fn_task_create to spawn follow-up work, fn_task_log to record observations, and fn_task_document_write for durable artifacts. Before calling fn_task_create, scan existing open tasks (the board context provided to you, or fn_task_list when in doubt) — if an open task already covers this work, log against it or update it instead of creating a duplicate.
 4. Use fn_list_agents + fn_delegate_task when work should be assigned to a specific capable agent now.
 5. Use fn_get_agent_config and fn_update_agent_config to tune direct reports before delegating recurring work.
 6. Call fn_heartbeat_done when finished with an optional summary of what was accomplished.
@@ -396,7 +396,7 @@ When you are woken by an incoming message (source includes "wake-on-message"), y
    - If the message requires a response, use fn_send_message to reply.
    - When replying, include 'reply_to_message_id' with the original message ID from fn_read_messages output.
    - If the message is informational, acknowledge it by logging with fn_task_log.
-   - If the message requests net-new work, create a follow-up task with fn_task_create.
+   - If the message requests net-new work, first check whether an open task already covers it; only call fn_task_create when no existing open task matches.
    - If ownership is clear and an agent is available, delegate using fn_delegate_task.
 4. If a Pending Room Messages section is present, review it too:
    - Use fn_post_room_message only when the room content is relevant to your role, soul, or identity.
@@ -428,7 +428,7 @@ You are not expected to implement large code changes in no-task mode.
 Your job:
 1. Review your context — check messages, memory, and project state.
 2. Do ONE useful action: analyze, create follow-up tasks, delegate work, or update memory.
-3. Use fn_task_create to spawn follow-up work.
+3. Use fn_task_create to spawn follow-up work — but first scan the board/context for an existing open task covering the same work; do not duplicate.
 4. Use fn_list_agents and fn_delegate_task to coordinate with other agents.
 5. Use fn_get_agent_config and fn_update_agent_config to read/tune direct-report agents for better routing outcomes.
 6. Call fn_heartbeat_done when finished with an optional summary of what was accomplished.
@@ -486,7 +486,7 @@ When you are woken by an incoming message (source includes "wake-on-message"), y
    - If the message requires a response and fn_send_message is available, use fn_send_message to reply.
    - When replying, include 'reply_to_message_id' with the original message ID from fn_read_messages output.
    - If the message is informational, acknowledge it and respond via fn_send_message when appropriate.
-   - If the message requests work, create a follow-up task with fn_task_create.
+   - If the message requests work, check whether an open task already covers it; only create a follow-up with fn_task_create when no existing open task matches.
    - If the request has a clear owner and fn_delegate_task is available, delegate it directly.
 3. If a Pending Room Messages section is present, review it too and use fn_post_room_message only when the room content is relevant to your role or identity; if Room Ambiguity Notices are present, follow their resolve/clarify branch instructions exactly. If a Room Coordination Notices section is present, follow its claim/defer branch exactly: under "claim" post a one-line claim before calling fn_task_create; under "defer-suggested" do NOT call fn_task_create and instead acknowledge the prior claim via fn_post_room_message.
 4. After processing messages, continue with your ambient work.
@@ -2542,6 +2542,8 @@ export class HeartbeatMonitor {
           defaultModelId: heartbeatSessionModels.defaultModelId,
           fallbackProvider: heartbeatSessionModels.fallbackProvider,
           fallbackModelId: heartbeatSessionModels.fallbackModelId,
+          runAuditor: audit,
+          settings: heartbeatModelSettings,
           onText: (delta) => {
             outputLength += delta.length;
             appendStdoutExcerpt(delta);
@@ -3223,10 +3225,14 @@ export class HeartbeatMonitor {
   ): ToolDefinition[] {
     const tools: ToolDefinition[] = [];
 
-    // Wrap createTaskCreateTool with tracking and agent-link logging
+    // Wrap createTaskCreateTool with tracking and agent-link logging.
+    // Stamp the parent task ID so sibling tasks spawned from the same parent
+    // can be deduped even if the AI rewrites their titles during triage.
     const baseCreateTool = createTaskCreateTool(taskStore, {
       sourceType: "agent_heartbeat",
       sourceAgentId: agentId,
+      sourceRunId: runContext?.runId,
+      sourceParentTaskId: taskId,
     }, { rootDir: this.rootDir });
     const trackedCreateTool: ToolDefinition = {
       ...baseCreateTool,

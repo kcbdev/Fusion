@@ -961,7 +961,7 @@ describe("SettingsModal", () => {
       Object.defineProperty(window, "matchMedia", {
         writable: true,
         value: vi.fn().mockImplementation((query: string) => ({
-          matches: query === "(max-width: 768px)",
+          matches: query === "(max-width: 768px)" || query === "(max-width: 768px), (max-height: 480px)",
           media: query,
           onchange: null,
           addEventListener: vi.fn(),
@@ -1930,7 +1930,7 @@ describe("SettingsModal", () => {
       Object.defineProperty(window, "matchMedia", {
         writable: true,
         value: vi.fn().mockImplementation((query: string) => ({
-          matches: query === "(max-width: 768px)" || query === "(pointer: coarse)",
+          matches: query === "(max-width: 768px)" || query === "(max-width: 768px), (max-height: 480px)" || query === "(pointer: coarse)",
           media: query,
           onchange: null,
           addEventListener: vi.fn(),

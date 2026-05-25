@@ -186,20 +186,14 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
     };
   }, [projectId]);
 
-  // FN-4574 + FN-001 diagnosis: on touch-primary devices (iOS Safari mobile,
-  // Android Chrome tablet) the board can snap against stale layout/visualViewport
-  // metrics before columns resolve, both on initial mount and on pageshow/bfcache
-  // restore. On Android tablets this also fires the first time cards populate
-  // — scroll-snap re-evaluates and lands on a non-zero offset, leaving column 1
-  // partially off-screen. We keep the FN-001 baseline (`scroll-snap-type: x
-  // proximity` + `overflow-anchor: none`) and only stabilize via reflow + scroll
-  // offset normalization; do NOT reintroduce `scroll-snap-type: x mandatory`.
-  const tasksLoaded = tasks.length > 0;
+  // FN-4574 + FN-001 diagnosis: on iOS Safari, the mobile board can occasionally
+  // snap against stale layout/visualViewport metrics before flex columns resolve,
+  // both on initial mount and on pageshow/bfcache restore after backgrounding.
+  // We keep the FN-001 baseline (`scroll-snap-type: x proximity` +
+  // `overflow-anchor: none`) and only stabilize via reflow + scroll offset
+  // normalization; do NOT reintroduce `scroll-snap-type: x mandatory`.
   useEffect(() => {
-    const touchPrimary =
-      window.matchMedia("(max-width: 768px)").matches ||
-      window.matchMedia("(hover: none) and (pointer: coarse)").matches;
-    if (!touchPrimary) {
+    if (!window.matchMedia("(max-width: 768px)").matches) {
       return;
     }
 
@@ -267,7 +261,7 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
         clearTimeout(timeoutId);
       }
     };
-  }, [tasksLoaded]);
+  }, []);
 
   // FN-4380: GitHub badge state comes from persisted task fields (`task.prInfo`,
   // `task.issueInfo`, `task.githubTracking.issue`) and live WebSocket `badge:updated`

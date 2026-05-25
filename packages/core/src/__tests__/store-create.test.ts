@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import * as projectMemory from "../project-memory.js";
 import { AgentStore } from "../agent-store.js";
 import { CentralDatabase } from "../central-db.js";
-import { TaskStore, TaskHasDependentsError } from "../store.js";
+import { DependencyCycleError, TaskStore, TaskHasDependentsError } from "../store.js";
 import { setTaskCreatedHook } from "../task-creation-hooks.js";
 import { buildResearchDocumentKey, type Task } from "../types.js";
 import { createTaskStoreTestHarness, makeTmpDir } from "./store-test-helpers.js";
@@ -842,12 +842,21 @@ describe("TaskStore", () => {
         store.createTaskWithReservedId({ description: "duplicate" }, { taskId: "FN-9003" }),
       ).rejects.toThrow("Task ID already exists: FN-9003");
 
-      await expect(
-        store.createTaskWithReservedId(
+      let error: unknown;
+      try {
+        await store.createTaskWithReservedId(
           { description: "self dep", dependencies: ["FN-9004"] },
           { taskId: "FN-9004" },
-        ),
-      ).rejects.toThrow("Task FN-9004 cannot depend on itself");
+        );
+      } catch (caught) {
+        error = caught;
+      }
+
+      expect(error).toBeInstanceOf(DependencyCycleError);
+      expect(error).toMatchObject({
+        taskId: "FN-9004",
+        cyclePath: ["FN-9004", "FN-9004"],
+      });
     });
 
     it("applyReplicatedTaskCreate does not auto-apply default workflow steps", async () => {

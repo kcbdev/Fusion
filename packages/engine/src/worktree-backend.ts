@@ -1,6 +1,6 @@
 import { exec } from "node:child_process";
 import { existsSync } from "node:fs";
-import { access } from "node:fs/promises";
+import { access, rm } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { Settings } from "@fusion/core";
@@ -195,12 +195,7 @@ export class NativeWorktreeBackend implements WorktreeBackend {
           taskAttributionTrailerName: this.deps.settings?.taskAttributionTrailerNames?.[0],
         });
       } catch (error) {
-        await execAsync(`rm -rf ${quoteShellArg(worktreePath)}`, {
-          cwd: input.rootDir,
-          encoding: "utf-8",
-          timeout: REMOVE_TIMEOUT_MS,
-          maxBuffer: MAX_BUFFER,
-        }).catch(() => undefined);
+        await rm(worktreePath, { recursive: true, force: true }).catch(() => undefined);
         await pruneWorktreeAdminEntries({
           rootDir: input.rootDir,
           auditor: this.deps.audit,
@@ -561,12 +556,7 @@ export class WorktrunkWorktreeBackend implements WorktreeBackend {
         taskId: input.taskId,
       });
     } catch (error) {
-      await execAsync(`rm -rf ${quoteShellArg(resolvedPath)}`, {
-        cwd: input.rootDir,
-        encoding: "utf-8",
-        timeout: REMOVE_TIMEOUT_MS,
-        maxBuffer: MAX_BUFFER,
-      }).catch(() => undefined);
+      await rm(resolvedPath, { recursive: true, force: true }).catch(() => undefined);
       await pruneWorktreeAdminEntries({
         rootDir: input.rootDir,
         auditor: this.deps.audit,

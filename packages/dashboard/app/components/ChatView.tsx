@@ -42,7 +42,7 @@ import { useModelsCache } from "../hooks/useModelsCache";
 import { useDiscoveredSkillsCache } from "../hooks/useDiscoveredSkillsCache";
 import { useAgentsMapCache } from "../hooks/useAgentsMapCache";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
-import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
+import { useMobileScrollLock, isIOS } from "../hooks/useMobileScrollLock";
 import { matchesAgentMentionFilter } from "./mentionMatching";
 import { useNavigationHistoryContext } from "../hooks/useNavigationHistory";
 import { linkifyFilePaths, linkifyReactChildren } from "../utils/filePathLinkify";
@@ -2988,6 +2988,13 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                     onTouchStart={(event) => {
                       if (typeof window === "undefined") return;
                       if (window.innerWidth > 768) return;
+                      // iOS-only: preventDefault + programmatic focus avoids
+                      // iOS's visual-viewport scroll on re-focus. On Android,
+                      // preventDefault here blocks the soft keyboard from
+                      // opening at all (programmatic focus() does not raise
+                      // the keyboard on Android), so the input "focuses" but
+                      // the keyboard never appears.
+                      if (!isIOS()) return;
                       if (document.activeElement === event.currentTarget) return;
                       event.preventDefault();
                       event.currentTarget.focus({ preventScroll: true });
@@ -3313,6 +3320,10 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                   onTouchStart={(event) => {
                     if (typeof window === "undefined") return;
                     if (window.innerWidth > 768) return;
+                    // iOS-only: see comment on the other chat-input touchstart
+                    // handler above. On Android, preventDefault blocks the
+                    // soft keyboard from opening.
+                    if (!isIOS()) return;
                     if (document.activeElement === event.currentTarget) return;
                     event.preventDefault();
                     event.currentTarget.focus({ preventScroll: true });
