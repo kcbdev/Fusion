@@ -637,6 +637,9 @@ const taskUpdateParams = Type.Object({
     STEP_STATUSES.map((s) => Type.Literal(s)),
     { description: "New status: pending, in-progress, done, or skipped" },
   ),
+  dependencies: Type.Optional(Type.Array(Type.String(), {
+    description: "Optional task dependency array. Replaces existing dependencies. Pass ['FN-001', 'FN-002'] to set dependencies. Pass [] to clear all dependencies. Omit parameter to preserve existing dependencies.",
+  })),
 });
 
 // taskLogParams and taskCreateParams are imported from agent-tools.ts
@@ -5487,10 +5490,11 @@ export class TaskExecutor {
       description:
         "Update a step's status. Call before starting a step (in-progress), " +
         "after completing it (done), or to skip it (skipped). " +
+        "Optionally update task dependencies by passing a dependencies array. " +
         "The board updates in real-time.",
       parameters: taskUpdateParams,
       execute: async (_id: string, params: Static<typeof taskUpdateParams>) => {
-        const { step, status } = params;
+        const { step, status, dependencies } = params;
 
         // Record step progress for stuck task detection.
         // Step transitions (in-progress, done, skipped) indicate real progress
@@ -5543,6 +5547,43 @@ export class TaskExecutor {
             }],
             details: {},
           };
+        }
+
+        // Handle dependencies parameter if provided
+        if (dependencies !== undefined) {
+          // Validate: prevent self-dependency
+          if (dependencies.includes(taskId)) {
+            return {
+              content: [{
+                type: "text" as const,
+                text: `Cannot add self-dependency: ${taskId} cannot depend on itself.`,
+              }],
+              details: {},
+            };
+          }
+
+          // Validate: all dependency task IDs must exist
+          const invalidIds: string[] = [];
+          for (const depId of dependencies) {
+            try {
+              await store.getTask(depId);
+            } catch {
+              invalidIds.push(depId);
+            }
+          }
+
+          if (invalidIds.length > 0) {
+            return {
+              content: [{
+                type: "text" as const,
+                text: `Cannot set dependencies — the following task(s) do not exist: ${invalidIds.join(", ")}`,
+              }],
+              details: {},
+            };
+          }
+
+          // Update dependencies
+          await store.updateTask(taskId, { dependencies });
         }
 
         const task = await store.updateStep(taskId, stepIndex, status as StepStatus);
