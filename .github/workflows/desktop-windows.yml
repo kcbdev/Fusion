@@ -25,12 +25,37 @@ jobs:
       - name: Build desktop package
         run: pnpm --filter @fusion/desktop build
 
-      # Code-signing via WINDOWS_CERTIFICATE_BASE64 / WINDOWS_CERTIFICATE_PASSWORD is intentionally deferred to a follow-up task.
-      - name: Package Windows artifacts
+      - name: Package signed Windows EXE
+        if: ${{ env.WINDOWS_CERTIFICATE_BASE64 != '' }}
         run: pnpm --filter @fusion/desktop exec electron-builder --win --publish never
         env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Package unsigned Windows EXE
+        if: ${{ env.WINDOWS_CERTIFICATE_BASE64 == '' }}
+        run: pnpm --filter @fusion/desktop exec electron-builder --win --publish never
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify signed artifacts
+        if: ${{ env.WINDOWS_CERTIFICATE_BASE64 != '' }}
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+        run: |
+          $exes = Get-ChildItem packages/desktop/dist-electron -Filter *.exe
+          if ($exes.Count -eq 0) { Write-Error "No EXE artifacts produced"; exit 1 }
+          foreach ($exe in $exes) {
+            $sig = Get-AuthenticodeSignature $exe.FullName
+            Write-Host "$($exe.Name): $($sig.Status)"
+            if ($sig.Status -ne 'Valid') { Write-Error "Signature invalid: $($exe.Name) ($($sig.Status))"; exit 1 }
+          }
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4

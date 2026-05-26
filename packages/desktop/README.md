@@ -357,6 +357,18 @@ Desktop packaging is configured in `electron-builder.yml`.
 
 Run `pnpm --filter @fusion/desktop build` before `pack`/`dist` to ensure `dist/` assets are up to date.
 
+### Windows code-signing
+
+The Windows desktop workflow (`.github/workflows/desktop-windows.yml`) supports conditional Authenticode signing for NSIS + portable EXE outputs.
+
+- Required CI secrets:
+  - `WINDOWS_CERTIFICATE_BASE64` (base64-encoded `.pfx`)
+  - `WINDOWS_CERTIFICATE_PASSWORD`
+- Signing is handled directly by electron-builder using `CSC_LINK` and `CSC_KEY_PASSWORD`; no separate `signtool` wrapper script is invoked in this workflow.
+- If signing secrets are not available (for example, forked PR contexts), the workflow still succeeds and uploads unsigned artifacts; the `Verify signed artifacts` step is skipped.
+- Signing policy is pinned in `electron-builder.yml` (`sha256` digest + `http://timestamp.digicert.com`) to match `scripts/sign-windows.ps1` used by CLI binaries.
+- Local signing is opt-in: developers who need signed local Windows builds must set `CSC_LINK`/`CSC_KEY_PASSWORD` in their own environment before invoking electron-builder.
+
 ## Environment
 
 - `FUSION_DASHBOARD_URL` — override the default dashboard URL in development mode (`http://localhost:5173`)

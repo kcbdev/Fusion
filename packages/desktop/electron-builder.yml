@@ -70,6 +70,11 @@ win:
   target:
     - target: nsis
     - target: portable
+  signtoolOptions:
+    signingHashAlgorithms:
+      - sha256
+    rfc3161TimeStampServer: http://timestamp.digicert.com
+    publisherName: Fusion
 
 nsis:
   oneClick: false

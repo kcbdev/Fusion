@@ -27,10 +27,37 @@ describe("electron-builder windows config", () => {
     expect(builderConfig).toMatch(/productName:\s*Fusion/m);
   });
 
+  it("locks windows signing policy without baked certificate paths", async () => {
+    const builderConfig = await readDesktopFile("electron-builder.yml");
+
+    expect(builderConfig).toMatch(/signtoolOptions:\s*[\s\S]*?signingHashAlgorithms:\s*[\s\S]*?-\s*sha256/m);
+    expect(builderConfig).toMatch(/signtoolOptions:\s*[\s\S]*?rfc3161TimeStampServer:\s*http:\/\/timestamp\.digicert\.com/m);
+    expect(builderConfig).toMatch(/signtoolOptions:\s*[\s\S]*?publisherName:\s*Fusion/m);
+    expect(builderConfig).not.toContain("certificateFile:");
+    expect(builderConfig).not.toContain("certificateSubjectName:");
+  });
+
   it("exposes a dedicated dist:win script", async () => {
     const packageJsonRaw = await readDesktopFile("package.json");
     const packageJson = JSON.parse(packageJsonRaw) as { scripts?: Record<string, string> };
 
     expect(packageJson.scripts?.["dist:win"]).toBe("electron-builder --win");
+  });
+});
+
+describe("desktop windows workflow signing guards", () => {
+  it("references signing secrets and verification flow", async () => {
+    const workflow = await readFile(
+      path.resolve(desktopRoot, "../../.github/workflows/desktop-windows.yml"),
+      "utf-8",
+    );
+
+    expect(workflow).toContain("secrets.WINDOWS_CERTIFICATE_BASE64");
+    expect(workflow).toContain("secrets.WINDOWS_CERTIFICATE_PASSWORD");
+    expect(workflow).toContain("CSC_LINK:");
+    expect(workflow).toContain("CSC_KEY_PASSWORD:");
+    expect(workflow).toContain("WINDOWS_CERTIFICATE_BASE64 != ''");
+    expect(workflow).toContain("Get-AuthenticodeSignature");
+    expect(workflow).not.toContain("intentionally deferred");
   });
 });
