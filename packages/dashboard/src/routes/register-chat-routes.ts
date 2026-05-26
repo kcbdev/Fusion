@@ -2,12 +2,14 @@ import { randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
-import type { EnrichedChatSession, ChatAttachment } from "@fusion/core";
+import type { EnrichedChatSession, ChatAttachment, TaskStore, ChatStore } from "@fusion/core";
 import { ApiError, badRequest, internalError, notFound } from "../api-error.js";
 import { CHAT_ALLOWED_MIME_TYPES, CHAT_MAX_ATTACHMENT_SIZE } from "./chat-attachment-config.js";
 import { rateLimit, RATE_LIMITS } from "../rate-limit.js";
 import { writeSSEEvent, type SessionBufferedEvent } from "../sse-buffer.js";
 import type { ApiRoutesContext } from "./types.js";
+import { getOrCreateScopedChatManager, getOrCreateScopedChatStore } from "../chat-project-services.js";
+import { getOrCreateProjectStore } from "../project-store-resolver.js";
 
 interface ChatRouteDeps {
   parseLastEventId: (req: import("express").Request) => number | undefined;
@@ -45,6 +47,22 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
     });
   };
 
+  // ── Per-project ChatManager resolution ──────────────────────────────────────
+
+  async function resolveScopedChatStore(projectId: string): Promise<{ store: TaskStore; chatStore: ChatStore }> {
+    const store = await getOrCreateProjectStore(projectId);
+    const chatStore = getOrCreateScopedChatStore(store);
+    return { store, chatStore };
+  }
+
+  async function resolveScopedChatManager(projectId: string | undefined) {
+    if (!projectId) {
+      if (!options?.chatManager) throw new ApiError(503, "Chat manager not available");
+      return options.chatManager;
+    }
+    const { store, chatStore } = await resolveScopedChatStore(projectId);
+    return getOrCreateScopedChatManager(store, chatStore, options?.pluginRunner);
+  }
   // ── Chat Routes ────────────────────────────────────────────────────────────
 
   /**
@@ -108,7 +126,10 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
         const lastMessages = chatStore.getLastMessageForSessions(sessionIds);
 
         // Batch-gather generating session IDs to avoid N+1 calls
-        const generatingIds = options?.chatManager?.getGeneratingSessionIds?.() ?? [];
+        const resolvedChatManager = projectId
+          ? await resolveScopedChatManager(projectId).catch(() => options?.chatManager)
+          : options?.chatManager;
+        const generatingIds = resolvedChatManager?.getGeneratingSessionIds?.() ?? [];
         const generatingSet = new Set(generatingIds);
 
         for (const session of sessions) {
@@ -457,10 +478,10 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
   router.get("/chat/sessions/:id/stream", rateLimit(RATE_LIMITS.sse), async (req, res) => {
     try {
       const chatStore = options?.chatStore;
-      const chatManager = options?.chatManager;
-      if (!chatStore || !chatManager) {
-        throw internalError("Chat store or manager not available");
+      if (!chatStore) {
+        throw internalError("Chat store not available");
       }
+      const chatManager = await resolveScopedChatManager(req.query.projectId as string | undefined);
 
       const sessionId = String(req.params.id);
       const session = chatStore.getSession(sessionId);
@@ -546,9 +567,8 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
   router.post("/chat/sessions/:id/messages", rateLimit(RATE_LIMITS.sse), async (req, res) => {
     try {
       const chatStore = options?.chatStore;
-      const chatManager = options?.chatManager;
-      if (!chatStore || !chatManager) {
-        throw internalError("Chat store or manager not available");
+      if (!chatStore) {
+        throw internalError("Chat store not available");
       }
 
       const { content, modelProvider, modelId, attachments } = req.body as {
@@ -604,6 +624,9 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
           }
         }
       }
+
+      // Resolve per-project ChatManager (falls back to global when no projectId)
+      const chatManager = await resolveScopedChatManager(req.query.projectId as string | undefined);
 
       // Allocate a generation up front so subscription and sendMessage broadcasts
       // share the same id. This filters out stragglers from a prior, just-cancelled
@@ -689,11 +712,7 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
    */
   router.post("/chat/sessions/:id/cancel", rateLimit(RATE_LIMITS.mutation), async (req, res) => {
     try {
-      const chatManager = options?.chatManager;
-      if (!chatManager) {
-        throw new ApiError(503, "Chat manager not available");
-      }
-
+      const chatManager = await resolveScopedChatManager(req.query.projectId as string | undefined);
       const sessionId = String(req.params.id);
       const success = chatManager.cancelGeneration(sessionId);
       res.json({ success });
