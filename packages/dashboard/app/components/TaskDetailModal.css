@@ -360,8 +360,20 @@
   margin-top: var(--space-lg);
 }
 
+.detail-pr-tab {
+  display: grid;
+  gap: var(--space-lg);
+}
+
+.detail-pr-tab .detail-section,
 .detail-pr-section {
-  margin-top: var(--space-lg);
+  margin-top: 0;
+}
+
+@media (max-width: 768px) {
+  .detail-pr-tab {
+    gap: var(--space-md);
+  }
 }
 
 .detail-provider-icons {

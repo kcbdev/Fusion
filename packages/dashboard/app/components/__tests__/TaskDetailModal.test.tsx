@@ -146,6 +146,8 @@ describe("TaskDetailModal in-review stall diagnostics", () => {
       />,
     );
 
+    await user.click(screen.getByRole("button", { name: "Pull Request" }));
+
     expect(screen.getByText("Merge blocked by a pre-merge check")).toBeInTheDocument();
     expect(screen.getByText("Workflow pre-merge check failed")).toBeInTheDocument();
     expect(screen.getByText("Open the Review tab to see which step is blocking, then fix the failure or override the step.")).toBeInTheDocument();
@@ -157,7 +159,8 @@ describe("TaskDetailModal in-review stall diagnostics", () => {
     expect(highlighted?.textContent).toContain("In-review stall surfaced [merge-blocker]");
   });
 
-  it("renders retry-exhausted badge label with counter", () => {
+  it("renders retry-exhausted badge label with counter", async () => {
+    const user = userEvent.setup();
     render(
       <TaskDetailModal
         task={makeTask({
@@ -178,10 +181,12 @@ describe("TaskDetailModal in-review stall diagnostics", () => {
       />,
     );
 
+    await user.click(screen.getByRole("button", { name: "Pull Request" }));
     expect(screen.getByText("Retries exhausted 3/3")).toBeInTheDocument();
   });
 
-  it("shows no-log copy when no matching stall entry exists", () => {
+  it("shows no-log copy when no matching stall entry exists", async () => {
+    const user = userEvent.setup();
     render(
       <TaskDetailModal
         task={makeTask({
@@ -202,6 +207,7 @@ describe("TaskDetailModal in-review stall diagnostics", () => {
       />,
     );
 
+    await user.click(screen.getByRole("button", { name: "Pull Request" }));
     expect(screen.getByText("No log entry yet")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "View activity log" })).not.toBeInTheDocument();
   });
