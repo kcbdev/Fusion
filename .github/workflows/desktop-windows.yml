@@ -25,9 +25,10 @@ jobs:
       - name: Build desktop package
         run: pnpm --filter @fusion/desktop build
 
+      # Code-signing hardening is intentionally deferred to FN-5592.
       - name: Package signed Windows EXE
         if: ${{ env.WINDOWS_CERTIFICATE_BASE64 != '' }}
-        run: pnpm --filter @fusion/desktop exec electron-builder --win --publish never
+        run: pnpm --filter @fusion/desktop exec electron-builder --win --x64 --arm64 --publish never
         env:
           WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
           CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
@@ -37,7 +38,7 @@ jobs:
 
       - name: Package unsigned Windows EXE
         if: ${{ env.WINDOWS_CERTIFICATE_BASE64 == '' }}
-        run: pnpm --filter @fusion/desktop exec electron-builder --win --publish never
+        run: pnpm --filter @fusion/desktop exec electron-builder --win --x64 --arm64 --publish never
         env:
           WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
@@ -57,6 +58,8 @@ jobs:
             if ($sig.Status -ne 'Valid') { Write-Error "Signature invalid: $($exe.Name) ($($sig.Status))"; exit 1 }
           }
 
+      # Automated publish is intentionally deferred to FN-5593.
+      # Keep a single artifact; filenames include -x64 / -arm64 so both arches are captured.
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:

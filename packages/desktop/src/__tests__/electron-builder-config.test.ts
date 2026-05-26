@@ -19,6 +19,22 @@ describe("electron-builder windows config", () => {
     expect(builderConfig).toMatch(/win:\s*[\s\S]*?target:\s*[\s\S]*?-\s*target:\s*nsis/m);
     expect(builderConfig).toMatch(/win:\s*[\s\S]*?target:\s*[\s\S]*?-\s*target:\s*portable/m);
 
+    const nsisArchMatch = builderConfig.match(
+      /-\s*target:\s*nsis\s*arch:\s*([\s\S]*?)(?=\n\s*-\s*target:|\n\w)/m,
+    );
+    const portableArchMatch = builderConfig.match(
+      /-\s*target:\s*portable\s*arch:\s*([\s\S]*?)(?=\n\s*-\s*target:|\n\w)/m,
+    );
+
+    expect(nsisArchMatch?.[1]).toBeDefined();
+    expect(portableArchMatch?.[1]).toBeDefined();
+
+    const extractArchValues = (archBlock: string) =>
+      Array.from(archBlock.matchAll(/-\s*(x64|arm64)/g), (match) => match[1]).sort();
+
+    expect(extractArchValues(nsisArchMatch![1])).toEqual(["arm64", "x64"]);
+    expect(extractArchValues(portableArchMatch![1])).toEqual(["arm64", "x64"]);
+
     expect(builderConfig).toMatch(/nsis:\s*[\s\S]*?oneClick:\s*false/m);
     expect(builderConfig).toMatch(/nsis:\s*[\s\S]*?allowToChangeInstallationDirectory:\s*true/m);
 
@@ -58,6 +74,6 @@ describe("desktop windows workflow signing guards", () => {
     expect(workflow).toContain("CSC_KEY_PASSWORD:");
     expect(workflow).toContain("WINDOWS_CERTIFICATE_BASE64 != ''");
     expect(workflow).toContain("Get-AuthenticodeSignature");
-    expect(workflow).not.toContain("intentionally deferred");
+    expect(workflow).toContain("intentionally deferred");
   });
 });

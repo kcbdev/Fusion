@@ -349,11 +349,11 @@ Desktop packaging is configured in `electron-builder.yml`.
 
 - Output directory: `packages/desktop/dist-electron`
 - Targets: macOS (`dmg`, `zip`), Windows (`nsis`, `portable`), Linux (`AppImage`, `deb`, `tar.gz`)
-- Windows artifacts: `Fusion-<version>-win-<arch>.exe` (NSIS installer) and portable `.exe` in `packages/desktop/dist-electron/`
-- Binary GitHub Release workflow (`.github/workflows/release.yml`) now attaches Windows desktop artifacts: `Fusion-<version>-win-x64.exe` outputs (NSIS + portable), matching `.exe.sha256` sidecars, and `.blockmap` files.
+- Windows artifacts: `Fusion-<version>-win-x64.exe` and `Fusion-<version>-win-arm64.exe` (both NSIS + portable variants) in `packages/desktop/dist-electron/`
+- Binary GitHub Release workflow (`.github/workflows/release.yml`) now attaches Windows desktop artifacts: x64 + arm64 outputs (NSIS + portable), matching `.exe.sha256` sidecars, and `.blockmap` files.
 - Tag-less release rehearsal workflow (`.github/workflows/test-release.yml`) mirrors that artifact collection path without publishing a real GitHub Release.
-- Isolated manual Windows build path: `.github/workflows/desktop-windows.yml` (`workflow_dispatch` on `windows-latest`).
-- Windows `.exe` packaging requires a Windows host/runner for this task (no Wine-based cross-compilation path)
+- Isolated manual Windows build path: `.github/workflows/desktop-windows.yml` (`workflow_dispatch` on `windows-latest`) runs `electron-builder --win --x64 --arm64 --publish never`.
+- ARM64 artifacts are cross-built on the `windows-latest` x64 runner; execution/validation still requires a Windows ARM64 device or emulator.
 - Deep link protocol: `fusion://`
 - Publish provider: GitHub (`gsxdsm/fusion`)
 
