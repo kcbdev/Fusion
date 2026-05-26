@@ -84,8 +84,6 @@ interface AppModalsProps {
   onReopenOnboarding?: () => void;
   /** Optional callback to open mailbox approvals from Settings. */
   onOpenApprovals?: (approvalId?: string) => void;
-  /** Optional callback to navigate from Settings to Secrets view. */
-  onNavigateToSecrets?: () => void;
 }
 
 export function AppModals({
@@ -105,7 +103,6 @@ export function AppModals({
   onSettingsClose,
   onReopenOnboarding,
   onOpenApprovals,
-  onNavigateToSecrets,
 }: AppModalsProps) {
   const [firstCreatedTask, setFirstCreatedTask] = useState<Task | null>(null);
   const detailTask = modalManager.detailTask
@@ -208,7 +205,6 @@ export function AppModals({
               onDashboardFontScaleChange={settings.setDashboardFontScalePct}
               onReopenOnboarding={onReopenOnboarding}
               onOpenApprovals={onOpenApprovals}
-              onNavigateToSecrets={onNavigateToSecrets}
             />
           </Suspense>
         </ModalErrorBoundary>

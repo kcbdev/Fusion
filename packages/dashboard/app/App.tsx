@@ -1995,10 +1995,6 @@ function AppInner() {
         onSettingsClose={handleSettingsClose}
         onReopenOnboarding={reopenOnboardingWithNav}
         onOpenApprovals={(_approvalId) => handleTaskViewChange("mailbox")}
-        onNavigateToSecrets={() => {
-          modalManager.closeSettings();
-          handleChangeTaskView("secrets");
-        }}
       />
       <AuthTokenRecoveryDialog open={authTokenRecoveryOpen} />
             {shellApi && (

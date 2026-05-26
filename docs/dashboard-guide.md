@@ -1006,6 +1006,10 @@ Breakpoints: 768px (primary mobile), 1024px (tablet `min-width: 769px and max-wi
 
 **Safe area:** `max(var(--space-md), env(safe-area-inset-left, 0px))` for notch-aware horizontal padding.
 
+### Secrets management in Settings
+
+Manage project and global secrets directly inside **Settings → Project → Secrets**. This section embeds the existing Secrets UI in the settings content panel so you no longer need a footer "Manage secrets" link to leave the modal.
+
 ### Lazy-Loaded Heavy Views
 
 These 19 views are lazy-loaded via `React.lazy()` with `<Suspense fallback={null}>`. `prefetchLazyViews()` warms chunks once on mount via `requestIdleCallback`. **Do not make these eager.**

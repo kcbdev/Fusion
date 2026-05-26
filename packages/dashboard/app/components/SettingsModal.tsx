@@ -44,6 +44,7 @@ import { ProviderIcon } from "./ProviderIcon";
 import { CustomProvidersSection } from "./CustomProvidersSection";
 import { AgentPermissionPolicyEditor } from "./AgentPermissionPolicyEditor";
 import { AgentProvisioningPolicyEditor } from "./AgentProvisioningPolicyEditor";
+import { SecretsView } from "./SecretsView";
 import { applyPresetToSelection, generateUniquePresetId } from "../utils/modelPresets";
 import { copyTextToClipboard } from "../utils/copyToClipboard";
 import { appendTokenQuery } from "../auth";
@@ -255,6 +256,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   // Project group (specific to this project)
   { id: "__project_header", label: "Project", scope: undefined, isGroupHeader: true },
   { id: "general", label: "Project General", scope: "project" },
+  { id: "secrets", label: "Secrets", scope: "project" },
   { id: "project-models", label: "Project Models", scope: "project" },
   { id: "scheduling", label: "Scheduling", scope: "project" },
   { id: "scheduled-evals", label: "Scheduled Evals", scope: "project" },
@@ -395,8 +397,6 @@ interface SettingsModalProps {
   onReopenOnboarding?: () => void;
   /** Optional callback to open approvals/mailbox view. */
   onOpenApprovals?: (approvalId?: string) => void;
-  /** Optional callback to navigate from settings to Secrets view. */
-  onNavigateToSecrets?: () => void;
 }
 
 export function SettingsModal({
@@ -412,7 +412,6 @@ export function SettingsModal({
   onDashboardFontScaleChange,
   onReopenOnboarding,
   onOpenApprovals,
-  onNavigateToSecrets,
 }: SettingsModalProps) {
   const { confirm } = useConfirm();
   const worktrunkInstall = useWorktrunkInstallStatus(projectId);
@@ -3136,6 +3135,15 @@ export function SettingsModal({
           </>
         );
       }
+
+      case "secrets":
+        return (
+          <>
+            {renderScopeBanner()}
+            <h4 className="settings-section-heading">Secrets</h4>
+            <SecretsView addToast={addToast} />
+          </>
+        );
 
       case "project-models": {
         const presets = form.modelPresets || [];
@@ -7521,16 +7529,6 @@ export function SettingsModal({
         )}
         <div className="modal-actions">
           <div className="modal-actions-left">
-            <a
-              href="?view=secrets"
-              className="settings-inline-link"
-              onClick={(event) => {
-                event.preventDefault();
-                onNavigateToSecrets?.();
-              }}
-            >
-              Manage secrets
-            </a>
             <button
               type="button"
               className="btn btn-sm"
