@@ -199,8 +199,30 @@ describe("mission commands", () => {
         expect(mockMissionStore.createMission).toHaveBeenCalledWith({
           title: "Test Mission",
           description: "Test description",
+          baseBranch: undefined,
         });
         expect(consoleCapture.logs).toContain("  ✓ Created M-001: Test Mission");
+      } finally {
+        consoleCapture.restore();
+      }
+    });
+
+    it("passes baseBranch when provided", async () => {
+      const mockMissionStore = createMockMissionStore();
+      vi.mocked(getStore).mockResolvedValue({
+        getMissionStore: () => mockMissionStore,
+      } as any);
+
+      const consoleCapture = captureConsole();
+
+      try {
+        await runMissionCreate("Test Mission", "Test description", undefined, "develop");
+
+        expect(mockMissionStore.createMission).toHaveBeenCalledWith({
+          title: "Test Mission",
+          description: "Test description",
+          baseBranch: "develop",
+        });
       } finally {
         consoleCapture.restore();
       }
@@ -220,6 +242,7 @@ describe("mission commands", () => {
         expect(mockMissionStore.createMission).toHaveBeenCalledWith({
           title: "Test Mission",
           description: undefined,
+          baseBranch: undefined,
         });
       } finally {
         consoleCapture.restore();
@@ -250,6 +273,7 @@ describe("mission commands", () => {
         expect(mockMissionStore.createMission).toHaveBeenCalledWith({
           title: "Interactive Title",
           description: "Interactive Description",
+          baseBranch: undefined,
         });
       } finally {
         consoleCapture.restore();

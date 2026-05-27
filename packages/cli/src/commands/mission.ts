@@ -67,7 +67,12 @@ async function promptForTitleAndDescription(
  * Create a new mission with optional title and description.
  * If arguments are omitted, prompts interactively.
  */
-export async function runMissionCreate(titleArg?: string, descriptionArg?: string, projectName?: string) {
+export async function runMissionCreate(
+  titleArg?: string,
+  descriptionArg?: string,
+  projectName?: string,
+  baseBranch?: string,
+) {
   const store = await getStore({ project: projectName });
   const missionStore = store.getMissionStore();
 
@@ -82,6 +87,7 @@ export async function runMissionCreate(titleArg?: string, descriptionArg?: strin
   const mission = missionStore.createMission({
     title,
     description,
+    baseBranch: baseBranch?.trim() || undefined,
   });
 
   console.log();

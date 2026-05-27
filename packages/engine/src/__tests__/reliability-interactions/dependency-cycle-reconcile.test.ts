@@ -124,4 +124,121 @@ describeIfGit("reliability interactions: dependency-cycle reconciliation", () =>
 
     await expect(fx.store.updateTask(child.id, { dependencies: [umbrella.id] })).rejects.toBeInstanceOf(DependencyCycleError);
   });
+
+  it("leaves ambiguous long cycles unchanged and emits one unrepaired event with closed cyclePath", async () => {
+    const fx = await makeReliabilityFixture({ taskId: "FN-5432-LONG" });
+    fixtures.push(fx);
+
+    const a = await fx.store.createTask({ id: "FN-5432-A", title: "Task A", description: "A" } as any);
+    const b = await fx.store.createTask({ id: "FN-5432-B", title: "Task B", description: "B" } as any);
+    const c = await fx.store.createTask({ id: "FN-5432-C", title: "Task C", description: "C" } as any);
+    const d = await fx.store.createTask({ id: "FN-5432-D", title: "Task D", description: "D" } as any);
+
+    const db = fx.store.getDatabase();
+    db.prepare("UPDATE tasks SET dependencies = ? WHERE id = ?").run(JSON.stringify([b.id]), a.id);
+    db.prepare("UPDATE tasks SET dependencies = ? WHERE id = ?").run(JSON.stringify([c.id]), b.id);
+    db.prepare("UPDATE tasks SET dependencies = ? WHERE id = ?").run(JSON.stringify([d.id]), c.id);
+    db.prepare("UPDATE tasks SET dependencies = ? WHERE id = ?").run(JSON.stringify([a.id]), d.id);
+
+    const recovered = await fx.manager.reconcileDependencyCycles();
+    expect(recovered).toBe(0);
+
+    expect((await fx.store.getTask(a.id))?.dependencies).toEqual([b.id]);
+    expect((await fx.store.getTask(b.id))?.dependencies).toEqual([c.id]);
+    expect((await fx.store.getTask(c.id))?.dependencies).toEqual([d.id]);
+    expect((await fx.store.getTask(d.id))?.dependencies).toEqual([a.id]);
+
+    const repaired = fx.store.getRunAuditEvents({ domain: "database", mutationType: "task:auto-reconciled-dependency-cycle" });
+    expect(repaired).toHaveLength(0);
+
+    const unrepaired = fx.store.getRunAuditEvents({ domain: "database", mutationType: "task:dependency-cycle-unrepaired" });
+    expect(unrepaired).toHaveLength(1);
+    const cyclePath = unrepaired[0]?.metadata?.cyclePath as string[];
+    expect(Array.isArray(cyclePath)).toBe(true);
+    expect(cyclePath.length).toBe(5);
+    expect(cyclePath[0]).toBe(cyclePath[cyclePath.length - 1]);
+    expect(new Set(cyclePath)).toEqual(new Set([a.id, b.id, c.id, d.id]));
+  });
+
+  it("keeps write-time cycle guard correct during ambiguous cycle sweep", async () => {
+    const fx = await makeReliabilityFixture({ taskId: "FN-5432-RACE" });
+    fixtures.push(fx);
+
+    const a = await fx.store.createTask({ id: "FN-5432-RA", title: "Task A", description: "A" } as any);
+    const b = await fx.store.createTask({ id: "FN-5432-RB", title: "Task B", description: "B" } as any);
+    const c = await fx.store.createTask({ id: "FN-5432-RC", title: "Task C", description: "C" } as any);
+    const d = await fx.store.createTask({ id: "FN-5432-RD", title: "Task D", description: "D" } as any);
+
+    const db = fx.store.getDatabase();
+    db.prepare("UPDATE tasks SET dependencies = ? WHERE id = ?").run(JSON.stringify([b.id]), a.id);
+    db.prepare("UPDATE tasks SET dependencies = ? WHERE id = ?").run(JSON.stringify([c.id]), b.id);
+    db.prepare("UPDATE tasks SET dependencies = ? WHERE id = ?").run(JSON.stringify([d.id]), c.id);
+    db.prepare("UPDATE tasks SET dependencies = ? WHERE id = ?").run(JSON.stringify([a.id]), d.id);
+
+    const sweepPromise = fx.manager.reconcileDependencyCycles();
+    const x = await fx.store.createTask({ id: "FN-5432-RX", title: "Task X", description: "X", dependencies: [a.id] } as any);
+    const recovered = await sweepPromise;
+
+    expect(recovered).toBe(0);
+    await expect(fx.store.updateTask(x.id, { dependencies: [b.id, a.id] })).resolves.toBeTruthy();
+    await expect(fx.store.updateTask(a.id, { dependencies: [x.id] })).rejects.toBeInstanceOf(DependencyCycleError);
+  });
+
+  it("reconciles self-defeating edges before cycle handling without contradictory audit outcomes", async () => {
+    const fx = await makeReliabilityFixture({ taskId: "FN-5432-COMP2" });
+    fixtures.push(fx);
+
+    const p = await fx.store.createTask({ title: "Task P", description: "P" } as any);
+    const q = await fx.store.createTask({ title: "Task Q", description: "Q", dependencies: [p.id] } as any);
+
+    const db = fx.store.getDatabase();
+    db.prepare("UPDATE tasks SET title = ?, dependencies = ? WHERE id = ?").run(`Finalize ${p.id}: now`, JSON.stringify([p.id]), p.id);
+
+    const selfDefRecovered = await fx.manager.reconcileSelfDefeatingDependencies();
+    expect(selfDefRecovered).toBe(1);
+    expect((await fx.store.getTask(p.id))?.dependencies).toEqual([]);
+
+    db.prepare("UPDATE tasks SET dependencies = ? WHERE id = ?").run(JSON.stringify([q.id]), p.id);
+    const cycleRecovered = await fx.manager.reconcileDependencyCycles();
+    expect(cycleRecovered).toBe(0);
+
+    const selfDefAudit = fx.store.getRunAuditEvents({ taskId: p.id, domain: "database", mutationType: "task:auto-reconciled-self-defeating-dep" });
+    const unrepairedP = fx.store.getRunAuditEvents({ taskId: p.id, domain: "database", mutationType: "task:dependency-cycle-unrepaired" });
+    expect(selfDefAudit).toHaveLength(1);
+    expect(unrepairedP).toHaveLength(1);
+    const unrepairedPath = unrepairedP[0]?.metadata?.cyclePath as string[];
+    expect(unrepairedPath).toEqual([p.id, q.id, p.id]);
+
+    const cycleDetected = fx.store.getRunAuditEvents({ taskId: p.id, domain: "database", mutationType: "task:dependency-cycle-detected" });
+    expect(cycleDetected).toHaveLength(1);
+  });
+
+  it("emits closed and task-anchored cyclePath metadata for unrepaired cycle events", async () => {
+    const fx = await makeReliabilityFixture({ taskId: "FN-5432-SHAPE" });
+    fixtures.push(fx);
+
+    const a = await fx.store.createTask({ id: "FN-5432-SA", title: "Task A", description: "A" } as any);
+    const b = await fx.store.createTask({ id: "FN-5432-SB", title: "Task B", description: "B" } as any);
+    const c = await fx.store.createTask({ id: "FN-5432-SC", title: "Task C", description: "C" } as any);
+    const d = await fx.store.createTask({ id: "FN-5432-SD", title: "Task D", description: "D" } as any);
+
+    const db = fx.store.getDatabase();
+    db.prepare("UPDATE tasks SET dependencies = ? WHERE id = ?").run(JSON.stringify([b.id]), a.id);
+    db.prepare("UPDATE tasks SET dependencies = ? WHERE id = ?").run(JSON.stringify([c.id]), b.id);
+    db.prepare("UPDATE tasks SET dependencies = ? WHERE id = ?").run(JSON.stringify([d.id]), c.id);
+    db.prepare("UPDATE tasks SET dependencies = ? WHERE id = ?").run(JSON.stringify([a.id]), d.id);
+
+    await fx.manager.reconcileDependencyCycles();
+
+    const unrepaired = fx.store.getRunAuditEvents({ domain: "database", mutationType: "task:dependency-cycle-unrepaired" });
+    expect(unrepaired.length).toBeGreaterThan(0);
+
+    for (const event of unrepaired) {
+      const cyclePath = event.metadata?.cyclePath as string[];
+      expect(Array.isArray(cyclePath)).toBe(true);
+      expect(cyclePath.length).toBeGreaterThan(0);
+      expect(cyclePath[0]).toBe(cyclePath[cyclePath.length - 1]);
+      expect(cyclePath).toContain(event.taskId);
+    }
+  });
 });

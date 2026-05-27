@@ -118,11 +118,12 @@ Unarchive an archived task (move from archived → done). Restores the task to t
 
 ### fn_task_delete
 
-Soft-delete a task from active Fusion board views. The task row and artifacts are preserved, and the task ID remains reserved for potential operator recovery.
+Soft-delete a task from active Fusion board views. The task row and artifacts are preserved; optional allowResurrection marks the ID for intentional recreation.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `id` | string | ✓ | Task ID to delete (e.g. FN-001) |
+| `allowResurrection` | boolean | — | When true, mark this tombstone as explicitly reusable for future recreation. |
 
 ### fn_task_plan
 
@@ -131,6 +132,7 @@ Create a task via AI-guided planning mode — interactive conversation to refine
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `description` | string | — | Initial plan description (optional) — the AI will ask clarifying questions if not provided |
+| `baseBranch` | string | — | Optional base branch for the task created from this planning session |
 
 ## GitHub Tools
 
@@ -176,6 +178,7 @@ Create a new mission — a high-level objective that can span multiple milestone
 | `title` | string | ✓ | Mission title — brief but descriptive |
 | `description` | string | — | Detailed mission objectives and context |
 | `autoAdvance` | boolean | — | Automatically activate the next pending slice when the current slice completes |
+| `baseBranch` | string | — | Optional integration base branch for tasks triaged from this mission |
 
 ### fn_mission_list
 

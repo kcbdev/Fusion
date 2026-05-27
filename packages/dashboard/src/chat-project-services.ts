@@ -1,7 +1,6 @@
 import { AgentStore, ChatStore, type MessageStore, type TaskStore } from "@fusion/core";
 import type { ProjectEngineManager } from "@fusion/engine";
 import { ChatManager } from "./chat.js";
-import { getOrCreateProjectStore } from "./project-store-resolver.js";
 
 const scopedChatStoreCache = new Map<string, ChatStore>();
 
@@ -38,20 +37,29 @@ export async function resolveProjectChatContext(options: {
     };
   }
 
-  const engine = engineManager?.getEngine(projectId);
-  try {
-    const scopedStore = engine?.getTaskStore() ?? await getOrCreateProjectStore(projectId);
-    const engineChatStore = engine?.getChatStore?.();
-    return {
-      store: scopedStore,
-      chatStore: getOrCreateScopedChatStore(scopedStore, engineChatStore),
-    };
-  } catch {
-    return {
-      store: defaultStore,
-      chatStore: getOrCreateScopedChatStore(defaultStore, defaultChatStore),
-    };
+  // Only use engine path when an engine is actually found for this project.
+  if (engineManager) {
+    const engine = engineManager.getEngine(projectId);
+    if (engine) {
+      try {
+        const scopedStore = engine.getTaskStore?.() ?? defaultStore;
+        const engineChatStore = engine.getChatStore?.();
+        return {
+          store: scopedStore,
+          chatStore: getOrCreateScopedChatStore(scopedStore, engineChatStore),
+        };
+      } catch {
+        // engine's store not accessible — fall through to default
+      }
+    }
   }
+
+  // No engine for this project — use the default store.
+  // Route handlers apply projectId filtering at the query level.
+  return {
+    store: defaultStore,
+    chatStore: getOrCreateScopedChatStore(defaultStore, defaultChatStore),
+  };
 }
 
 export async function createProjectScopedChatManager(options: {

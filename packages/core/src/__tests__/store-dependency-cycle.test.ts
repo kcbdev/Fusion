@@ -27,6 +27,14 @@ describe("detectDependencyCycle", () => {
     expect(detectDependencyCycle("A", ["B", "C"], lookup({ B: ["D"], C: ["D"], D: [] }))).toBeNull();
   });
 
+  it("detects 4-node cycle", () => {
+    expect(detectDependencyCycle("FN-A", ["FN-B"], lookup({
+      "FN-B": ["FN-C"],
+      "FN-C": ["FN-D"],
+      "FN-D": ["FN-A"],
+    }))).toEqual(["FN-A", "FN-B", "FN-C", "FN-D", "FN-A"]);
+  });
+
   it("ignores missing dependencies", () => {
     expect(detectDependencyCycle("A", ["MISSING"], lookup({}))).toBeNull();
   });
@@ -124,7 +132,76 @@ describe("TaskStore dependency cycle guard", () => {
     expect(metadata.source).toBe("updateTask");
   });
 
-  it("rejects indirect cycle via existing dependency chain", async () => {
+  it("rejects self-loop introduced via update", async () => {
+    const store = harness.store();
+    const a = await store.createTask({ title: "A", description: "A" });
+
+    let error: unknown;
+    try {
+      await store.updateTask(a.id, { dependencies: [a.id] });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(DependencyCycleError);
+    expect(error).toMatchObject({
+      name: "DependencyCycleError",
+      taskId: a.id,
+      cyclePath: [a.id, a.id],
+    });
+    expect((error as DependencyCycleError).message).toContain(`${a.id} → ${a.id}`);
+
+    const refreshedA = await store.getTask(a.id);
+    expect(refreshedA.dependencies).toEqual([]);
+
+    const rows = (store as any).db
+      .prepare("SELECT metadata FROM runAuditEvents WHERE taskId = ? AND mutationType = ?")
+      .all(a.id, "task:dependency-cycle-rejected") as Array<{ metadata: string | { source?: string } }>;
+    expect(rows).toHaveLength(1);
+    const metadata = typeof rows[0].metadata === "string" ? JSON.parse(rows[0].metadata) : rows[0].metadata;
+    expect(metadata.source).toBe("updateTask");
+  });
+
+  it("rejects createTaskWithReservedId self-loop with typed cycle contract", async () => {
+    const store = harness.store();
+
+    let error: unknown;
+    try {
+      await store.createTaskWithReservedId(
+        { title: "self", description: "self", dependencies: ["FN-SELF-1"] },
+        { taskId: "FN-SELF-1" },
+      );
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(DependencyCycleError);
+    expect(error).toMatchObject({
+      taskId: "FN-SELF-1",
+      cyclePath: ["FN-SELF-1", "FN-SELF-1"],
+    });
+
+    const rows = (store as any).db
+      .prepare("SELECT metadata FROM runAuditEvents WHERE taskId = ? AND mutationType = ?")
+      .all("FN-SELF-1", "task:dependency-cycle-rejected") as Array<{ metadata: string | { source?: string } }>;
+    expect(rows).toHaveLength(1);
+    const metadata = typeof rows[0].metadata === "string" ? JSON.parse(rows[0].metadata) : rows[0].metadata;
+    expect(metadata.source).toBe("createTaskWithReservedId");
+
+    await expect(store.getTask("FN-SELF-1")).rejects.toThrow("Task FN-SELF-1 not found");
+  });
+
+  it("prioritizes self-edge cycle path when mixed with other dependencies", async () => {
+    const store = harness.store();
+    const a = await store.createTask({ title: "A", description: "A" });
+
+    await expect(store.updateTask(a.id, { dependencies: [a.id, "FN-NONEXISTENT"] })).rejects.toMatchObject({
+      taskId: a.id,
+      cyclePath: [a.id, a.id],
+    });
+  });
+
+  it("rejects incremental update that closes a loop and preserves state", async () => {
     const store = harness.store();
     const a = await store.createTask({ title: "A", description: "A" });
     const b = await store.createTask({ title: "B", description: "B", dependencies: [a.id] });
@@ -133,6 +210,56 @@ describe("TaskStore dependency cycle guard", () => {
     await expect(store.updateTask(a.id, { dependencies: [c.id] })).rejects.toMatchObject({
       cyclePath: [a.id, c.id, b.id, a.id],
     });
+
+    const refreshedA = await store.getTask(a.id);
+    expect(refreshedA.dependencies).toEqual([]);
+
+    const rows = (store as any).db
+      .prepare("SELECT metadata FROM runAuditEvents WHERE taskId = ? AND mutationType = ?")
+      .all(a.id, "task:dependency-cycle-rejected") as Array<{ metadata: string | { source?: string } }>;
+    expect(rows).toHaveLength(1);
+    const metadata = typeof rows[0].metadata === "string" ? JSON.parse(rows[0].metadata) : rows[0].metadata;
+    expect(metadata.source).toBe("updateTask");
+  });
+
+  it("moveTask transitions do not mutate dependencies or emit cycle rejection", async () => {
+    const store = harness.store();
+    const a = await store.createTask({ title: "A", description: "A" });
+    const b = await store.createTask({ title: "B", description: "B", dependencies: [a.id] });
+
+    const beforeRows = (store as any).db
+      .prepare("SELECT COUNT(*) as count FROM runAuditEvents WHERE domain = ? AND mutationType = ?")
+      .get("database", "task:dependency-cycle-rejected") as { count: number };
+
+    await store.moveTask(b.id, "todo");
+    await store.moveTask(b.id, "in-progress");
+    await store.moveTask(a.id, "todo");
+    await store.moveTask(a.id, "in-progress");
+    await store.moveTask(a.id, "done");
+
+    const movedA = await store.getTask(a.id);
+    const movedB = await store.getTask(b.id);
+    expect(movedA.dependencies).toEqual([]);
+    expect(movedB.dependencies).toEqual([a.id]);
+
+    const afterRows = (store as any).db
+      .prepare("SELECT COUNT(*) as count FROM runAuditEvents WHERE domain = ? AND mutationType = ?")
+      .get("database", "task:dependency-cycle-rejected") as { count: number };
+    expect(afterRows.count).toBe(beforeRows.count);
+
+    await expect(store.updateTask(a.id, { dependencies: [b.id] })).rejects.toBeInstanceOf(DependencyCycleError);
+  });
+
+  it("DependencyCycleError includes IDs and arrow-rendered path", () => {
+    const error = new DependencyCycleError("FN-A", ["FN-A", "FN-B", "FN-A"]);
+
+    expect(error.name).toBe("DependencyCycleError");
+    expect(error).toBeInstanceOf(Error);
+    expect(error.taskId).toBe("FN-A");
+    expect(error.cyclePath).toEqual(["FN-A", "FN-B", "FN-A"]);
+    expect(error.message).toContain("FN-A");
+    expect(error.message).toContain("FN-B");
+    expect(error.message).toContain("FN-A → FN-B → FN-A");
   });
 
   it("accepts non-cyclic updates", async () => {

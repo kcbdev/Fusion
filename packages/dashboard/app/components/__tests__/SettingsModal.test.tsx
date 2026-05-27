@@ -348,13 +348,22 @@ describe("SettingsModal", () => {
     expect(await screen.findByTestId("pi-extensions-manager")).toBeInTheDocument();
   });
 
-  it("fires onNavigateToSecrets when Manage secrets is clicked", async () => {
-    const onNavigateToSecrets = vi.fn();
-    renderModal({ onNavigateToSecrets });
+  it("shows a Secrets entry in the settings nav", async () => {
+    renderModal();
     await waitForSettingsModalReady();
 
-    await userEvent.click(screen.getByRole("link", { name: "Manage secrets" }));
-    expect(onNavigateToSecrets).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Secrets" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Manage secrets" })).not.toBeInTheDocument();
+  });
+
+  it("renders the SecretsView when the Secrets section is selected", async () => {
+    renderModal();
+    await waitForSettingsModalReady();
+
+    await userEvent.click(screen.getByRole("button", { name: "Secrets" }));
+
+    expect(await screen.findByRole("button", { name: "Add Secret" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Manage secrets" })).not.toBeInTheDocument();
   });
 
   it("shows direct merge commit routing only for direct merges", async () => {
@@ -549,6 +558,28 @@ describe("SettingsModal", () => {
       pendingApprovalId: undefined,
       error: undefined,
     });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/secrets")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ secrets: [] }),
+        };
+      }
+      if (url.endsWith("/api/secrets/sync-passphrase")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ configured: false }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ stargazers_count: 0 }),
+      };
+    }));
     mockFetchDashboardHealth.mockResolvedValue({ status: "ok", version: "1.2.3", uptime: 123 });
     mockCheckForUpdates.mockResolvedValue(undefined);
     mockFetchRemoteSettings.mockResolvedValue({
@@ -961,7 +992,7 @@ describe("SettingsModal", () => {
       Object.defineProperty(window, "matchMedia", {
         writable: true,
         value: vi.fn().mockImplementation((query: string) => ({
-          matches: query === "(max-width: 768px)",
+          matches: query === "(max-width: 768px)" || query === "(max-width: 768px), (max-height: 480px)",
           media: query,
           onchange: null,
           addEventListener: vi.fn(),
@@ -1930,7 +1961,7 @@ describe("SettingsModal", () => {
       Object.defineProperty(window, "matchMedia", {
         writable: true,
         value: vi.fn().mockImplementation((query: string) => ({
-          matches: query === "(max-width: 768px)" || query === "(pointer: coarse)",
+          matches: query === "(max-width: 768px)" || query === "(max-width: 768px), (max-height: 480px)" || query === "(pointer: coarse)",
           media: query,
           onchange: null,
           addEventListener: vi.fn(),

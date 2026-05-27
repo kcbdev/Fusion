@@ -340,6 +340,8 @@ Tray icons are generated from `packages/dashboard/app/public/logo.svg`.
 - `pnpm --filter @fusion/desktop generate:icons` — regenerate tray icon PNG assets from the dashboard logo SVG
 - `pnpm --filter @fusion/desktop pack` — generate unpacked artifacts via electron-builder (`--dir`)
 - `pnpm --filter @fusion/desktop dist` — generate installable desktop artifacts via electron-builder
+- `pnpm --filter @fusion/desktop dist:win` — generate Windows installable artifacts (`--win`)
+- `pnpm dist:desktop:win` — workspace alias to build desktop assets then run Windows packaging
 
 ## Packaging
 
@@ -347,10 +349,28 @@ Desktop packaging is configured in `electron-builder.yml`.
 
 - Output directory: `packages/desktop/dist-electron`
 - Targets: macOS (`dmg`, `zip`), Windows (`nsis`, `portable`), Linux (`AppImage`, `deb`, `tar.gz`)
+- Windows artifacts: `Fusion-<version>-win-x64.exe` and `Fusion-<version>-win-arm64.exe` (both NSIS + portable variants) in `packages/desktop/dist-electron/`
+- Binary GitHub Release workflow (`.github/workflows/release.yml`) now attaches Windows desktop artifacts: x64 + arm64 outputs (NSIS + portable), matching `.exe.sha256` sidecars, and `.blockmap` files.
+- Tag-less release rehearsal workflow (`.github/workflows/test-release.yml`) mirrors that artifact collection path without publishing a real GitHub Release.
+- Isolated manual Windows build path: `.github/workflows/desktop-windows.yml` (`workflow_dispatch` on `windows-latest`) runs `electron-builder --win --x64 --arm64 --publish never`.
+- ARM64 artifacts are cross-built on the `windows-latest` x64 runner; execution/validation still requires a Windows ARM64 device or emulator.
 - Deep link protocol: `fusion://`
 - Publish provider: GitHub (`gsxdsm/fusion`)
 
 Run `pnpm --filter @fusion/desktop build` before `pack`/`dist` to ensure `dist/` assets are up to date.
+
+### Windows code-signing
+
+The Windows desktop workflow (`.github/workflows/desktop-windows.yml`) supports conditional Authenticode signing for NSIS + portable EXE outputs.
+
+- Required CI secrets:
+  - `WINDOWS_CERTIFICATE_BASE64` (base64-encoded `.pfx`)
+  - `WINDOWS_CERTIFICATE_PASSWORD`
+- Signing is handled directly by electron-builder using `CSC_LINK` and `CSC_KEY_PASSWORD`; no separate `signtool` wrapper script is invoked in this workflow.
+- If signing secrets are not available (for example, forked PR contexts), the workflow still succeeds and uploads unsigned artifacts; the `Verify signed artifacts` step is skipped.
+- Release-attached Windows `.exe` artifacts are currently unsigned in the binary publishing pipeline; code-signing automation for release workflows is tracked by FN-5592.
+- Signing policy is pinned in `electron-builder.yml` (`sha256` digest + `http://timestamp.digicert.com`) to match `scripts/sign-windows.ps1` used by CLI binaries.
+- Local signing is opt-in: developers who need signed local Windows builds must set `CSC_LINK`/`CSC_KEY_PASSWORD` in their own environment before invoking electron-builder.
 
 ## Environment
 

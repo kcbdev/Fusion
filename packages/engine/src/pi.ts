@@ -313,7 +313,32 @@ export async function promptSessionAndCheck(session: AgentSession, prompt: strin
   }
 }
 
+// Re-entry guard for the top-level dispatcher below. When `session.promptWithFallback`
+// is attached (e.g. by `createFnAgent` at pi.ts:2012, where the rich model-swap +
+// `isRetryableModelSelectionError` path lives), we want top-level callers like
+// triage/executor to flow through it so missing-API-key, 401/403, rate-limit, etc.
+// trigger the configured `fallbackModel`. The WeakSet prevents infinite recursion
+// in case a session-attached `promptWithFallback` ever calls back into the
+// top-level export with the same session.
+const promptWithFallbackInFlight = new WeakSet<object>();
+
 export async function promptWithFallback(session: AgentSession, prompt: string, options?: unknown): Promise<void> {
+  const sessionWithDispatch = session as AgentSession & {
+    promptWithFallback?: (prompt: string, options?: unknown) => Promise<void>;
+  };
+  if (
+    typeof sessionWithDispatch.promptWithFallback === "function" &&
+    !promptWithFallbackInFlight.has(session as unknown as object)
+  ) {
+    promptWithFallbackInFlight.add(session as unknown as object);
+    try {
+      await sessionWithDispatch.promptWithFallback(prompt, options);
+      return;
+    } finally {
+      promptWithFallbackInFlight.delete(session as unknown as object);
+    }
+  }
+
   piLog.log(`promptWithFallback: calling session.prompt (prompt length=${prompt.length})`);
   try {
     await promptSessionAndCheck(session, prompt, options);

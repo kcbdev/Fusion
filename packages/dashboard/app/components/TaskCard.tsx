@@ -765,8 +765,11 @@ function TaskCardComponent({
     const isQuickTap = touchDuration < TOUCH_TAP_MAX_DURATION;
     const isStationary = !hasTouchMovedRef.current;
     
-    // Only open modal for quick taps that didn't move significantly
+    // Only open modal for quick taps that didn't move significantly.
+    // Prevent default here to suppress Android compatibility mouse events
+    // (mousedown/mouseup/click) that would otherwise hit a newly-mounted overlay.
     if (isQuickTap && isStationary) {
+      e.preventDefault();
       touchOpenHandledRef.current = true;
       void handleClick();
     }

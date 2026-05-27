@@ -109,6 +109,8 @@ Paste the result as the `WINDOWS_CERTIFICATE_BASE64` secret.
 
 The test-release workflow (`workflow_dispatch`) includes the same signing steps but guards them with secret-availability checks — signing is skipped if secrets are not configured.
 
+Desktop Windows packaging (`.github/workflows/desktop-windows.yml`) now uses the same `WINDOWS_CERTIFICATE_BASE64` / `WINDOWS_CERTIFICATE_PASSWORD` secrets to sign NSIS and portable EXE artifacts via electron-builder (`CSC_LINK` / `CSC_KEY_PASSWORD`) and validates signatures with `Get-AuthenticodeSignature` when signing is enabled.
+
 ## Troubleshooting
 
 ### macOS: "The signature of the binary is invalid"
@@ -141,3 +143,9 @@ The test-release workflow (`workflow_dispatch`) includes the same signing steps 
 
 - In the test-release workflow, signing is intentionally skipped when secrets are not configured
 - Verify the secrets are set at the repository level in **Settings → Secrets and variables → Actions**
+
+### Desktop EXE signing skipped
+
+- The desktop Windows workflow intentionally falls back to unsigned artifacts when `WINDOWS_CERTIFICATE_BASE64` is empty
+- In that unsigned path, `Verify signed artifacts` is skipped by design
+- Set both `WINDOWS_CERTIFICATE_BASE64` and `WINDOWS_CERTIFICATE_PASSWORD` at the repository level to enable signed desktop EXE output

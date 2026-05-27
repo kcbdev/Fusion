@@ -1058,6 +1058,43 @@ describe("Planning Mode API", () => {
 
       await expect(createTaskFromPlanning("plan-123")).rejects.toThrow("not found");
     });
+
+    it("includes branchSelection options in create-task request body", async () => {
+      const createdTask: Task = {
+        id: "FN-043",
+        title: "Branch aware plan",
+        description: "Create task with branch config",
+        column: "triage",
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, createdTask, 201));
+
+      await createTaskFromPlanning("plan-123", undefined, undefined, {
+        branchSelection: {
+          mode: "custom-new",
+          branchName: "feature/planning-ui",
+          baseBranch: "develop",
+        },
+      });
+
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/planning/create-task", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: "plan-123",
+          branchSelection: {
+            mode: "custom-new",
+            branchName: "feature/planning-ui",
+            baseBranch: "develop",
+          },
+        }),
+      });
+    });
   });
 });
 

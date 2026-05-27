@@ -1177,22 +1177,24 @@ export default function kbExtension(pi: ExtensionAPI) {
     label: "fn: Delete Task",
     description:
       "Soft-delete a task from active Fusion board views. " +
-      "The task row and artifacts are preserved, and the task ID remains reserved for potential operator recovery.",
+      "The task row and artifacts are preserved; optional allowResurrection marks the ID for intentional recreation.",
     promptSnippet: "Soft-delete a Fusion task",
     promptGuidelines: [
       "Use for cleaning up test tasks or tasks created in error when you want the task hidden from active board views",
       "This tool performs a soft delete: task data is preserved and the ID stays reserved",
-      "Tasks cannot be undeleted through the current pi/CLI tool surface",
+      "Use allowResurrection:true when operators want the deleted task ID to be intentionally reusable on future createTask calls",
       "Use fn_task_archive for completed work you want to keep referenceable in the board",
       "True hard removal is handled by archive cleanup paths (archiveTaskAndCleanup / cleanupArchivedTasks), not fn_task_delete",
     ],
     parameters: Type.Object({
       id: Type.String({ description: "Task ID to delete (e.g. FN-001)" }),
+      allowResurrection: Type.Optional(Type.Boolean({ description: "When true, mark this tombstone as explicitly reusable for future recreation." })),
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const store = await getStore(ctx.cwd);
       const task = await store.deleteTask(params.id, {
+        allowResurrection: params.allowResurrection === true,
         auditContext: {
           agentId: "pi-extension",
           runId: `synthetic-pi-delete-${params.id}-${Date.now()}`,
@@ -1500,6 +1502,7 @@ export default function kbExtension(pi: ExtensionAPI) {
           description: "Initial plan description (optional) — the AI will ask clarifying questions if not provided",
         })
       ),
+      baseBranch: Type.Optional(Type.String({ description: "Optional base branch for the task created from this planning session" })),
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
@@ -1524,7 +1527,7 @@ export default function kbExtension(pi: ExtensionAPI) {
 
       let taskId: string | undefined;
       try {
-        taskId = await runTaskPlan(params.description, true); // Use --yes flag for non-interactive
+        taskId = await runTaskPlan(params.description, true, undefined, params.baseBranch); // Use --yes flag for non-interactive
       } catch (err) {
         console.error = originalError;
         console.log = originalLog;
@@ -2256,6 +2259,7 @@ export default function kbExtension(pi: ExtensionAPI) {
       autoAdvance: Type.Optional(
         Type.Boolean({ description: "Automatically activate the next pending slice when the current slice completes" })
       ),
+      baseBranch: Type.Optional(Type.String({ description: "Optional integration base branch for tasks triaged from this mission" })),
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -2265,6 +2269,7 @@ export default function kbExtension(pi: ExtensionAPI) {
       const mission = missionStore.createMission({
         title: params.title.trim(),
         description: params.description?.trim(),
+        baseBranch: params.baseBranch?.trim() || undefined,
       });
 
       if (params.autoAdvance !== undefined) {

@@ -25,6 +25,15 @@ Mission: Improve Reliability
 
 ## Creating Missions
 
+### Mission base branch defaults
+
+Missions support an optional `baseBranch` field. When set, feature triage (`triageFeature`) and slice triage (`triageSlice`) inherit this value as the task `baseBranch` whenever a triage request does not explicitly provide a base branch override.
+
+Precedence order during triage:
+1. Explicit triage `branchSelection.baseBranch` / `baseBranch`
+2. Mission `baseBranch`
+3. Project default branch resolution
+
 ### Dashboard
 
 Use the Mission Manager UI to create missions and build hierarchy interactively.
@@ -49,7 +58,7 @@ The canonical per-parameter tool reference lives in `packages/cli/skill/fusion/r
 
 | Tool | Purpose |
 |---|---|
-| `fn_mission_create` | Create a mission with title/description and optional auto-advance behavior. |
+| `fn_mission_create` | Create a mission with title/description, optional `baseBranch`, and optional auto-advance behavior. |
 | `fn_mission_list` | List missions and their current status. |
 | `fn_mission_show` | Show mission details with milestone/slice/feature hierarchy, including milestone/feature acceptance criteria and slice verification when present. |
 | `fn_mission_delete` | Delete a mission and its hierarchy. |

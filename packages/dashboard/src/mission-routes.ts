@@ -299,7 +299,7 @@ export function createMissionRouter(
   router.post(
     "/",
     catchTypedHandler(async (req, res) => {
-      const { title, description, autoAdvance, autopilotEnabled } = req.body;
+      const { title, description, autoAdvance, autopilotEnabled, baseBranch } = req.body;
 
       const validatedTitle = validateTitle(title);
       const validatedDescription = validateDescription(description);
@@ -307,6 +307,7 @@ export function createMissionRouter(
       const input: MissionCreateInput = {
         title: validatedTitle,
         description: validatedDescription,
+        baseBranch: validateDescription(baseBranch),
       };
 
       const mission = missionStore.createMission(input);
@@ -890,7 +891,7 @@ export function createMissionRouter(
     "/:missionId",
     catchTypedHandler(async (req, res) => {
       const { missionId } = req.params;
-      const { title, description, status, autoAdvance, autopilotEnabled } = req.body;
+      const { title, description, status, autoAdvance, autopilotEnabled, baseBranch } = req.body;
 
       if (!validateMissionId(missionId)) {
         throw badRequest("Invalid mission ID format");
@@ -912,6 +913,9 @@ export function createMissionRouter(
       }
       if (autopilotEnabled !== undefined) {
         updates.autopilotEnabled = validateBoolean(autopilotEnabled, "autopilotEnabled");
+      }
+      if (baseBranch !== undefined) {
+        updates.baseBranch = validateDescription(baseBranch);
       }
 
       if (Object.keys(updates).length === 0) {

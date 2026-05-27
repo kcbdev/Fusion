@@ -1031,6 +1031,7 @@ describe("PlanningModeModal", () => {
           "session-complete-2",
           expect.objectContaining({ ...resumedSummary, priority: "normal" }),
           undefined,
+          expect.objectContaining({ branchSelection: { mode: "project-default" } }),
         );
       });
     });
@@ -1085,8 +1086,102 @@ describe("PlanningModeModal", () => {
           "session-complete-priority",
           expect.objectContaining({ priority: "high" }),
           undefined,
+          expect.objectContaining({
+            branchSelection: { mode: "project-default" },
+          }),
         );
       });
+    });
+
+    it("surfaces planning branch controls and sends branchSelection in create request", async () => {
+      const resumedSummary: PlanningSummary = {
+        title: "Resume-branch-controls",
+        description: "Recovered summary for branch controls",
+        suggestedSize: "M",
+        suggestedDependencies: [],
+        keyDeliverables: ["Implement", "Verify"],
+      };
+
+      mockFetchAiSession.mockResolvedValueOnce({
+        id: "session-branch-controls",
+        type: "planning",
+        status: "complete",
+        title: "Resume-branch-controls",
+        inputPayload: JSON.stringify({ initialPlan: "Recover and create with branch controls" }),
+        conversationHistory: "[]",
+        currentQuestion: null,
+        result: JSON.stringify(resumedSummary),
+        thinkingOutput: "",
+        error: null,
+        projectId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          resumeSessionId="session-branch-controls"
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Create Single Task" })).toBeDefined();
+      });
+
+      const branchStrategy = screen.getByRole("combobox", { name: "Branch strategy" }) as HTMLSelectElement;
+      expect(branchStrategy.value).toBe("project-default");
+
+      fireEvent.click(screen.getByRole("button", { name: "Create Single Task" }));
+      await waitFor(() => {
+        expect(mockCreateTaskFromPlanning).toHaveBeenCalledWith(
+          "session-branch-controls",
+          expect.any(Object),
+          undefined,
+          expect.objectContaining({
+            branchSelection: { mode: "project-default" },
+          }),
+        );
+      });
+
+      fireEvent.change(branchStrategy, { target: { value: "existing" } });
+      expect(screen.getByRole("textbox", { name: "Branch name" })).toBeDefined();
+
+      const createSingleTaskButton = screen.getByRole("button", { name: "Create Single Task" });
+      expect(createSingleTaskButton).toBeDisabled();
+
+      fireEvent.change(screen.getByRole("textbox", { name: "Branch name" }), {
+        target: { value: "feat/planning-branch" },
+      });
+      fireEvent.change(screen.getByRole("textbox", { name: "Merge target / base branch (optional)" }), {
+        target: { value: "develop" },
+      });
+      fireEvent.click(createSingleTaskButton);
+
+      await waitFor(() => {
+        expect(mockCreateTaskFromPlanning).toHaveBeenLastCalledWith(
+          "session-branch-controls",
+          expect.any(Object),
+          undefined,
+          expect.objectContaining({
+            branchSelection: {
+              mode: "existing",
+              branchName: "feat/planning-branch",
+              baseBranch: "develop",
+            },
+          }),
+        );
+      });
+
+      fireEvent.change(branchStrategy, { target: { value: "auto-new" } });
+      expect(screen.queryByRole("textbox", { name: "Branch name" })).toBeNull();
+
+      fireEvent.change(branchStrategy, { target: { value: "custom-new" } });
+      expect(screen.getByRole("textbox", { name: "Branch name" })).toBeDefined();
     });
 
     it("preserves per-subtask priority selections when creating tasks from breakdown", async () => {

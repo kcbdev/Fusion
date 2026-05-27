@@ -571,7 +571,14 @@ describe("promptWithFallback auto-compaction", () => {
     expect(mockPrompt.mock.calls[1]).toEqual(["test prompt", options]);
   });
 
-  it("uses standalone prompt path even when session.promptWithFallback exists", async () => {
+  it("delegates to session.promptWithFallback when available so rich fallback logic runs", async () => {
+    // The session-attached promptWithFallback (set by createFnAgent at pi.ts:2012)
+    // is the only path that swaps to the configured fallbackModel on
+    // isRetryableModelSelectionError matches like "api key", 401/403, rate-limit, etc.
+    // Bypassing it (as the old standalone-only behavior did) silently dropped
+    // missing-API-key triage failures with no fallback attempt — see FN-5584.
+    // A re-entry guard in promptWithFallback prevents the recursion that
+    // FN-4900 originally guarded against.
     const mockSessionPromptWithFallback = vi.fn().mockResolvedValue(undefined);
     const mockPrompt = vi.fn().mockResolvedValue(undefined);
     const mockCompact = vi.fn();
@@ -583,8 +590,9 @@ describe("promptWithFallback auto-compaction", () => {
 
     await promptWithFallback(session, "test prompt");
 
-    expect(mockPrompt).toHaveBeenCalledTimes(1);
-    expect(mockSessionPromptWithFallback).not.toHaveBeenCalled();
+    expect(mockSessionPromptWithFallback).toHaveBeenCalledTimes(1);
+    expect(mockSessionPromptWithFallback).toHaveBeenCalledWith("test prompt", undefined);
+    expect(mockPrompt).not.toHaveBeenCalled();
   });
 
   it("handles context error patterns from various providers", async () => {

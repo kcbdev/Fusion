@@ -158,6 +158,9 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const [responseHistory, setResponseHistory] = useState<QuestionResponse[]>([]);
   const [conversationHistory, setConversationHistory] = useState<ConversationHistoryEntry[]>([]);
   const [editedSummary, setEditedSummary] = useState<PlanningSummary | null>(null);
+  const [branchMode, setBranchMode] = useState<"project-default" | "auto-new" | "existing" | "custom-new">("project-default");
+  const [branchName, setBranchName] = useState("");
+  const [baseBranch, setBaseBranch] = useState("");
   // Use ref instead of state for hasAutoStarted to handle React StrictMode double-render.
   // In StrictMode, components render twice but state persists across renders,
   // which would skip auto-start on the second (committed) render. Refs are
@@ -377,6 +380,9 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     setResponseHistory([]);
     setConversationHistory([]);
     setEditedSummary(null);
+    setBranchMode("project-default");
+    setBranchName("");
+    setBaseBranch("");
     setStreamingOutput("");
     setIsReconnecting(false);
     setIsRetrying(false);
@@ -1557,13 +1563,20 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
 
   const handleCreateTask = useCallback(async () => {
     if (view.type !== "summary") return;
+    if ((branchMode === "existing" || branchMode === "custom-new") && !branchName.trim()) return;
 
     setError(null);
     setIsCreatingTask(true);
 
     try {
       const completedSessionId = view.session.sessionId;
-      const task = await createTaskFromPlanning(completedSessionId, editedSummary ?? undefined, projectId);
+      const task = await createTaskFromPlanning(completedSessionId, editedSummary ?? undefined, projectId, {
+        branchSelection: {
+          mode: branchMode,
+          ...(branchMode === "existing" || branchMode === "custom-new" ? { branchName: branchName.trim() } : {}),
+          ...(baseBranch.trim() ? { baseBranch: baseBranch.trim() } : {}),
+        },
+      });
       onTaskCreated(task);
       // The server cleans up the planning session after task creation. Drop
       // the local selection so a future reopen doesn't try to fetch a deleted
@@ -1582,7 +1595,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     } finally {
       setIsCreatingTask(false);
     }
-  }, [broadcastCompleted, editedSummary, view, projectId, onTaskCreated, handleClose]);
+  }, [baseBranch, branchMode, branchName, broadcastCompleted, editedSummary, view, projectId, onTaskCreated, handleClose]);
 
   const handleStartBreakdown = useCallback(async () => {
     if (view.type !== "summary") return;
@@ -2070,6 +2083,12 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
               historyEntries={conversationHistory}
               onSummaryChange={setEditedSummary}
               tasks={tasks}
+              branchMode={branchMode}
+              branchName={branchName}
+              baseBranch={baseBranch}
+              onBranchModeChange={setBranchMode}
+              onBranchNameChange={setBranchName}
+              onBaseBranchChange={setBaseBranch}
               onCreateTask={handleCreateTask}
               onBreakIntoTasks={handleStartBreakdown}
               onRefine={() => {
@@ -2360,6 +2379,12 @@ interface SummaryViewProps {
   historyEntries: ConversationHistoryEntry[];
   onSummaryChange: (summary: PlanningSummary) => void;
   tasks: Task[];
+  branchMode: "project-default" | "auto-new" | "existing" | "custom-new";
+  branchName: string;
+  baseBranch: string;
+  onBranchModeChange: (mode: "project-default" | "auto-new" | "existing" | "custom-new") => void;
+  onBranchNameChange: (name: string) => void;
+  onBaseBranchChange: (branch: string) => void;
   onCreateTask: () => void;
   onBreakIntoTasks: () => void;
   onRefine: () => void;
@@ -2371,6 +2396,12 @@ function SummaryView({
   historyEntries,
   onSummaryChange,
   tasks,
+  branchMode,
+  branchName,
+  baseBranch,
+  onBranchModeChange,
+  onBranchNameChange,
+  onBaseBranchChange,
   onCreateTask,
   onBreakIntoTasks,
   onRefine,
@@ -2387,6 +2418,8 @@ function SummaryView({
     deps: [isExpanded],
   });
   const selectedPriority = normalizeTaskPriority(summary.priority);
+  const isBranchNameRequired = branchMode === "existing" || branchMode === "custom-new";
+  const hasInvalidBranchSelection = isBranchNameRequired && !branchName.trim();
 
   const handleDependencyToggle = (taskId: string) => {
     const newDeps = selectedDependencies.includes(taskId)
@@ -2430,6 +2463,44 @@ function SummaryView({
               value={summary.description}
               onChange={(e) => onSummaryChange({ ...summary, description: e.target.value })}
             />
+          </div>
+
+          <div className="task-detail-section">
+            <div className="form-group">
+              <label>Branch strategy</label>
+              <select
+                value={branchMode}
+                onChange={(event) => onBranchModeChange(event.target.value as "project-default" | "auto-new" | "existing" | "custom-new")}
+                disabled={isLoading}
+              >
+                <option value="project-default">Use project/default branch</option>
+                <option value="auto-new">Create auto-named branch per task</option>
+                <option value="existing">Use existing branch</option>
+                <option value="custom-new">Create custom new branch</option>
+              </select>
+            </div>
+            {isBranchNameRequired && (
+              <div className="form-group">
+                <label>Branch name</label>
+                <input
+                  value={branchName}
+                  onChange={(event) => onBranchNameChange(event.target.value)}
+                  disabled={isLoading}
+                />
+              </div>
+            )}
+            <div className="form-group">
+              <label>Merge target / base branch (optional)</label>
+              <input
+                value={baseBranch}
+                onChange={(event) => onBaseBranchChange(event.target.value)}
+                disabled={isLoading}
+                placeholder="main"
+              />
+            </div>
+            {hasInvalidBranchSelection && (
+              <div className="form-error planning-error">Branch name is required for this branch strategy.</div>
+            )}
           </div>
 
           <div className="planning-summary-meta-row">
@@ -2517,7 +2588,7 @@ function SummaryView({
           Refine Further
         </button>
         <div className="planning-summary-actions-right">
-          <button className="btn" onClick={onCreateTask} disabled={isLoading}>
+          <button className="btn" onClick={onCreateTask} disabled={isLoading || hasInvalidBranchSelection}>
             {isLoading ? (
               <>
                 <Loader2 size={16} className="spin icon-mr-8" />

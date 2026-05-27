@@ -151,10 +151,16 @@ describe("settings key parity", () => {
     expect(DEFAULT_PROJECT_SETTINGS.completionDocumentationMode).toBe("off");
   });
 
-  it("keeps directMergeCommitStrategy project-scoped with auto default", () => {
-    expect(DEFAULT_PROJECT_SETTINGS.directMergeCommitStrategy).toBe("auto");
+  it("defaults directMergeCommitStrategy to always-squash and keeps it project-scoped", () => {
+    expect(DEFAULT_PROJECT_SETTINGS.directMergeCommitStrategy).toBe("always-squash");
     expect(isProjectSettingsKey("directMergeCommitStrategy")).toBe(true);
     expect(isGlobalSettingsKey("directMergeCommitStrategy")).toBe(false);
+  });
+
+  it("defaults mergeAdvanceAutoSync to stash-and-ff and keeps it project-scoped", () => {
+    expect(DEFAULT_PROJECT_SETTINGS.mergeAdvanceAutoSync).toBe("stash-and-ff");
+    expect(isProjectSettingsKey("mergeAdvanceAutoSync")).toBe(true);
+    expect(isGlobalSettingsKey("mergeAdvanceAutoSync")).toBe(false);
   });
 
   it("keeps integrationBranch project-scoped", () => {
@@ -166,6 +172,7 @@ describe("settings key parity", () => {
 
   it("keeps task stuck timeout active by default without coupling to workflow step timeout", () => {
     expect(DEFAULT_PROJECT_SETTINGS.taskStuckTimeoutMs).toBe(600_000);
+    expect(DEFAULT_PROJECT_SETTINGS.runtimeStopDrainMs).toBe(2_000);
     expect(DEFAULT_PROJECT_SETTINGS.workflowStepTimeoutMs).toBe(360_000);
   });
 
@@ -299,6 +306,7 @@ describe("settings key parity", () => {
     const projectKeySet = new Set(PROJECT_SETTINGS_KEYS as readonly string[]);
     const overlap = (GLOBAL_SETTINGS_KEYS as readonly string[]).filter((key) => projectKeySet.has(key));
     expect(overlap).toEqual([
+      "testMode",
       "taskTokenBudget",
       "githubTrackingDefaultRepo",
       "worktrunk",
@@ -432,6 +440,11 @@ describe("model lane key parity regression (FN-1729)", () => {
     expect(isProjectSettingsKey("defaultModelIdOverride")).toBe(true);
     expect(isGlobalSettingsKey("defaultProviderOverride")).toBe(false);
     expect(isGlobalSettingsKey("defaultModelIdOverride")).toBe(false);
+  });
+
+  it("testMode key is recognized in both project and global scopes", () => {
+    expect(isProjectSettingsKey("testMode")).toBe(true);
+    expect(isGlobalSettingsKey("testMode")).toBe(true);
   });
 
   it("no model lane provider exists without its corresponding modelId key", () => {

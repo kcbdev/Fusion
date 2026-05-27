@@ -275,7 +275,7 @@ function formatDurationCompact(ageMs: number): string {
   return `${minutes}m`;
 }
 
-type TabId = "definition" | "logs" | "changes" | "review" | "comments" | "model" | "workflow" | "documents" | "stats" | "routing" | "retries" | `plugin-${string}`;
+type TabId = "definition" | "logs" | "changes" | "review" | "pr" | "comments" | "model" | "workflow" | "documents" | "stats" | "routing" | "retries" | `plugin-${string}`;
 
 export interface TaskDetailModalProps {
   task: Task | TaskDetail;
@@ -288,6 +288,7 @@ export interface TaskDetailModalProps {
     removeDependencyReferences?: boolean;
     removeLineageReferences?: boolean;
     githubIssueAction?: GithubIssueAction;
+    allowResurrection?: boolean;
   }) => Promise<Task>;
   onArchiveTask?: (id: string, options?: { removeLineageReferences?: boolean }) => Promise<Task>;
   onMergeTask: (id: string) => Promise<MergeResult>;
@@ -554,6 +555,12 @@ export function TaskDetailContent({
       setRetriesExpanded(true);
     }
   }, [initialTab]);
+
+  useEffect(() => {
+    if (activeTab === "pr" && task.column !== "in-review") {
+      setActiveTab("definition");
+    }
+  }, [activeTab, task.column]);
 
   // Reset description expanded state when task changes
   useEffect(() => {
@@ -1347,7 +1354,7 @@ export function TaskDetailContent({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { nodes } = useNodes();
-  const { confirm, confirmWithChoice } = useConfirm();
+  const { confirm, confirmWithChoice, confirmWithCheckbox } = useConfirm();
 
   const handleUnlinkGithubIssue = useCallback(async () => {
     if (!canEdit || !githubTrackedIssue || isSavingGithubTracking) return;
@@ -1438,6 +1445,8 @@ export function TaskDetailContent({
   );
 
   const handleDelete = useCallback(async () => {
+    let allowResurrection = false;
+
     if (task.column === "done" && onArchiveTask) {
       const deleteChoice = await confirmWithChoice({
         title: "Delete Task",
@@ -1484,12 +1493,18 @@ export function TaskDetailContent({
         return;
       }
     } else {
-      const shouldDelete = await confirm({
+      const { choice, checkboxValue } = await confirmWithCheckbox({
         title: "Delete Task",
         message: `Delete ${task.id}?`,
         danger: true,
+        checkbox: {
+          label: "Allow re-creation later (operator unlock)",
+          description: "Lets agents recreate this task ID without --force-resurrect. Leave unchecked to keep this task tombstoned.",
+          defaultChecked: false,
+        },
       });
-      if (!shouldDelete) return;
+      if (choice !== "primary") return;
+      allowResurrection = checkboxValue === true;
     }
 
     const trackedIssue = task.githubTracking?.enabled === true ? task.githubTracking.issue : undefined;
@@ -1519,9 +1534,9 @@ export function TaskDetailContent({
 
     try {
       if (githubIssueAction) {
-        await onDeleteTask(task.id, { githubIssueAction });
+        await onDeleteTask(task.id, { githubIssueAction, allowResurrection });
       } else {
-        await onDeleteTask(task.id);
+        await onDeleteTask(task.id, { allowResurrection });
       }
       requestClose();
       const issueSuffix = trackedIssue?.owner && trackedIssue.repo && trackedIssue.number && githubIssueAction
@@ -1548,6 +1563,7 @@ export function TaskDetailContent({
             removeDependencyReferences: true,
             removeLineageReferences: true,
             githubIssueAction,
+            allowResurrection,
           });
           requestClose();
           addToast(`Deleted ${task.id} after removing dependency references`, "info");
@@ -1574,6 +1590,7 @@ export function TaskDetailContent({
               removeDependencyReferences: true,
               removeLineageReferences: true,
               githubIssueAction,
+              allowResurrection,
             });
             requestClose();
             addToast(`Deleted ${task.id} after unlinking lineage references`, "info");
@@ -1606,6 +1623,7 @@ export function TaskDetailContent({
           removeDependencyReferences: true,
           removeLineageReferences: true,
           githubIssueAction,
+          allowResurrection,
         });
         requestClose();
         addToast(`Deleted ${task.id} after unlinking lineage references`, "info");
@@ -1613,7 +1631,7 @@ export function TaskDetailContent({
         addToast(getErrorMessage(retryErr), "error");
       }
     }
-  }, [task.column, task.githubTracking?.enabled, task.githubTracking?.issue, task.id, onDeleteTask, onArchiveTask, requestClose, addToast, confirm, confirmWithChoice]);
+  }, [task.column, task.githubTracking?.enabled, task.githubTracking?.issue, task.id, onDeleteTask, onArchiveTask, requestClose, addToast, confirm, confirmWithChoice, confirmWithCheckbox]);
 
   const handleMerge = useCallback(async () => {
     const shouldMerge = await confirm({
@@ -1952,6 +1970,46 @@ export function TaskDetailContent({
       addToast(getErrorMessage(err), "error");
     }
   }, [task.id, dependencies, addToast]);
+
+  const handleClearOverlapBlocker = useCallback(async () => {
+    if (!workingTask.overlapBlockedBy) return;
+
+    const requestTaskId = task.id;
+    const previousOverlapBlockedBy = workingTask.overlapBlockedBy;
+    const previousStatus = workingTask.status;
+
+    setFullDetail((prev) => prev
+      ? {
+        ...prev,
+        overlapBlockedBy: undefined,
+        ...(previousStatus === "queued" ? { status: undefined } : {}),
+      }
+      : prev);
+
+    try {
+      const updatedTask = await updateTask(task.id, {
+        overlapBlockedBy: null,
+        status: previousStatus === "queued" ? null : undefined,
+      }, projectId);
+      if (activeTaskIdRef.current !== requestTaskId) {
+        return;
+      }
+      setFullDetail((prev) => prev ? ({ ...prev, ...updatedTask } as TaskDetail) : (updatedTask as TaskDetail));
+      onTaskUpdated?.(updatedTask);
+    } catch (err) {
+      if (activeTaskIdRef.current !== requestTaskId) {
+        return;
+      }
+      setFullDetail((prev) => prev
+        ? {
+          ...prev,
+          overlapBlockedBy: previousOverlapBlockedBy,
+          ...(previousStatus === "queued" ? { status: previousStatus } : {}),
+        }
+        : prev);
+      addToast(getErrorMessage(err), "error");
+    }
+  }, [activeTaskIdRef, addToast, onTaskUpdated, projectId, task.id, workingTask.overlapBlockedBy, workingTask.status]);
 
   const handleDepClick = useCallback(async (depId: string) => {
     try {
@@ -2525,6 +2583,14 @@ export function TaskDetailContent({
             >
               Review
             </button>
+            {task.column === "in-review" && (
+              <button
+                className={`detail-tab${activeTab === "pr" ? " detail-tab-active" : ""}`}
+                onClick={() => setActiveTab("pr")}
+              >
+                Pull Request
+              </button>
+            )}
             <button
               className={`detail-tab${activeTab === "comments" ? " detail-tab-active" : ""}`}
               onClick={() => setActiveTab("comments")}
@@ -2678,6 +2744,135 @@ export function TaskDetailContent({
               autoMergeEnabled={autoMergeEnabled}
               onRequestCreatePr={() => setPrCreateOpen(true)}
             />
+          ) : activeTab === "pr" ? (
+            <div className="detail-section detail-pr-tab">
+              {task.column === "in-review" && (
+                <>
+                  {shouldShowInReviewStallBadge(workingTask) && workingTask.inReviewStall && (() => {
+                    const copy = getInReviewStallCopy(workingTask.inReviewStall, {
+                      mergeRetries: workingTask.mergeRetries,
+                      maxAutoMergeRetries: MAX_AUTO_MERGE_RETRIES,
+                    });
+                    const logMatch = findInReviewStallLogEntry(workingTask, workingTask.inReviewStall.code);
+                    return (
+                      <div
+                        className={`detail-section detail-in-review-stall detail-in-review-stall--${copy.code}`}
+                        data-stall-code={copy.code}
+                      >
+                        <div className="detail-in-review-stall-header">
+                          <span className="card-status-badge card-status-badge--in-review in-review-stall">
+                            {copy.badgeLabel}{copy.counter ? ` ${copy.counter}` : ""}
+                          </span>
+                          <span className="detail-in-review-stall-headline">{copy.headline}</span>
+                        </div>
+                        <div className="detail-in-review-stall-reason">{workingTask.inReviewStall.reason}</div>
+                        <div className="detail-in-review-stall-description">{copy.description}</div>
+                        <div className="detail-in-review-stall-action">{copy.suggestedAction}</div>
+                        <div className="detail-in-review-stall-meta">
+                          <span>Observed {formatTimestamp(workingTask.inReviewStall.observedAt)}</span>
+                          {logMatch ? (
+                            <button
+                              type="button"
+                              className="btn btn-sm detail-in-review-stall-jump"
+                              onClick={() => {
+                                setActiveTab("logs");
+                                setLogSubview("activity");
+                                setHighlightStallCode(workingTask.inReviewStall?.code ?? null);
+                              }}
+                            >
+                              View activity log
+                            </button>
+                          ) : (
+                            <span
+                              className="detail-in-review-stall-no-log"
+                              title="No 'In-review stall surfaced' entry on this task yet — self-healing may not have logged one within its rate-limit window."
+                            >
+                              No log entry yet
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {shouldShowStalePausedReviewBadge(workingTask) && workingTask.stalePausedReview && (() => {
+                    const copy = getStalePausedReviewCopy(workingTask.stalePausedReview);
+                    const logMatch = [...(workingTask.log ?? [])].reverse().find((entry) => {
+                      const match = entry.action.match(STALE_PAUSED_REVIEW_LOG_REGEX);
+                      return match?.[1] === workingTask.stalePausedReview?.code;
+                    });
+                    return (
+                      <div
+                        className={`detail-section detail-in-review-stall detail-in-review-stall--${copy.code}`}
+                        data-stall-code={copy.code}
+                      >
+                        <div className="detail-in-review-stall-header">
+                          <span className="card-status-badge card-status-badge--in-review stale-paused-review">
+                            {copy.badgeLabel}
+                          </span>
+                          <span className="detail-in-review-stall-headline">{copy.headline}</span>
+                        </div>
+                        <div className="detail-in-review-stall-reason">{workingTask.stalePausedReview.reason}</div>
+                        <div className="detail-in-review-stall-description">{copy.description}</div>
+                        <div className="detail-in-review-stall-action">{copy.suggestedAction}</div>
+                        <div className="detail-in-review-stall-meta">
+                          <span>Age {formatDurationCompact(workingTask.stalePausedReview.ageMs)}</span>
+                          <span>Threshold {formatDurationCompact(workingTask.stalePausedReview.thresholdMs)}</span>
+                          <span>Observed {formatTimestamp(workingTask.stalePausedReview.observedAt)}</span>
+                          {logMatch ? (
+                            <button
+                              type="button"
+                              className="btn btn-sm detail-in-review-stall-jump"
+                              onClick={() => {
+                                setActiveTab("logs");
+                                setLogSubview("activity");
+                                setHighlightStallCode(workingTask.stalePausedReview?.code ?? null);
+                              }}
+                            >
+                              View activity log
+                            </button>
+                          ) : (
+                            <span className="detail-in-review-stall-no-log">No log entry yet</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  <div className="detail-section detail-pr-section">
+                    <PrPanel
+                      taskId={task.id}
+                      projectId={projectId}
+                      prInfo={task.prInfo}
+                      prInfos={task.prInfos}
+                      automationStatus={task.status ?? null}
+                      taskColumn={task.column}
+                      autoMerge={settings?.autoMerge ?? false}
+                      isManualPrFlow={isManualPrFlow}
+                      directMergeCommitStrategy={settings?.directMergeCommitStrategy}
+                      prAuthAvailable={prAuthAvailable ?? false}
+                      onRequestCreatePr={() => setPrCreateOpen(true)}
+                      onPrUpdated={(prInfo) => {
+                        const existing = task.prInfos ?? (task.prInfo ? [task.prInfo] : []);
+                        const nextPrInfos = existing.some((entry) => entry.number === prInfo.number)
+                          ? existing.map((entry) => (entry.number === prInfo.number ? prInfo : entry))
+                          : [...existing, prInfo];
+                        (task as TaskDetail).prInfos = nextPrInfos;
+                        (task as TaskDetail).prInfo = nextPrInfos[0] ?? prInfo;
+                      }}
+                      onPrsRefreshed={(prInfos) => {
+                        (task as TaskDetail).prInfos = prInfos;
+                        (task as TaskDetail).prInfo = prInfos[0];
+                      }}
+                      onPrUnlinked={(prNumber) => {
+                        const nextPrInfos = (task.prInfos ?? (task.prInfo ? [task.prInfo] : [])).filter((entry) => entry.number !== prNumber);
+                        (task as TaskDetail).prInfos = nextPrInfos;
+                        (task as TaskDetail).prInfo = nextPrInfos[0];
+                      }}
+                      addToast={addToast}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
           ) : activeTab === "comments" ? (
             <TaskComments task={task} addToast={addToast} projectId={projectId} onTaskUpdated={onTaskUpdated} />
           ) : activeTab === "documents" ? (
@@ -3245,8 +3440,18 @@ export function TaskDetailContent({
             )}
             {workingTask.overlapBlockedBy && (
               <div className="detail-empty-inline">
-                File scope overlap blocker: {workingTask.overlapBlockedBy}
-                {!overlapBlockerActive && " (stale)"}
+                <span>
+                  File scope overlap blocker: {workingTask.overlapBlockedBy}
+                  {!overlapBlockerActive && " (stale)"}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => void handleClearOverlapBlocker()}
+                  title={`Clear overlap blocker ${workingTask.overlapBlockedBy}`}
+                >
+                  Clear
+                </button>
               </div>
             )}
             <div className="dep-trigger-wrap">
@@ -3362,133 +3567,6 @@ export function TaskDetailContent({
               </div>
             );
           })()}
-          {/* PR Section - only for in-review tasks */}
-          {task.column === "in-review" && (
-            <>
-              {shouldShowInReviewStallBadge(workingTask) && workingTask.inReviewStall && (() => {
-                const copy = getInReviewStallCopy(workingTask.inReviewStall, {
-                  mergeRetries: workingTask.mergeRetries,
-                  maxAutoMergeRetries: MAX_AUTO_MERGE_RETRIES,
-                });
-                const logMatch = findInReviewStallLogEntry(workingTask, workingTask.inReviewStall.code);
-                return (
-                  <div
-                    className={`detail-section detail-in-review-stall detail-in-review-stall--${copy.code}`}
-                    data-stall-code={copy.code}
-                  >
-                    <div className="detail-in-review-stall-header">
-                      <span className="card-status-badge card-status-badge--in-review in-review-stall">
-                        {copy.badgeLabel}{copy.counter ? ` ${copy.counter}` : ""}
-                      </span>
-                      <span className="detail-in-review-stall-headline">{copy.headline}</span>
-                    </div>
-                    <div className="detail-in-review-stall-reason">{workingTask.inReviewStall.reason}</div>
-                    <div className="detail-in-review-stall-description">{copy.description}</div>
-                    <div className="detail-in-review-stall-action">{copy.suggestedAction}</div>
-                    <div className="detail-in-review-stall-meta">
-                      <span>Observed {formatTimestamp(workingTask.inReviewStall.observedAt)}</span>
-                      {logMatch ? (
-                        <button
-                          type="button"
-                          className="btn btn-sm detail-in-review-stall-jump"
-                          onClick={() => {
-                            setActiveTab("logs");
-                            setLogSubview("activity");
-                            setHighlightStallCode(workingTask.inReviewStall?.code ?? null);
-                          }}
-                        >
-                          View activity log
-                        </button>
-                      ) : (
-                        <span
-                          className="detail-in-review-stall-no-log"
-                          title="No 'In-review stall surfaced' entry on this task yet — self-healing may not have logged one within its rate-limit window."
-                        >
-                          No log entry yet
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })()}
-              {shouldShowStalePausedReviewBadge(workingTask) && workingTask.stalePausedReview && (() => {
-                const copy = getStalePausedReviewCopy(workingTask.stalePausedReview);
-                const logMatch = [...(workingTask.log ?? [])].reverse().find((entry) => {
-                  const match = entry.action.match(STALE_PAUSED_REVIEW_LOG_REGEX);
-                  return match?.[1] === workingTask.stalePausedReview?.code;
-                });
-                return (
-                  <div
-                    className={`detail-section detail-in-review-stall detail-in-review-stall--${copy.code}`}
-                    data-stall-code={copy.code}
-                  >
-                    <div className="detail-in-review-stall-header">
-                      <span className="card-status-badge card-status-badge--in-review stale-paused-review">
-                        {copy.badgeLabel}
-                      </span>
-                      <span className="detail-in-review-stall-headline">{copy.headline}</span>
-                    </div>
-                    <div className="detail-in-review-stall-reason">{workingTask.stalePausedReview.reason}</div>
-                    <div className="detail-in-review-stall-description">{copy.description}</div>
-                    <div className="detail-in-review-stall-action">{copy.suggestedAction}</div>
-                    <div className="detail-in-review-stall-meta">
-                      <span>Age {formatDurationCompact(workingTask.stalePausedReview.ageMs)}</span>
-                      <span>Threshold {formatDurationCompact(workingTask.stalePausedReview.thresholdMs)}</span>
-                      <span>Observed {formatTimestamp(workingTask.stalePausedReview.observedAt)}</span>
-                      {logMatch ? (
-                        <button
-                          type="button"
-                          className="btn btn-sm detail-in-review-stall-jump"
-                          onClick={() => {
-                            setActiveTab("logs");
-                            setLogSubview("activity");
-                            setHighlightStallCode(workingTask.stalePausedReview?.code ?? null);
-                          }}
-                        >
-                          View activity log
-                        </button>
-                      ) : (
-                        <span className="detail-in-review-stall-no-log">No log entry yet</span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })()}
-              <div className="detail-section detail-pr-section">
-              <PrPanel
-                taskId={task.id}
-                projectId={projectId}
-                prInfo={task.prInfo}
-                prInfos={task.prInfos}
-                automationStatus={task.status ?? null}
-                taskColumn={task.column}
-                autoMerge={settings?.autoMerge ?? false}
-                isManualPrFlow={isManualPrFlow}
-                directMergeCommitStrategy={settings?.directMergeCommitStrategy}
-                prAuthAvailable={prAuthAvailable ?? false}
-                onRequestCreatePr={() => setPrCreateOpen(true)}
-                onPrUpdated={(prInfo) => {
-                  const existing = task.prInfos ?? (task.prInfo ? [task.prInfo] : []);
-                  const nextPrInfos = existing.some((entry) => entry.number === prInfo.number)
-                    ? existing.map((entry) => (entry.number === prInfo.number ? prInfo : entry))
-                    : [...existing, prInfo];
-                  (task as TaskDetail).prInfos = nextPrInfos;
-                  (task as TaskDetail).prInfo = nextPrInfos[0] ?? prInfo;
-                }}
-                onPrsRefreshed={(prInfos) => {
-                  (task as TaskDetail).prInfos = prInfos;
-                  (task as TaskDetail).prInfo = prInfos[0];
-                }}
-                onPrUnlinked={(prNumber) => {
-                  const nextPrInfos = (task.prInfos ?? (task.prInfo ? [task.prInfo] : [])).filter((entry) => entry.number !== prNumber);
-                  (task as TaskDetail).prInfos = nextPrInfos;
-                  (task as TaskDetail).prInfo = nextPrInfos[0];
-                }}
-                addToast={addToast}
-              />
-            </div>
-            </>
-          )}
           </>
           )}
           </>

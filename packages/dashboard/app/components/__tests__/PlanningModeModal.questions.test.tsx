@@ -1070,7 +1070,12 @@ describe("PlanningModeModal", () => {
       fireEvent.click(screen.getByText("Create Single Task"));
 
       await waitFor(() => {
-        expect(mockCreateTaskFromPlanning).toHaveBeenCalledWith("session-123", mockSummary, undefined);
+        expect(mockCreateTaskFromPlanning).toHaveBeenCalledWith(
+          "session-123",
+          mockSummary,
+          undefined,
+          expect.objectContaining({ branchSelection: { mode: "project-default" } }),
+        );
         expect(mockOnTaskCreated).toHaveBeenCalledWith(createdTask);
       });
     });

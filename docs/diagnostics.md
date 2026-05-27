@@ -65,6 +65,15 @@ FN-5346 adds a same-task stale-binding reconcile marker before worktree removal:
 - `[FN-5346] <taskId>: dropped stale self-owned activeSessionRegistry entry before removeWorktree at <worktreePath>`
 - Follow-up task log entry: `Cleared stale self-owned active-session entry before remove`
 
+## Runtime stop diagnostics (`[runtime-stop]`, `[executor]`)
+
+Engine stop now aborts in-flight executor AI sessions before the runtime drain wait.
+
+- Executor summary log: `[executor] abortAllInFlight: aborted N task surface(s) — engine stop`
+- Runtime warning when in-flight work still exists after configured post-abort drain: `[runtime-stop] post-abort drain timeout reached with N tasks still in-flight`
+
+Use these together to distinguish expected immediate session teardown from genuinely stuck cleanup surfaces that outlive the configured `runtimeStopDrainMs` window.
+
 ## Reports health stale-classifier diagnostics (`[reports-health]`)
 
 Direct-report stale decisions in `HeartbeatMonitor.buildReportsHealthSection()` now emit a structured log when an agent is marked `**stale**`.

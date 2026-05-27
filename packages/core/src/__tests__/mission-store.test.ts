@@ -1869,6 +1869,38 @@ describe("MissionStore", () => {
       expect(task!.missionId).toBe(mission.id);
     });
 
+    it("inherits mission baseBranch when no explicit override is provided", async () => {
+      const { TaskStore } = await import("../store.js");
+      const ts = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"), { inMemoryDb: true });
+      const msWithTs = ts.getMissionStore();
+
+      const mission = msWithTs.createMission({ title: "Mission", baseBranch: "develop" });
+      const milestone = msWithTs.addMilestone(mission.id, { title: "Milestone" });
+      const slice = msWithTs.addSlice(milestone.id, { title: "Slice" });
+      const feature = msWithTs.addFeature(slice.id, { title: "Original" });
+
+      const triaged = await msWithTs.triageFeature(feature.id);
+      const task = await ts.getTask(triaged.taskId!);
+
+      expect(task?.baseBranch).toBe("develop");
+    });
+
+    it("explicit baseBranch override takes precedence over mission default", async () => {
+      const { TaskStore } = await import("../store.js");
+      const ts = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"), { inMemoryDb: true });
+      const msWithTs = ts.getMissionStore();
+
+      const mission = msWithTs.createMission({ title: "Mission", baseBranch: "develop" });
+      const milestone = msWithTs.addMilestone(mission.id, { title: "Milestone" });
+      const slice = msWithTs.addSlice(milestone.id, { title: "Slice" });
+      const feature = msWithTs.addFeature(slice.id, { title: "Original" });
+
+      const triaged = await msWithTs.triageFeature(feature.id, undefined, undefined, { baseBranch: "release/1.0" });
+      const task = await ts.getTask(triaged.taskId!);
+
+      expect(task?.baseBranch).toBe("release/1.0");
+    });
+
     it("uses provided title and description overrides", async () => {
       const { TaskStore } = await import("../store.js");
       const ts = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"), { inMemoryDb: true });
@@ -2029,6 +2061,39 @@ describe("MissionStore", () => {
       expect(triaged).toHaveLength(1);
       expect(triaged[0].id).toBe(f2.id);
       expect(triaged[0].status).toBe("triaged");
+    });
+
+    it("triageSlice inherits mission baseBranch when no override is provided", async () => {
+      const { TaskStore } = await import("../store.js");
+      const ts = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"), { inMemoryDb: true });
+      const msWithTs = ts.getMissionStore();
+
+      const mission = msWithTs.createMission({ title: "Mission", baseBranch: "develop" });
+      const milestone = msWithTs.addMilestone(mission.id, { title: "Milestone" });
+      const slice = msWithTs.addSlice(milestone.id, { title: "Slice" });
+      const f1 = msWithTs.addFeature(slice.id, { title: "Feature 1" });
+
+      const triaged = await msWithTs.triageSlice(slice.id);
+      const task = await ts.getTask(triaged[0].taskId!);
+
+      expect(triaged[0].id).toBe(f1.id);
+      expect(task?.baseBranch).toBe("develop");
+    });
+
+    it("triageSlice does not inject baseBranch when mission has none", async () => {
+      const { TaskStore } = await import("../store.js");
+      const ts = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"), { inMemoryDb: true });
+      const msWithTs = ts.getMissionStore();
+
+      const mission = msWithTs.createMission({ title: "Mission" });
+      const milestone = msWithTs.addMilestone(mission.id, { title: "Milestone" });
+      const slice = msWithTs.addSlice(milestone.id, { title: "Slice" });
+      msWithTs.addFeature(slice.id, { title: "Feature 1" });
+
+      const triaged = await msWithTs.triageSlice(slice.id);
+      const task = await ts.getTask(triaged[0].taskId!);
+
+      expect(task?.baseBranch).toBeUndefined();
     });
 
     it("returns empty array if no defined features", async () => {
@@ -2821,7 +2886,7 @@ describe("MissionStore", () => {
 
   describe("Loop State & Validator Run Schema (v31)", () => {
     it("schema version is 40 after migration", () => {
-      expect(db.getSchemaVersion()).toBe(90);
+      expect(db.getSchemaVersion()).toBe(91);
     });
 
     it("mission_features table has loop state columns", () => {

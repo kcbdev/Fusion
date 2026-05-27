@@ -111,6 +111,7 @@ describe("TaskDetailModal create-PR wiring", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Pull Request" }));
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Create PR" })).toBeInTheDocument();
     });

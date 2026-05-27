@@ -167,6 +167,7 @@ interface MissionRow {
   description: string | null;
   status: string;
   interviewState: string;
+  baseBranch: string | null;
   autoAdvance: number;
   autopilotEnabled: number;
   autopilotState: string;
@@ -338,6 +339,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       description: row.description || undefined,
       status: row.status as MissionStatus,
       interviewState: row.interviewState as InterviewState,
+      baseBranch: row.baseBranch || undefined,
       autoAdvance: Boolean(row.autoAdvance),
       autopilotEnabled: Boolean(row.autopilotEnabled),
       autopilotState: (row.autopilotState as AutopilotState) || "inactive",
@@ -527,6 +529,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       description: input.description,
       status: "planning",
       interviewState: "not_started",
+      baseBranch: input.baseBranch,
       autoAdvance: false,
       autopilotEnabled: input.autopilotEnabled ?? false,
       autopilotState: "inactive",
@@ -535,14 +538,15 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     };
 
     this.db.prepare(`
-      INSERT INTO missions (id, title, description, status, interviewState, autoAdvance, autopilotEnabled, autopilotState, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO missions (id, title, description, status, interviewState, baseBranch, autoAdvance, autopilotEnabled, autopilotState, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       mission.id,
       mission.title,
       mission.description ?? null,
       mission.status,
       mission.interviewState,
+      mission.baseBranch ?? null,
       mission.autoAdvance ? 1 : 0,
       mission.autopilotEnabled ? 1 : 0,
       mission.autopilotState ?? "inactive",
@@ -1094,6 +1098,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
         description = ?,
         status = ?,
         interviewState = ?,
+        baseBranch = ?,
         autoAdvance = ?,
         autopilotEnabled = ?,
         autopilotState = ?,
@@ -1105,6 +1110,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       updated.description ?? null,
       updated.status,
       updated.interviewState,
+      updated.baseBranch ?? null,
       updated.autoAdvance ? 1 : 0,
       updated.autopilotEnabled ? 1 : 0,
       updated.autopilotState ?? "inactive",
@@ -3127,6 +3133,8 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     const slice = this.getSlice(feature.sliceId);
     const milestone = slice ? this.getMilestone(slice.milestoneId) : undefined;
     const missionId = milestone?.missionId;
+    const mission = missionId ? this.getMission(missionId) : undefined;
+    const resolvedBaseBranch = branchOptions?.baseBranch ?? mission?.baseBranch;
 
     const lockScope = missionId ? `mission:${missionId}` : `mission-store:${this.taskStore.getRootDir()}`;
     const guard = await runDeterministicDuplicateGuard(this.taskStore, {
@@ -3143,14 +3151,14 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
           title: taskTitle || feature.title,
           description,
           branch: branchOptions?.branch,
-          baseBranch: branchOptions?.baseBranch,
+          baseBranch: resolvedBaseBranch,
           ...(missionId
             ? {
                 branchContext: {
                   groupId: `mission:${missionId}`,
                   source: "mission" as const,
                   assignmentMode: branchOptions?.assignmentMode ?? "shared",
-                  inheritedBaseBranch: branchOptions?.baseBranch,
+                  inheritedBaseBranch: resolvedBaseBranch,
                 },
               }
             : {}),
@@ -3208,6 +3216,9 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
 
     const features = this.listFeatures(sliceId);
     const definedFeatures = features.filter((f) => f.status === "defined");
+    const milestone = this.getMilestone(slice.milestoneId);
+    const mission = milestone ? this.getMission(milestone.missionId) : undefined;
+    const resolvedBaseBranch = branchOptions?.baseBranch ?? mission?.baseBranch;
 
     const triaged: MissionFeature[] = [];
     for (const feature of definedFeatures) {
@@ -3217,6 +3228,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       const updated = await this.triageFeature(feature.id, undefined, undefined, {
         ...branchOptions,
         branch,
+        baseBranch: resolvedBaseBranch,
       });
       triaged.push(updated);
     }

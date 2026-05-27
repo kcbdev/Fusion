@@ -466,6 +466,48 @@ describe("branch-conflicts", () => {
     await expect(assertion).resolves.toBeUndefined();
   });
 
+  // FN-5475 / option-2 promotion check: a commit attributed to another
+  // task that's already reachable from local `main` was integrated via
+  // fast-forward and shouldn't be treated as contamination on a
+  // downstream branch that briefly inherited it.
+  it("assertCleanBranchAtBase treats foreign-attributed commits that are ancestors of main as promoted", async () => {
+    mockedExecSync.mockImplementation((cmd: string | string[]) => {
+      const command = typeof cmd === "string" ? cmd : cmd[0];
+      if (command.includes("git log --format=%H%x1f%s%x1f%b 'main..fusion/fn-4068'")) {
+        return Buffer.from("bbb222feat(FN-4386): foreignFusion-Task-Id: FN-4386\n");
+      }
+      if (command.includes("git merge-base --is-ancestor 'bbb222' 'main'")) {
+        // Simulate the FN-5475 case: foreign commit is already on main.
+        return Buffer.from("");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    await expect(
+      assertCleanBranchAtBase("/tmp/repo", "fusion/fn-4068", "main", "FN-4068"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("assertCleanBranchAtBase still throws when foreign-attributed commits are NOT on main", async () => {
+    mockedExecSync.mockImplementation((cmd: string | string[]) => {
+      const command = typeof cmd === "string" ? cmd : cmd[0];
+      if (command.includes("git log --format=%H%x1f%s%x1f%b 'main..fusion/fn-4068'")) {
+        return Buffer.from("bbb222feat(FN-4386): foreignFusion-Task-Id: FN-4386\n");
+      }
+      if (command.includes("git merge-base --is-ancestor")) {
+        // Not on main — exits non-zero.
+        const err = new Error("not an ancestor") as Error & { stderr?: string };
+        err.stderr = "";
+        throw err;
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    await expect(
+      assertCleanBranchAtBase("/tmp/repo", "fusion/fn-4068", "main", "FN-4068"),
+    ).rejects.toBeInstanceOf(BranchCrossContaminationError);
+  });
+
   describe("reportBranchAttribution", () => {
     const RS = "\x1e";
     const FS = "\x1f";

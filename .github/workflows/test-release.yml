@@ -109,10 +109,63 @@ jobs:
             packages/cli/dist/${{ matrix.binary }}.sha256
             packages/cli/dist/runtime/**/*
 
+  # ── Build Windows desktop EXE artifacts ──────────────────────────────
+  # Code-signing with WINDOWS_CERTIFICATE_BASE64 / WINDOWS_CERTIFICATE_PASSWORD
+  # is intentionally deferred to FN-5592; ARM64 support is tracked in FN-5594.
+  build-desktop-windows:
+    name: Build Desktop Windows EXE
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node and install dependencies
+        uses: ./.github/actions/setup-node-pnpm
+
+      - name: Build
+        run: pnpm build
+
+      - name: Build desktop package
+        run: pnpm --filter @fusion/desktop build
+
+      - name: Package Windows desktop EXE
+        run: pnpm --filter @fusion/desktop dist:win -- --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify desktop EXE artifacts
+        shell: pwsh
+        run: |
+          $exes = Get-ChildItem packages/desktop/dist-electron -Filter "Fusion-*-win-*.exe"
+          if ($exes.Count -eq 0) {
+            Write-Error "No Fusion Windows EXE artifacts produced"
+            exit 1
+          }
+
+      - name: Generate desktop EXE checksums
+        shell: pwsh
+        run: |
+          $exes = Get-ChildItem packages/desktop/dist-electron -Filter "Fusion-*-win-*.exe"
+          foreach ($exe in $exes) {
+            $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($exe.Name)" | Out-File -Encoding ascii "$($exe.FullName).sha256"
+          }
+
+      - name: Upload desktop Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fusion-desktop-windows
+          path: |
+            packages/desktop/dist-electron/Fusion-*-win-*.exe
+            packages/desktop/dist-electron/Fusion-*-win-*.exe.sha256
+            packages/desktop/dist-electron/Fusion-*-win-*.exe.blockmap
+
   # ── Collect all artifacts ─────────────────────────────────────────────
   collect:
     name: Collect Artifacts
-    needs: build-binaries
+    needs: [build-binaries, build-desktop-windows]
     runs-on: ubuntu-latest
 
     steps:
@@ -124,7 +177,7 @@ jobs:
       - name: Combine artifacts
         run: |
           mkdir combined
-          find artifacts -type f \( -name "fn-*" -o -name "*.sha256" \) -exec cp {} combined/ \;
+          find artifacts -type f \( -name "fn-*" -o -name "*.sha256" -o -name "*.exe" -o -name "*.exe.sha256" -o -name "*.blockmap" \) -exec cp {} combined/ \;
           ls -la combined/
 
       - name: Upload combined archive

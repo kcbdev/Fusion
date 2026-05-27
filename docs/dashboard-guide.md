@@ -97,6 +97,20 @@ Behavior:
 - Nodes support manual drag repositioning with a 4px movement threshold to separate click from drag, using pointer capture and zoom-aware delta scaling for reliable tracking
 - Custom node positions persist per project in browser localStorage (`kb:${projectId}:fusion-plugin-dependency-graph:positions`) across refresh/project switches, and **Fit to graph** clears saved positions and restores auto-layout
 
+## Planning Mode
+
+Planning Mode now includes branch controls on the summary screen before you create a task.
+
+- **Branch strategy** options mirror Subtask Breakdown semantics:
+  - `Use project/default branch`
+  - `Create auto-named branch per task`
+  - `Use existing branch`
+  - `Create custom new branch`
+- **Branch name** is required when using `existing` or `custom new` strategies.
+- **Merge target / base branch (optional)** lets you set the PR base branch (for example `main` or `develop`).
+
+These values are sent with the Planning Mode create-task request as `branchSelection`, so created tasks persist branch/base-branch settings consistently with other branch-aware task creation flows.
+
 ## Chat View
 
 Chat view provides project-scoped conversations with agents.
@@ -208,6 +222,61 @@ Features:
 - Remotes tab keeps "Recent commits on {remote}" in sync immediately after successful push/pull actions
 
 ![Git manager](./screenshots/git-manager.png)
+
+## Merge Advance Notice
+
+Merge Advance Notice is a global banner (`MergeAdvanceNotice`) mounted in the main app chrome that appears when the integration branch advances.
+
+When it appears:
+- Reacts to `task:merged` SSE events
+- Hydrates from `GET /api/tasks/merge-advance-events`
+- Shows the latest merge-advance event for the current project
+
+What it shows:
+- Integration branch name and the new tip short SHA
+- Advancing task ID and advance metadata from the event payload (`advanceMode`, `refName`, SHA details)
+- Checkout-state warnings when your current worktree is dirty or has untracked files
+
+How to react:
+- Click **Pull** to run Smart Pull (`POST /api/git/smart-pull`), including the stash-conflict flow in `StashConflictModal` when needed
+- Use the dismiss close button to hide the notice
+- Treat dirty/untracked warnings as a hint that local changes may be auto-stashed during pull
+
+Push follow-up (when shown):
+- If the integration branch is ahead of `origin`, the banner can show push controls with ahead count
+- Use **Push to origin** (or force-with-lease via **Advanced**) to publish the advanced branch tip
+- If push is rejected (`rejected-non-ff` / `sha-mismatch`), the banner offers a Smart Pull retry path
+
+Branch names are dynamic from merge/audit payloads; the banner is not hardcoded to `main`.
+
+## Smart Pull
+
+Smart Pull is a one-shot pull workflow that keeps local work safe while advancing your checked-out integration branch.
+
+What it does:
+- Calls `POST /api/git/smart-pull`
+- If your worktree is clean, runs a fast-forward pull and returns `kind: "clean-pull"`
+- If local changes exist, auto-stashes (including untracked files), runs `git pull --ff-only`, then restores the stash
+- Returns `kind: "stash-pull-pop"` when stash → pull → pop succeeds cleanly
+- Returns `kind: "stash-pop-conflict"` when stash restore conflicts, then opens `StashConflictModal`
+
+Where it is triggered:
+- From the merge-advance banner pull action (`MergeAdvanceNotice`)
+- From any dashboard surface that invokes `POST /api/git/smart-pull`
+
+When `stash-pop-conflict` occurs, `StashConflictModal` shows:
+- Stash short SHA + stash label
+- Per-file conflict list
+- Per-file resolution actions (**Keep mine** / **Keep incoming**, backed by `/api/git/stash-resolve` choices `ours`/`theirs`)
+- Stash actions: **Drop stash** (`POST /api/git/stash-drop`) and **Restore from stash ref** (`POST /api/git/stash-restore`)
+- A stash-SHA copy button for sharing the conflict list/reference
+
+After resolution:
+- As each file is resolved, `remainingConflicts` shrinks; when empty, the modal can be closed and the branch stays at the advanced integration tip with resolved stash content applied
+- Dropping the stash discards the saved local edits after conflicts are resolved
+- Restoring from stash ref re-applies the stash and may reintroduce conflicts for manual handling
+
+You may also see matching run-audit events in logs, including `pull:fast-forward` and `stash:pop-conflict`.
 
 ## Documents View
 
@@ -492,6 +561,7 @@ Inspect task definition, logs, review feedback, comments, documents, workflow ou
 - The GitHub tracking section now defaults to a compact summary row; use the disclosure arrow to expand linked-issue details plus tracking edit controls.
 - In shared task edit/create forms, GitHub Tracking appears at the bottom of **More options**, after **Workflow Steps**.
 - From this section you can explicitly enable/disable tracking and manage a per-task repo override (`owner/repo`). Clearing the override saves `null` and falls back to project/global defaults.
+- In `in-review`, pull-request controls/status (including stall badges) are in a dedicated **Pull Request** tab instead of the Definition tab.
 - The **Review** tab is separate from **Comments**: Review shows actionable PR/reviewer feedback and same-task revision controls, while Comments remains the general collaboration thread.
 - **Request revision** in Review resumes work on the same task ID (no refinement task): `in-progress` tasks get steering injection, while `in-review` tasks are moved back to `in-progress` for the same branch/worktree revision pass.
 - Review supports a manual **Refresh** action in-place: PR mode pulls latest GitHub review state/decision, while direct mode rehydrates reviewer-agent feedback from persisted task data (no GitHub call).
@@ -937,6 +1007,10 @@ Breakpoints: 768px (primary mobile), 1024px (tablet `min-width: 769px and max-wi
 
 **Safe area:** `max(var(--space-md), env(safe-area-inset-left, 0px))` for notch-aware horizontal padding.
 
+### Secrets management in Settings
+
+Manage project and global secrets directly inside **Settings → Project → Secrets**. This section embeds the existing Secrets UI in the settings content panel so you no longer need a footer "Manage secrets" link to leave the modal.
+
 ### Lazy-Loaded Heavy Views
 
 These 19 views are lazy-loaded via `React.lazy()` with `<Suspense fallback={null}>`. `prefetchLazyViews()` warms chunks once on mount via `requestIdleCallback`. **Do not make these eager.**
@@ -992,3 +1066,16 @@ Reuse `packages/dashboard/app/utils/filePathLinkify.tsx` and `FileBrowserContext
 - **Mobile board scroll-snap (FN-001)** — `scroll-snap-type: x mandatory` on mobile `.board` causes iOS Safari to compress the viewport when switching from ListView. Use `x proximity` + `overflow-anchor: none`.
 - **`lucide-react` icon adds** — update `vi.mock("lucide-react")` test mocks immediately; missing exports cascade.
 - **`.spin` is global** — don't redefine the generic spin keyframes in component CSS.
+
+## Integration Branch Push to Origin
+
+The merge-advance notice includes an explicit **Push to origin** action for the dynamically resolved integration branch.
+
+- The branch name is resolved from project settings, then `origin/HEAD`, then fallback; UI copy and API behavior must remain dynamic.
+- Push status probes compute ahead/behind counts and disable push when there is no `origin`, no upstream tracking ref, the branch is not ahead, or a Fusion merge lock is active.
+- The mutating route performs a TOCTOU merge-lock recheck immediately before building push argv.
+- Standard push is `git push origin refs/heads/<branch>:refs/heads/<branch>` with no plain `--force` path.
+- Advanced mode enables opt-in `--force-with-lease=refs/heads/<branch>:<localSha>` only.
+- Non-fast-forward and lease-stale failures surface actionable messaging with Smart Pull.
+- Every attempt records `mutationType: "push:origin"` run-audit metadata: `integrationBranch`, `remote`, `localSha`, `remoteSha`, `aheadCount`, `behindCount`, `forceWithLease`, `outcome`, optional `stderrPreview`, and `durationMs`.
+- Push remains explicit user authorization only through dashboard HTTP routes (no scheduler/heartbeat auto-push).

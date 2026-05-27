@@ -1,10 +1,23 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { execSync, exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { IDENTITY_GUARD_BYPASS_ENV } from "./worktree-hooks.js";
 
 // Internal git plumbing intentionally bypasses sandbox backends.
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
+
+/**
+ * Env for merger-driven `git commit` calls so the identity-guard pre-commit
+ * hook accepts commits made on a detached HEAD (intentional in
+ * reuse-task-worktree squash/verification-fix ceremonies). Scope is narrow —
+ * commit calls only, never plumbing like checkout/reset — and the guard
+ * checks for the exact value "1" so a leaked/empty var cannot accidentally
+ * bypass agent commits.
+ */
+function mergerCommitEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, [IDENTITY_GUARD_BYPASS_ENV]: "1" };
+}
 import {
   detectMissingWorkspaceEntry,
   runVerificationCommand as runVerificationCommandShared,
@@ -30,7 +43,7 @@ export {
   type VerificationResult,
 } from "./verification-utils.js";
 
-import { existsSync, readFileSync, writeFileSync, unlinkSync, renameSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync, unlinkSync, renameSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { resolveTaskWorktreePath } from "./worktree-paths.js";
@@ -70,13 +83,14 @@ import {
   type TaskSourceIssue,
   type Task,
   type AutostashOrphanRecord,
+  normalizeMergeAdvanceAutoSyncMode,
 } from "@fusion/core";
 import { describeModel, promptWithFallback } from "./pi.js";
 import { accumulateSessionTokenUsage } from "./session-token-usage.js";
 import { createResolvedAgentSession, extractRuntimeHint, resolveMergerSessionModel } from "./agent-session-helpers.js";
 import { createFallbackModelObserver } from "./fallback-model-observer.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
-import { classifyTaskWorktree, RemovalReason, removeWorktree, type WorktreePool } from "./worktree-pool.js";
+import { classifyTaskWorktree, getRegisteredWorktreeBranches, RemovalReason, removeWorktree, type WorktreePool } from "./worktree-pool.js";
 import { activeSessionRegistry } from "./active-session-registry.js";
 import { AgentLogger } from "./agent-logger.js";
 import { mergerLog } from "./logger.js";
@@ -112,10 +126,139 @@ import {
 import { acquireTaskWorktree } from "./worktree-acquisition.js";
 import { resolveIntegrationBranch } from "./integration-branch.js";
 import { advanceIntegrationBranchRef, IntegrationBranchConcurrentAdvanceError } from "./merger-ref-update-advance.js";
+import { syncWorktreeToHead, type SyncWorktreeResult } from "./worktree-ref-sync.js";
 import { appendAutoWidenedScopeToPrompt, evaluateScopeAutoWiden } from "./merger-scope-auto-widen.js";
 
 export { DiffVolumeRegressionError } from "./merger-diff-volume-gate.js";
 export { IntegrationBranchConcurrentAdvanceError } from "./merger-ref-update-advance.js";
+
+/**
+ * After `advanceIntegrationBranchRef` ff-updates `refs/heads/<integrationBranch>`,
+ * any other worktree still checked out on that branch keeps its index + working
+ * tree pinned at the previous tip. `git status` in such a worktree then shows
+ * the new commits inverted as "staged changes to be committed" — the surprise
+ * behavior that made many users think the merge had been silently reverted.
+ *
+ * This helper enumerates other worktrees on the integration branch and calls
+ * `syncWorktreeToHead` inside each — snap-forward when the worktree is clean
+ * against the previous tip, or capture-patch + reset + reapply when the user
+ * has real local edits. Each attempt emits a `merge:auto-sync` audit event
+ * with the outcome.
+ *
+ * Best-effort: any per-worktree failure is recorded as an audit event and the
+ * loop continues — the merge has already landed and the auto-sync is convenience.
+ */
+async function runMergeAdvanceAutoSync(input: {
+  store: TaskStore;
+  audit: RunAuditor;
+  taskId: string;
+  projectRootDir: string;
+  integrationBranch: string;
+  previousSha: string;
+  newSha: string;
+  mode: "ff-only" | "stash-and-ff";
+}): Promise<void> {
+  const { audit, taskId, projectRootDir, integrationBranch, previousSha, newSha, mode } = input;
+  // `getRegisteredWorktreeBranches` returns ALL (branch, path) pairs, not a
+  // Map keyed by branch — multiple worktrees can share a branch when the user
+  // created secondary checkouts via `git worktree add --force -b`. Collapsing
+  // to a Map would silently skip all but the last-iterated of those, which is
+  // exactly the surprise-`git status` bug this hook was meant to fix.
+  let entries: Array<{ branch: string; worktreePath: string }>;
+  try {
+    entries = await getRegisteredWorktreeBranches(projectRootDir);
+  } catch (err: unknown) {
+    await audit.git({
+      type: "merge:auto-sync",
+      target: projectRootDir,
+      metadata: {
+        taskId,
+        integrationBranch,
+        mode,
+        outcome: "enumeration-failed",
+        error: err instanceof Error ? err.message : String(err),
+      },
+    });
+    return;
+  }
+
+  const matchingWorktrees: string[] = [];
+  for (const entry of entries) {
+    if (entry.branch === integrationBranch) {
+      matchingWorktrees.push(entry.worktreePath);
+    }
+  }
+
+  if (matchingWorktrees.length === 0) {
+    return;
+  }
+
+  for (const worktreePath of matchingWorktrees) {
+    let result: SyncWorktreeResult;
+    try {
+      result = await syncWorktreeToHead({
+        worktreePath,
+        integrationBranch,
+        previousSha,
+        newSha,
+        mode,
+        taskId,
+        emit: async (event) => {
+          try {
+            await audit.git({
+              type: event.mutationType,
+              target: worktreePath,
+              metadata: { ...event.metadata, autoSync: true },
+            });
+          } catch {
+            // best-effort: never let inner audit failure abort the loop
+          }
+        },
+      });
+    } catch (err: unknown) {
+      await audit.git({
+        type: "merge:auto-sync",
+        target: worktreePath,
+        metadata: {
+          taskId,
+          integrationBranch,
+          mode,
+          newSha,
+          worktreePath,
+          outcome: "exception",
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+      continue;
+    }
+
+    await audit.git({
+      type: "merge:auto-sync",
+      target: worktreePath,
+      metadata: {
+        taskId,
+        integrationBranch,
+        mode,
+        newSha,
+        previousSha,
+        worktreePath,
+        outcome: result.kind,
+        ...(result.kind === "synced-with-pop-conflict"
+          ? { conflictedFiles: result.conflictedFiles, patchPath: result.patchPath, stashedFiles: result.stashedFiles, untrackedSkippedAsTracked: result.untrackedSkippedAsTracked }
+          : {}),
+        ...(result.kind === "synced-with-edits-restored"
+          ? { stashedFiles: result.stashedFiles, untrackedRestored: result.untrackedRestored, untrackedSkippedAsTracked: result.untrackedSkippedAsTracked }
+          : {}),
+        ...(result.kind === "failed"
+          ? { stage: result.stage, error: result.error }
+          : {}),
+        ...(result.kind === "skipped-dirty"
+          ? { dirtyFiles: result.dirtyFiles, untrackedFiles: result.untrackedFiles }
+          : {}),
+      },
+    });
+  }
+}
 
 /** Conflict type classification for merge conflict resolution */
 export type ConflictType =
@@ -424,8 +567,8 @@ async function syncDependenciesForMerge(
   }
 
   throwIfAborted(signal, taskId);
-  mergerLog.log(`${taskId}: syncing dependencies before merge build verification`);
-  await store.logEntry(taskId, `Syncing dependencies before merge build verification: ${installCommand}`);
+  mergerLog.log(`${taskId}: syncing dependencies before merge verification`);
+  await store.logEntry(taskId, `Syncing dependencies before merge verification: ${installCommand}`);
   try {
     await execAsync(installCommand, {
       cwd: rootDir,
@@ -448,7 +591,7 @@ async function syncDependenciesForMerge(
 interface InferredTestCommand {
   command: string;
   /** Source indicates whether this was explicitly configured or inferred from project files */
-  testSource: "explicit" | "inferred";
+  testSource: "explicit" | "inferred" | "inferred-scoped";
   buildSource?: "explicit" | "inferred";
 }
 
@@ -478,8 +621,23 @@ export type OwnedLandedClassification =
     details: Record<string, unknown>;
   };
 
+function escapeRegexForOwnership(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Decide whether a git commit belongs to a given task. Line-anchored trailers
+ * and subject-anchored conventional commits only — prose mentions never count.
+ * Mirrors `commitOwnedByTask` in self-healing.ts (FN-5441/FN-5446 regression).
+ */
 function commitOwnedByTask(taskId: string, subject: string, body: string): boolean {
-  return body.includes(`${FUSION_TASK_ID_TRAILER_KEY}: ${taskId}`) || subject.includes(taskId);
+  if (new RegExp(`(?:^|\\n)${escapeRegexForOwnership(FUSION_TASK_ID_TRAILER_KEY)}: ${escapeRegexForOwnership(taskId)}\\s*(?:\\n|$)`).test(body)) {
+    return true;
+  }
+  const subjectAnchor = new RegExp(
+    `^(?:[A-Za-z]+(?:\\([^)]*\\b${escapeRegexForOwnership(taskId)}\\b[^)]*\\))?:|${escapeRegexForOwnership(taskId)}:)`,
+  );
+  return subjectAnchor.test(subject);
 }
 
 async function findOwnedLandedCommitForTask(rootDir: string, task: Task): Promise<OwnedLandedCommit | null> {
@@ -733,14 +891,220 @@ export async function classifyOwnedLandedEvidence(
 }
 
 /**
+ * Parse a pnpm-workspace.yaml file and return the list of package glob patterns.
+ * Handles only the `packages:` list format used in pnpm workspace configs.
+ * Returns an empty array on any parse failure (best-effort).
+ *
+ * @internal Exported for testing only.
+ */
+export function parsePnpmWorkspaceGlobs(workspaceYamlContent: string): string[] {
+  const globs: string[] = [];
+  let inPackages = false;
+  for (const rawLine of workspaceYamlContent.split("\n")) {
+    const line = rawLine.trimEnd();
+    if (/^packages\s*:/.test(line)) {
+      inPackages = true;
+      continue;
+    }
+    if (inPackages) {
+      // A new top-level key ends the packages block
+      if (/^\S/.test(line) && line.trim() !== "") {
+        break;
+      }
+      // List item: "  - 'some/glob'" or `  - "some/glob"` or `  - some/glob`
+      const match = line.match(/^\s+-\s+['"]?([^'"#\s]+)['"]?/);
+      if (match && match[1]) {
+        globs.push(match[1]);
+      }
+    }
+  }
+  return globs;
+}
+
+/**
+ * Given a list of workspace package globs (e.g. "packages/*") and a rootDir,
+ * return all package root directories (dirs that contain a package.json) that
+ * match at least one glob.
+ *
+ * Glob matching: only simple single-star patterns at the last path segment are
+ * supported (covering the `packages/*` and `plugins/examples/*` patterns used
+ * in practice). Literal paths (no glob) are treated as direct package roots.
+ *
+ * @internal Exported for testing only.
+ */
+export function resolveWorkspacePackageRoots(
+  rootDir: string,
+  globs: string[],
+): string[] {
+  const roots: string[] = [];
+  for (const glob of globs) {
+    const starIdx = glob.indexOf("*");
+    if (starIdx === -1) {
+      // Literal path — treat the glob itself as a package root
+      const candidate = join(rootDir, glob);
+      if (existsSync(join(candidate, "package.json"))) {
+        roots.push(glob); // Store relative to rootDir
+      }
+      continue;
+    }
+    // Pattern like "packages/*" or "plugins/examples/*"
+    // The prefix is everything before the last slash before the star
+    const prefix = glob.slice(0, starIdx);
+    const parentDir = join(rootDir, prefix.replace(/\/$/, ""));
+    let entries: string[];
+    try {
+      entries = readdirSync(parentDir, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const relPath = `${prefix.replace(/\/$/, "")}/${entry}`;
+      const absPath = join(rootDir, relPath);
+      if (existsSync(join(absPath, "package.json"))) {
+        roots.push(relPath); // Store relative to rootDir
+      }
+    }
+  }
+  return roots;
+}
+
+/**
+ * Given a list of changed files (relative to rootDir) and a list of package
+ * root paths (relative to rootDir), return the unique package names (from each
+ * package.json's "name" field) whose root is the longest prefix-match for at
+ * least one changed file.
+ *
+ * @internal Exported for testing only.
+ */
+export function mapChangedFilesToPackageNames(
+  changedFiles: string[],
+  packageRoots: string[],
+  rootDir: string,
+): string[] {
+  const nameSet = new Set<string>();
+  for (const file of changedFiles) {
+    // Find the longest package root that is a prefix of this file
+    let bestRoot: string | null = null;
+    let bestLen = -1;
+    for (const pkgRoot of packageRoots) {
+      const prefix = pkgRoot.endsWith("/") ? pkgRoot : `${pkgRoot}/`;
+      if (file === pkgRoot || file.startsWith(prefix)) {
+        if (pkgRoot.length > bestLen) {
+          bestLen = pkgRoot.length;
+          bestRoot = pkgRoot;
+        }
+      }
+    }
+    if (bestRoot !== null) {
+      // Read the package name from package.json
+      try {
+        const pkgJsonPath = join(rootDir, bestRoot, "package.json");
+        const raw = readFileSync(pkgJsonPath, "utf-8");
+        const parsed = JSON.parse(raw) as { name?: string };
+        if (parsed.name) {
+          nameSet.add(parsed.name);
+        }
+      } catch {
+        // If we can't read the package name, use the relative root path
+        nameSet.add(bestRoot);
+      }
+    }
+  }
+  return Array.from(nameSet);
+}
+
+/**
+ * Best-effort: map a list of repo-relative file paths to the pnpm package
+ * names they belong to. Returns an empty array if pnpm-workspace.yaml is
+ * missing or unparseable — callers fall back to a directory-based heuristic.
+ *
+ * @internal Exported for testing only.
+ */
+export function packageNamesForFiles(rootDir: string, files: string[]): string[] {
+  if (files.length === 0) return [];
+  let workspaceContent: string;
+  try {
+    workspaceContent = readFileSync(join(rootDir, "pnpm-workspace.yaml"), "utf-8");
+  } catch {
+    return [];
+  }
+  const globs = parsePnpmWorkspaceGlobs(workspaceContent);
+  if (globs.length === 0) return [];
+  const packageRoots = resolveWorkspacePackageRoots(rootDir, globs);
+  if (packageRoots.length === 0) return [];
+  return mapChangedFilesToPackageNames(files, packageRoots, rootDir);
+}
+
+/**
+ * Attempt to derive the set of pnpm package names touched by the branch.
+ * Returns null when scoping cannot be determined (missing git context, no
+ * workspace file, root-only changes, etc.) — callers fall back to `pnpm test`.
+ *
+ * @internal Exported for testing only.
+ */
+export function deriveScopedPnpmTestCommand(rootDir: string, baseBranch: string, branch: string): string | null {
+  // 1. Read and parse pnpm-workspace.yaml
+  const workspacePath = join(rootDir, "pnpm-workspace.yaml");
+  let workspaceContent: string;
+  try {
+    workspaceContent = readFileSync(workspacePath, "utf-8");
+  } catch {
+    return null;
+  }
+  const globs = parsePnpmWorkspaceGlobs(workspaceContent);
+  if (globs.length === 0) return null;
+
+  // 2. Resolve actual package roots
+  const packageRoots = resolveWorkspacePackageRoots(rootDir, globs);
+  if (packageRoots.length === 0) return null;
+
+  // 3. Get the changed files between base and the branch tip passed by caller.
+  let changedFilesOutput: string;
+  try {
+    changedFilesOutput = execSync(
+      `git diff --name-only ${quoteArg(baseBranch)}...${quoteArg(branch)}`,
+      { cwd: rootDir, stdio: "pipe", encoding: "utf-8" },
+    ).toString();
+  } catch {
+    return null;
+  }
+  const changedFiles = changedFilesOutput
+    .split("\n")
+    .map((f) => f.trim())
+    .filter(Boolean);
+  if (changedFiles.length === 0) return null;
+
+  // 4. Map changed files to package names
+  const packageNames = mapChangedFilesToPackageNames(changedFiles, packageRoots, rootDir);
+  if (packageNames.length === 0) {
+    // All changes are at the root (e.g. workspace config) — fall back to full suite
+    return null;
+  }
+
+  // 5. Compose the scoped pnpm command
+  // `...^` includes dependents (packages that import the changed packages).
+  // Package names come from workspace package.json files (potentially
+  // untrusted) so we quote each filter argument via `quoteArg` to prevent
+  // shell interpolation if a name contains metacharacters.
+  const filters = packageNames.map((name) => `--filter ${quoteArg(`${name}...^`)}`).join(" ");
+  return `pnpm ${filters} test`;
+}
+
+/**
  * Infer a default test command based on project files.
  * Returns the command and whether it was explicitly configured or inferred.
  *
  * Inference rules:
- * - pnpm-lock.yaml → "pnpm test"
+ * - pnpm-lock.yaml → "pnpm test" (or scoped when monorepo + git context available)
  * - yarn.lock → "yarn test"
  * - bun.lock/bun.lockb → "bun test"
  * - package-lock.json → "npm test"
+ *
+ * When a pnpm workspace is detected and git context (baseBranch + branch) is
+ * provided, the command is automatically scoped to the packages touched by the
+ * branch diff. testSource will be "inferred-scoped" in that case.
  *
  * Returns null if no test command can be inferred.
  */
@@ -748,6 +1112,8 @@ export function inferDefaultTestCommand(
   rootDir: string,
   explicitTestCommand?: string,
   explicitBuildCommand?: string,
+  baseBranch?: string,
+  branch?: string,
 ): InferredTestCommand | null {
   // If explicit test command is set, use it (no inference needed)
   if (explicitTestCommand?.trim()) {
@@ -758,49 +1124,46 @@ export function inferDefaultTestCommand(
     };
   }
 
+  const buildSource = explicitBuildCommand?.trim() ? "explicit" : undefined;
+
   // Infer test command from lock files
   if (existsSync(join(rootDir, "pnpm-lock.yaml"))) {
-    // Monorepo heuristic: a pnpm-workspace.yaml means `pnpm test` will fan out
-    // across every workspace package on every merge, which is usually far slower
-    // than necessary. Warn so the user sets an explicit scoped testCommand
-    // (e.g. `pnpm -r --filter "...[main]" test`). We don't auto-scope because
-    // the default branch name isn't guaranteed and git context may be unavailable.
+    // Monorepo heuristic: if pnpm-workspace.yaml exists and we have git context,
+    // scope the command to only the packages touched by this branch's diff.
     if (existsSync(join(rootDir, "pnpm-workspace.yaml"))) {
+      if (baseBranch?.trim() && branch?.trim()) {
+        try {
+          const scoped = deriveScopedPnpmTestCommand(rootDir, baseBranch.trim(), branch.trim());
+          if (scoped) {
+            mergerLog.log(
+              `Scoped inferred test command to changed packages: ${scoped}`,
+            );
+            return { command: scoped, testSource: "inferred-scoped", buildSource };
+          }
+        } catch {
+          // Fall through to unscoped fallback
+        }
+      }
+      // No git context or scoping failed — warn and use unscoped
       mergerLog.warn(
         `Inferred test command "pnpm test" in a pnpm workspace (${rootDir}). ` +
         `This runs the full monorepo suite on every merge. Consider setting an explicit ` +
         `scoped testCommand in project settings, e.g. \`pnpm -r --filter "...[main]" test\`.`,
       );
     }
-    return {
-      command: "pnpm test",
-      testSource: "inferred",
-      buildSource: explicitBuildCommand?.trim() ? "explicit" : undefined,
-    };
+    return { command: "pnpm test", testSource: "inferred", buildSource };
   }
 
   if (existsSync(join(rootDir, "yarn.lock"))) {
-    return {
-      command: "yarn test",
-      testSource: "inferred",
-      buildSource: explicitBuildCommand?.trim() ? "explicit" : undefined,
-    };
+    return { command: "yarn test", testSource: "inferred", buildSource };
   }
 
   if (existsSync(join(rootDir, "bun.lock")) || existsSync(join(rootDir, "bun.lockb"))) {
-    return {
-      command: "bun test",
-      testSource: "inferred",
-      buildSource: explicitBuildCommand?.trim() ? "explicit" : undefined,
-    };
+    return { command: "bun test", testSource: "inferred", buildSource };
   }
 
   if (existsSync(join(rootDir, "package-lock.json"))) {
-    return {
-      command: "npm test",
-      testSource: "inferred",
-      buildSource: explicitBuildCommand?.trim() ? "explicit" : undefined,
-    };
+    return { command: "npm test", testSource: "inferred", buildSource };
   }
 
   // No inference possible — return null, letting the caller decide what to do
@@ -833,6 +1196,25 @@ export class MergeAbortedError extends Error {
   }
 }
 
+/**
+ * Raised when fix agent made no changes and the failing test files are all
+ * outside the branch's diff. This signals that the failure is pre-existing on
+ * the base branch (e.g. a flaky engine test) and retrying cannot help.
+ *
+ * The merger catches this and marks the task `failed` with a clear error
+ * message, bypassing limbo recovery so the user sees an actionable status.
+ */
+export class OutOfScopeVerificationError extends Error {
+  constructor(
+    message: string,
+    public readonly failingFiles: string[],
+    public readonly branchFiles: string[],
+  ) {
+    super(message);
+    this.name = "OutOfScopeVerificationError";
+  }
+}
+
 export class SquashAuditError extends Error {
   constructor(
     taskId: string,
@@ -847,6 +1229,69 @@ export class SquashAuditError extends Error {
 export function throwIfAborted(signal: AbortSignal | undefined, taskId: string): void {
   if (!signal?.aborted) return;
   throw new MergeAbortedError(`Merge aborted for ${taskId}: engine shutdown requested`);
+}
+
+/**
+ * Parse failing test file paths from vitest/jest output.
+ *
+ * Looks for lines matching:
+ *   - `FAIL <path>` (jest/vitest)
+ *   - ` × <path>` / ` ✕ <path>` (vitest unicode markers)
+ *   - `● <test suite> › <test name>` is NOT a file path — skip those
+ *
+ * Returns an array of unique relative file paths. Returns an empty array when
+ * no file paths can be parsed (callers treat this as "unknown", not "in-scope").
+ *
+ * @internal Exported for testing only.
+ */
+export function parseFailingFilesFromOutput(output: string): string[] {
+  const paths = new Set<string>();
+  for (const line of output.split("\n")) {
+    // jest/vitest: "FAIL packages/engine/src/__tests__/foo.test.ts"
+    const failMatch = line.match(/^FAIL\s+(\S+)/);
+    if (failMatch && failMatch[1]) {
+      paths.add(failMatch[1]);
+      continue;
+    }
+    // vitest summary: " ❯ packages/engine/src/__tests__/foo.test.ts (2 tests | 1 failed)"
+    const vitestSummaryMatch = line.match(/^\s*[❯>]\s+(\S+\.(?:test|spec)\.[jt]sx?)\s/);
+    if (vitestSummaryMatch && vitestSummaryMatch[1]) {
+      paths.add(vitestSummaryMatch[1]);
+      continue;
+    }
+    // vitest: " × src/__tests__/foo.test.ts > some test name"
+    const crossMatch = line.match(/^\s*[×✕✗]\s+(\S+\.(?:test|spec)\.[jt]sx?)\s/);
+    if (crossMatch && crossMatch[1]) {
+      paths.add(crossMatch[1]);
+    }
+  }
+  return Array.from(paths);
+}
+
+/**
+ * Get the set of files changed in the branch relative to the base branch.
+ * Uses `git diff --name-only <baseBranch>...HEAD` (three-dot range so it
+ * computes the diff from the merge-base, not the current HEAD of baseBranch).
+ *
+ * Returns an empty array on git errors (callers treat this as "unknown").
+ *
+ * @internal Exported for testing only.
+ */
+export function getBranchChangedFiles(rootDir: string, baseBranch: string, branch: string): string[] {
+  try {
+    // Quote both refs — branch names can legally contain `/` and other
+    // characters that, while harmless to git, would expose us to shell
+    // injection if a caller ever passed an unsanitized branch string.
+    const baseRef = quoteArg(baseBranch);
+    const headRef = branch === "HEAD" ? "HEAD" : quoteArg(branch);
+    const output = execSync(
+      `git diff --name-only ${baseRef}...${headRef}`,
+      { cwd: rootDir, stdio: "pipe", encoding: "utf-8" },
+    ).toString();
+    return output.split("\n").map((f) => f.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -961,7 +1406,7 @@ async function runDeterministicVerification(
   taskId: string,
   testCommand?: string,
   buildCommand?: string,
-  testSource?: "explicit" | "inferred",
+  testSource?: "explicit" | "inferred" | "inferred-scoped",
   buildSource?: "explicit" | "inferred",
   signal?: AbortSignal,
 ): Promise<VerificationResult> {
@@ -1014,7 +1459,7 @@ async function runDeterministicVerification(
   // ── End cache lookup ───────────────────────────────────────────────────
 
   // Build source indicator for logging
-  const testSourceLabel = testSource === "inferred" ? " [inferred]" : "";
+  const testSourceLabel = (testSource === "inferred" || testSource === "inferred-scoped") ? ` [${testSource}]` : "";
   const buildSourceLabel = buildSource === "inferred" ? " [inferred]" : "";
 
   mergerLog.log(
@@ -1022,9 +1467,10 @@ async function runDeterministicVerification(
     (hasTestCommand ? ` [test:${testSourceLabel} ${normalizedTestCommand}]` : "") +
     (hasBuildCommand ? ` [build:${buildSourceLabel} ${normalizedBuildCommand}]` : ""),
   );
+  const testSourceDisplayLabel = (testSource === "inferred" || testSource === "inferred-scoped") ? ` [${testSource}]` : "";
   const deterministicVerificationMessage =
     "Running deterministic merge verification" +
-    (hasTestCommand ? ` (test${testSource === "inferred" ? " [inferred]" : ""}: ${normalizedTestCommand})` : "") +
+    (hasTestCommand ? ` (test${testSourceDisplayLabel}: ${normalizedTestCommand})` : "") +
     (hasBuildCommand ? ` (build${buildSource === "inferred" ? " [inferred]" : ""}: ${normalizedBuildCommand})` : "");
   await store.logEntry(taskId, deterministicVerificationMessage);
   await store.appendAgentLog(taskId, deterministicVerificationMessage, "text", undefined, "merger");
@@ -1246,13 +1692,20 @@ async function runVerificationCommand(
 /**
  * Attempt an in-merge verification fix by spawning an AI agent on the main branch.
  * Returns true if verification passes after the fix, false otherwise.
- * Never throws — errors are caught and logged, and the function returns false.
+ *
+ * Throws OutOfScopeVerificationError when the fix agent made no changes AND the
+ * failing files are all outside the branch's diff — meaning the failure is
+ * pre-existing on the base branch and cannot be fixed by this task's agent.
  *
  * @param fixModifiedFiles - Mutable set that this function populates with every
  *   path that changed during the fix agent's run (post-snapshot minus
  *   pre-snapshot). The caller passes this set across all fix attempts so that
  *   `commitOrAmendMergeWithFixes` can build an allowlist that covers every file
  *   the fix agent touched, regardless of how many retries were needed.
+ * @param baseBranch - Integration branch name (e.g. "main"). Used for
+ *   out-of-scope detection; pass undefined to skip detection.
+ * @param branch - Feature branch name being merged. Used for out-of-scope
+ *   detection; pass undefined to skip detection.
  */
 async function attemptInMergeVerificationFix(
   store: TaskStore,
@@ -1270,9 +1723,11 @@ async function attemptInMergeVerificationFix(
   fixAttemptNumber?: number,
   testCommand?: string,
   buildCommand?: string,
-  testSource?: "explicit" | "inferred",
+  testSource?: "explicit" | "inferred" | "inferred-scoped",
   buildSource?: "explicit" | "inferred",
   fixModifiedFiles?: Set<string>,
+  baseBranch?: string,
+  branch?: string,
 ): Promise<boolean> {
   // Snapshot the working tree before doing anything so the diff reflects only
   // what the fix agent touched, not pre-existing dirty state.
@@ -1354,6 +1809,14 @@ Do not refactor, rename broadly, or make opportunistic improvements.
       fallbackProvider: settings.fallbackProvider,
       fallbackModelId: settings.fallbackModelId,
       defaultThinkingLevel: settings.defaultThinkingLevel,
+      runAuditor: createRunAuditor(store, {
+        runId: mergeRunContext?.runId ?? generateSyntheticRunId("merge", taskId),
+        agentId: mergeRunContext?.agentId ?? "merger",
+        taskId,
+        phase: "merge",
+        source: "merger",
+      }),
+      settings,
       // Skill selection: use assigned agent skills if available, otherwise role fallback
       ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
       taskId,
@@ -1451,6 +1914,43 @@ ${failureContext.output.slice(0, VERIFICATION_LOG_MAX_CHARS)}
           undefined,
           "merger",
         );
+
+        // Out-of-scope detection: if we have git context and can parse failing
+        // file paths, check whether ALL failing files are outside the branch
+        // diff. If so, throw OutOfScopeVerificationError so the caller can mark
+        // the task failed immediately rather than retrying into limbo.
+        //
+        // Heuristic: a failing file is "in-scope" if any branch-changed file
+        // shares the same workspace package (preferred), or — when pnpm
+        // workspace info is unavailable — if the paths share a common
+        // directory prefix. The exact-match clause catches the trivial case
+        // (test failure in the same file the branch touched).
+        if (baseBranch && branch) {
+          const failingFiles = parseFailingFilesFromOutput(failureContext.output);
+          if (failingFiles.length > 0) {
+            const branchFiles = getBranchChangedFiles(rootDir, baseBranch, branch);
+            if (branchFiles.length > 0) {
+              const branchPackages = new Set(packageNamesForFiles(rootDir, branchFiles));
+              const failingPackages = packageNamesForFiles(rootDir, failingFiles);
+              const hasPackageOverlap =
+                branchPackages.size > 0 &&
+                failingPackages.some((p) => branchPackages.has(p));
+              const allOutOfScope = !hasPackageOverlap && failingFiles.every((ff) =>
+                !branchFiles.some((bf) => bf === ff || ff.startsWith(`${bf}/`)),
+              );
+              if (allOutOfScope) {
+                const msg =
+                  `Merge verification failed in files outside branch scope — likely pre-existing flake on ${baseBranch}. ` +
+                  `Failing files: [${failingFiles.join(", ")}]. Branch diff files: [${branchFiles.slice(0, 10).join(", ")}${branchFiles.length > 10 ? ", ..." : ""}].`;
+                mergerLog.warn(`${taskId}: ${msg}`);
+                await store.logEntry(taskId, msg);
+                await store.appendAgentLog(taskId, "Out-of-scope verification failure detected — not retrying", "text", undefined, "merger");
+                throw new OutOfScopeVerificationError(msg, failingFiles, branchFiles);
+              }
+            }
+          }
+        }
+
         return false;
       }
 
@@ -1491,6 +1991,11 @@ ${failureContext.output.slice(0, VERIFICATION_LOG_MAX_CHARS)}
     }
   } catch (err: unknown) {
     rethrowIfMergeAborted(err);
+    // OutOfScopeVerificationError must propagate so the caller can mark the
+    // task failed without entering the limbo-recovery cycle.
+    if (err instanceof OutOfScopeVerificationError) {
+      throw err;
+    }
     // Even on failure, try to surface any paths the agent partially touched.
     if (fixModifiedFiles) {
       try {
@@ -1536,7 +2041,7 @@ function resetMergeWithWarn(rootDir: string, taskId: string, label: string): voi
  *  `rescueShas` lists any race-rescue stashes the autostash captured for
  *  late-dirty paths (concurrent dev edits during the merger run). They are
  *  surfaced separately so the caller can log them to the task feed. */
-interface AutostashHandle {
+export interface AutostashHandle {
   sha: string;
   label: string;
   rescueShas?: { sha: string; label: string }[];
@@ -2099,9 +2604,10 @@ export const __test__ = {
   applyAutostashBySha,
   getAutostashDiff,
   notifyAutostashOrphans,
+  runMergeAdvanceAutoSync,
 };
 
-async function stashUnrelatedRootDirChanges(
+export async function stashUnrelatedRootDirChanges(
   rootDir: string,
   taskId: string,
 ): Promise<AutostashHandle | null> {
@@ -2207,18 +2713,31 @@ async function stashUnrelatedRootDirChanges(
     return rescueShas.length > 0 ? { sha, label, rescueShas } : { sha, label };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    mergerLog.warn(
-      `${taskId}: pre-merge autostash failed (${msg}) — proceeding without stash; concurrent dev edits in rootDir may be wiped`,
-    );
-    // Best-effort: try to unstage anything `git add -A` may have staged
-    // before the failure, so the working tree is at least back to a sane
-    // state for the merge.
+    // Best-effort: unstage anything `git add -A` may have staged before the
+    // failure, so the working tree is at least back to a sane state.
     try {
       await execAsync("git reset", { cwd: rootDir });
     } catch {
       // Nothing more we can do.
     }
-    return null;
+    // Refuse to proceed: the merge flow will issue `git reset --hard` and
+    // forced checkouts that would wipe the dirty edits we just failed to
+    // stash. Better to fail the merge loudly than to silently destroy work.
+    mergerLog.warn(
+      `${taskId}: pre-merge autostash failed (${msg}) — refusing to run destructive merge ops over a dirty tree`,
+    );
+    throw new AutostashCreationFailedError(msg, rootDir);
+  }
+}
+
+/** Thrown when pre-merge autostash cannot capture a dirty working tree.
+ *  The merger catches this and bails before any destructive op runs. */
+export class AutostashCreationFailedError extends Error {
+  readonly rootDir: string;
+  constructor(reason: string, rootDir: string) {
+    super(`pre-merge autostash failed: ${reason}`);
+    this.name = "AutostashCreationFailedError";
+    this.rootDir = rootDir;
   }
 }
 
@@ -2315,7 +2834,7 @@ async function isAutostashLive(rootDir: string, sha: string): Promise<boolean> {
   }
 }
 
-async function dropAutostashHandle(
+export async function dropAutostashHandle(
   rootDir: string,
   taskId: string,
   handle: AutostashHandle,
@@ -2483,6 +3002,14 @@ ${fileList}
     fallbackProvider: settings.fallbackProvider,
     fallbackModelId: settings.fallbackModelId,
     defaultThinkingLevel: settings.defaultThinkingLevel,
+    runAuditor: createRunAuditor(store, {
+      runId: generateSyntheticRunId("merge", taskId),
+      agentId: "merger",
+      taskId,
+      phase: "merge",
+      source: "merger",
+    }),
+    settings,
     ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
     taskId,
     taskTitle: taskForSkillContext?.title,
@@ -2886,6 +3413,14 @@ ${fileList}
     fallbackProvider: settings.fallbackProvider,
     fallbackModelId: settings.fallbackModelId,
     defaultThinkingLevel: settings.defaultThinkingLevel,
+    runAuditor: createRunAuditor(store, {
+      runId: generateSyntheticRunId("merge", taskId),
+      agentId: "merger",
+      taskId,
+      phase: "merge",
+      source: "merger",
+    }),
+    settings,
     ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
     taskId,
     taskTitle: taskForSkillContext?.title,
@@ -2995,7 +3530,7 @@ async function restoreRescueAutostashes(
   return { unresolvedCount };
 }
 
-async function restoreUnrelatedRootDirChanges(
+export async function restoreUnrelatedRootDirChanges(
   rootDir: string,
   taskId: string,
   handle: AutostashHandle,
@@ -3897,7 +4432,7 @@ export async function commitOrAmendMergeWithFixes(
       });
       await execAsync(
         `git commit ${subjectArg} ${bodyArg}${trailerArg}${authorArg}`,
-        { cwd: rootDir },
+        { cwd: rootDir, env: mergerCommitEnv() },
       );
       if (store && lineageId) {
         const sha = (await execAsync("git rev-parse HEAD", { cwd: rootDir })).stdout.trim();
@@ -3940,7 +4475,7 @@ export async function commitOrAmendMergeWithFixes(
     });
     await execAsync(
       `git commit --amend ${subjectArg} ${bodyArg}${trailerArg}${authorArg}`,
-      { cwd: rootDir },
+      { cwd: rootDir, env: mergerCommitEnv() },
     );
     if (store && lineageId) {
       const sha = (await execAsync("git rev-parse HEAD", { cwd: rootDir })).stdout.trim();
@@ -4839,7 +5374,7 @@ async function ensureTaskTrailersOnHead(rootDir: string, task: Pick<Task, "id"> 
     for (const trailer of trailersToAdd) {
       amendCommand += ` --trailer "${trailer}"`;
     }
-    await execAsync(amendCommand, { cwd: rootDir });
+    await execAsync(amendCommand, { cwd: rootDir, env: mergerCommitEnv() });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     mergerLog.warn(`${task.id}: failed to add merge trailers to HEAD (${msg}) — relying on fallback ownership signals`);
@@ -4993,7 +5528,7 @@ async function applyBranchCommitsPreservingHistory(params: {
   result: MergeResult;
   testCommand?: string;
   buildCommand?: string;
-  testSource?: "explicit" | "inferred";
+  testSource?: "explicit" | "inferred" | "inferred-scoped";
   buildSource?: "explicit" | "inferred";
   signal?: AbortSignal;
 }): Promise<{ landedCommitCount: number; landedCommitShas: string[]; baseSha: string; fullySubsumedByMain: boolean; skippedEmptyCount: number }> {
@@ -5086,7 +5621,10 @@ async function applyBranchCommitsPreservingHistory(params: {
   };
 }
 
-/** Build the --author flag for git commits based on project settings. */
+/** Build the `-m "Co-authored-by: ..."` trailer arg for git commits based on
+ *  project settings. The user's configured git identity remains the primary
+ *  author/committer; Fusion (or whatever name/email is configured) is appended
+ *  as a co-author trailer that GitHub recognizes for shared attribution. */
 function getCommitAuthorArg(settings: {
   commitAuthorEnabled?: boolean;
   commitAuthorName?: string;
@@ -5095,7 +5633,7 @@ function getCommitAuthorArg(settings: {
   if (settings.commitAuthorEnabled === false) return "";
   const name = settings.commitAuthorName || "Fusion";
   const email = settings.commitAuthorEmail || "noreply@runfusion.ai";
-  return ` --author="${name} <${email}>"`;
+  return ` -m "Co-authored-by: ${name} <${email}>"`;
 }
 
 export function buildSourceIssueRef(sourceIssue?: TaskSourceIssue | null): string {
@@ -5125,7 +5663,7 @@ Message format:
 - **Summary:** one line describing what the squash brings in (imperative mood)
 - **Body:** 2-5 bullet points summarizing the key changes, each starting with "- "
 - **GitHub reference:** when the prompt includes a source issue reference, add \`Ref: owner/repo#N\` to the commit body
-${authorArg ? `- **Author:** Always include the --author flag as shown in the example above.` : ""}
+${authorArg ? `- **Co-author:** Always include the \`Co-authored-by\` trailer as shown in the example above so Fusion is credited alongside your git identity.` : ""}
 
 Example:
 \`\`\`
@@ -5144,7 +5682,7 @@ Message format:
 - **Summary:** one line describing what the squash brings in (imperative mood)
 - **Body:** 2-5 bullet points summarizing the key changes, each starting with "- "
 - **GitHub reference:** when the prompt includes a source issue reference, add \`Ref: owner/repo#N\` to the commit body
-${authorArg ? `- **Author:** Always include the --author flag as shown in the example above.` : ""}
+${authorArg ? `- **Co-author:** Always include the \`Co-authored-by\` trailer as shown in the example above so Fusion is credited alongside your git identity.` : ""}
 Do NOT include a scope in the commit message type.
 
 Example:
@@ -5456,7 +5994,7 @@ function resolveDirectMergeCommitStrategy(
     return { strategy: promptOverride, source: "prompt" };
   }
   return {
-    strategy: settings.directMergeCommitStrategy ?? "auto",
+    strategy: settings.directMergeCommitStrategy ?? "always-squash",
     source: "project",
   };
 }
@@ -6153,6 +6691,14 @@ You are assisting with a paused \`git pull --rebase\`.
     fallbackProvider: settings.fallbackProvider,
     fallbackModelId: settings.fallbackModelId,
     defaultThinkingLevel: settings.defaultThinkingLevel,
+    runAuditor: createRunAuditor(store, {
+      runId: generateSyntheticRunId("merge", taskId),
+      agentId: "merger",
+      taskId,
+      phase: "merge",
+      source: "merger",
+    }),
+    settings,
     taskId,
     onFallbackModelUsed: createFallbackModelObserver({
       agent: "merger",
@@ -6766,6 +7312,31 @@ export async function aiMergeTask(
   const mergeTarget = resolveTaskMergeTarget(task, {
     projectDefaultBranch: resolvedIntegrationBranch,
   });
+  if (mergeTarget.rejected) {
+    // FN-5233/FN-5530 regression: the task's baseBranch/inheritedBaseBranch
+    // pointed at a sibling fusion/fn-* branch. The resolver fell through to
+    // projectDefault, but we surface the steering miss in the audit timeline
+    // so the underlying baseBranch-propagation bug stays observable.
+    mergerLog.warn(
+      `${taskId}: merge target rejected (${mergeTarget.rejected.reason}): ${mergeTarget.rejected.source}=${mergeTarget.rejected.branch} → using ${mergeTarget.branch}`,
+    );
+    try {
+      await (store as any).recordRunAuditEvent?.({
+        domain: "git",
+        mutationType: "merge:merge-target-rejected-fusion-sibling",
+        target: taskId,
+        metadata: {
+          rejectedBranch: mergeTarget.rejected.branch,
+          rejectedSource: mergeTarget.rejected.source,
+          reason: mergeTarget.rejected.reason,
+          fallbackBranch: mergeTarget.branch,
+          fallbackSource: mergeTarget.source,
+        },
+      });
+    } catch {
+      // best-effort audit; never block the merge on telemetry
+    }
+  }
   const integrationBranch = resolvedIntegrationBranch;
   let branch = task.branch || canonicalFusionBranchName(taskId);
 
@@ -6784,9 +7355,12 @@ export async function aiMergeTask(
       | "merge:reuse-handoff-refused"
       | "merge:reuse-handoff-released"
       | "merge:reuse-handoff-deferred-to-worktrunk"
+      | "merge:reuse-handoff-autostash"
       | "merge:reuse-fallback-new-worktree"
       | "merge:reuse-fallback-pruned-stale-registration"
       | "merge:reuse-fallback-reused-existing-registration"
+      | "merge:reuse-worktree-fresh-acquire"
+      | "merge:reuse-worktree-fresh-acquired"
       | "branch:auto-canonicalize-case",
     metadata: Record<string, unknown>,
     target: string,
@@ -6859,6 +7433,8 @@ export async function aiMergeTask(
     reason: string,
     diagnostics: Record<string, unknown>,
   ): Promise<void> => {
+    const priorWorktreePath = task.worktree ?? null;
+
     // FN-5345/FN-5377: consult existing registration of `fusion/<id>` before
     // creating a fresh worktree. If the branch is already registered at a
     // usable extant path, rebind `task.worktree` to it (avoids FN-5083-class
@@ -7004,6 +7580,19 @@ export async function aiMergeTask(
       }
     }
 
+    await emitReuseHandoffAuditEvent(
+      "merge:reuse-worktree-fresh-acquire",
+      {
+        taskId,
+        reason,
+        expectedBranch,
+        priorWorktreePath,
+        integrationBranch: mergeTarget.branch,
+        diagnostics,
+      },
+      projectRootDir,
+    );
+
     const acquisition = await acquireTaskWorktree({
       task,
       rootDir: projectRootDir,
@@ -7040,6 +7629,21 @@ export async function aiMergeTask(
       rootDir,
       integrationBranch: mergeTarget.branch,
     });
+    await emitReuseHandoffAuditEvent(
+      "merge:reuse-worktree-fresh-acquired",
+      {
+        taskId,
+        reason,
+        branch: acquisition.branch,
+        worktreePath: acquisition.worktreePath,
+        source: acquisition.source,
+        priorWorktreePath: priorWorktreePath ?? null,
+        integrationRemote: integrationRemote ?? null,
+        integrationBranch: mergeTarget.branch,
+        diagnostics,
+      },
+      acquisition.worktreePath,
+    );
     await emitReuseHandoffAuditEvent(
       "merge:reuse-fallback-new-worktree",
       {
@@ -7297,6 +7901,44 @@ export async function aiMergeTask(
     }
 
     if (classification.kind === "proven-no-op" || classification.kind === "no-changes-finalized") {
+      // FN-5490/FN-5517/FN-5526/FN-5540 guard: the classifier only sees git
+      // evidence, but the task itself can attest that work happened. When
+      // modifiedFiles is non-empty AND no commit landed, that's lost work
+      // (uncommitted in the worktree, or the squash committed the wrong tree)
+      // — NOT a legitimate no-op. Demote to the unproven-recovery path which
+      // moves the task back to todo with progress preserved instead of
+      // clearing modifiedFiles to [].
+      if (task.modifiedFiles && task.modifiedFiles.length > 0) {
+        const reason = `lost-work-detected: ${task.modifiedFiles.length} modifiedFiles claimed but no commit landed`;
+        await store.updateTask(taskId, { error: reason });
+        await store.logEntry(
+          taskId,
+          `Finalize blocked (lost-work guard): task claims ${task.modifiedFiles.length} modifiedFiles but classification would finalize as no-op — moving back to todo with progress preserved`,
+          JSON.stringify({
+            modifiedFilesSample: task.modifiedFiles.slice(0, 5),
+            classification: classification.kind,
+          }, null, 2),
+        );
+        await (store as any).recordRunAuditEvent?.({
+          domain: "database",
+          mutationType: "task:finalize-lost-work-blocked",
+          target: taskId,
+          metadata: {
+            modifiedFilesCount: task.modifiedFiles.length,
+            classification: classification.kind,
+          },
+        });
+        await store.moveTask(taskId, "todo", { preserveProgress: true, moveSource: "engine" } as any);
+        await releaseReuseHandoffEarly("lost-work-blocked");
+        return {
+          task,
+          branch,
+          merged: false,
+          worktreeRemoved: false,
+          branchDeleted: false,
+          error: reason,
+        };
+      }
       const noOpReason = classification.kind === "proven-no-op"
         ? `branch has zero commits ahead of ${classification.baseRef}`
         : "verification-only finalize: no branch and no owned commits";
@@ -7377,7 +8019,29 @@ export async function aiMergeTask(
   // otherwise wipe any unrelated unstaged/untracked dev edits. Stash them
   // here, restore in the finally below — see stashUnrelatedRootDirChanges
   // for the full rationale.
-  const autostashHandle = await stashUnrelatedRootDirChanges(rootDir, taskId);
+  let autostashHandle: AutostashHandle | null;
+  try {
+    autostashHandle = await stashUnrelatedRootDirChanges(rootDir, taskId);
+  } catch (err: unknown) {
+    if (err instanceof AutostashCreationFailedError) {
+      // Surface to the task feed so the developer sees their edits are still
+      // in the working tree (not destroyed) — we just refused to proceed.
+      const message = `Merge aborted: could not autostash dirty working tree in ${rootDir} (${err.message}). Your uncommitted changes are intact. Commit, stash, or revert them and retry the merge.`;
+      await store.logEntry(taskId, "Merge aborted: autostash creation failed (dirty edits preserved)", message).catch(() => undefined);
+      await store.updateTask(taskId, { error: "autostash-create-failed" }).catch(() => undefined);
+      clearActiveMergerStatus(activeStatusPath, taskId);
+      await releaseReuseHandoffEarly("autostash-create-failed");
+      return {
+        task,
+        branch,
+        merged: false,
+        worktreeRemoved: false,
+        branchDeleted: false,
+        error: message,
+      };
+    }
+    throw err;
+  }
   // Surface any race-rescue stashes (mid-run dev edits caught between
   // initial snapshot and the destructive reset) on the task feed so the
   // operator sees the recovery handle without having to grep `git stash list`.
@@ -7467,6 +8131,7 @@ export async function aiMergeTask(
     }
 
     if (classification.kind === "owned-commit") {
+      const mergedAt = new Date().toISOString();
       await store.updateTask(taskId, {
         mergeDetails: {
           commitSha: classification.commit.sha,
@@ -7474,16 +8139,27 @@ export async function aiMergeTask(
           insertions: classification.commit.insertions,
           deletions: classification.commit.deletions,
           mergeCommitMessage: classification.commit.subject,
-          mergedAt: new Date().toISOString(),
+          mergedAt,
           mergeConfirmed: true,
           prNumber: task.prInfo?.number,
           mergeTargetBranch: mergeTarget.branch,
           mergeTargetSource: mergeTarget.source,
         },
       });
+      result.merged = true;
+      result.mergeConfirmed = true;
+      result.commitSha = classification.commit.sha;
+      result.filesChanged = classification.commit.filesChanged;
+      result.insertions = classification.commit.insertions;
+      result.deletions = classification.commit.deletions;
+      result.mergeCommitMessage = classification.commit.subject;
+      result.mergedAt = mergedAt;
+      result.mergeTargetBranch = mergeTarget.branch;
+      result.mergeTargetSource = mergeTarget.source;
       mergerLog.log(`${taskId}: branch missing; recovered owned landed commit ${classification.commit.sha.slice(0, 8)}`);
     } else {
       const noOpReason = `branch has zero commits ahead of ${classification.baseRef}`;
+      const mergedAt = new Date().toISOString();
       await store.updateTask(taskId, {
         modifiedFiles: [],
         mergeDetails: {
@@ -7492,17 +8168,25 @@ export async function aiMergeTask(
           noOpMerge: true,
           noOpReason,
           landedFiles: [],
-          mergedAt: new Date().toISOString(),
+          mergedAt,
           prNumber: task.prInfo?.number,
           mergeTargetBranch: classification.baseRef,
           mergeTargetSource: mergeTarget.source,
         },
       });
+      result.merged = true;
+      result.mergeConfirmed = true;
+      result.noOp = true;
+      result.noOpMerge = true;
+      result.noOpReason = noOpReason;
+      result.mergedAt = mergedAt;
+      result.mergeTargetBranch = classification.baseRef;
+      result.mergeTargetSource = mergeTarget.source;
       await store.logEntry(taskId, `Auto-finalized no-op (proven): start point on ${classification.baseRef}; modifiedFiles cleared`);
     }
 
     // Audit trail: record merge completion (FN-1404)
-    await audit.database({ type: "task:move", target: taskId, metadata: { to: "done", merged: false } });
+    await audit.database({ type: "task:move", target: taskId, metadata: { to: "done", merged: true } });
     await completeTask(store, taskId, result);
     return result;
   }
@@ -7577,10 +8261,18 @@ export async function aiMergeTask(
   if (worktreePath && task.baseCommitSha) {
     try {
       throwIfAborted(options.signal, taskId);
-      const { stdout: mainHeadOut } = await execAsync("git rev-parse HEAD", {
-        cwd: rootDir,
-        encoding: "utf-8",
-      });
+      // Read the authoritative integration-branch tip from the shared ref —
+      // NOT rootDir's HEAD. In reuse-task-worktree mode rootDir's HEAD can
+      // lag behind refs/heads/<integrationBranch> when a sibling merger
+      // advanced the ref via update-ref without re-checking-out, and using a
+      // stale base sha here causes the eventual squash commit to parent off
+      // an earlier sha and orphan the previously-merged tip on a subsequent
+      // non-FF ref advance.
+      const refName = `refs/heads/${mergeTarget.branch}`;
+      const { stdout: mainHeadOut } = await execAsync(
+        `git rev-parse --verify ${refName}`,
+        { cwd: rootDir, encoding: "utf-8" },
+      );
       const mainHead = mainHeadOut.trim();
       if (mainHead) {
         const divergence = await probeDivergence({
@@ -8197,8 +8889,15 @@ export async function aiMergeTask(
   const explicitBuildCommand = settings.buildCommand?.trim() || undefined;
 
   // Infer default test command if explicit testCommand is not set
-  // This ensures merge verification runs even when settings.testCommand is not configured
-  const inferredTest = inferDefaultTestCommand(rootDir, explicitTestCommand, explicitBuildCommand);
+  // This ensures merge verification runs even when settings.testCommand is not configured.
+  // Thread baseBranch + branch so pnpm workspaces can be scoped to changed packages.
+  const inferredTest = inferDefaultTestCommand(
+    rootDir,
+    explicitTestCommand,
+    explicitBuildCommand,
+    mergeTarget.branch,
+    branch,
+  );
   const effectiveTestCommand = inferredTest?.command || explicitTestCommand;
   const effectiveTestSource = inferredTest?.testSource;
   const effectiveBuildCommand = explicitBuildCommand;
@@ -8321,6 +9020,28 @@ export async function aiMergeTask(
         throw error;
       }
 
+      // Out-of-scope verification failure: the failing tests are in files that
+      // this branch never touched. Retrying will not help. Mark the task failed
+      // immediately with a clear message so it does not enter limbo recovery.
+      if (error instanceof OutOfScopeVerificationError || error?.name === "OutOfScopeVerificationError") {
+        try {
+          execSync("git reset --merge", { cwd: rootDir, stdio: "pipe" });
+        } catch {
+          // best-effort cleanup
+        }
+        const outOfScopeMsg =
+          `Merge verification failed in files outside branch scope — likely pre-existing flake on ${mergeTarget.branch}. ` +
+          `Fix the base-branch test breakage separately and retry.`;
+        mergerLog.error(`${taskId}: ${outOfScopeMsg}`);
+        await store.updateTask(taskId, {
+          status: "failed",
+          error: outOfScopeMsg,
+        });
+        await store.logEntry(taskId, outOfScopeMsg, "OutOfScopeVerificationError");
+        // Re-throw so the outer merge runner does not attempt further retries.
+        throw error;
+      }
+
       if (
         error instanceof DiffVolumeRegressionError
         || error?.name === "DiffVolumeRegressionError"
@@ -8389,6 +9110,8 @@ export async function aiMergeTask(
                 effectiveTestSource,
                 effectiveBuildSource,
                 verificationFixModifiedFiles,
+                mergeTarget.branch,
+                branch,
               );
 
               const fixAttemptDurationMs = Date.now() - fixAttemptStartedAt;
@@ -8540,6 +9263,8 @@ export async function aiMergeTask(
               effectiveTestSource,
               effectiveBuildSource,
               buildFixModifiedFiles,
+              mergeTarget.branch,
+              branch,
             );
 
             const fixAttemptDurationMs = Date.now() - fixAttemptStartedAt;
@@ -9083,7 +9808,14 @@ export async function aiMergeTask(
           audit,
         });
         if (!advanceResult.advanced) {
-          if (advanceResult.reason === "concurrent-advance") {
+          // `non-fast-forward-advance` has the same root cause as
+          // `concurrent-advance` — integration moved during the merge window,
+          // here detected by ancestry rather than CAS old-value mismatch —
+          // so route it through the same rebind/retry path (FN-5576).
+          if (
+            advanceResult.reason === "concurrent-advance"
+            || advanceResult.reason === "non-fast-forward-advance"
+          ) {
             throw new IntegrationBranchConcurrentAdvanceError({
               integrationBranch,
               expectedCurrentSha,
@@ -9097,6 +9829,33 @@ export async function aiMergeTask(
         mergerLog.log(
           `${taskId}: ${integrationBranch} advanced to ${worktreeHeadSha.slice(0, 8)} via update-ref; your checked-out worktree at ${projectRootDir} is now behind`,
         );
+
+        // Auto-sync other worktrees still on the integration branch so their
+        // index + working tree catch up to the new tip. When `off`, the legacy
+        // surprise behavior is preserved and the user pulls manually via the
+        // Merge Advance Notice banner. Isolated in its own try-catch because
+        // the merge has already landed at this point: failing the merger run
+        // because a downstream worktree sync threw would leave the project in
+        // a worse state than just emitting the failure as an audit event.
+        const autoSyncMode = normalizeMergeAdvanceAutoSyncMode(settings.mergeAdvanceAutoSync);
+        if (autoSyncMode !== "off") {
+          try {
+            await runMergeAdvanceAutoSync({
+              store,
+              audit,
+              taskId,
+              projectRootDir,
+              integrationBranch,
+              previousSha: expectedCurrentSha,
+              newSha: worktreeHeadSha,
+              mode: autoSyncMode,
+            });
+          } catch (syncErr: unknown) {
+            mergerLog.warn(
+              `${taskId}: mergeAdvanceAutoSync threw — continuing merge: ${syncErr instanceof Error ? syncErr.message : String(syncErr)}`,
+            );
+          }
+        }
       }
     } catch (advErr: unknown) {
       const advMsg = advErr instanceof Error ? advErr.message : String(advErr);
@@ -9430,7 +10189,7 @@ export async function aiMergeTask(
  *  NOTE: This is NOT FN-5350's integration-branch ref advance path. FN-5350
  *  advances refs/heads/<integration-branch> via compare-and-swap `git update-ref`.
  */
-async function tryFastForwardFromOrigin(
+export async function tryFastForwardFromOrigin(
   rootDir: string,
   taskId: string,
   integrationBranch: string,
@@ -9548,8 +10307,8 @@ interface MergeAttemptParams {
   mergeTargetBranch?: string;
   testCommand?: string;
   buildCommand?: string;
-  /** Source of the test command: 'explicit' from settings or 'inferred' from project files */
-  testSource?: "explicit" | "inferred";
+  /** Source of the test command: 'explicit' from settings or 'inferred'/'inferred-scoped' from project files */
+  testSource?: "explicit" | "inferred" | "inferred-scoped";
   /** Source of the build command: 'explicit' from settings or 'inferred' (future use) */
   buildSource?: "explicit" | "inferred";
   /** Set when the pre-merge rebase recovery cascade (Layers 1–2) failed and
@@ -9766,7 +10525,7 @@ export async function executeMergeAttempt(
             });
             await execAsync(
               `git commit ${subjectArg} ${bodyArg}${trailerArg}${authorArg}`,
-              { cwd: rootDir },
+              { cwd: rootDir, env: mergerCommitEnv() },
             );
             mergerLog.log(`${taskId}: committed after auto-resolving all conflicts`);
           } else {
@@ -9883,7 +10642,7 @@ export async function executeMergeAttempt(
       }
     }
 
-    if (buildCommand) {
+    if (testCommand || buildCommand) {
       throwIfAborted(options.signal, taskId);
       const stagedFiles = await getStagedFiles(rootDir);
       if (shouldSyncDependenciesForMerge(stagedFiles, hasInstallState(rootDir))) {
@@ -9995,7 +10754,7 @@ export async function executeMergeAttempt(
       const trailerArg = buildTaskTrailerArgs(taskId);
       await execAsync(
         `git commit --amend ${subjectArg} ${bodyArg}${trailerArg}${authorArg}`,
-        { cwd: rootDir },
+        { cwd: rootDir, env: mergerCommitEnv() },
       );
       mergerLog.log(`${taskId}: rewrote AI-authored merge commit message with deterministic body`);
     } catch (err: unknown) {
@@ -10203,7 +10962,7 @@ async function finalizeSideStrategyAttempt(
   });
   await execAsync(
     `git commit ${subjectArg} ${bodyArg}${issueRefBodyArg}${trailerArg}${authorArg}`,
-    { cwd: rootDir },
+    { cwd: rootDir, env: mergerCommitEnv() },
   );
   mergerLog.log(`${taskId}: committed with -X ${side} auto-resolution`);
 
@@ -10414,6 +11173,14 @@ async function runAiAgentForCommit(params: AiAgentParams): Promise<{ success: bo
     fallbackProvider: settings.fallbackProvider,
     fallbackModelId: settings.fallbackModelId,
     defaultThinkingLevel: settings.defaultThinkingLevel,
+    runAuditor: createRunAuditor(store, {
+      runId: generateSyntheticRunId("merge", taskId),
+      agentId: "merger",
+      taskId,
+      phase: "merge",
+      source: "merger",
+    }),
+    settings,
     // Skill selection: use assigned agent skills if available, otherwise role fallback
     ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
     taskId,
@@ -10570,7 +11337,7 @@ async function runAiAgentForCommit(params: AiAgentParams): Promise<{ success: bo
         });
         await execAsync(
           `git commit ${subjectArg} ${bodyArg}${issueRefBodyArg}${trailerArg}${authorArg}`,
-          { cwd: rootDir },
+          { cwd: rootDir, env: mergerCommitEnv() },
         );
       } else {
         // Build command was configured but agent didn't commit and didn't report failure
@@ -10683,14 +11450,14 @@ export function buildMergePrompt(params: MergePromptParams): string {
       "## ⚠️ There are merge conflicts",
       "Run `git diff --name-only --diff-filter=U` to see which files.",
       "Resolve each conflict, then `git add` the resolved files.",
-      `After resolving all conflicts, write and run the commit command.${authorArg ? ` Be sure to include \`${authorArg.trim()}\` in the commit command.` : ""}`,
+      `After resolving all conflicts, write and run the commit command.${authorArg ? ` Be sure to append \`${authorArg.trim()}\` to the commit command so Fusion is recorded as a co-author.` : ""}`,
     );
   } else {
     parts.push(
       "",
       "## No conflicts",
       "The merge applied cleanly. All changes are staged.",
-      `Write and run the \`git commit\` command with a good message summarizing the work.${authorArg ? ` Be sure to include \`${authorArg.trim()}\` in the commit command.` : ""}`,
+      `Write and run the \`git commit\` command with a good message summarizing the work.${authorArg ? ` Be sure to append \`${authorArg.trim()}\` to the commit command so Fusion is recorded as a co-author.` : ""}`,
     );
   }
 
@@ -10830,7 +11597,7 @@ async function runPostMergeWorkflowSteps(
 
     try {
       const result = stepMode === "script"
-        ? await executePostMergeScriptStep(store, taskId, ws, cwd, settings, auditor)
+        ? await executePostMergeScriptStep(store, taskId, ws, cwd, settings, auditor, mergeOptions.signal)
         : await executePostMergePromptStep(store, taskId, ws, rootDir, cwd, settings, mergeOptions);
       const completedAt = new Date().toISOString();
 
@@ -10892,6 +11659,7 @@ async function executePostMergeScriptStep(
   cwd: string,
   settings: Settings,
   auditor?: RunAuditor,
+  signal?: AbortSignal,
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const scriptName = workflowStep.scriptName!.trim();
   const scripts = settings.scripts || {};
@@ -10907,6 +11675,7 @@ async function executePostMergeScriptStep(
     encoding: "utf-8",
     timeoutMs: 120_000,
     maxBuffer: 10 * 1024 * 1024,
+    ...(signal !== undefined && { signal }),
   });
 
   if (result.exitCode === 0 && !result.signal && !result.timedOut && !result.bufferExceeded && !result.spawnError) {
@@ -10934,8 +11703,9 @@ export async function __executePostMergeScriptStepForTests(
   cwd: string,
   settings: Settings,
   auditor?: RunAuditor,
+  signal?: AbortSignal,
 ): Promise<{ success: boolean; output?: string; error?: string }> {
-  return executePostMergeScriptStep(store, taskId, workflowStep, cwd, settings, auditor);
+  return executePostMergeScriptStep(store, taskId, workflowStep, cwd, settings, auditor, signal);
 }
 
 /** Execute a prompt-mode post-merge workflow step using an AI agent in the provided execution directory. */
@@ -11047,6 +11817,14 @@ If issues are found that need attention, describe them clearly and include concr
       fallbackProvider: settings.fallbackProvider,
       fallbackModelId: settings.fallbackModelId,
       defaultThinkingLevel: settings.defaultThinkingLevel,
+      runAuditor: createRunAuditor(store, {
+        runId: generateSyntheticRunId("merge", taskId),
+        agentId: "merger",
+        taskId,
+        phase: "merge",
+        source: "merger",
+      }),
+      settings,
       // Skill selection: use assigned agent skills if available, otherwise role fallback
       ...(postMergeSkillContext?.skillSelectionContext ? { skillSelection: postMergeSkillContext.skillSelectionContext } : {}),
       ...(readonlyCustomTools.allowed.length > 0 ? { customTools: readonlyCustomTools.allowed } : {}),

@@ -50,6 +50,7 @@ export interface Mission {
   id: string;
   title: string;
   description?: string;
+  baseBranch?: string;
   status: MissionStatus;
   interviewState: "not_started" | "in_progress" | "completed" | "needs_update";
   autoAdvance?: boolean;

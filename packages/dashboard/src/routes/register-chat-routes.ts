@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
-import type { EnrichedChatSession, ChatAttachment, TaskStore, ChatStore } from "@fusion/core";
-import { ApiError, badRequest, internalError, notFound } from "../api-error.js";
+import type { EnrichedChatSession, ChatAttachment } from "@fusion/core";
+import { ApiError, badRequest, notFound } from "../api-error.js";
+import { resolveProjectChatContext } from "../chat-project-services.js";
 import { CHAT_ALLOWED_MIME_TYPES, CHAT_MAX_ATTACHMENT_SIZE } from "./chat-attachment-config.js";
 import { rateLimit, RATE_LIMITS } from "../rate-limit.js";
 import { writeSSEEvent, type SessionBufferedEvent } from "../sse-buffer.js";
@@ -29,7 +30,7 @@ function resolveAttachmentPath(rootDir: string, sessionId: string, filename: str
 }
 
 export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): void {
-  const { router, options, getProjectContext, chatLogger, rethrowAsApiError } = ctx;
+  const { router, options, store, getProjectContext, chatLogger, rethrowAsApiError } = ctx;
   const { parseLastEventId, replayBufferedSSE, validateOptionalModelField, upload } = deps;
 
   const uploadChatAttachment: import("express").RequestHandler = (req, res, next) => {
@@ -47,12 +48,15 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
     });
   };
 
-  // ── Per-project ChatManager resolution ──────────────────────────────────────
+  // ── Per-project store / manager resolution ───────────────────────────────────
 
-  async function resolveScopedChatStore(projectId: string): Promise<{ store: TaskStore; chatStore: ChatStore }> {
-    const store = await getOrCreateProjectStore(projectId);
-    const chatStore = getOrCreateScopedChatStore(store);
-    return { store, chatStore };
+  async function resolveScopedChatStore(projectId: string | undefined) {
+    return resolveProjectChatContext({
+      projectId,
+      defaultStore: store,
+      defaultChatStore: options?.chatStore,
+      engineManager: options?.engineManager,
+    });
   }
 
   async function resolveScopedChatManager(projectId: string | undefined) {
@@ -60,8 +64,9 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
       if (!options?.chatManager) throw new ApiError(503, "Chat manager not available");
       return options.chatManager;
     }
-    const { store, chatStore } = await resolveScopedChatStore(projectId);
-    return getOrCreateScopedChatManager(store, chatStore, options?.pluginRunner);
+    const projectStore = await getOrCreateProjectStore(projectId);
+    const chatStore = getOrCreateScopedChatStore(projectStore);
+    return getOrCreateScopedChatManager(projectStore, chatStore, options?.pluginRunner);
   }
   // ── Chat Routes ────────────────────────────────────────────────────────────
 
@@ -74,11 +79,6 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
    */
   router.get("/chat/sessions", rateLimit(RATE_LIMITS.api), async (req, res) => {
     try {
-      const chatStore = options?.chatStore;
-      if (!chatStore) {
-        throw internalError("Chat store not available");
-      }
-
       const { projectId, status, agentId, lookup, modelProvider, modelId } = req.query as {
         projectId?: string;
         status?: string;
@@ -87,6 +87,7 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
         modelProvider?: string;
         modelId?: string;
       };
+      const { chatStore } = await resolveScopedChatStore(projectId);
 
       const isResumeLookup = lookup === "resume";
       const hasModelProvider = typeof modelProvider === "string" && modelProvider.trim().length > 0;
@@ -165,13 +166,9 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
    */
   router.post("/chat/sessions", rateLimit(RATE_LIMITS.mutation), async (req, res) => {
     try {
-      const chatStore = options?.chatStore;
-      if (!chatStore) {
-        throw internalError("Chat store not available");
-      }
-
       // Get project context to scope the session and resolve agent from the correct store
       const { store: scopedStore, projectId } = await getProjectContext(req);
+      const { chatStore } = await resolveScopedChatStore(projectId);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -241,10 +238,7 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
    */
   router.get("/chat/sessions/:id", async (req, res) => {
     try {
-      const chatStore = options?.chatStore;
-      if (!chatStore) {
-        throw internalError("Chat store not available");
-      }
+      const { chatStore } = await resolveScopedChatStore(req.query.projectId as string | undefined);
 
       const sessionId = String(req.params.id);
       const session = chatStore.getSession(sessionId);
@@ -272,10 +266,7 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
    */
   router.patch("/chat/sessions/:id", rateLimit(RATE_LIMITS.mutation), async (req, res) => {
     try {
-      const chatStore = options?.chatStore;
-      if (!chatStore) {
-        throw internalError("Chat store not available");
-      }
+      const { chatStore } = await resolveScopedChatStore(req.query.projectId as string | undefined);
 
       const sessionId = String(req.params.id);
       const { title, status } = req.body as { title?: string; status?: string };
@@ -309,11 +300,8 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
    */
   router.delete("/chat/sessions/:id", rateLimit(RATE_LIMITS.mutation), async (req, res) => {
     try {
-      const chatStore = options?.chatStore;
+      const { chatStore } = await resolveScopedChatStore(req.query.projectId as string | undefined);
       const sessionId = String(req.params.id);
-      if (!chatStore) {
-        throw internalError("Chat store not available");
-      }
 
       const deleted = chatStore.deleteSession(sessionId);
       if (!deleted) {
@@ -336,10 +324,7 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
    */
   router.get("/chat/sessions/:id/messages", async (req, res) => {
     try {
-      const chatStore = options?.chatStore;
-      if (!chatStore) {
-        throw internalError("Chat store not available");
-      }
+      const { chatStore } = await resolveScopedChatStore(req.query.projectId as string | undefined);
 
       const sessionId = String(req.params.id);
 
@@ -385,10 +370,7 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
 
   router.post("/chat/sessions/:id/attachments", rateLimit(RATE_LIMITS.mutation), uploadChatAttachment, async (req, res) => {
     try {
-      const chatStore = options?.chatStore;
-      if (!chatStore) {
-        throw internalError("Chat store not available");
-      }
+      const { chatStore } = await resolveScopedChatStore(req.query.projectId as string | undefined);
 
       const sessionId = String(req.params.id);
       const session = chatStore.getSession(sessionId);
@@ -725,10 +707,7 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
    */
   router.delete("/chat/sessions/:id/messages/:messageId", rateLimit(RATE_LIMITS.mutation), async (req, res) => {
     try {
-      const chatStore = options?.chatStore;
-      if (!chatStore) {
-        throw internalError("Chat store not available");
-      }
+      const { chatStore } = await resolveScopedChatStore(req.query.projectId as string | undefined);
 
       const sessionId = String(req.params.id);
       const messageId = String(req.params.messageId);

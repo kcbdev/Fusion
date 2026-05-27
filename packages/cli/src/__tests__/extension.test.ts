@@ -268,7 +268,7 @@ describe.skipIf(!SHOULD_RUN_LEGACY_EXTENSION_INTEGRATION)("fn pi extension (lega
         makeCtx(tmpDir),
       );
 
-      expect(runTaskPlan).toHaveBeenCalledWith("Plan a project task", true);
+      expect(runTaskPlan).toHaveBeenCalledWith("Plan a project task", true, undefined, undefined);
       expect(result.details.taskId).toBe("PROJ-042");
       expect(result.content[0].text).toContain("Task PROJ-042");
     });
@@ -1031,7 +1031,7 @@ describe.skipIf(!SHOULD_RUN_LEGACY_EXTENSION_INTEGRATION)("fn pi extension (lega
       const tool = api.tools.get("fn_mission_create")!;
       const result = await tool.execute(
         "call-1",
-        { title: "Test Mission", description: "Test description", autoAdvance: true },
+        { title: "Test Mission", description: "Test description", autoAdvance: true, baseBranch: "develop" },
         undefined,
         undefined,
         makeCtx(tmpDir),
@@ -1043,6 +1043,11 @@ describe.skipIf(!SHOULD_RUN_LEGACY_EXTENSION_INTEGRATION)("fn pi extension (lega
       expect(result.content[0].text).toContain("Created");
       expect(result.content[0].text).toContain("Test Mission");
       expect(result.content[0].text).toContain("Auto-advance: enabled");
+
+      const store = new TaskStore(tmpDir);
+      await store.init();
+      const mission = store.getMissionStore().getMission(result.details.missionId);
+      expect(mission?.baseBranch).toBe("develop");
     });
   });
 

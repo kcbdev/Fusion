@@ -122,6 +122,8 @@ export interface Mission {
   description?: string;
   /** Current lifecycle status */
   status: MissionStatus;
+  /** Optional integration base branch inherited by triaged feature tasks */
+  baseBranch?: string;
   /** State of the AI specification interview process */
   interviewState: InterviewState;
   /**
@@ -369,6 +371,8 @@ export interface MissionCreateInput {
   title: string;
   /** Detailed description of the mission's objectives */
   description?: string;
+  /** Optional integration base branch for tasks created from this mission */
+  baseBranch?: string;
 }
 
 /** Input for creating a new Milestone */

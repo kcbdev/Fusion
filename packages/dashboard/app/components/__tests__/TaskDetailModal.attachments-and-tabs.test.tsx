@@ -305,7 +305,7 @@ describe("TaskDetailModal", () => {
     });
   });
 
-  it("wraps in-review PR content in a spaced detail section after dependencies", () => {
+  it("renders in-review PR content only in the Pull Request tab body", () => {
     const { container } = render(
       <TaskDetailModal
         task={makeTask({ column: "in-review", status: "creating-pr", dependencies: ["FN-001"] })}
@@ -318,20 +318,19 @@ describe("TaskDetailModal", () => {
       />,
     );
 
-    const depsSection = container.querySelector(".detail-deps");
-    const blockingSection = container.querySelector(".detail-deps.detail-blocking");
-    const prSection = container.querySelector(".detail-pr-section");
+    expect(container.querySelector(".detail-pr-section")).toBeNull();
 
-    expect(depsSection).toBeTruthy();
-    expect(blockingSection).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Pull Request" }));
+
+    const prSection = container.querySelector(".detail-pr-section");
     expect(prSection).toBeTruthy();
-    expect(blockingSection?.nextElementSibling).toBe(prSection);
     expect(prSection?.querySelector(".pr-section")).toBeTruthy();
   });
 
-  it("defines tokenized margin on detail-pr-section spacing contract", () => {
+  it("defines tokenized spacing rules for detail-pr-tab layout", () => {
     const css = readDashboardStylesSource();
-    expectBaseRule(css, ".detail-pr-section", "margin-top: var(--space-lg);");
+    expectBaseRule(css, ".detail-pr-tab", "gap: var(--space-lg);");
+    expectBaseRule(css, ".detail-pr-tab .detail-section,\n.detail-pr-section", "margin-top: 0;");
   });
 
   it("activity list does not have nested scroll constraints", () => {

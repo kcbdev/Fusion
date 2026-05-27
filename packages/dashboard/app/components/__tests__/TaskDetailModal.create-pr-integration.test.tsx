@@ -181,6 +181,7 @@ describe("TaskDetailModal create-PR integration wiring", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Pull Request" }));
     const panelCreateButton = await screen.findByTestId("pr-panel-create-pr");
     expect(screen.queryByRole("dialog", { name: "Create Pull Request" })).toBeNull();
 

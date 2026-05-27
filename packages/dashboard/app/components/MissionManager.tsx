@@ -1764,7 +1764,14 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   const handleTriageFeature = useCallback(async (featureId: string) => {
     try {
       setSaving(true);
-      await triageFeature(featureId, undefined, undefined, projectId);
+      await triageFeature(featureId, undefined, undefined, projectId, selectedMission?.baseBranch
+        ? {
+            branchSelection: {
+              mode: "project-default",
+              baseBranch: selectedMission.baseBranch,
+            },
+          }
+        : undefined);
       addToast("Feature triaged — task created", "success");
       await loadMissionDetail(selectedMission!.id);
     } catch (err) {
@@ -1804,7 +1811,14 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   const handleTriageAllSliceFeatures = useCallback(async (sliceId: string) => {
     try {
       setSaving(true);
-      const result = await triageAllSliceFeatures(sliceId, projectId);
+      const result = await triageAllSliceFeatures(sliceId, projectId, selectedMission?.baseBranch
+        ? {
+            branchSelection: {
+              mode: "project-default",
+              baseBranch: selectedMission.baseBranch,
+            },
+          }
+        : undefined);
       addToast(`Triaged ${result.count} feature${result.count !== 1 ? "s" : ""}`, "success");
       await loadMissionDetail(selectedMission!.id);
     } catch (err) {

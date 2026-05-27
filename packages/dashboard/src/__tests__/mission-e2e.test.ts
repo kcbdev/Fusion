@@ -706,6 +706,21 @@ describe("Mission API", () => {
       expect(res.body.autoAdvance).toBe(false);
     });
 
+    it("should persist baseBranch when provided during creation", async () => {
+      const { app } = buildApp();
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/missions",
+        JSON.stringify({ title: "Mission", baseBranch: "develop" }),
+        { "content-type": "application/json" }
+      );
+
+      expect(res.status).toBe(201);
+      expect(res.body.baseBranch).toBe("develop");
+    });
+
     it("should persist auto-advance when provided during creation", async () => {
       const { app, missionStore } = buildApp();
 
@@ -939,6 +954,24 @@ describe("Mission API", () => {
         status: "active",
         autoAdvance: true,
       });
+    });
+
+    it("should update mission baseBranch", async () => {
+      const { app, missionStore } = buildApp();
+      const mission = missionStore.createMission({ title: "Original Title" });
+
+      const res = await request(
+        app,
+        "PATCH",
+        `/api/missions/${mission.id}`,
+        JSON.stringify({ baseBranch: "release/1.0" }),
+        { "content-type": "application/json" }
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.baseBranch).toBe("release/1.0");
+      const updated = missionStore.getMission(mission.id);
+      expect(updated?.baseBranch).toBe("release/1.0");
     });
 
     it("should update mission title with generated-format ID", async () => {
@@ -2112,6 +2145,14 @@ describe("Mission API", () => {
     });
 
     it("accepts long missionTitle values on interview start", async () => {
+      const interviewSpy = vi
+        .spyOn(missionInterviewModule, "createMissionInterviewSession")
+        .mockResolvedValueOnce({
+          sessionId: "session-long-title",
+          interview: { missionDraft: { title: "x".repeat(5000) } },
+          state: "active",
+        } as any);
+
       const { app } = buildApp();
       const res = await request(
         app,
@@ -2121,6 +2162,7 @@ describe("Mission API", () => {
         { "content-type": "application/json" }
       );
       expect(res.status).not.toBe(400);
+      expect(interviewSpy).toHaveBeenCalled();
     });
 
     it("should return 400 when sessionId is missing on interview respond", async () => {

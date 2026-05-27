@@ -275,7 +275,8 @@ Usage:
   fn task refine <id> [opts]          Create a refinement task from done/in-review
   fn task archive <id>                Archive a done task
   fn task unarchive <id>              Unarchive an archived task
-  fn task delete <id> [--force]       Delete a task (use --force to skip confirmation)
+  fn task delete <id> [--force] [--allow-resurrection]
+                                      Delete a task (use --force to skip confirmation; --allow-resurrection permits intentional ID recreation)
   fn task attach <id> <file>          Attach a file to a task
   fn task pause <id>                  Pause a task (stops all automation)
   fn task unpause <id>                Unpause a task (resumes automation)
@@ -1028,16 +1029,20 @@ async function main() {
           case "plan": {
             const planArgs = args.slice(2);
             const yesFlag = planArgs.includes("--yes");
+            let baseBranch: string | undefined;
             const descParts: string[] = [];
             for (let i = 0; i < planArgs.length; i++) {
               if (planArgs[i] === "--yes") {
                 continue; // skip flag
+              } else if (planArgs[i] === "--base-branch" && i + 1 < planArgs.length) {
+                baseBranch = planArgs[i + 1];
+                i++;
               } else {
                 descParts.push(planArgs[i]);
               }
             }
             const initialPlan = descParts.join(" ");
-            await runTaskPlan(initialPlan || undefined, yesFlag, projectName);
+            await runTaskPlan(initialPlan || undefined, yesFlag, projectName, baseBranch);
             break;
           }
           case "list":
@@ -1138,9 +1143,10 @@ async function main() {
           }
           case "delete": {
             const id = args[2];
-            if (!id) { console.error("Usage: fn task delete <id> [--force]"); process.exit(1); }
+            if (!id) { console.error("Usage: fn task delete <id> [--force] [--allow-resurrection]"); process.exit(1); }
             const force = args.includes("--force");
-            await runTaskDelete(id, force, projectName);
+            const allowResurrection = args.includes("--allow-resurrection");
+            await runTaskDelete(id, force, allowResurrection, projectName);
             break;
           }
           case "attach": {
@@ -1281,9 +1287,20 @@ async function main() {
         const subcommand = args[1];
         switch (subcommand) {
           case "create": {
-            const title = args[2];
-            const description = args.length > 3 ? args.slice(3).join(" ") : undefined;
-            await runMissionCreate(title, description, projectName);
+            const createArgs = args.slice(2);
+            let baseBranch: string | undefined;
+            const positional: string[] = [];
+            for (let i = 0; i < createArgs.length; i++) {
+              if (createArgs[i] === "--base-branch" && i + 1 < createArgs.length) {
+                baseBranch = createArgs[i + 1];
+                i++;
+              } else {
+                positional.push(createArgs[i]);
+              }
+            }
+            const title = positional[0];
+            const description = positional.length > 1 ? positional.slice(1).join(" ") : undefined;
+            await runMissionCreate(title, description, projectName, baseBranch);
             break;
           }
           case "list":
