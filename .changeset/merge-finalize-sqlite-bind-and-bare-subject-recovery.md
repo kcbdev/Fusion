@@ -1,8 +1,0 @@
----
-"@fusion/engine": patch
----
-
-Fix two bugs that compounded to produce bare `feat(FN-XXXX): merge fusion/fn-XXXX` merge commits in the dashboard:
-
-- **`Provided value cannot be bound to SQLite parameter 4` (TypeError) mid-merge**: the verification-fix finalize path called `upsertTaskCommitAssociation` with `commitSha` derived from a `git rev-parse HEAD` whose surrounding exec could reject under the parallel-attempt race, leaving `commitSha` undefined when bound to positional parameter 4. Extracted both duplicated callsites into a `recordCommitAssociationFromHead` helper that catches exec failures and validates each git output is non-empty before binding. The merge no longer fails over a denormalized lookup write when the commit itself landed cleanly.
-- **Bare-fallback subjects persisted into `mergeDetails.mergeCommitMessage`**: when `buildDeterministicMergeMessage`'s tier-3 fallback (`merge ${branch}`) made it onto a landed commit, the four `classification.commit.subject` / `landedCommit.subject` recovery sites in `self-healing.ts` and `aiMergeTask` copied that bare subject verbatim into `mergeDetails`. Added `regenerateBareMergeSubject` (in a new `merger-bare-subject.ts` module to keep self-healing's import graph narrow) which detects the bare pattern via `BARE_MERGE_SUBJECT_RE` and regenerates a descriptive subject from the landed commit's diff stat via the existing AI commit-subject summarizer. Cosmetic only — the git commit is never amended; the regenerated subject only populates the persisted `mergeDetails` and the in-process `MergeResult`. Gated by `settings.useAiMergeCommitSummary`.

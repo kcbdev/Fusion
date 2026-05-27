@@ -1,5 +1,13 @@
 # @fusion-plugin-examples/even-realities-glasses
 
+## 0.1.13
+
+### Patch Changes
+
+- Updated dependencies [6a6c6fd]
+  - @fusion/core@0.34.0
+  - @fusion/plugin-sdk@0.34.0
+
 ## 0.1.12
 
 ### Patch Changes

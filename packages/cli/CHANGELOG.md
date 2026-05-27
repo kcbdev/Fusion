@@ -1,5 +1,77 @@
 # @runfusion/fusion
 
+## 0.34.0
+
+### Minor Changes
+
+- 5eacd79: Add optional `baseBranch` support to mission creation and task planning flows.
+
+  - `fn_mission_create` now accepts `baseBranch` to persist a mission-level default integration branch.
+  - Mission feature/slice triage inherits mission `baseBranch` when no explicit triage base branch is supplied.
+  - `fn_task_plan`/CLI planning paths now accept and forward `baseBranch` to created tasks.
+
+- 1fb905a: Planning Mode now lets you pick a branch strategy (project default, auto-named, existing, or custom new) and an optional base/merge-target branch when creating a task from a completed planning session.
+
+### Patch Changes
+
+- 0a6da9f: Fix ntfy notification deep links: project-only links now switch projects, and task links to non-current projects resolve against the correct project before opening the modal.
+- 06a107d: Fix triage/executor not swapping to the configured planning fallback model when the primary provider's API key is missing (or returns 401/403/rate-limit). The top-level `promptWithFallback` now delegates to the rich session-attached path (which runs `isRetryableModelSelectionError` and `swapPromptSession`), with a WeakSet re-entry guard preserving the FN-4900 recursion fix.
+- 88c465c: Fix two engine reliability bugs surfaced by CI sharding repair:
+
+  - Self-healing in-review branch rebind now dedups case-variant candidate refs by resolved SHA rather than lowercase name, so two distinct branches sharing a case-insensitive name on case-sensitive filesystems (Linux) are correctly flagged as ambiguous instead of one being silently picked.
+  - CI test sharding: removed the `--` separator between `pnpm test` and `--shard`, which vitest's CLI parser was treating as end-of-flags and turning the shard selector into a positional file filter — silently disabling sharding so every shard ran the full suite. Test shards now run their actual slice.
+  - CI test-shards jobs now check out with `fetch-depth: 0` so engine tests that depend on real git history (merge-base, ref resolution) behave the same on CI as locally.
+  - PR Checks workflow now also runs on push to `main`, so post-merge regressions surface immediately instead of waiting for the next PR.
+
+- 6a6c6fd: Dashboard startup and request-storm fixes:
+
+  - **Faster startup**: parallelized independent store inits, started CentralCore init early in background, and ran plugin loading concurrently with extension resolution. The duplicate-runtime root cause is also fixed — `shouldUseHybridExecutor` no longer auto-enables for local-only multi-project setups, where `ProjectEngineManager` already handles project lifecycle (set `FUSION_HYBRID_EXECUTOR=1` to force-enable). Eliminates ~7s of redundant self-healing pipeline work per cold start.
+  - **Per-page request reduction**: added in-flight request dedupe (`packages/dashboard/app/api/dedupe.ts`) wrapped around the top API offenders. A single page load went from ~177 requests to ~101, with `/api/plugins/ui-slots` dropping from 17× to 1×.
+  - **Stale-data-after-mutation hazard**: `forceFresh` option on the deduped fetchers now redirects ALL in-flight waiters to receive the fresh post-mutation response, not just the forcing caller. Generation counters in `useAgents` and `AgentListModal` provide a second layer of protection against slow polls overwriting fresh state.
+  - **SSE refresh storm**: agent SSE event handler now debounces (250ms) with a trailing-edge guard, so multi-agent activity bursts coalesce to at most 2 refetches per burst instead of one per event.
+  - **Live isolation-mode transition**: PATCH `/api/projects/:id` with an `isolationMode` change now returns a 503 with actionable guidance when HybridExecutor is unavailable (local-only single-node), instead of silently persisting a config that the live runtime won't honor.
+  - **Error handling regression**: restored try/catch around `HybridExecutor.initialize` and `engineManager.ensureEngine` in the parallel engine setup so a paused or broken cwd project no longer aborts dashboard startup.
+  - **TaskStore migration race**: sequenced the SQLite store inits (TaskStore → AutomationStore → PluginStore → AgentStore) since they all open the same `.fusion/fusion.db` and run `addColumnIfMissing` migrations with a TOCTOU `hasColumn` → `ALTER` pattern.
+  - **`gh` CLI invocation storm**: `isGhAvailable()` and `isGhAuthenticated()` now memoize their results with a 60s TTL. `GitHubTrackingReconciler` was scanning up to 200 done tasks at startup and calling `hasGhAuth()` per task — each call shelled out to `gh --version` and `gh auth status` (which makes a network roundtrip), pinning the event loop for ~60s of synchronous `spawnSync` work. CPU-profile-confirmed: dropped from 71s (69% of cold-start CPU) to 2s. The cache benefits all 28+ call sites in `dashboard/src/github.ts`, the engine PR monitor, the research provider, and the API routes automatically. `resetGhAvailabilityCache()` is exported for login/logout flows that need to invalidate immediately.
+  - **SQLite integrity check delay**: `PRAGMA integrity_check(100)` walks every page of the database file and was scheduled 3 seconds after init — landing right in the responsiveness-critical window for ~7s per database. Pushed the deferred-check timer to 60 seconds so the user is already interacting with the dashboard by the time it runs. The check itself is unchanged; corruption detection still works.
+  - **Engine init event-loop yields**: `InProcessRuntime.start()` now awaits a `setImmediate`-based yield between major init phases (TaskStore → Plugins → WorktreePool → AgentStore → Scheduler → Executor → HeartbeatMonitor → SelfHealing) so HTTP requests can be processed between them instead of waiting on the entire stack. Same yield is now interleaved between each step of `SelfHealingManager.runStartupRecovery()` (34 steps per project) and its periodic maintenance batches.
+  - **Deferred startup recovery**: `InProcessRuntime.start()` no longer awaits `resumeStartupRecoverySequence()` or `workerManager.reconcileOrphaned()` — both are correctness-preserving background operations and their git/SQLite work was blocking server-listen for several seconds.
+  - **Deferred orphan-task AI agent resumption**: orphaned in-progress tasks resumed at engine restart now wait 30 seconds before spawning their AI agent session (worktree setup + pi-coding-agent session creation is heavy and saturates the event loop). Override via `FUSION_RESUME_ORPHAN_DELAY_MS=<ms>`; auto-zeroes under Vitest.
+  - **Event-loop lag tracer**: opt-in debug aid for diagnosing cold-start regressions. Set `FUSION_TRACE_EL_LAG=/path/to/file.txt` to capture every block >150ms with a timestamp relative to process start.
+
+- bad6759: Enable editing the agent name during the review step of the New Agent dialog.
+- 7f01b53: Fix chat session API endpoints ignoring `projectId` in multi-project mode.
+
+  `GET /chat/sessions`, `GET /chat/sessions/:id`, `GET /chat/sessions/:id/messages`
+  and related mutation endpoints all used `options.chatStore` (the home-directory
+  project's store) regardless of the `projectId` query parameter. In a multi-project
+  daemon (e.g. running from `~/`) sessions belonging to secondary projects were
+  invisible — list returned empty, fetching by ID returned 404.
+
+  Root cause: `registerChatRoutes` accessed `options.chatStore` directly instead of
+  routing through the per-project `resolveProjectChatContext` helper (already used
+  correctly by `registerChatRoomRoutes` for the rooms API).
+
+  Fix: introduce a `resolveScopedChatStore(projectId)` helper inside
+  `registerChatRoutes` that delegates to `resolveProjectChatContext`, and replace
+  all ten `options.chatStore` usages with calls to this helper. When `engineManager`
+  is present and has an engine for the given `projectId`, the engine's own
+  `ChatStore` is used; otherwise falls back to the default store (backward compatible).
+
+- 64056b3: Fix `useChat` truncating sessions longer than 50 messages on initial open.
+
+  `loadMessages()` fetched `{ limit: 50 }` for the initial load. The
+  `loadMoreMessages` callback was never called from `ChatView` (no scroll
+  sentinel exists), so sessions beyond 50 messages were permanently cut off.
+
+  Fix: introduce `fetchAllMessagesInChat()` that paginates through the API's
+  200-message cap and replace the initial load path. A stale-session guard
+  (via `activeSessionRef`) prevents overwriting a switched session's messages.
+  The forward-pagination path (`isPaginationRequest = true`) is preserved
+  unchanged for backward compatibility.
+
+- 629aa29: Fix Windows compatibility in cloudflared install fallback by replacing `execFileAsync("mkdir", ["-p", ...])` with `fs.mkdir({ recursive: true })`. The shell-level `-p` flag is Unix-only and breaks installation on Windows cmd.exe with "A subdirectory or file -p already exists". The worktree-hooks fix from the original report was already landed independently.
+
 ## 0.33.0
 
 ### Minor Changes

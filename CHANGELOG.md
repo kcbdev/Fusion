@@ -2,6 +2,198 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
+## 0.34.0
+
+### @fusion/core
+
+#### Patch Changes
+
+- 6a6c6fd: Dashboard startup and request-storm fixes:
+
+  - **Faster startup**: parallelized independent store inits, started CentralCore init early in background, and ran plugin loading concurrently with extension resolution. The duplicate-runtime root cause is also fixed — `shouldUseHybridExecutor` no longer auto-enables for local-only multi-project setups, where `ProjectEngineManager` already handles project lifecycle (set `FUSION_HYBRID_EXECUTOR=1` to force-enable). Eliminates ~7s of redundant self-healing pipeline work per cold start.
+  - **Per-page request reduction**: added in-flight request dedupe (`packages/dashboard/app/api/dedupe.ts`) wrapped around the top API offenders. A single page load went from ~177 requests to ~101, with `/api/plugins/ui-slots` dropping from 17× to 1×.
+  - **Stale-data-after-mutation hazard**: `forceFresh` option on the deduped fetchers now redirects ALL in-flight waiters to receive the fresh post-mutation response, not just the forcing caller. Generation counters in `useAgents` and `AgentListModal` provide a second layer of protection against slow polls overwriting fresh state.
+  - **SSE refresh storm**: agent SSE event handler now debounces (250ms) with a trailing-edge guard, so multi-agent activity bursts coalesce to at most 2 refetches per burst instead of one per event.
+  - **Live isolation-mode transition**: PATCH `/api/projects/:id` with an `isolationMode` change now returns a 503 with actionable guidance when HybridExecutor is unavailable (local-only single-node), instead of silently persisting a config that the live runtime won't honor.
+  - **Error handling regression**: restored try/catch around `HybridExecutor.initialize` and `engineManager.ensureEngine` in the parallel engine setup so a paused or broken cwd project no longer aborts dashboard startup.
+  - **TaskStore migration race**: sequenced the SQLite store inits (TaskStore → AutomationStore → PluginStore → AgentStore) since they all open the same `.fusion/fusion.db` and run `addColumnIfMissing` migrations with a TOCTOU `hasColumn` → `ALTER` pattern.
+  - **`gh` CLI invocation storm**: `isGhAvailable()` and `isGhAuthenticated()` now memoize their results with a 60s TTL. `GitHubTrackingReconciler` was scanning up to 200 done tasks at startup and calling `hasGhAuth()` per task — each call shelled out to `gh --version` and `gh auth status` (which makes a network roundtrip), pinning the event loop for ~60s of synchronous `spawnSync` work. CPU-profile-confirmed: dropped from 71s (69% of cold-start CPU) to 2s. The cache benefits all 28+ call sites in `dashboard/src/github.ts`, the engine PR monitor, the research provider, and the API routes automatically. `resetGhAvailabilityCache()` is exported for login/logout flows that need to invalidate immediately.
+  - **SQLite integrity check delay**: `PRAGMA integrity_check(100)` walks every page of the database file and was scheduled 3 seconds after init — landing right in the responsiveness-critical window for ~7s per database. Pushed the deferred-check timer to 60 seconds so the user is already interacting with the dashboard by the time it runs. The check itself is unchanged; corruption detection still works.
+  - **Engine init event-loop yields**: `InProcessRuntime.start()` now awaits a `setImmediate`-based yield between major init phases (TaskStore → Plugins → WorktreePool → AgentStore → Scheduler → Executor → HeartbeatMonitor → SelfHealing) so HTTP requests can be processed between them instead of waiting on the entire stack. Same yield is now interleaved between each step of `SelfHealingManager.runStartupRecovery()` (34 steps per project) and its periodic maintenance batches.
+  - **Deferred startup recovery**: `InProcessRuntime.start()` no longer awaits `resumeStartupRecoverySequence()` or `workerManager.reconcileOrphaned()` — both are correctness-preserving background operations and their git/SQLite work was blocking server-listen for several seconds.
+  - **Deferred orphan-task AI agent resumption**: orphaned in-progress tasks resumed at engine restart now wait 30 seconds before spawning their AI agent session (worktree setup + pi-coding-agent session creation is heavy and saturates the event loop). Override via `FUSION_RESUME_ORPHAN_DELAY_MS=<ms>`; auto-zeroes under Vitest.
+  - **Event-loop lag tracer**: opt-in debug aid for diagnosing cold-start regressions. Set `FUSION_TRACE_EL_LAG=/path/to/file.txt` to capture every block >150ms with a timestamp relative to process start.
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- 6a6c6fd: Dashboard startup and request-storm fixes:
+
+  - **Faster startup**: parallelized independent store inits, started CentralCore init early in background, and ran plugin loading concurrently with extension resolution. The duplicate-runtime root cause is also fixed — `shouldUseHybridExecutor` no longer auto-enables for local-only multi-project setups, where `ProjectEngineManager` already handles project lifecycle (set `FUSION_HYBRID_EXECUTOR=1` to force-enable). Eliminates ~7s of redundant self-healing pipeline work per cold start.
+  - **Per-page request reduction**: added in-flight request dedupe (`packages/dashboard/app/api/dedupe.ts`) wrapped around the top API offenders. A single page load went from ~177 requests to ~101, with `/api/plugins/ui-slots` dropping from 17× to 1×.
+  - **Stale-data-after-mutation hazard**: `forceFresh` option on the deduped fetchers now redirects ALL in-flight waiters to receive the fresh post-mutation response, not just the forcing caller. Generation counters in `useAgents` and `AgentListModal` provide a second layer of protection against slow polls overwriting fresh state.
+  - **SSE refresh storm**: agent SSE event handler now debounces (250ms) with a trailing-edge guard, so multi-agent activity bursts coalesce to at most 2 refetches per burst instead of one per event.
+  - **Live isolation-mode transition**: PATCH `/api/projects/:id` with an `isolationMode` change now returns a 503 with actionable guidance when HybridExecutor is unavailable (local-only single-node), instead of silently persisting a config that the live runtime won't honor.
+  - **Error handling regression**: restored try/catch around `HybridExecutor.initialize` and `engineManager.ensureEngine` in the parallel engine setup so a paused or broken cwd project no longer aborts dashboard startup.
+  - **TaskStore migration race**: sequenced the SQLite store inits (TaskStore → AutomationStore → PluginStore → AgentStore) since they all open the same `.fusion/fusion.db` and run `addColumnIfMissing` migrations with a TOCTOU `hasColumn` → `ALTER` pattern.
+  - **`gh` CLI invocation storm**: `isGhAvailable()` and `isGhAuthenticated()` now memoize their results with a 60s TTL. `GitHubTrackingReconciler` was scanning up to 200 done tasks at startup and calling `hasGhAuth()` per task — each call shelled out to `gh --version` and `gh auth status` (which makes a network roundtrip), pinning the event loop for ~60s of synchronous `spawnSync` work. CPU-profile-confirmed: dropped from 71s (69% of cold-start CPU) to 2s. The cache benefits all 28+ call sites in `dashboard/src/github.ts`, the engine PR monitor, the research provider, and the API routes automatically. `resetGhAvailabilityCache()` is exported for login/logout flows that need to invalidate immediately.
+  - **SQLite integrity check delay**: `PRAGMA integrity_check(100)` walks every page of the database file and was scheduled 3 seconds after init — landing right in the responsiveness-critical window for ~7s per database. Pushed the deferred-check timer to 60 seconds so the user is already interacting with the dashboard by the time it runs. The check itself is unchanged; corruption detection still works.
+  - **Engine init event-loop yields**: `InProcessRuntime.start()` now awaits a `setImmediate`-based yield between major init phases (TaskStore → Plugins → WorktreePool → AgentStore → Scheduler → Executor → HeartbeatMonitor → SelfHealing) so HTTP requests can be processed between them instead of waiting on the entire stack. Same yield is now interleaved between each step of `SelfHealingManager.runStartupRecovery()` (34 steps per project) and its periodic maintenance batches.
+  - **Deferred startup recovery**: `InProcessRuntime.start()` no longer awaits `resumeStartupRecoverySequence()` or `workerManager.reconcileOrphaned()` — both are correctness-preserving background operations and their git/SQLite work was blocking server-listen for several seconds.
+  - **Deferred orphan-task AI agent resumption**: orphaned in-progress tasks resumed at engine restart now wait 30 seconds before spawning their AI agent session (worktree setup + pi-coding-agent session creation is heavy and saturates the event loop). Override via `FUSION_RESUME_ORPHAN_DELAY_MS=<ms>`; auto-zeroes under Vitest.
+  - **Event-loop lag tracer**: opt-in debug aid for diagnosing cold-start regressions. Set `FUSION_TRACE_EL_LAG=/path/to/file.txt` to capture every block >150ms with a timestamp relative to process start.
+
+- Updated dependencies [6a6c6fd]
+- Updated dependencies [97f1143]
+- Updated dependencies [4e4830f]
+  - @fusion/engine@0.34.0
+  - @fusion/core@0.34.0
+  - @fusion-plugin-examples/cli-printing-press@0.1.11
+  - @fusion-plugin-examples/dependency-graph@0.1.25
+  - @fusion-plugin-examples/roadmap@0.1.13
+  - @fusion-plugin-examples/cursor-runtime@0.1.13
+  - @fusion-plugin-examples/droid-runtime@0.1.20
+  - @fusion-plugin-examples/hermes-runtime@0.2.44
+  - @fusion-plugin-examples/openclaw-runtime@0.2.44
+  - @fusion-plugin-examples/paperclip-runtime@0.2.44
+
+### @fusion/desktop
+
+#### Patch Changes
+
+- Updated dependencies [6a6c6fd]
+  - @fusion/dashboard@0.34.0
+  - @fusion/core@0.34.0
+
+### @fusion/engine
+
+#### Minor Changes
+
+- 97f1143: Add optional dependencies parameter to fn_task_update tool. Executors can now programmatically modify task dependency arrays during execution with `fn_task_update({ id: "FN-XXX", dependencies: ["FN-001", "FN-002"] })`. The parameter is optional and backward-compatible; omitting it preserves existing dependencies. Includes validation for self-dependency and non-existent task IDs. Eliminates the need for direct task.json editing workarounds.
+
+#### Patch Changes
+
+- 6a6c6fd: Dashboard startup and request-storm fixes:
+
+  - **Faster startup**: parallelized independent store inits, started CentralCore init early in background, and ran plugin loading concurrently with extension resolution. The duplicate-runtime root cause is also fixed — `shouldUseHybridExecutor` no longer auto-enables for local-only multi-project setups, where `ProjectEngineManager` already handles project lifecycle (set `FUSION_HYBRID_EXECUTOR=1` to force-enable). Eliminates ~7s of redundant self-healing pipeline work per cold start.
+  - **Per-page request reduction**: added in-flight request dedupe (`packages/dashboard/app/api/dedupe.ts`) wrapped around the top API offenders. A single page load went from ~177 requests to ~101, with `/api/plugins/ui-slots` dropping from 17× to 1×.
+  - **Stale-data-after-mutation hazard**: `forceFresh` option on the deduped fetchers now redirects ALL in-flight waiters to receive the fresh post-mutation response, not just the forcing caller. Generation counters in `useAgents` and `AgentListModal` provide a second layer of protection against slow polls overwriting fresh state.
+  - **SSE refresh storm**: agent SSE event handler now debounces (250ms) with a trailing-edge guard, so multi-agent activity bursts coalesce to at most 2 refetches per burst instead of one per event.
+  - **Live isolation-mode transition**: PATCH `/api/projects/:id` with an `isolationMode` change now returns a 503 with actionable guidance when HybridExecutor is unavailable (local-only single-node), instead of silently persisting a config that the live runtime won't honor.
+  - **Error handling regression**: restored try/catch around `HybridExecutor.initialize` and `engineManager.ensureEngine` in the parallel engine setup so a paused or broken cwd project no longer aborts dashboard startup.
+  - **TaskStore migration race**: sequenced the SQLite store inits (TaskStore → AutomationStore → PluginStore → AgentStore) since they all open the same `.fusion/fusion.db` and run `addColumnIfMissing` migrations with a TOCTOU `hasColumn` → `ALTER` pattern.
+  - **`gh` CLI invocation storm**: `isGhAvailable()` and `isGhAuthenticated()` now memoize their results with a 60s TTL. `GitHubTrackingReconciler` was scanning up to 200 done tasks at startup and calling `hasGhAuth()` per task — each call shelled out to `gh --version` and `gh auth status` (which makes a network roundtrip), pinning the event loop for ~60s of synchronous `spawnSync` work. CPU-profile-confirmed: dropped from 71s (69% of cold-start CPU) to 2s. The cache benefits all 28+ call sites in `dashboard/src/github.ts`, the engine PR monitor, the research provider, and the API routes automatically. `resetGhAvailabilityCache()` is exported for login/logout flows that need to invalidate immediately.
+  - **SQLite integrity check delay**: `PRAGMA integrity_check(100)` walks every page of the database file and was scheduled 3 seconds after init — landing right in the responsiveness-critical window for ~7s per database. Pushed the deferred-check timer to 60 seconds so the user is already interacting with the dashboard by the time it runs. The check itself is unchanged; corruption detection still works.
+  - **Engine init event-loop yields**: `InProcessRuntime.start()` now awaits a `setImmediate`-based yield between major init phases (TaskStore → Plugins → WorktreePool → AgentStore → Scheduler → Executor → HeartbeatMonitor → SelfHealing) so HTTP requests can be processed between them instead of waiting on the entire stack. Same yield is now interleaved between each step of `SelfHealingManager.runStartupRecovery()` (34 steps per project) and its periodic maintenance batches.
+  - **Deferred startup recovery**: `InProcessRuntime.start()` no longer awaits `resumeStartupRecoverySequence()` or `workerManager.reconcileOrphaned()` — both are correctness-preserving background operations and their git/SQLite work was blocking server-listen for several seconds.
+  - **Deferred orphan-task AI agent resumption**: orphaned in-progress tasks resumed at engine restart now wait 30 seconds before spawning their AI agent session (worktree setup + pi-coding-agent session creation is heavy and saturates the event loop). Override via `FUSION_RESUME_ORPHAN_DELAY_MS=<ms>`; auto-zeroes under Vitest.
+  - **Event-loop lag tracer**: opt-in debug aid for diagnosing cold-start regressions. Set `FUSION_TRACE_EL_LAG=/path/to/file.txt` to capture every block >150ms with a timestamp relative to process start.
+
+- 4e4830f: Fix two bugs that compounded to produce bare `feat(FN-XXXX): merge fusion/fn-XXXX` merge commits in the dashboard:
+
+  - **`Provided value cannot be bound to SQLite parameter 4` (TypeError) mid-merge**: the verification-fix finalize path called `upsertTaskCommitAssociation` with `commitSha` derived from a `git rev-parse HEAD` whose surrounding exec could reject under the parallel-attempt race, leaving `commitSha` undefined when bound to positional parameter 4. Extracted both duplicated callsites into a `recordCommitAssociationFromHead` helper that catches exec failures and validates each git output is non-empty before binding. The merge no longer fails over a denormalized lookup write when the commit itself landed cleanly.
+  - **Bare-fallback subjects persisted into `mergeDetails.mergeCommitMessage`**: when `buildDeterministicMergeMessage`'s tier-3 fallback (`merge ${branch}`) made it onto a landed commit, the four `classification.commit.subject` / `landedCommit.subject` recovery sites in `self-healing.ts` and `aiMergeTask` copied that bare subject verbatim into `mergeDetails`. Added `regenerateBareMergeSubject` (in a new `merger-bare-subject.ts` module to keep self-healing's import graph narrow) which detects the bare pattern via `BARE_MERGE_SUBJECT_RE` and regenerates a descriptive subject from the landed commit's diff stat via the existing AI commit-subject summarizer. Cosmetic only — the git commit is never amended; the regenerated subject only populates the persisted `mergeDetails` and the in-process `MergeResult`. Gated by `settings.useAiMergeCommitSummary`.
+
+- Updated dependencies [6a6c6fd]
+  - @fusion/core@0.34.0
+  - @fusion/pi-claude-cli@0.34.0
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- Updated dependencies [6a6c6fd]
+  - @fusion/core@0.34.0
+
+### @runfusion/fusion
+
+#### Minor Changes
+
+- 5eacd79: Add optional `baseBranch` support to mission creation and task planning flows.
+
+  - `fn_mission_create` now accepts `baseBranch` to persist a mission-level default integration branch.
+  - Mission feature/slice triage inherits mission `baseBranch` when no explicit triage base branch is supplied.
+  - `fn_task_plan`/CLI planning paths now accept and forward `baseBranch` to created tasks.
+
+- 1fb905a: Planning Mode now lets you pick a branch strategy (project default, auto-named, existing, or custom new) and an optional base/merge-target branch when creating a task from a completed planning session.
+
+#### Patch Changes
+
+- 0a6da9f: Fix ntfy notification deep links: project-only links now switch projects, and task links to non-current projects resolve against the correct project before opening the modal.
+- 06a107d: Fix triage/executor not swapping to the configured planning fallback model when the primary provider's API key is missing (or returns 401/403/rate-limit). The top-level `promptWithFallback` now delegates to the rich session-attached path (which runs `isRetryableModelSelectionError` and `swapPromptSession`), with a WeakSet re-entry guard preserving the FN-4900 recursion fix.
+- 88c465c: Fix two engine reliability bugs surfaced by CI sharding repair:
+
+  - Self-healing in-review branch rebind now dedups case-variant candidate refs by resolved SHA rather than lowercase name, so two distinct branches sharing a case-insensitive name on case-sensitive filesystems (Linux) are correctly flagged as ambiguous instead of one being silently picked.
+  - CI test sharding: removed the `--` separator between `pnpm test` and `--shard`, which vitest's CLI parser was treating as end-of-flags and turning the shard selector into a positional file filter — silently disabling sharding so every shard ran the full suite. Test shards now run their actual slice.
+  - CI test-shards jobs now check out with `fetch-depth: 0` so engine tests that depend on real git history (merge-base, ref resolution) behave the same on CI as locally.
+  - PR Checks workflow now also runs on push to `main`, so post-merge regressions surface immediately instead of waiting for the next PR.
+
+- 6a6c6fd: Dashboard startup and request-storm fixes:
+
+  - **Faster startup**: parallelized independent store inits, started CentralCore init early in background, and ran plugin loading concurrently with extension resolution. The duplicate-runtime root cause is also fixed — `shouldUseHybridExecutor` no longer auto-enables for local-only multi-project setups, where `ProjectEngineManager` already handles project lifecycle (set `FUSION_HYBRID_EXECUTOR=1` to force-enable). Eliminates ~7s of redundant self-healing pipeline work per cold start.
+  - **Per-page request reduction**: added in-flight request dedupe (`packages/dashboard/app/api/dedupe.ts`) wrapped around the top API offenders. A single page load went from ~177 requests to ~101, with `/api/plugins/ui-slots` dropping from 17× to 1×.
+  - **Stale-data-after-mutation hazard**: `forceFresh` option on the deduped fetchers now redirects ALL in-flight waiters to receive the fresh post-mutation response, not just the forcing caller. Generation counters in `useAgents` and `AgentListModal` provide a second layer of protection against slow polls overwriting fresh state.
+  - **SSE refresh storm**: agent SSE event handler now debounces (250ms) with a trailing-edge guard, so multi-agent activity bursts coalesce to at most 2 refetches per burst instead of one per event.
+  - **Live isolation-mode transition**: PATCH `/api/projects/:id` with an `isolationMode` change now returns a 503 with actionable guidance when HybridExecutor is unavailable (local-only single-node), instead of silently persisting a config that the live runtime won't honor.
+  - **Error handling regression**: restored try/catch around `HybridExecutor.initialize` and `engineManager.ensureEngine` in the parallel engine setup so a paused or broken cwd project no longer aborts dashboard startup.
+  - **TaskStore migration race**: sequenced the SQLite store inits (TaskStore → AutomationStore → PluginStore → AgentStore) since they all open the same `.fusion/fusion.db` and run `addColumnIfMissing` migrations with a TOCTOU `hasColumn` → `ALTER` pattern.
+  - **`gh` CLI invocation storm**: `isGhAvailable()` and `isGhAuthenticated()` now memoize their results with a 60s TTL. `GitHubTrackingReconciler` was scanning up to 200 done tasks at startup and calling `hasGhAuth()` per task — each call shelled out to `gh --version` and `gh auth status` (which makes a network roundtrip), pinning the event loop for ~60s of synchronous `spawnSync` work. CPU-profile-confirmed: dropped from 71s (69% of cold-start CPU) to 2s. The cache benefits all 28+ call sites in `dashboard/src/github.ts`, the engine PR monitor, the research provider, and the API routes automatically. `resetGhAvailabilityCache()` is exported for login/logout flows that need to invalidate immediately.
+  - **SQLite integrity check delay**: `PRAGMA integrity_check(100)` walks every page of the database file and was scheduled 3 seconds after init — landing right in the responsiveness-critical window for ~7s per database. Pushed the deferred-check timer to 60 seconds so the user is already interacting with the dashboard by the time it runs. The check itself is unchanged; corruption detection still works.
+  - **Engine init event-loop yields**: `InProcessRuntime.start()` now awaits a `setImmediate`-based yield between major init phases (TaskStore → Plugins → WorktreePool → AgentStore → Scheduler → Executor → HeartbeatMonitor → SelfHealing) so HTTP requests can be processed between them instead of waiting on the entire stack. Same yield is now interleaved between each step of `SelfHealingManager.runStartupRecovery()` (34 steps per project) and its periodic maintenance batches.
+  - **Deferred startup recovery**: `InProcessRuntime.start()` no longer awaits `resumeStartupRecoverySequence()` or `workerManager.reconcileOrphaned()` — both are correctness-preserving background operations and their git/SQLite work was blocking server-listen for several seconds.
+  - **Deferred orphan-task AI agent resumption**: orphaned in-progress tasks resumed at engine restart now wait 30 seconds before spawning their AI agent session (worktree setup + pi-coding-agent session creation is heavy and saturates the event loop). Override via `FUSION_RESUME_ORPHAN_DELAY_MS=<ms>`; auto-zeroes under Vitest.
+  - **Event-loop lag tracer**: opt-in debug aid for diagnosing cold-start regressions. Set `FUSION_TRACE_EL_LAG=/path/to/file.txt` to capture every block >150ms with a timestamp relative to process start.
+
+- bad6759: Enable editing the agent name during the review step of the New Agent dialog.
+- 7f01b53: Fix chat session API endpoints ignoring `projectId` in multi-project mode.
+
+  `GET /chat/sessions`, `GET /chat/sessions/:id`, `GET /chat/sessions/:id/messages`
+  and related mutation endpoints all used `options.chatStore` (the home-directory
+  project's store) regardless of the `projectId` query parameter. In a multi-project
+  daemon (e.g. running from `~/`) sessions belonging to secondary projects were
+  invisible — list returned empty, fetching by ID returned 404.
+
+  Root cause: `registerChatRoutes` accessed `options.chatStore` directly instead of
+  routing through the per-project `resolveProjectChatContext` helper (already used
+  correctly by `registerChatRoomRoutes` for the rooms API).
+
+  Fix: introduce a `resolveScopedChatStore(projectId)` helper inside
+  `registerChatRoutes` that delegates to `resolveProjectChatContext`, and replace
+  all ten `options.chatStore` usages with calls to this helper. When `engineManager`
+  is present and has an engine for the given `projectId`, the engine's own
+  `ChatStore` is used; otherwise falls back to the default store (backward compatible).
+
+- 64056b3: Fix `useChat` truncating sessions longer than 50 messages on initial open.
+
+  `loadMessages()` fetched `{ limit: 50 }` for the initial load. The
+  `loadMoreMessages` callback was never called from `ChatView` (no scroll
+  sentinel exists), so sessions beyond 50 messages were permanently cut off.
+
+  Fix: introduce `fetchAllMessagesInChat()` that paginates through the API's
+  200-message cap and replace the initial load path. A stale-session guard
+  (via `activeSessionRef`) prevents overwriting a switched session's messages.
+  The forward-pagination path (`isPaginationRequest = true`) is preserved
+  unchanged for backward compatibility.
+
+- 629aa29: Fix Windows compatibility in cloudflared install fallback by replacing `execFileAsync("mkdir", ["-p", ...])` with `fs.mkdir({ recursive: true })`. The shell-level `-p` flag is Unix-only and breaks installation on Windows cmd.exe with "A subdirectory or file -p already exists". The worktree-hooks fix from the original report was already landed independently.
+
+### runfusion.ai
+
+#### Patch Changes
+
+- Updated dependencies [0a6da9f]
+- Updated dependencies [06a107d]
+- Updated dependencies [88c465c]
+- Updated dependencies [6a6c6fd]
+- Updated dependencies [bad6759]
+- Updated dependencies [7f01b53]
+- Updated dependencies [64056b3]
+- Updated dependencies [5eacd79]
+- Updated dependencies [1fb905a]
+- Updated dependencies [629aa29]
+  - @runfusion/fusion@0.34.0
+
 ## 0.33.0
 
 ### @fusion/core
@@ -955,6 +1147,7 @@ User-facing release notes aggregated across all packages. This file is auto-sync
 
 #### Patch Changes
 
+- Fixed `fn_task_done` to gracefully handle missing worktree directories. When a task's worktree has been deleted (common for documentation/coordination tasks with no code changes), `fn_task_done` previously failed with ENOENT attempting to spawn git commands in non-existent directories. The fix adds an `existsSync` check in `verifyWorktreeInvariants` before executing git commands, allowing legitimate task completions to proceed. This is safe because task completion is read-only, deliverables are stored in fusion.db (not the worktree), and if code changes were made, the worktree would exist. Resolves infinite loops where agents couldn't complete tasks without shell access to missing directories.
 - Updated dependencies [1f0bb7e]
   - @fusion/core@0.32.0
   - @fusion/pi-claude-cli@0.32.0
@@ -6918,6 +7111,14 @@ for reference.
 - Updated dependencies [25d44e1]
 - Updated dependencies [a2ed6d0]
   - @runfusion/fusion@0.1.0
+
+## 0.11.20
+
+### @fusion/droid-cli
+
+#### Patch Changes
+
+- @fusion-plugin-examples/droid-runtime@0.1.20
 
 ## 0.11.19
 
