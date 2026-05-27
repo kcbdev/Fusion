@@ -84,6 +84,27 @@ describe("electron-builder desktop config", () => {
       (match) => match[1]?.trim(),
     );
     expect(linuxTargetEntries[0]).toBe("AppImage");
+
+    const linuxArchMatches = Array.from(
+      linuxSection.matchAll(
+        /-\s*target:\s*(AppImage|deb|tar\.gz)\s*arch:\s*([\s\S]*?)(?=\n\s*-\s*target:|\n\w|$)/g,
+      ),
+    );
+
+    expect(linuxArchMatches).toHaveLength(3);
+
+    const linuxArchByTarget = new Map(
+      linuxArchMatches.map((match) => {
+        const target = match[1];
+        const archBlock = match[2] ?? "";
+        const archValues = Array.from(archBlock.matchAll(/-\s*(x64|arm64)/g), (entry) => entry[1]).sort();
+        return [target, archValues] as const;
+      }),
+    );
+
+    expect(linuxArchByTarget.get("AppImage")).toEqual(["arm64", "x64"]);
+    expect(linuxArchByTarget.get("deb")).toEqual(["arm64", "x64"]);
+    expect(linuxArchByTarget.get("tar.gz")).toEqual(["arm64", "x64"]);
   });
 });
 

@@ -246,17 +246,23 @@ jobs:
         run: pnpm --filter @fusion/desktop build
 
       - name: Package Linux desktop artifacts
-        run: pnpm --filter @fusion/desktop dist:linux -- --publish never
+        # Linux desktop code-signing is deferred to FN-5605; Linux ARM64 CLI binaries are tracked in FN-5606.
+        run: pnpm --filter @fusion/desktop dist:linux -- --x64 --arm64 --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify desktop Linux AppImage artifact
+      - name: Verify desktop Linux AppImage artifacts
         shell: bash
         run: |
           shopt -s nullglob
-          appimages=(packages/desktop/dist-electron/Fusion-*-linux-*.AppImage)
-          if [ ${#appimages[@]} -eq 0 ]; then
-            echo "No Fusion Linux AppImage artifacts produced" >&2
+          arm64_appimages=(packages/desktop/dist-electron/Fusion-*-linux-arm64.AppImage)
+          x64_appimages=(packages/desktop/dist-electron/Fusion-*-linux-x64.AppImage)
+          if [ ${#arm64_appimages[@]} -eq 0 ]; then
+            echo "No Fusion Linux arm64 AppImage artifacts produced" >&2
+            exit 1
+          fi
+          if [ ${#x64_appimages[@]} -eq 0 ]; then
+            echo "No Fusion Linux x64 AppImage artifacts produced" >&2
             exit 1
           fi
 
@@ -287,6 +293,7 @@ jobs:
       - name: Upload desktop Linux artifacts
         uses: actions/upload-artifact@v4
         with:
+          # Single glob set covers both linux-x64 and linux-arm64 artifact filenames.
           name: fusion-desktop-linux
           if-no-files-found: ignore
           path: |

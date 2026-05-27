@@ -357,9 +357,10 @@ Desktop packaging is configured in `electron-builder.yml`.
   - Electron-updater feed files are also published per platform: `latest.yml` (Windows), `latest-mac.yml` (macOS), and `latest-linux.yml` (Linux). `setupAutoUpdater` / `triggerUpdateCheck` resolve these feeds from the GitHub Release channel.
   - Windows: x64 + arm64 outputs (NSIS + portable), matching `.exe.sha256` sidecars, and `.blockmap` files.
   - macOS: `Fusion-<version>-mac-arm64.dmg`, `Fusion-<version>-mac-x64.dmg`, matching `.zip` variants, `.sha256` sidecars, and `.blockmap` files.
-  - Linux: `Fusion-<version>-linux-x64.AppImage` with `.sha256`, plus best-effort `.deb` and `.tar.gz` outputs (and sidecars) when available on the runner image.
+  - Linux: `Fusion-<version>-linux-x64.AppImage` and `Fusion-<version>-linux-arm64.AppImage` with matching `.sha256` sidecars, plus best-effort `.deb` and `.tar.gz` outputs per arch (`Fusion-<version>-linux-x64.{deb,tar.gz}` / `Fusion-<version>-linux-arm64.{deb,tar.gz}`) and sidecars when available on the runner image.
 - Tag-less release rehearsal workflow (`.github/workflows/test-release.yml`) mirrors that artifact collection path without publishing a real GitHub Release.
-- Linux desktop artifacts now include detached GPG signature sidecars: `*.AppImage.asc`, `*.deb.asc`, and `*.tar.gz.asc` when Linux signing secrets are configured in CI.
+- Linux ARM64 artifacts are cross-built from the `ubuntu-latest` x64 runner by passing `electron-builder --linux --x64 --arm64`; running/validating arm64 installers still requires an arm64 Linux device or emulator.
+- Linux desktop artifacts can include detached GPG signature sidecars (`*.AppImage.asc`, `*.deb.asc`, `*.tar.gz.asc`) when Linux signing secrets are configured in CI; full Linux desktop code-signing rollout remains tracked in FN-5605.
 - Linux `.deb` and `.tar.gz` outputs are best-effort and may be absent on some runner images without failing the release.
 
 ### Linux signing

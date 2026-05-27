@@ -32,6 +32,10 @@ describe("desktop release workflow wiring", () => {
       expect(workflow).toContain("build-desktop-linux:");
       expect(workflow).toContain("runs-on: ubuntu-latest");
       expect(workflow).toMatch(/pnpm --filter @fusion\/desktop dist:linux|electron-builder --linux/);
+      expect(workflow).toContain("--x64");
+      expect(workflow).toContain("--arm64");
+      expect(workflow).toContain("Fusion-*-linux-arm64.AppImage");
+      expect(workflow).toContain("Fusion-*-linux-x64.AppImage");
       expect(workflow).toContain("name: fusion-desktop-linux");
       expect(workflow).toContain("packages/desktop/dist-electron/latest-linux.yml");
     }
