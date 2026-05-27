@@ -1379,6 +1379,9 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     logScrollDebug(cause);
     const messagesContainer = messagesContainerRef.current;
     if (!messagesContainer) return;
+    // Cancel any pending scroll restoration so it doesn't override the explicit jump-to-bottom.
+    scrollRestoreSnapshotRef.current = null;
+    isUserScrollingRef.current = false;
     anchorToBottom(messagesContainer);
   }, [anchorToBottom, logScrollDebug]);
 
