@@ -343,6 +343,9 @@ function compileBinary(outFile: string, target: string, isCrossCompile: boolean)
       // external so Bun's static bundler doesn't try to resolve it at compile.
       "--external",
       "react-devtools-core",
+      // cpu-features: native .node binding from ssh2 (transitive via dockerode); ssh2 falls back to pure JS when unavailable
+      "--external",
+      "cpu-features",
     ],
     cwd: workspaceRoot,
     stdout: "inherit",
