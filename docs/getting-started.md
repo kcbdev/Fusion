@@ -54,6 +54,24 @@ fn --help
 fusion --help
 ```
 
+### Troubleshooting `fn update`
+
+If `fn update` fails with an npm bin-link collision (for example `EEXIST` / `File exists` mentioning `fn` or `fusion`), Fusion now retries once with `--force` automatically.
+
+If update still fails, run the manual recovery commands:
+
+```bash
+npm uninstall -g runfusion.ai
+rm -f $(command -v fn) $(command -v fusion)
+npm install -g @runfusion/fusion@latest
+```
+
+If you installed via Homebrew and links are still broken, reinstall the formula:
+
+```bash
+brew uninstall fusion && brew install runfusion/tap/fusion
+```
+
 ## Initialize a Project
 
 In each repository you want Fusion to manage, run:

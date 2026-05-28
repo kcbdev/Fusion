@@ -8,6 +8,7 @@ import { getCachedUpdateStatus } from "../update-cache.js";
 const execAsync = promisify(exec);
 const REGISTRY_URL = "https://registry.npmjs.org/@runfusion%2Ffusion";
 const INSTALL_COMMAND = "npm install -g @runfusion/fusion@latest";
+const LOCAL_INSTALL_COMMAND = "npm install @runfusion/fusion@latest";
 
 export type RunUpdateOptions = {
   check?: boolean;
@@ -92,12 +93,78 @@ async function fetchLatestVersion(): Promise<string> {
   return latestVersion;
 }
 
-async function installLatest(globalInstall: boolean): Promise<void> {
-  const command = globalInstall ? INSTALL_COMMAND : "npm install @runfusion/fusion@latest";
-  await execAsync(command, {
-    timeout: 120_000,
-    maxBuffer: 10 * 1024 * 1024,
-  });
+function getInstallCommand(globalInstall: boolean, force = false): string {
+  const baseCommand = globalInstall ? INSTALL_COMMAND : LOCAL_INSTALL_COMMAND;
+  return force ? baseCommand.replace("npm install", "npm install --force") : baseCommand;
+}
+
+type InstallError = Error & { stdout?: string; stderr?: string };
+
+function isBinCollisionInstallError(error: unknown): boolean {
+  const installError = error as InstallError;
+  const message = [installError?.message, installError?.stderr, installError?.stdout]
+    .filter((part): part is string => typeof part === "string" && part.length > 0)
+    .join("\n");
+
+  const hasBinHint = /\/(fn|fusion)\b|runfusion\.ai/i.test(message);
+  if (!hasBinHint) return false;
+
+  return /EEXIST|ENOENT|File exists/i.test(message);
+}
+
+function detectRunningBinaryPath(): string | null {
+  const argvPath = process.argv[1];
+  if (typeof argvPath === "string" && argvPath.length > 0) {
+    return argvPath;
+  }
+  return typeof process.execPath === "string" ? process.execPath : null;
+}
+
+function shouldSuggestHomebrewFix(binaryPath: string | null): boolean {
+  if (!binaryPath) return false;
+  return (
+    binaryPath.startsWith("/opt/homebrew/") ||
+    binaryPath.startsWith("/usr/local/Homebrew/") ||
+    binaryPath.startsWith("/home/linuxbrew/")
+  );
+}
+
+function printCollisionRemediation(binaryPath: string | null): void {
+  console.error("Legacy runfusion.ai bin links blocked automatic update. Run:");
+  console.error("  npm uninstall -g runfusion.ai");
+  console.error("  rm -f $(command -v fn) $(command -v fusion)");
+  console.error("  npm install -g @runfusion/fusion@latest");
+  if (shouldSuggestHomebrewFix(binaryPath)) {
+    console.error("If installed via Homebrew, reinstall with:");
+    console.error("  brew uninstall fusion && brew install runfusion/tap/fusion");
+  }
+}
+
+async function installLatest(globalInstall: boolean, resolveBinaryPath: () => string | null = detectRunningBinaryPath): Promise<void> {
+  try {
+    await execAsync(getInstallCommand(globalInstall), {
+      timeout: 120_000,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    return;
+  } catch (error) {
+    if (!isBinCollisionInstallError(error)) {
+      throw error;
+    }
+
+    console.error("Detected legacy runfusion.ai bin symlinks; retrying update with --force.");
+
+    try {
+      await execAsync(getInstallCommand(globalInstall, true), {
+        timeout: 120_000,
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      return;
+    } catch (forceError) {
+      printCollisionRemediation(resolveBinaryPath());
+      throw forceError;
+    }
+  }
 }
 
 function printStatus(status: UpdateStatus, checkOnly: boolean): void {

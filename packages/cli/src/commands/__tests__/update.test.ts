@@ -128,13 +128,60 @@ describe("runUpdate", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it("returns helpful error when npm install fails", async () => {
+  it("retries once with --force when EEXIST bin collision is detected", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: vi.fn().mockResolvedValue({ "dist-tags": { latest: "1.2.4" } }) }));
-    execAsyncMock.mockRejectedValue(new Error("permission denied"));
+    execAsyncMock
+      .mockRejectedValueOnce(new Error("npm ERR! code EEXIST\nnpm ERR! path /usr/local/bin/fn\nnpm ERR! File exists"))
+      .mockResolvedValueOnce({ stdout: "ok", stderr: "" });
+
+    await runUpdate();
+
+    expect(execAsyncMock).toHaveBeenCalledTimes(2);
+    expect((execAsyncMock.mock.calls[1] ?? [""])[0]).toContain("npm install --force -g @runfusion/fusion@latest");
+    expect(errorSpy).toHaveBeenCalledWith("Detected legacy runfusion.ai bin symlinks; retrying update with --force.");
+    expect(logSpy).toHaveBeenCalledWith("Update complete.");
+  });
+
+  it("retries local install with --force when collision detected", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: vi.fn().mockResolvedValue({ "dist-tags": { latest: "1.2.4" } }) }));
+    execAsyncMock
+      .mockRejectedValueOnce(new Error("npm ERR! code EEXIST\nnpm ERR! path /usr/local/bin/fusion\nnpm ERR! File exists"))
+      .mockResolvedValueOnce({ stdout: "ok", stderr: "" });
+
+    await runUpdate({ global: false });
+
+    expect(execAsyncMock).toHaveBeenCalledTimes(2);
+    expect((execAsyncMock.mock.calls[1] ?? [""])[0]).toContain("npm install --force @runfusion/fusion@latest");
+    expect((execAsyncMock.mock.calls[1] ?? [""])[0]).not.toContain(" -g ");
+  });
+
+  it("shows remediation when forced retry also fails", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: vi.fn().mockResolvedValue({ "dist-tags": { latest: "1.2.4" } }) }));
+    execAsyncMock
+      .mockRejectedValueOnce(new Error("npm ERR! code EEXIST\nnpm ERR! path /opt/homebrew/bin/fn\nnpm ERR! File exists"))
+      .mockRejectedValueOnce(new Error("npm ERR! code EEXIST\nnpm ERR! path /opt/homebrew/bin/fn\nnpm ERR! File exists"));
+
+    const argvSpy = vi.spyOn(process, "argv", "get").mockReturnValue(["node", "/opt/homebrew/bin/fn"]);
 
     await expect(runUpdate()).rejects.toThrow("process.exit:1");
 
-    expect(errorSpy).toHaveBeenCalledWith("Error installing update: permission denied");
+    argvSpy.mockRestore();
+    expect(execAsyncMock).toHaveBeenCalledTimes(2);
+    expect(errorSpy).toHaveBeenCalledWith("Legacy runfusion.ai bin links blocked automatic update. Run:");
+    expect(errorSpy).toHaveBeenCalledWith("  npm uninstall -g runfusion.ai");
+    expect(errorSpy).toHaveBeenCalledWith("  rm -f $(command -v fn) $(command -v fusion)");
+    expect(errorSpy).toHaveBeenCalledWith("  npm install -g @runfusion/fusion@latest");
+    expect(errorSpy).toHaveBeenCalledWith("  brew uninstall fusion && brew install runfusion/tap/fusion");
+  });
+
+  it("returns helpful error when npm install fails without collision", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: vi.fn().mockResolvedValue({ "dist-tags": { latest: "1.2.4" } }) }));
+    execAsyncMock.mockRejectedValue(new Error("network down"));
+
+    await expect(runUpdate()).rejects.toThrow("process.exit:1");
+
+    expect(execAsyncMock).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith("Error installing update: network down");
   });
 
   it("handles semver comparisons for major, minor, and patch", async () => {
