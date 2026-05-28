@@ -44,10 +44,56 @@ describe("decideAutoPrerebase", () => {
     expect(decision.reason).toBe("divergence-threshold");
   });
 
-  it("returns no-divergence when nothing triggers", () => {
-    const decision = decideAutoPrerebase({ settings, baseCommitSha: "abc", commitsBehind: 5, changedFiles: ["x.ts"], worktrunkEnabled: false });
+  it("returns no-divergence only when branch is fully up-to-date", () => {
+    // FN-5627 update: was 'returns no-divergence when nothing triggers'.
+    // Now safety-fallback fires for any commitsBehind > 0, so a true
+    // no-divergence requires commitsBehind === 0.
+    const decision = decideAutoPrerebase({ settings, baseCommitSha: "abc", commitsBehind: 0, changedFiles: [], worktrunkEnabled: false });
     expect(decision.fire).toBe(false);
     expect(decision.reason).toBe("no-divergence");
+  });
+
+  it("FN-5627: safety fallback fires for any commitsBehind > 0 even when threshold not tripped", () => {
+    // Root cause of FN-5626/FN-5633 strandings: user's project config had
+    // `prerebaseDivergenceThreshold: 50` for low-noise PR experience.
+    // FN-5626 was only 4 commits behind main, so the threshold path didn't
+    // fire, prerebase skipped, squash built against stale base, update-ref
+    // refused non-FF — task stranded. The safety fallback ensures any branch
+    // behind main rebases before squash, regardless of threshold.
+    const decision = decideAutoPrerebase({
+      settings, // threshold=50
+      baseCommitSha: "abc",
+      commitsBehind: 4,
+      changedFiles: ["x.ts"],
+      worktrunkEnabled: false,
+    });
+    expect(decision.fire).toBe(true);
+    expect(decision.reason).toBe("safety-fallback-any-divergence");
+    expect(decision.commitsBehind).toBe(4);
+  });
+
+  it("FN-5627: safety fallback respects prerebaseAutoEnabled=false opt-out", () => {
+    const decision = decideAutoPrerebase({
+      settings: { ...settings, prerebaseAutoEnabled: false },
+      baseCommitSha: "abc",
+      commitsBehind: 4,
+      changedFiles: ["x.ts"],
+      worktrunkEnabled: false,
+    });
+    expect(decision.fire).toBe(false);
+    expect(decision.reason).toBe("disabled");
+  });
+
+  it("FN-5627: divergence-threshold still wins over safety-fallback when configured threshold is tripped", () => {
+    const decision = decideAutoPrerebase({
+      settings, // threshold=50
+      baseCommitSha: "abc",
+      commitsBehind: 51,
+      changedFiles: ["x.ts"],
+      worktrunkEnabled: false,
+    });
+    expect(decision.fire).toBe(true);
+    expect(decision.reason).toBe("divergence-threshold");
   });
 
   it("FN-5627: fires on default threshold (1 commit) when prerebaseDivergenceThreshold is undefined", () => {
@@ -74,21 +120,25 @@ describe("decideAutoPrerebase", () => {
     expect(decision.commitsBehind).toBe(1);
   });
 
-  it("FN-5627: respects explicit prerebaseDivergenceThreshold = 0 as opt-out (never fire on commit-count)", () => {
-    const settingsOptOut = {
+  it("FN-5627: explicit prerebaseDivergenceThreshold = 0 still fires via safety-fallback (full opt-out requires prerebaseAutoEnabled=false)", () => {
+    // FN-5627 semantics: `prerebaseDivergenceThreshold = 0` only opts out of
+    // the threshold-based trigger; the safety fallback still fires when the
+    // branch is behind, because the alternative is a guaranteed update-ref
+    // failure. Full opt-out requires `prerebaseAutoEnabled = false`.
+    const settingsThresholdZero = {
       prerebaseAutoEnabled: true,
       prerebaseHotFiles: ["AGENTS.md"],
       prerebaseDivergenceThreshold: 0,
     };
     const decision = decideAutoPrerebase({
-      settings: settingsOptOut,
+      settings: settingsThresholdZero,
       baseCommitSha: "abc",
       commitsBehind: 100,
       changedFiles: ["x.ts"],
       worktrunkEnabled: false,
     });
-    expect(decision.fire).toBe(false);
-    expect(decision.reason).toBe("no-divergence");
+    expect(decision.fire).toBe(true);
+    expect(decision.reason).toBe("safety-fallback-any-divergence");
   });
 
   it("FN-5627: default threshold doesn't fire when branch is up-to-date", () => {

@@ -7,7 +7,7 @@ const execAsync = promisify(exec);
 
 export interface AutoPrerebaseDecision {
   fire: boolean;
-  reason: "disabled" | "no-base" | "no-divergence" | "worktrunk-deferred" | "hot-file" | "divergence-threshold";
+  reason: "disabled" | "no-base" | "no-divergence" | "worktrunk-deferred" | "hot-file" | "divergence-threshold" | "safety-fallback-any-divergence";
   commitsBehind: number;
   hotMatches: string[];
 }
@@ -73,15 +73,31 @@ export function decideAutoPrerebase(input: {
 
   // FN-5627 follow-up: default divergence threshold flipped from 0 ("never
   // fire on commit-count") to 1 ("fire when branch is behind by at least 1
-  // commit"). The legacy default left tasks that branched off an older main
-  // tip with no recourse — the squash would build against the stale base,
-  // `git update-ref` would correctly refuse the non-fast-forward advance,
-  // and the merger would surface `IntegrationBranchConcurrentAdvanceError`
-  // with a misleading same-SHA pair. Users who want the legacy never-fire
-  // behavior can explicitly set `prerebaseDivergenceThreshold = 0`.
+  // commit"). Users who want the legacy never-fire behavior can explicitly
+  // set `prerebaseDivergenceThreshold = 0`. Threshold remains user-tunable
+  // for the user-visible severity label ("divergence-threshold" reason).
   const threshold = input.settings.prerebaseDivergenceThreshold ?? 1;
   if (threshold > 0 && commitsBehind >= threshold) {
     return { fire: true, reason: "divergence-threshold", commitsBehind, hotMatches: [] };
+  }
+
+  // FN-5627 safety invariant: even when the user-configurable threshold
+  // hasn't tripped (e.g., user explicitly set threshold=50 for low-noise
+  // PR experience), ANY branch behind main MUST be rebased before squash.
+  // Otherwise the squash commit doesn't descend from current main, and
+  // `git update-ref refs/heads/<integration> <new> <old>` will refuse the
+  // non-fast-forward advance — the merger surfaces
+  // `IntegrationBranchConcurrentAdvanceError` with a misleading same-SHA
+  // pair (because `observedCurrentSha` was captured from the pre-update
+  // rev-parse, not post-failure), and the task is stranded at
+  // `mergeRetries=3`. This safety fallback is the engine-correctness path;
+  // the threshold above is for user-visible severity reporting only.
+  //
+  // The only way to opt out of the safety fallback is
+  // `prerebaseAutoEnabled = false`, which already short-circuits much earlier
+  // and means the user has accepted that behind-branch merges will fail.
+  if (commitsBehind > 0) {
+    return { fire: true, reason: "safety-fallback-any-divergence", commitsBehind, hotMatches: [] };
   }
 
   return { fire: false, reason: "no-divergence", commitsBehind, hotMatches: [] };
