@@ -1,5 +1,21 @@
 # @runfusion/fusion
 
+## 0.37.0
+
+### Minor Changes
+
+- b335f3d: Add a new `fn_goal_show` tool for goal retrieval by ID, including structured JSON output via `details.goal` and a stable not-found contract (`GOAL_NOT_FOUND`).
+
+  Also register `fn_goal_list` and `fn_goal_show` in the engine readonly tool allowlist so agent runtime sessions can use goal retrieval on the readonly path.
+
+### Patch Changes
+
+- 230efa1: Update `useAiMergeCommitSummary` docs/JSDoc to match the intended default of `true`, including that merge commit summaries include a subject plus body summary (narrative + bullets + diff-stat).
+
+  Also fixes AI merge-mode prompt guidance so AI-authored squash commits include a summarized body instead of subject-only commit messages.
+
+- b5f2f91: Do not mark executor sessions as failed when they are parked for pending code review.
+
 ## 0.36.0
 
 ### Minor Changes

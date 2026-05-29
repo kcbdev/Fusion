@@ -2,6 +2,68 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
+## 0.37.0
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- @fusion/core@0.37.0
+- @fusion/engine@0.37.0
+- @fusion-plugin-examples/cli-printing-press@0.1.14
+- @fusion-plugin-examples/dependency-graph@0.1.28
+- @fusion-plugin-examples/roadmap@0.1.16
+- @fusion-plugin-examples/cursor-runtime@0.1.16
+- @fusion-plugin-examples/droid-runtime@0.1.23
+- @fusion-plugin-examples/hermes-runtime@0.2.47
+- @fusion-plugin-examples/openclaw-runtime@0.2.47
+- @fusion-plugin-examples/paperclip-runtime@0.2.47
+
+### @fusion/desktop
+
+#### Patch Changes
+
+- @fusion/core@0.37.0
+- @fusion/dashboard@0.37.0
+
+### @fusion/engine
+
+#### Patch Changes
+
+- @fusion/core@0.37.0
+- @fusion/pi-claude-cli@0.37.0
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- @fusion/core@0.37.0
+
+### @runfusion/fusion
+
+#### Minor Changes
+
+- b335f3d: Add a new `fn_goal_show` tool for goal retrieval by ID, including structured JSON output via `details.goal` and a stable not-found contract (`GOAL_NOT_FOUND`).
+
+  Also register `fn_goal_list` and `fn_goal_show` in the engine readonly tool allowlist so agent runtime sessions can use goal retrieval on the readonly path.
+
+#### Patch Changes
+
+- 230efa1: Update `useAiMergeCommitSummary` docs/JSDoc to match the intended default of `true`, including that merge commit summaries include a subject plus body summary (narrative + bullets + diff-stat).
+
+  Also fixes AI merge-mode prompt guidance so AI-authored squash commits include a summarized body instead of subject-only commit messages.
+
+- b5f2f91: Do not mark executor sessions as failed when they are parked for pending code review.
+
+### runfusion.ai
+
+#### Patch Changes
+
+- Updated dependencies [230efa1]
+- Updated dependencies [b335f3d]
+- Updated dependencies [b5f2f91]
+  - @runfusion/fusion@0.37.0
+
 ## 0.36.0
 
 ### @fusion/dashboard
@@ -7407,6 +7469,14 @@ for reference.
 - Updated dependencies [25d44e1]
 - Updated dependencies [a2ed6d0]
   - @runfusion/fusion@0.1.0
+
+## 0.11.23
+
+### @fusion/droid-cli
+
+#### Patch Changes
+
+- @fusion-plugin-examples/droid-runtime@0.1.23
 
 ## 0.11.22
 

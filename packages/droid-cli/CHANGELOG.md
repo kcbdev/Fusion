@@ -1,5 +1,11 @@
 # @fusion/droid-cli
 
+## 0.11.23
+
+### Patch Changes
+
+- @fusion-plugin-examples/droid-runtime@0.1.23
+
 ## 0.11.22
 
 ### Patch Changes

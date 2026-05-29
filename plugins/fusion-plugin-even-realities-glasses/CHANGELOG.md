@@ -1,5 +1,12 @@
 # @fusion-plugin-examples/even-realities-glasses
 
+## 0.1.16
+
+### Patch Changes
+
+- @fusion/core@0.37.0
+- @fusion/plugin-sdk@0.37.0
+
 ## 0.1.15
 
 ### Patch Changes
