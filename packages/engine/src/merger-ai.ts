@@ -36,6 +36,7 @@ import { join } from "node:path";
 import {
   getTaskMergeBlocker,
   resolveTaskMergeTarget,
+  resolveValidatorSettingsModel,
   type MergeResult,
   type Settings,
   type Task,
@@ -346,10 +347,11 @@ function makeMutatingAgent(store: TaskStore, settings: Settings, taskId: string,
 
 function makeReviewAgent(store: TaskStore, settings: Settings, taskId: string, options: MergerOptions, audit: RunAuditor) {
   return async (cwd: string, prompt: string): Promise<string> => {
-    const override = settings.merger?.reviewerModel?.trim();
-    const model = override
-      ? parseModelOverride(override, settings)
-      : resolveMergerSessionModel(settings);
+    // The reviewer uses the project's validator/reviewer model lane (the same
+    // one used elsewhere for review), falling back to the merger model only if
+    // that lane resolves to nothing.
+    const validator = resolveValidatorSettingsModel(settings);
+    const model = validator.provider && validator.modelId ? validator : resolveMergerSessionModel(settings);
     let captured = "";
     const { session } = await createResolvedAgentSession({
       sessionPurpose: "merger",
@@ -382,14 +384,6 @@ function makeReviewAgent(store: TaskStore, settings: Settings, taskId: string, o
     }
     return captured;
   };
-}
-
-function parseModelOverride(value: string, settings: Settings): { provider: string | undefined; modelId: string | undefined } {
-  const slash = value.indexOf("/");
-  if (slash > 0 && slash < value.length - 1) {
-    return { provider: value.slice(0, slash), modelId: value.slice(slash + 1) };
-  }
-  return { provider: resolveMergerSessionModel(settings).provider, modelId: value };
 }
 
 // ---------------------------------------------------------------------------

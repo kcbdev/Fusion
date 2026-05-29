@@ -336,10 +336,9 @@ export function normalizeMergerMode(value: unknown): MergerMode {
 export interface MergerSettings {
   /** Which merge path to use. Default: "ai". */
   mode?: MergerMode;
-  /** Optional `provider/modelId` override for the read-only reviewer agent. */
-  reviewerModel?: string;
   /** How many AI corrective rounds before landing the best result (advisory) or
-   *  hard-failing (blocking). Default: 3. */
+   *  hard-failing (blocking). Default: 3. The reviewer uses the project's
+   *  validator/reviewer model lane — there is no merge-specific model setting. */
   maxReviewPasses?: number;
 }
 

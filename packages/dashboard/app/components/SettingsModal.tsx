@@ -4626,20 +4626,7 @@ export function SettingsModal({
                       setForm((f) => ({ ...f, merger: { ...(f.merger ?? {}), maxReviewPasses: e.target.value === "" ? undefined : Number(e.target.value) } }))
                     }
                   />
-                  <small>AI corrective rounds before landing the best result (advisory concern) or hard-failing (unfixable correctness concern). Default 3.</small>
-                </div>
-                <div className="form-group">
-                  <label htmlFor="mergerReviewerModel">Reviewer model (optional)</label>
-                  <input
-                    id="mergerReviewerModel"
-                    type="text"
-                    placeholder="provider/modelId — defaults to the merger model"
-                    value={form.merger?.reviewerModel ?? ""}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, merger: { ...(f.merger ?? {}), reviewerModel: e.target.value || undefined } }))
-                    }
-                  />
-                  <small>Model for the read-only reviewer agent (a cheaper/faster model is fine). Leave blank to reuse the merger model.</small>
+                  <small>AI corrective rounds before landing the best result (advisory concern) or hard-failing (unfixable correctness concern). Default 3. The reviewer uses your project&apos;s reviewer/validator model.</small>
                 </div>
               </>
             )}

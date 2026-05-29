@@ -262,7 +262,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   ],
   prerebaseDivergenceThreshold: 50,
   mergeConflictStrategy: "smart-prefer-main",
-  merger: { mode: "ai", reviewerModel: undefined, maxReviewPasses: 3 },
+  merger: { mode: "ai", maxReviewPasses: 3 },
   mergeDiffVolumeMinLines: undefined,
   mergeDiffVolumeThreshold: undefined,
   mergeDiffVolumeAllowlist: undefined,
