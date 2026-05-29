@@ -265,6 +265,10 @@ Push follow-up (when shown):
 
 Branch names are dynamic from merge/audit payloads; the banner is not hardcoded to `main`.
 
+## OAuth Re-login Banner
+
+The global OAuth re-login banner now clears a provider row immediately after that provider successfully re-authenticates (from Settings → Authentication or Model Onboarding), instead of waiting for the next `GET /auth/status` poll interval.
+
 ## Smart Pull
 
 Smart Pull is a one-shot pull workflow that keeps local work safe while advancing your checked-out integration branch.

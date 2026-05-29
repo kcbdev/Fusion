@@ -38,6 +38,7 @@ let daemonAuthFailureSignaled = false;
  * indicating the current browser token is missing/invalid and user recovery is required.
  */
 export const AUTH_TOKEN_RECOVERY_REQUIRED_EVENT = "fn:auth-token-recovery-required";
+export const OAUTH_RELOGIN_SUCCESS_EVENT = "fusion:oauth-relogin-success";
 
 interface DaemonUnauthorizedPayload {
   error?: unknown;

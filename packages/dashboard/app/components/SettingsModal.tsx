@@ -47,7 +47,7 @@ import { AgentProvisioningPolicyEditor } from "./AgentProvisioningPolicyEditor";
 import { SecretsView } from "./SecretsView";
 import { applyPresetToSelection, generateUniquePresetId } from "../utils/modelPresets";
 import { copyTextToClipboard } from "../utils/copyToClipboard";
-import { appendTokenQuery } from "../auth";
+import { appendTokenQuery, OAUTH_RELOGIN_SUCCESS_EVENT } from "../auth";
 import { useConfirm } from "../hooks/useConfirm";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
@@ -1295,6 +1295,7 @@ export function SettingsModal({
             setAuthActionInProgress(null);
             clearAuthLoginUiState(providerId);
             addToast("Login successful", "success");
+            window.dispatchEvent(new CustomEvent(OAUTH_RELOGIN_SUCCESS_EVENT, { detail: { providerId } }));
             scrollSettingsToTop();
             return;
           }

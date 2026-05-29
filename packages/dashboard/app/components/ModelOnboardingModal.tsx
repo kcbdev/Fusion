@@ -30,7 +30,7 @@ import { OAuthManualCodeForm } from "./OAuthManualCodeForm";
 import { OnboardingDisclosure } from "./OnboardingDisclosure";
 import { CustomProviderForm } from "./CustomProviderForm";
 import { PluginSlot } from "./PluginSlot";
-import { appendTokenQuery } from "../auth";
+import { appendTokenQuery, OAUTH_RELOGIN_SUCCESS_EVENT } from "../auth";
 import { copyTextToClipboard } from "../utils/copyToClipboard";
 import { filterVisibleOnboardingAndSettingsProviders } from "./providerVisibility";
 import { useShellConnection } from "../hooks/useShellConnection";
@@ -1199,6 +1199,7 @@ export function ModelOnboardingModal({
                 setGitHubSkippedState(false);
               }
               addToast("Login successful", "success");
+              window.dispatchEvent(new CustomEvent(OAUTH_RELOGIN_SUCCESS_EVENT, { detail: { providerId } }));
               return;
             }
 

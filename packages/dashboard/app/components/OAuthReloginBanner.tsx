@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, type JSX } from "react";
+import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import { AlertTriangle, X } from "lucide-react";
 import { fetchAuthStatus } from "../api";
+import { OAUTH_RELOGIN_SUCCESS_EVENT } from "../auth";
 import "./OAuthReloginBanner.css";
 
 const DISMISS_STORAGE_KEY = "fusion:oauth-relogin-dismissed";
@@ -37,44 +38,53 @@ export function OAuthReloginBanner({
   const [expiredProviders, setExpiredProviders] = useState<Array<{ id: string; name: string }>>([]);
   const [dismissedProviderIds, setDismissedProviderIds] = useState<Set<string>>(() => loadDismissedProviderIds());
 
-  useEffect(() => {
-    let active = true;
+  const refreshAuthStatus = useCallback(async () => {
+    try {
+      const { providers } = await fetchAuthStatus();
+      const nextExpiredProviders = providers
+        .filter((provider) => provider.type === "oauth" && provider.expired === true)
+        .map((provider) => ({ id: provider.id, name: provider.name }));
 
-    const refreshAuthStatus = async () => {
-      try {
-        const { providers } = await fetchAuthStatus();
-        if (!active) {
-          return;
+      setExpiredProviders(nextExpiredProviders);
+      setDismissedProviderIds((currentDismissed) => {
+        const expiredProviderIds = new Set(nextExpiredProviders.map((provider) => provider.id));
+        const filteredDismissed = new Set(
+          Array.from(currentDismissed).filter((providerId) => expiredProviderIds.has(providerId)),
+        );
+        if (filteredDismissed.size === currentDismissed.size) {
+          return currentDismissed;
         }
-        const nextExpiredProviders = providers
-          .filter((provider) => provider.type === "oauth" && provider.expired === true)
-          .map((provider) => ({ id: provider.id, name: provider.name }));
+        persistDismissedProviderIds(filteredDismissed);
+        return filteredDismissed;
+      });
+    } catch {
+      // Non-blocking banner; ignore transient status fetch failures.
+    }
+  }, []);
 
-        setExpiredProviders(nextExpiredProviders);
-        setDismissedProviderIds((currentDismissed) => {
-          const expiredProviderIds = new Set(nextExpiredProviders.map((provider) => provider.id));
-          const filteredDismissed = new Set(
-            Array.from(currentDismissed).filter((providerId) => expiredProviderIds.has(providerId)),
-          );
-          if (filteredDismissed.size === currentDismissed.size) {
-            return currentDismissed;
-          }
-          persistDismissedProviderIds(filteredDismissed);
-          return filteredDismissed;
-        });
-      } catch {
-        // Non-blocking banner; ignore transient status fetch failures.
-      }
-    };
-
+  useEffect(() => {
     void refreshAuthStatus();
     const interval = window.setInterval(refreshAuthStatus, pollIntervalMs ?? 60 * 60 * 1000);
 
     return () => {
-      active = false;
       window.clearInterval(interval);
     };
-  }, [pollIntervalMs]);
+  }, [pollIntervalMs, refreshAuthStatus]);
+
+  useEffect(() => {
+    const handleOAuthReloginSuccess = (event: Event) => {
+      const { detail } = event as CustomEvent<{ providerId?: string }>;
+      if (detail?.providerId) {
+        setExpiredProviders((current) => current.filter((provider) => provider.id !== detail.providerId));
+      }
+      void refreshAuthStatus();
+    };
+
+    window.addEventListener(OAUTH_RELOGIN_SUCCESS_EVENT, handleOAuthReloginSuccess);
+    return () => {
+      window.removeEventListener(OAUTH_RELOGIN_SUCCESS_EVENT, handleOAuthReloginSuccess);
+    };
+  }, [refreshAuthStatus]);
 
   const visibleExpiredProviders = useMemo(
     () => expiredProviders.filter((provider) => !dismissedProviderIds.has(provider.id)),
