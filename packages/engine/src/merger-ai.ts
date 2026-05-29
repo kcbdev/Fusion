@@ -34,9 +34,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  buildTaskLineageTrailer,
   getTaskMergeBlocker,
+  resolveAgentPrompt,
   resolveTaskMergeTarget,
   resolveValidatorSettingsModel,
+  type AgentPromptsConfig,
   type MergeResult,
   type Settings,
   type Task,
@@ -76,6 +79,30 @@ async function gitOk(args: string[], cwd: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+const FUSION_TASK_ID_TRAILER_KEY = "Fusion-Task-Id";
+
+/** Trailers that associate the squash commit with its board task: the
+ *  `Fusion-Task-Id` trailer plus the canonical lineage trailer when available.
+ *  These are what the board's commit→task association parses. */
+function taskTrailers(taskId: string, lineageId?: string | null): string[] {
+  const trailers = [`${FUSION_TASK_ID_TRAILER_KEY}: ${taskId}`];
+  if (lineageId) trailers.push(buildTaskLineageTrailer(lineageId));
+  return trailers;
+}
+
+/** Idempotently guarantee the task trailers are on HEAD — a safety net so board
+ *  association holds even if the AI agent omitted them from its commit. */
+async function ensureTaskTrailersOnHead(mergeRoot: string, trailers: string[]): Promise<void> {
+  const existing = await git(["log", "-1", "--pretty=%B"], mergeRoot).catch(() => "");
+  const missing = trailers.filter((t) => !existing.includes(t));
+  if (missing.length === 0) return;
+  const args = ["-c", "trailer.ifExists=addIfDifferent", "commit", "--amend", "--no-edit"];
+  for (const t of missing) args.push("--trailer", t);
+  await git(args, mergeRoot).catch((err: unknown) => {
+    aiMergeLog.warn(`failed to amend task trailers onto squash (${err instanceof Error ? err.message : String(err)})`);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -143,11 +170,17 @@ function extractRejectReasons(lines: string[], verdictLineIndex: number): string
   return reasons;
 }
 
-export function buildMergeSystemPrompt(): string {
+export function buildMergeSystemPrompt(agentPrompts?: AgentPromptsConfig): string {
+  // Base persona is the editable "merger" agent prompt (Settings → Prompts);
+  // the non-negotiable clean-room / verification / commit-trailer rules below
+  // are always appended so a custom prompt can't drop them.
+  const base = resolveAgentPrompt("merger", agentPrompts).trim();
   return [
-    "You are merging a task branch into the integration branch. You are on a",
-    "CLEAN, detached checkout at the integration branch's current tip. Your job",
-    "is to land the task branch's work as a single commit.",
+    base,
+    base ? "" : undefined,
+    "## AI merge — clean room",
+    "You are on a CLEAN, detached checkout at the integration branch's current",
+    "tip. Land the task branch's work as a single commit.",
     "",
     "Constraints:",
     "  - Resolve every conflict in favor of the task branch's intent; never drop",
@@ -156,7 +189,24 @@ export function buildMergeSystemPrompt(): string {
     "  - Do NOT push, force-push, or run `git update-ref` / `git reset --hard`",
     "    on any other branch. Only commit on this detached HEAD.",
     "  - Finish with exactly ONE new commit on HEAD containing the task's work.",
-  ].join("\n");
+    "",
+    "Verify before committing:",
+    "  - After resolving the merge, run the project's checks — tests, type-check,",
+    "    and lint (discover them from the project config / package.json scripts,",
+    "    e.g. test / typecheck / lint / build).",
+    "  - FIX any NEW failure the merge or conflict resolution introduced (a check",
+    "    that passed on the task branch or the integration tip but fails on the",
+    "    merged tree). You do not need to fix failures that were already broken on",
+    "    the integration branch beforehand, but never commit a merge that adds new",
+    "    test, type-check, or lint failures.",
+    "",
+    "Commit message:",
+    "  - The subject line must CONCISELY SUMMARIZE the squashed changes in",
+    "    imperative mood (e.g. \"add X\", \"fix Y\") based on the actual diff — do",
+    "    not just restate the task title.",
+    "  - Include the task-id prefix and the trailer lines EXACTLY as given in the",
+    "    task instructions (they associate the commit with the board task).",
+  ].filter((l) => l !== undefined).join("\n");
 }
 
 export function buildMergePrompt(input: {
@@ -164,16 +214,28 @@ export function buildMergePrompt(input: {
   branch: string;
   integrationBranch: string;
   tipSha: string;
-  subject: string;
+  /** Task title — a HINT for the summary, not the literal subject. */
+  taskTitle?: string;
+  /** Whether to prefix the subject with the task id. */
+  includeTaskId: boolean;
+  /** Required trailers to append (board association). */
+  trailers: string[];
   correctiveReasons?: string[];
 }): string {
+  const subjectShape = input.includeTaskId
+    ? `"${input.taskId}: <concise imperative summary of the squashed changes>"`
+    : `"<concise imperative summary of the squashed changes>"`;
+  const trailerArgs = input.trailers.map((t) => ` -m ${JSON.stringify(t)}`).join("");
   const lines = [
     `Merge branch "${input.branch}" into "${input.integrationBranch}" (HEAD is detached at ${short(input.tipSha)}).`,
     "",
     "Steps:",
     `  1. Run: git merge --squash ${input.branch}`,
     "  2. If there are conflicts, resolve them (favor the task's intent), then `git add` the resolved files.",
-    `  3. Commit the staged result as a single commit: git commit -m ${JSON.stringify(input.subject)}`,
+    "  3. Commit the staged result as a SINGLE commit whose subject summarizes the",
+    `     actual changes${input.taskTitle ? ` (task title hint: ${JSON.stringify(input.taskTitle)})` : ""}, including the required trailers:`,
+    `       git commit -m ${subjectShape}${trailerArgs}`,
+    "     Keep the trailer line(s) verbatim — they link the commit to the board task.",
     "  4. Verify `git log --oneline ${tip}..HEAD` shows exactly one new commit and `git status` is clean.".replace("${tip}", short(input.tipSha)),
     "",
     "If `git merge --squash` reports the branch is already up to date (nothing to",
@@ -630,10 +692,13 @@ export async function runAiMerge(
   }
 
   const maxPasses = Math.max(0, Math.trunc(settings.merger?.maxReviewPasses ?? 3));
-  const mergeAgent = deps.mergeAgent ?? makeMutatingAgent(store, settings, taskId, options, audit, buildMergeSystemPrompt());
+  const mergeAgent = deps.mergeAgent ?? makeMutatingAgent(store, settings, taskId, options, audit, buildMergeSystemPrompt(settings.agentPrompts));
   const reviewAgent = deps.reviewAgent ?? makeReviewAgent(store, settings, taskId, options, audit);
   const stashResolveAgent = deps.stashResolveAgent ?? makeMutatingAgent(store, settings, taskId, options, audit, buildStashResolveSystemPrompt());
-  const subject = (task.title?.trim() || `Merge ${taskId}`).split("\n")[0];
+  const includeTaskId = settings.includeTaskIdInCommit !== false;
+  // Trailers that link the squash commit to the board task (FN-id + lineage).
+  const trailers = taskTrailers(taskId, task.lineageId);
+  const taskTitle = task.title?.trim() ? task.title.split("\n")[0] : undefined;
 
   await setStatus("merging");
   let advanceRetries = 0;
@@ -652,7 +717,7 @@ export async function runAiMerge(
 
       // 2 + 3. Merge + review loop (corrective passes).
       const squashSha = await mergeAndReview({
-        mergeRoot, branch, integrationBranch, tipSha, subject, taskId,
+        mergeRoot, branch, integrationBranch, tipSha, taskTitle, includeTaskId, trailers, taskId,
         maxPasses, mergeAgent, reviewAgent, audit, log, setStatus, signal: options.signal,
       });
 
@@ -694,7 +759,9 @@ async function mergeAndReview(input: {
   branch: string;
   integrationBranch: string;
   tipSha: string;
-  subject: string;
+  taskTitle?: string;
+  includeTaskId: boolean;
+  trailers: string[];
   taskId: string;
   maxPasses: number;
   mergeAgent: (cwd: string, prompt: string) => Promise<void>;
@@ -704,7 +771,7 @@ async function mergeAndReview(input: {
   setStatus: (status: string | null) => Promise<unknown>;
   signal?: AbortSignal;
 }): Promise<string | null> {
-  const { mergeRoot, branch, integrationBranch, tipSha, subject, taskId, maxPasses, mergeAgent, reviewAgent, audit, log, setStatus, signal } = input;
+  const { mergeRoot, branch, integrationBranch, tipSha, taskTitle, includeTaskId, trailers, taskId, maxPasses, mergeAgent, reviewAgent, audit, log, setStatus, signal } = input;
   let priorReasons: string[] = [];
 
   for (let attempt = 0; ; attempt++) {
@@ -719,12 +786,17 @@ async function mergeAndReview(input: {
       await log(`AI merge: corrective re-merge (pass ${attempt}/${maxPasses}) addressing: ${priorReasons.join("; ")}`);
     }
     await mergeAgent(mergeRoot, buildMergePrompt({
-      taskId, branch, integrationBranch, tipSha, subject,
+      taskId, branch, integrationBranch, tipSha, taskTitle, includeTaskId, trailers,
       correctiveReasons: priorReasons.length ? priorReasons : undefined,
     }));
 
-    const head = await git(["rev-parse", "HEAD"], mergeRoot);
+    let head = await git(["rev-parse", "HEAD"], mergeRoot);
     if (head === tipSha) return null; // empty merge — nothing landed
+
+    // Guarantee the board-association trailers are on the squash even if the
+    // agent omitted them — this amends HEAD, so re-read the sha afterwards.
+    await ensureTaskTrailersOnHead(mergeRoot, trailers);
+    head = await git(["rev-parse", "HEAD"], mergeRoot);
 
     await setStatus("reviewing");
     const diffStat = await git(["diff", "--stat", `${tipSha}..${head}`], mergeRoot);

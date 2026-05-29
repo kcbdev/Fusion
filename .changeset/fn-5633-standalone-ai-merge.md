@@ -16,6 +16,16 @@ How it works:
 
 Settings: `merger.mode` (`ai` default / `deterministic` legacy), `merger.reviewerModel`, `merger.maxReviewPasses` (default 3), surfaced in Settings → Merge. When AI merge is on, the legacy merge-mechanics settings (integration worktree, conflict strategy, overlap guard, post-merge audit, direct-commit routing) are hidden since they do not apply.
 
+Commit message: the AI agent writes the squash commit subject as a concise summary of the actual changes (not just the task title), and every landed squash carries the board-association trailers — `Fusion-Task-Id: <taskId>` plus the canonical lineage trailer when the task has a `lineageId` — guaranteed via an idempotent amend even if the agent omits them, so the board associates the commit with the task.
+
+Verification: the merge agent is instructed to run the project's tests, type-check, and lint after resolving the merge and to fix any NEW failure the merge introduced (without being on the hook for pre-existing breakage) before committing.
+
+Editable prompt: the AI merge agent's base persona is the editable "merger" role prompt (Settings → Prompts); the non-negotiable clean-room / verification / commit-trailer rules are always appended so a custom prompt can't drop them.
+
+Reviewer model: the reviewer agent uses the project's reviewer/validator model lane (`resolveValidatorSettingsModel`: project validator → global validator → project default), not a merge-specific setting.
+
+No-branch guard: a missing task branch is a benign no-op only when the task was never executed or was already merged (branch cleaned up on re-process); if the task was executed (`baseCommitSha` recorded) and was never merged, the merge fails loudly rather than silently marking the task done.
+
 The legacy `aiMergeTask` pipeline is retained unchanged and used when `merger.mode: "deterministic"`.
 
 Tests: `merger-ai.test.ts` covers the verdict parser, clean merge, blocking hard-fail (no advance), advisory land, empty no-op, per-task target branch isolation, missing-target-branch error, and `landSquash` (clean ff, other-branch update-ref, dirty stash-restore, AI-resolved restore conflict). Engine merge-orchestration tests that assert the legacy path are pinned to `merger.mode: "deterministic"`.

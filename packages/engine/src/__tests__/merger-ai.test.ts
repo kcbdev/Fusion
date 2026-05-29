@@ -115,6 +115,20 @@ describe("parseReviewVerdict", () => {
     expect(buildReviewSystemPrompt().toLowerCase()).toContain("read-only");
     expect(buildMergeSystemPrompt().toLowerCase()).toContain("conflict");
   });
+
+  it("merge system prompt enforces new-breakage verification + uses the editable merger prompt", () => {
+    expect(buildMergeSystemPrompt().toLowerCase()).toContain("type-check");
+    expect(buildMergeSystemPrompt()).toMatch(/new failure/i);
+    // A custom 'merger' role prompt is incorporated as the base, while the hard
+    // rules (verification + trailers) are still appended.
+    const cfg = {
+      templates: [{ id: "custom-merger", role: "merger", name: "Custom", prompt: "CUSTOM MERGER PERSONA" }],
+      roleAssignments: { merger: "custom-merger" },
+    } as any;
+    const p = buildMergeSystemPrompt(cfg);
+    expect(p).toContain("CUSTOM MERGER PERSONA");
+    expect(p).toContain("Verify before committing");
+  });
 });
 
 describe("runAiMerge", () => {
@@ -134,9 +148,26 @@ describe("runAiMerge", () => {
     expect(mainAfter).not.toBe(mainBefore);
     // The squash landed the feature file.
     expect(existsSync(join(dir, "feature.txt"))).toBe(true);
+    // The landed commit carries the board-association trailer even though the
+    // (mock) merge agent committed without it — ensureTaskTrailersOnHead adds it.
+    expect(git(dir, "log -1 --pretty=%B main")).toContain("Fusion-Task-Id: FN-1");
     // Task moved to done + event emitted.
     expect(store.moveTask).toHaveBeenCalledWith("FN-1", "done");
     expect(emitted.some((e) => e.event === "task:merged")).toBe(true);
+  });
+
+  it("includes the lineage trailer when the task has a lineageId", async () => {
+    const { dir } = initRepoWithBranch({ branch: "fusion/fn-1" });
+    const { store } = makeStore(dir, { lineageId: "lin-abc123" });
+
+    await runAiMerge(store, dir, "FN-1", { manual: true }, {
+      mergeAgent: realMergeAgent("fusion/fn-1"),
+      reviewAgent: vi.fn(async () => "REVIEW_VERDICT: approve"),
+    });
+
+    const msg = git(dir, "log -1 --pretty=%B main");
+    expect(msg).toContain("Fusion-Task-Id: FN-1");
+    expect(msg).toContain("lin-abc123"); // canonical lineage trailer
   });
 
   it("hard-fails (no advance) on a blocking veto past the budget", async () => {

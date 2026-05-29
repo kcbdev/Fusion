@@ -188,6 +188,7 @@ const defaultSettings = {
   overlapIgnorePaths: [],
   autoMerge: true,
   mergeStrategy: "direct",
+  merger: { mode: "deterministic" },
   directMergeCommitStrategy: "auto",
   mergeIntegrationWorktree: "reuse-task-worktree",
   pushAfterMerge: false,
