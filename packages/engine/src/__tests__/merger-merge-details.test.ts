@@ -861,6 +861,7 @@ describe("aiMergeTask — merge details collection", () => {
     });
 
     vi.spyOn(core, "summarizeMergeCommit").mockResolvedValue("AI summary of merged work.");
+    vi.spyOn(core, "summarizeCommitBody").mockResolvedValue("- touched merger.ts\n- added merge-body tests");
 
     mockedExecSync.mockImplementation((cmd: any) => {
       const cmdStr = String(cmd);
@@ -885,8 +886,14 @@ describe("aiMergeTask — merge details collection", () => {
     const updateCalls = (store.updateTask as ReturnType<typeof vi.fn>).mock.calls;
     const mergeDetailsCall = updateCalls.find((call: any[]) => call[1]?.mergeDetails !== undefined);
     expect(mergeDetailsCall?.[1].mergeDetails.mergeCommitMessage).toBe("AI summary of merged work.");
-  });
 
+    const commitCommand = mockedExecSync.mock.calls
+      .map((call) => String(call[0]))
+      .find((cmd) => cmd.includes("git commit"));
+    expect(commitCommand).toContain("AI summary of merged work.");
+    expect(commitCommand).toContain("- touched merger.ts");
+    expect(commitCommand).toContain("Files changed:\n1 file changed");
+  });
   it("emits task:merged once when completeTask finalizes a successful merge", async () => {
     const store = createMockStore(
       { id: "FN-777", worktree: "/tmp/root/.worktrees/FN-777" },
@@ -907,7 +914,7 @@ describe("aiMergeTask — merge details collection", () => {
     );
   });
 
-  it("falls back to raw commit log when AI merge summary returns null", async () => {
+  it("falls back to deterministic body when both AI merge summary and AI merge body return null", async () => {
     const store = createMockStore(
       { id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050" },
       [{ id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050", column: "in-review" } as Task],
@@ -919,6 +926,7 @@ describe("aiMergeTask — merge details collection", () => {
     });
 
     vi.spyOn(core, "summarizeMergeCommit").mockResolvedValue(null);
+    vi.spyOn(core, "summarizeCommitBody").mockResolvedValue(null);
 
     mockedExecSync.mockImplementation((cmd: any) => {
       const cmdStr = String(cmd);
@@ -943,6 +951,57 @@ describe("aiMergeTask — merge details collection", () => {
     const updateCalls = (store.updateTask as ReturnType<typeof vi.fn>).mock.calls;
     const mergeDetailsCall = updateCalls.find((call: any[]) => call[1]?.mergeDetails !== undefined);
     expect(mergeDetailsCall?.[1].mergeDetails.mergeCommitMessage).toBe("- feat: something");
+
+    const commitCommand = mockedExecSync.mock.calls
+      .map((call) => String(call[0]))
+      .find((cmd) => cmd.includes("git commit"));
+    expect(commitCommand).toContain("- feat: something");
+    expect(commitCommand).toContain("Files changed:\n1 file changed");
+  });
+
+  it("uses AI bullet body when AI merge summary is null", async () => {
+    const store = createMockStore(
+      { id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050" },
+      [{ id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050", column: "in-review" } as Task],
+    );
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const,
+      useAiMergeCommitSummary: true,
+    });
+
+    vi.spyOn(core, "summarizeMergeCommit").mockResolvedValue(null);
+    vi.spyOn(core, "summarizeCommitBody").mockResolvedValue("- bullet one\n- bullet two");
+
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.includes("rev-parse --verify")) return Buffer.from("abc123");
+      if (cmdStr === "git rev-parse HEAD" || cmdStr.startsWith("git rev-parse HEAD ")) return "mergedcommit123456789";
+      if (cmdStr.includes("git log")) return "- feat: something";
+      if (cmdStr.includes("merge-base")) return Buffer.from("abc123");
+      if (cmdStr.includes("--stat")) return "1 file changed";
+      if (cmdStr.includes("merge --squash")) return Buffer.from("");
+      if (cmdStr.includes("diff --name-only --diff-filter=U")) return "";
+      if (cmdStr.includes("diff --cached --quiet")) return "1";
+      if (cmdStr.includes("git commit")) return Buffer.from("");
+      if (cmdStr.includes("show --shortstat")) return "1 file changed, 1 insertion(+)";
+      if (cmdStr.includes("branch -d") || cmdStr.includes("branch -D")) return Buffer.from("");
+      if (cmdStr.includes("worktree remove")) return Buffer.from("");
+      return Buffer.from("");
+    });
+
+    const result = await aiMergeTask(store, "/tmp/root", "FN-050");
+    expect(result.merged).toBe(true);
+
+    const updateCalls = (store.updateTask as ReturnType<typeof vi.fn>).mock.calls;
+    const mergeDetailsCall = updateCalls.find((call: any[]) => call[1]?.mergeDetails !== undefined);
+    expect(mergeDetailsCall?.[1].mergeDetails.mergeCommitMessage).toBe("- feat: something");
+
+    const commitCommand = mockedExecSync.mock.calls
+      .map((call) => String(call[0]))
+      .find((cmd) => cmd.includes("git commit"));
+    expect(commitCommand).toContain("- bullet one");
+    expect(commitCommand).toContain("Files changed:\n1 file changed");
   });
 
   it("recovers owned landed commit when branch is not found", async () => {

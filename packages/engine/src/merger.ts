@@ -3754,6 +3754,33 @@ async function generateAiMergeSummary(
   }
 }
 
+async function generateAiMergeBody(
+  commitLog: string,
+  diffStat: string,
+  settings: Settings,
+  rootDir: string,
+  branch: string,
+  taskId: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const cleanStat = diffStat.trim();
+  if (!cleanStat) return null;
+
+  try {
+    const resolved = resolveTitleSummarizerSettingsModel(settings);
+    return await summarizeCommitBody(cleanStat, rootDir, resolved.provider, resolved.modelId, {
+      branch,
+      taskId,
+      commitLog,
+      signal,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    mergerLog.warn(`AI merge body failed; using deterministic fallback (${message})`);
+    return null;
+  }
+}
+
 async function generateAiMergeSubject(
   commitLog: string,
   diffStat: string,
@@ -3881,6 +3908,41 @@ export function deriveDeterministicSubjectSummary(commitLog: string): string | n
  *   2. First step commit subject (with conventional prefix stripped) + `(+N more)`
  *   3. `merge <branch>` (last-resort, only when no step commits exist)
  */
+export function composeMergeCommitBody(params: {
+  branch: string;
+  commitLog: string;
+  diffStat?: string;
+  aiSummary?: string | null;
+  aiBody?: string | null;
+}): string {
+  const { branch, commitLog, diffStat, aiSummary, aiBody } = params;
+  const trimmedSummary = aiSummary?.trim() ?? "";
+  const trimmedAiBody = aiBody?.trim() ?? "";
+  const trimmedCommitLog = commitLog?.trim() ?? "";
+  const trimmedDiffStat = diffStat?.trim() ?? "";
+
+  const commitsSection = trimmedCommitLog.length > 0
+    ? trimmedCommitLog
+    : `- merge ${branch}`;
+
+  const parts: string[] = [];
+  if (trimmedSummary.length > 0) parts.push(trimmedSummary);
+  if (trimmedAiBody.length > 0) parts.push(trimmedAiBody);
+
+  const deterministicFallback = [
+    `Commits merged:\n${commitsSection}`,
+    trimmedDiffStat.length > 0 ? `Files changed:\n${trimmedDiffStat}` : "",
+  ].filter(Boolean).join("\n\n");
+
+  if (parts.length === 0) return deterministicFallback;
+
+  if (trimmedDiffStat.length > 0) {
+    parts.push(`Files changed:\n${trimmedDiffStat}`);
+  }
+
+  return parts.join("\n\n");
+}
+
 async function buildDeterministicMergeMessage(params: {
   taskId: string;
   branch: string;
@@ -3888,9 +3950,10 @@ async function buildDeterministicMergeMessage(params: {
   diffStat?: string;
   includeTaskId: boolean;
   aiSummary?: string | null;
+  aiBody?: string | null;
   aiSubject?: string | null;
 }): Promise<{ subjectArg: string; bodyArg: string }> {
-  const { taskId, branch, commitLog, diffStat, includeTaskId, aiSummary, aiSubject } = params;
+  const { taskId, branch, commitLog, diffStat, includeTaskId, aiSummary, aiBody, aiSubject } = params;
   const prefix = includeTaskId ? `feat(${taskId})` : "feat";
   const trimmedAiSubject = aiSubject?.trim() ?? "";
   const derived = trimmedAiSubject.length === 0
@@ -3901,19 +3964,13 @@ async function buildDeterministicMergeMessage(params: {
     : (derived ?? `merge ${branch}`);
   const subject = `${prefix}: ${subjectSummary}`;
 
-  const trimmedCommitLog = commitLog?.trim() ?? "";
-  const trimmedDiffStat = diffStat?.trim() ?? "";
-
-  const commitsSection = trimmedCommitLog.length > 0
-    ? trimmedCommitLog
-    : `- merge ${branch}`;
-
-  const body = aiSummary?.trim().length
-    ? aiSummary.trim()
-    : [
-      `Commits merged:\n${commitsSection}`,
-      trimmedDiffStat.length > 0 ? `Files changed:\n${trimmedDiffStat}` : "",
-    ].filter(Boolean).join("\n\n");
+  const body = composeMergeCommitBody({
+    branch,
+    commitLog,
+    diffStat,
+    aiSummary,
+    aiBody,
+  });
 
   // -m args are double-quoted in the shell command, so escape backslashes,
   // double quotes, dollar signs, and backticks.
@@ -4448,6 +4505,7 @@ export async function commitOrAmendMergeWithFixes(
       diffStat: messageDiffStat,
       includeTaskId,
       aiSummary,
+      aiBody: undefined,
       aiSubject,
     });
     let lineageId: string | undefined;
@@ -8894,12 +8952,13 @@ export async function aiMergeTask(
     await store.appendAgentLog(taskId, routeMessage, "text", undefined, "merger");
   }
 
-  const aiMergeSummary = settings.useAiMergeCommitSummary
-    ? await generateAiMergeSummary(commitLog, diffStat, settings, rootDir)
-    : null;
-  const aiMergeSubject = settings.useAiMergeCommitSummary
-    ? await generateAiMergeSubject(commitLog, diffStat, settings, rootDir, branch, taskId, options.signal)
-    : null;
+  const [aiMergeSummary, aiMergeBody, aiMergeSubject] = settings.useAiMergeCommitSummary
+    ? await Promise.all([
+      generateAiMergeSummary(commitLog, diffStat, settings, rootDir),
+      generateAiMergeBody(commitLog, diffStat, settings, rootDir, branch, taskId, options.signal),
+      generateAiMergeSubject(commitLog, diffStat, settings, rootDir, branch, taskId, options.signal),
+    ])
+    : [null, null, null] as const;
 
   // 4b. Validate diff scope against task's declared File Scope
   try {
@@ -9008,6 +9067,7 @@ export async function aiMergeTask(
         commitLog,
         diffStat,
         aiSummary: aiMergeSummary,
+        aiBody: aiMergeBody,
         aiSubject: aiMergeSubject,
         includeTaskId,
         sourceIssueRef,
@@ -9771,6 +9831,8 @@ export async function aiMergeTask(
       noOpVerifiedShortCircuit,
       landedFilesAttributionRestricted,
       landedFilesCaptureFallback,
+      // Keep mergeDetails headline-only for dashboard cards; rich bullet body
+      // is used in the actual git commit message composition path.
       mergeCommitMessage: aiMergeSummary || commitLog,
       mergedAt: new Date().toISOString(),
       mergeConfirmed: mergeConfirmedAtThisPoint,
@@ -10375,6 +10437,7 @@ interface MergeAttemptParams {
   commitLog: string;
   diffStat: string;
   aiSummary?: string | null;
+  aiBody?: string | null;
   aiSubject?: string | null;
   includeTaskId: boolean;
   sourceIssueRef?: string;
@@ -10432,6 +10495,7 @@ export async function executeMergeAttempt(
     commitLog,
     diffStat,
     aiSummary,
+    aiBody,
     aiSubject,
     includeTaskId,
     sourceIssueRef,
@@ -10752,6 +10816,7 @@ export async function executeMergeAttempt(
       commitLog,
       diffStat,
       aiSummary,
+      aiBody,
       aiSubject,
       includeTaskId,
       hasConflicts,
@@ -10977,7 +11042,7 @@ async function finalizeSideStrategyAttempt(
   side: "theirs" | "ours",
   aiTracker?: AiInvocationTracker,
 ): Promise<boolean> {
-  const { rootDir, branch, commitLog, diffStat, aiSummary, aiSubject, includeTaskId, sourceIssueRef, taskId, store, settings, testCommand, buildCommand, testSource, buildSource } = params;
+  const { rootDir, branch, commitLog, diffStat, aiSummary, aiBody, aiSubject, includeTaskId, sourceIssueRef, taskId, store, settings, testCommand, buildCommand, testSource, buildSource } = params;
 
   const staged = execSyncText("git diff --cached --quiet 2>&1; echo $?", {
     cwd: rootDir,
@@ -11021,7 +11086,8 @@ async function finalizeSideStrategyAttempt(
     commitLog,
     diffStat,
     includeTaskId,
-    aiSummary: aiSummary?.trim().length ? aiSummary : safeBody,
+    aiSummary,
+    aiBody: aiBody?.trim().length ? aiBody : safeBody,
     aiSubject,
   });
   await enforceSquashFileScopeInvariant({
@@ -11082,6 +11148,7 @@ interface AiAgentParams {
   commitLog: string;
   diffStat: string;
   aiSummary?: string | null;
+  aiBody?: string | null;
   aiSubject?: string | null;
   includeTaskId: boolean;
   hasConflicts: boolean;
@@ -11128,6 +11195,7 @@ async function runAiAgentForCommit(params: AiAgentParams): Promise<{ success: bo
     commitLog,
     diffStat,
     aiSummary,
+    aiBody,
     aiSubject,
     includeTaskId,
     hasConflicts,
@@ -11404,7 +11472,8 @@ async function runAiAgentForCommit(params: AiAgentParams): Promise<{ success: bo
           commitLog,
           diffStat,
           includeTaskId,
-          aiSummary: aiSummary?.trim().length ? aiSummary : safeBody,
+          aiSummary,
+          aiBody: aiBody?.trim().length ? aiBody : safeBody,
           aiSubject,
         });
         await runDiffVolumeGate({
