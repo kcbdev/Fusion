@@ -1417,6 +1417,8 @@
      vertical flex sizing so the inline autosize height from ChatView.tsx is
      honored instead of collapsing back toward the one-line minimum. */
   flex: 0 0 auto;
+  width: 100%;
+  box-sizing: border-box;
   resize: none;
   border: 1px solid var(--border);
   border-radius: 12px;
