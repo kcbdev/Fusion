@@ -474,6 +474,32 @@ describe("updateTask", () => {
     });
   });
 
+  it("sends PATCH with autoMerge boolean when provided", async () => {
+    globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, { ...FAKE_TASK, autoMerge: true }));
+
+    const result = await updateTask("FN-001", { autoMerge: true });
+
+    expect(result.autoMerge).toBe(true);
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001", {
+      headers: { "Content-Type": "application/json" },
+      method: "PATCH",
+      body: JSON.stringify({ autoMerge: true }),
+    });
+  });
+
+  it("sends PATCH with null to clear autoMerge", async () => {
+    globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, { ...FAKE_TASK, autoMerge: undefined }));
+
+    const result = await updateTask("FN-001", { autoMerge: null });
+
+    expect(result.autoMerge).toBeUndefined();
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001", {
+      headers: { "Content-Type": "application/json" },
+      method: "PATCH",
+      body: JSON.stringify({ autoMerge: null }),
+    });
+  });
+
   it("omits executionMode key when not provided in update", async () => {
     globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, { ...FAKE_TASK, title: "Updated" }));
 

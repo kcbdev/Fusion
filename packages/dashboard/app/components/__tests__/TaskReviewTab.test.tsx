@@ -10,12 +10,14 @@ const apiMocks = vi.hoisted(() => ({
   fetchTaskReview: vi.fn(),
   refreshTaskReview: vi.fn(),
   reviseTaskReviewItems: vi.fn(),
+  updateTask: vi.fn(),
 }));
 
 vi.mock("../../api", () => ({
   fetchTaskReview: apiMocks.fetchTaskReview,
   refreshTaskReview: apiMocks.refreshTaskReview,
   reviseTaskReviewItems: apiMocks.reviseTaskReviewItems,
+  updateTask: apiMocks.updateTask,
 }));
 
 describe("TaskReviewTab", () => {
@@ -580,5 +582,51 @@ describe("TaskReviewTab", () => {
     fireEvent.click(screen.getByRole("button", { name: "Request revision" }));
 
     expect(apiMocks.reviseTaskReviewItems).toHaveBeenCalledWith(task.id, [expect.objectContaining({ id: "reviewer-code-1", source: "reviewer-agent" })], undefined);
+  });
+
+  it("updates per-task auto-merge preference for on/off/follow default", async () => {
+    const onTaskUpdated = vi.fn();
+    const task = makeTask({ autoMerge: undefined, reviewState: { source: "pull-request", items: [], addressing: [] } });
+    apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
+
+    apiMocks.updateTask.mockResolvedValueOnce({ ...task, autoMerge: true });
+    apiMocks.updateTask.mockResolvedValueOnce({ ...task, autoMerge: false });
+    apiMocks.updateTask.mockResolvedValueOnce({ ...task, autoMerge: undefined });
+
+    render(<TaskReviewTab task={task} addToast={vi.fn()} onTaskUpdated={onTaskUpdated} />);
+
+    const select = await screen.findByTestId("task-review-auto-merge-select");
+    fireEvent.change(select, { target: { value: "on" } });
+    await waitFor(() => expect(apiMocks.updateTask).toHaveBeenCalledWith(task.id, { autoMerge: true }, undefined));
+
+    fireEvent.change(select, { target: { value: "off" } });
+    await waitFor(() => expect(apiMocks.updateTask).toHaveBeenCalledWith(task.id, { autoMerge: false }, undefined));
+
+    fireEvent.change(select, { target: { value: "follow-default" } });
+    await waitFor(() => expect(apiMocks.updateTask).toHaveBeenCalledWith(task.id, { autoMerge: null }, undefined));
+
+    expect(onTaskUpdated).toHaveBeenCalledTimes(3);
+  });
+
+  it("shows effective auto-merge hint for in-review tasks using global default", async () => {
+    const inReviewTask = makeTask({ column: "in-review", autoMerge: undefined, reviewState: { source: "pull-request", items: [], addressing: [] } });
+    apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: inReviewTask.reviewState, automationStatus: null, emptyMessage: null });
+
+    const { rerender } = render(<TaskReviewTab task={inReviewTask} addToast={vi.fn()} autoMergeEnabled />);
+    expect(await screen.findByTestId("task-review-auto-merge-effective-hint")).toHaveTextContent("Effective: Auto-merge on — frozen on entry to review");
+
+    rerender(<TaskReviewTab task={inReviewTask} addToast={vi.fn()} autoMergeEnabled={false} />);
+    await waitFor(() => expect(screen.getByTestId("task-review-auto-merge-effective-hint")).toHaveTextContent("Effective: Auto-merge off — frozen on entry to review"));
+  });
+
+  it("reflects current per-task auto-merge selection", async () => {
+    const task = makeTask({ autoMerge: true, reviewState: { source: "pull-request", items: [], addressing: [] } });
+    apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
+
+    const { rerender } = render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+    expect(await screen.findByTestId("task-review-auto-merge-select")).toHaveValue("on");
+
+    rerender(<TaskReviewTab task={makeTask({ autoMerge: false, reviewState: { source: "pull-request", items: [], addressing: [] } })} addToast={vi.fn()} />);
+    await waitFor(() => expect(screen.getByTestId("task-review-auto-merge-select")).toHaveValue("off"));
   });
 });

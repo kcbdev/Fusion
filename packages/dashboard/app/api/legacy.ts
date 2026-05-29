@@ -454,6 +454,7 @@ export function updateTask(
     reviewLevel?: number | null;
     executionMode?: "standard" | "fast" | null;
     noCommitsExpected?: boolean;
+    autoMerge?: boolean | null;
     priority?: TaskPriority | null;
     sourceIssue?: TaskSourceIssue | null;
     nodeId?: string | null;

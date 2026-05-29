@@ -1,11 +1,12 @@
 import "./TaskReviewTab.css";
-import type { Task, TaskDetail } from "@fusion/core";
+import { getErrorMessage, type Task, type TaskDetail } from "@fusion/core";
+import { resolveEffectiveAutoMerge } from "../../../core/src/task-merge";
 import { GitPullRequest } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
-import { fetchTaskReview, refreshTaskReview, reviseTaskReviewItems } from "../api";
+import { fetchTaskReview, refreshTaskReview, reviseTaskReviewItems, updateTask } from "../api";
 import type { SelectedReviewItem } from "../api";
 import type { ToastType } from "../hooks/useToast";
 import { linkifyFilePaths, linkifyReactChildren } from "../utils/filePathLinkify";
@@ -150,6 +151,10 @@ export function TaskReviewTab({
   const [emptyMessage, setEmptyMessage] = useState<string | null>(null);
   const [review, setReview] = useState(task.reviewState ?? null);
   const [renderMarkdown, setRenderMarkdown] = useState<boolean>(() => readBooleanPref(REVIEW_MARKDOWN_TOGGLE_STORAGE_KEY, true));
+  const [autoMergePreference, setAutoMergePreference] = useState<"follow-default" | "on" | "off">(
+    task.autoMerge === true ? "on" : task.autoMerge === false ? "off" : "follow-default",
+  );
+  const [isSavingAutoMergePreference, setIsSavingAutoMergePreference] = useState(false);
 
   const canRevise = selected.length > 0 && !revising;
   const isPrMode = review?.source === "pull-request";
@@ -158,6 +163,10 @@ export function TaskReviewTab({
   useEffect(() => {
     writeBooleanPref(REVIEW_MARKDOWN_TOGGLE_STORAGE_KEY, renderMarkdown);
   }, [renderMarkdown]);
+
+  useEffect(() => {
+    setAutoMergePreference(task.autoMerge === true ? "on" : task.autoMerge === false ? "off" : "follow-default");
+  }, [task.autoMerge]);
 
   useEffect(() => {
     let cancelled = false;
@@ -229,6 +238,25 @@ export function TaskReviewTab({
     }
   };
 
+  const onAutoMergePreferenceChange = async (nextPreference: "follow-default" | "on" | "off") => {
+    const previousPreference = autoMergePreference;
+    setAutoMergePreference(nextPreference);
+    setIsSavingAutoMergePreference(true);
+
+    try {
+      const autoMerge = nextPreference === "follow-default" ? null : nextPreference === "on";
+      const updatedTask = await updateTask(task.id, { autoMerge }, projectId);
+      setAutoMergePreference(updatedTask.autoMerge === true ? "on" : updatedTask.autoMerge === false ? "off" : "follow-default");
+      onTaskUpdated?.(updatedTask);
+      addToast("Per-task auto-merge preference updated", "success");
+    } catch (updateError) {
+      setAutoMergePreference(previousPreference);
+      addToast(`Failed to update ${task.id}: ${getErrorMessage(updateError)}`, "error");
+    } finally {
+      setIsSavingAutoMergePreference(false);
+    }
+  };
+
   const onRevise = async () => {
     try {
       if (!review) return;
@@ -279,6 +307,9 @@ export function TaskReviewTab({
     }
   };
 
+  const effectiveAutoMerge = resolveEffectiveAutoMerge({ autoMerge: task.autoMerge }, { autoMerge: autoMergeEnabled });
+  const effectiveAutoMergeLabel = effectiveAutoMerge ? "Auto-merge on" : "Auto-merge off";
+
   return (
     <div className="task-review-tab">
       <div className="task-review-tab__header">
@@ -287,6 +318,26 @@ export function TaskReviewTab({
           {decisionLabel ? <span className={`task-review-tab__decision task-review-tab__decision--${decisionLabel}`}>{decisionLabel}</span> : null}
         </div>
         <div className="task-review-tab__actions">
+          <div className="task-review-tab__auto-merge-control">
+            <label htmlFor="task-review-auto-merge-select" className="form-label">Per-task auto-merge</label>
+            <select
+              id="task-review-auto-merge-select"
+              className="select"
+              value={autoMergePreference}
+              onChange={(event) => void onAutoMergePreferenceChange(event.target.value as "follow-default" | "on" | "off")}
+              disabled={isSavingAutoMergePreference}
+              data-testid="task-review-auto-merge-select"
+            >
+              <option value="follow-default">Follow default</option>
+              <option value="on">Auto-merge on</option>
+              <option value="off">Auto-merge off</option>
+            </select>
+            <div className="task-review-tab__meta" data-testid="task-review-auto-merge-effective-hint">
+              {task.column === "in-review"
+                ? `Effective: ${effectiveAutoMergeLabel} — frozen on entry to review`
+                : `Effective: ${effectiveAutoMergeLabel}`}
+            </div>
+          </div>
           {task.column === "in-review" && !task.prInfo && prAuthAvailable === true && autoMergeEnabled !== true && typeof onRequestCreatePr === "function" ? (
             <button className="btn btn-sm" onClick={() => onRequestCreatePr?.()} data-testid="task-review-create-pr">
               <GitPullRequest />

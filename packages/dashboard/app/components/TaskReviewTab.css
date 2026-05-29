@@ -48,6 +48,14 @@
 .task-review-tab__actions {
   display: flex;
   gap: var(--space-sm);
+  align-items: flex-start;
+}
+
+.task-review-tab__auto-merge-control {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  min-inline-size: max-content;
 }
 
 .task-review-tab__list {
@@ -177,6 +185,15 @@
     width: 100%;
     gap: var(--space-sm);
     flex-wrap: wrap;
+  }
+
+  .task-review-tab__auto-merge-control {
+    width: 100%;
+    min-inline-size: 0;
+  }
+
+  .task-review-tab__auto-merge-control .select {
+    width: 100%;
   }
 
   .task-review-tab__refresh-meta {

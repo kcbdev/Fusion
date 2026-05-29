@@ -2953,6 +2953,71 @@ describe("PATCH /tasks/:id", () => {
     const updateArg = (store.updateTask as ReturnType<typeof vi.fn>).mock.calls[0][1];
     expect(updateArg).not.toHaveProperty("executionMode");
   });
+
+  it("forwards autoMerge to store.updateTask", async () => {
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...FAKE_TASK_DETAIL,
+      autoMerge: true,
+    });
+
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({
+      autoMerge: true,
+    }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+      autoMerge: true,
+    });
+  });
+
+  it("accepts null to clear autoMerge via PATCH", async () => {
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...FAKE_TASK_DETAIL,
+      autoMerge: undefined,
+    });
+
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({
+      autoMerge: null,
+    }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+      autoMerge: undefined,
+    });
+  });
+
+  it("returns 400 for invalid autoMerge value via PATCH", async () => {
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({
+      autoMerge: "yes",
+    }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("autoMerge must be a boolean");
+  });
+
+  it("omission does not overwrite autoMerge via PATCH", async () => {
+    const existingTask = {
+      ...FAKE_TASK_DETAIL,
+      autoMerge: false,
+    };
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(existingTask);
+
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({
+      title: "Updated Title",
+    }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    const updateArg = (store.updateTask as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(updateArg).not.toHaveProperty("autoMerge");
+  });
 });
 
 
