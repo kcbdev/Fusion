@@ -1768,11 +1768,6 @@ export interface Task {
   branch?: string;
   /** Optional planning/mission branch-group metadata carried across related tasks. */
   branchContext?: TaskBranchContext;
-  /**
-   * Optional per-task auto-merge override.
-   * Undefined means no task-level override is set.
-   */
-  autoMerge?: boolean;
   /** Internal execution-only provenance for dependency-start handoff.
    *  When set, the scheduler asked executor to start from an upstream dependency
    *  branch. This is transient execution state and should be cleared after use. */

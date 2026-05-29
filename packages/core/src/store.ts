@@ -150,7 +150,6 @@ interface TaskRow {
   mergeDetails: string | null;
   breakIntoSubtasks: number | null;
   noCommitsExpected: number | null;
-  autoMerge: number | null;
   enabledWorkflowSteps: string | null;
   modifiedFiles: string | null;
   missionId: string | null;
@@ -1401,7 +1400,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       baseBranch: row.baseBranch || undefined,
       executionStartBranch: row.executionStartBranch || undefined,
       branch: row.branch || undefined,
-      autoMerge: row.autoMerge === null ? undefined : Boolean(row.autoMerge),
+      autoMerge: row.autoMerge === null ? undefined : row.autoMerge === 1,
       baseCommitSha: row.baseCommitSha || undefined,
       scopeOverride: row.scopeOverride ? true : undefined,
       scopeOverrideReason: row.scopeOverrideReason || undefined,
@@ -1519,7 +1518,6 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       mergeDetails: fromJson<import("./types.js").MergeDetails>(row.mergeDetails),
       breakIntoSubtasks: row.breakIntoSubtasks ? true : undefined,
       noCommitsExpected: row.noCommitsExpected ? true : undefined,
-      autoMerge: row.autoMerge === null ? undefined : row.autoMerge === 1,
       enabledWorkflowSteps: (() => { const e = fromJson<string[]>(row.enabledWorkflowSteps); return e && e.length > 0 ? e : undefined; })(),
       modifiedFiles: (() => { const m = fromJson<string[]>(row.modifiedFiles); return m && m.length > 0 ? m : undefined; })(),
       missionId: row.missionId || undefined,

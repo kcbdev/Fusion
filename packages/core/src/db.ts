@@ -293,7 +293,6 @@ CREATE TABLE IF NOT EXISTS tasks (
   mergeDetails TEXT,
   breakIntoSubtasks INTEGER DEFAULT 0,
   noCommitsExpected INTEGER DEFAULT 0,
-  autoMerge INTEGER,
   enabledWorkflowSteps TEXT DEFAULT '[]',
   modifiedFiles TEXT DEFAULT '[]',
   missionId TEXT,
