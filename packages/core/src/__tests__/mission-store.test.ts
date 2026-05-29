@@ -2577,8 +2577,8 @@ describe("MissionStore", () => {
       store.linkFeatureToAssertion(feature.id, assertion.id);
 
       const linkedAssertions = store.listAssertionsForFeature(feature.id);
-      expect(linkedAssertions).toHaveLength(1);
-      expect(linkedAssertions[0].id).toBe(assertion.id);
+      expect(linkedAssertions).toHaveLength(2);
+      expect(linkedAssertions.some((a) => a.id === assertion.id)).toBe(true);
     });
 
     it("lists assertions for a feature", () => {
@@ -2589,8 +2589,8 @@ describe("MissionStore", () => {
       store.linkFeatureToAssertion(feature.id, a2.id);
 
       const linked = store.listAssertionsForFeature(feature.id);
-      expect(linked).toHaveLength(2);
-      expect(linked.map((a) => a.title).sort()).toEqual(["A1", "A2"]);
+      expect(linked).toHaveLength(3);
+      expect(linked.map((a) => a.title)).toEqual(expect.arrayContaining(["A1", "A2"]));
     });
 
     it("lists features for an assertion", () => {
@@ -2610,7 +2610,8 @@ describe("MissionStore", () => {
       store.unlinkFeatureFromAssertion(feature.id, assertion.id);
 
       const linked = store.listAssertionsForFeature(feature.id);
-      expect(linked).toHaveLength(0);
+      expect(linked).toHaveLength(1);
+      expect(linked[0].sourceFeatureId).toBe(feature.id);
     });
 
     it("throws when linking already-linked feature-assertion pair", () => {
@@ -2718,7 +2719,7 @@ describe("MissionStore", () => {
 
       const rollup = store.getMilestoneValidationRollup(milestone.id);
 
-      expect(rollup.totalAssertions).toBe(2);
+      expect(rollup.totalAssertions).toBe(3);
       expect(rollup.passedAssertions).toBe(1);
       expect(rollup.unlinkedAssertions).toBe(0);
       expect(rollup.state).toBe("ready");
@@ -2728,11 +2729,13 @@ describe("MissionStore", () => {
       const slice = store.addSlice(milestone.id, { title: "Slice" });
       const feature = store.addFeature(slice.id, { title: "Feature" });
 
+      const [managed] = store.listAssertionsForFeature(feature.id);
       const a1 = store.addContractAssertion(milestone.id, { title: "A1", assertion: "T" });
       const a2 = store.addContractAssertion(milestone.id, { title: "A2", assertion: "T" });
 
       store.linkFeatureToAssertion(feature.id, a1.id);
       store.linkFeatureToAssertion(feature.id, a2.id);
+      store.updateContractAssertion(managed.id, { status: "passed" });
       store.updateContractAssertion(a1.id, { status: "passed" });
       store.updateContractAssertion(a2.id, { status: "passed" });
 
@@ -2790,7 +2793,8 @@ describe("MissionStore", () => {
       // Link all assertions
       const slice = store.addSlice(milestone.id, { title: "Slice" });
       const feature = store.addFeature(slice.id, { title: "Feature" });
-      const assertions = store.listContractAssertions(milestone.id);
+      const assertions = store.listContractAssertions(milestone.id)
+        .filter((a) => a.sourceFeatureId !== feature.id);
       for (const a of assertions) {
         store.linkFeatureToAssertion(feature.id, a.id);
       }
@@ -2872,6 +2876,10 @@ describe("MissionStore", () => {
       const slice = store.addSlice(milestone.id, { title: "Slice" });
       const feature = store.addFeature(slice.id, { title: "Feature" });
 
+      const managed = store.listAssertionsForFeature(feature.id);
+      expect(managed).toHaveLength(1);
+      store.unlinkFeatureFromAssertion(feature.id, managed[0].id);
+
       // Create assertions but don't link them
       store.addContractAssertion(milestone.id, { title: "A1", assertion: "T" });
 
@@ -2882,11 +2890,69 @@ describe("MissionStore", () => {
     });
   });
 
+  describe("Feature assertion canonical seam", () => {
+    it("creates exactly one managed assertion with acceptance criteria text", () => {
+      const mission = store.createMission({ title: "M" });
+      const milestone = store.addMilestone(mission.id, { title: "MS" });
+      const slice = store.addSlice(milestone.id, { title: "SL" });
+      const feature = store.addFeature(slice.id, { title: "Feature", acceptanceCriteria: "AC text" });
+      const linked = store.listAssertionsForFeature(feature.id);
+      expect(linked).toHaveLength(1);
+      expect(linked[0].assertion).toBe("AC text");
+      expect(linked[0].sourceFeatureId).toBe(feature.id);
+    });
+
+    it("derives managed assertion text from description or fallback", () => {
+      const mission = store.createMission({ title: "M" });
+      const milestone = store.addMilestone(mission.id, { title: "MS" });
+      const slice = store.addSlice(milestone.id, { title: "SL" });
+      const fromDescription = store.addFeature(slice.id, { title: "Desc Feature", description: "Desc text" });
+      const fallback = store.addFeature(slice.id, { title: "Fallback Feature" });
+      expect(store.listAssertionsForFeature(fromDescription.id)[0].assertion).toBe("Desc text");
+      expect(store.listAssertionsForFeature(fallback.id)[0].assertion).toBe("Verify implementation of: Fallback Feature");
+    });
+
+    it("syncs managed assertion in place on acceptanceCriteria update", () => {
+      const mission = store.createMission({ title: "M" });
+      const milestone = store.addMilestone(mission.id, { title: "MS" });
+      const slice = store.addSlice(milestone.id, { title: "SL" });
+      const feature = store.addFeature(slice.id, { title: "Feature", acceptanceCriteria: "Old" });
+      const before = store.listAssertionsForFeature(feature.id)[0];
+      store.updateFeature(feature.id, { acceptanceCriteria: "New" });
+      const after = store.listAssertionsForFeature(feature.id);
+      expect(after).toHaveLength(1);
+      expect(after[0].id).toBe(before.id);
+      expect(after[0].assertion).toBe("New");
+    });
+
+    it("does not change managed assertion on status-only update", () => {
+      const mission = store.createMission({ title: "M" });
+      const milestone = store.addMilestone(mission.id, { title: "MS" });
+      const slice = store.addSlice(milestone.id, { title: "SL" });
+      const feature = store.addFeature(slice.id, { title: "Feature" });
+      const before = store.listAssertionsForFeature(feature.id)[0];
+      store.updateFeature(feature.id, { status: "triaged" });
+      const after = store.listAssertionsForFeature(feature.id)[0];
+      expect(after.id).toBe(before.id);
+      expect(after.updatedAt).toBe(before.updatedAt);
+    });
+
+    it("removes managed assertion row on feature delete", () => {
+      const mission = store.createMission({ title: "M" });
+      const milestone = store.addMilestone(mission.id, { title: "MS" });
+      const slice = store.addSlice(milestone.id, { title: "SL" });
+      const feature = store.addFeature(slice.id, { title: "Feature" });
+      const assertionId = store.listAssertionsForFeature(feature.id)[0].id;
+      store.deleteFeature(feature.id);
+      expect(store.getContractAssertion(assertionId)).toBeUndefined();
+    });
+  });
+
   // ── Loop State & Validator Run Schema Tests ───────────────────────────
 
   describe("Loop State & Validator Run Schema (v31)", () => {
     it("schema version is 40 after migration", () => {
-      expect(db.getSchemaVersion()).toBe(96);
+      expect(db.getSchemaVersion()).toBe(97);
     });
 
     it("mission_features table has loop state columns", () => {

@@ -556,6 +556,8 @@ export interface MissionContractAssertion {
   id: string;
   /** Parent milestone ID */
   milestoneId: string;
+  /** Feature ID when this assertion is store-managed for a specific feature */
+  sourceFeatureId?: string;
   /** Human-readable title describing the assertion */
   title: string;
   /** The behavioral specification or acceptance test content */
@@ -618,6 +620,8 @@ export interface ContractAssertionCreateInput {
   assertion: string;
   /** Initial status, defaults to "pending" */
   status?: MissionAssertionStatus;
+  /** Feature ID when this assertion is store-managed for a specific feature */
+  sourceFeatureId?: string;
 }
 
 /**

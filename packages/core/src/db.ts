@@ -149,7 +149,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 96;
+const SCHEMA_VERSION = 97;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -1176,6 +1176,7 @@ export const MIGRATION_ONLY_TABLE_SCHEMAS: Record<string, Record<string, string>
     assertion: "TEXT NOT NULL",
     status: "TEXT NOT NULL DEFAULT 'pending'",
     orderIndex: "INTEGER NOT NULL DEFAULT 0",
+    sourceFeatureId: "TEXT",
     createdAt: "TEXT NOT NULL",
     updatedAt: "TEXT NOT NULL",
   },
@@ -3707,6 +3708,14 @@ export class Database {
         `);
         this.addColumnIfMissing("tasks", "autoMerge", "INTEGER");
         this.addColumnIfMissing("missions", "autoMerge", "INTEGER");
+      });
+    }
+
+    if (version < 97) {
+      this.applyMigration(97, () => {
+        if (this.hasTable("mission_contract_assertions")) {
+          this.addColumnIfMissing("mission_contract_assertions", "sourceFeatureId", "TEXT");
+        }
       });
     }
 

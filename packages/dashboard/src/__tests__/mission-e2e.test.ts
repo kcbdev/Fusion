@@ -306,6 +306,31 @@ function createMockMissionStore() {
         updatedAt: new Date().toISOString(),
       };
       features.set(feature.id, feature);
+
+      const slice = slices.get(sliceId);
+      if (slice) {
+        const text = input.acceptanceCriteria?.trim()
+          || input.description?.trim()
+          || `Verify implementation of: ${input.title}`;
+        const existingAssertions = Array.from(assertions.values()).filter((a) => a.milestoneId === slice.milestoneId);
+        const orderIndex = existingAssertions.length > 0
+          ? Math.max(...existingAssertions.map((a) => a.orderIndex)) + 1
+          : 0;
+        const assertion: MissionContractAssertion = {
+          id: generateAssertionId(),
+          milestoneId: slice.milestoneId,
+          sourceFeatureId: feature.id,
+          title: input.title,
+          assertion: text,
+          status: "pending",
+          orderIndex,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        assertions.set(assertion.id, assertion);
+        assertionLinks.push({ featureId: feature.id, assertionId: assertion.id });
+      }
+
       return feature;
     }),
 
@@ -416,6 +441,7 @@ function createMockMissionStore() {
       const assertion: MissionContractAssertion = {
         id: generateAssertionId(),
         milestoneId,
+        sourceFeatureId: input.sourceFeatureId,
         title: input.title,
         assertion: input.assertion,
         status: input.status ?? "pending",
@@ -2560,8 +2586,9 @@ describe("Mission API", () => {
       // Verify features are created
       expect(slice.features).toHaveLength(2);
 
-      // Verify assertions were created at milestone + slice + feature levels
-      expect(missionStore.addContractAssertion).toHaveBeenCalledTimes(4);
+      // Route now creates only milestone + slice assertions directly;
+      // feature assertions are store-managed inside addFeature.
+      expect(missionStore.addContractAssertion).toHaveBeenCalledTimes(2);
 
       const milestoneCall = (missionStore.addContractAssertion as ReturnType<typeof vi.fn>).mock.calls.find(
         call => call[1].title === "Milestone: First Milestone"
@@ -2573,23 +2600,22 @@ describe("Mission API", () => {
       );
       expect(sliceCall).toBeDefined();
 
-      // Verify Feature One assertion uses acceptanceCriteria
-      const featureOneCall = (missionStore.addContractAssertion as ReturnType<typeof vi.fn>).mock.calls.find(
-        call => call[1].title === "Feature One"
-      );
-      expect(featureOneCall).toBeDefined();
-      expect(featureOneCall![1].assertion).toBe("Feature one criteria");
-      expect(featureOneCall![1].title).toBe("Feature One");
+      const featureOne = slice.features.find((f: MissionFeature) => f.title === "Feature One");
+      const featureTwo = slice.features.find((f: MissionFeature) => f.title === "Feature Two");
+      expect(featureOne).toBeDefined();
+      expect(featureTwo).toBeDefined();
 
-      // Verify Feature Two assertion uses description (no acceptanceCriteria, has description)
-      const featureTwoCall = (missionStore.addContractAssertion as ReturnType<typeof vi.fn>).mock.calls.find(
-        call => call[1].title === "Feature Two"
-      );
-      expect(featureTwoCall).toBeDefined();
-      expect(featureTwoCall![1].assertion).toBe("Feature two description");
+      const featureOneAssertions = missionStore.listAssertionsForFeature(featureOne!.id);
+      const featureTwoAssertions = missionStore.listAssertionsForFeature(featureTwo!.id);
+      expect(featureOneAssertions).toHaveLength(1);
+      expect(featureTwoAssertions).toHaveLength(1);
+      expect(featureOneAssertions[0].assertion).toBe("Feature one criteria");
+      expect(featureTwoAssertions[0].assertion).toBe("Feature two description");
+      expect(featureOneAssertions[0].sourceFeatureId).toBe(featureOne!.id);
+      expect(featureTwoAssertions[0].sourceFeatureId).toBe(featureTwo!.id);
 
-      // Verify assertions are linked to features
-      expect(missionStore.linkFeatureToAssertion).toHaveBeenCalledTimes(2);
+      // No route-level feature-linking call; linking is internal to addFeature
+      expect(missionStore.linkFeatureToAssertion).toHaveBeenCalledTimes(0);
     });
 
     it("uses fallback assertion text when feature has no acceptanceCriteria or description", async () => {
@@ -2649,12 +2675,10 @@ describe("Mission API", () => {
 
       expect(res.status).toBe(201);
 
-      // Verify the assertion uses the fallback text
-      const fallbackCall = (missionStore.addContractAssertion as ReturnType<typeof vi.fn>).mock.calls.find(
-        call => call[1].title === "Minimal Feature"
-      );
-      expect(fallbackCall).toBeDefined();
-      expect(fallbackCall![1].assertion).toBe("Verify implementation of: Minimal Feature");
+      const feature = res.body.milestones[0].slices[0].features[0] as MissionFeature;
+      const linkedAssertions = missionStore.listAssertionsForFeature(feature.id);
+      expect(linkedAssertions).toHaveLength(1);
+      expect(linkedAssertions[0].assertion).toBe("Verify implementation of: Minimal Feature");
     });
 
     it("derives milestone acceptance criteria from feature acceptance criteria when omitted", async () => {

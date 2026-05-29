@@ -91,6 +91,6 @@ describe("goals schema", () => {
   });
 
   it("reports schema version 92", () => {
-    expect(db.getSchemaVersion()).toBe(96);
+    expect(db.getSchemaVersion()).toBe(97);
   });
 });

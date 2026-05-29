@@ -366,7 +366,7 @@ The `tasks.githubTracking` JSON column stores per-task GitHub tracking state (`e
 | `chat_room_members` *(migration-created)* | Room membership map with composite PK `(roomId, agentId)` and role (`owner`/`member`). |
 | `chat_room_messages` *(migration-created)* | Room message history with `senderAgentId`, JSON `mentions`, attachments/metadata blobs, ordered by `createdAt`. |
 | `runAuditEvents` *(migration-created)* | Run audit trail events across database/git/filesystem mutation domains. |
-| `mission_contract_assertions` *(migration-created)* | Milestone contract assertions used by mission validator workflows. |
+| `mission_contract_assertions` *(migration-created)* | Milestone contract assertions used by mission validator workflows, including nullable `sourceFeatureId` for the store-managed per-feature assertion owner. |
 | `mission_feature_assertions` *(migration-created)* | Many-to-many links between mission features and contract assertions. |
 | `mission_validator_runs` *(migration-created)* | Validator run records for mission feature loop execution. |
 | `mission_validator_failures` *(migration-created)* | Assertion failure records captured during validator runs. |

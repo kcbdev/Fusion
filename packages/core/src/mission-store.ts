@@ -203,6 +203,7 @@ interface AssertionRow {
   assertion: string;
   status: string;
   orderIndex: number;
+  sourceFeatureId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -380,6 +381,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     return {
       id: row.id,
       milestoneId: row.milestoneId,
+      sourceFeatureId: row.sourceFeatureId || undefined,
       title: row.title,
       assertion: row.assertion,
       status: row.status as import("./mission-types.js").MissionAssertionStatus,
@@ -1724,8 +1726,9 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     // here ensures the full chain is updated atomically when a feature is added.
     this.recomputeSliceStatus(sliceId);
     this.applyDerivedMilestoneAcceptanceCriteria(slice.milestoneId);
+    this.ensureFeatureAssertion(feature);
 
-    return feature;
+    return this.getFeature(feature.id) ?? feature;
   }
 
   /**
@@ -1819,6 +1822,14 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       this.recomputeSliceStatus(updated.sliceId);
     }
 
+    const shouldSyncAssertion = updates.title !== undefined
+      || updates.description !== undefined
+      || updates.acceptanceCriteria !== undefined;
+    if (shouldSyncAssertion) {
+      this.ensureFeatureAssertion(updated);
+      return this.getFeature(updated.id) ?? updated;
+    }
+
     return updated;
   }
 
@@ -1835,6 +1846,15 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     }
 
     const sliceId = feature.sliceId;
+    const slice = this.getSlice(sliceId);
+    const milestoneId = slice?.milestoneId;
+    if (milestoneId) {
+      const managedAssertion = this.listContractAssertions(milestoneId)
+        .find((assertion) => assertion.sourceFeatureId === feature.id);
+      if (managedAssertion) {
+        this.deleteContractAssertion(managedAssertion.id);
+      }
+    }
 
     this.db.prepare("DELETE FROM mission_features WHERE id = ?").run(id);
     this.db.bumpLastModified();
@@ -1843,6 +1863,39 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
 
     // Recompute slice status after deletion
     this.recomputeSliceStatus(sliceId);
+  }
+
+  private ensureFeatureAssertion(feature: MissionFeature): void {
+    const slice = this.getSlice(feature.sliceId);
+    if (!slice) {
+      throw new Error(`Slice ${feature.sliceId} not found`);
+    }
+
+    const milestoneId = slice.milestoneId;
+    const assertionText = feature.acceptanceCriteria?.trim()
+      || feature.description?.trim()
+      || `Verify implementation of: ${feature.title}`;
+
+    const existing = this.listContractAssertions(milestoneId)
+      .find((assertion) => assertion.sourceFeatureId === feature.id);
+
+    if (!existing) {
+      const created = this.addContractAssertion(milestoneId, {
+        title: feature.title,
+        assertion: assertionText,
+        status: "pending",
+        sourceFeatureId: feature.id,
+      });
+      this.linkFeatureToAssertion(feature.id, created.id);
+      return;
+    }
+
+    if (existing.title !== feature.title || existing.assertion !== assertionText) {
+      this.updateContractAssertion(existing.id, {
+        title: feature.title,
+        assertion: assertionText,
+      });
+    }
   }
 
   /**
@@ -2584,6 +2637,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     const assertion: MissionContractAssertion = {
       id,
       milestoneId,
+      sourceFeatureId: input.sourceFeatureId,
       title: input.title,
       assertion: input.assertion,
       status: input.status || "pending",
@@ -2593,8 +2647,8 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     };
 
     this.db.prepare(`
-      INSERT INTO mission_contract_assertions (id, milestoneId, title, assertion, status, orderIndex, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO mission_contract_assertions (id, milestoneId, title, assertion, status, orderIndex, sourceFeatureId, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       assertion.id,
       assertion.milestoneId,
@@ -2602,6 +2656,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       assertion.assertion,
       assertion.status,
       assertion.orderIndex,
+      assertion.sourceFeatureId ?? null,
       assertion.createdAt,
       assertion.updatedAt,
     );
@@ -3485,10 +3540,10 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
 
     for (const assertion of snapshot.payload.assertions) {
       if (!assertion.id || !assertion.milestoneId) continue;
-      this.db.prepare(`INSERT INTO mission_contract_assertions (id, milestoneId, title, assertion, status, orderIndex, createdAt, updatedAt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET title=excluded.title, assertion=excluded.assertion, status=excluded.status, orderIndex=excluded.orderIndex, updatedAt=excluded.updatedAt`)
-        .run(assertion.id, assertion.milestoneId, assertion.title, assertion.assertion, assertion.status, assertion.orderIndex, assertion.createdAt, assertion.updatedAt);
+      this.db.prepare(`INSERT INTO mission_contract_assertions (id, milestoneId, title, assertion, status, orderIndex, sourceFeatureId, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET title=excluded.title, assertion=excluded.assertion, status=excluded.status, orderIndex=excluded.orderIndex, sourceFeatureId=excluded.sourceFeatureId, updatedAt=excluded.updatedAt`)
+        .run(assertion.id, assertion.milestoneId, assertion.title, assertion.assertion, assertion.status, assertion.orderIndex, assertion.sourceFeatureId ?? null, assertion.createdAt, assertion.updatedAt);
     }
 
     for (const link of snapshot.payload.featureAssertionLinks) {

@@ -134,6 +134,7 @@ function createMockValidatorRun(overrides: Partial<MissionValidatorRun> = {}): M
 function createMockMissionStore() {
   const missions = new Map<string, Mission>();
   const features = new Map<string, MissionFeature>();
+  const assertionsByFeature = new Map<string, Array<{ id: string; milestoneId: string; title: string; assertion: string; status: "pending" | "passed" | "failed" | "blocked"; orderIndex: number; createdAt: string; updatedAt: string; sourceFeatureId?: string }>>();
   const validatorRuns = new Map<string, MissionValidatorRun>();
 
   const store = {
@@ -180,8 +181,8 @@ function createMockMissionStore() {
       features.set(id, updated);
       return updated;
     }),
-    listAssertionsForFeature: vi.fn(() => []),
-    getAssertionsForFeature: vi.fn(() => []),
+    listAssertionsForFeature: vi.fn((featureId: string) => assertionsByFeature.get(featureId) ?? []),
+    getAssertionsForFeature: vi.fn((featureId: string) => assertionsByFeature.get(featureId) ?? []),
     getSlice: vi.fn((id: string) => {
       // Return a mock slice with milestoneId for the hierarchy
       return createMockSlice({ id });
@@ -254,10 +255,26 @@ function createMockMissionStore() {
     // Internal setters for test setup
     _setMission: (m: Mission) => missions.set(m.id, m),
     _setFeature: (f: MissionFeature) => features.set(f.id, f),
+    _addFeatureWithManagedAssertion: (f: MissionFeature) => {
+      features.set(f.id, f);
+      const now = new Date().toISOString();
+      assertionsByFeature.set(f.id, [{
+        id: `CA-${f.id}`,
+        milestoneId: "MS-001",
+        title: f.title,
+        assertion: f.acceptanceCriteria || f.description || `Verify implementation of: ${f.title}`,
+        status: "pending",
+        orderIndex: 0,
+        createdAt: now,
+        updatedAt: now,
+        sourceFeatureId: f.id,
+      }]);
+    },
     _getValidatorRun: (id: string) => validatorRuns.get(id),
     _clear: () => {
       missions.clear();
       features.clear();
+      assertionsByFeature.clear();
       validatorRuns.clear();
     },
   };
@@ -488,6 +505,31 @@ describe("MissionExecutionLoop", () => {
         expect.objectContaining({ featureId: "F-001" }),
       );
       expectNoValidationBoardTaskMutation(taskStore);
+    });
+
+    it("uses validator path for later-added feature with managed assertion", async () => {
+      const feature = createMockFeature({
+        id: "F-LATER",
+        loopState: "implementing",
+        taskId: "FN-LATER",
+        title: "Later Feature",
+        acceptanceCriteria: "Later criteria",
+      });
+      (missionStore as any)._addFeatureWithManagedAssertion(feature);
+      taskStore._setTask({ id: "FN-LATER", title: "Later task", description: "done", log: [] });
+      missionStore.getFeatureByTaskId = vi.fn().mockReturnValue(feature);
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+      loop.start();
+
+      await loop.processTaskOutcome("FN-LATER");
+
+      expect(missionStore.listAssertionsForFeature).toHaveBeenCalledWith("F-LATER");
+      expect(missionStore.startValidatorRun).toHaveBeenCalledWith("F-LATER", "task_completion");
     });
 
     it("does NOT create a board task for single-feature validation", async () => {

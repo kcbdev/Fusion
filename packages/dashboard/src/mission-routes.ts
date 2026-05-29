@@ -817,25 +817,11 @@ export function createMissionRouter(
             });
 
             for (const featureData of (sliceData.features ?? [])) {
-              const feature = missionStore.addFeature(slice.id, {
+              missionStore.addFeature(slice.id, {
                 title: featureData.title,
                 description: featureData.description,
                 acceptanceCriteria: featureData.acceptanceCriteria,
               });
-
-              // Feature assertion text source priority: acceptanceCriteria -> description -> fallback
-              const assertionText = featureData.acceptanceCriteria
-                || featureData.description
-                || `Verify implementation of: ${featureData.title}`;
-
-              const assertion = missionStore.addContractAssertion(milestone.id, {
-                title: featureData.title,
-                assertion: assertionText,
-                status: "pending",
-              });
-
-              // Link the assertion to the feature
-              missionStore.linkFeatureToAssertion(feature.id, assertion.id);
             }
           }
 
