@@ -239,7 +239,8 @@ async function addLocalStorageToGitignore(cwd: string): Promise<void> {
 
   const lines = content.split(/\r?\n/);
   const existingEntries = new Set(lines.map((line) => line.trim()));
-  const missingEntries = [".fusion", ".pi"].filter((entry) => !existingEntries.has(entry));
+  const missingEntries = [".fusion", ".pi", "fusion.db", "fusion.db-wal", "fusion.db-shm"]
+    .filter((entry) => !existingEntries.has(entry));
 
   if (missingEntries.length === 0) {
     return;
@@ -249,7 +250,7 @@ async function addLocalStorageToGitignore(cwd: string): Promise<void> {
   const newContent = `${content}${prefix}${missingEntries.join("\n")}\n`;
   try {
     writeFileSync(gitignorePath, newContent);
-    console.log(`  ✓ Added ${missingEntries.join(" and ")} to .gitignore`);
+    console.log(`  ✓ Updated .gitignore (added: ${missingEntries.join(", ")})`);
   } catch {
     // Best-effort: don't fail init if we can't write to .gitignore
     console.log(`  ⚠ Could not update .gitignore (best-effort)`);

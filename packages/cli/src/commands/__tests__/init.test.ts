@@ -51,6 +51,18 @@ async function git(command: string, cwd: string): Promise<string> {
   return stdout.trim();
 }
 
+const localStorageGitignoreEntries = [
+  ".fusion",
+  ".pi",
+  "fusion.db",
+  "fusion.db-wal",
+  "fusion.db-shm",
+] as const;
+
+function toLines(content: string): string[] {
+  return content.split(/\r?\n/).filter((line) => line.length > 0);
+}
+
 describe("init command", () => {
   let tempProjectDir: string;
   let tempHomeDir: string;
@@ -208,9 +220,10 @@ describe("init command", () => {
     await runInit({ path: tempProjectDir });
 
     expect(existsSync(gitignorePath)).toBe(true);
-    const content = readFileSync(gitignorePath, "utf-8");
-    expect(content).toContain(".fusion");
-    expect(content).toContain(".pi");
+    const lines = toLines(readFileSync(gitignorePath, "utf-8"));
+    for (const entry of localStorageGitignoreEntries) {
+      expect(lines).toContain(entry);
+    }
   });
 
   it("should append local storage directories to existing .gitignore", async () => {
@@ -219,24 +232,27 @@ describe("init command", () => {
 
     await runInit({ path: tempProjectDir });
 
-    const content = readFileSync(gitignorePath, "utf-8");
-    expect(content).toContain("node_modules");
-    expect(content).toContain("dist");
-    expect(content).toContain(".fusion");
-    expect(content).toContain(".pi");
+    const lines = toLines(readFileSync(gitignorePath, "utf-8"));
+    expect(lines).toContain("node_modules");
+    expect(lines).toContain("dist");
+    for (const entry of localStorageGitignoreEntries) {
+      expect(lines).toContain(entry);
+    }
   });
 
   it("should not duplicate local storage directories in .gitignore (idempotent)", async () => {
     const gitignorePath = join(tempProjectDir, ".gitignore");
-    writeFileSync(gitignorePath, "node_modules\n.fusion\n.pi\n");
+    writeFileSync(
+      gitignorePath,
+      `node_modules\n${localStorageGitignoreEntries.join("\n")}\n`,
+    );
 
     await runInit({ path: tempProjectDir });
 
-    const content = readFileSync(gitignorePath, "utf-8");
-    const fusionMatches = content.match(/\.fusion/g);
-    const piMatches = content.match(/\.pi/g);
-    expect(fusionMatches).toHaveLength(1);
-    expect(piMatches).toHaveLength(1);
+    const lines = toLines(readFileSync(gitignorePath, "utf-8"));
+    for (const entry of localStorageGitignoreEntries) {
+      expect(lines.filter((line) => line === entry)).toHaveLength(1);
+    }
   });
 
   it("installs the bundled Fusion skill into Claude, Codex, and Gemini homes", async () => {
@@ -288,17 +304,28 @@ describe("init command", () => {
     expect(existsSync(join(tempHomeDir, ".gemini", "skills", "fusion", "SKILL.md"))).toBe(true);
   });
 
-  it("should add .pi when .fusion is already ignored", async () => {
+  it("should add .pi and fusion.db entries when .fusion is already ignored", async () => {
     const gitignorePath = join(tempProjectDir, ".gitignore");
     writeFileSync(gitignorePath, "node_modules\n.fusion\n");
 
     await runInit({ path: tempProjectDir });
 
-    const content = readFileSync(gitignorePath, "utf-8");
-    const fusionMatches = content.match(/\.fusion/g);
-    const piMatches = content.match(/\.pi/g);
-    expect(fusionMatches).toHaveLength(1);
-    expect(piMatches).toHaveLength(1);
+    const lines = toLines(readFileSync(gitignorePath, "utf-8"));
+    expect(lines.filter((line) => line === ".fusion")).toHaveLength(1);
+    for (const entry of [".pi", "fusion.db", "fusion.db-wal", "fusion.db-shm"]) {
+      expect(lines.filter((line) => line === entry)).toHaveLength(1);
+    }
+  });
+
+  it("does not modify .gitignore when all local storage entries are already present", async () => {
+    const gitignorePath = join(tempProjectDir, ".gitignore");
+    const existingContent = `node_modules\n${localStorageGitignoreEntries.join("\n")}\n`;
+    writeFileSync(gitignorePath, existingContent);
+
+    await runInit({ path: tempProjectDir });
+
+    const contentAfterInit = readFileSync(gitignorePath, "utf-8");
+    expect(contentAfterInit).toBe(existingContent);
   });
 
   it("initializes git when --git is enabled in a non-git directory", async () => {
