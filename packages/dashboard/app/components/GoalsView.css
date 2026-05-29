@@ -49,6 +49,26 @@
   margin: 0;
 }
 
+.goals-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.goals-form-label {
+  color: var(--text-muted);
+}
+
+.goals-form textarea.input {
+  min-height: calc(var(--space-2xl) * 2);
+  resize: vertical;
+}
+
+.goals-form-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
 .goals-list {
   display: flex;
   flex-direction: column;
@@ -62,8 +82,19 @@
   gap: var(--space-md);
 }
 
+.goals-card-archived {
+  border-color: color-mix(in srgb, var(--text-muted) 25%, transparent);
+}
+
 .goals-card-main {
   min-width: 0;
+}
+
+.goals-card-edit {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-sm);
 }
 
 .goals-card-title {
@@ -72,9 +103,19 @@
   font-size: calc(var(--space-md) + var(--space-xs));
 }
 
+.goals-card-description {
+  margin: var(--space-xs) 0 0;
+  color: var(--text-muted);
+}
+
 .goals-card-status {
   margin: var(--space-xs) 0 0;
   color: var(--text-muted);
+}
+
+.goals-card-actions {
+  display: flex;
+  gap: var(--space-sm);
 }
 
 .goals-activate-button {
@@ -91,14 +132,13 @@
     align-items: stretch;
   }
 
-  .goals-add-button,
-  .goals-card,
-  .goals-activate-button {
-    min-height: calc(var(--space-xl) + var(--space-md));
-  }
-
   .goals-card {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .goals-form-actions,
+  .goals-card-actions {
+    flex-direction: column;
   }
 }

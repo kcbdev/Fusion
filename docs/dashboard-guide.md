@@ -421,24 +421,26 @@ For mission planning context and handoff structure, see [Missions guide](./missi
 
 ## Goals View
 
-Goals view is a minimal strategic-goals surface that shows the current goal list, active-goal count, and quick activation controls.
+Goals view is a strategic-goals surface backed by the Goals REST API.
 
 > No feature flag required.
 > Current status: the `GoalsView` chunk is lazy-defined/prefetched in `App.tsx`, but it is not yet wired into the primary dashboard navigation.
 
-What it currently shows:
+What it shows:
 - Header with active-goal count (`N active goals`) and an **Add Goal** action
-- Goal cards with title, `Status: active|inactive`, and a per-goal **Activate** button (disabled for already-active goals)
+- Goal cards with title, optional description, and `Status: active|archived`
 - Empty state when no goals exist: `No goals yet. Add one to begin tracking strategic outcomes.`
 
-Current data behavior:
-- Uses in-component mock data (`defaultMockGoals`)
-- UI-only state; no backend persistence or server-side goal storage yet
+Data behavior:
+- Initial load: `GET /api/goals` (returns `{ goals }`)
+- Create: inline Add Goal form posts `title` (required) + `description` (optional) to `POST /api/goals`
+- Edit: per-card inline form patches title/description via `PATCH /api/goals/:id`
+- Archive/unarchive: `POST /api/goals/:id/archive` and `POST /api/goals/:id/unarchive`
 
 Active-goal cap behavior:
-- Hard cap of 5 active goals
+- Hard cap of 5 active goals (server-enforced)
 - Warning banner appears when active goals are in the 3–5 range
-- Add/activate attempts beyond 5 are blocked and show an error message
+- Cap violations (for create or unarchive) return HTTP 409 with `code: ACTIVE_GOAL_LIMIT_EXCEEDED` and are surfaced as inline goal errors
 
 Source file: `packages/dashboard/app/components/GoalsView.tsx`
 
