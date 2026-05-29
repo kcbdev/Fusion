@@ -842,6 +842,14 @@
   font-size: calc(var(--space-sm) + var(--space-xs) * 0.75);
 }
 
+/* FN-5599: widen task detail modal on tablet viewports. */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .modal.task-detail-modal {
+    width: min(92vw, 960px);
+    max-width: 92vw;
+  }
+}
+
 @media (max-width: 768px) {
   .detail-move-btn__arrow {
     padding: var(--space-xs);
