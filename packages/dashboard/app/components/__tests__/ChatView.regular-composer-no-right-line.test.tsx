@@ -94,6 +94,8 @@ describe("ChatView regular composer right-edge artifact regression", () => {
     expect(textareaRule).not.toBeNull();
     expect(textareaRule?.[0]).toContain("box-sizing: border-box");
     expect(textareaRule?.[0]).toContain("width: 100%");
+    expect(textareaRule?.[0]).toContain("-webkit-appearance: none");
+    expect(textareaRule?.[0]).toContain("appearance: none");
 
     const wrapperRule = chatViewCss.match(/\.chat-input-wrapper\s*\{[^}]*\}/);
     expect(wrapperRule).not.toBeNull();

@@ -1419,6 +1419,8 @@
   flex: 0 0 auto;
   width: 100%;
   box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
   resize: none;
   border: 1px solid var(--border);
   border-radius: 12px;
