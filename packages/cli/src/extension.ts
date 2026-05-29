@@ -2522,6 +2522,49 @@ export default function kbExtension(pi: ExtensionAPI) {
     },
   });
 
+  pi.registerTool({
+    name: "fn_goal_show",
+    label: "fn: Show Goal",
+    description: "Show full details for a single goal by ID.",
+    promptSnippet: "Show goal details by ID",
+    promptGuidelines: [
+      "Use to inspect a specific goal after listing or referencing its ID",
+      "Cite the goal ID and status when summarizing or planning from this output",
+      "Read-only retrieval; does not mutate goals",
+    ],
+    parameters: Type.Object({
+      id: Type.String({ description: "Goal ID (G-…)" }),
+    }),
+
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const store = await getStore(ctx.cwd);
+      const goalStore = store.getGoalStore();
+      const goal = goalStore.getGoal(params.id);
+
+      if (!goal) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Goal ${params.id} not found` }],
+          details: { code: "GOAL_NOT_FOUND", goalId: params.id },
+        };
+      }
+
+      const lines: string[] = [];
+      lines.push(`${goal.id}: ${goal.title}`);
+      lines.push(`Status: ${goal.status}`);
+      lines.push(`Created: ${goal.createdAt}`);
+      lines.push(`Updated: ${goal.updatedAt}`);
+      if (goal.description) {
+        lines.push(`Description: ${goal.description}`);
+      }
+
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+        details: { goal },
+      };
+    },
+  });
+
   // ── fn_mission_show ──────────────────────────────────────────────
 
   pi.registerTool({

@@ -301,6 +301,14 @@ Archive a goal by ID.
 |-----------|------|----------|-------------|
 | `id` | string | ✓ | Goal ID (G-…) to archive |
 
+### fn_goal_show
+
+Show full details for a single goal by ID.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | ✓ | Goal ID (G-…) |
+
 ## Agent Tools
 
 ### fn_agent_stop
@@ -523,6 +531,14 @@ Group kept experiment runs into reviewable branches and finalize the session. Us
 | `summary` | string | — | Optional finalize summary |
 
 <!-- END: extension-tools -->
+
+## Goal retrieval contract notes
+
+### Goal-show response contract
+
+- **Success:** returns `details.goal` as the complete goal JSON object (`id`, `title`, optional `description`, `status`, `createdAt`, `updatedAt`) and `content[0].text` with those same human-readable fields.
+- **Not found:** returns `isError: true` with `details.code: "GOAL_NOT_FOUND"` and `details.goalId` set to the requested id.
+
 ## Dashboard Command
 
 ### /fn

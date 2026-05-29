@@ -89,6 +89,8 @@ export const READONLY_FN_TOOLS: ReadonlySet<string> = new Set([
   "fn_insight_show",
   "fn_insight_run_list",
   "fn_insight_run_show",
+  "fn_goal_list",
+  "fn_goal_show",
   "fn_mission_list",
   "fn_mission_show",
   "fn_list_agents",

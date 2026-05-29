@@ -106,6 +106,13 @@ describe("gating-classifications parity", () => {
     }
   });
 
+  it("includes goal retrieval tools on readonly path only", () => {
+    expect(READONLY_FN_TOOLS.has("fn_goal_list")).toBe(true);
+    expect(READONLY_FN_TOOLS.has("fn_goal_show")).toBe(true);
+    expect(READONLY_FN_TOOLS.has("fn_goal_create")).toBe(false);
+    expect(READONLY_FN_TOOLS.has("fn_goal_archive")).toBe(false);
+  });
+
   it("classifies fn_web_fetch as network_api in both action and permanent sets", () => {
     expect(ACTION_GATE_NETWORK_API_TOOLS.has("fn_web_fetch")).toBe(true);
     expect(NETWORK_API_TOOLS.has("fn_web_fetch")).toBe(true);
