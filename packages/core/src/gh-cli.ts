@@ -246,12 +246,16 @@ function describeAbortReason(reason: unknown): string {
   return "aborted";
 }
 
+function shouldAutoAppendJsonFlag(args: string[]): boolean {
+  return args[0] !== "api" && !args.includes("--json");
+}
+
 /**
  * Execute a gh CLI command and parse the JSON output.
- * Requires the command to support --json flag.
+ * Auto-appends `--json` except for `gh api`, which emits JSON natively and rejects that flag.
  */
 export function runGhJson<T>(args: string[], cwd?: string): T {
-  const jsonArgs = args.includes("--json") ? args : [...args, "--json"];
+  const jsonArgs = shouldAutoAppendJsonFlag(args) ? [...args, "--json"] : args;
   const output = runGh(jsonArgs, cwd);
   try {
     return JSON.parse(output) as T;
@@ -262,13 +266,13 @@ export function runGhJson<T>(args: string[], cwd?: string): T {
 
 /**
  * Execute a gh CLI command asynchronously and parse the JSON output.
- * Requires the command to support --json flag.
+ * Auto-appends `--json` except for `gh api`, which emits JSON natively and rejects that flag.
  *
  * Forwards `signal` / `timeoutMs` to the underlying `runGhAsync` so callers
  * can bound the call from outside (e.g. an AI tool's `signal` argument).
  */
 export async function runGhJsonAsync<T>(args: string[], cwdOrOptions?: string | RunGhOptions): Promise<T> {
-  const jsonArgs = args.includes("--json") ? args : [...args, "--json"];
+  const jsonArgs = shouldAutoAppendJsonFlag(args) ? [...args, "--json"] : args;
   const output = await runGhAsync(jsonArgs, cwdOrOptions);
   try {
     return JSON.parse(output) as T;

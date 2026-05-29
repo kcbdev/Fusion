@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 
-const { mockExecFile } = vi.hoisted(() => ({
+const { mockExecFile, mockExecFileSync } = vi.hoisted(() => ({
   mockExecFile: vi.fn(),
+  mockExecFileSync: vi.fn(),
 }));
 
 // Mock child_process before importing gh-cli so runGhAsync's `execFile`
@@ -9,7 +10,7 @@ const { mockExecFile } = vi.hoisted(() => ({
 // is what we need to exercise; the synchronous helpers don't go through it.
 vi.mock("node:child_process", async () => {
   const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
-  return { ...actual, execFile: mockExecFile };
+  return { ...actual, execFile: mockExecFile, execFileSync: mockExecFileSync };
 });
 
 import {
@@ -17,6 +18,8 @@ import {
   getGhErrorMessage,
   parseRepoFromRemote,
   runGhAsync,
+  runGhJson,
+  runGhJsonAsync,
   type GhErrorCode,
 } from "../gh-cli.js";
 
@@ -272,6 +275,77 @@ describe("gh-cli functions (inline tests)", () => {
         expect(ghErr.stderr).toBe("error message");
       }
     });
+  });
+});
+
+describe("runGhJson / runGhJsonAsync", () => {
+  it("does not append --json for gh api async", async () => {
+    mockExecFile.mockReset();
+    mockExecFile.mockImplementation((_bin, args, _opts, callback) => {
+      callback?.(null, "[]", "");
+      expect(args).toEqual(["api", "repos/o/r/issues/1/comments?per_page=100&page=1"]);
+      return {} as ReturnType<typeof import("node:child_process").execFile>;
+    });
+
+    const result = await runGhJsonAsync<unknown[]>(["api", "repos/o/r/issues/1/comments?per_page=100&page=1"]);
+    expect(result).toEqual([]);
+  });
+
+  it("auto-appends --json once for non-api async commands", async () => {
+    mockExecFile.mockReset();
+    mockExecFile.mockImplementation((_bin, args, _opts, callback) => {
+      callback?.(null, '{"ok":true}', "");
+      expect(args).toEqual(["pr", "view", "1", "--repo", "o/r", "--json"]);
+      return {} as ReturnType<typeof import("node:child_process").execFile>;
+    });
+
+    const result = await runGhJsonAsync<{ ok: boolean }>(["pr", "view", "1", "--repo", "o/r"]);
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("does not double-append --json for async commands", async () => {
+    mockExecFile.mockReset();
+    mockExecFile.mockImplementation((_bin, args, _opts, callback) => {
+      callback?.(null, '{"ok":true}', "");
+      expect(args).toEqual(["pr", "view", "1", "--json", "reviewDecision"]);
+      return {} as ReturnType<typeof import("node:child_process").execFile>;
+    });
+
+    const result = await runGhJsonAsync<{ ok: boolean }>(["pr", "view", "1", "--json", "reviewDecision"]);
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("mirrors api/non-api/no-double-append behavior for sync commands", () => {
+    mockExecFileSync.mockReset();
+    mockExecFileSync
+      .mockReturnValueOnce('{"api":true}')
+      .mockReturnValueOnce('{"pr":true}')
+      .mockReturnValueOnce('{"already":true}');
+
+    expect(runGhJson<{ api: boolean }>(["api", "repos/o/r/issues/1/comments?per_page=100&page=1"])).toEqual({ api: true });
+    expect(mockExecFileSync).toHaveBeenNthCalledWith(1, "gh", ["api", "repos/o/r/issues/1/comments?per_page=100&page=1"], expect.any(Object));
+
+    expect(runGhJson<{ pr: boolean }>(["pr", "view", "1", "--repo", "o/r"])).toEqual({ pr: true });
+    expect(mockExecFileSync).toHaveBeenNthCalledWith(2, "gh", ["pr", "view", "1", "--repo", "o/r", "--json"], expect.any(Object));
+
+    expect(runGhJson<{ already: boolean }>(["pr", "view", "1", "--json", "reviewDecision"])).toEqual({ already: true });
+    expect(mockExecFileSync).toHaveBeenNthCalledWith(3, "gh", ["pr", "view", "1", "--json", "reviewDecision"], expect.any(Object));
+  });
+
+  it("throws the existing parse error message on invalid JSON", async () => {
+    mockExecFileSync.mockReset();
+    mockExecFileSync.mockReturnValue("not-json");
+    expect(() => runGhJson(["pr", "view", "1"]))
+      .toThrowError(/Failed to parse gh JSON output:/);
+
+    mockExecFile.mockReset();
+    mockExecFile.mockImplementation((_bin, _args, _opts, callback) => {
+      callback?.(null, "not-json", "");
+      return {} as ReturnType<typeof import("node:child_process").execFile>;
+    });
+
+    await expect(runGhJsonAsync(["pr", "view", "1"]))
+      .rejects.toThrowError(/Failed to parse gh JSON output:/);
   });
 });
 
