@@ -23,6 +23,7 @@ vi.mock("../../api", async () => {
     ...actual,
     fetchModels: vi.fn(),
     updateTask: vi.fn(),
+    updateGlobalSettings: vi.fn(),
   };
 });
 
@@ -32,6 +33,7 @@ vi.mock("../ProviderIcon", () => ({
 
 const mockFetchModels = api.fetchModels as ReturnType<typeof vi.fn>;
 const mockUpdateTask = api.updateTask as ReturnType<typeof vi.fn>;
+const mockUpdateGlobalSettings = api.updateGlobalSettings as ReturnType<typeof vi.fn>;
 
 const FAKE_TASK: Task = {
   id: "FN-001",
@@ -119,6 +121,7 @@ describe("ModelSelectorTab", () => {
       ...FAKE_TASK,
       ...updates,
     }));
+    mockUpdateGlobalSettings.mockResolvedValue({});
   });
 
   it("renders loading state initially", () => {
@@ -384,6 +387,50 @@ describe("ModelSelectorTab", () => {
     expect(screen.getByTestId("provider-icon-openai")).toBeInTheDocument();
   });
 
+  it("renders favorites from shared models response", async () => {
+    mockFetchModels.mockResolvedValueOnce({
+      models: MOCK_MODELS,
+      favoriteProviders: ["openai"],
+      favoriteModels: ["anthropic/claude-opus-4"],
+    });
+
+    render(<ModelSelectorTab task={FAKE_TASK} addToast={mockAddToast} />);
+    await waitForSelectors();
+    await openSelector("Executor Model");
+
+    expect(screen.getByLabelText("Remove openai from favorites")).toBeInTheDocument();
+    expect(screen.getByLabelText("Remove Claude Opus 4 from favorites")).toBeInTheDocument();
+  });
+
+  it("toggles provider/model favorites through shared global settings flow", async () => {
+    const user = userEvent.setup();
+    mockFetchModels.mockResolvedValueOnce({
+      models: MOCK_MODELS,
+      favoriteProviders: ["openai"],
+      favoriteModels: ["anthropic/claude-opus-4"],
+    });
+
+    render(<ModelSelectorTab task={FAKE_TASK} addToast={mockAddToast} />);
+    await waitForSelectors();
+    await user.click(getSelector("Executor Model"));
+
+    await user.click(screen.getByLabelText("Add anthropic to favorites"));
+    await waitFor(() => {
+      expect(mockUpdateGlobalSettings).toHaveBeenCalledWith({
+        favoriteProviders: ["anthropic", "openai"],
+        favoriteModels: ["anthropic/claude-opus-4"],
+      });
+    });
+
+    await user.click(screen.getByLabelText("Add Claude Sonnet 4.5 to favorites"));
+    await waitFor(() => {
+      expect(mockUpdateGlobalSettings).toHaveBeenCalledWith({
+        favoriteProviders: ["anthropic", "openai"],
+        favoriteModels: ["anthropic/claude-sonnet-4-5", "anthropic/claude-opus-4"],
+      });
+    });
+  });
+
   it("auto-saves executor and validator changes immediately", async () => {
     render(<ModelSelectorTab task={FAKE_TASK} addToast={mockAddToast} />);
 
@@ -510,20 +557,18 @@ describe("ModelSelectorTab", () => {
     });
   });
 
-  it("shows error state when fetchModels fails", async () => {
+  it("shows empty state when fetchModels fails", async () => {
     mockFetchModels.mockRejectedValue(new Error("Network error"));
 
     render(<ModelSelectorTab task={FAKE_TASK} addToast={mockAddToast} />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Error loading models:/)).toBeInTheDocument();
+      expect(screen.getByText(/No models available/)).toBeInTheDocument();
     });
-
-    expect(screen.getByText("Retry")).toBeInTheDocument();
   });
 
   it("shows empty state when no models available", async () => {
-    mockFetchModels.mockResolvedValue({ models: [], favoriteProviders: [] });
+    mockFetchModels.mockResolvedValue({ models: [], favoriteProviders: [], favoriteModels: [] });
 
     render(<ModelSelectorTab task={FAKE_TASK} addToast={mockAddToast} />);
 

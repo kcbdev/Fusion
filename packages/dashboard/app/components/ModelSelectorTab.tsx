@@ -1,7 +1,6 @@
 import "./ModelSelectorTab.css";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { fetchModels, updateTask, updateGlobalSettings } from "../api";
-import type { ModelInfo } from "../api";
+import { updateTask } from "../api";
 import type { Settings, Task, TaskDetail } from "@fusion/core";
 import {
   getErrorMessage,
@@ -10,6 +9,8 @@ import {
   resolveTaskValidatorModel,
 } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
+import { useFavorites } from "../hooks/useFavorites";
+import { useModelsCache } from "../hooks/useModelsCache";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { ProviderIcon } from "./ProviderIcon";
 
@@ -109,11 +110,14 @@ function getSuccessToastMessage(target: "executor" | "validator" | "planning", s
 }
 
 export function ModelSelectorTab({ task, addToast, onTaskUpdated, settings }: ModelSelectorTabProps) {
-  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
-  const [favoriteProviders, setFavoriteProviders] = useState<string[]>([]);
-  const [favoriteModels, setFavoriteModels] = useState<string[]>([]);
-  const [modelsLoading, setModelsLoading] = useState(false);
-  const [modelsError, setModelsError] = useState<string | null>(null);
+  const {
+    availableModels,
+    favoriteProviders,
+    favoriteModels,
+    toggleFavoriteProvider,
+    toggleFavoriteModel,
+  } = useFavorites();
+  const { loading: modelsLoading } = useModelsCache();
 
   const [selectedExecutor, setSelectedExecutor] = useState<ModelSelection>(() => getExecutorSelection(task));
   const [savedExecutor, setSavedExecutor] = useState<ModelSelection>(() => getExecutorSelection(task));
@@ -127,61 +131,21 @@ export function ModelSelectorTab({ task, addToast, onTaskUpdated, settings }: Mo
 
   const activeTaskIdRef = useRef(task.id);
 
-  // Load available models on mount
-  useEffect(() => {
-    setModelsLoading(true);
-    setModelsError(null);
-    fetchModels()
-      .then((response) => {
-        setAvailableModels(response.models);
-        setFavoriteProviders(response.favoriteProviders);
-        setFavoriteModels(response.favoriteModels);
-      })
-      .catch((err) => {
-        setModelsError(err.message || "Failed to load models");
-      })
-      .finally(() => {
-        setModelsLoading(false);
-      });
-  }, []);
-
-  // Handle toggle favorite
   const handleToggleFavorite = useCallback(async (provider: string) => {
-    const currentFavorites = favoriteProviders;
-    const isFavorite = currentFavorites.includes(provider);
-    const newFavorites = isFavorite
-      ? currentFavorites.filter((p) => p !== provider)
-      : [provider, ...currentFavorites]; // Add to front
-
-    setFavoriteProviders(newFavorites);
-
     try {
-      await updateGlobalSettings({ favoriteProviders: newFavorites, favoriteModels });
+      await toggleFavoriteProvider(provider);
     } catch {
-      // Revert on error
-      setFavoriteProviders(currentFavorites);
       addToast("Failed to update favorites", "error");
     }
-  }, [favoriteProviders, favoriteModels, addToast]);
+  }, [toggleFavoriteProvider, addToast]);
 
-  // Handle toggle model favorite
   const handleToggleModelFavorite = useCallback(async (modelId: string) => {
-    const currentFavorites = favoriteModels;
-    const isFavorite = currentFavorites.includes(modelId);
-    const newFavorites = isFavorite
-      ? currentFavorites.filter((m) => m !== modelId)
-      : [modelId, ...currentFavorites]; // Add to front
-
-    setFavoriteModels(newFavorites);
-
     try {
-      await updateGlobalSettings({ favoriteProviders, favoriteModels: newFavorites });
+      await toggleFavoriteModel(modelId);
     } catch {
-      // Revert on error
-      setFavoriteModels(currentFavorites);
       addToast("Failed to update model favorites", "error");
     }
-  }, [favoriteModels, favoriteProviders, addToast]);
+  }, [toggleFavoriteModel, addToast]);
 
   useEffect(() => {
     activeTaskIdRef.current = task.id;
@@ -402,28 +366,6 @@ export function ModelSelectorTab({ task, addToast, onTaskUpdated, settings }: Mo
 
       {modelsLoading ? (
         <div className="model-selector-loading">Loading available models…</div>
-      ) : modelsError ? (
-        <div className="model-selector-error">
-          Error loading models: {modelsError}
-          <button
-            className="btn btn-sm"
-            onClick={() => {
-              setModelsLoading(true);
-              setModelsError(null);
-              fetchModels()
-                .then((response) => {
-                  setAvailableModels(response.models);
-                  setFavoriteProviders(response.favoriteProviders);
-                  setFavoriteModels(response.favoriteModels);
-                })
-                .catch((err) => setModelsError(err.message))
-                .finally(() => setModelsLoading(false));
-            }}
-            style={{ marginLeft: "8px" }}
-          >
-            Retry
-          </button>
-        </div>
       ) : availableModels.length === 0 ? (
         <div className="model-selector-empty">
           No models available. Configure authentication in Settings to enable model selection.
