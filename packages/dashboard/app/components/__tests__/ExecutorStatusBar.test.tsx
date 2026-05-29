@@ -495,6 +495,23 @@ describe("ExecutorStatusBar", () => {
     });
   });
 
+  describe("mobile keyboard behavior", () => {
+    it("hides bar when hideWhenKeyboardOpen is true", () => {
+      const { container } = render(<ExecutorStatusBar tasks={emptyTasks} hideWhenKeyboardOpen={true} />);
+      expect(container.firstChild).toBeNull();
+    });
+
+    it("applies keyboard-open class when keyboardOpen is true", () => {
+      render(<ExecutorStatusBar tasks={emptyTasks} keyboardOpen={true} />);
+      expect(screen.getByRole("status")).toHaveClass("executor-status-bar--keyboard-open");
+    });
+
+    it("does not apply keyboard-open class when keyboardOpen is false", () => {
+      render(<ExecutorStatusBar tasks={emptyTasks} keyboardOpen={false} />);
+      expect(screen.getByRole("status")).not.toHaveClass("executor-status-bar--keyboard-open");
+    });
+  });
+
   describe("layout integration", () => {
     it("exposes stable executor-status-bar class for external layout hooks", () => {
       render(<ExecutorStatusBar tasks={emptyTasks} />);

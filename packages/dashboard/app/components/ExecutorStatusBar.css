@@ -298,6 +298,12 @@
     bottom: calc(var(--icb-bottom-offset, 0px) + var(--mobile-nav-height) + max(env(safe-area-inset-bottom, 0px), 12px) + var(--standalone-bottom-gap));
   }
 
+  /* Keyboard-open override: ignore ICB offset so the keyboard can cover the
+     footer instead of displacing it upward by keyboard height. */
+  .executor-status-bar.executor-status-bar--keyboard-open {
+    bottom: 0;
+  }
+
   .executor-status-bar__segment {
     min-width: 0;
     gap: 4px;

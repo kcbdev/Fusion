@@ -635,14 +635,16 @@ describe("MobileNavBar", () => {
     expect(container.querySelector(".mobile-nav-bar")).toBeNull();
   });
 
-  it("renders nav bar when keyboardOpen is true on mobile", () => {
+  it("renders nav bar with keyboard-open class when keyboardOpen is true on mobile", () => {
     const { container } = render(<MobileNavBar {...createDefaultProps()} keyboardOpen={true} />);
     expect(container.querySelector(".mobile-nav-bar")).not.toBeNull();
+    expect(container.querySelector(".mobile-nav-bar--keyboard-open")).not.toBeNull();
   });
 
-  it("renders nav bar when keyboardOpen is false on mobile", () => {
+  it("renders nav bar without keyboard-open class when keyboardOpen is false on mobile", () => {
     const { container } = render(<MobileNavBar {...createDefaultProps()} keyboardOpen={false} />);
     expect(container.querySelector(".mobile-nav-bar")).not.toBeNull();
+    expect(container.querySelector(".mobile-nav-bar--keyboard-open")).toBeNull();
   });
 
   it("applies footer-visible class when footer is shown", () => {

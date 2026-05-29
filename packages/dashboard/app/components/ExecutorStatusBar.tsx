@@ -32,10 +32,12 @@ interface ExecutorStatusBarProps {
   currentProjectPath?: string;
   /** Opens the workspace-aware file browser to the project workspace. */
   onOpenProjectDirectory?: () => void;
-  /** When true on mobile, hide the bar so it doesn't slide over messages
-   *  during visualViewport pans (position:fixed is anchored to layout
-   *  viewport, which iOS leaves below the keyboard). */
+  /** When true on mobile, force bottom pinning so ICB compensation does not
+   *  push the bar above the keyboard; keyboard may cover it instead. */
   keyboardOpen?: boolean;
+  /** iOS-only hide guard to prevent footer drifting over content while
+   *  visualViewport settles during keyboard transitions. */
+  hideWhenKeyboardOpen?: boolean;
 }
 
 /**
@@ -85,8 +87,8 @@ function getStateDisplay(state: ExecutorState): { label: string; color: string; 
  * - Executor state badge (idle/running/paused)
  * - Last activity timestamp
  */
-export function ExecutorStatusBar({ tasks, projectId, taskStuckTimeoutMs, staleHighFanoutBlockerAgeThresholdMs, backgroundSessions, backgroundGenerating, backgroundNeedsInput, onOpenBackgroundSession, onDismissBackgroundSession, lastFetchTimeMs, currentProjectPath, onOpenProjectDirectory, keyboardOpen }: ExecutorStatusBarProps) {
-  if (keyboardOpen) return null;
+export function ExecutorStatusBar({ tasks, projectId, taskStuckTimeoutMs, staleHighFanoutBlockerAgeThresholdMs, backgroundSessions, backgroundGenerating, backgroundNeedsInput, onOpenBackgroundSession, onDismissBackgroundSession, lastFetchTimeMs, currentProjectPath, onOpenProjectDirectory, keyboardOpen, hideWhenKeyboardOpen }: ExecutorStatusBarProps) {
+  if (hideWhenKeyboardOpen) return null;
   const { stats, loading, error } = useExecutorStats(tasks, projectId, taskStuckTimeoutMs, lastFetchTimeMs);
   const [isProjectPathVisible, setIsProjectPathVisible] = useState(false);
 
@@ -136,7 +138,7 @@ export function ExecutorStatusBar({ tasks, projectId, taskStuckTimeoutMs, staleH
 
   return (
     <div
-      className={`executor-status-bar ${stats.executorState === "running" ? "executor-status-bar--running" : ""}`}
+      className={`executor-status-bar ${stats.executorState === "running" ? "executor-status-bar--running" : ""}${keyboardOpen ? " executor-status-bar--keyboard-open" : ""}`}
       role="status"
       aria-label="Executor status"
     >
