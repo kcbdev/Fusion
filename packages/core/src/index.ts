@@ -174,6 +174,7 @@ export {
   type DeterministicGuardOptions,
   type DeterministicGuardOutcome,
 } from "./duplicate-guard.js";
+export type { TaskDependencyMutation } from "./store.js";
 export {
   findSameAgentDuplicates,
   archiveAsSameAgentDuplicate,

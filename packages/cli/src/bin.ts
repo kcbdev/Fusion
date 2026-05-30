@@ -119,7 +119,7 @@ async function loadCommandHandlers() {
   const { runServe } = await import("./commands/serve.js");
   const { runDaemon } = await import("./commands/daemon.js");
   const { runDesktop } = await import("./commands/desktop.js");
-  const { runTaskCreate, runTaskList, runTaskMove, runTaskMerge, runTaskUpdate, runTaskLog, runTaskLogs, runTaskShow, runTaskAttach, runTaskPause, runTaskUnpause, runTaskImportFromGitHub, runTaskDuplicate, runTaskArchive, runTaskUnarchive, runTaskRefine, runTaskPlan, runTaskDelete, runTaskRetry, runTaskComment, runTaskComments, runTaskSteer, runTaskSetNode, runTaskClearNode, runTaskPrCreate } = await import("./commands/task.js");
+  const { runTaskCreate, runTaskList, runTaskMove, runTaskMerge, runTaskUpdate, runTaskDeps, runTaskLog, runTaskLogs, runTaskShow, runTaskAttach, runTaskPause, runTaskUnpause, runTaskImportFromGitHub, runTaskDuplicate, runTaskArchive, runTaskUnarchive, runTaskRefine, runTaskPlan, runTaskDelete, runTaskRetry, runTaskComment, runTaskComments, runTaskSteer, runTaskSetNode, runTaskClearNode, runTaskPrCreate } = await import("./commands/task.js");
   const { runSettingsShow, runSettingsSet } = await import("./commands/settings.js");
   const { runSettingsExport } = await import("./commands/settings-export.js");
   const { runSettingsImport } = await import("./commands/settings-import.js");
@@ -153,6 +153,7 @@ async function loadCommandHandlers() {
     runTaskMove,
     runTaskMerge,
     runTaskUpdate,
+    runTaskDeps,
     runTaskLog,
     runTaskLogs,
     runTaskShow,
@@ -274,6 +275,7 @@ Usage:
                                       Show task agent execution logs
   fn task move <id> <col>             Move a task to a column
   fn task update <id> <step> <status> Update step status (pending|in-progress|done|skipped)
+  fn task deps <op> <id> ...        Add/remove/replace/set task dependencies
   fn task log <id> <message>          Add a log entry
   fn task merge <id>                  Merge an in-review task and close it
   fn task duplicate <id>              Duplicate a task (creates copy in triage)
@@ -562,6 +564,7 @@ async function main() {
     runTaskMove,
     runTaskMerge,
     runTaskUpdate,
+    runTaskDeps,
     runTaskLog,
     runTaskLogs,
     runTaskShow,
@@ -1086,6 +1089,20 @@ async function main() {
               process.exit(1);
             }
             await runTaskUpdate(id, step, status, projectName);
+            break;
+          }
+          case "deps": {
+            const operation = args[2];
+            const id = args[3];
+            const dependencyArgs = args.slice(4);
+            if (!operation || !id || !["add", "remove", "replace", "set"].includes(operation)) {
+              console.error("Usage: fn task deps add <id> <dependency>");
+              console.error("       fn task deps remove <id> <dependency>");
+              console.error("       fn task deps replace <id> <old> <new>");
+              console.error("       fn task deps set <id> [dependency ...]");
+              process.exit(1);
+            }
+            await runTaskDeps(operation as "add" | "remove" | "replace" | "set", id, dependencyArgs, projectName);
             break;
           }
           case "log": {

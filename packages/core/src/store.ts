@@ -631,6 +631,13 @@ export interface TaskStoreEvents {
  * references *before* deleting the parent — otherwise the dependents
  * would be permanently blocked by a nonexistent id.
  */
+
+export type TaskDependencyMutation =
+  | { operation: "add"; dependency: string }
+  | { operation: "remove"; dependency: string }
+  | { operation: "replace"; from: string; to: string }
+  | { operation: "set"; dependencies: string[] };
+
 export class TaskHasDependentsError extends Error {
   readonly taskId: string;
   readonly dependentIds: string[];
@@ -5556,6 +5563,168 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     if (resetContent !== content) {
       await writeFile(promptPath, resetContent, "utf-8");
     }
+  }
+
+
+  async updateTaskDependencies(
+    id: string,
+    mutation: TaskDependencyMutation,
+    runContext?: RunMutationContext,
+  ): Promise<Task> {
+    return this.withTaskLock(id, async () => {
+      const dir = this.taskDir(id);
+      const task = await this.readTaskJson(dir);
+      const previousDependencies = [...(task.dependencies ?? [])];
+      const normalizedCurrent = previousDependencies.map((dependency) => dependency.trim()).filter(Boolean);
+      let nextDependencies: string[];
+      let action: string;
+
+      const assertNotSelf = (dependencyId: string) => {
+        if (dependencyId === id) {
+          throw new Error(`Task ${id} cannot depend on itself`);
+        }
+      };
+      const assertTaskExists = (dependencyId: string) => {
+        if (!this.readTaskFromDb(dependencyId)) {
+          throw new Error(`Dependency task ${dependencyId} not found`);
+        }
+      };
+      const assertUnique = (dependencies: readonly string[]) => {
+        const seen = new Set<string>();
+        for (const dependencyId of dependencies) {
+          if (seen.has(dependencyId)) {
+            throw new Error(`Task ${id} already depends on ${dependencyId}`);
+          }
+          seen.add(dependencyId);
+        }
+      };
+      const normalizeDependency = (dependencyId: string, label = "dependency") => {
+        const normalized = dependencyId.trim();
+        if (!normalized) {
+          throw new Error(`${label} is required`);
+        }
+        assertNotSelf(normalized);
+        assertTaskExists(normalized);
+        return normalized;
+      };
+
+      switch (mutation.operation) {
+        case "add": {
+          const dependency = normalizeDependency(mutation.dependency);
+          if (normalizedCurrent.includes(dependency)) {
+            throw new Error(`Task ${id} already depends on ${dependency}`);
+          }
+          nextDependencies = [...normalizedCurrent, dependency];
+          action = `Added dependency ${dependency}`;
+          break;
+        }
+        case "remove": {
+          const dependency = mutation.dependency.trim();
+          if (!dependency) {
+            throw new Error("dependency is required");
+          }
+          if (!normalizedCurrent.includes(dependency)) {
+            throw new Error(`Task ${id} does not depend on ${dependency}`);
+          }
+          nextDependencies = normalizedCurrent.filter((candidate) => candidate !== dependency);
+          action = `Removed dependency ${dependency}`;
+          break;
+        }
+        case "replace": {
+          const from = mutation.from.trim();
+          if (!from) {
+            throw new Error("from dependency is required");
+          }
+          const to = normalizeDependency(mutation.to, "replacement dependency");
+          if (!normalizedCurrent.includes(from)) {
+            throw new Error(`Task ${id} does not depend on ${from}`);
+          }
+          if (from !== to && normalizedCurrent.includes(to)) {
+            throw new Error(`Task ${id} already depends on ${to}`);
+          }
+          nextDependencies = normalizedCurrent.map((dependency) => dependency === from ? to : dependency);
+          action = `Replaced dependency ${from} with ${to}`;
+          break;
+        }
+        case "set": {
+          nextDependencies = mutation.dependencies.map((dependency) => normalizeDependency(dependency));
+          assertUnique(nextDependencies);
+          action = nextDependencies.length > 0
+            ? `Set dependencies to ${nextDependencies.join(", ")}`
+            : "Cleared dependencies";
+          break;
+        }
+      }
+
+      const selfDefeatingDep = detectSelfDefeatingDependency(task.title, nextDependencies);
+      if (selfDefeatingDep) {
+        throw new SelfDefeatingDependencyError(
+          task.title?.trim() ?? "",
+          selfDefeatingDep.matchedVerb,
+          selfDefeatingDep.operandTaskId,
+        );
+      }
+
+      await this.assertNoDependencyCycle(
+        id,
+        nextDependencies,
+        "updateTask",
+        new Map([[id, nextDependencies]]),
+      );
+
+      const previousDependencySet = new Set(previousDependencies);
+      const hasNewDependencies = nextDependencies.some((dependencyId) => !previousDependencySet.has(dependencyId));
+
+      task.dependencies = nextDependencies;
+      const unresolvedDependency = nextDependencies.find((dependencyId) => {
+        const dependency = this.readTaskFromDb(dependencyId);
+        return dependency?.column !== "done" && dependency?.column !== "archived";
+      });
+      if (unresolvedDependency) {
+        const currentBlocker = task.blockedBy ? this.readTaskFromDb(task.blockedBy) : undefined;
+        const currentBlockerResolved = currentBlocker?.column === "done" || currentBlocker?.column === "archived";
+        if (!task.blockedBy || !nextDependencies.includes(task.blockedBy) || !currentBlocker || currentBlockerResolved) {
+          task.blockedBy = unresolvedDependency;
+        }
+      } else {
+        task.blockedBy = undefined;
+      }
+      task.updatedAt = new Date().toISOString();
+      task.log ??= [];
+      if (hasNewDependencies && task.column === "todo") {
+        task.column = "triage";
+        task.status = undefined;
+        task.columnMovedAt = task.updatedAt;
+        task.log.push({
+          timestamp: task.updatedAt,
+          action: "Moved to triage for re-specification — new dependency added",
+          ...(runContext ? { runContext } : {}),
+        });
+      }
+      task.log.push({
+        timestamp: task.updatedAt,
+        action,
+        ...(runContext ? { runContext } : {}),
+      });
+
+      const auditEvent: RunAuditEventInput = {
+        taskId: id,
+        agentId: runContext?.agentId ?? "manual",
+        runId: runContext?.runId ?? "manual",
+        domain: "database",
+        mutationType: "task:dependencies:update",
+        target: id,
+        metadata: {
+          mutation,
+          previousDependencies,
+          dependencies: nextDependencies,
+          blockedBy: task.blockedBy ?? null,
+        },
+      };
+      await this.atomicWriteTaskJsonWithAudit(dir, task, auditEvent);
+      this.emit("task:updated", task);
+      return task;
+    });
   }
 
   async updateTask(

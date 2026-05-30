@@ -14,6 +14,7 @@ const commandMocks = vi.hoisted(() => ({
   runTaskMove: vi.fn(),
   runTaskMerge: vi.fn(),
   runTaskUpdate: vi.fn(),
+  runTaskDeps: vi.fn(),
   runTaskLog: vi.fn(),
   runTaskLogs: vi.fn(),
   runTaskShow: vi.fn(),
@@ -122,6 +123,7 @@ vi.mock("../commands/task.js", () => ({
   runTaskMove: commandMocks.runTaskMove,
   runTaskMerge: commandMocks.runTaskMerge,
   runTaskUpdate: commandMocks.runTaskUpdate,
+  runTaskDeps: commandMocks.runTaskDeps,
   runTaskLog: commandMocks.runTaskLog,
   runTaskLogs: commandMocks.runTaskLogs,
   runTaskShow: commandMocks.runTaskShow,
@@ -399,6 +401,32 @@ describe("bin command routing and fallbacks", () => {
     expect(errorSpy).toHaveBeenCalledWith(
       "Usage: fn backup --create | --list | --cleanup | --restore <filename>",
     );
+  });
+
+
+  it("routes task dependency replacement", async () => {
+    await runBin(["task", "deps", "replace", "FN-155", "FN-191", "FN-195", "--project", "atlas-notes"]);
+    expect(commandMocks.runTaskDeps).toHaveBeenCalledWith(
+      "replace",
+      "FN-155",
+      ["FN-191", "FN-195"],
+      "atlas-notes",
+    );
+  });
+
+  it("routes task dependency add", async () => {
+    await runBin(["task", "deps", "add", "FN-155", "FN-191", "--project", "atlas-notes"]);
+    expect(commandMocks.runTaskDeps).toHaveBeenCalledWith(
+      "add",
+      "FN-155",
+      ["FN-191"],
+      "atlas-notes",
+    );
+  });
+
+  it("errors for task deps missing operation", async () => {
+    await expect(runBin(["task", "deps"])).rejects.toThrow("process.exit:1");
+    expect(errorSpy).toHaveBeenCalledWith("Usage: fn task deps add <id> <dependency>");
   });
 
   it("errors for task move missing arguments", async () => {

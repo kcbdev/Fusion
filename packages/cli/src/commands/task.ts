@@ -1,4 +1,4 @@
-import { TaskStore, COLUMNS, COLUMN_LABELS, CentralCore, buildManualRetryResetPatch, extractIntentSignature, findNearDuplicates, getTaskDuplicateLineage, reconcileDeterministicDuplicate, runDeterministicDuplicateGuard, type Settings, type Column, type StepStatus, type AgentLogType, type AgentLogEntry, type IntentSignature, type NearDuplicateCandidate, type NearDuplicateMatch } from "@fusion/core";
+import { TaskStore, COLUMNS, COLUMN_LABELS, CentralCore, buildManualRetryResetPatch, extractIntentSignature, findNearDuplicates, getTaskDuplicateLineage, reconcileDeterministicDuplicate, runDeterministicDuplicateGuard, type Settings, type Column, type StepStatus, type AgentLogType, type AgentLogEntry, type IntentSignature, type NearDuplicateCandidate, type NearDuplicateMatch, type TaskDependencyMutation } from "@fusion/core";
 import { aiMergeTask } from "@fusion/engine";
 import { createInterface } from "node:readline/promises";
 import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
@@ -519,6 +519,43 @@ export async function runTaskUpdate(id: string, stepStr: string, status: string,
   console.log();
 }
 
+
+export async function runTaskDeps(
+  operation: "add" | "remove" | "replace" | "set",
+  id: string,
+  dependencyArgs: string[],
+  projectName?: string,
+) {
+  const store = await getStore(projectName);
+  let mutation: TaskDependencyMutation;
+  switch (operation) {
+    case "add":
+      if (dependencyArgs.length !== 1) throw new Error("Usage: fn task deps add <task> <dependency>");
+      mutation = { operation, dependency: dependencyArgs[0] };
+      break;
+    case "remove":
+      if (dependencyArgs.length !== 1) throw new Error("Usage: fn task deps remove <task> <dependency>");
+      mutation = { operation, dependency: dependencyArgs[0] };
+      break;
+    case "replace":
+      if (dependencyArgs.length !== 2) throw new Error("Usage: fn task deps replace <task> <old> <new>");
+      mutation = { operation, from: dependencyArgs[0], to: dependencyArgs[1] };
+      break;
+    case "set":
+      mutation = { operation, dependencies: dependencyArgs };
+      break;
+  }
+  const task = await store.updateTaskDependencies(id, mutation);
+  console.log();
+  console.log(`  ✓ ${task.id}: dependencies → ${task.dependencies.length ? task.dependencies.join(", ") : "none"}`);
+  if (task.blockedBy) {
+    console.log(`    Blocked by: ${task.blockedBy}`);
+  } else {
+    console.log("    Blocked by: none");
+  }
+  console.log();
+}
+
 export async function runTaskLog(id: string, message: string, outcome?: string, projectName?: string) {
   const store = await getStore(projectName);
   await store.logEntry(id, message, outcome);
@@ -600,6 +637,7 @@ function filterEntries(entries: AgentLogEntry[], options: LogsOptions): AgentLog
 
   return result;
 }
+
 
 export async function runTaskLogs(id: string, options: LogsOptions = {}, projectName?: string) {
   const projectContext = await getProjectContext(projectName);
