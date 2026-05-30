@@ -46,6 +46,7 @@ import {
   type FinalizePlanOverride,
   fetchWebContent,
   assertNoSecretPlaintext,
+  emitGoalRetrievalAudit,
 } from "@fusion/engine";
 import * as dashboard from "@fusion/dashboard";
 import { resolve, basename, extname, join } from "node:path";
@@ -2402,12 +2403,22 @@ export default function kbExtension(pi: ExtensionAPI) {
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const fnCtx = ctx as typeof ctx & {
+        agentId?: string;
+        runId?: string;
+        taskId?: string;
+      };
       const store = await getStore(ctx.cwd);
       const goalStore = store.getGoalStore();
       const status = params.status ?? "active";
       const goals = status === "all" ? goalStore.listGoals() : goalStore.listGoals({ status });
       const activeCount = goalStore.listGoals({ status: "active" }).length;
       const softWarning = activeCount >= 3;
+
+      emitGoalRetrievalAudit(store, fnCtx, {
+        toolName: "fn_goal_list",
+        resultCount: goals.length,
+      });
 
       const lines: string[] = [];
       lines.push(`Goals (${goals.length}) [filter: ${status}]`);
@@ -2537,11 +2548,22 @@ export default function kbExtension(pi: ExtensionAPI) {
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const fnCtx = ctx as typeof ctx & {
+        agentId?: string;
+        runId?: string;
+        taskId?: string;
+      };
       const store = await getStore(ctx.cwd);
       const goalStore = store.getGoalStore();
       const goal = goalStore.getGoal(params.id);
 
       if (!goal) {
+        emitGoalRetrievalAudit(store, fnCtx, {
+          toolName: "fn_goal_show",
+          resultCount: 0,
+          goalId: params.id,
+          notFound: true,
+        });
         return {
           isError: true,
           content: [{ type: "text", text: `Goal ${params.id} not found` }],
@@ -2557,6 +2579,12 @@ export default function kbExtension(pi: ExtensionAPI) {
       if (goal.description) {
         lines.push(`Description: ${goal.description}`);
       }
+
+      emitGoalRetrievalAudit(store, fnCtx, {
+        toolName: "fn_goal_show",
+        resultCount: 1,
+        goalId: params.id,
+      });
 
       return {
         content: [{ type: "text", text: lines.join("\n") }],

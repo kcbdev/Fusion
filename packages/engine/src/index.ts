@@ -183,6 +183,16 @@ export {
   type GoalInjectionTruncationEvent,
 } from "./goal-context-injector.js";
 export {
+  emitGoalAnchoringAudit,
+  emitGoalRetrievalAudit,
+  GOAL_INJECTION_APPLIED,
+  GOAL_INJECTION_SKIPPED,
+  GOAL_RETRIEVAL_INVOKED,
+  type GoalAnchoringLane,
+  type GoalInjectionAuditInput,
+  type GoalRetrievalAuditInput,
+} from "./goal-anchoring-audit.js";
+export {
   resolveWorktrunkBinary,
   installWorktrunk,
   probeWorktrunk,

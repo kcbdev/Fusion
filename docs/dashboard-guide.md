@@ -297,6 +297,7 @@ After resolution:
 - Restoring from stash ref re-applies the stash and may reintroduce conflicts for manual handling
 
 You may also see matching run-audit events in logs, including `pull:fast-forward` and `stash:pop-conflict`.
+`goal:*` run-audit events (`goal:injection-applied`, `goal:injection-skipped`, `goal:retrieval-invoked`) use the same timeline endpoint and are filterable with `startTime`/`endTime` query params.
 
 ## Documents View
 

@@ -8,7 +8,7 @@ const execAsync = promisify(exec);
 import { delimiter, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { existsSync, realpathSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
-import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, Goal } from "@fusion/core";
+import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings } from "@fusion/core";
 import { RetryStormError, TaskDeletedError, serializeRetryStormError } from "@fusion/core";
 import {
   ApprovalRequestStore,
@@ -100,6 +100,7 @@ import {
 } from "./agent-instructions.js";
 import { buildPromptLayers, collapsePromptLayers } from "./prompt-layers.js";
 import { buildGoalContextSection } from "./goal-context-injector.js";
+import { emitGoalAnchoringAudit } from "./goal-anchoring-audit.js";
 import type { AgentReflectionService } from "./agent-reflection.js";
 import { createRunAuditor, generateSyntheticRunId, type EngineRunContext, type RunAuditor } from "./run-audit.js";
 import { AutoRecoveryDispatcher } from "./auto-recovery.js";
@@ -4153,13 +4154,18 @@ export class TaskExecutor {
           executorLog.log(`${task.id}: applied plugin prompt contributions for executor-system surface`);
         }
 
-        const goalStore = typeof (this.store as { getGoalStore?: unknown }).getGoalStore === "function"
-          ? (this.store as { getGoalStore: () => { listGoals?: (input: { status: "active" }) => Goal[] } }).getGoalStore()
-          : undefined;
-        const activeGoals = typeof goalStore?.listGoals === "function"
-          ? goalStore.listGoals({ status: "active" })
+        const activeGoals = typeof this.store.getGoalStore === "function"
+          ? this.store.getGoalStore().listGoals({ status: "active" })
           : [];
-        const executorGoalContext = buildGoalContextSection({ activeGoals }).text;
+        const executorGoalInjection = buildGoalContextSection({ activeGoals });
+        await emitGoalAnchoringAudit(audit, {
+          lane: "executor",
+          taskId: task.id,
+          goalsInjected: executorGoalInjection.emittedGoalIds.length,
+          truncated: !!executorGoalInjection.truncated,
+          reason: executorGoalInjection.emittedGoalIds.length === 0 ? "no-active-goals" : undefined,
+        });
+        const executorGoalContext = executorGoalInjection.text;
 
         const executorLayers = buildPromptLayers({
           basePrompt: getExecutorSystemPrompt(settings),

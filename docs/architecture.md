@@ -714,6 +714,7 @@ Guardrails: this routine does **not** retry merges, does **not** apply to mixed/
 - `AgentLogger` (`agent-logger.ts`) — structured per-agent run logging
 - `RunAudit` (`run-audit.ts`) — mutation audit tracking (DB/git/filesystem)
   - FN-4956: Layer 3 merge-conflict arbitration now scope-partitions conflicted files before AI resolution. Out-of-scope conflicts are deterministically resolved to the integration branch (`git checkout --ours`) and unstaged, while only in-scope conflicts flow to AI. Integration branch defaults are resolved via `resolveIntegrationBranch(rootDir, settings)`. Audit events: `merge:layer3:foreign-file-skipped` and `merge:layer3:scope-override-bypass`.
+  - FN-5655 goal anchoring observability adds `database`-domain mutation types `goal:injection-applied`, `goal:injection-skipped`, and `goal:retrieval-invoked` so Slice 2 cite-rate tracking has a prompt-independent signal. Metadata uses counts/IDs only (`count`, `lane`, `toolName`, optional `truncated`/`reason`/`notFound`) and never stores prompt bodies or goal titles/descriptions. These events surface through `GET /api/agents/:id/runs/:runId/audit` and support the existing `startTime`/`endTime` filters.
 
 #### Key diagnostic points (log subsystem tags)
 - `[self-healing]` — startup/maintenance recovery pass outcomes.

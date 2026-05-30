@@ -589,7 +589,11 @@ export type DatabaseMutationType =
    */
   | "merger:transient-failure-auto-recovered"
   /** Metadata: { taskId, transientClass, recoveryCount, maxRecoveries, errorSnippet } */
-  | "merger:transient-failure-budget-exhausted";
+  | "merger:transient-failure-budget-exhausted"
+  /** Goal anchoring observability events (FN-5655). */
+  | "goal:injection-applied"
+  | "goal:injection-skipped"
+  | "goal:retrieval-invoked";
 
 // ── Filesystem mutation types ─────────────────────────────────────────────────
 
