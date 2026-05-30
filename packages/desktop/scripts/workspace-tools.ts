@@ -23,6 +23,10 @@ export function runWorkspaceBin(command: string, args: string[], cwd: string): P
       cwd,
       stdio: "inherit",
       env: process.env,
+      // On Windows the resolved bin is a .cmd shim; Node refuses to spawn
+      // .cmd/.bat without a shell (EINVAL) since CVE-2024-27980. resolveBin
+      // produces an absolute, space-free path, so shell quoting is safe here.
+      shell: process.platform === "win32",
     });
 
     child.on("error", rejectPromise);
