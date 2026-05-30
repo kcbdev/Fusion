@@ -41,6 +41,22 @@ function buildApp(seed: Task[]) {
       tasks.push(created);
       return created;
     }),
+    getTask: vi.fn().mockImplementation(async (id: string) => tasks.find((task) => task.id === id) ?? null),
+    updateTask: vi.fn().mockImplementation(async (id: string, updates: Record<string, unknown>) => {
+      const index = tasks.findIndex((task) => task.id === id);
+      if (index < 0) throw new Error("Task not found");
+      const current = tasks[index];
+      const sourceMetadataPatch = updates.sourceMetadataPatch as Record<string, unknown> | undefined;
+      const next = {
+        ...current,
+        ...updates,
+        ...(sourceMetadataPatch
+          ? { sourceMetadata: { ...(current.sourceMetadata ?? {}), ...sourceMetadataPatch } }
+          : {}),
+      };
+      tasks[index] = next;
+      return next;
+    }),
     recordActivity: vi.fn().mockResolvedValue(undefined),
   };
 
@@ -232,5 +248,34 @@ describe("routes /api/tasks near duplicate", () => {
       "Near-duplicate intent guard failed; proceeding",
       expect.objectContaining({ error: "boom" }),
     );
+  });
+
+  it("PATCH dismissNearDuplicate applies sourceMetadataPatch merge", async () => {
+    const seeded = mkTask({
+      id: "FN-6001",
+      title: "Near duplicate candidate",
+      description: "Test candidate",
+      column: "todo",
+      sourceMetadata: { nearDuplicateOf: "FN-1000" },
+    });
+    const { app, tasks } = buildApp([seeded]);
+
+    const res = await performRequest(
+      app,
+      "PATCH",
+      "/api/tasks/FN-6001",
+      JSON.stringify({ dismissNearDuplicate: true }),
+      { "content-type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect((res.body as Task).sourceMetadata).toMatchObject({
+      nearDuplicateOf: "FN-1000",
+      nearDuplicateDismissed: true,
+    });
+    expect(tasks[0]?.sourceMetadata).toMatchObject({
+      nearDuplicateOf: "FN-1000",
+      nearDuplicateDismissed: true,
+    });
   });
 });

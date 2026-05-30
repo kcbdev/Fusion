@@ -44,7 +44,7 @@ describe("reliability interactions: near-duplicate intake", () => {
     while (fixtures.length) await fixtures.pop()!.cleanup();
   });
 
-  it("archives newer task as near-duplicate and records activity", async () => {
+  it("flags newer task as near-duplicate and records activity", async () => {
     const fx = await createFixture();
     fixtures.push(fx);
 
@@ -61,10 +61,14 @@ describe("reliability interactions: near-duplicate intake", () => {
     await (fx.triage as any).finalizeApprovedTask(incoming, basePrompt, await fx.store.getSettings(), {});
 
     const updated = await fx.store.getTask(incoming.id);
-    expect(updated.column).toBe("archived");
+    expect(updated.column).toBe("todo");
     expect(updated.sourceMetadata?.nearDuplicateOf).toBeTruthy();
-    const activity = await fx.store.getActivityLog({ type: "task:auto-archived-near-duplicate", limit: 20 });
-    expect(activity.some((entry) => entry.taskId === incoming.id)).toBe(true);
+    expect(typeof updated.sourceMetadata?.nearDuplicateScore).toBe("number");
+    expect(Array.isArray(updated.sourceMetadata?.nearDuplicateSharedTokens)).toBe(true);
+    const flaggedActivity = await fx.store.getActivityLog({ type: "task:near-duplicate-flagged", limit: 20 });
+    expect(flaggedActivity.some((entry) => entry.taskId === incoming.id)).toBe(true);
+    const archivedActivity = await fx.store.getActivityLog({ type: "task:auto-archived-near-duplicate", limit: 20 });
+    expect(archivedActivity.some((entry) => entry.taskId === incoming.id)).toBe(false);
   });
 
   it("does not archive generic file overlap only", async () => {
@@ -149,7 +153,7 @@ describe("reliability interactions: near-duplicate intake", () => {
     expect(updatedNewer.column).toBe("todo");
   });
 
-  it("archives at most one sibling when both near-duplicates finalize in the same millisecond", async () => {
+  it("does not auto-archive siblings when both near-duplicates finalize in the same millisecond", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-19T12:00:00.000Z"));
 
@@ -173,7 +177,7 @@ describe("reliability interactions: near-duplicate intake", () => {
 
     const refreshed = await fx.store.listTasks({ includeArchived: true });
     const archived = refreshed.filter((task) => task.id === first.id || task.id === second.id).filter((task) => task.column === "archived");
-    expect(archived.length).toBeLessThanOrEqual(1);
+    expect(archived.length).toBe(0);
     vi.useRealTimers();
   });
 });

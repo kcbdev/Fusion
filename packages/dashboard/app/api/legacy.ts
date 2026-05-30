@@ -467,6 +467,7 @@ export function updateTask(
       repoOverride?: string | null;
       issue?: null;
     } | null;
+    dismissNearDuplicate?: boolean;
   },
   projectId?: string,
 ): Promise<Task> {

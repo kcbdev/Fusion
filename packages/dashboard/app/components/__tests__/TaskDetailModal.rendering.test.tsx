@@ -1904,6 +1904,74 @@ describe("TaskDetailModal", () => {
     });
   });
 
+  it("shows near-duplicate banner and keeps warning on Keep click", async () => {
+    const { updateTask } = await import("../../api");
+    const mockUpdateTask = vi.mocked(updateTask);
+    mockUpdateTask.mockResolvedValueOnce(makeTask({
+      id: "FN-099",
+      sourceMetadata: { nearDuplicateOf: "FN-1234", nearDuplicateDismissed: true },
+    }));
+
+    render(
+      <TaskDetailModal
+        task={makeTask({ sourceMetadata: { nearDuplicateOf: "FN-1234" } })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.getByText("Potential duplicate detected")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Keep" }));
+
+    await waitFor(() => {
+      expect(mockUpdateTask).toHaveBeenCalledWith("FN-099", { dismissNearDuplicate: true }, undefined);
+    });
+  });
+
+  it("hides near-duplicate banner once dismissed", () => {
+    render(
+      <TaskDetailModal
+        task={makeTask({ sourceMetadata: { nearDuplicateOf: "FN-1234", nearDuplicateDismissed: true } })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.queryByText("Potential duplicate detected")).toBeNull();
+  });
+
+  it("archives from near-duplicate banner when confirmed", async () => {
+    const onArchiveTask = vi.fn().mockResolvedValue(makeTask({ column: "archived" }));
+    mockConfirm.mockResolvedValueOnce(true);
+
+    render(
+      <TaskDetailModal
+        task={makeTask({ sourceMetadata: { nearDuplicateOf: "FN-1234" } })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        onArchiveTask={onArchiveTask}
+        addToast={noop}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Archive" }));
+
+    await waitFor(() => {
+      expect(onArchiveTask).toHaveBeenCalledWith("FN-099");
+    });
+  });
+
   it("renders corrected stats timing totals in Stats tab", async () => {
     const { fetchTaskDetail } = await import("../../api");
     const mockFetch = vi.mocked(fetchTaskDetail);

@@ -1024,6 +1024,7 @@ export type ActivityEventType =
   | "task:duplicate-warning-overridden"
   | "task:auto-archived-deterministic-duplicate"
   | "task:auto-archived-near-duplicate"
+  | "task:near-duplicate-flagged"
   | "task:auto-archived-ghost-bug"
   | "task:auto-archived-duplicate"
   | "task:merge-worktree-reacquired"
@@ -1660,6 +1661,9 @@ export interface TaskSource {
    * Reserved metadata keys:
    * - `duplicateOfTaskIds: string[]` stores structured duplicate lineage captured
    *   from triage parsing and backfills.
+   * - near-duplicate markers: `nearDuplicateOf` (canonical task id),
+   *   `nearDuplicateScore` (number), `nearDuplicateSharedTokens` (string[]),
+   *   and optional `nearDuplicateDismissed` (boolean).
    */
   sourceMetadata?: Record<string, unknown>;
 }

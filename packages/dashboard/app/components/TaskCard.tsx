@@ -274,7 +274,7 @@ interface TaskCardProps {
   globalPaused?: boolean;
   onUpdateTask?: (
     id: string,
-    updates: { title?: string; description?: string; dependencies?: string[] }
+    updates: { title?: string; description?: string; dependencies?: string[]; dismissNearDuplicate?: boolean }
   ) => Promise<Task>;
   onArchiveTask?: (id: string, options?: { removeLineageReferences?: boolean }) => Promise<Task>;
   onUnarchiveTask?: (id: string) => Promise<Task>;
@@ -492,6 +492,8 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     previousTask.sourceAgentId === nextTask.sourceAgentId &&
     previousTask.sourceMetadata?.issueUrl === nextTask.sourceMetadata?.issueUrl &&
     previousTask.sourceMetadata?.agentName === nextTask.sourceMetadata?.agentName &&
+    previousTask.sourceMetadata?.nearDuplicateOf === nextTask.sourceMetadata?.nearDuplicateOf &&
+    previousTask.sourceMetadata?.nearDuplicateDismissed === nextTask.sourceMetadata?.nearDuplicateDismissed &&
     previousTask.stalledReview?.reason === nextTask.stalledReview?.reason &&
     previousTask.stalledReview?.heuristic === nextTask.stalledReview?.heuristic &&
     previousTask.stalledReview?.matchCount === nextTask.stalledReview?.matchCount &&
@@ -845,6 +847,10 @@ function TaskCardComponent({
   const showTrackingIndicator = hasGithubTrackingLink
     && !hasMatchingIssueInfoBadge
     && !hasMatchingSourceIssue;
+  const showNearDuplicateChip = Boolean(task.sourceMetadata?.nearDuplicateOf)
+    && task.sourceMetadata?.nearDuplicateDismissed !== true
+    && task.column !== "archived"
+    && task.column !== "done";
   const branchMetadata = useMemo(() => getVisibleTaskCardBranches(task), [task.id, task.branch, task.baseBranch]);
   const hasBranchMetadata = Boolean(branchMetadata.branch || branchMetadata.baseBranch);
   const isAgentCreated = isAgentCreatedTask(task);
@@ -1224,6 +1230,18 @@ function TaskCardComponent({
     el.style.height = "auto";
     el.style.height = el.scrollHeight + "px";
   }, []);
+
+  const handleDismissNearDuplicate = useCallback(async (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    if (!onUpdateTask) return;
+
+    try {
+      await onUpdateTask(task.id, { dismissNearDuplicate: true });
+      addToast(`Kept ${task.id}; duplicate warning dismissed`, "success");
+    } catch (err) {
+      addToast(`Failed to keep ${task.id}: ${getErrorMessage(err)}`, "error");
+    }
+  }, [addToast, onUpdateTask, task.id]);
 
   const handleArchiveClick = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
@@ -1934,7 +1952,7 @@ function TaskCardComponent({
           </>
         );
       })()}
-      {(filesChangedButton || isGitHubImportedTask || ((showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue) || (task.retrySummary?.total ?? 0) > 0 || timeIndicator) && (
+      {(filesChangedButton || isGitHubImportedTask || showNearDuplicateChip || ((showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue) || (task.retrySummary?.total ?? 0) > 0 || timeIndicator) && (
         <div className={`card-footer-row${chipFarRight ? " card-footer-row--chip-far-right" : ""}`}>
           {filesChangedButton}
           {isGitHubImportedTask && !showLinkedIssueChipForImport && (
@@ -1946,8 +1964,30 @@ function TaskCardComponent({
               <ProviderIcon provider="github" size="sm" />
             </span>
           )}
-          {(((showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue) || (task.retrySummary?.total ?? 0) > 0 || timeIndicator) && (
+          {(showNearDuplicateChip || ((showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue) || (task.retrySummary?.total ?? 0) > 0 || timeIndicator) && (
             <div className="card-footer-row-right">
+              {showNearDuplicateChip && (
+                <>
+                  <span
+                    className="card-duplicate-chip"
+                    title={`Potential near-duplicate of ${String(task.sourceMetadata?.nearDuplicateOf)}`}
+                    aria-label={`Potential near-duplicate of ${String(task.sourceMetadata?.nearDuplicateOf)}`}
+                  >
+                    <span>{`Duplicate of ${String(task.sourceMetadata?.nearDuplicateOf)}`}</span>
+                  </span>
+                  {onUpdateTask && (
+                    <button
+                      type="button"
+                      className="card-duplicate-keep"
+                      onClick={(e) => void handleDismissNearDuplicate(e)}
+                      title="Keep this task and dismiss duplicate warning"
+                      aria-label="Keep this task and dismiss duplicate warning"
+                    >
+                      Keep
+                    </button>
+                  )}
+                </>
+              )}
               {chipFarRight && (showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue && (
                 <a
                   className="card-github-tracking-chip card-github-tracking-link"

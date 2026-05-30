@@ -1,6 +1,6 @@
 import "./TaskDetailModal.css";
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pencil, Bot, X, ChevronDown, ChevronRight, GitBranch, ArrowLeft, Zap, Loader2 } from "lucide-react";
+import { Pencil, Bot, X, ChevronDown, ChevronRight, GitBranch, ArrowLeft, Zap, Loader2, AlertTriangle } from "lucide-react";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
@@ -542,6 +542,13 @@ export function TaskDetailContent({
     (task.stuckKillCount ?? 0) > 0 ||
     (task.recoveryRetryCount ?? 0) > 0 ||
     Boolean(task.nextRecoveryAt);
+  const nearDuplicateOf = typeof workingTask.sourceMetadata?.nearDuplicateOf === "string"
+    ? workingTask.sourceMetadata.nearDuplicateOf
+    : null;
+  const showNearDuplicateWarning = Boolean(nearDuplicateOf)
+    && workingTask.sourceMetadata?.nearDuplicateDismissed !== true
+    && task.column !== "archived"
+    && task.column !== "done";
   const [sourceAgent, setSourceAgent] = useState<Agent | null>(null);
   const [selectedSourceAgentId, setSelectedSourceAgentId] = useState<string | null>(null);
   const provenanceDisplay = getProvenanceLabel(workingTask, {
@@ -1695,6 +1702,35 @@ export function TaskDetailContent({
     }
   }, [task.id, onDuplicateTask, requestClose, addToast, confirm]);
 
+  const handleDismissNearDuplicate = useCallback(async () => {
+    try {
+      const updatedTask = await updateTask(task.id, { dismissNearDuplicate: true }, projectId);
+      onTaskUpdated?.(updatedTask);
+      addToast(`Kept ${task.id} and dismissed duplicate warning`, "success");
+    } catch (err) {
+      addToast(getErrorMessage(err), "error");
+    }
+  }, [task.id, projectId, onTaskUpdated, addToast]);
+
+  const handleArchiveNearDuplicate = useCallback(async () => {
+    if (!onArchiveTask) return;
+    const confirmed = await confirm({
+      title: "Archive near-duplicate task",
+      message: `Archive ${task.id} as a duplicate of ${nearDuplicateOf}?`,
+      confirmLabel: "Archive",
+      cancelLabel: "Cancel",
+      danger: true,
+    });
+    if (!confirmed) return;
+    try {
+      await onArchiveTask(task.id);
+      addToast(`Archived ${task.id}`, "success");
+      requestClose();
+    } catch (err) {
+      addToast(getErrorMessage(err), "error");
+    }
+  }, [onArchiveTask, confirm, task.id, nearDuplicateOf, addToast, requestClose]);
+
   const isTaskPaused = task.paused || task.userPaused;
   const showRecoverBranchBindingBanner = task.column === "in-review" && !task.branch;
 
@@ -2421,6 +2457,39 @@ export function TaskDetailContent({
                   </>
                 );
               })()}
+              {showNearDuplicateWarning && (
+                <div className="detail-near-duplicate-banner" role="status" aria-live="polite">
+                  <div className="detail-near-duplicate-banner__header">
+                    <AlertTriangle aria-hidden="true" />
+                    <span className="detail-near-duplicate-banner__headline">Potential duplicate detected</span>
+                  </div>
+                  <p className="detail-near-duplicate-banner__copy">
+                    This task appears to be a near-duplicate of{" "}
+                    <button
+                      type="button"
+                      className="detail-provenance-link"
+                      onClick={() => {
+                        if (nearDuplicateOf) {
+                          handleDepClick(nearDuplicateOf);
+                        }
+                      }}
+                    >
+                      {nearDuplicateOf}
+                    </button>
+                    . Choose Archive to move this task to archived, or Keep to continue with this task.
+                  </p>
+                  <div className="detail-near-duplicate-banner__actions">
+                    {onArchiveTask && (
+                      <button type="button" className="btn btn-danger btn-sm" onClick={() => void handleArchiveNearDuplicate()}>
+                        Archive
+                      </button>
+                    )}
+                    <button type="button" className="btn btn-sm" onClick={() => void handleDismissNearDuplicate()}>
+                      Keep
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="detail-meta">
                 <div className="detail-meta-inline-controls" data-testid="detail-meta-inline-controls">
                   <label

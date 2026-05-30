@@ -3932,6 +3932,77 @@ describe("TaskCard provider icons on agent row", () => {
   });
 });
 
+describe("TaskCard near-duplicate chip", () => {
+  it("renders duplicate chip when nearDuplicateOf is present", () => {
+    render(
+      <TaskCard
+        task={makeTask({ sourceMetadata: { nearDuplicateOf: "FN-1234" } })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onUpdateTask={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Duplicate of FN-1234")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Keep this task and dismiss duplicate warning" })).toBeInTheDocument();
+  });
+
+  it("hides duplicate chip when nearDuplicateDismissed is true", () => {
+    render(
+      <TaskCard
+        task={makeTask({ sourceMetadata: { nearDuplicateOf: "FN-1234", nearDuplicateDismissed: true } })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.queryByText("Duplicate of FN-1234")).toBeNull();
+  });
+
+  it("hides duplicate chip in archived and done columns", () => {
+    const { rerender } = render(
+      <TaskCard
+        task={makeTask({ column: "archived", sourceMetadata: { nearDuplicateOf: "FN-1234" } })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onUpdateTask={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("Duplicate of FN-1234")).toBeNull();
+
+    rerender(
+      <TaskCard
+        task={makeTask({ column: "done", sourceMetadata: { nearDuplicateOf: "FN-1234" } })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onUpdateTask={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("Duplicate of FN-1234")).toBeNull();
+  });
+
+  it("clicking Keep calls updateTask dismissNearDuplicate", async () => {
+    const onUpdateTask = vi.fn().mockResolvedValue(makeTask());
+
+    render(
+      <TaskCard
+        task={makeTask({ sourceMetadata: { nearDuplicateOf: "FN-1234" } })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onUpdateTask={onUpdateTask}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep this task and dismiss duplicate warning" }));
+
+    await waitFor(() => {
+      expect(onUpdateTask).toHaveBeenCalledWith("FN-001", { dismissNearDuplicate: true });
+    });
+  });
+});
+
 describe("TaskCard memo comparator provenance behavior", () => {
   it("returns false when prAuthAvailable changes", () => {
     const task = makeTask({ column: "in-review" });

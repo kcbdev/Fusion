@@ -545,7 +545,7 @@ export function useTasks(options?: UseTasksOptions) {
 
   const updateTask = useCallback(async (
     id: string,
-    updates: { title?: string; description?: string; dependencies?: string[] }
+    updates: { title?: string; description?: string; dependencies?: string[]; dismissNearDuplicate?: boolean }
   ): Promise<Task> => {
     const previousTask = tasksRef.current.find((t) => t.id === id);
     const optimisticTask = previousTask

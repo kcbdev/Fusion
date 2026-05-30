@@ -2560,24 +2560,24 @@ export class TriageProcessor {
             return;
           }
 
-          // FN-5152: only archive the task being finalized when it is the newer sibling,
-          // or the tie-loser when both rows share the same millisecond timestamp.
+          // FN-5152: when the candidate is older (or tie-canonical), flag for user confirmation.
           if (isStrictlyOlderOrTieCanonical(canonicalTask)) {
             await this.store.updateTask(task.id, {
               sourceMetadataPatch: {
                 nearDuplicateOf: canonical.id,
+                nearDuplicateScore: canonical.score,
+                nearDuplicateSharedTokens: canonical.sharedTokens,
                 intentSignature: taskIntentSignature,
                 ...(parsedFileScope.length > 0 ? { fileScope: parsedFileScope } : {}),
               },
             });
             await this.store.logEntry(
               task.id,
-              `Auto-archived as near-duplicate of ${canonical.id}`,
+              `Flagged as near-duplicate of ${canonical.id} (awaiting user decision)`,
               `Shared tokens: ${canonical.sharedTokens.join(", ")}`,
             );
-            await this.store.moveTask(task.id, "archived");
             await this.store.recordActivity({
-              type: "task:auto-archived-near-duplicate",
+              type: "task:near-duplicate-flagged",
               taskId: task.id,
               taskTitle: task.title ?? "",
               details: `Near-duplicate of ${canonical.id}`,
@@ -2587,17 +2587,14 @@ export class TriageProcessor {
                 score: canonical.score,
               },
             });
-            planLog.log(`${task.id} auto-archived as near-duplicate of ${canonical.id}`);
-            return "archived" as const;
+            planLog.log(`${task.id} flagged as near-duplicate of ${canonical.id}; awaiting user decision`);
+            return;
           }
 
-          planLog.warn(`${task.id}: near-duplicate candidate ${canonical.id} is newer; skipping auto-archive`);
+          planLog.warn(`${task.id}: near-duplicate candidate ${canonical.id} is newer; skipping near-duplicate flag`);
         })(),
         new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 5_000)),
       ]);
-      if (nearDuplicateResult === "archived") {
-        return;
-      }
       if (nearDuplicateResult === "timeout") {
         planLog.warn(`${task.id}: near-duplicate backstop timed out; proceeding`);
       }
