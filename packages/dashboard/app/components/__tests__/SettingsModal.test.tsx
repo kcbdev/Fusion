@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ComponentProps } from "react";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { EditorView } from "@codemirror/view";
 import { SettingsModal } from "../SettingsModal";
@@ -2096,26 +2096,41 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
       await userEvent.click(screen.getByRole("button", { name: "Authentication" }));
 
-      const copilotCard = screen.getByTestId("auth-provider-icon-github-copilot").closest(".auth-provider-card") as HTMLElement;
-      await userEvent.click(within(copilotCard).getByRole("button", { name: "Login" }));
+      vi.useFakeTimers();
 
-      expect(await within(copilotCard).findByText("ABCD-1234")).toBeInTheDocument();
-      expect(within(copilotCard).queryByTestId("auth-login-instructions-github-copilot")).not.toBeInTheDocument();
-      expect(openSpy).not.toHaveBeenCalled();
-      expect(writeText).toHaveBeenCalledWith("ABCD-1234");
-      expect(writeText).toHaveBeenCalledTimes(1);
+      try {
+        const copilotCard = screen.getByTestId("auth-provider-icon-github-copilot").closest(".auth-provider-card") as HTMLElement;
+        fireEvent.click(within(copilotCard).getByRole("button", { name: "Login" }));
 
-      await userEvent.click(within(copilotCard).getByRole("button", { name: "Copy code" }));
-      expect(writeText).toHaveBeenCalledWith("ABCD-1234");
-      expect(writeText).toHaveBeenCalledTimes(2);
-      expect(addToast).toHaveBeenCalledWith("Copied code to clipboard", "success");
+        await act(async () => {
+          await Promise.resolve();
+        });
+        expect(within(copilotCard).getByText("ABCD-1234")).toBeInTheDocument();
+        expect(within(copilotCard).queryByTestId("auth-login-instructions-github-copilot")).not.toBeInTheDocument();
+        expect(openSpy).not.toHaveBeenCalled();
+        expect(writeText).toHaveBeenCalledWith("ABCD-1234");
+        expect(writeText).toHaveBeenCalledTimes(1);
 
-      await userEvent.click(within(copilotCard).getByRole("button", { name: "Open GitHub" }));
-      expect(openSpy).toHaveBeenCalledWith("https://github.com/login/device", "_blank");
+        fireEvent.click(within(copilotCard).getByRole("button", { name: "Copy code" }));
+        await act(async () => {
+          await Promise.resolve();
+        });
+        expect(writeText).toHaveBeenCalledWith("ABCD-1234");
+        expect(writeText).toHaveBeenCalledTimes(2);
+        expect(addToast).toHaveBeenCalledWith("Copied code to clipboard", "success");
 
-      await waitFor(() => {
+        fireEvent.click(within(copilotCard).getByRole("button", { name: "Open GitHub" }));
+        expect(openSpy).toHaveBeenCalledWith("https://github.com/login/device", "_blank");
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(2000);
+          await vi.advanceTimersByTimeAsync(2000);
+        });
+
         expect(within(copilotCard).queryByText("ABCD-1234")).not.toBeInTheDocument();
-      }, { timeout: 5000 });
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("uses execCommand fallback when clipboard API is unavailable", async () => {
