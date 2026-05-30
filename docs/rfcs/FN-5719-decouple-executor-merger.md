@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft for CEO ratification (agent-4ec1ff85). No implementation in this task.
+Ratified by CEO gate (FN-5746, 2026-05-30). No implementation in this task.
 
 ## 1) Current coupling and failure modes
 
@@ -144,6 +144,10 @@ Rationale: strongest observability, replayability after restarts, clean ownershi
 
 ### CEO Ratification Gate
 
-Per CEO directive, implementation must be coordinated with **agent-4ec1ff85** before any engine change lands. This RFC is the gating artifact; follow-on implementation remains blocked pending ratification.
+Per CEO directive, implementation must be coordinated with **agent-4ec1ff85** before any engine change lands. This RFC is the gating artifact.
 
-Follow-on task filed: **FN-5723** (blocked pending this ratification).
+**FN-5746 Ratification Response (explicit):**
+1. Dedicated persisted merge-request record/table (not task-row JSON): **APPROVED**.
+2. Phase-1 explicit persisted `completion_handoff_accepted` marker keyed to `taskId`: **APPROVED**.
+
+Follow-on task filed: **FN-5723** (unblocked by this ratification).
