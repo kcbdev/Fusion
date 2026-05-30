@@ -1056,6 +1056,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     anchorMessageId: string | null;
     anchorOffset: number;
     wasPinnedBefore: boolean;
+    capturedAtMs: number;
   } | null>(null);
   const hideSkillMenuTimeoutRef = useRef<number | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -1274,18 +1275,23 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     const threadId = getActiveThreadId();
     if (!messagesContainer || !threadId) return;
 
-    const anchorMessage = messagesContainer.querySelector<HTMLElement>(".chat-message[data-message-id]");
+    const scrollTop = messagesContainer.scrollTop;
+    const messageElements = messagesContainer.querySelectorAll<HTMLElement>(".chat-message[data-message-id]");
+    const anchorMessage = Array.from(messageElements).find((element) => element.offsetTop + element.offsetHeight >= scrollTop)
+      ?? messageElements[0]
+      ?? null;
     const anchorMessageId = anchorMessage?.getAttribute("data-message-id") ?? null;
-    const anchorOffset = anchorMessage ? anchorMessage.offsetTop - messagesContainer.scrollTop : 0;
+    const anchorOffset = anchorMessage ? anchorMessage.offsetTop - scrollTop : 0;
 
     scrollRestoreSnapshotRef.current = {
       threadId,
-      scrollTop: messagesContainer.scrollTop,
+      scrollTop,
       scrollHeight: messagesContainer.scrollHeight,
       clientHeight: messagesContainer.clientHeight,
       anchorMessageId,
       anchorOffset,
       wasPinnedBefore: !isUserScrollingRef.current,
+      capturedAtMs: typeof performance !== "undefined" ? performance.now() : Date.now(),
     };
   }, [getActiveThreadId]);
 
@@ -1300,8 +1306,11 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     captureScrollSnapshot();
   }, [captureScrollSnapshot]);
 
-  const anchorToBottom = useCallback((container: HTMLElement) => {
+  const anchorToBottom = useCallback((container: HTMLElement, options?: { force?: boolean }) => {
     if (!container.isConnected) return;
+    if (!options?.force && isUserScrollingRef.current) {
+      return;
+    }
 
     let frame = 0;
     let stableFrames = 0;
@@ -1310,6 +1319,9 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
 
     const writeBottom = () => {
       if (!container.isConnected) return;
+      if (!options?.force && isUserScrollingRef.current) {
+        return;
+      }
 
       container.scrollTop = container.scrollHeight;
       if (container.scrollHeight === lastScrollHeight) {
@@ -1339,6 +1351,15 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     const threadId = getActiveThreadId();
     const snapshot = scrollRestoreSnapshotRef.current;
     if (!messagesContainer || !threadId || !snapshot || snapshot.threadId !== threadId || snapshot.wasPinnedBefore) {
+      return;
+    }
+
+    const snapshotAgeMs = (typeof performance !== "undefined" ? performance.now() : Date.now()) - snapshot.capturedAtMs;
+    const hasScrollableOverflow = messagesContainer.scrollHeight > messagesContainer.clientHeight;
+    const isStaleSnapshot = snapshotAgeMs > 3000;
+    const isLikelyInvalidTopSample = snapshot.scrollTop <= 0 && snapshot.anchorOffset <= 0 && hasScrollableOverflow;
+    if (!isUserScrollingRef.current || isStaleSnapshot || isLikelyInvalidTopSample) {
+      scrollRestoreSnapshotRef.current = null;
       return;
     }
 
@@ -1425,7 +1446,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     }
 
     logScrollDebug(isThreadChanged ? "thread-change" : finishedLoading ? "finished-loading" : firstMessagesArrived ? "first-messages" : "mount");
-    anchorToBottom(messagesContainer);
+    anchorToBottom(messagesContainer, { force: true });
     if (!roomThreadActive) {
       directThreadDeferredAnchorTimeoutRef.current = window.setTimeout(() => {
         directThreadDeferredAnchorTimeoutRef.current = null;
@@ -1644,7 +1665,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       return;
     }
 
-    anchorToBottom(messagesContainer);
+    anchorToBottom(messagesContainer, { force: true });
     isUserScrollingRef.current = false;
     setIsUserScrolling(false);
   }, [chatScope, rooms.activeRoom, anchorToBottom]);

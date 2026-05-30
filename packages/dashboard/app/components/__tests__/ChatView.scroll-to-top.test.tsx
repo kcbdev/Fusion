@@ -213,4 +213,45 @@ describe("ChatView scroll-to-top message affordance", () => {
 
     expect(screen.getByTestId("chat-message-scroll-to-top-room-assistant-1")).toBeInTheDocument();
   });
+
+  it("does not reset to top when a stale zero snapshot is captured while user is reading older messages", () => {
+    const state: UseChatReturn = {
+      ...defaultChatState,
+      messages: [
+        { id: "assistant-1", sessionId: activeSession.id, role: "assistant", content: "hello", createdAt: "2026-04-08T00:00:00.000Z" },
+        { id: "assistant-2", sessionId: activeSession.id, role: "assistant", content: "world", createdAt: "2026-04-08T00:00:01.000Z" },
+      ],
+    };
+
+    mockUseChat.mockImplementation(() => state);
+    mockUseChatRooms.mockReturnValue(defaultRoomsState);
+
+    const { rerender } = render(<ChatView addToast={vi.fn()} />);
+    const container = document.querySelector(".chat-messages") as HTMLDivElement;
+
+    let scrollTopValue = 600;
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 300 });
+    Object.defineProperty(container, "scrollHeight", { configurable: true, value: 1200 });
+
+    fireEvent.scroll(container);
+
+    scrollTopValue = 0;
+    fireEvent.scroll(container);
+
+    scrollTopValue = 600;
+    state.messages = [
+      ...state.messages,
+      { id: "assistant-3", sessionId: activeSession.id, role: "assistant", content: "new", createdAt: "2026-04-08T00:00:02.000Z" },
+    ];
+    rerender(<ChatView addToast={vi.fn()} />);
+
+    expect(scrollTopValue).toBe(600);
+  });
 });
