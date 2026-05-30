@@ -108,7 +108,7 @@ Planning Mode now includes branch controls on the summary screen before you crea
   - `Use existing branch`
   - `Create custom new branch`
 - **Branch name** is required when using `existing` or `custom new` strategies.
-- **Merge target / base branch (optional)** lets you set the PR base branch (for example `main` or `develop`).
+- **Merge target / base branch (optional)** uses a dropdown of existing local branches (with common names like `main`/`master`/`trunk`/`develop` listed first) plus a **Custom…** fallback when you need to type a branch that is not local yet.
 
 These values are sent with the Planning Mode create-task request as `branchSelection`, so created tasks persist branch/base-branch settings consistently with other branch-aware task creation flows.
 
@@ -126,7 +126,7 @@ Rules:
 - `existing` and `custom-new` require a branch name.
 - `project-default` leaves `branch` unset.
 - `auto-new` creates a branch after task creation using `fusion/{task-id}-{short-name}` (for example `fusion/fn-5671-branch-strategy-dropdown`).
-- `Merge target / base branch` stays optional for all modes.
+- `Merge target / base branch` stays optional for all modes and uses the same branch-dropdown + `Custom…` fallback behavior as Planning Mode.
 
 ## Chat View
 

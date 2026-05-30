@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef, type ReactNode } from "react";
 import { DEFAULT_TASK_PRIORITY, TASK_PRIORITIES, type GlobalSettings, type Task, type TaskPriority, type Settings, type WorkflowStep } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
-import { fetchModels, fetchSettings, fetchWorkflowSteps, refineText, getRefineErrorMessage, updateGlobalSettings, fetchGlobalSettings, type RefinementType, type ModelInfo, type NodeInfo } from "../api";
+import { fetchModels, fetchSettings, fetchWorkflowSteps, refineText, getRefineErrorMessage, updateGlobalSettings, fetchGlobalSettings, fetchGitBranches, type RefinementType, type ModelInfo, type NodeInfo } from "../api";
 import { applyPresetToSelection, getRecommendedPresetForSize } from "../utils/modelPresets";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { NodeHealthDot } from "./NodeHealthDot";
@@ -16,6 +16,26 @@ function getNodeStatusLabel(status: NodeInfo["status"]): string {
 }
 
 const ALLOWED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+const COMMON_INTEGRATION_BRANCHES = ["main", "master", "trunk", "develop"];
+const CUSTOM_BRANCH_OPTION = "__fusion-custom__";
+const DEFAULT_BRANCH_OPTION = "";
+
+function sortBranchNames(branches: string[]): string[] {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  for (const name of COMMON_INTEGRATION_BRANCHES) {
+    if (branches.includes(name) && !seen.has(name)) {
+      ordered.push(name);
+      seen.add(name);
+    }
+  }
+  for (const name of [...branches].sort((a, b) => a.localeCompare(b))) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    ordered.push(name);
+  }
+  return ordered;
+}
 
 /** Renders a phase badge using shared .phase-badge classes for consistency */
 function phaseBadge(phase: "pre-merge" | "post-merge", id: string, prefix: string): ReactNode {
@@ -214,6 +234,8 @@ export function TaskForm({
   const [globalSettings, setGlobalSettings] = useState<GlobalSettings | null>(null);
   const [workflowSteps, setWorkflowSteps] = useState<WorkflowStep[]>([]);
   const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const [baseBranchOptions, setBaseBranchOptions] = useState<string[]>([]);
+  const [baseBranchCustomMode, setBaseBranchCustomMode] = useState(false);
 
   // AI Refinement state
   const [isRefineMenuOpen, setIsRefineMenuOpen] = useState(false);
@@ -324,6 +346,18 @@ export function TaskForm({
     onGithubTrackingEnabledChange(settings.githubTrackingEnabledByDefault ?? false);
     githubTrackingDefaultAppliedRef.current = true;
   }, [mode, isActive, settings, onGithubTrackingEnabledChange]);
+
+  useEffect(() => {
+    if (!isActive || !onBaseBranchChange) return;
+    fetchGitBranches(projectId)
+      .then((branches) => {
+        const names = branches
+          .map((branchInfo) => branchInfo.name)
+          .filter((name): name is string => typeof name === "string" && name.length > 0);
+        setBaseBranchOptions(sortBranchNames(names));
+      })
+      .catch(() => setBaseBranchOptions([]));
+  }, [isActive, onBaseBranchChange, projectId]);
 
   useEffect(() => {
     if (!isActive) {
@@ -1010,14 +1044,62 @@ export function TaskForm({
           {onBaseBranchChange && (
             <>
               <label htmlFor="task-base-branch" className="model-select-label">Merge target / base branch</label>
-              <input
-                id="task-base-branch"
-                className="input"
-                value={baseBranch || ""}
-                onChange={(e) => onBaseBranchChange(e.target.value)}
-                placeholder="e.g. main"
-                disabled={disabled}
-              />
+              {(() => {
+                const currentValue = baseBranch || "";
+                const valueIsKnown = currentValue.length > 0 && baseBranchOptions.includes(currentValue);
+                const isCustomMode = baseBranchCustomMode || (currentValue.length > 0 && !valueIsKnown) || baseBranchOptions.length === 0;
+                if (isCustomMode) {
+                  return (
+                    <div className="form-inline-group">
+                      <input
+                        id="task-base-branch"
+                        className="input"
+                        value={currentValue}
+                        onChange={(e) => onBaseBranchChange(e.target.value)}
+                        placeholder="e.g. main"
+                        disabled={disabled}
+                        data-testid="task-base-branch-custom-input"
+                      />
+                      <button
+                        type="button"
+                        className="btn-link"
+                        onClick={() => {
+                          setBaseBranchCustomMode(false);
+                          onBaseBranchChange("");
+                        }}
+                        disabled={disabled}
+                        data-testid="task-base-branch-use-dropdown"
+                      >
+                        Use dropdown
+                      </button>
+                    </div>
+                  );
+                }
+
+                return (
+                  <select
+                    id="task-base-branch"
+                    className="select"
+                    value={currentValue}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      if (next === CUSTOM_BRANCH_OPTION) {
+                        setBaseBranchCustomMode(true);
+                        return;
+                      }
+                      onBaseBranchChange(next === DEFAULT_BRANCH_OPTION ? "" : next);
+                    }}
+                    disabled={disabled}
+                    data-testid="task-base-branch-select"
+                  >
+                    <option value={DEFAULT_BRANCH_OPTION}>(default / project branch)</option>
+                    {baseBranchOptions.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                    <option value={CUSTOM_BRANCH_OPTION}>Custom…</option>
+                  </select>
+                );
+              })()}
             </>
           )}
         </div>

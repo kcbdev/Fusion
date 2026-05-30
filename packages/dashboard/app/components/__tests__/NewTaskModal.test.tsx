@@ -29,6 +29,7 @@ vi.mock("../../api", () => ({
   }),
   fetchWorkflowSteps: vi.fn().mockResolvedValue([]),
   fetchGlobalSettings: vi.fn().mockResolvedValue({}),
+  fetchGitBranches: vi.fn().mockResolvedValue([]),
   fetchAgents: vi.fn().mockResolvedValue([]),
   fetchAuthStatus: vi.fn().mockResolvedValue({ providers: [] }),
   refineText: vi.fn(),

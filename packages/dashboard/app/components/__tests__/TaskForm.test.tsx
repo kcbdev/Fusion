@@ -30,6 +30,7 @@ vi.mock("../../api", () => ({
   refineText: vi.fn().mockResolvedValue("Refined text"),
   getRefineErrorMessage: vi.fn((err) => err?.message || "Failed to refine text. Please try again."),
   updateGlobalSettings: vi.fn().mockResolvedValue({}),
+  fetchGitBranches: vi.fn().mockResolvedValue([]),
 }));
 
 function makeTask(id: string): Task {
@@ -127,8 +128,10 @@ globalThis.URL.createObjectURL = vi.fn(() => "blob:mock-url");
 globalThis.URL.revokeObjectURL = vi.fn();
 
 describe("TaskForm", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    const { fetchGitBranches } = await import("../../api");
+    vi.mocked(fetchGitBranches).mockResolvedValue([]);
   });
 
   it("renders description field with AI refine button when text is present", () => {
@@ -222,7 +225,7 @@ describe("TaskForm", () => {
     expect(onPriorityChange).toHaveBeenCalledWith("urgent");
   });
 
-  it("renders working and base branch inputs when branch callbacks are provided", () => {
+  it("renders working branch input and base branch custom input when no branch options are available", () => {
     renderTaskForm({
       branch: "feature/fn-3422",
       baseBranch: "main",
@@ -233,7 +236,7 @@ describe("TaskForm", () => {
     fireEvent.click(screen.getByTestId("task-form-more-options-toggle"));
 
     expect(screen.getByLabelText("Working branch")).toHaveValue("feature/fn-3422");
-    expect(screen.getByLabelText("Merge target / base branch")).toHaveValue("main");
+    expect(screen.getByTestId("task-base-branch-custom-input")).toHaveValue("main");
   });
 
   it("calls branch change handlers and supports explicit clearing", () => {
@@ -250,7 +253,7 @@ describe("TaskForm", () => {
     fireEvent.click(screen.getByTestId("task-form-more-options-toggle"));
 
     fireEvent.change(screen.getByLabelText("Working branch"), { target: { value: "feature/new" } });
-    fireEvent.change(screen.getByLabelText("Merge target / base branch"), { target: { value: "" } });
+    fireEvent.change(screen.getByTestId("task-base-branch-custom-input"), { target: { value: "" } });
 
     expect(onBranchChange).toHaveBeenCalledWith("feature/new");
     expect(onBaseBranchChange).toHaveBeenCalledWith("");
@@ -271,6 +274,61 @@ describe("TaskForm", () => {
     renderTaskForm({ priority: "high", onPriorityChange: vi.fn() });
 
     expect(screen.getByTestId("task-form-more-options-toggle")).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("renders base branch dropdown options sorted with common integration branches first", async () => {
+    const { fetchGitBranches } = await import("../../api");
+    vi.mocked(fetchGitBranches).mockResolvedValueOnce([
+      { name: "release" },
+      { name: "develop" },
+      { name: "feature/foo" },
+      { name: "main" },
+      { name: "main" },
+      { name: "trunk" },
+    ] as any);
+
+    const onBaseBranchChange = vi.fn();
+    renderTaskForm({ onBaseBranchChange });
+    fireEvent.click(screen.getByTestId("task-form-more-options-toggle"));
+
+    const select = await screen.findByTestId("task-base-branch-select");
+    const optionValues = Array.from((select as HTMLSelectElement).options).map((option) => option.value);
+    expect(optionValues).toEqual(["", "main", "trunk", "develop", "feature/foo", "release", "__fusion-custom__"]);
+
+    fireEvent.change(select, { target: { value: "develop" } });
+    expect(onBaseBranchChange).toHaveBeenCalledWith("develop");
+
+    fireEvent.change(select, { target: { value: "__fusion-custom__" } });
+    expect(screen.getByTestId("task-base-branch-custom-input")).toBeTruthy();
+  });
+
+  it("defaults to custom mode for unknown base branch and supports switching back to dropdown", async () => {
+    const { fetchGitBranches } = await import("../../api");
+    vi.mocked(fetchGitBranches).mockResolvedValueOnce([{ name: "main" }, { name: "develop" }] as any);
+
+    const onBaseBranchChange = vi.fn();
+    renderTaskForm({
+      baseBranch: "release/candidate",
+      onBaseBranchChange,
+    });
+    fireEvent.click(screen.getByTestId("task-form-more-options-toggle"));
+
+    expect(await screen.findByTestId("task-base-branch-custom-input")).toHaveValue("release/candidate");
+    fireEvent.click(screen.getByTestId("task-base-branch-use-dropdown"));
+
+    expect(onBaseBranchChange).toHaveBeenCalledWith("");
+  });
+
+  it("keeps base branch entry available when branch loading fails", async () => {
+    const { fetchGitBranches } = await import("../../api");
+    vi.mocked(fetchGitBranches).mockRejectedValueOnce(new Error("boom"));
+
+    renderTaskForm({ onBaseBranchChange: vi.fn() });
+    fireEvent.click(screen.getByTestId("task-form-more-options-toggle"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("task-base-branch-custom-input")).toBeTruthy();
+    });
   });
 
   it("fetches and stores favoriteModels from fetchModels response", async () => {
