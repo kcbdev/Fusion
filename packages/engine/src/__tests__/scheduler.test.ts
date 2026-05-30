@@ -3839,6 +3839,60 @@ describe("Scheduler", () => {
       expect(mockAutopilot.handleTaskCompletion).toHaveBeenCalledWith("FN-001");
     });
 
+    it("keeps assertion-linked features non-done until validator pass", async () => {
+      const feature = {
+        id: "F-001",
+        sliceId: "SL-001",
+        status: "triaged",
+        loopState: "implementing",
+        taskId: "FN-001",
+      };
+      const missionStore = {
+        getFeatureByTaskId: vi.fn().mockReturnValue(feature),
+        updateFeatureStatus: vi.fn(),
+        getSlice: vi.fn().mockReturnValue({ id: "SL-001", milestoneId: "MS-001", status: "active" }),
+        getMilestone: vi.fn().mockReturnValue({ id: "MS-001", missionId: "M-001" }),
+        listAssertionsForFeature: vi.fn().mockReturnValue([
+          {
+            id: "CA-1",
+            milestoneId: "MS-001",
+            title: "Must pass",
+            assertion: "Should pass",
+            status: "pending",
+            orderIndex: 0,
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        ]),
+      };
+      const missionExecutionLoop = {
+        isRunning: vi.fn().mockReturnValue(true),
+        processTaskOutcome: vi.fn().mockResolvedValue(undefined),
+        start: vi.fn(),
+      };
+      const taskStore = createMockStore({
+        getTask: vi.fn().mockResolvedValue(createMockTask({
+          id: "FN-001",
+          title: "Mission task",
+          description: "done",
+          column: "done",
+          sliceId: "SL-001",
+          log: [],
+        })),
+      });
+
+      const scheduler = new Scheduler(taskStore, {
+        missionStore: missionStore as any,
+        missionExecutionLoop: missionExecutionLoop as any,
+      });
+
+      await (scheduler as any).handleMissionTaskMove("FN-001", "done");
+
+      expect(missionStore.updateFeatureStatus).toHaveBeenCalledWith("F-001", "in-progress");
+      expect(missionExecutionLoop.processTaskOutcome).toHaveBeenCalledWith("FN-001");
+      expect(missionStore.updateFeatureStatus).not.toHaveBeenCalledWith("F-001", "done");
+    });
+
     it("starts validator run through missionExecutionLoop when a linked task moves to done", async () => {
       const feature = {
         id: "F-001",

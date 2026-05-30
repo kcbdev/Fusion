@@ -860,7 +860,12 @@ export class MissionAutopilot {
           continue;
         }
 
-        const reconciliation = await reconcileMissionFeatureState(this.taskStore, task, feature);
+        const hasLinkedAssertions = typeof this.missionStore.listAssertionsForFeature === "function"
+          ? this.missionStore.listAssertionsForFeature(feature.id).length > 0
+          : false;
+        const reconciliation = await reconcileMissionFeatureState(this.taskStore, task, feature, {
+          hasLinkedAssertions,
+        });
 
         if (reconciliation.kind === "failure") {
           await this.handleTaskFailure(feature.taskId);

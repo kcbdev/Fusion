@@ -141,6 +141,11 @@ export class MissionExecutionLoop extends EventEmitter {
   async recoverActiveMissions(): Promise<{ recoveredCount: number }> {
     loopLog.log("Starting active mission recovery...");
 
+    if (!this.running) {
+      loopLog.warn("recoverActiveMissions called while loop is stopped; starting loop for recovery");
+      this.start();
+    }
+
     try {
       const missions = this.missionStore.listMissions();
       let recoveredCount = 0;
@@ -200,6 +205,26 @@ export class MissionExecutionLoop extends EventEmitter {
                   }
                 } else {
                   recoveredCount++;
+                }
+              }
+
+              // Features that remained implementing while their linked task already finished
+              // can be stranded after restart; recover by re-triggering task outcome.
+              if (
+                feature.loopState === "implementing"
+                && feature.taskId
+                && feature.lastValidatorStatus !== "passed"
+                && this.missionStore.listAssertionsForFeature(feature.id).length > 0
+              ) {
+                try {
+                  const linkedTask = await this.taskStore.getTask(feature.taskId).catch(() => null);
+                  if (linkedTask && (linkedTask.column === "done" || linkedTask.column === "archived")) {
+                    loopLog.log(`Recovery: re-triggering implementing feature ${feature.id} from completed task ${feature.taskId}`);
+                    await this.processTaskOutcome(feature.taskId);
+                    recoveredCount++;
+                  }
+                } catch (err) {
+                  loopLog.error(`Recovery failed for implementing feature ${feature.id}:`, err);
                 }
               }
             }

@@ -173,7 +173,7 @@ describe("MissionStore integration with TaskStore", () => {
     for (const { featureId, taskId } of linkedFeatures) {
       await taskStore.moveTask(taskId, "in-review");
       await taskStore.moveTask(taskId, "done");
-      missionStore.updateFeature(featureId, { taskId, status: "done" });
+      missionStore.updateFeature(featureId, { taskId, status: "done", lastValidatorStatus: "passed" });
     }
 
     updatedSlice = missionStore.getSlice(firstSlice.id);

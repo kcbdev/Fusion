@@ -334,9 +334,10 @@ When a feature enters the `implementing` state, `implementationAttemptCount` is 
 On task completion, the scheduler calls `MissionExecutionLoop.processTaskOutcome()` to run AI validation:
 
 1. Find the feature linked to the completed task
-2. Transition feature to `validating` state
-3. Fire AI validator agent against contract assertions
-4. Record `MissionValidatorRun` with per-assertion results
+2. If assertions are linked, keep feature completion gated until validation passes
+3. Transition feature to `validating` state
+4. Fire AI validator agent against contract assertions
+5. Record `MissionValidatorRun` with per-assertion results
 
 Validation runs are internal mission-loop operations: Fusion does **not** create visible `🔍 Validate:` board tasks for single-feature validation.
 
@@ -389,7 +390,7 @@ A feature transitions to `blocked` when:
 - `MilestoneValidationRollup.state` reflects `blocked` assertions
 - The feature remains in `blocked` state until operator intervention
 
-On engine restart, `recoverActiveMissions()` re-enqueues features in `validating` or `needs_fix` states from the `activeValidations` set, ensuring no validation work is lost.
+On engine restart, `recoverActiveMissions()` re-enqueues features in `validating` or `needs_fix` states from the `activeValidations` set, ensuring no validation work is lost. It also re-triggers `implementing` features whose linked task is already `done`/`archived` and whose assertion validation has not passed yet.
 
 ### Autopilot / Scheduler Interplay
 
@@ -452,7 +453,7 @@ interface MissionAssertionFailureRecord {
 | Blocked mission not advancing | `MilestoneValidationRollup.state` shows `blocked` | Identify blocked assertions; operator must resolve root cause |
 | Validation agent errors | AI session creation failed or `VALIDATION_TIMEOUT_MS` (10 min) exceeded | Check model configuration and logs; verify AI provider auth |
 | No validation runs after task completion | `processTaskOutcome()` not called; check scheduler logs | Verify mission linkage on feature → task mapping; check scheduler event handlers |
-| Recovery after engine restart | Features in `validating`/`needs_fix` state may not re-enqueue | `recoverActiveMissions()` should run on startup; check recovery log count |
+| Recovery after engine restart | Features in `validating`/`needs_fix`/stalled `implementing` state may not re-enqueue | `recoverActiveMissions()` should run on startup; check recovery log count and mission-loop logs |
 
 ### Parity Verification Tests
 

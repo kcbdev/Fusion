@@ -255,6 +255,9 @@ function createMockMissionStore() {
     // Internal setters for test setup
     _setMission: (m: Mission) => missions.set(m.id, m),
     _setFeature: (f: MissionFeature) => features.set(f.id, f),
+    _setAssertionsForFeature: (featureId: string, assertions: Array<{ id: string; milestoneId: string; title: string; assertion: string; status: "pending" | "passed" | "failed" | "blocked"; orderIndex: number; createdAt: string; updatedAt: string; sourceFeatureId?: string }>) => {
+      assertionsByFeature.set(featureId, assertions);
+    },
     _addFeatureWithManagedAssertion: (f: MissionFeature) => {
       features.set(f.id, f);
       const now = new Date().toISOString();
@@ -1559,6 +1562,98 @@ describe("MissionExecutionLoop", () => {
 
       expect(processTaskOutcomeSpy).not.toHaveBeenCalled();
       expect(missionStore.transitionLoopState).toHaveBeenCalledWith("F-VALIDATING-IN-PROGRESS", "implementing");
+    });
+
+    it("should recover implementing features whose linked task is already done and assertions are unpassed", async () => {
+      const feature = createMockFeature({
+        id: "F-IMPLEMENTING-DONE",
+        sliceId: "SL-001",
+        loopState: "implementing",
+        status: "done",
+        taskId: "FN-DONE",
+        lastValidatorStatus: undefined,
+      });
+      missionStore._setFeature(feature);
+      missionStore._setAssertionsForFeature("F-IMPLEMENTING-DONE", [
+        {
+          id: "CA-1",
+          milestoneId: "MS-001",
+          title: "Must pass",
+          assertion: "Assertion",
+          status: "pending",
+          orderIndex: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ]);
+
+      missionStore.getMissionWithHierarchy = vi.fn().mockReturnValue({
+        ...createMockMission(),
+        milestones: [
+          {
+            ...createMockMilestone(),
+            slices: [{ ...createMockSlice(), features: [feature] }],
+          },
+        ],
+      });
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+      const processTaskOutcomeSpy = vi.spyOn(loop, "processTaskOutcome");
+      taskStore._setTask({ id: "FN-DONE", column: "done" });
+
+      await loop.recoverActiveMissions();
+
+      expect(processTaskOutcomeSpy).toHaveBeenCalledWith("FN-DONE");
+    });
+
+    it("does not re-trigger implementing features when validator already passed", async () => {
+      const feature = createMockFeature({
+        id: "F-IMPLEMENTING-PASSED",
+        sliceId: "SL-001",
+        loopState: "implementing",
+        status: "done",
+        taskId: "FN-PASSED",
+        lastValidatorStatus: "passed",
+      });
+      missionStore._setFeature(feature);
+      missionStore._setAssertionsForFeature("F-IMPLEMENTING-PASSED", [
+        {
+          id: "CA-1",
+          milestoneId: "MS-001",
+          title: "Must pass",
+          assertion: "Assertion",
+          status: "passed",
+          orderIndex: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ]);
+
+      missionStore.getMissionWithHierarchy = vi.fn().mockReturnValue({
+        ...createMockMission(),
+        milestones: [
+          {
+            ...createMockMilestone(),
+            slices: [{ ...createMockSlice(), features: [feature] }],
+          },
+        ],
+      });
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+      const processTaskOutcomeSpy = vi.spyOn(loop, "processTaskOutcome");
+      taskStore._setTask({ id: "FN-PASSED", column: "done" });
+
+      await loop.recoverActiveMissions();
+
+      expect(processTaskOutcomeSpy).not.toHaveBeenCalled();
     });
 
     it("should not call processTaskOutcome for needs_fix features without taskId", async () => {

@@ -3476,8 +3476,23 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       return "pending";
     }
 
-    // Check if all features are done (linked to done tasks)
-    const allDone = features.every((f) => f.status === "done");
+    // Check if all features are done. For features linked to contract assertions,
+    // a passed validator run is required before they count toward slice completion.
+    const allDone = features.every((feature) => {
+      if (feature.status !== "done") {
+        return false;
+      }
+      const hasLinkedAssertions = this.listAssertionsForFeature(feature.id).length > 0;
+      if (!hasLinkedAssertions) {
+        return true;
+      }
+      if (feature.lastValidatorStatus === "passed") {
+        return true;
+      }
+      // Gate completion for assertion-linked features that are in the execution loop.
+      // Legacy/manual rows that remain idle retain prior completion behavior.
+      return feature.loopState === "idle" || feature.loopState === undefined;
+    });
     if (allDone) {
       return "complete";
     }

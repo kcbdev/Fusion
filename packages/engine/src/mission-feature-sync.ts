@@ -3,6 +3,10 @@ import { getTaskCompletionBlockerForStore } from "./task-completion.js";
 
 export type MissionFeatureSyncTargetStatus = "done" | "in-progress" | "triaged";
 
+export interface MissionFeatureSyncContext {
+  hasLinkedAssertions?: boolean;
+}
+
 export type MissionFeatureSyncDecision =
   | { kind: "failure"; reason: string }
   | { kind: "blocked"; reason: string }
@@ -12,7 +16,8 @@ export type MissionFeatureSyncDecision =
 export async function reconcileMissionFeatureState(
   taskStore: Pick<TaskStore, "getTask">,
   task: Task,
-  feature: Pick<MissionFeature, "id" | "status">,
+  feature: Pick<MissionFeature, "id" | "status" | "lastValidatorStatus">,
+  context: MissionFeatureSyncContext = {},
 ): Promise<MissionFeatureSyncDecision> {
   if (task.status === "failed" && feature.status === "in-progress") {
     return {
@@ -21,10 +26,24 @@ export async function reconcileMissionFeatureState(
     };
   }
 
+  const hasUnvalidatedAssertions = context.hasLinkedAssertions === true
+    && feature.lastValidatorStatus !== "passed";
+
   if (task.column === "done") {
     const blocker = await getTaskCompletionBlockerForStore(taskStore, task);
     if (blocker) {
       return { kind: "blocked", reason: blocker };
+    }
+
+    if (hasUnvalidatedAssertions) {
+      if (feature.status !== "in-progress") {
+        return {
+          kind: "update",
+          status: "in-progress",
+          reason: `task ${task.id} completed; awaiting assertion validation`,
+        };
+      }
+      return { kind: "noop" };
     }
 
     if (feature.status !== "done") {
@@ -39,6 +58,17 @@ export async function reconcileMissionFeatureState(
   }
 
   if (task.column === "archived") {
+    if (hasUnvalidatedAssertions) {
+      if (feature.status !== "in-progress") {
+        return {
+          kind: "update",
+          status: "in-progress",
+          reason: `task ${task.id} archived; awaiting assertion validation`,
+        };
+      }
+      return { kind: "noop" };
+    }
+
     if (feature.status !== "done") {
       return {
         kind: "update",

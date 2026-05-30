@@ -1422,6 +1422,26 @@ describe("MissionStore", () => {
         const status = store.computeSliceStatus(slice.id);
         expect(status).toBe("active");
       });
+
+      it("does not complete slice when done feature has linked assertions without validator pass", () => {
+        const mission = store.createMission({ title: "Mission" });
+        const milestone = store.addMilestone(mission.id, { title: "Milestone" });
+        const slice = store.addSlice(milestone.id, { title: "Slice" });
+        const feature = store.addFeature(slice.id, { title: "Feature" });
+
+        const assertion = store.addContractAssertion(milestone.id, {
+          title: "AC",
+          assertion: "Must pass",
+        });
+        store.linkFeatureToAssertion(feature.id, assertion.id);
+
+        store.transitionLoopState(feature.id, "implementing");
+        store.updateFeature(feature.id, { status: "done" });
+        expect(store.computeSliceStatus(slice.id)).toBe("pending");
+
+        store.updateFeature(feature.id, { lastValidatorStatus: "passed" });
+        expect(store.computeSliceStatus(slice.id)).toBe("complete");
+      });
     });
 
     describe("computeMilestoneStatus", () => {
@@ -1537,13 +1557,13 @@ describe("MissionStore", () => {
         expect(store.computeMilestoneStatus(milestone.id)).toBe("active");
 
         // Update f1 status to done (not changing taskId)
-        store.updateFeature(f1.id, { status: "done" });
+        store.updateFeature(f1.id, { status: "done", lastValidatorStatus: "passed" });
 
         // Slice should still be "active" (partial completion)
         expect(store.computeSliceStatus(slice.id)).toBe("active");
 
         // Update f2 status to done
-        store.updateFeature(f2.id, { status: "done" });
+        store.updateFeature(f2.id, { status: "done", lastValidatorStatus: "passed" });
 
         // Now slice should be "complete"
         expect(store.computeSliceStatus(slice.id)).toBe("complete");
@@ -1574,9 +1594,9 @@ describe("MissionStore", () => {
 
         // Mark all features as "done" using updateFeature (not updateFeatureStatus)
         // → milestone should become "complete"
-        store.updateFeature(f1.id, { status: "done" });
-        store.updateFeature(f2.id, { status: "done" });
-        store.updateFeature(f3.id, { status: "done" });
+        store.updateFeature(f1.id, { status: "done", lastValidatorStatus: "passed" });
+        store.updateFeature(f2.id, { status: "done", lastValidatorStatus: "passed" });
+        store.updateFeature(f3.id, { status: "done", lastValidatorStatus: "passed" });
 
         expect(store.computeMilestoneStatus(milestone.id)).toBe("complete");
       });

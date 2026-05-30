@@ -1751,10 +1751,15 @@ export class Scheduler {
         return;
       }
 
+      const hasLinkedAssertions = typeof missionStore.listAssertionsForFeature === "function"
+        ? missionStore.listAssertionsForFeature(feature.id).length > 0
+        : false;
+
       const reconciliation = await reconcileMissionFeatureState(
         this.store,
         { ...task, column: toColumn },
         feature,
+        { hasLinkedAssertions },
       );
 
       if (reconciliation.kind === "blocked") {
@@ -2050,7 +2055,12 @@ export class Scheduler {
 
             if (!task) continue;
 
-            const reconciliation = await reconcileMissionFeatureState(this.store, task, featureForReconciliation);
+            const hasLinkedAssertions = typeof missionStore.listAssertionsForFeature === "function"
+              ? missionStore.listAssertionsForFeature(featureForReconciliation.id).length > 0
+              : false;
+            const reconciliation = await reconcileMissionFeatureState(this.store, task, featureForReconciliation, {
+              hasLinkedAssertions,
+            });
 
             if (reconciliation.kind === "failure") {
               if (this.options.onTaskFailed) {
