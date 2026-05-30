@@ -2033,10 +2033,11 @@ export class Scheduler {
           .filter((slice) => slice.status === "active");
 
         for (const slice of activeSlices) {
+          const missionAutoTriageEnabled = mission.autopilotEnabled === true || mission.autoAdvance === true;
+
           for (const feature of slice.features) {
             let featureForReconciliation = feature;
             let task: Task | undefined;
-
             if (feature.taskId) {
               task = await this.store.getTask(feature.taskId);
             } else {
@@ -2050,6 +2051,36 @@ export class Scheduler {
                 featureForReconciliation = missionStore.linkFeatureToTask(feature.id, matchedTask.id);
                 task = matchedTask;
                 totalFixed++;
+                await this.emitStrandedFeatureTriageAudit(mission.id, slice.id, feature.id, matchedTask.id);
+              } else if (
+                missionAutoTriageEnabled
+                && feature.status !== "blocked"
+              ) {
+                if (feature.status === "defined") {
+                  try {
+                    featureForReconciliation = await missionStore.triageFeature(feature.id);
+                    task = featureForReconciliation.taskId
+                      ? await this.store.getTask(featureForReconciliation.taskId)
+                      : undefined;
+                    totalFixed++;
+                    if (featureForReconciliation.taskId) {
+                      await this.emitStrandedFeatureTriageAudit(
+                        mission.id,
+                        slice.id,
+                        featureForReconciliation.id,
+                        featureForReconciliation.taskId,
+                      );
+                    }
+                  } catch (error) {
+                    schedulerLog.warn(
+                      `Failed to triage stranded feature ${feature.id} during reconciliation: ${error instanceof Error ? error.message : String(error)}`,
+                    );
+                  }
+                } else {
+                  schedulerLog.warn(
+                    `Skipping stranded feature ${feature.id} with status ${feature.status}: no linked task and no title-matched task available`,
+                  );
+                }
               }
             }
 
@@ -2093,6 +2124,37 @@ export class Scheduler {
     }
 
     return totalFixed;
+  }
+
+  private async emitStrandedFeatureTriageAudit(
+    missionId: string,
+    sliceId: string,
+    featureId: string,
+    taskId: string,
+  ): Promise<void> {
+    const auditor = createRunAuditor(this.store, {
+      runId: generateSyntheticRunId("scheduler-mission-stranded-feature", featureId),
+      agentId: "scheduler",
+      taskId,
+      phase: "mission-stranded-feature-reconcile",
+    });
+
+    try {
+      await auditor.database({
+        type: "mission:stranded-feature-triaged",
+        target: featureId,
+        metadata: {
+          missionId,
+          sliceId,
+          featureId,
+          taskId,
+        },
+      });
+    } catch (error) {
+      schedulerLog.warn(
+        `Feature ${featureId} failed to emit stranded-feature triage audit: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   private getMissionFeatureTitleKey(sliceId: string, title: string): string {

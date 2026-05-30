@@ -274,6 +274,8 @@ export interface SelfHealingOptions {
   /** Optional notifier for board-stall unrecovered alerts. */
   ntfyNotifier?: Pick<NtfyNotifier, "notifyBoardStallUnrecovered">;
   getProjectId?: () => string;
+  /** Optional callback to reconcile active mission features during maintenance. */
+  reconcileAllMissionFeatures?: () => Promise<number>;
 }
 
 const APPROVED_TRIAGE_RECOVERY_GRACE_MS = 60_000;
@@ -1468,6 +1470,15 @@ export class SelfHealingManager {
       } else {
         // Batch 2 — Task recovery (operations are independent of each other)
         const batch2Fns: Array<{ name: string; fn: () => Promise<unknown> }> = [
+          {
+            name: "reconcile-mission-features",
+            fn: async () => {
+              if (!this.options.reconcileAllMissionFeatures) {
+                return;
+              }
+              await this.options.reconcileAllMissionFeatures();
+            },
+          },
           { name: "recover-completed-tasks", fn: () => this.recoverCompletedTasks() },
           { name: "recover-stranded-completed-todo", fn: () => this.recoverStrandedCompletedTodoTasks() },
           { name: "recover-stale-incomplete-review", fn: () => this.recoverStaleIncompleteReviewTasks() },

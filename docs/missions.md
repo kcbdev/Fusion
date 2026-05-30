@@ -218,6 +218,7 @@ If validation cannot run (unexpected loop state, duplicate trigger, blocked vali
 
 - `autopilotEnabled=true` → features in activated slices are automatically planned (converted to tasks)
 - `autopilotEnabled=false`, `autoAdvance=true` → features are planned (legacy compat)
+- Active autopilot slices are continuously reconciled on startup recovery and periodic maintenance: stranded features (`taskId == null`) are re-triaged idempotently, title-matched tasks are linked first, and successful link/triage repairs emit `mission:stranded-feature-triaged` run-audit events.
 - `autopilotEnabled=false`, `autoAdvance=false` → manual slice activation only
 
 **Slice progression (on slice completion):**

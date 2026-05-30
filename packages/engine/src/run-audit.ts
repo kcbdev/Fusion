@@ -414,6 +414,7 @@ export type DatabaseMutationType =
   | "verification:followup-deduped"
   /** Metadata: { kind, parentTaskId, newTaskId, signature, supersedesTaskId } */
   | "verification:followup-created"
+  | "mission:stranded-feature-triaged"
   | "task:auto-recover-branch-misbound"
   | "task:auto-recover-misrouted-foreign-commit"
   | "task:auto-recover-foreign-only-contamination"

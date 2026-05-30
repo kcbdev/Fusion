@@ -397,6 +397,7 @@ describe("Scheduler", () => {
         title: "Linked feature",
         status: "triaged",
       })),
+      triageFeature: vi.fn(),
       ...overrides,
     };
   }
@@ -4485,6 +4486,160 @@ describe("Scheduler", () => {
       expect(mockMissionStore.linkFeatureToTask).toHaveBeenCalledWith("F-1702", "FN-1702");
       expect(mockMissionStore.updateFeatureStatus).toHaveBeenCalledWith("F-1702", "done");
       expect(result).toBe(2);
+    });
+
+    it("triages defined stranded features for active autopilot slices", async () => {
+      const triagedFeature = {
+        id: "F-001",
+        sliceId: "SL-001",
+        title: "Feature one",
+        taskId: "FN-TRIAGED",
+        status: "triaged",
+      };
+      const store = createMockStore({
+        getTask: vi.fn().mockResolvedValue(createMockTask({ id: "FN-TRIAGED", column: "todo" })),
+      });
+      const mockMissionStore = createMockMissionStore({
+        listMissions: vi.fn().mockReturnValue([{ id: "M-001", status: "active", autopilotEnabled: true }]),
+        getMissionWithHierarchy: vi.fn().mockReturnValue({
+          id: "M-001",
+          status: "active",
+          milestones: [{ id: "MS-001", slices: [{ id: "SL-001", status: "active", features: [{ id: "F-001", sliceId: "SL-001", title: "Feature one", taskId: undefined, status: "defined" }] }] }],
+        }),
+        triageFeature: vi.fn().mockResolvedValue(triagedFeature),
+        updateFeatureStatus: vi.fn(),
+      });
+
+      const scheduler = new Scheduler(store, { missionStore: mockMissionStore as any });
+      const result = await scheduler.reconcileAllMissionFeatures();
+
+      expect(mockMissionStore.triageFeature).toHaveBeenCalledWith("F-001");
+      expect(result).toBe(1);
+    });
+
+    it("does not triage stranded features for non-autopilot missions", async () => {
+      const store = createMockStore({ getTask: vi.fn() });
+      const mockMissionStore = createMockMissionStore({
+        listMissions: vi.fn().mockReturnValue([{ id: "M-001", status: "active", autopilotEnabled: false, autoAdvance: false }]),
+        getMissionWithHierarchy: vi.fn().mockReturnValue({
+          id: "M-001",
+          status: "active",
+          milestones: [{ id: "MS-001", slices: [{ id: "SL-001", status: "active", features: [{ id: "F-001", sliceId: "SL-001", title: "Feature one", taskId: undefined, status: "defined" }] }] }],
+        }),
+        triageFeature: vi.fn(),
+        updateFeatureStatus: vi.fn(),
+      });
+
+      const scheduler = new Scheduler(store, { missionStore: mockMissionStore as any });
+      const result = await scheduler.reconcileAllMissionFeatures();
+
+      expect(mockMissionStore.triageFeature).not.toHaveBeenCalled();
+      expect(result).toBe(0);
+    });
+
+    it("links title-matched stranded features instead of re-triaging", async () => {
+      const matchedTask = createMockTask({
+        id: "FN-1703",
+        title: "Feature one",
+        missionId: "M-001",
+        sliceId: "SL-001",
+        column: "todo",
+      } as Partial<Task>);
+      const store = createMockStore({
+        listTasks: vi.fn().mockResolvedValue([matchedTask]),
+        getTask: vi.fn().mockResolvedValue(matchedTask),
+      });
+      const mockMissionStore = createMockMissionStore({
+        listMissions: vi.fn().mockReturnValue([{ id: "M-001", status: "active", autopilotEnabled: true }]),
+        getMissionWithHierarchy: vi.fn().mockReturnValue({
+          id: "M-001",
+          status: "active",
+          milestones: [{ id: "MS-001", slices: [{ id: "SL-001", status: "active", features: [{ id: "F-001", sliceId: "SL-001", title: "Feature one", taskId: undefined, status: "triaged" }] }] }],
+        }),
+        triageFeature: vi.fn(),
+        linkFeatureToTask: vi.fn().mockReturnValue({ id: "F-001", sliceId: "SL-001", title: "Feature one", taskId: "FN-1703", status: "triaged" }),
+        updateFeatureStatus: vi.fn(),
+      });
+
+      const scheduler = new Scheduler(store, { missionStore: mockMissionStore as any });
+      const result = await scheduler.reconcileAllMissionFeatures();
+
+      expect(mockMissionStore.linkFeatureToTask).toHaveBeenCalledWith("F-001", "FN-1703");
+      expect(mockMissionStore.triageFeature).not.toHaveBeenCalled();
+      expect(result).toBe(1);
+    });
+
+    it("skips inconsistent non-defined stranded features with no title match", async () => {
+      const store = createMockStore({ getTask: vi.fn() });
+      const mockMissionStore = createMockMissionStore({
+        listMissions: vi.fn().mockReturnValue([{ id: "M-001", status: "active", autopilotEnabled: true }]),
+        getMissionWithHierarchy: vi.fn().mockReturnValue({
+          id: "M-001",
+          status: "active",
+          milestones: [{ id: "MS-001", slices: [{ id: "SL-001", status: "active", features: [{ id: "F-001", sliceId: "SL-001", title: "Feature one", taskId: undefined, status: "triaged" }] }] }],
+        }),
+        triageFeature: vi.fn(),
+        updateFeatureStatus: vi.fn(),
+      });
+
+      const scheduler = new Scheduler(store, { missionStore: mockMissionStore as any });
+      const result = await scheduler.reconcileAllMissionFeatures();
+
+      expect(mockMissionStore.triageFeature).not.toHaveBeenCalled();
+      expect(result).toBe(0);
+    });
+
+    it("skips blocked stranded features", async () => {
+      const store = createMockStore({ getTask: vi.fn() });
+      const mockMissionStore = createMockMissionStore({
+        listMissions: vi.fn().mockReturnValue([{ id: "M-001", status: "active", autopilotEnabled: true }]),
+        getMissionWithHierarchy: vi.fn().mockReturnValue({
+          id: "M-001",
+          status: "active",
+          milestones: [{ id: "MS-001", slices: [{ id: "SL-001", status: "active", features: [{ id: "F-001", sliceId: "SL-001", title: "Feature one", taskId: undefined, status: "blocked" }] }] }],
+        }),
+        triageFeature: vi.fn(),
+      });
+
+      const scheduler = new Scheduler(store, { missionStore: mockMissionStore as any });
+      const result = await scheduler.reconcileAllMissionFeatures();
+
+      expect(mockMissionStore.triageFeature).not.toHaveBeenCalled();
+      expect(result).toBe(0);
+    });
+
+    it("emits stranded-feature audit events for triaged features", async () => {
+      const triagedFeature = {
+        id: "F-001",
+        sliceId: "SL-001",
+        title: "Feature one",
+        taskId: "FN-TRIAGED",
+        status: "triaged",
+      };
+      const recordRunAuditEvent = vi.fn().mockResolvedValue(undefined);
+      const store = createMockStore({
+        recordRunAuditEvent,
+        getTask: vi.fn().mockResolvedValue(createMockTask({ id: "FN-TRIAGED", column: "todo" })),
+      });
+      const mockMissionStore = createMockMissionStore({
+        listMissions: vi.fn().mockReturnValue([{ id: "M-001", status: "active", autopilotEnabled: true }]),
+        getMissionWithHierarchy: vi.fn().mockReturnValue({
+          id: "M-001",
+          status: "active",
+          milestones: [{ id: "MS-001", slices: [{ id: "SL-001", status: "active", features: [{ id: "F-001", sliceId: "SL-001", title: "Feature one", taskId: undefined, status: "defined" }] }] }],
+        }),
+        triageFeature: vi.fn().mockResolvedValue(triagedFeature),
+      });
+
+      const scheduler = new Scheduler(store, { missionStore: mockMissionStore as any });
+      await scheduler.reconcileAllMissionFeatures();
+
+      expect(recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        domain: "database",
+        mutationType: "mission:stranded-feature-triaged",
+        target: "F-001",
+        metadata: expect.objectContaining({ missionId: "M-001", sliceId: "SL-001", featureId: "F-001", taskId: "FN-TRIAGED" }),
+      }));
     });
 
     it("skips features without taskId", async () => {

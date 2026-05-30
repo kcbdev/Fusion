@@ -81,6 +81,7 @@ Autopilot may advance only when each active-slice feature is resolved under this
 - Feature with linked assertions: all linked assertions must pass.
 - Feature with zero linked assertions: explicit auto-pass path completes it.
 - Feature with failed/blocked validation: slice remains incomplete.
+- Feature stranded without a task link in an active autopilot slice (`taskId == null`): startup + maintenance reconciliation must repair it (title-match link first, otherwise defined-status re-triage) so `allDone` remains reachable instead of stalling on never-triaged features.
 
 Then:
 
