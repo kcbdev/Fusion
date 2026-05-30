@@ -1960,6 +1960,11 @@ export class TaskExecutor {
             executorLog.log(`Unpaused ${task.id} in-progress with no session — resuming execution`);
             try {
               await this.clearResumeFailureState(task);
+              await this.store.updateTask(task.id, {
+                resumeLimboCount: 0,
+                resumeLimboTipSha: null,
+                resumeLimboStepSignature: null,
+              });
               await this.store.logEntry(task.id, "Resuming execution after unpause", undefined, this.getRunContextFor(task.id));
               await this.recoverApprovedStepsOnResume(task.id);
             } catch (clearErr) {

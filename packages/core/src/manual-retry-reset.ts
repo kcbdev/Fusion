@@ -2,6 +2,7 @@ import type { Task } from "./types.js";
 
 export const MANUAL_RETRY_RESET_COUNTER_KEYS = [
   "stuckKillCount",
+  "resumeLimboCount",
   "recoveryRetryCount",
   "taskDoneRetryCount",
   "worktreeSessionRetryCount",

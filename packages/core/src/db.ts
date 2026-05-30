@@ -149,7 +149,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 98;
+const SCHEMA_VERSION = 99;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -242,6 +242,9 @@ CREATE TABLE IF NOT EXISTS tasks (
   planningModelId TEXT,
   mergeRetries INTEGER,
   workflowStepRetries INTEGER,
+  resumeLimboCount INTEGER DEFAULT 0,
+  resumeLimboTipSha TEXT,
+  resumeLimboStepSignature TEXT,
   recoveryRetryCount INTEGER,
   taskDoneRetryCount INTEGER DEFAULT 0,
   worktreeSessionRetryCount INTEGER DEFAULT 0,
@@ -3723,6 +3726,14 @@ export class Database {
     if (version < 98) {
       this.applyMigration(98, () => {
         this.addColumnIfMissing("missions", "branchStrategy", "TEXT");
+      });
+    }
+
+    if (version < 99) {
+      this.applyMigration(99, () => {
+        this.addColumnIfMissing("tasks", "resumeLimboCount", "INTEGER DEFAULT 0");
+        this.addColumnIfMissing("tasks", "resumeLimboTipSha", "TEXT");
+        this.addColumnIfMissing("tasks", "resumeLimboStepSignature", "TEXT");
       });
     }
 

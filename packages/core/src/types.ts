@@ -1887,6 +1887,17 @@ export interface Task {
    *  Incremented by the self-healing manager on each stuck kill. When this reaches
    *  `maxStuckKills`, the task is marked as permanently failed instead of re-queued. */
   stuckKillCount?: number;
+  /** Number of consecutive reclaim/unpause attempts where no execution progress
+   *  materialized (tip unchanged, step signature unchanged, and no active session).
+   *  Incremented by self-healing for resume-limbo detection and reset when
+   *  progress is observed or recovery escalates to a fresh todo dispatch. */
+  resumeLimboCount?: number;
+  /** Branch tip SHA snapshot captured at the last reclaim/unpause attempt used
+   *  by resume-limbo detection to determine whether commits advanced. */
+  resumeLimboTipSha?: string;
+  /** Compact execution-progress snapshot captured at the last reclaim/unpause
+   *  attempt (current step + step statuses) for resume-limbo detection. */
+  resumeLimboStepSignature?: string;
   /** Number of times the self-healing manager has auto-revived this task from
    *  `in-review` after a failed pre-merge workflow step. Incremented each time the
    *  `recoverReviewTasksWithFailedPreMergeSteps` scan sends the task back with the

@@ -72,6 +72,7 @@ const DB_CORRUPTION_NOTIFICATION_COOLDOWN_MS = 60 * 60 * 1000;
 export const STALE_ACTIVE_BRANCH_EXECUTION_GRACE_MS = 10 * 60_000;
 export const COMPLETION_HANDOFF_LIMBO_GRACE_MS = 5 * 60_000;
 export const MAX_COMPLETION_HANDOFF_LIMBO_RECOVERIES = 3;
+const MAX_NO_PROGRESS_RESUME_ATTEMPTS = 2;
 
 // listTasks already enforces ACTIVE_TASKS_WHERE (`"deletedAt" IS NULL`), but
 // deadlock/stall sweeps still defensively skip soft-deleted rows in case a
@@ -104,6 +105,13 @@ export async function archiveAsGhostBug(
 async function classifyOwnedLandedEvidenceForSelfHealing(rootDir: string, task: Task, mergeTargetBranch: string): Promise<OwnedLandedClassification> {
   const { classifyOwnedLandedEvidence } = await import("./merger.js");
   return classifyOwnedLandedEvidence(rootDir, task, { mergeTargetBranch });
+}
+
+function buildResumeLimboStepSignature(task: Task): string {
+  return JSON.stringify({
+    currentStep: task.currentStep ?? null,
+    steps: Array.isArray(task.steps) ? task.steps.map((step) => step.status) : [],
+  });
 }
 
 function formatRecoveryTimestamp(date = new Date()): string {
@@ -2328,6 +2336,67 @@ export class SelfHealingManager {
           const preservedCommitCount = inspection.kind === "fully-subsumed"
             ? 0
             : inspection.taskAttributedCommitCount;
+          const stepSignature = buildResumeLimboStepSignature(task);
+          const hasActiveSessionSignal = Boolean(task.checkedOutBy) || activeTaskIds.has(task.id.toUpperCase());
+          const hasPriorSnapshot = typeof task.resumeLimboTipSha === "string" && typeof task.resumeLimboStepSignature === "string";
+          const unchangedSincePriorResume = hasPriorSnapshot
+            && task.resumeLimboTipSha === inspection.tipSha
+            && task.resumeLimboStepSignature === stepSignature;
+          const isNoProgressResume = task.column === "in-progress"
+            && unchangedSincePriorResume
+            && !hasActiveSessionSignal;
+          const resumeAttemptCount = isNoProgressResume ? (task.resumeLimboCount ?? 0) + 1 : 0;
+
+          if (task.column === "in-progress" && isNoProgressResume && resumeAttemptCount >= MAX_NO_PROGRESS_RESUME_ATTEMPTS) {
+            const idleAnchor = task.executionStartedAt ?? task.columnMovedAt ?? task.updatedAt;
+            const idleAnchorMs = Date.parse(idleAnchor ?? "");
+            const idleMs = Number.isFinite(idleAnchorMs) ? Math.max(0, Date.now() - idleAnchorMs) : null;
+            await this.store.moveTask(task.id, "todo", {
+              moveSource: "engine",
+              preserveWorktree: true,
+              preserveProgress: true,
+              preserveResumeState: true,
+            });
+            await this.store.updateTask(task.id, {
+              resumeLimboCount: 0,
+              resumeLimboTipSha: inspection.tipSha,
+              resumeLimboStepSignature: stepSignature,
+            });
+            await this.store.logEntry(
+              task.id,
+              `[recovery] resume-limbo-escalated ${task.id} moved to todo after ${resumeAttemptCount} no-progress reclaim/resume attempts`,
+              JSON.stringify({
+                frozenTipSha: inspection.tipSha,
+                idleMs,
+                resumeAttemptCount,
+                currentStep: task.currentStep ?? null,
+              }),
+            );
+            try {
+              await createRunAuditor(this.store, {
+                runId: generateSyntheticRunId("self-heal", task.id),
+                agentId: "self-healing",
+                taskId: task.id,
+                taskLineageId: task.lineageId,
+                phase: "reclaim-self-owned-branch-conflicts",
+              }).database({
+                type: "task:resume-limbo-escalated",
+                target: task.id,
+                metadata: {
+                  taskId: task.id,
+                  frozenTipSha: inspection.tipSha,
+                  idleMs,
+                  resumeAttemptCount,
+                  currentStep: task.currentStep ?? null,
+                },
+              });
+            } catch (auditErr: unknown) {
+              log.warn(`Failed to write task:resume-limbo-escalated run-audit event for ${task.id}: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`);
+            }
+            recovered++;
+            continue;
+          }
+
           await this.store.updateTask(task.id, {
             worktree: inspection.livePath,
             branch: task.branch,
@@ -2335,6 +2404,9 @@ export class SelfHealingManager {
             pausedReason: undefined,
             status: null,
             error: null,
+            resumeLimboCount: resumeAttemptCount,
+            resumeLimboTipSha: inspection.tipSha,
+            resumeLimboStepSignature: stepSignature,
           });
           await this.store.logEntry(
             task.id,

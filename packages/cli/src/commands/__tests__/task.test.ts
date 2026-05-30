@@ -2428,6 +2428,7 @@ describe("runTaskRetry", () => {
       completionHandoffLimboRecoveryCount: 0,
       mergeAuditBounceCount: 0,
       mergeRetries: 0,
+      resumeLimboCount: 0,
     });
     expect(mockMoveTask).toHaveBeenCalledWith("FN-001", "todo");
     expect(mockLogEntry).toHaveBeenCalledWith("FN-001", "Retry requested from CLI", "Task reset to todo for retry");
@@ -2501,6 +2502,7 @@ describe("runTaskRetry", () => {
       completionHandoffLimboRecoveryCount: 0,
       mergeAuditBounceCount: 0,
       mergeRetries: 0,
+      resumeLimboCount: 0,
     });
     expect(mockMoveTask).toHaveBeenCalledWith("FN-001", "todo");
     expect(mockLogEntry).toHaveBeenCalledWith("FN-001", "Retry requested from CLI", "Task reset to todo for retry");
