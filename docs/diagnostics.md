@@ -1,5 +1,13 @@
 # Diagnostics
 
+## Goal injection diagnostics (`[goal-injection]`)
+
+Executor and heartbeat runs emit one goal-injection diagnostic with outcome `applied`, `no-goals`, or `disabled-or-failed`.
+
+- Run-audit event: `prompt:goal-injection` (`database` domain, target lane) with metadata `{ lane, outcome, goalCount, goalIds, truncated, reason?, errorClass?, runId?, agentId?, taskId? }`.
+- Task log (executor lane with `taskId`): `[goal-injection] <outcome> count=<n> ids=<json-array> truncated=<bool> ...`.
+- Guardrail: diagnostics persist goal IDs/counts only; never prompt text, goal titles, or goal descriptions.
+
 ## Insight run sweeper (`[insight-sweeper]`)
 
 The dashboard insight router runs stale-run recovery sweeps for `project_insight_runs` rows stuck in `pending`/`running` without a live controller owner.

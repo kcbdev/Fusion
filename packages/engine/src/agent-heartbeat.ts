@@ -32,7 +32,10 @@ import {
 } from "./agent-instructions.js";
 import { resolveHeartbeatPromptTemplate, resolveHeartbeatScopeDisciplineMode, selectHeartbeatProcedure } from "./heartbeat-procedure-resolver.js";
 import { buildPromptLayers, collapsePromptLayers } from "./prompt-layers.js";
-import { buildGoalContextSection } from "./goal-context-injector.js";
+import {
+  emitGoalInjectionDiagnostic,
+  resolveGoalContextForDiagnostics,
+} from "./goal-injection-diagnostics.js";
 import { emitGoalAnchoringAudit } from "./goal-anchoring-audit.js";
 import { createLogger, heartbeatLog, formatError } from "./logger.js";
 import { acquireTaskWorktree } from "./worktree-acquisition.js";
@@ -2384,18 +2387,31 @@ export class HeartbeatMonitor {
           heartbeatLog.log(`applied plugin prompt contributions for heartbeat surface`);
         }
 
-        const activeGoals = typeof taskStore.getGoalStore === "function"
-          ? taskStore.getGoalStore().listGoals({ status: "active" })
-          : [];
-        const heartbeatGoalInjection = buildGoalContextSection({ activeGoals });
+        const heartbeatGoalResolution = resolveGoalContextForDiagnostics({
+          listActiveGoals:
+            typeof taskStore.getGoalStore === "function"
+              ? () => taskStore.getGoalStore().listGoals({ status: "active" })
+              : undefined,
+        });
+        const heartbeatGoalContext = heartbeatGoalResolution.goalContext;
+        const heartbeatGoalClassification = heartbeatGoalResolution.classification;
+
         await emitGoalAnchoringAudit(audit, {
           lane: "heartbeat",
           taskId,
-          goalsInjected: heartbeatGoalInjection.emittedGoalIds.length,
-          truncated: !!heartbeatGoalInjection.truncated,
-          reason: heartbeatGoalInjection.emittedGoalIds.length === 0 ? "no-active-goals" : undefined,
+          goalsInjected: heartbeatGoalClassification.goalCount,
+          truncated: heartbeatGoalClassification.truncated,
+          reason: heartbeatGoalClassification.outcome === "no-goals" ? "no-active-goals" : undefined,
         });
-        const heartbeatGoalContext = heartbeatGoalInjection.text;
+
+        await emitGoalInjectionDiagnostic({
+          lane: "heartbeat",
+          ...heartbeatGoalClassification,
+          runId: run.id,
+          agentId,
+          store: taskStore,
+          runContext: engineRunContext,
+        });
 
         const heartbeatLayers = buildPromptLayers({
           basePrompt: baseHeartbeatSystemPrompt,

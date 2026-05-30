@@ -593,7 +593,12 @@ export type DatabaseMutationType =
   /** Goal anchoring observability events (FN-5655). */
   | "goal:injection-applied"
   | "goal:injection-skipped"
-  | "goal:retrieval-invoked";
+  | "goal:retrieval-invoked"
+  /**
+   * Goal injection diagnostic event (FN-5658).
+   * Metadata: { lane, outcome, goalCount, goalIds, truncated, reason?, errorClass?, runId?, agentId?, taskId? }
+   */
+  | "prompt:goal-injection";
 
 // ── Filesystem mutation types ─────────────────────────────────────────────────
 

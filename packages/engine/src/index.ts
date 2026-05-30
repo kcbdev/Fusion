@@ -183,6 +183,16 @@ export {
   type GoalInjectionTruncationEvent,
 } from "./goal-context-injector.js";
 export {
+  classifyGoalInjectionFailure,
+  classifyGoalInjectionResult,
+  emitGoalInjectionDiagnostic,
+  type GoalInjectionClassification,
+  type GoalInjectionDiagnostic,
+  type GoalInjectionDiagnosticInput,
+  type GoalInjectionDisabledReason,
+  type GoalInjectionOutcome,
+} from "./goal-injection-diagnostics.js";
+export {
   emitGoalAnchoringAudit,
   emitGoalRetrievalAudit,
   GOAL_INJECTION_APPLIED,
