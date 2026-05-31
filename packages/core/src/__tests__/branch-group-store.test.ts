@@ -49,6 +49,24 @@ describe("TaskStore branch groups", () => {
     expect(abandonedUpdated.closedAt).toBeTypeOf("number");
   });
 
+  it("ensures branch groups by source with supplied autoMerge and is idempotent", () => {
+    const first = store.ensureBranchGroupForSource("planning", "PS-ensure", {
+      branchName: "fn/ensure",
+      autoMerge: true,
+    });
+
+    expect(first.autoMerge).toBe(true);
+
+    const second = store.ensureBranchGroupForSource("planning", "PS-ensure", {
+      branchName: "fn/ignored",
+      autoMerge: false,
+    });
+
+    expect(second.id).toBe(first.id);
+    expect(second.branchName).toBe("fn/ensure");
+    expect(second.autoMerge).toBe(true);
+  });
+
   it("enforces unique branchName", () => {
     store.createBranchGroup({ sourceType: "mission", sourceId: "M-1", branchName: "fn/shared" });
     expect(() =>

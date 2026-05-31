@@ -128,7 +128,7 @@ import {
 } from "./merger-integration-worktree.js";
 import { acquireTaskWorktree } from "./worktree-acquisition.js";
 import { resolveIntegrationBranch } from "./integration-branch.js";
-import { resolveBranchGroupMergeRouting } from "./group-merge-coordinator.js";
+import { isGroupPromotionAutoMergeEligible, resolveBranchGroupMergeRouting } from "./group-merge-coordinator.js";
 import { advanceIntegrationBranchRef, IntegrationBranchConcurrentAdvanceError } from "./merger-ref-update-advance.js";
 import { syncWorktreeToHead, type SyncWorktreeResult } from "./worktree-ref-sync.js";
 import { appendAutoWidenedScopeToPrompt, evaluateScopeAutoWiden } from "./merger-scope-auto-widen.js";
@@ -5924,14 +5924,10 @@ export interface MergerOptions {
   signal?: AbortSignal;
   /** AgentStore for resolving per-agent custom instructions. */
   agentStore?: import("@fusion/core").AgentStore;
+  /** Allow synchronization when local checkout is dirty during merge reconciliation. */
+  allowDirtyLocalCheckoutSync?: boolean;
   /** Plugin runner for runtime selection. When provided, enables plugin runtime lookup. */
   pluginRunner?: import("./plugin-runner.js").PluginRunner;
-  /**
-   * Escape hatch for trusted callers that want the AI merge path to stash/pop
-   * dirty edits in the checked-out integration worktree instead of failing
-   * closed. Defaults false because project-root dirt contaminates later merges.
-   */
-  allowDirtyLocalCheckoutSync?: boolean;
 }
 
 function quoteArg(value: string): string {
@@ -7450,8 +7446,13 @@ export async function aiMergeTask(
     }
   };
   if (groupRouting) {
+    const promotionEligibility = isGroupPromotionAutoMergeEligible(groupRouting.branchGroup, settings);
+    const auditRunId = `merge-${taskId}`;
     try {
       await (store as any).recordRunAuditEvent?.({
+        taskId,
+        agentId: "merger",
+        runId: auditRunId,
         domain: "git",
         mutationType: "merge:branch-group-routed",
         target: taskId,
@@ -7460,6 +7461,21 @@ export async function aiMergeTask(
           branchName: groupRouting.branchGroup.branchName,
           mergeTargetBranch: mergeTarget.branch,
           mergeTargetSource: mergeTarget.source,
+        },
+      });
+      await (store as any).recordRunAuditEvent?.({
+        taskId,
+        agentId: "merger",
+        runId: auditRunId,
+        domain: "git",
+        mutationType: "merge:branch-group-promotion-gated",
+        target: taskId,
+        metadata: {
+          groupId: groupRouting.branchGroup.id,
+          branchName: groupRouting.branchGroup.branchName,
+          groupAutoMerge: promotionEligibility.groupAutoMerge,
+          effectiveEligible: promotionEligibility.eligible,
+          reason: promotionEligibility.reason,
         },
       });
     } catch {

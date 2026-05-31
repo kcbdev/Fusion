@@ -308,6 +308,7 @@ export {
   getTaskCompletionBlocker,
   isTaskReadyForMerge,
   resolveEffectiveAutoMerge,
+  resolveEffectiveGroupAutoMerge,
   resolveTaskMergeTarget,
   type MergeTargetResolution,
   type MergeTargetResolverOptions,

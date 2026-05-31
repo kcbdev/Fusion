@@ -9,6 +9,7 @@ import {
   getTaskMergeBlocker,
   isTaskReadyForMerge,
   resolveEffectiveAutoMerge,
+  resolveEffectiveGroupAutoMerge,
   resolveTaskMergeTarget,
 } from "../task-merge.js";
 
@@ -41,6 +42,23 @@ describe("resolveEffectiveAutoMerge", () => {
 
   it("falls back to global false when task value is undefined", () => {
     expect(resolveEffectiveAutoMerge({ autoMerge: undefined }, { autoMerge: false })).toBe(false);
+  });
+});
+
+describe("resolveEffectiveGroupAutoMerge", () => {
+  it("prefers explicit true over global false", () => {
+    expect(resolveEffectiveGroupAutoMerge({ autoMerge: true }, { autoMerge: false })).toBe(true);
+  });
+
+  it("prefers explicit false over global true", () => {
+    expect(resolveEffectiveGroupAutoMerge({ autoMerge: false }, { autoMerge: true })).toBe(false);
+  });
+
+  it("group and per-task resolvers stay independent", () => {
+    expect(resolveEffectiveAutoMerge({ autoMerge: false }, { autoMerge: true })).toBe(false);
+    expect(resolveEffectiveGroupAutoMerge({ autoMerge: true }, { autoMerge: false })).toBe(true);
+    expect(resolveEffectiveAutoMerge({ autoMerge: true }, { autoMerge: false })).toBe(true);
+    expect(resolveEffectiveGroupAutoMerge({ autoMerge: false }, { autoMerge: true })).toBe(false);
   });
 });
 

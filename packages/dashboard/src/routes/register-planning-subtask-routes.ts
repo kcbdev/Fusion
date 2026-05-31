@@ -217,6 +217,20 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
         inheritedBaseBranch: resolvedBaseBranch,
       };
 
+      if (branchMode === "shared") {
+        const settings = await scopedStore.getSettings();
+        const settingsDefaultBranch =
+          typeof settings.defaultBranch === "string" && settings.defaultBranch.trim().length > 0
+            ? settings.defaultBranch
+            : "main";
+        const settingsAutoMerge = typeof settings.autoMerge === "boolean" ? settings.autoMerge : false;
+        const ensureBranchGroupForSource = (scopedStore as { ensureBranchGroupForSource?: TaskStore["ensureBranchGroupForSource"] }).ensureBranchGroupForSource;
+        ensureBranchGroupForSource?.("planning", sessionId, {
+          branchName: resolvedBranch ?? resolvedBaseBranch ?? settingsDefaultBranch,
+          autoMerge: session.autoMerge ?? settingsAutoMerge,
+        });
+      }
+
       const createdTasks = [] as Awaited<ReturnType<TaskStore["createTask"]>>[];
       const tempIdToTaskId = new Map<string, string>();
 
@@ -1257,6 +1271,20 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
         assignmentMode: branchMode,
         inheritedBaseBranch: resolvedBaseBranch,
       };
+
+      if (branchMode === "shared") {
+        const settings = await scopedStore.getSettings();
+        const settingsDefaultBranch =
+          typeof settings.defaultBranch === "string" && settings.defaultBranch.trim().length > 0
+            ? settings.defaultBranch
+            : "main";
+        const settingsAutoMerge = typeof settings.autoMerge === "boolean" ? settings.autoMerge : false;
+        const ensureBranchGroupForSource = (scopedStore as { ensureBranchGroupForSource?: TaskStore["ensureBranchGroupForSource"] }).ensureBranchGroupForSource;
+        ensureBranchGroupForSource?.("planning", planningSessionId, {
+          branchName: resolvedBranch ?? resolvedBaseBranch ?? settingsDefaultBranch,
+          autoMerge: session.autoMerge ?? settingsAutoMerge,
+        });
+      }
 
       const createdTasks = [] as Awaited<ReturnType<TaskStore["createTask"]>>[];
       const tempIdToTaskId = new Map<string, string>();

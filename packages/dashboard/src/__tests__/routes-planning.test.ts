@@ -170,6 +170,18 @@ function createMockGlobalSettingsStore() {
 }
 
 function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
+  const branchGroups = new Map<string, {
+    id: string;
+    sourceType: "planning" | "mission";
+    sourceId: string;
+    branchName: string;
+    autoMerge: boolean;
+    prState: "none";
+    status: "open";
+    createdAt: number;
+    updatedAt: number;
+  }>();
+
   return {
     getTask: vi.fn(),
     listTasks: vi.fn().mockResolvedValue([]),
@@ -181,8 +193,8 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
     mergeTask: vi.fn(),
     archiveTask: vi.fn(),
     unarchiveTask: vi.fn(),
-    getSettings: vi.fn().mockResolvedValue({}),
-    getSettingsFast: vi.fn().mockResolvedValue({}),
+    getSettings: vi.fn().mockResolvedValue({ autoMerge: false, defaultBranch: "main" }),
+    getSettingsFast: vi.fn().mockResolvedValue({ autoMerge: false, defaultBranch: "main" }),
     updateSettings: vi.fn(),
     updateGlobalSettings: vi.fn(),
     getSettingsByScope: vi.fn().mockResolvedValue({ global: {}, project: {} }),
@@ -205,6 +217,29 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
     updatePrInfo: vi.fn().mockResolvedValue(undefined),
     updateIssueInfo: vi.fn().mockResolvedValue(undefined),
     getRootDir: vi.fn().mockReturnValue("/fake/root"),
+    ensureBranchGroupForSource: vi.fn((sourceType: "planning" | "mission", sourceId: string, init: { branchName: string; autoMerge?: boolean }) => {
+      const key = `${sourceType}:${sourceId}`;
+      const existing = branchGroups.get(key);
+      if (existing) {
+        return existing;
+      }
+      const created = {
+        id: `BG-${sourceType}-${sourceId}`,
+        sourceType,
+        sourceId,
+        branchName: init.branchName,
+        autoMerge: Boolean(init.autoMerge),
+        prState: "none" as const,
+        status: "open" as const,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      branchGroups.set(key, created);
+      return created;
+    }),
+    getBranchGroupBySource: vi.fn((sourceType: "planning" | "mission", sourceId: string) =>
+      branchGroups.get(`${sourceType}:${sourceId}`) ?? null
+    ),
     listWorkflowSteps: vi.fn().mockResolvedValue([]),
     createWorkflowStep: vi.fn(),
     getWorkflowStep: vi.fn(),
@@ -2052,6 +2087,7 @@ describe("Planning Mode Routes", () => {
           JSON.stringify({
             planningSessionId,
             branchSelection: { mode: "custom-new", branchName: "feature/auth-slice", baseBranch: "main" },
+            branchAssignment: { mode: "shared" },
             subtasks: [
               {
                 id: "subtask-1",
@@ -2074,6 +2110,12 @@ describe("Planning Mode Routes", () => {
         );
 
         expect(res.status).toBe(201);
+        expect(store.ensureBranchGroupForSource).toHaveBeenCalledWith(
+          "planning",
+          planningSessionId,
+          expect.objectContaining({ branchName: "feature/auth-slice", autoMerge: false }),
+        );
+        expect(store.getBranchGroupBySource).toHaveBeenCalledWith("planning", planningSessionId);
         expect(store.createTask).toHaveBeenNthCalledWith(
           1,
           expect.objectContaining({ branch: "feature/auth-slice", baseBranch: "main" }),
@@ -2081,6 +2123,69 @@ describe("Planning Mode Routes", () => {
         expect(store.createTask).toHaveBeenNthCalledWith(
           2,
           expect.objectContaining({ branch: "feature/auth-slice", baseBranch: "main" }),
+        );
+      });
+
+      it("prefers session autoMerge override when creating shared planning subtasks", async () => {
+        (store.createTask as ReturnType<typeof vi.fn>)
+          .mockResolvedValueOnce({
+            id: "FN-301",
+            description: "First",
+            column: "triage",
+            dependencies: [],
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          })
+          .mockResolvedValueOnce({
+            id: "FN-302",
+            description: "Second",
+            column: "triage",
+            dependencies: [],
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          });
+
+        const startRes = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start",
+          JSON.stringify({ initialPlan: "Build a user auth system" }),
+          { "Content-Type": "application/json" }
+        );
+        const planningSessionId = startRes.body.sessionId;
+
+        await REQUEST(buildApp(), "POST", "/api/planning/respond", JSON.stringify({ sessionId: planningSessionId, responses: { scope: "medium" } }), { "Content-Type": "application/json" });
+        await REQUEST(buildApp(), "POST", "/api/planning/respond", JSON.stringify({ sessionId: planningSessionId, responses: { requirements: "Must have login" } }), { "Content-Type": "application/json" });
+        await REQUEST(buildApp(), "POST", "/api/planning/respond", JSON.stringify({ sessionId: planningSessionId, responses: { confirm: true } }), { "Content-Type": "application/json" });
+
+        const { getSubtaskSession } = await import("../subtask-breakdown.js");
+        const session = getSubtaskSession(planningSessionId);
+        if (!session) {
+          throw new Error("Expected planning subtask session to exist");
+        }
+        session.autoMerge = true;
+
+        const res = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/create-tasks",
+          JSON.stringify({
+            planningSessionId,
+            branchSelection: { mode: "custom-new", branchName: "feature/auth-slice", baseBranch: "main" },
+            branchAssignment: { mode: "shared" },
+            subtasks: [
+              { id: "subtask-1", title: "Auth backend", description: "Implement backend", dependsOn: [] },
+              { id: "subtask-2", title: "Auth UI", description: "Implement UI", dependsOn: [] },
+            ],
+          }),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(201);
+        expect(store.ensureBranchGroupForSource).toHaveBeenCalledWith(
+          "planning",
+          planningSessionId,
+          expect.objectContaining({ branchName: "feature/auth-slice", autoMerge: true }),
         );
       });
 

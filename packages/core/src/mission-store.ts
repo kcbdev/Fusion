@@ -3526,6 +3526,19 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       if (guard.action === "duplicate" && guard.existing) {
         linkedTaskId = guard.existing.id;
       } else {
+        if (missionId && resolvedAssignmentMode === "shared") {
+          const settings = await this.taskStore.getSettings();
+          const settingsDefaultBranch =
+            typeof settings.defaultBranch === "string" && settings.defaultBranch.trim().length > 0
+              ? settings.defaultBranch
+              : "main";
+          const settingsAutoMerge = typeof settings.autoMerge === "boolean" ? settings.autoMerge : false;
+          this.taskStore.ensureBranchGroupForSource("mission", missionId, {
+            branchName: resolvedBranch ?? resolvedBaseBranch ?? settingsDefaultBranch,
+            autoMerge: mission?.autoMerge ?? settingsAutoMerge,
+          });
+        }
+
         const createdTask = await this.taskStore.createTask({
           title: taskTitle || feature.title,
           description,

@@ -47,6 +47,14 @@ export function resolveEffectiveAutoMerge(
   return task.autoMerge ?? settings.autoMerge;
 }
 
+// Resolves group → default-branch PROMOTION auto-merge. See resolveEffectiveAutoMerge for the per-task member→group-integration step; the two are distinct and must not be conflated.
+export function resolveEffectiveGroupAutoMerge(
+  group: Pick<BranchGroup, "autoMerge">,
+  settings: Pick<Settings, "autoMerge">,
+): boolean {
+  return group.autoMerge ?? settings.autoMerge;
+}
+
 export function resolveTaskMergeTarget(
   task: Pick<Task, "baseBranch" | "branchContext">,
   options: MergeTargetResolverOptions = {},

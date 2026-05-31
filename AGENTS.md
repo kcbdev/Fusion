@@ -166,6 +166,7 @@ When `settings.autoMerge: false`, `in-review` is terminal-until-merged by a huma
 - FN-5743 backstop: `packages/engine/src/__tests__/reliability-interactions/merge-request-cancel-on-hard-cancel.test.ts` plus `packages/core/src/__tests__/merge-request-record.test.ts` guard Phase-3 cutover semantics (merge-request retry state transitions, authoritative user hard-cancel tombstone, and non-user rebound no-op cancel semantics).
 - FN-5754 backstop: `packages/engine/src/__tests__/reliability-interactions/mission-stranded-feature-retriage.test.ts` guards startup/maintenance stranded-feature re-triage for active autopilot slices, including link-first dedupe, non-defined skip safety, non-autopilot no-op, idempotency, and `mission:stranded-feature-triaged` audit shape.
 - FN-5755 backstop: `packages/engine/src/__tests__/reliability-interactions/mission-validation-trigger-gap.test.ts` extends mission validation coverage so bounded periodic maintenance replays `recoverActiveMissions` for stranded `implementing` features and remains idempotent on repeated passes.
+- FN-5783 backstop: `packages/engine/src/__tests__/reliability-interactions/branch-group-automerge-precedence.test.ts` guards grouped merge precedence so per-task `autoMerge` remains member→integration only, group `autoMerge` gates promotion eligibility, and promotion-gate audit events capture pause/automerge override reasons.
 
 ---
 

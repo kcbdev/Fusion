@@ -4345,6 +4345,23 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     return row ? this.rowToBranchGroup(row) : null;
   }
 
+  ensureBranchGroupForSource(
+    sourceType: BranchGroup["sourceType"],
+    sourceId: string,
+    init: Omit<BranchGroupCreateInput, "sourceType" | "sourceId">,
+  ): BranchGroup {
+    const existing = this.getBranchGroupBySource(sourceType, sourceId);
+    if (existing) {
+      return existing;
+    }
+
+    return this.createBranchGroup({
+      sourceType,
+      sourceId,
+      ...init,
+    });
+  }
+
   listBranchGroups(options?: { status?: BranchGroup["status"] }): BranchGroup[] {
     const rows = options?.status
       ? this.db.prepare(`SELECT * FROM branch_groups WHERE status = ? ORDER BY createdAt ASC`).all(options.status)

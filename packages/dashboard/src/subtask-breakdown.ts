@@ -65,6 +65,7 @@ export interface SubtaskSession {
   initialDescription: string;
   subtasks: SubtaskItem[];
   status: "generating" | "complete" | "error";
+  autoMerge?: boolean;
   error?: string;
   createdAt: Date;
 }

@@ -1,14 +1,41 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 
-import type { BranchGroup, MergeTargetResolution, Task, TaskStore } from "@fusion/core";
-import { resolveTaskMergeTarget } from "@fusion/core";
+import type { BranchGroup, MergeTargetResolution, Settings, Task, TaskStore } from "@fusion/core";
+import { resolveEffectiveGroupAutoMerge, resolveTaskMergeTarget } from "@fusion/core";
 
 const execAsync = promisify(exec);
 
 export interface BranchGroupMergeRouting {
   branchGroup: BranchGroup;
   mergeTarget: MergeTargetResolution;
+}
+
+export type BranchGroupPromotionEligibilityReason =
+  | "group-automerge-disabled"
+  | "global-pause"
+  | "engine-paused"
+  | "settings-automerge-disabled"
+  | "eligible";
+
+export function isGroupPromotionAutoMergeEligible(
+  group: Pick<BranchGroup, "autoMerge">,
+  settings: Pick<Settings, "autoMerge" | "globalPause" | "enginePaused">,
+): { eligible: boolean; reason: BranchGroupPromotionEligibilityReason; groupAutoMerge: boolean } {
+  const groupAutoMerge = resolveEffectiveGroupAutoMerge(group, settings);
+  if (!groupAutoMerge) {
+    return { eligible: false, reason: "group-automerge-disabled", groupAutoMerge };
+  }
+  if (settings.globalPause) {
+    return { eligible: false, reason: "global-pause", groupAutoMerge };
+  }
+  if (settings.enginePaused) {
+    return { eligible: false, reason: "engine-paused", groupAutoMerge };
+  }
+  if (!settings.autoMerge) {
+    return { eligible: false, reason: "settings-automerge-disabled", groupAutoMerge };
+  }
+  return { eligible: true, reason: "eligible", groupAutoMerge };
 }
 
 async function ensureGroupBranchExists(rootDir: string, branchName: string, startPoint: string): Promise<void> {

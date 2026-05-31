@@ -309,6 +309,7 @@ interface Session {
   /** Plan text the current title was summarized from; lets startExistingSession skip a redundant re-summarize when blur/close already covered the final text. */
   draftSummarizedFor?: string;
   ntfyConfig?: PlanningNtfyConfig;
+  autoMerge?: boolean;
   /** Last planning question notified via ntfy, keyed as `${sessionId}:${questionId}` for dedupe across reconnect/replay. */
   lastNotifiedQuestionKey?: string;
   history: PlanningHistoryEntry[];

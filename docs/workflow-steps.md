@@ -44,6 +44,8 @@ Built-in coding IR currently encodes the legacy lifecycle path as graph stages:
 
 Interpreter authority is gated on parity: interpreter-driven coding runs must match legacy behavior for observable task transitions and reliability invariants (file-scope guards including `FileScopeViolationError`, squash/merge contract, self-healing expectations, `autoMerge:false` terminal-until-merged, and `moveTask(in-progress→todo)` hard-cancel semantics).
 
+For grouped branch flows (`branch_groups`), auto-merge precedence is split: per-task `autoMerge` controls member→group-integration landing, while group `autoMerge` controls group→default-branch promotion eligibility.
+
 #### IR-gap reconciliation (v1)
 
 The workflow redesign brief references `agent-call` nodes and typed edges (`success|failure|conditional|fan-out-join`), but shipped v1 IR only supports node kinds `start|prompt|script|gate|end` plus optional string edge `condition`.
