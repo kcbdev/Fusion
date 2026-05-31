@@ -41,11 +41,6 @@
     min-width: 0;
   }
 
-  .settings-update-check {
-    flex-wrap: wrap;
-    row-gap: var(--space-xs);
-  }
-
   .settings-header-actions {
     margin-left: auto;
     margin-right: var(--space-sm);
@@ -164,10 +159,30 @@
   font-weight: 500;
 }
 
+.settings-modal-footer-version {
+  display: flex;
+  align-items: center;
+  margin-right: var(--space-sm);
+  min-width: 0;
+}
+
 .settings-update-check {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .settings-modal-footer-version {
+    flex: 1 1 100%;
+    margin-right: 0;
+  }
+
+  .settings-update-check {
+    flex-wrap: wrap;
+    row-gap: var(--space-xs);
+  }
 }
 
 .settings-version-check-btn {

@@ -7443,37 +7443,6 @@ export function SettingsModal({
         <div className="modal-header">
           <div className="settings-modal-heading">
             <h3>Settings</h3>
-            <div className="settings-update-check">
-              {appVersion && (
-                <button
-                  type="button"
-                  className="settings-version-check-btn"
-                  onClick={() => {
-                    void handleCheckForUpdates();
-                  }}
-                  disabled={updateCheckLoading}
-                  aria-label="Check for updates"
-                  title="Check for updates"
-                >
-                  <span className="settings-modal-version">Version {appVersion}</span>
-                  <RefreshCw size={12} className={updateCheckLoading ? "spinning" : undefined} />
-                </button>
-              )}
-              {updateCheckResult && (
-                <span
-                  aria-live="polite"
-                  className={`settings-update-result ${
-                    updateCheckResult.error
-                      ? "settings-update-result--error"
-                      : updateCheckResult.updateAvailable
-                        ? "settings-update-result--available"
-                        : "settings-update-result--up-to-date"
-                  }`}
-                >
-                  {renderUpdateCheckResultContent()}
-                </span>
-              )}
-            </div>
           </div>
           <div className="settings-header-actions">
             {form.showGitHubStarButton !== false && (
@@ -7588,6 +7557,39 @@ export function SettingsModal({
           </div>
         )}
         <div className="modal-actions">
+          <div className="settings-modal-footer-version">
+            <div className="settings-update-check">
+              {appVersion && (
+                <button
+                  type="button"
+                  className="settings-version-check-btn"
+                  onClick={() => {
+                    void handleCheckForUpdates();
+                  }}
+                  disabled={updateCheckLoading}
+                  aria-label="Check for updates"
+                  title="Check for updates"
+                >
+                  <span className="settings-modal-version">Version {appVersion}</span>
+                  <RefreshCw size={12} className={updateCheckLoading ? "spinning" : undefined} />
+                </button>
+              )}
+              {updateCheckResult && (
+                <span
+                  aria-live="polite"
+                  className={`settings-update-result ${
+                    updateCheckResult.error
+                      ? "settings-update-result--error"
+                      : updateCheckResult.updateAvailable
+                        ? "settings-update-result--available"
+                        : "settings-update-result--up-to-date"
+                  }`}
+                >
+                  {renderUpdateCheckResultContent()}
+                </span>
+              )}
+            </div>
+          </div>
           <div className="modal-actions-left">
             <button
               type="button"
