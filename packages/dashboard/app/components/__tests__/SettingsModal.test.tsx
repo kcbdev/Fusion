@@ -1529,14 +1529,14 @@ describe("SettingsModal", () => {
   });
 
   describe("settings header actions", () => {
-    it("renders Help and Discord controls, without GitHub star", async () => {
+    it("renders Help, Discord, and GitHub star controls", async () => {
       renderModal();
       await waitForSettingsModalReady();
 
       const headerActions = document.querySelector(".settings-header-actions");
       expect(headerActions).toBeInTheDocument();
 
-      expect(within(headerActions as HTMLElement).queryByRole("link", { name: "Star Fusion on GitHub" })).toBeNull();
+      expect(within(headerActions as HTMLElement).getByRole("link", { name: "Star Fusion on GitHub" })).toBeInTheDocument();
       expect(within(headerActions as HTMLElement).getByRole("link", { name: "Join our Discord" })).toBeInTheDocument();
       expect(within(headerActions as HTMLElement).getByRole("link", { name: "Help and discussions" })).toBeInTheDocument();
     });

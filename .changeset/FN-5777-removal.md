@@ -2,6 +2,6 @@
 "@runfusion/fusion": patch
 ---
 
-Removed the Settings modal "Star on GitHub" header button and deleted its `showGitHubStarButton` setting.
+Removed the `showGitHubStarButton` setting and its Project General toggle from Settings.
 
-This simplifies the Settings surface by removing a promotional control and all of its related client-side logic/styles (including star-count fetch/cache behavior).
+The Settings header "Star on GitHub" button remains available (always shown) while the dedicated visibility setting is no longer configurable.
