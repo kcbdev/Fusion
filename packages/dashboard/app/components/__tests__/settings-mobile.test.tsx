@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { loadAllAppCss } from "../../test/cssFixture";
 import path from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, waitFor } from "@testing-library/react";
+import { render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SettingsModal } from "../SettingsModal";
 import type { Settings } from "@fusion/core";
@@ -192,10 +192,31 @@ describe("SettingsModal mobile adaptations", () => {
 
   it("renders the app version label in mobile layout", async () => {
     mockSettingsViewport(true);
-    const { findByText } = render(<SettingsModal onClose={vi.fn()} addToast={vi.fn()} />);
+    const { findByText, container } = render(<SettingsModal onClose={vi.fn()} addToast={vi.fn()} />);
     await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
 
-    expect(await findByText("Version 1.2.3")).toBeTruthy();
+    const version = await findByText("Version 1.2.3");
+    const modalActions = container.querySelector(".modal-actions");
+    const modalHeader = container.querySelector(".modal-header");
+
+    expect(version).toBeTruthy();
+    expect(modalActions?.contains(version)).toBe(true);
+    expect(modalHeader?.contains(version)).toBe(false);
+  });
+
+  it("keeps update-check button clickable from the footer", async () => {
+    mockSettingsViewport(true);
+    const user = userEvent.setup();
+    const { container } = render(<SettingsModal onClose={vi.fn()} addToast={vi.fn()} />);
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+    const modalActions = container.querySelector(".modal-actions");
+    expect(modalActions).toBeTruthy();
+
+    const updateButton = within(modalActions as HTMLElement).getByRole("button", { name: "Check for updates" });
+    await user.click(updateButton);
+
+    expect(updateButton).toBeTruthy();
   });
 
   it("excludes research sections from mobile picker when researchView is disabled", async () => {
