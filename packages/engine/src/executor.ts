@@ -134,6 +134,7 @@ import {
   createTaskLogTool as sharedCreateTaskLogTool,
 } from "./agent-tools.js";
 import { getTaskCompletionBlockerForStore } from "./task-completion.js";
+import { normalizeStreamingDeltaFromEvent } from "./streaming-delta.js";
 import {
   getEnabledPluginTools,
   getResearchGuidanceForSurface,
@@ -8289,10 +8290,14 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         if (event.type === "message_update") {
           const msgEvent = event.assistantMessageEvent;
           if (msgEvent.type === "text_delta") {
-            output += msgEvent.delta;
-            agentLogger.onText(msgEvent.delta);
+            // Repair dropped sentence-boundary spaces for all providers at the shared engine delta chokepoint.
+            const delta = normalizeStreamingDeltaFromEvent(msgEvent.partial, msgEvent.contentIndex, msgEvent.delta, "text");
+            output += delta;
+            agentLogger.onText(delta);
           } else if (msgEvent.type === "thinking_delta") {
-            agentLogger.onThinking(msgEvent.delta);
+            // Repair dropped sentence-boundary spaces for all providers at the shared engine delta chokepoint.
+            const delta = normalizeStreamingDeltaFromEvent(msgEvent.partial, msgEvent.contentIndex, msgEvent.delta, "thinking");
+            agentLogger.onThinking(delta);
           }
         }
         if (event.type === "tool_execution_start") {
