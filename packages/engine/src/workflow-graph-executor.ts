@@ -1,82 +1,183 @@
-import { isExperimentalFeatureEnabled, type Settings, type Task, type WorkflowIr, type WorkflowIrEdge, type WorkflowIrNode } from "@fusion/core";
+import type { Settings, TaskDetail, WorkflowIr, WorkflowIrEdge, WorkflowIrNode } from "@fusion/core";
+import { BUILTIN_CODING_WORKFLOW_IR, WorkflowIrError, isExperimentalFeatureEnabled } from "@fusion/core";
 
-export const WORKFLOW_GRAPH_EXECUTOR_FLAG = "workflowGraphExecutor" as const;
+import { createDefaultNodeHandlers, createNoopLegacySeams, type WorkflowLegacySeams } from "./workflow-node-handlers.js";
 
-export interface WorkflowGraphExecutorDependencies {
-  onNode?: (node: WorkflowIrNode) => Promise<void> | void;
+export type WorkflowNodeOutcome = "success" | "failure";
+
+export interface WorkflowNodeResult {
+  outcome: WorkflowNodeOutcome;
+  value?: string;
+  contextPatch?: Record<string, unknown>;
 }
 
-export interface WorkflowGraphExecutorRunInput {
-  workflow: WorkflowIr;
-  settings?: Pick<Settings, "experimentalFeatures">;
-  task?: Pick<Task, "id">;
+export interface WorkflowNodeExecutionContext {
+  task: TaskDetail;
+  settings: Pick<Settings, "experimentalFeatures"> | undefined;
+  context: Record<string, unknown>;
 }
 
-export interface WorkflowGraphExecutorRunResult {
+export type WorkflowNodeHandler = (node: WorkflowIrNode, context: WorkflowNodeExecutionContext) => Promise<WorkflowNodeResult>;
+
+export interface WorkflowGraphExecutorDeps {
+  handlers?: Partial<Record<WorkflowIrNode["kind"], WorkflowNodeHandler>>;
+  seams?: WorkflowLegacySeams;
+  maxRetriesPerNode?: number;
+}
+
+export interface WorkflowGraphExecutorResult {
   executed: boolean;
+  outcome: WorkflowNodeOutcome;
+  context: Record<string, unknown>;
   visitedNodeIds: string[];
-  reason?: "flag-disabled";
 }
+
+const TERMINAL_FAILURE: WorkflowGraphExecutorResult = {
+  executed: false,
+  outcome: "failure",
+  context: {},
+  visitedNodeIds: [],
+};
 
 export class WorkflowGraphExecutor {
-  constructor(private readonly deps: WorkflowGraphExecutorDependencies = {}) {}
+  private readonly maxRetriesPerNode: number;
 
-  async run(input: WorkflowGraphExecutorRunInput): Promise<WorkflowGraphExecutorRunResult> {
-    if (!isExperimentalFeatureEnabled(input.settings, WORKFLOW_GRAPH_EXECUTOR_FLAG)) {
-      return { executed: false, visitedNodeIds: [], reason: "flag-disabled" };
-    }
+  private readonly handlers: Partial<Record<WorkflowIrNode["kind"], WorkflowNodeHandler>>;
 
-    const nodesById = new Map(input.workflow.nodes.map((node) => [node.id, node]));
-    const outgoingByNode = new Map<string, WorkflowIrEdge[]>();
-    for (const edge of input.workflow.edges) {
-      const list = outgoingByNode.get(edge.from) ?? [];
-      list.push(edge);
-      outgoingByNode.set(edge.from, list);
-    }
-
-    const startNodes = input.workflow.nodes.filter((node) => node.kind === "start");
-    if (startNodes.length !== 1) {
-      throw new Error(`WorkflowGraphExecutor expected exactly one start node, received ${startNodes.length}.`);
-    }
-
-    const visitedNodeIds: string[] = [];
-    const queue: string[] = [startNodes[0].id];
-    const seen = new Set<string>();
-
-    while (queue.length > 0) {
-      const nodeId = queue.shift();
-      if (!nodeId || seen.has(nodeId)) continue;
-      seen.add(nodeId);
-
-      const node = nodesById.get(nodeId);
-      if (!node) {
-        throw new Error(`WorkflowGraphExecutor found unknown node id: ${nodeId}`);
-      }
-
-      visitedNodeIds.push(node.id);
-      await this.dispatchNode(node);
-      const nextEdges = outgoingByNode.get(node.id) ?? [];
-      for (const edge of nextEdges) {
-        queue.push(edge.to);
-      }
-    }
-
-    return { executed: true, visitedNodeIds };
+  public constructor(private readonly deps: WorkflowGraphExecutorDeps) {
+    this.maxRetriesPerNode = Math.max(1, Math.floor(deps.maxRetriesPerNode ?? 2));
+    this.handlers = {
+      ...createDefaultNodeHandlers(deps.seams ?? createNoopLegacySeams()),
+      ...(deps.handlers ?? {}),
+    };
   }
 
-  private async dispatchNode(node: WorkflowIrNode): Promise<void> {
-    await this.deps.onNode?.(node);
-    switch (node.kind) {
-      case "start":
-      case "prompt":
-      case "script":
-      case "gate":
-      case "end":
-        return;
-      default: {
-        const exhaustive: never = node.kind;
-        throw new Error(`Unsupported node kind: ${String(exhaustive)}`);
+  public async run(
+    task: TaskDetail,
+    settings: Pick<Settings, "experimentalFeatures"> | undefined,
+    ir: WorkflowIr = BUILTIN_CODING_WORKFLOW_IR,
+  ): Promise<WorkflowGraphExecutorResult> {
+    if (!isExperimentalFeatureEnabled(settings, "workflowGraphExecutor")) {
+      return TERMINAL_FAILURE;
+    }
+
+    const startNode = ir.nodes.find((node) => node.kind === "start");
+    if (!startNode) throw new WorkflowIrError("Workflow IR missing start node");
+
+    const nodeMap = new Map(ir.nodes.map((node) => [node.id, node]));
+    const outgoingMap = new Map<string, WorkflowIrEdge[]>();
+    for (const edge of ir.edges) {
+      if (!nodeMap.has(edge.from) || !nodeMap.has(edge.to)) {
+        throw new WorkflowIrError(`Workflow IR edge references unknown node: ${edge.from} -> ${edge.to}`);
+      }
+      const list = outgoingMap.get(edge.from) ?? [];
+      list.push(edge);
+      outgoingMap.set(edge.from, list);
+    }
+
+    const context: Record<string, unknown> = {};
+    const visitedNodeIds: string[] = [];
+    const inStack = new Set<string>();
+
+    const walk = async (nodeId: string): Promise<WorkflowNodeResult> => {
+      const node = nodeMap.get(nodeId);
+      if (!node) throw new WorkflowIrError(`Unknown workflow node: ${nodeId}`);
+      if (inStack.has(nodeId)) throw new WorkflowIrError(`Cycle detected at node: ${nodeId}`);
+      inStack.add(nodeId);
+      visitedNodeIds.push(nodeId);
+
+      try {
+        if (node.kind === "start") {
+          return await traverseChildren(node, { outcome: "success" });
+        }
+        if (node.kind === "end") {
+          return { outcome: "success" };
+        }
+
+        const result = await this.executeNodeWithRetries(node, task, settings, context);
+        if (result.contextPatch) Object.assign(context, result.contextPatch);
+        context[`node:${node.id}:outcome`] = result.outcome;
+        if (result.value !== undefined) context[`node:${node.id}:value`] = result.value;
+
+        return await traverseChildren(node, result);
+      } finally {
+        inStack.delete(nodeId);
+      }
+    };
+
+    const traverseChildren = async (node: WorkflowIrNode, sourceResult: WorkflowNodeResult): Promise<WorkflowNodeResult> => {
+      const edges = outgoingMap.get(node.id) ?? [];
+      if (edges.length === 0) {
+        return sourceResult;
+      }
+
+      const matching = edges.filter((edge) => this.shouldTraverseEdge(edge, sourceResult));
+      if (matching.length === 0) {
+        return sourceResult;
+      }
+
+      let aggregate: WorkflowNodeResult = sourceResult;
+      for (const edge of matching.sort((a, b) => a.to.localeCompare(b.to))) {
+        const target = nodeMap.get(edge.to);
+        if (target?.kind === "end") {
+          aggregate = sourceResult;
+          continue;
+        }
+        const child = await walk(edge.to);
+        if (child.outcome === "failure") {
+          aggregate = child;
+          break;
+        }
+        aggregate = child;
+      }
+      return aggregate;
+    };
+
+    const terminal = await walk(startNode.id);
+    return {
+      executed: true,
+      outcome: terminal.outcome,
+      context,
+      visitedNodeIds,
+    };
+  }
+
+  private shouldTraverseEdge(edge: WorkflowIrEdge, sourceResult: WorkflowNodeResult): boolean {
+    if (!edge.condition) return sourceResult.outcome === "success";
+    if (edge.condition === "success") return sourceResult.outcome === "success";
+    if (edge.condition === "failure") return sourceResult.outcome === "failure";
+    if (edge.condition.startsWith("outcome:")) {
+      return sourceResult.value === edge.condition.slice("outcome:".length);
+    }
+    throw new WorkflowIrError(`Unsupported edge condition: ${edge.condition}`);
+  }
+
+  private async executeNodeWithRetries(
+    node: WorkflowIrNode,
+    task: TaskDetail,
+    settings: Pick<Settings, "experimentalFeatures"> | undefined,
+    context: Record<string, unknown>,
+  ): Promise<WorkflowNodeResult> {
+    const handler = this.handlers[node.kind];
+    if (!handler) {
+      throw new WorkflowIrError(`No handler registered for node kind: ${node.kind}`);
+    }
+
+    let lastError: unknown;
+    for (let attempt = 0; attempt < this.maxRetriesPerNode; attempt++) {
+      try {
+        return await handler(node, { task, settings, context });
+      } catch (error) {
+        lastError = error;
       }
     }
+
+    return {
+      outcome: "failure",
+      value: "exception",
+      contextPatch: {
+        [`node:${node.id}:error`]: lastError instanceof Error ? lastError.message : String(lastError),
+      },
+    };
   }
 }

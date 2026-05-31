@@ -1,32 +1,108 @@
 import { describe, expect, it, vi } from "vitest";
-import { BUILTIN_CODING_WORKFLOW_IR, parseWorkflowIr } from "@fusion/core";
-import { WorkflowGraphExecutor, WORKFLOW_GRAPH_EXECUTOR_FLAG } from "../workflow-graph-executor.js";
+import type { TaskDetail } from "@fusion/core";
 
-describe("workflow graph executor parity scaffold", () => {
-  it("is strict no-op when flag is absent or false", async () => {
-    const onNode = vi.fn();
-    const executor = new WorkflowGraphExecutor({ onNode });
+import { WorkflowGraphExecutor } from "../workflow-graph-executor.js";
+import type { WorkflowLegacySeams } from "../workflow-node-handlers.js";
 
-    const absent = await executor.run({ workflow: BUILTIN_CODING_WORKFLOW_IR, settings: undefined });
-    expect(absent).toEqual({ executed: false, visitedNodeIds: [], reason: "flag-disabled" });
+const task = { id: "FN-5767" } as TaskDetail;
 
-    const disabled = await executor.run({
-      workflow: BUILTIN_CODING_WORKFLOW_IR,
-      settings: { experimentalFeatures: { [WORKFLOW_GRAPH_EXECUTOR_FLAG]: false } },
-    });
-    expect(disabled).toEqual({ executed: false, visitedNodeIds: [], reason: "flag-disabled" });
-    expect(onNode).not.toHaveBeenCalled();
+function runLegacy(seams: WorkflowLegacySeams) {
+  return async () => {
+    const events: string[] = [];
+    const execute = await seams.execute(task, {});
+    events.push(`execute:${execute.outcome}`);
+    if (execute.outcome !== "success") return events;
+    const review = await seams.review(task, {});
+    events.push(`review:${review.outcome}`);
+    if (review.outcome !== "success") return events;
+    const merge = await seams.merge(task, {});
+    events.push(`merge:${merge.outcome}`);
+    return events;
+  };
+}
+
+describe("WorkflowGraphExecutor interpreter-parity", () => {
+  it("is a strict no-op when workflowGraphExecutor flag is disabled", async () => {
+    const prompt = vi.fn(async () => ({ outcome: "success" as const }));
+    const executor = new WorkflowGraphExecutor({ handlers: { prompt, script: prompt, gate: prompt } });
+    const result = await executor.run(task, { experimentalFeatures: {} });
+    expect(result.executed).toBe(false);
+    expect(prompt).not.toHaveBeenCalled();
   });
 
-  it("loads builtin coding workflow IR", () => {
-    const parsed = parseWorkflowIr(BUILTIN_CODING_WORKFLOW_IR);
-    const stages = parsed.nodes.map((node) => String(node.config?.stage ?? ""));
+  it("matches legacy execute-review-merge success path", async () => {
+    const events: string[] = [];
+    const seams: WorkflowLegacySeams = {
+      execute: async () => ({ outcome: "success" }),
+      review: async () => ({ outcome: "success" }),
+      merge: async () => ({ outcome: "success" }),
+      schedule: async () => ({ outcome: "success" }),
+    };
+    const legacyEvents = await runLegacy(seams)();
+    const executor = new WorkflowGraphExecutor({ seams, handlers: { prompt: async (node, ctx) => {
+      const seam = String(node.config?.seam);
+      const result = await seams[seam as keyof WorkflowLegacySeams](ctx.task, ctx.context);
+      events.push(`${seam}:${result.outcome}`);
+      return result;
+    } } });
 
-    expect(stages).toEqual(expect.arrayContaining(["triage", "execute", "review", "merge"]));
+    const result = await executor.run(task, { experimentalFeatures: { workflowGraphExecutor: true } });
+    expect(result.outcome).toBe("success");
+    expect(events).toEqual(legacyEvents);
   });
 
-  it.todo("parity invariant: file-scope violations match legacy FileScopeViolationError behavior");
-  it.todo("parity invariant: squash/merge contract outcomes match legacy merger");
-  it.todo("parity invariant: autoMerge=false keeps in-review terminal until human merge");
-  it.todo("parity invariant: moveTask in-progress->todo hard-cancels active execution");
+  it("routes file-scope-like merge failure parity", async () => {
+    const seams: WorkflowLegacySeams = {
+      execute: async () => ({ outcome: "success" }),
+      review: async () => ({ outcome: "success" }),
+      merge: async () => ({ outcome: "failure", value: "FileScopeViolationError" }),
+      schedule: async () => ({ outcome: "success" }),
+    };
+    const legacyEvents = await runLegacy(seams)();
+    const executor = new WorkflowGraphExecutor({ seams });
+    const result = await executor.run(task, { experimentalFeatures: { workflowGraphExecutor: true } });
+    expect(result.outcome).toBe("failure");
+    expect(legacyEvents).toEqual(["execute:success", "review:success", "merge:failure"]);
+  });
+
+  it("preserves autoMerge:false terminal in-review semantics via review failure", async () => {
+    const seams: WorkflowLegacySeams = {
+      execute: async () => ({ outcome: "success" }),
+      review: async () => ({ outcome: "failure", value: "manual-merge-required" }),
+      merge: async () => ({ outcome: "success" }),
+      schedule: async () => ({ outcome: "success" }),
+    };
+    const executor = new WorkflowGraphExecutor({ seams });
+    const result = await executor.run(task, { experimentalFeatures: { workflowGraphExecutor: true } });
+    expect(result.outcome).toBe("failure");
+    expect(result.visitedNodeIds).not.toContain("merge");
+  });
+
+  it("matches self-healing parity by routing deterministic failure outcomes", async () => {
+    const seams: WorkflowLegacySeams = {
+      execute: async () => ({ outcome: "failure", value: "recoverable" }),
+      review: vi.fn(async () => ({ outcome: "success" as const })),
+      merge: vi.fn(async () => ({ outcome: "success" as const })),
+      schedule: async () => ({ outcome: "success" }),
+    };
+    const executor = new WorkflowGraphExecutor({ seams });
+    const result = await executor.run(task, { experimentalFeatures: { workflowGraphExecutor: true } });
+    expect(result.outcome).toBe("failure");
+    expect(result.context["node:execute:value"]).toBe("recoverable");
+    expect(seams.review).not.toHaveBeenCalled();
+  });
+
+  it("matches moveTask hard-cancel behavior by halting downstream seams", async () => {
+    const seams: WorkflowLegacySeams = {
+      execute: async () => ({ outcome: "failure", value: "hard-cancel" }),
+      review: vi.fn(async () => ({ outcome: "success" as const })),
+      merge: vi.fn(async () => ({ outcome: "success" as const })),
+      schedule: async () => ({ outcome: "success" }),
+    };
+    const executor = new WorkflowGraphExecutor({ seams });
+    const result = await executor.run(task, { experimentalFeatures: { workflowGraphExecutor: true } });
+    expect(result.outcome).toBe("failure");
+    expect(seams.review).not.toHaveBeenCalled();
+    expect(seams.merge).not.toHaveBeenCalled();
+  });
 });

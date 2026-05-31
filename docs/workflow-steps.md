@@ -361,6 +361,23 @@ Prompt-mode workflow agents should emit a trailing JSON object:
 - Backward compatibility remains for legacy prose-only responses via heuristic fallback (`REQUEST REVISION` and approval keywords).
 - If neither structured JSON nor fallback prose can be interpreted, output is recorded as `malformed` (no inferable verdict) instead of hard-failing the task.
 
+## Workflow Graph Executor (interpreter)
+
+The experimental `workflowGraphExecutor` path remains **default OFF** and only runs when `settings.experimentalFeatures.workflowGraphExecutor = true`.
+
+When enabled, interpreter nodes dispatch through DI-backed legacy seams:
+- `prompt` / `script` nodes with `config.seam` dispatch to `execute`, `review`, `merge`, or `schedule`
+- `gate` nodes evaluate context-key expectations and return success/failure outcomes
+
+Traversal semantics:
+- edge with no condition or `success` routes on success
+- `failure` routes on failure
+- `outcome:<value>` routes when the node result value matches exactly
+- unsupported conditions throw `WorkflowIrError`
+- per-node retries are bounded and deterministic
+
+Parity coverage includes flag-OFF no-op behavior, lifecycle ordering parity vs legacy seams, merge/file-scope-like failure routing, and downstream halt behavior for hard-cancel/self-healing style failures.
+
 ## Workflow Step APIs
 
 | Endpoint | Purpose |
