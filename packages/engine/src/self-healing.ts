@@ -1072,33 +1072,43 @@ export class SelfHealingManager {
         const hasIncompleteSteps = !!task.steps?.some((step) => NON_TERMINAL_STEP_STATUSES.has(step.status));
 
         if (hasIncompleteSteps) {
-          log.warn(`${taskId} exceeded stuck kill budget (${newCount}/${maxKills}, reason=${reason}) with incomplete steps — parking in todo`);
-          await this.store.updateTask(taskId, {
-            stuckKillCount: newCount,
-            paused: true,
-            userPaused: true,
-            pausedReason: "stuck-loop-exhausted-incomplete-steps",
-          } as Partial<Task> & { userPaused: boolean });
-          let parkedInTodo = true;
-          let moveErrMessage = "";
+          log.warn(`${taskId} exceeded stuck kill budget (${newCount}/${maxKills}, reason=${reason}) with incomplete steps — re-queueing in todo with progress preserved`);
+          await this.store.updateTask(taskId, { stuckKillCount: newCount });
           try {
-            await this.store.moveTask(taskId, "todo", { preserveProgress: true });
-            await this.store.updateTask(taskId, {
-              stuckKillCount: newCount,
-              paused: true,
-              userPaused: true,
-              pausedReason: "stuck-loop-exhausted-incomplete-steps",
-            } as Partial<Task> & { userPaused: boolean });
+            await this.store.moveTask(taskId, "todo", {
+              preserveProgress: true,
+              preserveStatus: true,
+            });
           } catch (moveErr: unknown) {
-            parkedInTodo = false;
-            moveErrMessage = moveErr instanceof Error ? moveErr.message : String(moveErr);
-            log.warn(`${taskId} moveTask(todo) failed (${moveErrMessage}) after incomplete STUCK_LOOP_EXHAUSTED terminalization — task remains paused for manual intervention`);
+            const moveErrMessage = moveErr instanceof Error ? moveErr.message : String(moveErr);
+            log.warn(`${taskId} moveTask(todo) failed (${moveErrMessage}) after incomplete STUCK_LOOP_EXHAUSTED terminalization — falling back to executor stuck-kill requeue`);
+            await this.store.logEntry(
+              taskId,
+              `STUCK_LOOP_EXHAUSTED: incomplete task exhausted stuck kill budget (${newCount}/${maxKills}), last reason=${reason}. Failed to move task to todo (${moveErrMessage}); falling back to executor stuck-kill requeue.`,
+            );
+            return true;
+          }
+
+          const requeueUpdate = {
+            stuckKillCount: newCount,
+            paused: false,
+            userPaused: false,
+            pausedReason: null,
+            status: "queued",
+          } satisfies Parameters<typeof this.store.updateTask>[1] & { userPaused: boolean };
+          try {
+            await this.store.updateTask(taskId, requeueUpdate);
+          } catch (patchErr: unknown) {
+            const patchErrMessage = patchErr instanceof Error ? patchErr.message : String(patchErr);
+            log.warn(`${taskId} post-move requeue patch failed after incomplete STUCK_LOOP_EXHAUSTED terminalization: ${patchErrMessage}`);
+            await this.store.logEntry(
+              taskId,
+              `STUCK_LOOP_EXHAUSTED: incomplete task moved to todo with progress preserved, but post-move requeue patch failed (${patchErrMessage}); scheduler retry may wait for the next state repair pass.`,
+            );
           }
           await this.store.logEntry(
             taskId,
-            parkedInTodo
-              ? `STUCK_LOOP_EXHAUSTED: incomplete task exhausted stuck kill budget (${newCount}/${maxKills}), last reason=${reason}. Parked in todo with progress preserved; manual review/resume required before retry.`
-              : `STUCK_LOOP_EXHAUSTED: incomplete task exhausted stuck kill budget (${newCount}/${maxKills}), last reason=${reason}. Failed to move task to todo (${moveErrMessage}); task remains paused for manual intervention.`,
+            `STUCK_LOOP_EXHAUSTED: incomplete task exhausted stuck kill budget (${newCount}/${maxKills}), last reason=${reason}. Re-queued in todo with progress preserved; scheduler may retry without manual unpause.`,
           );
           return false;
         }
