@@ -557,6 +557,9 @@ async function main() {
 
   const command = args[0];
 
+  const { maybeAutoLaunchOnboarding } = await import("./commands/onboard-autolaunch.js");
+  await maybeAutoLaunchOnboarding({ command, args });
+
   const {
     runDashboard,
     runServe,
