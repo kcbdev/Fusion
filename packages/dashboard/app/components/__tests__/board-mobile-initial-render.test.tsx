@@ -141,6 +141,36 @@ describe("Board mobile initial render stabilization (FN-4574)", () => {
     viewportSpy.mockRestore();
   });
 
+  it("does not throw when visualViewport resize listener lacks removeEventListener (Android seam)", () => {
+    const viewportSpy = mockViewport(375);
+    const visualViewportResizeListeners: Array<() => void> = [];
+
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      setTimeout(() => cb(0), 0);
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: {
+        scale: 1,
+        addEventListener: (_event: string, listener: () => void) => {
+          visualViewportResizeListeners.push(listener);
+        },
+      },
+    });
+
+    render(<Board {...boardProps} />);
+
+    expect(visualViewportResizeListeners).toHaveLength(1);
+
+    expect(() => {
+      visualViewportResizeListeners[0]();
+    }).not.toThrow();
+
+    viewportSpy.mockRestore();
+  });
+
   it("is a desktop no-op and does not force pageshow re-anchor", () => {
     const viewportSpy = mockViewport(1280);
     const addEventListenerSpy = vi.spyOn(window, "addEventListener");

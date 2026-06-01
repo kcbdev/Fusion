@@ -4127,6 +4127,72 @@ describe("App board branch filters", () => {
   });
 });
 
+describe("FN-5817 mobile auto-merge toggle stability", () => {
+  it("keeps app shell mounted when toggling auto-merge on mobile", async () => {
+    mockUseViewportMode.mockReturnValue("mobile");
+
+    const updateSettingsSpy = vi.mocked(updateSettings);
+    updateSettingsSpy.mockResolvedValue({ ...defaultSettings, autoMerge: false });
+
+    mockUseTasks.mockImplementation(() => ({
+      tasks: [
+        {
+          id: "FN-5817",
+          title: "In review task",
+          description: "Regression task",
+          column: "in-review",
+          status: "in-review",
+          dependencies: [],
+          steps: [],
+          currentStep: 0,
+          log: [],
+          createdAt: "",
+          updatedAt: "",
+        },
+      ],
+      isStale: false,
+      createTask: mockCreateTask,
+      moveTask: vi.fn(),
+      pauseTask: vi.fn(),
+      unpauseTask: vi.fn(),
+      deleteTask: vi.fn(),
+      mergeTask: vi.fn(),
+      retryTask: vi.fn(),
+      resetTask: vi.fn(),
+      updateTask: vi.fn(),
+      duplicateTask: vi.fn(),
+      archiveTask: vi.fn(),
+      unarchiveTask: vi.fn(),
+      archiveAllDone: vi.fn(),
+      loadArchivedTasks: vi.fn(),
+      refreshTasks: vi.fn(),
+      ingestCreatedTasks: vi.fn(),
+      lastFetchTimeMs: Date.now(),
+    }));
+
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    render(<App />);
+
+    const toggle = await screen.findByRole("checkbox", { name: "Auto-merge" });
+    expect(screen.getByTestId("mobile-view-toggle")).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(updateSettingsSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ autoMerge: expect.any(Boolean) }),
+        DEFAULT_PROJECT_ID,
+      );
+      expect(screen.getByTestId("mobile-view-toggle")).toBeInTheDocument();
+      expect(screen.getByRole("checkbox", { name: "Auto-merge" })).toBeInTheDocument();
+    });
+
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
+  });
+});
+
 describe("App shell connection status plumbing", () => {
   it("loads shell connection status for native shell host", async () => {
     mockShellHostContextValue.host = { kind: "desktop-shell", mode: "remote", connectionId: "p1", serverUrl: "https://fusion.example.com" };

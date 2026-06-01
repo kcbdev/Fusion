@@ -34,11 +34,31 @@ export function useViewportMode(): ViewportMode {
       }
     };
 
-    mobileQuery.addEventListener("change", updateMode);
-    tabletQuery.addEventListener("change", updateMode);
+    const addChangeListener = (query: MediaQueryList, listener: () => void) => {
+      if (typeof query.addEventListener === "function") {
+        query.addEventListener("change", listener);
+        return;
+      }
+      if (typeof query.addListener === "function") {
+        query.addListener(listener);
+      }
+    };
+
+    const removeChangeListener = (query: MediaQueryList, listener: () => void) => {
+      if (typeof query.removeEventListener === "function") {
+        query.removeEventListener("change", listener);
+        return;
+      }
+      if (typeof query.removeListener === "function") {
+        query.removeListener(listener);
+      }
+    };
+
+    addChangeListener(mobileQuery, updateMode);
+    addChangeListener(tabletQuery, updateMode);
     return () => {
-      mobileQuery.removeEventListener("change", updateMode);
-      tabletQuery.removeEventListener("change", updateMode);
+      removeChangeListener(mobileQuery, updateMode);
+      removeChangeListener(tabletQuery, updateMode);
     };
   }, []);
 
