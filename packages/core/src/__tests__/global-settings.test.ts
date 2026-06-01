@@ -219,6 +219,17 @@ describe("GlobalSettingsStore", () => {
       expect(settings.themeMode).toBe("dark"); // preserved default
     });
 
+    it("round-trips cliOnboardingCompletedAt without changing setupComplete", async () => {
+      await store.init();
+
+      const marker = "2026-05-31T00:00:00.000Z";
+      await store.updateSettings({ cliOnboardingCompletedAt: marker });
+
+      const settings = await store.getSettings();
+      expect(settings.cliOnboardingCompletedAt).toBe(marker);
+      expect(settings.setupComplete).toBeUndefined();
+    });
+
     it("round-trips testMode in global settings", async () => {
       await store.init();
 

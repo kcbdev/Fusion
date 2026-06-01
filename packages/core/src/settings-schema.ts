@@ -58,6 +58,7 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   customProviders: [],
   defaultProjectId: undefined,
   setupComplete: undefined,
+  cliOnboardingCompletedAt: undefined,
   favoriteProviders: undefined,
   favoriteModels: undefined,
   openrouterModelSync: true,

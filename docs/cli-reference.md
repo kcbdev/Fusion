@@ -48,6 +48,26 @@ During fresh initialization, Fusion also installs the bundled `fusion` skill int
 
 ---
 
+## `fn onboard`
+
+Run the interactive CLI onboarding wizard. It walks through central DB setup,
+API-key provider setup, optional first-project init, core settings defaults, and
+a short next-steps tour.
+
+```bash
+fn onboard
+fn onboard --force
+```
+
+| Option | Description |
+|---|---|
+| `--force` | Re-run onboarding even when `cliOnboardingCompletedAt` is already set. |
+
+The command is safe to re-run and only updates the settings you confirm during
+prompts.
+
+---
+
 ## `fn update`
 
 Check for and install the latest `@runfusion/fusion` CLI release from npm.

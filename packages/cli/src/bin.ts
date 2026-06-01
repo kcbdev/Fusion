@@ -131,6 +131,7 @@ async function loadCommandHandlers() {
   const { runProjectList, runProjectAdd, runProjectRemove, runProjectShow, runProjectInfo, runProjectSetDefault, runProjectDetect } = await import("./commands/project.js");
   const { runNodeList, runNodeConnect, runNodeDisconnect, runNodeShow, runNodeHealth, runMeshStatus } = await import("./commands/node.js");
   const { runInit } = await import("./commands/init.js");
+  const { runOnboard } = await import("./commands/onboard.js");
   const { runAgentStop, runAgentStart } = await import("./commands/agent.js");
   const { runAgentImport } = await import("./commands/agent-import.js");
   const { runAgentExport } = await import("./commands/agent-export.js");
@@ -212,6 +213,7 @@ async function loadCommandHandlers() {
     runNodeHealth,
     runMeshStatus,
     runInit,
+    runOnboard,
     runAgentStop,
     runAgentStart,
     runAgentImport,
@@ -253,6 +255,7 @@ fn — AI-orchestrated task board
 Usage:
   fn                                  Launch the dashboard (same as fn dashboard)
   fn init [opts]                      Initialize a new fn project (--name, --path, --git)
+  fn onboard [--force]                Run the interactive onboarding wizard
   fn dashboard                        Start the board web UI
   fn dashboard --paused               Start with automation paused
   fn dashboard --dev                  Start web UI only (no AI engine)
@@ -623,6 +626,7 @@ async function main() {
     runNodeHealth,
     runMeshStatus,
     runInit,
+    runOnboard,
     runAgentStop,
     runAgentStart,
     runAgentImport,
@@ -668,6 +672,12 @@ async function main() {
         const git = args.includes("--git");
 
         await runInit({ name, path, git });
+        break;
+      }
+
+      case "onboard": {
+        const force = args.includes("--force");
+        await runOnboard({ force });
         break;
       }
 

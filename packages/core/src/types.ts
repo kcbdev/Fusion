@@ -2542,6 +2542,10 @@ export interface GlobalSettings {
    *  Set to true when the user completes the multi-project setup process.
    *  Default: false (undefined until setup is completed). */
   setupComplete?: boolean;
+  /** ISO timestamp for completion of the `fn onboard` CLI wizard.
+   *  Distinct from dashboard `setupComplete` first-run flow state.
+   *  Undefined means CLI onboarding has not completed yet. */
+  cliOnboardingCompletedAt?: string;
   /** List of favorite provider names. Favorite providers appear at the top of
    *  model selection dropdowns. Order is preserved - earlier entries appear higher. */
   favoriteProviders?: string[];
