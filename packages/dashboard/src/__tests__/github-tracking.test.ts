@@ -375,7 +375,7 @@ describe("maybeCreateTrackingIssue", () => {
     expect(createIssueMock).toHaveBeenCalledTimes(1);
   });
 
-  it("creates issue for github_import tasks when tracking is explicitly enabled", async () => {
+  it("links GitHub sourceIssue instead of creating a duplicate", async () => {
     const linkGithubIssue = vi.fn();
     const recordActivity = vi.fn();
 
@@ -383,6 +383,13 @@ describe("maybeCreateTrackingIssue", () => {
       sourceType: "github_import",
       title: "Imported issue follow-up",
       description: "Short body",
+      sourceIssue: {
+        provider: "github",
+        repository: "upstream/repo",
+        externalIssueId: "123",
+        issueNumber: 123,
+        url: "https://github.com/upstream/repo/issues/123",
+      },
       githubTracking: { enabled: true },
     }), {
       taskStore: { linkGithubIssue, recordActivity } as any,
@@ -392,18 +399,89 @@ describe("maybeCreateTrackingIssue", () => {
       logger: console,
     });
 
-    expect(createIssueMock).toHaveBeenCalledWith(expect.objectContaining({
-      owner: "o",
-      repo: "r",
-      title: "[FN-1] Imported issue follow-up",
-      body: "Fusion task: FN-1\n\nShort body",
+    expect(result).toEqual({ created: false, reason: "source_issue_linked" });
+    expect(createIssueMock).not.toHaveBeenCalled();
+    expect(linkGithubIssue).toHaveBeenCalledWith("FN-1", expect.objectContaining({
+      owner: "upstream",
+      repo: "repo",
+      number: 123,
+      url: "https://github.com/upstream/repo/issues/123",
     }));
-    expect(result).toMatchObject({
-      created: true,
-      issue: { owner: "o", repo: "r", number: 12, htmlUrl: "https://github.com/o/r/issues/12" },
+    expect(recordActivity).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({ type: "github-issue-source-linked", repo: "upstream/repo", number: 123 }),
+    }));
+  });
+
+  it("constructs sourceIssue URL when sourceIssue.url is missing", async () => {
+    const linkGithubIssue = vi.fn();
+
+    const result = await maybeCreateTrackingIssue(buildTask({
+      sourceIssue: {
+        provider: "github",
+        repository: "upstream/repo",
+        externalIssueId: "987",
+        issueNumber: 987,
+      },
+      githubTracking: { enabled: true },
+    }), {
+      taskStore: { linkGithubIssue, recordActivity: vi.fn() } as any,
+      projectSettings: {},
+      globalSettings: { githubTrackingDefaultRepo: "o/r" } as any,
+      rootDir,
+      logger: { warn: vi.fn(), info: vi.fn() },
     });
-    expect(linkGithubIssue).toHaveBeenCalledWith("FN-1", expect.objectContaining({ owner: "o", repo: "r", number: 12 }));
-    expect(recordActivity).toHaveBeenCalled();
+
+    expect(result).toEqual({ created: false, reason: "source_issue_linked" });
+    expect(linkGithubIssue).toHaveBeenCalledWith("FN-1", expect.objectContaining({
+      url: "https://github.com/upstream/repo/issues/987",
+    }));
+    expect(createIssueMock).not.toHaveBeenCalled();
+  });
+
+  it("falls through to normal create path when sourceIssue provider is non-github", async () => {
+    const result = await maybeCreateTrackingIssue(buildTask({
+      title: "Imported issue follow-up",
+      description: "Short body",
+      sourceIssue: {
+        provider: "gitlab",
+        repository: "group/project",
+        externalIssueId: "321",
+        issueNumber: 321,
+      },
+      githubTracking: { enabled: true },
+    }), {
+      taskStore: { linkGithubIssue: vi.fn(), recordActivity: vi.fn() } as any,
+      projectSettings: {},
+      globalSettings: { githubTrackingDefaultRepo: "o/r" } as any,
+      rootDir,
+      logger: { warn: vi.fn(), info: vi.fn() },
+    });
+
+    expect(result).toMatchObject({ created: true });
+    expect(createIssueMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls through to normal create path when sourceIssue repository slug is invalid", async () => {
+    const result = await maybeCreateTrackingIssue(buildTask({
+      title: "Imported issue follow-up",
+      description: "Short body",
+      sourceIssue: {
+        provider: "github",
+        repository: "invalidslug",
+        externalIssueId: "222",
+        issueNumber: 222,
+      },
+      githubTracking: { enabled: true },
+    }), {
+      taskStore: { linkGithubIssue: vi.fn(), recordActivity: vi.fn() } as any,
+      projectSettings: {},
+      globalSettings: { githubTrackingDefaultRepo: "o/r" } as any,
+      rootDir,
+      logger: { warn: vi.fn(), info: vi.fn() },
+    });
+
+    expect(result).toMatchObject({ created: true });
+    expect(createIssueMock).toHaveBeenCalledTimes(1);
   });
 
   it("uses the AI summarizer when the title is missing and a summarizer model is configured", async () => {

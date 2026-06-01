@@ -1,6 +1,7 @@
 import {
   AiServiceError,
   MIN_DESCRIPTION_LENGTH,
+  parseRepoSlug,
   resolveTaskGithubTracking,
   summarizeTitle,
   type GlobalSettings,
@@ -152,6 +153,7 @@ export type MaybeCreateTrackingIssueReason =
   | "no_repo_configured"
   | "no_title_available"
   | "existing_issue_found"
+  | "source_issue_linked"
   | "github_error"
   | "auth_token_missing"
   | "auth_gh_not_installed"
@@ -225,6 +227,36 @@ export async function maybeCreateTrackingIssue(
       ...(tracking ?? {}),
       enabled: true,
     });
+  }
+
+  const sourceIssue = latestTask.sourceIssue;
+  if (sourceIssue?.provider === "github") {
+    const sourceRepo = parseRepoSlug(sourceIssue.repository);
+    if (sourceRepo && Number.isFinite(sourceIssue.issueNumber)) {
+      const url = sourceIssue.url
+        ?? `https://github.com/${sourceRepo.owner}/${sourceRepo.repo}/issues/${sourceIssue.issueNumber}`;
+      const createdAt = new Date().toISOString();
+      await deps.taskStore.linkGithubIssue(task.id, {
+        owner: sourceRepo.owner,
+        repo: sourceRepo.repo,
+        number: sourceIssue.issueNumber,
+        url,
+        createdAt,
+      });
+      await deps.taskStore.recordActivity({
+        type: "task:updated",
+        taskId: task.id,
+        taskTitle: latestTask.title,
+        details: `Linked source issue ${sourceRepo.owner}/${sourceRepo.repo}#${sourceIssue.issueNumber}`,
+        metadata: {
+          type: "github-issue-source-linked",
+          repo: `${sourceRepo.owner}/${sourceRepo.repo}`,
+          number: sourceIssue.issueNumber,
+          htmlUrl: url,
+        },
+      });
+      return { created: false, reason: "source_issue_linked" };
+    }
   }
 
   const repo = resolvedTracking.repo;
