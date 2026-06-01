@@ -1560,6 +1560,9 @@ describe("SettingsModal", () => {
       expect(discordLink).toHaveAttribute("target", "_blank");
       expect(discordLink).toHaveAttribute("rel", expect.stringContaining("noopener"));
       expect(discordLink).toHaveAttribute("rel", expect.stringContaining("noreferrer"));
+
+      expect(within(discordLink).getByTestId("discord-icon")).toBeInTheDocument();
+      expect(within(discordLink).queryByTestId("lucide-message-circle")).not.toBeInTheDocument();
     });
   });
 

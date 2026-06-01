@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense, type CSSProperties, type MouseEvent } from "react";
-import { Globe, Folder, RefreshCw, Star, HelpCircle, MessageCircle, Loader2, CheckCircle, AlertTriangle } from "lucide-react";
+import { Globe, Folder, RefreshCw, Star, HelpCircle, Loader2, CheckCircle, AlertTriangle } from "lucide-react";
 import {
   AGENT_PERMISSION_POLICY_ACTION_CATEGORIES,
   THINKING_LEVELS,
@@ -64,6 +64,22 @@ import { filterVisibleOnboardingAndSettingsProviders } from "./providerVisibilit
 const GITHUB_STAR_CACHE_KEY = "fusion_github_star_count";
 const GITHUB_STAR_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 const GITHUB_STAR_CLICKED_KEY = "fusion:github-star-clicked";
+
+function DiscordIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg
+      data-testid="discord-icon"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      role="img"
+      aria-hidden="true"
+      fill="currentColor"
+    >
+      <path d="M20.317 4.369A19.791 19.791 0 0 0 15.885 3a13.66 13.66 0 0 0-.696 1.412 18.27 18.27 0 0 0-6.378 0A13.627 13.627 0 0 0 8.115 3a19.736 19.736 0 0 0-4.432 1.369C.878 8.604.111 12.734.494 16.803a19.916 19.916 0 0 0 5.993 3.048 14.43 14.43 0 0 0 1.286-2.106 12.94 12.94 0 0 1-2.024-.977c.17-.122.337-.249.499-.381 3.908 1.838 8.149 1.838 12.01 0 .163.132.329.259.5.381a12.936 12.936 0 0 1-2.028.978 14.344 14.344 0 0 0 1.287 2.105 19.85 19.85 0 0 0 5.996-3.049c.449-4.713-.766-8.806-3.696-12.433zM8.02 14.335c-1.184 0-2.157-1.085-2.157-2.419 0-1.334.95-2.418 2.157-2.418 1.217 0 2.167 1.095 2.157 2.418 0 1.334-.95 2.419-2.157 2.419zm7.975 0c-1.184 0-2.157-1.085-2.157-2.419 0-1.334.95-2.418 2.157-2.418 1.217 0 2.167 1.095 2.157 2.418 0 1.334-.94 2.419-2.157 2.419z" />
+    </svg>
+  );
+}
 
 function toCompleteAgentPermissionRules(rules?: Partial<AgentPermissionPolicyRules>): AgentPermissionPolicyRules {
   return AGENT_PERMISSION_POLICY_ACTION_CATEGORIES.reduce((acc, category) => {
@@ -7485,7 +7501,7 @@ export function SettingsModal({
               aria-label="Join our Discord"
               title="Join our Discord"
             >
-              <MessageCircle size={13} aria-hidden="true" />
+              <DiscordIcon size={13} />
               Discord
             </a>
           </div>
