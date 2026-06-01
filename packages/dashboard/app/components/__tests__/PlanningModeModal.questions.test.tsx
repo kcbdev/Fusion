@@ -172,7 +172,7 @@ describe("PlanningModeModal", () => {
   });
 
   describe("Initial-turn reasoning visibility (FN-3274)", () => {
-    it("preserves reasoning in conversation history when first question arrives after thinking", async () => {
+    it("shows first-turn thinking in loading view and preserves it when question follows immediately", async () => {
       let streamHandlers: any;
       mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {
         streamHandlers = handlers;
@@ -202,17 +202,19 @@ describe("PlanningModeModal", () => {
         expect(screen.getByText("Generating next question...")).toBeDefined();
       });
 
-      // Simulate thinking output arriving during loading
+      // Simulate buffered first-turn replay where thinking and question can
+      // arrive back-to-back in the same flush.
       act(() => {
         streamHandlers.onThinking?.("Analyzing the plan requirements...");
       });
 
       await waitFor(() => {
         expect(screen.getByText("AI is thinking...")).toBeDefined();
+        expect(screen.getByText("Analyzing the plan requirements...")).toBeDefined();
       });
 
-      // Transition to question view
       act(() => {
+        streamHandlers.onThinking?.(" Buffered follow-up.");
         streamHandlers.onQuestion?.(mockQuestion);
       });
 
@@ -225,10 +227,56 @@ describe("PlanningModeModal", () => {
       expect(screen.getByTestId("conversation-history")).toBeDefined();
       expect(screen.getByText("AI Reasoning")).toBeDefined();
       fireEvent.click(screen.getByRole("button", { name: /Show AI reasoning/i }));
-      expect(screen.getByText("Analyzing the plan requirements...")).toBeDefined();
+      expect(screen.getByText("Analyzing the plan requirements... Buffered follow-up.")).toBeDefined();
 
       // avoid dangling handlers reference lint
       expect(streamHandlers).toBeDefined();
+    });
+
+    it("shows first-turn thinking before question when replay arrives in same connect tick", async () => {
+      vi.useFakeTimers();
+      mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {
+        handlers.onThinking?.("Synchronous buffered reasoning");
+        handlers.onQuestion?.(mockQuestion);
+        return {
+          close: vi.fn(),
+          isConnected: vi.fn().mockReturnValue(true),
+        };
+      });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />,
+      );
+
+      fireEvent.change(screen.getByPlaceholderText(/e.g., Build a user authentication/), {
+        target: { value: "Build auth system" },
+      });
+      fireEvent.click(screen.getByText("Start Planning"));
+
+      await waitFor(() => {
+        expect(screen.getByText("AI is thinking...")).toBeDefined();
+        expect(screen.getByText("Synchronous buffered reasoning")).toBeDefined();
+      });
+      expect(screen.queryByText("What is the scope?")).toBeNull();
+
+      act(() => {
+        vi.runOnlyPendingTimers();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("What is the scope?")).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: /Show AI reasoning/i }));
+      expect(screen.getByText("Synchronous buffered reasoning")).toBeDefined();
+
+      vi.useRealTimers();
     });
 
     it("preserves reasoning in conversation history when summary arrives after thinking", async () => {
@@ -495,6 +543,12 @@ describe("PlanningModeModal", () => {
       // Answer the first question
       fireEvent.click(screen.getByText("Medium"));
       fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+      // Second-turn parity: thinking should stream in loading view before the next question.
+      await waitFor(() => {
+        expect(screen.getByText("AI is thinking...")).toBeDefined();
+        expect(screen.getByText("Thinking about requirements...")).toBeDefined();
+      });
 
       // Wait for second question to arrive
       await waitFor(() => {

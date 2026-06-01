@@ -474,7 +474,14 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       const connection = connectPlanningStream(sessionId, projectId, {
         onThinking: (data) => {
           if (isStaleEvent()) return;
-          setStreamingOutput((prev) => prev + data);
+          setStreamingOutput((prev) => {
+            const next = prev + data;
+            // Keep the ref synchronized inside the event handler so
+            // back-to-back thinking/question events in the same flush can
+            // still preserve the full reasoning payload.
+            streamingOutputRef.current = next;
+            return next;
+          });
           broadcastUpdate({
             sessionId,
             status: "generating",
