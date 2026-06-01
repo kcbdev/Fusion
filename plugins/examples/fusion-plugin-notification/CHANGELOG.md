@@ -1,5 +1,12 @@
 # @fusion-plugin-examples/notification
 
+## 0.2.50
+
+### Patch Changes
+
+- Updated dependencies [3d22a98]
+  - @fusion/plugin-sdk@0.39.0
+
 ## 0.2.49
 
 ### Patch Changes

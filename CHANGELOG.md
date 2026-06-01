@@ -2,6 +2,199 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
+## 0.39.0
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- @fusion-plugin-examples/cli-printing-press@0.1.17
+- @fusion-plugin-examples/cursor-runtime@0.1.19
+- @fusion-plugin-examples/dependency-graph@0.1.31
+- @fusion-plugin-examples/droid-runtime@0.1.26
+- @fusion-plugin-examples/hermes-runtime@0.2.50
+- @fusion-plugin-examples/openclaw-runtime@0.2.50
+- @fusion-plugin-examples/paperclip-runtime@0.2.50
+- @fusion-plugin-examples/roadmap@0.1.19
+- @fusion/core@0.39.0
+- @fusion/engine@0.39.0
+
+### @fusion/desktop
+
+#### Patch Changes
+
+- @fusion/dashboard@0.39.0
+- @fusion/core@0.39.0
+
+### @fusion/engine
+
+#### Patch Changes
+
+- @fusion/core@0.39.0
+- @fusion/pi-claude-cli@0.39.0
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- 3d22a98: Fix Windows binary-release build failure: add the DOM lib to `@fusion/plugin-sdk`'s tsconfig. Because `@fusion/core` exports its types as raw `src/*.ts`, plugin-sdk recompiles core's source under its own compiler options; without the DOM lib the global fetch `Response` type (`.ok`/`.status`/`.json`) resolved inconsistently across platforms and broke the Windows CLI and desktop release jobs (TS2339).
+  - @fusion/core@0.39.0
+
+### @runfusion/fusion
+
+#### Minor Changes
+
+- 3b59487: Add a new `fn_mission_update` extension tool to patch mission `title`/`description` without recreating missions, and classify it as a mission mutation tool in readonly/permanent gating policy.
+- 194dfa9: Add a run-audit cited-goal trail for goal anchoring flows.
+
+  - Enrich `goal:injection-applied`, `goal:injection-skipped`, and `goal:retrieval-invoked` events with `metadata.goalIds` (IDs/counts only).
+  - Add core aggregation helper `collectCitedGoalIdsFromAudit(...)` to derive injected/retrieved/combined cited goal IDs from run-audit events.
+  - Add dashboard API endpoint `GET /api/agents/:id/runs/:runId/cited-goals` to query cited goal IDs for a run.
+
+- 3d22a98: Add the Workflow IR v1 contract surface via `@fusion/core`, including versioned graph types (`WorkflowIr`), runtime parsing/validation (`parseWorkflowIr`), serialization (`serializeWorkflowIr`), and a canonical built-in fixture (`BUILTIN_WORKFLOW_IR_FIXTURE`) for interpreter parity testing.
+- 0ffe7f0: Add mission delete tooling for agents: `fn_feature_delete`, `fn_slice_delete`, and `fn_milestone_delete`.
+
+  Mission feature/slice/milestone deletes now enforce a linked live-task guard by default and return clear conflict errors. Callers can pass `force: true` to clear mission linkage and proceed with hard deletion.
+
+- acad46c: Expose mission assertion backfill through operator-facing surfaces.
+
+  - Added dashboard API route `POST /api/missions/:missionId/backfill-assertions` with dry-run default and `MissionAssertionBackfillReport` response.
+  - Added agent/CLI tool `fn_mission_backfill_assertions` for dry-run/apply remediation of FN-5696 legacy zero-assertion features.
+  - Updated mission operator docs and synced fusion skill/tool reference docs.
+
+- 1edbb54: Add a flagged-off Workflow Graph Executor scaffold and built-in coding lifecycle Workflow IR exports.
+
+  - Adds `BUILTIN_CODING_WORKFLOW_IR` and `buildBuiltinCodingWorkflowIr` to `@fusion/core`.
+  - Adds `WorkflowGraphExecutor` and `WORKFLOW_GRAPH_EXECUTOR_FLAG` to `@fusion/engine`.
+  - Adds parity-harness skeleton tests and IR documentation updates.
+
+  The new executor path is gated by `experimentalFeatures.workflowGraphExecutor` and remains strict no-op while disabled (default).
+
+- ba81d1f: Add workflow graph interpreter node handlers and traversal semantics behind the default-off `workflowGraphExecutor` experimental flag. The interpreter now supports prompt/script/gate dispatch through legacy seam DI, edge-condition routing (`success`/`failure`/`outcome:<value>`), bounded retries, and parity-oriented tests for no-op flag behavior and lifecycle routing.
+- 5b4eecb: Add workflow interpreter dual-observe parity instrumentation surfaces for phased rollout.
+
+  - Export pure workflow parity comparison helpers from `@fusion/core` (`compareWorkflowRunObservations`, `compareWorkflowRunAudits`) with structured drift reports.
+  - Add `observeWorkflowParity` in the engine as a default-OFF, fail-soft observer gated by `experimentalFeatures.workflowInterpreterDualObserve`.
+  - Emit run-audit parity events (`workflow:parity-observed`, `workflow:parity-drift`) for shadow agreement/drift visibility without changing authoritative legacy execution.
+
+- 0c42578: Wire branch-group-aware merge routing into the merge path. Tasks marked with `branchContext.assignmentMode = "shared"` now merge onto their group's integration branch (`branch_groups.branchName`) in both direct merge and PR-mode base-branch resolution, while ungrouped and `per-task-derived` tasks keep existing default-branch behavior.
+
+  This release also adds reliability backstop coverage for grouped vs ungrouped routing and branch-group merge audit telemetry (`merge:branch-group-routed`).
+
+- 06d8490: feat(FN-5783): enforce branch-group autoMerge precedence for grouped promotion gating and audit visibility
+- e2101ea: Add single group-level pull request behavior for shared `branch_groups` in PR merge mode.
+
+  When tasks share a `branchContext.groupId`, Fusion now opens and tracks one PR for the group's integration branch instead of creating one PR per task. The group PR metadata is written back to `branch_groups` and refreshed from merge-status polling.
+
+- 7b70e7f: Add a branch-group promotion eligibility hook to the engine merge lifecycle via `evaluateBranchGroupPromotion`, and emit `merge:branch-group-promotion-gated` audit telemetry whenever shared-group member landings are evaluated for downstream group→default promotion readiness.
+- 5930c18: Add a new opt-in `task-created` notification event for ntfy/webhook providers.
+
+  - `task-created` fires when a task is created by an agent (`sourceAgentId` present), including agent-issued `fn_task_create` calls.
+  - Event is off by default and must be explicitly enabled in Settings → Notifications (`ntfyEvents` / provider `events`).
+  - ntfy formatting includes agent attribution and task deep-linking to the created task.
+
+- b1c1a33: Add safe `fn task deps` commands for audited task dependency mutations.
+
+#### Patch Changes
+
+- 62bc1e4: Removed the `showGitHubStarButton` setting and its Project General toggle from Settings.
+
+  The Settings header "Star on GitHub" button remains available (always shown) while the dedicated visibility setting is no longer configurable.
+
+- a7347ad: Skip self-owned branch reclaim for dependency-blocked todo tasks so repaired queued work is not repeatedly resumed before its blocker clears.
+- 6ba3cbf: Respect dashboard task-list column filters so API callers receive only tasks in the requested persisted column.
+- 3dee395: Block AI merge finalization when the checked-out integration worktree is dirty instead of stashing local changes into the merge landing path by default, with an explicit Merge settings UI escape hatch for the legacy dirty-checkout sync behavior.
+- 716f396: Fix room chat send reliability by preventing concurrent in-flight room dispatches, classifying ambiguous delivered sends as delivered (so composer text is not restored), and hardening optimistic/SSE reconciliation to avoid duplicate user message rendering.
+- 4148f43: Fix the Binary Release workflow so platform binaries publish to GitHub Releases again:
+
+  - The release job now tolerates a single failing build leg instead of being skipped, which previously suppressed all assets.
+  - The node_modules cache key includes CPU arch (so arm64 runners no longer restore x64 native deps, fixing the `@rollup/rollup-linux-arm64-gnu` build crash) and the job id (so same-OS/arch jobs don't race on one key and fail the post-job cache save).
+  - The macOS and Windows CLI signing steps are skipped gracefully when their certificate secrets are absent, so unsigned binaries still publish.
+  - Desktop packaging now invokes `electron-builder` directly via `pnpm exec` instead of the `dist:*` scripts: pnpm leaked the `--` separator into script args, which made electron-builder ignore `--publish never` (auto-publishing to the wrong repo and 404ing) and drop the Linux `--x64 --arm64` flags.
+  - The desktop build spawns workspace `.cmd` bins with a shell on Windows, fixing the `spawn EINVAL` failure.
+  - The desktop package declares an `author` with email so the Linux `.deb` target (fpm) can build.
+  - The Linux AppImage verify step matches electron-builder's actual x64 output name (`-linux-x86_64.AppImage`).
+  - `@types/node` is pinned workspace-wide via a pnpm override so the desktop/plugin-sdk build is deterministic (a stale transitive `@types/node` lacking global `fetch`/`Response` types intermittently broke the Windows desktop build).
+  - The `build-exe-cross` tests that cross-compile platform binaries are now opt-in (`FUSION_TEST_BUILD_EXE=1`) instead of auto-running on every CI run; native per-platform binary builds remain covered by `test-release.yml`.
+  - A workflow_dispatch run now builds and uploads binaries as artifacts for validation without creating a release (release creation is gated to tag pushes).
+  - The dependency-graph plugin build uses a cross-platform copy step that no longer breaks the Windows desktop build.
+  - The macOS Intel (`bun-darwin-x64`) CLI binary is no longer built/shipped — `macos-13` runners are too scarce to build reliably and were blocking releases. The macOS CLI is now Apple-Silicon-only; the desktop macOS DMG/ZIP remains universal.
+
+- f8bda56: Fix scheduler overlap starvation for coordination-only tasks by allowing no-commit/coordination scopes to bypass active file-scope leases when overlaps are limited to safe read-only paths. Implementation tasks with real write-scope overlaps remain serialized behind active leases.
+- 033f74c: Improve `fn_feature_link_task` error handling when linking to tasks that are not on the active board. Instead of surfacing a raw SQLite foreign key failure, the tool now returns a clear validation error explaining that only active (non-archived, non-deleted) tasks can be linked to mission features.
+- 3255965: Fix mission assertion-validation trigger gaps so mission-linked tasks reaching done no longer bypass validator execution.
+
+  Assertion-linked features now stay completion-gated until validator pass, and startup recovery replays implementing features whose linked tasks are already done/archived but still lack a passing validator status.
+
+- 1594470: Fix mission loop no-assertions auto-pass handling so completion deterministically advances feature `loopState` to `passed`, sets `lastValidatorStatus` to `passed`, and emits the structured `validation_auto_passed_no_assertions` audit event exactly once.
+- 9c4e8ed: Realize the mission completion-gate contract for live Goals mission workflows.
+
+  - Fix mission execution auto-pass behavior so zero-assertion features move to `loopState: "passed"` (not stuck in `implementing`) and emit `feature_auto_passed_no_assertions` telemetry while preserving `validation:passed` emission.
+  - Add milestone guard signaling for prose acceptance criteria with zero structured assertions via `hasProseButNoAssertions` rollup and warning event `milestone_missing_structured_assertions`.
+  - Add an idempotent `seedContractAssertionsForFeatures(...)` helper for operator-run assertion persistence and coverage tests.
+  - Reconcile MissionManager labels/copy to clearly separate enforced contract assertions from informational feature acceptance criteria, including warning badge and indicators.
+
+- 20c1c32: Persist merge-request handoff shadow contract and accepted marker for Phase 1 reliability scaffolding.
+- bb0f693: Fixes a dashboard regression where toggling the in-review Auto-merge switch could leave the UI in a broken/blank state until refresh. Auto-merge toggle state updates now remain consistent during rapid toggles, and regression coverage was added for the settings hook path.
+- 292bf07: Fix merger agent-log visibility by flushing buffered `AgentLogger` output before disposing AI sessions used for autostash conflict resolution, autostash hard-fail recovery, and rebase conflict resolution. This ensures trailing text/thinking deltas are persisted so merger activity reliably appears in the task agent log panel.
+- 5396730: Harden mission validation end-to-end by locking the canonical zero-assertion auto-pass path, strengthening assertion pass/fail regression coverage, and wiring bounded periodic mission recovery into existing self-healing maintenance so stranded implementing features recover without engine restart.
+- b154844: Fixes an executor worktree self-heal gap where `task.worktree` could be recorded as a nested subdirectory of a valid git worktree root.
+
+  When a nested path is detected under a registered worktree inside the configured worktrees directory, Fusion now re-anchors `task.worktree` to the actual git top-level and continues execution. Genuine mismatches (repo root, outside configured worktrees dir, or unregistered top-level) still fail with existing `wrong_toplevel` and liveness guard behavior.
+
+- 93e8a5f: Persist AI merge agent text, thinking, and tool output to task agent logs in AI merger mode.
+- 9f29935: Throttle `oauth-token-expired` notifications to at most once per provider every 12 hours, even when the credential `expires` timestamp changes across refreshes/replacements.
+- 793da2c: Refinement tasks now inherit the source task’s GitHub tracking state, preventing auto-created tracking issues when the source task was not GitHub-linked.
+- 2140ab2: Repair dropped spaces after sentence-ending punctuation in streamed agent responses (chat and agent logs) across all providers by applying the streaming-delta sentence-boundary fix at the shared engine delta chokepoints, not just the per-provider CLI bridges.
+- ffadb0c: Fix GitHub tracking reconciliation for soft-deleted and archived tasks by adding a periodic 15-minute sweep, paginating archive/deleted candidate scans, and correcting done-task filtering to use the task column.
+- fa428a4: Run the configured `worktreeInitCommand` when the merger has to create a fresh merge worktree during reuse-worktree reacquisition. This bootstraps newly created merge workspaces before merge verification/workflow steps run, while leaving pooled/reused existing worktrees unchanged.
+- ab38ee0: Requeue incomplete stuck-loop exhausted tasks in todo with progress preserved instead of routing them through review/merge or requiring manual unpause.
+- c6b3b77: Treat foreign-attributed commits reachable from origin/main as already integrated during branch contamination checks to avoid false-positive recovery loops when local main is stale.
+
+### runfusion.ai
+
+#### Patch Changes
+
+- Updated dependencies [62bc1e4]
+- Updated dependencies [a7347ad]
+- Updated dependencies [6ba3cbf]
+- Updated dependencies [3dee395]
+- Updated dependencies [716f396]
+- Updated dependencies [4148f43]
+- Updated dependencies [f8bda56]
+- Updated dependencies [3b59487]
+- Updated dependencies [033f74c]
+- Updated dependencies [3255965]
+- Updated dependencies [1594470]
+- Updated dependencies [9c4e8ed]
+- Updated dependencies [20c1c32]
+- Updated dependencies [bb0f693]
+- Updated dependencies [292bf07]
+- Updated dependencies [5396730]
+- Updated dependencies [194dfa9]
+- Updated dependencies [3d22a98]
+- Updated dependencies [0ffe7f0]
+- Updated dependencies [acad46c]
+- Updated dependencies [1edbb54]
+- Updated dependencies [ba81d1f]
+- Updated dependencies [5b4eecb]
+- Updated dependencies [b154844]
+- Updated dependencies [93e8a5f]
+- Updated dependencies [9f29935]
+- Updated dependencies [793da2c]
+- Updated dependencies [0c42578]
+- Updated dependencies [06d8490]
+- Updated dependencies [e2101ea]
+- Updated dependencies [7b70e7f]
+- Updated dependencies [2140ab2]
+- Updated dependencies [ffadb0c]
+- Updated dependencies [fa428a4]
+- Updated dependencies [5930c18]
+- Updated dependencies [ab38ee0]
+- Updated dependencies [c6b3b77]
+- Updated dependencies [b1c1a33]
+  - @runfusion/fusion@0.39.0
+
 ## 0.38.1
 
 ### @fusion/dashboard
@@ -7624,6 +7817,14 @@ for reference.
 - Updated dependencies [25d44e1]
 - Updated dependencies [a2ed6d0]
   - @runfusion/fusion@0.1.0
+
+## 0.11.26
+
+### @fusion/droid-cli
+
+#### Patch Changes
+
+- @fusion-plugin-examples/droid-runtime@0.1.26
 
 ## 0.11.25
 

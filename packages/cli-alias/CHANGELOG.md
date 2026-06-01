@@ -1,5 +1,49 @@
 # runfusion.ai
 
+## 0.39.0
+
+### Patch Changes
+
+- Updated dependencies [62bc1e4]
+- Updated dependencies [a7347ad]
+- Updated dependencies [6ba3cbf]
+- Updated dependencies [3dee395]
+- Updated dependencies [716f396]
+- Updated dependencies [4148f43]
+- Updated dependencies [f8bda56]
+- Updated dependencies [3b59487]
+- Updated dependencies [033f74c]
+- Updated dependencies [3255965]
+- Updated dependencies [1594470]
+- Updated dependencies [9c4e8ed]
+- Updated dependencies [20c1c32]
+- Updated dependencies [bb0f693]
+- Updated dependencies [292bf07]
+- Updated dependencies [5396730]
+- Updated dependencies [194dfa9]
+- Updated dependencies [3d22a98]
+- Updated dependencies [0ffe7f0]
+- Updated dependencies [acad46c]
+- Updated dependencies [1edbb54]
+- Updated dependencies [ba81d1f]
+- Updated dependencies [5b4eecb]
+- Updated dependencies [b154844]
+- Updated dependencies [93e8a5f]
+- Updated dependencies [9f29935]
+- Updated dependencies [793da2c]
+- Updated dependencies [0c42578]
+- Updated dependencies [06d8490]
+- Updated dependencies [e2101ea]
+- Updated dependencies [7b70e7f]
+- Updated dependencies [2140ab2]
+- Updated dependencies [ffadb0c]
+- Updated dependencies [fa428a4]
+- Updated dependencies [5930c18]
+- Updated dependencies [ab38ee0]
+- Updated dependencies [c6b3b77]
+- Updated dependencies [b1c1a33]
+  - @runfusion/fusion@0.39.0
+
 ## 0.38.1
 
 ### Patch Changes
