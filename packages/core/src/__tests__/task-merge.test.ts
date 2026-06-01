@@ -8,6 +8,7 @@ import {
   getTaskHardMergeBlocker,
   getTaskMergeBlocker,
   isTaskReadyForMerge,
+  isSharedBranchGroupMemberIntegration,
   resolveEffectiveAutoMerge,
   resolveEffectiveGroupAutoMerge,
   resolveTaskMergeTarget,
@@ -59,6 +60,42 @@ describe("resolveEffectiveGroupAutoMerge", () => {
     expect(resolveEffectiveGroupAutoMerge({ autoMerge: true }, { autoMerge: false })).toBe(true);
     expect(resolveEffectiveAutoMerge({ autoMerge: true }, { autoMerge: false })).toBe(true);
     expect(resolveEffectiveGroupAutoMerge({ autoMerge: false }, { autoMerge: true })).toBe(false);
+  });
+});
+
+describe("isSharedBranchGroupMemberIntegration", () => {
+  it("returns true for shared members with a resolvable group id", () => {
+    expect(isSharedBranchGroupMemberIntegration({
+      branchContext: {
+        assignmentMode: "shared",
+        groupId: "BG-1",
+        source: "planning",
+      },
+    })).toBe(true);
+  });
+
+  it("returns false for per-task-derived grouped members", () => {
+    expect(isSharedBranchGroupMemberIntegration({
+      branchContext: {
+        assignmentMode: "per-task-derived",
+        groupId: "BG-1",
+        source: "planning",
+      },
+    })).toBe(false);
+  });
+
+  it("returns false when no group id is present", () => {
+    expect(isSharedBranchGroupMemberIntegration({
+      branchContext: {
+        assignmentMode: "shared",
+        groupId: "   ",
+        source: "planning",
+      },
+    })).toBe(false);
+  });
+
+  it("returns false when branch context is absent", () => {
+    expect(isSharedBranchGroupMemberIntegration({ branchContext: undefined })).toBe(false);
   });
 });
 

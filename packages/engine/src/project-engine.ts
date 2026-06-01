@@ -10,7 +10,7 @@ import type {
   ScheduledTask,
   AutomationRunResult,
 } from "@fusion/core";
-import { compareTasksByPriorityThenAgeAndId, getTaskHardMergeBlocker, normalizeMergerMode, sortTasksByPriorityThenAgeAndId } from "@fusion/core";
+import { compareTasksByPriorityThenAgeAndId, getTaskHardMergeBlocker, isSharedBranchGroupMemberIntegration, normalizeMergerMode, sortTasksByPriorityThenAgeAndId } from "@fusion/core";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { InProcessRuntime } from "./runtimes/in-process-runtime.js";
@@ -1375,9 +1375,13 @@ export class ProjectEngine {
    * pushed wins. listTasks returns createdAt ASC — without this sort an
    * older low-priority task would start before a later urgent one.
    */
-  private enqueueEligibleInReviewTasks(tasks: readonly Task[]): number {
+  private allowInReviewMergeProcessing(task: Pick<Task, "branchContext">, settings: Pick<Settings, "autoMerge">): boolean {
+    return settings.autoMerge || isSharedBranchGroupMemberIntegration(task);
+  }
+
+  private enqueueEligibleInReviewTasks(tasks: readonly Task[], settings: Pick<Settings, "autoMerge">): number {
     const eligible = sortTasksByPriorityThenAgeAndId(
-      tasks.filter((t) => !t.paused && this.canMergeTask(t as any)) as Task[],
+      tasks.filter((t) => !t.paused && this.canMergeTask(t as any) && this.allowInReviewMergeProcessing(t, settings)) as Task[],
     );
     for (const t of eligible) {
       this.internalEnqueueMerge(t.id);
@@ -1487,13 +1491,12 @@ export class ProjectEngine {
               );
               continue;
             }
-            if (!settings.autoMerge) {
-              runtimeLog.log(`Auto-merge skipping ${taskId} — autoMerge disabled`);
-              continue;
-            }
-
             const task = await store.getTask(taskId);
             if (!task || task.column !== "in-review") {
+              continue;
+            }
+            if (!this.allowInReviewMergeProcessing(task, settings)) {
+              runtimeLog.log(`Auto-merge skipping ${taskId} — autoMerge disabled`);
               continue;
             }
             if (task.paused && !task.mergeDetails?.mergeConfirmed) {
@@ -2570,7 +2573,7 @@ export class ProjectEngine {
             runtimeLog.log(`Auto-merge handoff (${task.id}) skipped: ${settings.globalPause ? "globalPause" : "enginePaused"} active`);
             return;
           }
-          if (!settings.autoMerge) {
+          if (!this.allowInReviewMergeProcessing(latestTask, settings)) {
             runtimeLog.log(`Auto-merge handoff (${task.id}) skipped: autoMerge disabled`);
             return;
           }
@@ -2687,7 +2690,7 @@ export class ProjectEngine {
 
       try {
         const settings = await store.getSettings();
-        if (settings.globalPause || settings.enginePaused || !settings.autoMerge) {
+        if (settings.globalPause || settings.enginePaused || !this.allowInReviewMergeProcessing(task, settings)) {
           return;
         }
         if (this.options.getTaskMergeBlocker?.(task)) {
@@ -2759,10 +2762,8 @@ export class ProjectEngine {
       }
 
       const settings = await store.getSettings();
-      if (!settings.autoMerge) return;
 
-
-      const enqueued = this.enqueueEligibleInReviewTasks(tasks as Task[]);
+      const enqueued = this.enqueueEligibleInReviewTasks(tasks as Task[], settings);
       if (enqueued > 0) {
         runtimeLog.log(`Auto-merge startup sweep: enqueueing ${enqueued} task(s)`);
       }
@@ -2819,9 +2820,9 @@ export class ProjectEngine {
 
       try {
         const settings = await store.getSettings();
-        if (!settings.globalPause && !settings.enginePaused && settings.autoMerge) {
+        if (!settings.globalPause && !settings.enginePaused) {
           const tasks = await store.listTasks({ column: "in-review" });
-          this.enqueueEligibleInReviewTasks(tasks as Task[]);
+          this.enqueueEligibleInReviewTasks(tasks as Task[], settings);
         }
       } catch (err: unknown) {
         runtimeLog.warn(
@@ -2876,13 +2877,13 @@ export class ProjectEngine {
       );
     }
 
-    if (settings.globalPause || settings.enginePaused || !settings.autoMerge) {
+    if (settings.globalPause || settings.enginePaused) {
       return;
     }
 
     try {
       const tasks = await store.listTasks({ column: "in-review" });
-      this.enqueueEligibleInReviewTasks(tasks as Task[]);
+      this.enqueueEligibleInReviewTasks(tasks as Task[], settings);
     } catch (err: unknown) {
       runtimeLog.warn(
         `${source}: failed to scan in-review tasks for auto-merge: ${err instanceof Error ? err.message : String(err)}`,

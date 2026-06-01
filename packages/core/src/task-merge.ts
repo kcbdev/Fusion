@@ -55,6 +55,19 @@ export function resolveEffectiveGroupAutoMerge(
   return group.autoMerge ?? settings.autoMerge;
 }
 
+/**
+ * Shared-branch-group members perform a soft pre-integration step:
+ * member branch → shared group branch. This path is exempt from the global
+ * `autoMerge:false` in-review terminal gate so member integration can proceed,
+ * but shared-branch → default-branch promotion remains separately gated.
+ */
+export function isSharedBranchGroupMemberIntegration(
+  task: Pick<Task, "branchContext">,
+): boolean {
+  return task.branchContext?.assignmentMode === "shared"
+    && Boolean(task.branchContext.groupId?.trim());
+}
+
 export function resolveTaskMergeTarget(
   task: Pick<Task, "baseBranch" | "branchContext">,
   options: MergeTargetResolverOptions = {},

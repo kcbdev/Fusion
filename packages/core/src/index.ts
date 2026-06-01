@@ -318,6 +318,7 @@ export {
   getTaskHardMergeBlocker,
   getTaskCompletionBlocker,
   isTaskReadyForMerge,
+  isSharedBranchGroupMemberIntegration,
   resolveEffectiveAutoMerge,
   resolveEffectiveGroupAutoMerge,
   resolveTaskMergeTarget,

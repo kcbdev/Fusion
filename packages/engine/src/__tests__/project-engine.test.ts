@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Task } from "@fusion/core";
 import { ProjectEngine } from "../project-engine.js";
 import { runtimeLog } from "../logger.js";
 import { TunnelProcessManager } from "../remote-access/tunnel-process-manager.js";
@@ -1877,6 +1878,69 @@ describe("ProjectEngine paused in-review auto-merge behavior", () => {
     expect(enqueueSpy).not.toHaveBeenCalledWith("FN-paused");
 
     await engine.stop();
+  });
+
+  it("startup merge sweep enqueues shared-group members when autoMerge is false", async () => {
+    const mockStore = createMockStore({ ...baseSettings, autoMerge: false });
+    mockStore.store.listTasks.mockResolvedValueOnce([
+      {
+        id: "FN-shared",
+        column: "in-review",
+        paused: false,
+        mergeRetries: 0,
+        status: null,
+        branchContext: { assignmentMode: "shared", groupId: "BG-5819", source: "planning" },
+      },
+      { id: "FN-plain", column: "in-review", paused: false, mergeRetries: 0, status: null },
+    ]);
+    mocks.currentStore = mockStore.store;
+    const engine = createEngine();
+    const privateEngine = engine as unknown as { internalEnqueueMerge: (taskId: string) => void };
+    const enqueueSpy = vi.spyOn(privateEngine, "internalEnqueueMerge");
+
+    await engine.start();
+
+    expect(enqueueSpy).toHaveBeenCalledWith("FN-shared");
+    expect(enqueueSpy).not.toHaveBeenCalledWith("FN-plain");
+
+    await engine.stop();
+  });
+
+  it("task:moved handoff keeps shared members blocked by global or engine pause", async () => {
+    vi.useFakeTimers();
+    for (const settings of [
+      { ...baseSettings, autoMerge: false, globalPause: true, enginePaused: false },
+      { ...baseSettings, autoMerge: false, globalPause: false, enginePaused: true },
+    ]) {
+      const mockStore = createMockStore(settings);
+      mocks.currentStore = mockStore.store;
+      const engine = createEngine();
+      const privateEngine = engine as unknown as { internalEnqueueMerge: (taskId: string) => void };
+      const enqueueSpy = vi.spyOn(privateEngine, "internalEnqueueMerge");
+
+      await engine.start();
+      enqueueSpy.mockClear();
+      const movedHandler = mockStore.store.on.mock.calls.find((c: unknown[]) => c[0] === "task:moved")?.[1] as
+        | ((event: { task: Task; to: string }) => void)
+        | undefined;
+      if (!movedHandler) throw new Error("task:moved handler was not registered");
+
+      movedHandler({
+        task: {
+          id: "FN-shared",
+          column: "in-review",
+          paused: false,
+          steps: [],
+          branchContext: { assignmentMode: "shared", groupId: "BG-5819", source: "planning" },
+        } as unknown as Task,
+        to: "in-review",
+      });
+
+      await vi.advanceTimersByTimeAsync(350);
+      expect(enqueueSpy).not.toHaveBeenCalledWith("FN-shared");
+      await engine.stop();
+    }
+    vi.useRealTimers();
   });
 
   it("global unpause sweep does not enqueue paused in-review tasks", async () => {

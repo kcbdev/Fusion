@@ -74,6 +74,54 @@ describe("FN-5782 reliability interactions: branch group merge routing", () => {
     }
   }, 30_000);
 
+  it.skipIf(!hasGit)("records shared-member landing even when autoMerge is false", async () => {
+    const fixture = await makeReliabilityFixture({
+      taskId: "FN-5819-RI-AUTO-OFF",
+      settings: { testMode: true, autoMerge: false } as any,
+    });
+
+    try {
+      const { rootDir, store, task } = fixture;
+      await stageMergeBranch(store, rootDir, task.id, "fn5819AutoOff");
+
+      const group = store.createBranchGroup({
+        sourceType: "planning",
+        sourceId: "PS-FN5819",
+        branchName: "fusion/groups/fn-5819-auto-off",
+      });
+      await store.setTaskBranchGroup(task.id, group.id);
+
+      const result = await aiMergeTask(store, rootDir, task.id);
+      expect(result.merged).toBe(true);
+      expect(git(rootDir, `git show ${group.branchName}:packages/engine/src/fn5819AutoOff.ts`)).toContain("fn5819AutoOff");
+      expect(() => git(rootDir, "git show main:packages/engine/src/fn5819AutoOff.ts")).toThrow();
+
+      const updatedGroup = store.getBranchGroup(group.id)!;
+      expect(updatedGroup.status).toBe("open");
+      expect(updatedGroup.worktreePath).toBe(join(`${rootDir}-worktrees`, task.id.toLowerCase()));
+
+      const events = store.getRunAuditEvents().filter((event) => event.target === task.id);
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          mutationType: "merge:branch-group-routed",
+          metadata: expect.objectContaining({
+            mergeTargetBranch: group.branchName,
+            mergeTargetSource: "branch-group-integration",
+          }),
+        }),
+        expect.objectContaining({
+          mutationType: "merge:branch-group-promotion-gated",
+          metadata: expect.objectContaining({
+            groupId: group.id,
+            effectiveEligible: false,
+          }),
+        }),
+      ]));
+    } finally {
+      await fixture.cleanup();
+    }
+  }, 45_000);
+
   it.skipIf(!hasGit)("lands two shared members of same group onto one integration branch", async () => {
     const fixture = await makeReliabilityFixture({ taskId: "FN-5782-RI-A", settings: { testMode: true } as any });
 
