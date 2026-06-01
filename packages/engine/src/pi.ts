@@ -59,6 +59,7 @@ import { resolvePermanentAgentToolDecision } from "./permanent-agent-gating.js";
 import type { SystemPromptLayers } from "./prompt-layers.js";
 import { READONLY_ALLOWLIST, filterCustomToolsForReadonly, isReadonlyAllowed } from "./workflow-step-tool-policy.js";
 import { createStreamingDeltaNormalizer } from "./streaming-delta.js";
+import { isUnsupportedMessageRoleError } from "./transient-error-detector.js";
 
 const RTK_ACCEPTED_REWRITE_EXIT_CODES = new Set([0, 3]);
 const RTK_EXPECTED_PASSTHROUGH_EXIT_CODES = new Set([1, 2]);
@@ -387,6 +388,13 @@ export async function promptSessionAndCheck(session: AgentSession, prompt: strin
       const modelDesc = describeModel(session);
       piLog.warn(`pi state error — Codex WebSocket transport drop (model=${modelDesc}): ${stateError}`);
       throw new Error(`${stateError} (model=${modelDesc})`);
+    }
+    if (isUnsupportedMessageRoleError(stateError)) {
+      const modelDesc = describeModel(session);
+      const hint =
+        "Operator action required: this agent's configured model/provider rejected a message role. Check the agent model selection and provider compatibility (imported non-default 'company' agents may default to an incompatible model+provider combination).";
+      piLog.error(`pi state error — unsupported message role (model=${modelDesc}): ${stateError}`);
+      throw new Error(`${stateError} (model=${modelDesc}). ${hint}`);
     }
     throw new Error(stateError);
   }

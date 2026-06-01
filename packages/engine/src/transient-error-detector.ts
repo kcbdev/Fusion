@@ -191,6 +191,15 @@ export function extractMissingModulePath(errorMessage: string): string | null {
   return match[1];
 }
 
+const UNSUPPORTED_MESSAGE_ROLE_PATTERN = /\bmessages\.\[\d+\]\.role\b[\s\S]*\bis not one of\b|\bis not one of\b[\s\S]*\bmessages\.\[\d+\]\.role\b/i;
+
+export function isUnsupportedMessageRoleError(errorMessage: string): boolean {
+  if (!errorMessage || typeof errorMessage !== "string") {
+    return false;
+  }
+  return UNSUPPORTED_MESSAGE_ROLE_PATTERN.test(errorMessage);
+}
+
 const OPERATOR_ACTIONABLE_AGENT_ERROR_PATTERNS: RegExp[] = [
   /invalid api key/i,
   /authentication failed/i,
@@ -210,5 +219,8 @@ export function isOperatorActionableAgentError(errorMessage: string): boolean {
   if (!errorMessage || typeof errorMessage !== "string") {
     return false;
   }
-  return OPERATOR_ACTIONABLE_AGENT_ERROR_PATTERNS.some((pattern) => pattern.test(errorMessage));
+  return (
+    isUnsupportedMessageRoleError(errorMessage) ||
+    OPERATOR_ACTIONABLE_AGENT_ERROR_PATTERNS.some((pattern) => pattern.test(errorMessage))
+  );
 }

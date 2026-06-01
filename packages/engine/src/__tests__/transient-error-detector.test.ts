@@ -6,6 +6,7 @@ import {
   extractMissingModulePath,
   isOperatorActionableAgentError,
   isStaleWorktreeModuleResolutionError,
+  isUnsupportedMessageRoleError,
   TRANSIENT_ERROR_PATTERNS,
 } from "../transient-error-detector.js";
 import { isUsageLimitError } from "../usage-limit-detector.js";
@@ -269,6 +270,34 @@ describe("Transient Error Detector", () => {
     });
   });
 
+  describe("isUnsupportedMessageRoleError", () => {
+    it("returns true for the reported provider error", () => {
+      expect(
+        isUnsupportedMessageRoleError(
+          "developer is not one of ['system', 'assistant', 'user', 'tool', 'function'] - 'messages.[0].role'",
+        ),
+      ).toBe(true);
+    });
+
+    it("returns true for role/index/case variants", () => {
+      expect(
+        isUnsupportedMessageRoleError(
+          "assistant_role is not one of ['system','assistant','user','tool','function'] - 'messages.[3].role'",
+        ),
+      ).toBe(true);
+      expect(
+        isUnsupportedMessageRoleError(
+          "'MESSAGES.[9].ROLE' IS NOT ONE OF ['system','assistant']",
+        ),
+      ).toBe(true);
+    });
+
+    it("returns false for unrelated errors", () => {
+      expect(isUnsupportedMessageRoleError("socket hang up")).toBe(false);
+      expect(isUnsupportedMessageRoleError("invalid api key")).toBe(false);
+    });
+  });
+
   describe("isOperatorActionableAgentError", () => {
     it("returns true for credential/model/billing errors", () => {
       expect(isOperatorActionableAgentError("invalid api key")).toBe(true);
@@ -276,6 +305,13 @@ describe("Transient Error Detector", () => {
       expect(isOperatorActionableAgentError("model gpt-x not found")).toBe(true);
       expect(isOperatorActionableAgentError("missing OPENAI_API_KEY")).toBe(true);
       expect(isOperatorActionableAgentError("billing issue: quota exceeded")).toBe(true);
+    });
+
+    it("returns true for unsupported message-role errors", () => {
+      const message =
+        "developer is not one of ['system', 'assistant', 'user', 'tool', 'function'] - 'messages.[0].role'";
+      expect(isOperatorActionableAgentError(message)).toBe(true);
+      expect(classifyError(message)).toBe("permanent");
     });
 
     it("returns false for transient network errors", () => {

@@ -56,4 +56,28 @@ describe("promptSessionAndCheck recursion guard (FN-4930)", () => {
     }
     expect(warnMock).not.toHaveBeenCalledWith(expect.stringContaining("failed to inspect transcript"));
   });
+
+  it("annotates unsupported message-role provider errors with actionable hint", async () => {
+    const { promptSessionAndCheck } = await import("../pi.js");
+
+    const state = {
+      errorMessage: "",
+      messages: [],
+    };
+
+    const session = {
+      prompt: vi.fn(async () => {
+        state.errorMessage =
+          "developer is not one of ['system', 'assistant', 'user', 'tool', 'function'] - 'messages.[0].role'";
+      }),
+      state,
+    } as any;
+
+    await expect(promptSessionAndCheck(session, "hello")).rejects.toThrow(
+      /developer is not one of \['system', 'assistant', 'user', 'tool', 'function'\] - 'messages\.\[0\]\.role'/,
+    );
+    await expect(promptSessionAndCheck(session, "hello")).rejects.toThrow(
+      /Operator action required: this agent's configured model\/provider rejected a message role\./,
+    );
+  });
 });
