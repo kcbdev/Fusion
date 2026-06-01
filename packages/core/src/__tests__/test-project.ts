@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
@@ -25,6 +25,15 @@ export interface TestProjectFixture {
   globalDir: string;
   cleanup: () => Promise<void>;
 }
+
+const TEST_PROJECT_RM_OPTIONS = {
+  recursive: true,
+  force: true,
+  maxRetries: 5,
+  retryDelay: 50,
+} as const;
+const TRACKED_TEST_PROJECT_DIRS = new Set<string>();
+const TEST_PROJECT_CLEANUP_HOOK_KEY = Symbol.for("fusion.core.test-project.cleanup-hooks-installed");
 
 function assertAbsolutePath(pathValue: string, label: string): void {
   if (!isAbsolute(pathValue)) {
@@ -78,6 +87,11 @@ export async function createTestProject(
 
   assertAbsolutePath(rootDir, "rootDir");
   assertAbsolutePath(globalDir, "globalSettingsDir");
+
+  TRACKED_TEST_PROJECT_DIRS.add(rootDir);
+  if (ownsGlobalDir) {
+    TRACKED_TEST_PROJECT_DIRS.add(globalDir);
+  }
 
   let store: TaskStore | undefined;
 
@@ -199,5 +213,41 @@ export async function seedTasks(store: TaskStore, count = 3): Promise<Task[]> {
  */
 export async function destroyTestProject(dir: string): Promise<void> {
   assertAbsolutePath(dir, "dir");
-  await rm(dir, { recursive: true, force: true });
+  try {
+    await rm(dir, TEST_PROJECT_RM_OPTIONS);
+  } catch {
+    try {
+      rmSync(dir, TEST_PROJECT_RM_OPTIONS);
+    } catch {
+      // best-effort fallback during teardown
+    }
+  } finally {
+    TRACKED_TEST_PROJECT_DIRS.delete(dir);
+  }
+}
+
+function cleanupTrackedTestProjectDirsSync(): void {
+  const cleanup = Array.from(TRACKED_TEST_PROJECT_DIRS);
+  for (const dir of cleanup) {
+    try {
+      rmSync(dir, TEST_PROJECT_RM_OPTIONS);
+    } catch {
+      // best-effort fallback during process teardown
+    } finally {
+      TRACKED_TEST_PROJECT_DIRS.delete(dir);
+    }
+  }
+}
+
+const processWithCleanupFlag = process as typeof process & {
+  [TEST_PROJECT_CLEANUP_HOOK_KEY]?: boolean;
+};
+if (!processWithCleanupFlag[TEST_PROJECT_CLEANUP_HOOK_KEY]) {
+  process.once("beforeExit", cleanupTrackedTestProjectDirsSync);
+  process.once("exit", cleanupTrackedTestProjectDirsSync);
+  processWithCleanupFlag[TEST_PROJECT_CLEANUP_HOOK_KEY] = true;
+}
+
+export function __getTrackedTestProjectDirsForTests(): Set<string> {
+  return TRACKED_TEST_PROJECT_DIRS;
 }

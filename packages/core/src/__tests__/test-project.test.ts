@@ -1,4 +1,4 @@
-import { mkdtempSync, existsSync, readdirSync } from "node:fs";
+import { mkdtempSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TaskStore } from "../store.js";
 import {
+  __getTrackedTestProjectDirsForTests,
   createTestProject,
   destroyTestProject,
   seedTasks,
@@ -66,6 +67,22 @@ describe("test-project fixture", () => {
     await destroyTestProject(fixture.rootDir);
 
     expect(existsSync(fixture.rootDir)).toBe(false);
+  });
+
+  it("destroyTestProject() removes directories containing sqlite wal/shm siblings", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "fusion-test-project-wal-"));
+    extraDirs.add(dir);
+
+    const fusionDir = join(dir, ".fusion");
+    mkdirSync(fusionDir, { recursive: true });
+    writeFileSync(join(fusionDir, "fusion.db"), "db");
+    writeFileSync(join(fusionDir, "fusion.db-wal"), "wal");
+    writeFileSync(join(fusionDir, "fusion.db-shm"), "shm");
+
+    await destroyTestProject(dir);
+
+    extraDirs.delete(dir);
+    expect(existsSync(dir)).toBe(false);
   });
 
   it(
@@ -159,5 +176,20 @@ describe("test-project fixture", () => {
     const tasks = await fixture.store.listTasks();
 
     expect(tasks).toHaveLength(4);
+  });
+
+  it("cleanup() drains tracked backstop directories", async () => {
+    const fixture = await createFixture();
+    const trackedDirs = __getTrackedTestProjectDirsForTests();
+
+    expect(trackedDirs.has(fixture.rootDir)).toBe(true);
+    expect(trackedDirs.has(fixture.globalDir)).toBe(true);
+
+    await fixture.cleanup();
+
+    expect(trackedDirs.has(fixture.rootDir)).toBe(false);
+    expect(trackedDirs.has(fixture.globalDir)).toBe(false);
+    expect(existsSync(fixture.rootDir)).toBe(false);
+    expect(existsSync(fixture.globalDir)).toBe(false);
   });
 });

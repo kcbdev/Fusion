@@ -71,14 +71,18 @@ function removeTrackedTmpDirSync(dir: string | undefined): void {
 const activeLockChildren = new Set<ChildProcessWithoutNullStreams>();
 
 function killLockChildrenSync(): void {
-  for (const child of activeLockChildren) {
+  const children = Array.from(activeLockChildren);
+  for (const child of children) {
     try {
-      if (child.exitCode === null && !child.killed) child.kill("SIGKILL");
+      if (child.exitCode === null && !child.killed) {
+        child.kill("SIGKILL");
+      }
     } catch {
       // best-effort
+    } finally {
+      activeLockChildren.delete(child);
     }
   }
-  activeLockChildren.clear();
 }
 
 function cleanupTmpDirsSync(): void {
