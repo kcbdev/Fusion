@@ -304,6 +304,7 @@ describe("SubtaskBreakdownModal", () => {
     fireEvent.change(branchNameInput, { target: { value: "feature/planning-shared" } });
     fireEvent.change(mergeTargetInput, { target: { value: "develop" } });
     fireEvent.change(branchModeSelect, { target: { value: "shared" } });
+    expect(await screen.findByText("Grouped on shared branch")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Create Tasks"));
 

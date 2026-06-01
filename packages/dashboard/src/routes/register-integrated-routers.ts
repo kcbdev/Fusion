@@ -12,6 +12,7 @@ import { createRoadmapCompatibilityRouter } from "../roadmap-routes.js";
 import { createDevServerRouter } from "../dev-server-routes.js";
 import type { AiSessionStore } from "../ai-session-store.js";
 import { createStashRecoveryRouter } from "./register-stash-recovery-routes.js";
+import { createBranchGroupsRouter } from "./register-branch-groups-routes.js";
 
 interface IntegratedRoutersOptions {
   router: Router;
@@ -44,6 +45,18 @@ export function registerIntegratedRouters({
   router.use("/goals", createGoalsRouter(store));
   router.use("/roadmaps", createRoadmapCompatibilityRouter(store));
   router.use("/stash-recovery", createStashRecoveryRouter(store));
+  router.use("/branch-groups", createBranchGroupsRouter(store, {
+    promoteBranchGroup: async ({ groupId, projectId }) => {
+      const engine = projectId && options?.engineManager
+        ? options.engineManager.getEngine(projectId)
+        : options?.engine;
+      const promote = (engine as { promoteBranchGroup?: (id: string) => Promise<Record<string, unknown>> } | undefined)?.promoteBranchGroup;
+      if (!promote) {
+        throw new Error("promoteBranchGroup is not available on engine");
+      }
+      return await promote(groupId);
+    },
+  }));
 }
 
 export function registerIntegratedDevServerRouter({ router, store }: DevServerRouterOptions): void {

@@ -13,6 +13,10 @@ import {
 } from "./TaskDetailModal.test-helpers";
 import { TaskDetailModal } from "../TaskDetailModal";
 
+vi.mock("../BranchGroupCard", () => ({
+  BranchGroupCard: ({ groupId }: { groupId: string }) => <div>Mock Branch Group {groupId}</div>,
+}));
+
 setupTaskDetailModalHooks();
 
 describe("TaskDetailModal GitHub tracking CTA", () => {
@@ -85,6 +89,24 @@ describe("TaskDetailModal GitHub tracking CTA", () => {
     await user.click(screen.getByRole("button", { name: "Expand GitHub tracking details" }));
     expect(screen.getByRole("button", { name: "Create tracking issue" })).toBeEnabled();
     expect(screen.queryByText("Tracking issue will be created once this task has a title or description to summarize.")).not.toBeInTheDocument();
+  });
+});
+
+describe("TaskDetailModal branch group surfacing", () => {
+  it("renders branch group card when task has group context", () => {
+    render(
+      <TaskDetailModal
+        task={makeTask({ branchContext: { groupId: "BG-1", source: "planning", assignmentMode: "shared" } })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.getByText("Mock Branch Group BG-1")).toBeInTheDocument();
   });
 });
 

@@ -1,0 +1,83 @@
+.branch-group-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.branch-group-card-error {
+  color: var(--color-error);
+}
+
+.branch-group-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.branch-group-card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.branch-group-card-badge {
+  background: var(--surface-elevated);
+}
+
+.branch-group-card-progress-text {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.branch-group-card-progress {
+  width: 100%;
+  height: var(--space-xs);
+  border-radius: var(--radius-pill);
+  background: var(--surface-elevated);
+  overflow: hidden;
+}
+
+.branch-group-card-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--color-info);
+}
+
+.branch-group-card-members {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space-xs) / 2);
+}
+
+.branch-group-card-member {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.branch-group-card-member-title {
+  flex: 1;
+}
+
+.branch-group-card-member-status {
+  color: var(--text-muted);
+  display: inline-flex;
+}
+
+.branch-group-card-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .branch-group-card-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

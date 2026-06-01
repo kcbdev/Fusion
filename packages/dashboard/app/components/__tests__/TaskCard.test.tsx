@@ -1393,6 +1393,22 @@ describe("TaskCard", () => {
     expect(screen.getByText("develop")).toBeDefined();
   });
 
+  it("shows shared group chip with shared branch label for grouped tasks", () => {
+    render(
+      <TaskCard
+        task={makeTask({
+          branch: "feature/shared-branch",
+          branchContext: { groupId: "BG-22", source: "planning", assignmentMode: "shared" },
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.getByText("Shared")).toBeDefined();
+    expect(screen.getAllByText("feature/shared-branch").length).toBeGreaterThan(0);
+  });
+
   it("keeps long non-default branch names readable via text and title semantics", () => {
     const longBranch = "feature/fn-3423-display-very-long-working-branch-name-for-card-metadata";
     const { container } = render(

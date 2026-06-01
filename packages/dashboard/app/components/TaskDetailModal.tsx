@@ -38,6 +38,7 @@ import { WorkflowResultsTab } from "./WorkflowResultsTab";
 import { RoutingTab } from "./RoutingTab";
 import { TaskDocumentsTab } from "./TaskDocumentsTab";
 import { TaskTokenStatsPanel } from "./TaskTokenStatsPanel";
+import { BranchGroupCard } from "./BranchGroupCard";
 import { PluginSlot } from "./PluginSlot";
 import { ProviderIcon } from "./ProviderIcon";
 import { subscribeSse } from "../sse-bus";
@@ -2624,6 +2625,9 @@ export function TaskDetailContent({
                   </span>
                 </div>
               </div>
+              {task.branchContext?.groupId && (
+                <BranchGroupCard groupId={task.branchContext.groupId} projectId={projectId} />
+              )}
             </>
           )}
           {task.status === "failed" && task.error && (

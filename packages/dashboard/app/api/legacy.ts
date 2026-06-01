@@ -77,6 +77,8 @@ import type {
   ProjectNodePathMapping,
   ApprovalRequestStatus,
   TaskIdIntegrityReport,
+  BranchGroup,
+  BranchGroupPrState,
 } from "@fusion/core";
 import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
 import type { GithubIssueAction, ScheduledTask, ScheduledTaskCreateInput, ScheduledTaskUpdateInput, AutomationRunResult, Routine, RoutineCreateInput, RoutineUpdateInput, RoutineExecutionResult } from "@fusion/core";
@@ -562,6 +564,58 @@ export function deleteTask(id: string, projectId?: string, options?: DeleteTaskO
 
 export function mergeTask(id: string, projectId?: string): Promise<MergeResult> {
   return api<MergeResult>(withProjectId(`/tasks/${id}/merge`, projectId), { method: "POST" });
+}
+
+export interface BranchGroupMemberSummary {
+  taskId: string;
+  title: string;
+  column: Task["column"];
+  landed: boolean;
+}
+
+export interface BranchGroupSummary extends BranchGroup {
+  members: BranchGroupMemberSummary[];
+  completion: {
+    landed: number;
+    total: number;
+    complete: boolean;
+  };
+}
+
+export interface PromoteBranchGroupResult {
+  groupId: string;
+  status?: BranchGroup["status"];
+  prState?: BranchGroupPrState;
+  prNumber?: number;
+  prUrl?: string;
+}
+
+export function apiListBranchGroups(projectId?: string, status?: BranchGroup["status"]): Promise<{ groups: BranchGroupSummary[] }> {
+  const search = new URLSearchParams();
+  if (status) search.set("status", status);
+  const suffix = search.size > 0 ? `?${search.toString()}` : "";
+  return api<{ groups: BranchGroupSummary[] }>(withProjectId(`/branch-groups${suffix}`, projectId));
+}
+
+export function apiGetBranchGroup(id: string, projectId?: string): Promise<{ group: BranchGroupSummary }> {
+  return api<{ group: BranchGroupSummary }>(withProjectId(`/branch-groups/${id}`, projectId));
+}
+
+export function apiAssignTaskBranchGroup(
+  payload: { taskId: string; groupId?: string | null; branchName?: string },
+  projectId?: string,
+): Promise<{ taskId: string; groupId: string | null }> {
+  return api<{ taskId: string; groupId: string | null }>(withProjectId("/branch-groups/assign", projectId), {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function apiPromoteBranchGroup(id: string, projectId?: string): Promise<PromoteBranchGroupResult> {
+  return api<PromoteBranchGroupResult>(withProjectId(`/branch-groups/${id}/promote`, projectId), {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
 }
 
 export type RecoverBranchBindingOutcome =

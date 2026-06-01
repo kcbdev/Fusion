@@ -734,6 +734,9 @@ export function SubtaskBreakdownModal({ isOpen, onClose, initialDescription, onT
                         <option value="shared">Shared merge target — subtasks run on their own branches</option>
                         <option value="per-task-derived">Per-task branches derived from planning branch</option>
                       </select>
+                      {branchAssignmentMode === "shared" && branchName.trim() && (
+                        <p className="text-muted">Grouped on shared branch <strong>{branchName.trim()}</strong></p>
+                      )}
                     </div>
                   </div>
                   {subtasks.map((subtask, index) => {

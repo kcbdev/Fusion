@@ -1112,3 +1112,34 @@ The merge-advance notice includes an explicit **Push to origin** action for the 
 - Non-fast-forward and lease-stale failures surface actionable messaging with Smart Pull.
 - Every attempt records `mutationType: "push:origin"` run-audit metadata: `integrationBranch`, `remote`, `localSha`, `remoteSha`, `aheadCount`, `behindCount`, `forceWithLease`, `outcome`, optional `stderrPreview`, and `durationMs`.
 - Push remains explicit user authorization only through dashboard HTTP routes (no scheduler/heartbeat auto-push).
+
+## Shared branch groups
+
+The dashboard now exposes branch-group visibility and controls for shared planning/mission branches.
+
+- `GET /api/branch-groups` lists groups with completion (`landed`/`total`) and tracked PR metadata.
+- `GET /api/branch-groups/:id` returns group details (shared branch, members, per-member landed state, completion, PR state).
+- `POST /api/branch-groups/assign` is the supported online grouping path to attach/detach tasks (`{ taskId, groupId|null, branchName? }`).
+- `POST /api/branch-groups/:id/promote` triggers the engine promotion flow (`promoteBranchGroup`) and returns promotion/PR status.
+
+UI surfaces:
+
+- Subtask planning interview shows a grouped indicator when `assignmentMode=shared`.
+- Task cards show grouped/shared branch metadata for grouped tasks.
+- Task detail renders a branch-group card with member landed progress.
+
+The branch-group card is completion-gated: while members are still pending, it shows progress only. PR / merge controls are only revealed after all members are landed into the shared branch. When auto-merge is off, promote/open-PR is explicit user action (no automatic push-to-origin behavior).
+
+### CLI-onboarding backfill runbook
+
+Use the assign endpoint to place paused CLI-onboarding tasks into a single shared group rooted on `feature/cli-onboarding`:
+
+```bash
+for id in FN-5805 FN-5806 FN-5807 FN-5808 FN-5809 FN-5810 FN-5811 FN-5812 FN-5813 FN-5814 FN-5815 FN-5816; do
+  curl -sS -X POST "http://127.0.0.1:4040/api/branch-groups/assign" \
+    -H 'content-type: application/json' \
+    --data "{\"taskId\":\"$id\",\"branchName\":\"feature/cli-onboarding\"}"
+done
+```
+
+If the endpoint is unavailable on the running dashboard build, the response will be `{"error":"Not found"}` until a build containing the branch-group router is deployed.

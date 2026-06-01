@@ -1891,6 +1891,25 @@ function TaskCardComponent({
               <span className="card-branch-value">{branchMetadata.baseBranch}</span>
             </span>
           )}
+          {task.branchContext?.groupId && (
+            <span
+              className="card-branch-chip"
+              title={
+                task.branchContext.assignmentMode === "shared" && branchMetadata.branch
+                  ? `${task.branchContext.groupId} · ${branchMetadata.branch}`
+                  : task.branchContext.groupId
+              }
+            >
+              <span className="card-branch-label">
+                {task.branchContext.assignmentMode === "shared" ? "Shared" : "Group"}
+              </span>
+              <span className="card-branch-value">
+                {task.branchContext.assignmentMode === "shared" && branchMetadata.branch
+                  ? branchMetadata.branch
+                  : task.branchContext.groupId}
+              </span>
+            </span>
+          )}
         </div>
       )}
       {showProgressSection && (() => {
