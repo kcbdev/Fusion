@@ -1,6 +1,6 @@
 import { readdirSync } from "node:fs";
 import { existsSync } from "node:fs";
-import type { Settings } from "@fusion/core";
+import type { Settings, Task } from "@fusion/core";
 import { resolveTaskWorktreePath, resolveWorktreesDir } from "./worktree-paths.js";
 
 export const ADJECTIVES = [
@@ -31,6 +31,13 @@ export const NOUNS = [
 
 export function canonicalFusionBranchName(taskId: string): string {
   return `fusion/${taskId.toLowerCase()}`;
+}
+
+export function resolveTaskWorkingBranch(task: Pick<Task, "id" | "branch" | "branchContext">): string {
+  if (task.branchContext?.assignmentMode === "shared") {
+    return canonicalFusionBranchName(task.id);
+  }
+  return task.branch || canonicalFusionBranchName(task.id);
 }
 
 /**

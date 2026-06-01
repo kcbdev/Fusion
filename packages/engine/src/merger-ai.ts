@@ -48,7 +48,7 @@ import {
   type Task,
   type TaskStore,
 } from "@fusion/core";
-import { canonicalFusionBranchName } from "./worktree-names.js";
+import { resolveTaskWorkingBranch } from "./worktree-names.js";
 import { resolveIntegrationBranch } from "./integration-branch.js";
 import { advanceIntegrationBranchRef } from "./merger-ref-update-advance.js";
 import { createResolvedAgentSession, resolveMergerSessionModel } from "./agent-session-helpers.js";
@@ -710,7 +710,7 @@ export async function runAiMerge(
   deps: AgentDeps = {},
 ): Promise<MergeResult> {
   const task = await store.getTask(taskId);
-  const branch = task.branch || canonicalFusionBranchName(taskId);
+  const branch = resolveTaskWorkingBranch(task);
 
   if (task.column === "done" || task.column === "archived") {
     return noOpResult(task, branch, "already-finalized");

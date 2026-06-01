@@ -47,7 +47,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync, unlinkSync, renam
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { resolveTaskWorktreePath } from "./worktree-paths.js";
-import { canonicalFusionBranchName } from "./worktree-names.js";
+import { resolveTaskWorkingBranch } from "./worktree-names.js";
 import {
   collectOwnTaskCommitsForRange,
   filterFilesToOwnTaskCommits,
@@ -707,7 +707,7 @@ export async function classifyOwnedLandedEvidence(
   task: Task,
   opts: { mergeTargetBranch: string },
 ): Promise<OwnedLandedClassification> {
-  const branch = task.branch || canonicalFusionBranchName(task.id);
+  const branch = resolveTaskWorkingBranch(task);
   const mergeTargetBranch = opts.mergeTargetBranch;
 
   const ownedCommit = await findOwnedLandedCommitForTask(rootDir, task);
@@ -3189,7 +3189,7 @@ async function tryRecoverHardFailApply(params: {
       task,
       taskId,
       rootDir,
-      branch: task.branch || canonicalFusionBranchName(taskId),
+      branch: resolveTaskWorkingBranch(task),
       mergeTargetBranch: task.baseBranch || "main",
       conflictFiles: threeWayConflicted,
       auditor: undefined,
@@ -3632,7 +3632,7 @@ export async function restoreUnrelatedRootDirChanges(
     task,
     taskId,
     rootDir,
-    branch: task.branch || canonicalFusionBranchName(taskId),
+    branch: resolveTaskWorkingBranch(task),
     mergeTargetBranch: task.baseBranch || "main",
     conflictFiles: conflictedFiles,
     auditor: undefined,
@@ -7176,7 +7176,7 @@ async function tryEarlyEmptyOwnDiffFinalize(input: {
   completeTask: (result: MergeResult) => Promise<void>;
 }): Promise<MergeResult | null> {
   const { task, taskId, store, audit, log, projectRootDir, mergeTargetBranch } = input;
-  const branch = task.branch || canonicalFusionBranchName(taskId);
+  const branch = resolveTaskWorkingBranch(task);
 
   // 1. Branch exists?
   try {
@@ -7405,7 +7405,7 @@ export async function aiMergeTask(
     });
     return {
       task,
-      branch: task.branch || canonicalFusionBranchName(taskId),
+      branch: resolveTaskWorkingBranch(task),
       merged: false,
       noOp: true,
       ok: true,
@@ -7517,7 +7517,7 @@ export async function aiMergeTask(
     }
   }
   const integrationBranch = groupRouting ? mergeTarget.branch : resolvedIntegrationBranch;
-  let branch = task.branch || canonicalFusionBranchName(taskId);
+  let branch = resolveTaskWorkingBranch(task);
 
   const mergeRunId = generateSyntheticRunId("merge", taskId);
   const engineRunContext: EngineRunContext = {
@@ -7633,7 +7633,7 @@ export async function aiMergeTask(
     //     so the pool's `leased` map stays consistent. Without that fall-through
     //     the new path would bypass pool bookkeeping and could collide with
     //     `PoolDoubleLeaseError`.
-    const expectedBranch = task.branch || canonicalFusionBranchName(taskId);
+    const expectedBranch = resolveTaskWorkingBranch(task);
     // FN-4954: when a worktree pool is attached and recycling is enabled, pool
     // semantics REQUIRE going through `acquireTaskWorktree` so `WorktreePool`'s
     // lease bookkeeping stays consistent. Skip the direct-reuse shortcut here

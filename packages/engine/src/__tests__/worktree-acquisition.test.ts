@@ -109,6 +109,58 @@ describe("acquireTaskWorktree", () => {
     expect(vi.mocked(branchConflicts.reanchorBranchToBase)).not.toHaveBeenCalled();
   });
 
+  it("derives distinct per-task working branches for shared branch-group members", async () => {
+    const createWorktree = vi.fn(async (branchName: string, worktreePath: string) => ({ path: worktreePath, branch: branchName }));
+    const sharedBranch = "clionboarding";
+    const sharedContext = { assignmentMode: "shared", groupId: "BG-1", source: "planning" } as const;
+
+    const [first, second] = await Promise.all([
+      acquireTaskWorktree({
+        task: { ...task, id: "FN-100", worktree: null, branch: sharedBranch, branchContext: sharedContext },
+        rootDir: process.cwd(),
+        store,
+        settings: {},
+        createWorktree,
+      }),
+      acquireTaskWorktree({
+        task: { ...task, id: "FN-101", worktree: null, branch: sharedBranch, branchContext: sharedContext },
+        rootDir: process.cwd(),
+        store,
+        settings: {},
+        createWorktree,
+      }),
+    ]);
+
+    expect(first.branch).toBe("fusion/fn-100");
+    expect(second.branch).toBe("fusion/fn-101");
+    expect(first.branch).not.toBe(second.branch);
+    expect(createWorktree).toHaveBeenCalledWith("fusion/fn-100", expect.any(String), "FN-100", undefined, false);
+    expect(createWorktree).toHaveBeenCalledWith("fusion/fn-101", expect.any(String), "FN-101", undefined, false);
+  });
+
+  it("keeps per-task-derived and ungrouped branch derivation unchanged", async () => {
+    const createWorktree = vi.fn(async (branchName: string, worktreePath: string) => ({ path: worktreePath, branch: branchName }));
+
+    const perTaskDerived = await acquireTaskWorktree({
+      task: { ...task, id: "FN-102", worktree: null, branch: "fusion/custom-derived", branchContext: { assignmentMode: "per-task-derived", groupId: "BG-1", source: "planning" } },
+      rootDir: process.cwd(),
+      store,
+      settings: {},
+      createWorktree,
+    });
+
+    const ungrouped = await acquireTaskWorktree({
+      task: { ...task, id: "FN-103", worktree: null, branch: null },
+      rootDir: process.cwd(),
+      store,
+      settings: {},
+      createWorktree,
+    });
+
+    expect(perTaskDerived.branch).toBe("fusion/custom-derived");
+    expect(ungrouped.branch).toBe("fusion/fn-103");
+  });
+
   it("acquires from pool when enabled", async () => {
     const prepareForTask = vi.fn().mockResolvedValue({ branch: "fusion/fn-1", worktreePath: "/tmp/pooled", reclaimed: false });
     const release = vi.fn();

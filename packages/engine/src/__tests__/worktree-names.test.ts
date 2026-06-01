@@ -2,7 +2,25 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { generateWorktreeName, ADJECTIVES, NOUNS } from "../worktree-names.js";
+import { generateWorktreeName, ADJECTIVES, NOUNS, resolveTaskWorkingBranch } from "../worktree-names.js";
+
+describe("resolveTaskWorkingBranch", () => {
+  it("returns canonical per-task branch for shared assignment mode", () => {
+    expect(resolveTaskWorkingBranch({ id: "FN-5818", branch: "clionboarding", branchContext: { assignmentMode: "shared", groupId: "bg-1", source: "planning" } })).toBe("fusion/fn-5818");
+  });
+
+  it("returns explicit branch for per-task-derived assignment mode", () => {
+    expect(resolveTaskWorkingBranch({ id: "FN-5818", branch: "fusion/custom", branchContext: { assignmentMode: "per-task-derived", groupId: "bg-1", source: "planning" } })).toBe("fusion/custom");
+  });
+
+  it("returns canonical branch for ungrouped task without branch", () => {
+    expect(resolveTaskWorkingBranch({ id: "FN-5818", branch: undefined })).toBe("fusion/fn-5818");
+  });
+
+  it("returns explicit branch for ungrouped task with branch", () => {
+    expect(resolveTaskWorkingBranch({ id: "FN-5818", branch: "feature/fn-5818" })).toBe("feature/fn-5818");
+  });
+});
 
 describe("generateWorktreeName", () => {
   let tempDir: string;

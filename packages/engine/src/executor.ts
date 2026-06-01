@@ -30,7 +30,7 @@ import {
   VERIFICATION_LOG_MAX_CHARS,
   type VerificationResult,
 } from "./verification-utils.js";
-import { canonicalFusionBranchName, generateWorktreeName } from "./worktree-names.js";
+import { generateWorktreeName, resolveTaskWorkingBranch } from "./worktree-names.js";
 import { resolveTaskWorktreePath, resolveWorktreesDir } from "./worktree-paths.js";
 import { Type, type Static } from "@earendil-works/pi-ai";
 import { describeModel, promptWithFallback, compactSessionContext } from "./pi.js";
@@ -3480,7 +3480,7 @@ export class TaskExecutor {
         taskId: task.id,
         worktreePath,
         rootDir: this.rootDir,
-        branch: task.branch ?? undefined,
+        branch: acquisition.branch ?? undefined,
       });
       const pathPrepend = runtimeEnvContribution?.pathPrepend ?? [];
       const injectedEnv = runtimeEnvContribution?.env ?? {};
@@ -5929,7 +5929,7 @@ export class TaskExecutor {
     allowReanchor = true,
   ): Promise<{ ok: true } | { ok: false; reason: "wrong_toplevel" | "wrong_branch" | "no_commits"; observed: string; expected: string }> {
     const settings = await this.store.getSettings();
-    const branchName = task.branch || canonicalFusionBranchName(task.id);
+    const branchName = resolveTaskWorkingBranch(task);
     const worktreePath = worktreePathOverride ?? task.worktree ?? this.activeWorktrees.get(task.id) ?? null;
 
     if (!worktreePath) {
@@ -6764,7 +6764,7 @@ export class TaskExecutor {
 
     // Delete the branch — use stored branch name if available, fall back to convention
     const task = await this.store.getTask(taskId);
-    const branch = task.branch || canonicalFusionBranchName(taskId);
+    const branch = resolveTaskWorkingBranch(task);
     let branchDeleted = false;
     try {
       await execAsync(`git branch -D "${branch}"`, { cwd: this.rootDir });
@@ -10342,7 +10342,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
     );
     if (completedSteps.length === 0) return;
 
-    const branchName = task.branch || canonicalFusionBranchName(task.id);
+    const branchName = resolveTaskWorkingBranch(task);
 
     try {
       // Check if the branch has any unique commits vs main

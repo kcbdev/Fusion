@@ -1,7 +1,7 @@
 import { exec, execSync } from "node:child_process";
 import { promisify } from "node:util";
 
-import { canonicalFusionBranchName } from "./worktree-names.js";
+import { resolveTaskWorkingBranch } from "./worktree-names.js";
 
 const execAsync = promisify(exec);
 
@@ -84,7 +84,7 @@ export async function findAlreadyMergedTaskCommit(
   }
 
   let branchTip: string | null = null;
-  const branchName = taskBranch || canonicalFusionBranchName(taskId);
+  const branchName = resolveTaskWorkingBranch({ id: taskId, branch: taskBranch });
   try {
     branchTip = execSync(`git rev-parse --verify ${shellQuote(branchName)}`, {
       cwd: repoDir,
@@ -184,7 +184,7 @@ export async function findAlreadyMergedTaskCommit(
   }
 
   try {
-    const treeBranchName = taskBranch || canonicalFusionBranchName(taskId);
+    const treeBranchName = resolveTaskWorkingBranch({ id: taskId, branch: taskBranch });
     execSync(`git rev-parse --verify ${shellQuote(treeBranchName)}`, {
       cwd: repoDir,
       encoding: "utf-8",

@@ -46,7 +46,7 @@ import { AutoRecoveryDispatcher } from "./auto-recovery.js";
 import { activeSessionRegistry, executingTaskLock } from "./active-session-registry.js";
 import { findAlreadyMergedTaskCommit } from "./already-merged-detector.js";
 import { resolveWorktreesDir } from "./worktree-paths.js";
-import { canonicalFusionBranchName } from "./worktree-names.js";
+import { canonicalFusionBranchName, resolveTaskWorkingBranch } from "./worktree-names.js";
 import { resolveIntegrationBranch } from "./integration-branch.js";
 import type { OwnedLandedClassification } from "./merger.js";
 import { regenerateBareMergeSubject } from "./merger-bare-subject.js";
@@ -499,7 +499,7 @@ export async function isBranchAheadOfBase(
   rootDir: string,
   preferredBaseRef?: string,
 ): Promise<{ aheadCount: number; baseRef: string } | null> {
-  const branchName = task.branch || canonicalFusionBranchName(task.id);
+  const branchName = resolveTaskWorkingBranch(task);
 
   try {
     await execAsync(`git rev-parse --verify ${shellQuote(branchName)}`, {
@@ -1166,7 +1166,7 @@ export class SelfHealingManager {
     );
     if (completedSteps.length === 0) return;
 
-    const branchName = task.branch || canonicalFusionBranchName(task.id);
+    const branchName = resolveTaskWorkingBranch(task);
 
     try {
       const { stdout: mergeBaseOut } = await execAsync(
@@ -1431,7 +1431,7 @@ export class SelfHealingManager {
       }
     }
 
-    const branch = task.branch || canonicalFusionBranchName(task.id);
+    const branch = resolveTaskWorkingBranch(task);
     try {
       await execAsync(`git branch -D ${shellQuote(branch)}`, {
         cwd: this.options.rootDir,
@@ -2954,7 +2954,7 @@ export class SelfHealingManager {
         }
       }
 
-      const branchName = task?.branch || canonicalFusionBranchName(taskId);
+      const branchName = task ? resolveTaskWorkingBranch(task) : canonicalFusionBranchName(taskId);
       const hintedWorktreePath = options?.worktreeHint;
       let worktreePath = hintedWorktreePath;
       if (!worktreePath || !existsSync(worktreePath)) {
@@ -7558,7 +7558,7 @@ export class SelfHealingManager {
       }
     }
 
-    const branchName = task.branch || canonicalFusionBranchName(task.id);
+    const branchName = resolveTaskWorkingBranch(task);
     try {
       await execAsync(`git rev-parse --verify "${branchName}"`, {
         cwd: this.options.rootDir,
