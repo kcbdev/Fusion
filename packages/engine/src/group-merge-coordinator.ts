@@ -1,14 +1,33 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 
-import type { BranchGroup, MergeTargetResolution, Settings, Task, TaskStore } from "@fusion/core";
+import type { BranchGroup, BranchGroupPrState, MergeTargetResolution, Settings, Task, TaskStore } from "@fusion/core";
 import { resolveEffectiveGroupAutoMerge, resolveTaskMergeTarget } from "@fusion/core";
+import { resolveIntegrationBranch } from "./integration-branch.js";
 
 const execAsync = promisify(exec);
 
 export interface BranchGroupMergeRouting {
   branchGroup: BranchGroup;
   mergeTarget: MergeTargetResolution;
+}
+
+export interface BranchGroupCompletionStatus {
+  complete: boolean;
+  totalMembers: number;
+  landedMemberIds: string[];
+  pendingMemberIds: string[];
+}
+
+export interface BranchGroupPromotionResult {
+  groupId: string;
+  promoted: boolean;
+  alreadyFinalized: boolean;
+  reason: "promoted" | "incomplete" | "gated" | "already-finalized" | "group-not-found";
+  status: BranchGroup["status"];
+  prState: BranchGroupPrState;
+  prNumber?: number;
+  prUrl?: string;
 }
 
 export interface BranchGroupPromotionDecision {
@@ -20,6 +39,31 @@ export interface BranchGroupPromotionDecision {
     | "global-pause"
     | "engine-paused"
     | "eligible";
+}
+
+export function evaluateBranchGroupCompletion(input: {
+  members: Pick<Task, "id" | "column" | "branchContext" | "mergeDetails">[];
+}): BranchGroupCompletionStatus {
+  const landedMemberIds: string[] = [];
+  const pendingMemberIds: string[] = [];
+
+  for (const member of input.members) {
+    const landed = member.column === "done"
+      || (member.column === "in-review" && member.mergeDetails?.mergeTargetSource === "branch-group-integration");
+    if (landed) {
+      landedMemberIds.push(member.id);
+    } else {
+      pendingMemberIds.push(member.id);
+    }
+  }
+
+  const totalMembers = input.members.length;
+  return {
+    complete: totalMembers > 0 && pendingMemberIds.length === 0,
+    totalMembers,
+    landedMemberIds,
+    pendingMemberIds,
+  };
 }
 
 /**
@@ -58,6 +102,143 @@ async function ensureGroupBranchExists(rootDir: string, branchName: string, star
   } catch {
     await execAsync(`git branch ${JSON.stringify(branchName)} ${JSON.stringify(startPoint)}`, { cwd: rootDir });
   }
+}
+
+/**
+ * The only entrypoint allowed to perform shared-branch-group → default-branch promotion.
+ * Promotion is intentionally idempotent and must never run inline in aiMergeTask.
+ */
+export async function promoteBranchGroup(input: {
+  store: Pick<TaskStore, "getBranchGroup" | "listTasksByBranchGroup" | "updateBranchGroup">;
+  rootDir: string;
+  groupId: string;
+  settings: Pick<Settings, "autoMerge" | "globalPause" | "enginePaused"> & Partial<Pick<Settings, "mergeStrategy" | "integrationBranch" | "baseBranch">>;
+  recordAudit?: (event: {
+    domain: string;
+    mutationType: string;
+    target: string;
+    metadata?: Record<string, unknown>;
+  }) => Promise<void> | void;
+}): Promise<BranchGroupPromotionResult> {
+  const group = input.store.getBranchGroup(input.groupId);
+  if (!group) {
+    return {
+      groupId: input.groupId,
+      promoted: false,
+      alreadyFinalized: false,
+      reason: "group-not-found",
+      status: "abandoned",
+      prState: "none",
+    };
+  }
+
+  if (group.status === "finalized" || group.prState === "merged") {
+    return {
+      groupId: group.id,
+      promoted: false,
+      alreadyFinalized: true,
+      reason: "already-finalized",
+      status: group.status,
+      prState: group.prState,
+      prNumber: group.prNumber,
+      prUrl: group.prUrl,
+    };
+  }
+
+  if (group.prState === "open") {
+    return {
+      groupId: group.id,
+      promoted: false,
+      alreadyFinalized: true,
+      reason: "already-finalized",
+      status: group.status,
+      prState: group.prState,
+      prNumber: group.prNumber,
+      prUrl: group.prUrl,
+    };
+  }
+
+  const members = await input.store.listTasksByBranchGroup(group.id);
+  const completion = evaluateBranchGroupCompletion({ members });
+  if (!completion.complete) {
+    return {
+      groupId: group.id,
+      promoted: false,
+      alreadyFinalized: false,
+      reason: "incomplete",
+      status: group.status,
+      prState: group.prState,
+      prNumber: group.prNumber,
+      prUrl: group.prUrl,
+    };
+  }
+
+  const eligibility = evaluateBranchGroupPromotion({ group, settings: input.settings });
+  if (!eligibility.eligible) {
+    await input.recordAudit?.({
+      domain: "git",
+      mutationType: "merge:branch-group-promotion-gated",
+      target: group.id,
+      metadata: {
+        groupId: group.id,
+        branchName: group.branchName,
+        groupAutoMerge: eligibility.groupAutoMerge,
+        effectiveEligible: false,
+        reason: eligibility.reason,
+      },
+    });
+    return {
+      groupId: group.id,
+      promoted: false,
+      alreadyFinalized: false,
+      reason: "gated",
+      status: group.status,
+      prState: group.prState,
+      prNumber: group.prNumber,
+      prUrl: group.prUrl,
+    };
+  }
+
+  const integrationBranch = await resolveIntegrationBranch(input.rootDir, input.settings);
+  await ensureGroupBranchExists(input.rootDir, group.branchName, integrationBranch);
+  const currentBranch = (await execAsync("git rev-parse --abbrev-ref HEAD", { cwd: input.rootDir })).stdout.trim();
+  try {
+    await execAsync(`git checkout ${JSON.stringify(integrationBranch)}`, { cwd: input.rootDir });
+    await execAsync(`git merge --no-ff --no-edit ${JSON.stringify(group.branchName)}`, { cwd: input.rootDir });
+  } finally {
+    await execAsync(`git checkout ${JSON.stringify(currentBranch)}`, { cwd: input.rootDir });
+  }
+
+  const isPrMode = input.settings.mergeStrategy === "pull-request";
+  const updatedGroup = input.store.updateBranchGroup(group.id, {
+    status: "finalized",
+    prState: isPrMode ? "open" : "merged",
+  });
+
+  await input.recordAudit?.({
+    domain: "git",
+    mutationType: "merge:branch-group-promoted",
+    target: group.id,
+    metadata: {
+      groupId: group.id,
+      branchName: group.branchName,
+      integrationBranch,
+      memberIds: completion.landedMemberIds,
+      ...(updatedGroup.prNumber ? { prNumber: updatedGroup.prNumber } : {}),
+      ...(updatedGroup.prUrl ? { prUrl: updatedGroup.prUrl } : {}),
+    },
+  });
+
+  return {
+    groupId: group.id,
+    promoted: true,
+    alreadyFinalized: false,
+    reason: "promoted",
+    status: updatedGroup.status,
+    prState: updatedGroup.prState,
+    prNumber: updatedGroup.prNumber,
+    prUrl: updatedGroup.prUrl,
+  };
 }
 
 export async function resolveBranchGroupMergeRouting(input: {

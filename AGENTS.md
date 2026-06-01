@@ -170,6 +170,7 @@ Scoped exception (FN-5819): shared-branch-group members (`branchContext.assignme
 - FN-5755 backstop: `packages/engine/src/__tests__/reliability-interactions/mission-validation-trigger-gap.test.ts` extends mission validation coverage so bounded periodic maintenance replays `recoverActiveMissions` for stranded `implementing` features and remains idempotent on repeated passes.
 - FN-5783 backstop: `packages/engine/src/__tests__/reliability-interactions/branch-group-automerge-precedence.test.ts` guards grouped merge precedence so per-task `autoMerge` remains member→integration only, group `autoMerge` gates promotion eligibility, and promotion-gate audit events capture pause/automerge override reasons.
 - FN-5788 backstop: `packages/engine/src/__tests__/reliability-interactions/branch-group-promotion-gate.test.ts` guards merger-side promotion-gate telemetry on shared member landings, including pause/settings/group autoMerge reason mapping and no default-branch auto-promotion side effects.
+- FN-5830 backstop: `packages/engine/src/__tests__/reliability-interactions/branch-group-promotion.test.ts` guards branch-group completion-gate + promotion lifecycle so completion detection drives exactly one shared→default promotion, re-calls stay idempotent, and gated paths emit promotion-gated telemetry without promoting.
 
 ---
 

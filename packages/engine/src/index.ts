@@ -59,8 +59,12 @@ export {
 export {
   resolveBranchGroupMergeRouting,
   evaluateBranchGroupPromotion,
+  evaluateBranchGroupCompletion,
+  promoteBranchGroup,
   type BranchGroupMergeRouting,
   type BranchGroupPromotionDecision,
+  type BranchGroupCompletionStatus,
+  type BranchGroupPromotionResult,
 } from "./group-merge-coordinator.js";
 export {
   resolveMergeIntegrationRoot,

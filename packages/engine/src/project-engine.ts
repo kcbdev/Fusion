@@ -27,6 +27,7 @@ import { CronRunner, createAiPromptExecutor } from "./cron-runner.js";
 import type { RoutineRunner } from "./routine-runner.js";
 import { aiMergeTask, sweepStaleAutostashes, VerificationError } from "./merger.js";
 import { runAiMerge } from "./merger-ai.js";
+import { promoteBranchGroup } from "./group-merge-coordinator.js";
 import { PRIORITY_MERGE } from "./concurrency.js";
 import { runtimeLog } from "./logger.js";
 import type { HeartbeatTriggerScheduler } from "./agent-heartbeat.js";
@@ -1782,6 +1783,39 @@ export class ProjectEngine {
           }
 
           const mergeStrategy = this.options.getMergeStrategy?.(settings) ?? "direct";
+          const promotionSettings = {
+            autoMerge: settings.autoMerge,
+            globalPause: settings.globalPause,
+            enginePaused: settings.enginePaused,
+            mergeStrategy: settings.mergeStrategy,
+            integrationBranch: settings.integrationBranch,
+            baseBranch: settings.baseBranch,
+          };
+          const attemptBranchGroupPromotion = async (taskForPromotion: Task | null): Promise<void> => {
+            if (!taskForPromotion || !isSharedBranchGroupMemberIntegration(taskForPromotion)) {
+              return;
+            }
+            try {
+              await promoteBranchGroup({
+                store,
+                rootDir: cwd,
+                groupId: taskForPromotion.branchContext!.groupId,
+                settings: promotionSettings,
+                recordAudit: async (event) => {
+                  await store.recordRunAuditEvent({
+                    domain: event.domain as any,
+                    mutationType: event.mutationType,
+                    target: event.target,
+                    metadata: event.metadata,
+                  } as any);
+                },
+              });
+            } catch (promotionError) {
+              runtimeLog.warn(
+                `Branch-group promotion evaluation failed for ${taskId}: ${promotionError instanceof Error ? promotionError.message : String(promotionError)}`,
+              );
+            }
+          };
 
           if (mergeStrategy === "pull-request" && this.options.processPullRequestMerge) {
             this.activeMergeTaskId = taskId;
@@ -1807,6 +1841,7 @@ export class ProjectEngine {
                   mergeTargetBranch: mergedTask.mergeDetails?.mergeTargetBranch,
                 } as MergeResult);
               }
+              await attemptBranchGroupPromotion(mergedTask);
             } else if (result === "waiting") {
               runtimeLog.log(`${manualResolver ? "Manual" : "Auto"}-merge PR waiting: ${taskId}`);
             }
@@ -1882,6 +1917,8 @@ export class ProjectEngine {
             if (latestTask?.mergeRetries && latestTask.mergeRetries > 0) {
               await store.updateTask(taskId, { mergeRetries: 0 });
             }
+
+            await attemptBranchGroupPromotion(latestTask);
           }
         } catch (err: unknown) {
           this.activeMergeSession = null;
