@@ -2171,9 +2171,8 @@ describe("SettingsModal", () => {
       });
 
       render(<SettingsModal onClose={noop} addToast={addToast} />);
-      await waitForSettingsModalReady();
-      await userEvent.click(screen.getByRole("button", { name: "Authentication" }));
-      const copilotCard = screen.getByTestId("auth-provider-icon-github-copilot").closest(".auth-provider-card") as HTMLElement;
+      await userEvent.click(await screen.findByRole("button", { name: "Authentication" }));
+      const copilotCard = (await screen.findByTestId("auth-provider-icon-github-copilot")).closest(".auth-provider-card") as HTMLElement;
       await userEvent.click(within(copilotCard).getByRole("button", { name: "Login" }));
       await within(copilotCard).findByText("ABCD-1234");
 
@@ -2202,9 +2201,8 @@ describe("SettingsModal", () => {
       });
 
       render(<SettingsModal onClose={noop} addToast={addToast} />);
-      await waitForSettingsModalReady();
-      await userEvent.click(screen.getByRole("button", { name: "Authentication" }));
-      const copilotCard = screen.getByTestId("auth-provider-icon-github-copilot").closest(".auth-provider-card") as HTMLElement;
+      await userEvent.click(await screen.findByRole("button", { name: "Authentication" }));
+      const copilotCard = (await screen.findByTestId("auth-provider-icon-github-copilot")).closest(".auth-provider-card") as HTMLElement;
       await userEvent.click(within(copilotCard).getByRole("button", { name: "Login" }));
       await within(copilotCard).findByText("ABCD-1234");
 
@@ -3743,6 +3741,12 @@ describe("SettingsModal", () => {
   });
 
   describe("Remote section", () => {
+    let user: ReturnType<typeof userEvent.setup>;
+
+    beforeEach(() => {
+      user = userEvent.setup({ delay: null });
+    });
+
     beforeEach(() => {
       mockFetchSettings.mockResolvedValue({
         ...defaultSettings,
@@ -3752,14 +3756,132 @@ describe("SettingsModal", () => {
 
     const openRemoteSection = async () => {
       const [remoteSectionButton] = await screen.findAllByRole("button", { name: /Remote Access/i });
-      await userEvent.click(remoteSectionButton);
+      await user.click(remoteSectionButton);
       await screen.findByRole("heading", { name: "Remote Access" });
     };
 
     const openAdvancedSettings = async () => {
       const summary = screen.getByText("Advanced Settings");
-      await userEvent.click(summary);
+      await user.click(summary);
     };
+
+    describe("with default Remote render", () => {
+      beforeEach(async () => {
+        renderModal();
+        await waitForSettingsModalReady();
+        await openRemoteSection();
+      });
+
+      it("shows provider-specific settings when provider selected and auto-saves on Start Tunnel", async () => {
+        await user.click(screen.getByLabelText("Tailscale"));
+        expect(screen.queryByLabelText("Hostname label")).not.toBeInTheDocument();
+        expect(screen.queryByLabelText("Target port")).not.toBeInTheDocument();
+        expect(screen.getByLabelText("Accept routes")).toBeInTheDocument();
+        expect(screen.queryByLabelText("Tunnel name")).not.toBeInTheDocument();
+
+        await user.click(screen.getByLabelText("Cloudflare"));
+        expect(screen.queryByLabelText("Accept routes")).not.toBeInTheDocument();
+
+        if (!screen.queryByLabelText("Tunnel name")) {
+          const advancedDetails = screen.getByText(/Advanced \(Named Tunnel\)/i, { selector: "summary" }).closest("details") as HTMLDetailsElement;
+          advancedDetails.open = true;
+          fireEvent(advancedDetails, new Event("toggle"));
+          expect(await screen.findByLabelText("Tunnel name")).toBeInTheDocument();
+        }
+        fireEvent.change(screen.getByLabelText("Tunnel name"), { target: { value: "cf-team" } });
+        fireEvent.change(screen.getByLabelText("Tunnel token"), { target: { value: "cf_token" } });
+        fireEvent.change(screen.getByLabelText("Ingress URL"), { target: { value: "https://remote.example.com" } });
+
+        await user.click(screen.getByRole("button", { name: "Start Tunnel" }));
+
+        await waitFor(() => {
+          expect(mockUpdateRemoteSettings).toHaveBeenCalledWith(
+            expect.objectContaining({
+              remoteActiveProvider: "cloudflare",
+              remoteCloudflareEnabled: true,
+              remoteCloudflareQuickTunnel: false,
+              remoteCloudflareTunnelName: "cf-team",
+              remoteCloudflareTunnelToken: "cf_token",
+              remoteCloudflareIngressUrl: "https://remote.example.com",
+            }),
+            undefined,
+          );
+        });
+      });
+
+      it("toggles Cloudflare named tunnel advanced section and persists quick tunnel state", async () => {
+        await user.click(screen.getByLabelText("Cloudflare"));
+        const namedTunnelSummary = screen.getByText(/Advanced \(Named Tunnel\)/i, { selector: "summary" });
+
+        if (!screen.queryByLabelText("Tunnel name")) {
+          await user.click(namedTunnelSummary);
+        }
+        expect(await screen.findByLabelText("Tunnel name")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Start Tunnel" }));
+        await waitFor(() => {
+          expect(mockUpdateRemoteSettings).toHaveBeenCalledWith(expect.objectContaining({ remoteCloudflareQuickTunnel: false }), undefined);
+        });
+
+        // Closing <details> is not consistently simulated in jsdom; verify default quick-tunnel state via a fresh render below.
+      });
+
+      it("renders branded Cloudflare icon in Remote provider selector", () => {
+        const cloudflareSlot = screen.getByTestId("remote-provider-icon-cloudflare");
+        expect(within(cloudflareSlot).getByTestId("remote-cloudflare-option-icon")).toBeInTheDocument();
+      });
+
+      it("Start Tunnel button is disabled when no provider is selected", async () => {
+        const startButton = screen.getByRole("button", { name: "Start Tunnel" });
+        expect(startButton).toBeDisabled();
+        await user.click(screen.getByLabelText("Tailscale"));
+        expect(startButton).not.toBeDisabled();
+      });
+
+      it("no separate Activate Provider or Save Remote Settings buttons exist", () => {
+        expect(screen.queryByRole("button", { name: /Activate Provider/i })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /Save Remote Settings/i })).not.toBeInTheDocument();
+      });
+
+      it("only the selected provider's settings are rendered", async () => {
+        await user.click(screen.getByLabelText("Tailscale"));
+        expect(screen.getByLabelText("Accept routes")).toBeInTheDocument();
+        expect(screen.queryByText(/Advanced \(Named Tunnel\)/i)).not.toBeInTheDocument();
+
+        await user.click(screen.getByLabelText("Cloudflare"));
+        expect(screen.getByText(/Advanced \(Named Tunnel\)/i)).toBeInTheDocument();
+        expect(screen.queryByLabelText("Accept routes")).not.toBeInTheDocument();
+      });
+
+      it("sets quick tunnel false when opening Cloudflare advanced details", async () => {
+        await user.click(screen.getByLabelText("Cloudflare"));
+
+        const namedTunnelSummary = screen.getByText(/Advanced \(Named Tunnel\)/i, { selector: "summary" });
+        if (!screen.queryByLabelText("Tunnel name")) {
+          await user.click(namedTunnelSummary);
+        }
+        await user.click(screen.getByRole("button", { name: "Start Tunnel" }));
+        await waitFor(() => {
+          expect(mockUpdateRemoteSettings).toHaveBeenCalledWith(expect.objectContaining({ remoteCloudflareQuickTunnel: false }), undefined);
+        });
+      });
+
+      it("Start Tunnel auto-saves with enabled=true on selected provider before starting", async () => {
+        await user.click(screen.getByLabelText("Tailscale"));
+        await user.click(screen.getByRole("button", { name: "Start Tunnel" }));
+
+        await waitFor(() => {
+          expect(mockUpdateRemoteSettings).toHaveBeenCalledWith(
+            expect.objectContaining({
+              remoteActiveProvider: "tailscale",
+              remoteTailscaleEnabled: true,
+            }),
+            undefined,
+          );
+        });
+        expect(mockStartRemoteTunnel).toHaveBeenCalled();
+      });
+    });
 
     it("renders remote-status-bar with stopped state and omits share block when not running", async () => {
       mockFetchRemoteStatus.mockResolvedValue({ provider: null, state: "stopped", url: null, lastError: null });
@@ -3785,71 +3907,6 @@ describe("SettingsModal", () => {
       expect(container.querySelector(".remote-share-block")).toBeInTheDocument();
     });
 
-    it("shows provider-specific settings when provider selected and auto-saves on Start Tunnel", async () => {
-      renderModal();
-      await waitForSettingsModalReady();
-      await openRemoteSection();
-
-      await userEvent.click(screen.getByLabelText("Tailscale"));
-      expect(screen.queryByLabelText("Hostname label")).not.toBeInTheDocument();
-      expect(screen.queryByLabelText("Target port")).not.toBeInTheDocument();
-      expect(screen.getByLabelText("Accept routes")).toBeInTheDocument();
-      expect(screen.queryByLabelText("Tunnel name")).not.toBeInTheDocument();
-
-      await userEvent.click(screen.getByLabelText("Cloudflare"));
-      expect(screen.queryByLabelText("Accept routes")).not.toBeInTheDocument();
-
-      if (!screen.queryByLabelText("Tunnel name")) {
-        const advancedDetails = screen.getByText(/Advanced \(Named Tunnel\)/i, { selector: "summary" }).closest("details") as HTMLDetailsElement;
-        advancedDetails.open = true;
-        fireEvent(advancedDetails, new Event("toggle"));
-        expect(await screen.findByLabelText("Tunnel name")).toBeInTheDocument();
-      }
-      await userEvent.clear(screen.getByLabelText("Tunnel name"));
-      await userEvent.type(screen.getByLabelText("Tunnel name"), "cf-team");
-      await userEvent.clear(screen.getByLabelText("Tunnel token"));
-      await userEvent.type(screen.getByLabelText("Tunnel token"), "cf_token");
-      await userEvent.clear(screen.getByLabelText("Ingress URL"));
-      await userEvent.type(screen.getByLabelText("Ingress URL"), "https://remote.example.com");
-
-      await userEvent.click(screen.getByRole("button", { name: "Start Tunnel" }));
-
-      await waitFor(() => {
-        expect(mockUpdateRemoteSettings).toHaveBeenCalledWith(
-          expect.objectContaining({
-            remoteActiveProvider: "cloudflare",
-            remoteCloudflareEnabled: true,
-            remoteCloudflareQuickTunnel: false,
-            remoteCloudflareTunnelName: "cf-team",
-            remoteCloudflareTunnelToken: "cf_token",
-            remoteCloudflareIngressUrl: "https://remote.example.com",
-          }),
-          undefined,
-        );
-      });
-    });
-
-    it("toggles Cloudflare named tunnel advanced section and persists quick tunnel state", async () => {
-      renderModal();
-      await waitForSettingsModalReady();
-      await openRemoteSection();
-
-      await userEvent.click(screen.getByLabelText("Cloudflare"));
-      const namedTunnelSummary = screen.getByText(/Advanced \(Named Tunnel\)/i, { selector: "summary" });
-
-      if (!screen.queryByLabelText("Tunnel name")) {
-        await userEvent.click(namedTunnelSummary);
-      }
-      expect(await screen.findByLabelText("Tunnel name")).toBeInTheDocument();
-
-      await userEvent.click(screen.getByRole("button", { name: "Start Tunnel" }));
-      await waitFor(() => {
-        expect(mockUpdateRemoteSettings).toHaveBeenCalledWith(expect.objectContaining({ remoteCloudflareQuickTunnel: false }), undefined);
-      });
-
-      // Closing <details> is not consistently simulated in jsdom; verify default quick-tunnel state via a fresh render below.
-    });
-
     it("updates provider selection via radio and shows provider status", async () => {
       mockFetchRemoteStatus
         .mockResolvedValueOnce({ provider: null, state: "stopped", url: null, lastError: null })
@@ -3859,10 +3916,10 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
       await openRemoteSection();
 
-      await userEvent.click(screen.getByLabelText("Tailscale"));
+      await user.click(screen.getByLabelText("Tailscale"));
       expect(screen.getByLabelText("Tailscale")).toBeChecked();
 
-      await userEvent.click(screen.getByRole("button", { name: "Start Tunnel" }));
+      await user.click(screen.getByRole("button", { name: "Start Tunnel" }));
       expect(await screen.findByText("https://tail.example", { selector: ".remote-status-url" })).toBeInTheDocument();
     });
 
@@ -3872,19 +3929,10 @@ describe("SettingsModal", () => {
       renderModal();
       await waitForSettingsModalReady();
       await openRemoteSection();
-      await userEvent.click(screen.getByLabelText("Cloudflare"));
+      await user.click(screen.getByLabelText("Cloudflare"));
 
       expect(await screen.findByText("cloudflared is installed")).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Install cloudflared" })).not.toBeInTheDocument();
-    });
-
-    it("renders branded Cloudflare icon in Remote provider selector", async () => {
-      renderModal();
-      await waitForSettingsModalReady();
-      await openRemoteSection();
-
-      const cloudflareSlot = screen.getByTestId("remote-provider-icon-cloudflare");
-      expect(within(cloudflareSlot).getByTestId("remote-cloudflare-option-icon")).toBeInTheDocument();
     });
 
     it("shows install button when Cloudflare is selected and cloudflared is not available", async () => {
@@ -3893,7 +3941,7 @@ describe("SettingsModal", () => {
       renderModal();
       await waitForSettingsModalReady();
       await openRemoteSection();
-      await userEvent.click(screen.getByLabelText("Cloudflare"));
+      await user.click(screen.getByLabelText("Cloudflare"));
 
       expect(await screen.findByText("cloudflared is not installed")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Install cloudflared" })).toBeInTheDocument();
@@ -3910,10 +3958,10 @@ describe("SettingsModal", () => {
       renderModal({ addToast });
       await waitForSettingsModalReady();
       await openRemoteSection();
-      await userEvent.click(screen.getByLabelText("Cloudflare"));
+      await user.click(screen.getByLabelText("Cloudflare"));
 
       const installButton = await screen.findByRole("button", { name: "Install cloudflared" });
-      await userEvent.click(installButton);
+      await user.click(installButton);
 
       await waitFor(() => {
         expect(mockInstallCloudflared).toHaveBeenCalledWith(undefined);
@@ -3931,9 +3979,9 @@ describe("SettingsModal", () => {
       renderModal();
       await waitForSettingsModalReady();
       await openRemoteSection();
-      await userEvent.click(screen.getByLabelText("Cloudflare"));
+      await user.click(screen.getByLabelText("Cloudflare"));
 
-      await userEvent.click(await screen.findByRole("button", { name: "Install cloudflared" }));
+      await user.click(await screen.findByRole("button", { name: "Install cloudflared" }));
 
       expect(await screen.findByText("Command failed")).toBeInTheDocument();
     });
@@ -3949,10 +3997,10 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
       await openRemoteSection();
 
-      await userEvent.click(screen.getByLabelText("Tailscale"));
+      await user.click(screen.getByLabelText("Tailscale"));
       expect(screen.getByRole("button", { name: "Start Tunnel" })).toBeInTheDocument();
 
-      await userEvent.click(screen.getByRole("button", { name: "Start Tunnel" }));
+      await user.click(screen.getByRole("button", { name: "Start Tunnel" }));
       await waitFor(() => {
         expect(mockUpdateRemoteSettings).toHaveBeenCalled();
         expect(mockStartRemoteTunnel).toHaveBeenCalledTimes(1);
@@ -3961,11 +4009,11 @@ describe("SettingsModal", () => {
 
       expect(await screen.findByRole("button", { name: "Stop Tunnel" })).toBeInTheDocument();
 
-      await userEvent.click(screen.getByRole("button", { name: "Stop Tunnel" }));
+      await user.click(screen.getByRole("button", { name: "Stop Tunnel" }));
       await waitFor(() => {
         expect(mockStopRemoteTunnel).toHaveBeenCalledTimes(1);
       });
-      await userEvent.click(screen.getByRole("button", { name: "Stop Tunnel" }));
+      await user.click(screen.getByRole("button", { name: "Stop Tunnel" }));
       await waitFor(() => {
         expect(mockStopRemoteTunnel).toHaveBeenCalledTimes(2);
       });
@@ -4002,9 +4050,9 @@ describe("SettingsModal", () => {
       renderModal();
       await waitForSettingsModalReady();
       await openRemoteSection();
-      await userEvent.click(screen.getByLabelText("Tailscale"));
+      await user.click(screen.getByLabelText("Tailscale"));
 
-      await userEvent.click(await screen.findByRole("button", { name: "Start Fresh" }));
+      await user.click(await screen.findByRole("button", { name: "Start Fresh" }));
 
       await waitFor(() => {
         expect(mockKillExternalTunnel).toHaveBeenCalledWith(undefined);
@@ -4017,10 +4065,10 @@ describe("SettingsModal", () => {
       renderModal({ addToast });
       await waitForSettingsModalReady();
       await openRemoteSection();
-      await userEvent.click(screen.getByLabelText("Tailscale"));
+      await user.click(screen.getByLabelText("Tailscale"));
       await openAdvancedSettings();
 
-      await userEvent.click(screen.getByRole("button", { name: "Regenerate persistent token" }));
+      await user.click(screen.getByRole("button", { name: "Regenerate persistent token" }));
 
       await waitFor(() => {
         expect(mockRegenerateRemotePersistentToken).toHaveBeenCalledWith(undefined);
@@ -4045,20 +4093,20 @@ describe("SettingsModal", () => {
       renderModal();
       await waitForSettingsModalReady();
       await openRemoteSection();
-      await userEvent.click(screen.getByLabelText("Tailscale"));
+      await user.click(screen.getByLabelText("Tailscale"));
       await openAdvancedSettings();
 
-      await userEvent.selectOptions(screen.getByLabelText("Auth link token type"), "short-lived");
+      await user.selectOptions(screen.getByLabelText("Auth link token type"), "short-lived");
       const ttlInput = screen.getByLabelText("Short-lived TTL (ms)") as HTMLInputElement;
       fireEvent.change(ttlInput, { target: { value: "120000" } });
 
-      await userEvent.click(screen.getByRole("button", { name: "Generate short-lived token" }));
+      await user.click(screen.getByRole("button", { name: "Generate short-lived token" }));
       await waitFor(() => {
         expect(mockGenerateShortLivedRemoteToken).toHaveBeenCalledWith(120000, undefined);
       });
 
       fireEvent.change(ttlInput, { target: { value: "120000" } });
-      await userEvent.click(screen.getByRole("button", { name: "Show URL" }));
+      await user.click(screen.getByRole("button", { name: "Show URL" }));
       await waitFor(() => {
         expect(mockFetchRemoteUrl).toHaveBeenLastCalledWith({
           projectId: undefined,
@@ -4088,134 +4136,100 @@ describe("SettingsModal", () => {
       renderModal();
       await waitForSettingsModalReady();
       await openRemoteSection();
-      await userEvent.click(screen.getByLabelText("Tailscale"));
+      await user.click(screen.getByLabelText("Tailscale"));
       await openAdvancedSettings();
 
-      await userEvent.click(screen.getByRole("button", { name: "Generate QR" }));
+      await user.click(screen.getByRole("button", { name: "Generate QR" }));
       await waitFor(() => {
         expect(mockFetchRemoteQr).toHaveBeenNthCalledWith(1, "image/svg", expect.objectContaining({ tokenType: "persistent" }));
       });
       expect(await screen.findByRole("img", { name: "Remote access QR code" })).toBeInTheDocument();
 
-      await userEvent.click(screen.getByRole("button", { name: "Generate QR" }));
+      await user.click(screen.getByRole("button", { name: "Generate QR" }));
       await waitFor(() => {
         expect(screen.queryByRole("img", { name: "Remote access QR code" })).not.toBeInTheDocument();
       });
       expect(screen.getByText("https://remote.example.com/qr-text")).toBeInTheDocument();
     });
 
-    it("Start Tunnel button is disabled when no provider is selected", async () => {
-      renderModal();
-      await waitForSettingsModalReady();
-      await openRemoteSection();
-
-      const startButton = screen.getByRole("button", { name: "Start Tunnel" });
-      expect(startButton).toBeDisabled();
-      await userEvent.click(screen.getByLabelText("Tailscale"));
-      expect(startButton).not.toBeDisabled();
-    });
-
-    it("no separate Activate Provider or Save Remote Settings buttons exist", async () => {
-      renderModal();
-      await waitForSettingsModalReady();
-      await openRemoteSection();
-
-      expect(screen.queryByRole("button", { name: /Activate Provider/i })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: /Save Remote Settings/i })).not.toBeInTheDocument();
-    });
-
-    it("only the selected provider's settings are rendered", async () => {
-      renderModal();
-      await waitForSettingsModalReady();
-      await openRemoteSection();
-
-      await userEvent.click(screen.getByLabelText("Tailscale"));
-      expect(screen.getByLabelText("Accept routes")).toBeInTheDocument();
-      expect(screen.queryByText(/Advanced \(Named Tunnel\)/i)).not.toBeInTheDocument();
-
-      await userEvent.click(screen.getByLabelText("Cloudflare"));
-      expect(screen.getByText(/Advanced \(Named Tunnel\)/i)).toBeInTheDocument();
-      expect(screen.queryByLabelText("Accept routes")).not.toBeInTheDocument();
-    });
-
-    it("sets quick tunnel false when opening Cloudflare advanced details", async () => {
-      renderModal();
-      await waitForSettingsModalReady();
-      await openRemoteSection();
-      await userEvent.click(screen.getByLabelText("Cloudflare"));
-
-      const namedTunnelSummary = screen.getByText(/Advanced \(Named Tunnel\)/i, { selector: "summary" });
-      if (!screen.queryByLabelText("Tunnel name")) {
-        await userEvent.click(namedTunnelSummary);
-      }
-      await userEvent.click(screen.getByRole("button", { name: "Start Tunnel" }));
-      await waitFor(() => {
-        expect(mockUpdateRemoteSettings).toHaveBeenCalledWith(expect.objectContaining({ remoteCloudflareQuickTunnel: false }), undefined);
-      });
-
-    });
-
-    it("Start Tunnel auto-saves with enabled=true on selected provider before starting", async () => {
-      renderModal();
-      await waitForSettingsModalReady();
-      await openRemoteSection();
-
-      await userEvent.click(screen.getByLabelText("Tailscale"));
-      await userEvent.click(screen.getByRole("button", { name: "Start Tunnel" }));
-
-      await waitFor(() => {
-        expect(mockUpdateRemoteSettings).toHaveBeenCalledWith(
-          expect.objectContaining({
-            remoteActiveProvider: "tailscale",
-            remoteTailscaleEnabled: true,
-          }),
-          undefined,
-        );
-      });
-      expect(mockStartRemoteTunnel).toHaveBeenCalled();
-    });
   });
 
 
   describe("Notifications provider cards", () => {
-    const openNotificationsSection = async () => {
-      await userEvent.click(await screen.findByRole("button", { name: /Notifications/ }));
-    };
+    let user: ReturnType<typeof userEvent.setup>;
 
-    it("shows ntfy and webhook provider cards in notifications section", async () => {
-      renderModal();
-      await waitForSettingsModalReady();
-      await openNotificationsSection();
-
-      expect(screen.getByText("ntfy")).toBeInTheDocument();
-      expect(screen.getByText("Webhook")).toBeInTheDocument();
+    beforeEach(() => {
+      user = userEvent.setup({ delay: null });
     });
 
-    it("renders failure mode controls and persists updated values", async () => {
-      renderModal();
-      await waitForSettingsModalReady();
-      await openNotificationsSection();
+    const openNotificationsSection = async () => {
+      await user.click(await screen.findByRole("button", { name: /Notifications/ }));
+    };
 
-      const modeSelect = screen.getByLabelText("Failure notification mode") as HTMLSelectElement;
-      const delayInput = screen.getByLabelText("Failure notification delay (ms)") as HTMLInputElement;
+    describe("with default Notifications render", () => {
+      beforeEach(async () => {
+        renderModal({ initialSection: "notifications" });
+        await screen.findByRole("heading", { name: "Notifications" });
+      });
 
-      expect(modeSelect.value).toBe("sticky-only");
-      expect(delayInput.value).toBe("30000");
+      it("shows ntfy and webhook provider cards in notifications section", () => {
+        expect(screen.getByText("ntfy")).toBeInTheDocument();
+        expect(screen.getByText("Webhook")).toBeInTheDocument();
+      });
 
-      await userEvent.selectOptions(modeSelect, "all");
-      expect(delayInput).toBeDisabled();
-      await userEvent.selectOptions(modeSelect, "sticky-only");
-      await userEvent.clear(delayInput);
-      await userEvent.type(delayInput, "45000");
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      it("renders failure mode controls and persists updated values", async () => {
+        const modeSelect = screen.getByLabelText("Failure notification mode") as HTMLSelectElement;
+        const delayInput = screen.getByLabelText("Failure notification delay (ms)") as HTMLInputElement;
 
-      await waitFor(() => {
-        expect(mockUpdateGlobalSettings).toHaveBeenCalledWith(
-          expect.objectContaining({
-            failureNotificationMode: "sticky-only",
-            failureNotificationDelayMs: 45000,
-          }),
-        );
+        expect(modeSelect.value).toBe("sticky-only");
+        expect(delayInput.value).toBe("30000");
+
+        await user.selectOptions(modeSelect, "all");
+        expect(delayInput).toBeDisabled();
+        await user.selectOptions(modeSelect, "sticky-only");
+        fireEvent.change(delayInput, { target: { value: "45000" } });
+        await user.click(screen.getByRole("button", { name: "Save" }));
+
+        await waitFor(() => {
+          expect(mockUpdateGlobalSettings).toHaveBeenCalledWith(
+            expect.objectContaining({
+              failureNotificationMode: "sticky-only",
+              failureNotificationDelayMs: 45000,
+            }),
+          );
+        });
+      });
+
+      it("persists terminal-only selection on save", async () => {
+        const modeSelect = screen.getByLabelText("Failure notification mode") as HTMLSelectElement;
+        await user.selectOptions(modeSelect, "terminal-only");
+        await user.click(screen.getByRole("button", { name: "Save" }));
+
+        await waitFor(() => {
+          expect(mockUpdateGlobalSettings).toHaveBeenCalledWith(
+            expect.objectContaining({
+              failureNotificationMode: "terminal-only",
+            }),
+          );
+        });
+      });
+
+      it("calls testNotification with webhook provider ID when webhook test button clicked", async () => {
+        await user.click(screen.getByLabelText("Webhook notifications"));
+        fireEvent.change(screen.getByLabelText("Webhook URL"), { target: { value: "https://hooks.example.com/test" } });
+
+        const webhookCard = screen.getByText("Webhook").closest(".notification-provider-card") as HTMLElement;
+        await user.click(within(webhookCard).getByRole("button", { name: /Test notification/ }));
+
+        await waitFor(() => {
+          expect(mockTestNotification).toHaveBeenCalledWith(
+            "webhook",
+            expect.objectContaining({ webhookUrl: "https://hooks.example.com/test" }),
+            undefined,
+          );
+        });
+        expect(within(webhookCard).getByText("Test notification sent — check your webhook endpoint!")).toBeInTheDocument();
+        expect(within(webhookCard).getByText("Test notification sent — check your webhook endpoint!").closest(".notification-test-feedback")).toHaveAttribute("aria-live", "polite");
       });
     });
 
@@ -4235,24 +4249,6 @@ describe("SettingsModal", () => {
       expect(delayInput).not.toBeDisabled();
     });
 
-    it("persists terminal-only selection on save", async () => {
-      renderModal();
-      await waitForSettingsModalReady();
-      await openNotificationsSection();
-
-      const modeSelect = screen.getByLabelText("Failure notification mode") as HTMLSelectElement;
-      await userEvent.selectOptions(modeSelect, "terminal-only");
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
-
-      await waitFor(() => {
-        expect(mockUpdateGlobalSettings).toHaveBeenCalledWith(
-          expect.objectContaining({
-            failureNotificationMode: "terminal-only",
-          }),
-        );
-      });
-    });
-
     it.each([
       {
         provider: "ntfy",
@@ -4265,7 +4261,7 @@ describe("SettingsModal", () => {
         provider: "webhook",
         initial: defaultSettings,
         enable: async () => {
-          await userEvent.click(screen.getByLabelText("Webhook notifications"));
+          await user.click(screen.getByLabelText("Webhook notifications"));
         },
         visibleLabel: "Webhook URL",
         hiddenLabel: "ntfy Topic",
@@ -4319,7 +4315,7 @@ describe("SettingsModal", () => {
       expect(agentToAgentNtfy.checked).toBe(true);
       expect(roomMessageNtfy.checked).toBe(true);
 
-      await userEvent.click(screen.getByLabelText("Webhook notifications"));
+      await user.click(screen.getByLabelText("Webhook notifications"));
       expect(screen.getAllByLabelText("Fallback model used (recovered)").length).toBeGreaterThan(0);
       expect(screen.getAllByLabelText("Agent created a task").length).toBeGreaterThan(0);
       expect(screen.getAllByLabelText("DREAMS.md entry added").length).toBeGreaterThan(0);
@@ -4338,10 +4334,10 @@ describe("SettingsModal", () => {
       renderModal();
       await waitForSettingsModalReady();
       await openNotificationsSection();
-      await userEvent.click(screen.getByText("Advanced"));
-      await userEvent.type(screen.getByLabelText("Access token (optional)"), "secret-token");
+      await user.click(screen.getByText("Advanced"));
+      fireEvent.change(screen.getByLabelText("Access token (optional)"), { target: { value: "secret-token" } });
 
-      await userEvent.click(screen.getByRole("button", { name: /Test notification/ }));
+      await user.click(screen.getByRole("button", { name: /Test notification/ }));
 
       await waitFor(() => {
         expect(mockTestNotification).toHaveBeenCalledWith(
@@ -4366,10 +4362,10 @@ describe("SettingsModal", () => {
       renderModal();
       await waitForSettingsModalReady();
       await openNotificationsSection();
-      await userEvent.click(screen.getByText("Advanced"));
+      await user.click(screen.getByText("Advanced"));
       const tokenInput = screen.getByLabelText("Access token (optional)");
-      await userEvent.clear(tokenInput);
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await user.clear(tokenInput);
+      await user.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateGlobalSettings).toHaveBeenCalledWith(
@@ -4385,7 +4381,7 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
       await openNotificationsSection();
 
-      await userEvent.click(screen.getByRole("button", { name: /Test message inbox/ }));
+      await user.click(screen.getByRole("button", { name: /Test message inbox/ }));
 
       await waitFor(() => {
         expect(mockTestNotification).toHaveBeenCalledWith(
@@ -4409,7 +4405,7 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
       await openNotificationsSection();
 
-      await userEvent.click(screen.getByRole("button", { name: /Test room reply/ }));
+      await user.click(screen.getByRole("button", { name: /Test room reply/ }));
 
       await waitFor(() => {
         expect(mockTestNotification).toHaveBeenCalledWith(
@@ -4433,33 +4429,12 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
       await openNotificationsSection();
 
-      await userEvent.click(screen.getByRole("button", { name: /Test room reply/ }));
+      await user.click(screen.getByRole("button", { name: /Test room reply/ }));
 
       await waitFor(() => {
         expect(addToast).toHaveBeenCalledWith("Failed to send room reply test", "error");
       });
       expect(screen.getByText("Room reply: Failed to send room reply test")).toBeInTheDocument();
-    });
-
-    it("calls testNotification with webhook provider ID when webhook test button clicked", async () => {
-      renderModal();
-      await waitForSettingsModalReady();
-      await openNotificationsSection();
-      await userEvent.click(screen.getByLabelText("Webhook notifications"));
-      await userEvent.type(screen.getByLabelText("Webhook URL"), "https://hooks.example.com/test");
-
-      const webhookCard = screen.getByText("Webhook").closest(".notification-provider-card") as HTMLElement;
-      await userEvent.click(within(webhookCard).getByRole("button", { name: /Test notification/ }));
-
-      await waitFor(() => {
-        expect(mockTestNotification).toHaveBeenCalledWith(
-          "webhook",
-          expect.objectContaining({ webhookUrl: "https://hooks.example.com/test" }),
-          undefined,
-        );
-      });
-      expect(within(webhookCard).getByText("Test notification sent — check your webhook endpoint!")).toBeInTheDocument();
-      expect(within(webhookCard).getByText("Test notification sent — check your webhook endpoint!").closest(".notification-test-feedback")).toHaveAttribute("aria-live", "polite");
     });
 
     it("preserves existing ntfy settings in backward compat", async () => {
