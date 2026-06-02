@@ -35,6 +35,7 @@ vi.mock("../../hooks/useNavigationHistory", async (importOriginal) => {
 
 const mockUseChat = vi.mocked(useChatModule.useChat);
 const mockUseChatRooms = vi.mocked(useChatRoomsModule.useChatRooms);
+const mockFetchModels = vi.mocked(apiModule.fetchModels);
 const mockFetchDiscoveredSkills = vi.mocked(apiModule.fetchDiscoveredSkills);
 const mockCreateObjectURL = vi.fn();
 const mockRevokeObjectURL = vi.fn();
@@ -89,6 +90,17 @@ vi.mock("../CustomModelDropdown", () => ({
   ),
 }));
 
+const defaultModelsResponse = {
+  models: [
+    { provider: "anthropic", id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", reasoning: true, contextWindow: 200000 },
+    { provider: "openai", id: "gpt-4o", name: "GPT-4o", reasoning: false, contextWindow: 128000 },
+  ],
+  favoriteProviders: [],
+  favoriteModels: [],
+  defaultProvider: "anthropic",
+  defaultModelId: "claude-sonnet-4-5",
+};
+
 // Mock fetchAgents for new chat dialog
 vi.mock("../../api", () => ({
   fetchModels: vi.fn().mockResolvedValue({
@@ -98,6 +110,8 @@ vi.mock("../../api", () => ({
     ],
     favoriteProviders: [],
     favoriteModels: [],
+    defaultProvider: "anthropic",
+    defaultModelId: "claude-sonnet-4-5",
   }),
   fetchAgents: vi.fn().mockResolvedValue([
     { id: "agent-001", name: "Alpha", role: "executor", state: "idle", icon: undefined, createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z", metadata: {} },
@@ -278,6 +292,7 @@ beforeEach(() => {
   _resetInitialViewportHeight();
   setupMockRooms();
   mockViewportMode("desktop");
+  mockFetchModels.mockResolvedValue({ ...defaultModelsResponse });
   mockFetchDiscoveredSkills.mockResolvedValue([]);
   mockCreateObjectURL.mockImplementation((file: File) => `blob:${file.name}`);
   Object.defineProperty(URL, "createObjectURL", { value: mockCreateObjectURL, writable: true });
@@ -420,7 +435,25 @@ describe("ChatView", () => {
     });
   });
 
-  it("creates session with model selection (model mode uses KB agent ID)", async () => {
+  it("preselects the default model and enables Create in model mode", async () => {
+    setupMockChat({ sessions: [], filteredSessions: [] });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    await userEvent.click(screen.getByTestId("chat-new-btn"));
+
+    const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
+    const createBtn = within(dialog!).getByText("Create") as HTMLButtonElement;
+
+    await userEvent.click(within(dialog!).getByTestId("chat-new-dialog-mode-model"));
+
+    await waitFor(() => {
+      expect(within(dialog!).getByTestId("mock-model-dropdown")).toHaveValue("anthropic/claude-sonnet-4-5");
+    });
+    expect(createBtn).toBeEnabled();
+  });
+
+  it("creates session with the preselected default model in model mode", async () => {
     const createSession = vi.fn().mockResolvedValue({ id: "session-new", agentId: "__fn_agent__" });
     setupMockChat({ sessions: [], filteredSessions: [], createSession });
 
@@ -430,12 +463,11 @@ describe("ChatView", () => {
 
     const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
 
-    // Switch to model mode
     await userEvent.click(within(dialog!).getByTestId("chat-new-dialog-mode-model"));
 
-    // Select a model from the dropdown (now visible in model mode)
-    const modelDropdown = within(dialog!).getByTestId("mock-model-dropdown");
-    await userEvent.selectOptions(modelDropdown, "anthropic/claude-sonnet-4-5");
+    await waitFor(() => {
+      expect(within(dialog!).getByTestId("mock-model-dropdown")).toHaveValue("anthropic/claude-sonnet-4-5");
+    });
 
     await userEvent.click(within(dialog!).getByText("Create"));
 
@@ -446,6 +478,29 @@ describe("ChatView", () => {
         modelId: "claude-sonnet-4-5",
       });
     });
+  });
+
+  it("keeps Create disabled in model mode when no default model is resolvable", async () => {
+    mockFetchModels.mockResolvedValue({
+      ...defaultModelsResponse,
+      defaultProvider: null,
+      defaultModelId: null,
+    });
+    setupMockChat({ sessions: [], filteredSessions: [] });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    await userEvent.click(screen.getByTestId("chat-new-btn"));
+
+    const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
+    const createBtn = within(dialog!).getByText("Create") as HTMLButtonElement;
+
+    await userEvent.click(within(dialog!).getByTestId("chat-new-dialog-mode-model"));
+
+    await waitFor(() => {
+      expect(within(dialog!).getByTestId("mock-model-dropdown")).toHaveValue("");
+    });
+    expect(createBtn).toBeDisabled();
   });
 
   it("creates session without model selection omits model fields (agent mode)", async () => {

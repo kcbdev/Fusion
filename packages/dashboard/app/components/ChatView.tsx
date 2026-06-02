@@ -519,16 +519,20 @@ export function resolveSessionProvider(
 
 interface NewChatDialogProps {
   projectId?: string;
+  defaultModel: DefaultModelSelection;
   onClose: () => void;
   onCreate: (input: { agentId: string; modelProvider?: string; modelId?: string }) => void;
 }
 
-function NewChatDialog({ projectId, onClose, onCreate }: NewChatDialogProps) {
+function NewChatDialog({ projectId, defaultModel, onClose, onCreate }: NewChatDialogProps) {
   const [chatMode, setChatMode] = useState<"agent" | "model">("agent");
   const { agents, loading: agentsLoading } = useAgentsMapCache(projectId);
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
   const { models, favoriteProviders: cachedFavoriteProviders, favoriteModels: cachedFavoriteModels, loading: modelsLoading, refresh } = useModelsCache();
-  const [selectedModel, setSelectedModel] = useState<string>("");
+  const defaultModelValue = defaultModel.provider && defaultModel.modelId
+    ? `${defaultModel.provider}/${defaultModel.modelId}`
+    : "";
+  const [selectedModel, setSelectedModel] = useState<string>(defaultModelValue);
   const [favoriteProviders, setFavoriteProviders] = useState<string[]>(cachedFavoriteProviders);
   const [favoriteModels, setFavoriteModels] = useState<string[]>(cachedFavoriteModels);
 
@@ -539,6 +543,13 @@ function NewChatDialog({ projectId, onClose, onCreate }: NewChatDialogProps) {
   useEffect(() => {
     setFavoriteModels(cachedFavoriteModels);
   }, [cachedFavoriteModels]);
+
+  useEffect(() => {
+    if (!defaultModelValue) {
+      return;
+    }
+    setSelectedModel((current) => current || defaultModelValue);
+  }, [defaultModelValue]);
 
   const handleToggleFavorite = useCallback(async (provider: string) => {
     const currentFavorites = favoriteProviders;
@@ -606,7 +617,6 @@ function NewChatDialog({ projectId, onClose, onCreate }: NewChatDialogProps) {
             data-testid="chat-new-dialog-mode-agent"
             onClick={() => {
               setChatMode("agent");
-              setSelectedModel("");
             }}
           >
             Agent
@@ -618,6 +628,7 @@ function NewChatDialog({ projectId, onClose, onCreate }: NewChatDialogProps) {
             onClick={() => {
               setChatMode("model");
               setSelectedAgentId("");
+              setSelectedModel((current) => current || defaultModelValue);
             }}
           >
             Model
@@ -3511,6 +3522,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       {showNewDialog && (
         <NewChatDialog
           projectId={projectId}
+          defaultModel={defaultModel}
           onClose={() => setShowNewDialog(false)}
           onCreate={handleCreateSession}
         />
