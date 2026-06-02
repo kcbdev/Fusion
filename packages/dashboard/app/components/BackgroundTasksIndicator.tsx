@@ -119,7 +119,7 @@ export function BackgroundTasksIndicator({
         title={`${total} background AI task${total !== 1 ? "s" : ""}${needsInput > 0 ? ` (${needsInput} need${needsInput !== 1 ? "" : "s"} input)` : ""}`}
       >
         {generating > 0 && (
-          <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} />
+          <Loader2 size={12} className="animate-spin" />
         )}
         {needsInput > 0 && generating === 0 && <HelpCircle size={12} />}
         <span>AI {total}</span>
@@ -188,11 +188,8 @@ export function BackgroundTasksIndicator({
                   {isGenerating && (
                     <Loader2
                       size={14}
-                      className="background-tasks-indicator__session-icon"
-                      style={{
-                        animation: "spin 1s linear infinite",
-                        color: "var(--color-success)",
-                      }}
+                      className="background-tasks-indicator__session-icon animate-spin"
+                      style={{ color: "var(--color-success)" }}
                     />
                   )}
                   {isAwaiting && !activeElsewhere && (

@@ -187,10 +187,17 @@ html {
 }
 .animate-spin {
   animation: spin 1s linear infinite;
+  transform-origin: center;
 }
 
 .spin {
   animation: spin 1s linear infinite;
+  transform-origin: center;
+}
+
+svg.animate-spin,
+svg.spin {
+  transform-box: fill-box;
 }
 
 :root {
