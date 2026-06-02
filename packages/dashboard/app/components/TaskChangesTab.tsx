@@ -4,9 +4,7 @@ import type { MergeDetails, Column } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
 import {
   fetchTaskDiff,
-  fetchTaskCommitAssociations,
   type TaskDiff,
-  type TaskCommitAssociationRow,
 } from "../api";
 import { highlightDiff } from "../utils/highlightDiff";
 import { ChangesDiffModal } from "./ChangesDiffModal";
@@ -129,8 +127,6 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
   const [stats, setStats] = useState<{ filesChanged: number; additions: number; deletions: number }>({ filesChanged: 0, additions: 0, deletions: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [commitAssociations, setCommitAssociations] = useState<TaskCommitAssociationRow[]>([]);
-  const [lineageId, setLineageId] = useState<string | null>(null);
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
   const [currentFileIndex, setCurrentFileIndex] = useState<number | null>(null);
   const [wordWrap, setWordWrap] = useState(true);
@@ -150,9 +146,6 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
     try {
       setLoading(true);
       setError(null);
-      const associationsData = await fetchTaskCommitAssociations(taskId, projectId);
-      setLineageId(associationsData.lineageId);
-      setCommitAssociations(associationsData.associations);
 
       if (!canLoad) {
         setFiles([]);
@@ -261,47 +254,6 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
   }
 
 
-  const renderCommitAssociations = () => (
-    <section className="task-lineage-associations" aria-label="Task commit associations">
-      <div className="task-lineage-associations-header">
-        <h4>
-          <GitCommit size={16} />
-          Lineage commit associations
-        </h4>
-        {lineageId && (
-          <code className="task-lineage-id">{lineageId}</code>
-        )}
-      </div>
-      {commitAssociations.length === 0 ? (
-        <p className="task-lineage-associations-empty">No associated commits recorded yet.</p>
-      ) : (
-        <div className="task-lineage-associations-list">
-          {commitAssociations.map((association) => {
-            const matchedLabel = association.matchedBy.replace(/-/g, " ");
-            return (
-              <article
-                key={`${association.commitSha}-${association.matchedBy}`}
-                className={`task-lineage-association task-lineage-association--${association.confidence}`}
-              >
-                <div className="task-lineage-association-main">
-                  <code className="task-lineage-sha">{association.commitSha.slice(0, 7)}</code>
-                  <span className="task-lineage-subject">{association.commitSubject}</span>
-                </div>
-                <div className="task-lineage-association-meta">
-                  <span>{new Date(association.authoredAt).toLocaleString()}</span>
-                  <span>Confidence: {association.confidence}</span>
-                  <span>Match: {matchedLabel}</span>
-                  <span>Task snapshot: {association.taskIdSnapshot}</span>
-                </div>
-                {association.note && <p className="task-lineage-note">{association.note}</p>}
-              </article>
-            );
-          })}
-        </div>
-      )}
-    </section>
-  );
-
   if (files.length === 0) {
     if (isDone && !isDoneWithCommit) {
       const doneFallbackFiles = mergeDetails?.landedFiles && mergeDetails.landedFiles.length > 0
@@ -337,7 +289,6 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
 
     return (
       <div className="detail-section task-changes-tab">
-        {renderCommitAssociations()}
         <div className="task-changes-state task-changes-state--empty">
           <FileCode size={24} />
           <p>No files modified.</p>
@@ -353,7 +304,6 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
 
   return (
     <div className="detail-section task-changes-tab">
-      {renderCommitAssociations()}
       {/* Commit metadata for done tasks */}
       {isDone && mergeDetails && (
         <div className="commit-diff-meta">

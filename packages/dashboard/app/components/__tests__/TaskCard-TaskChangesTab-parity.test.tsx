@@ -6,7 +6,6 @@ import { TaskChangesTab } from "../TaskChangesTab";
 
 const useTaskDiffStatsMock = vi.fn();
 const fetchTaskDiffMock = vi.fn();
-const fetchTaskCommitAssociationsMock = vi.fn();
 
 vi.mock("../../hooks/useTaskDiffStats", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../hooks/useTaskDiffStats")>();
@@ -21,7 +20,6 @@ vi.mock("../../api", async (importOriginal) => {
   return {
     ...actual,
     fetchTaskDiff: (...args: unknown[]) => fetchTaskDiffMock(...args),
-    fetchTaskCommitAssociations: (...args: unknown[]) => fetchTaskCommitAssociationsMock(...args),
   };
 });
 
@@ -83,8 +81,6 @@ describe("TaskCard/TaskChangesTab files-changed parity", () => {
   beforeEach(() => {
     useTaskDiffStatsMock.mockReset();
     fetchTaskDiffMock.mockReset();
-    fetchTaskCommitAssociationsMock.mockReset();
-    fetchTaskCommitAssociationsMock.mockResolvedValue({ taskId: "FN-4521", lineageId: null, associations: [] });
   });
 
   it.each([
