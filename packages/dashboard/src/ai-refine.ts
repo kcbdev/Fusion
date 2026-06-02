@@ -86,11 +86,27 @@ Your job is to refine task descriptions based on the user's selected refinement 
 - Output ONLY the refined text, no markdown formatting, no explanations
 - The output should be a direct replacement for the input text`;
 
+/** System prompt for drafting goal descriptions */
+export const GOAL_DRAFT_SYSTEM_PROMPT = `You are a strategic planning assistant for a goal tracking system.
+
+Given a goal title, draft a concise goal description that helps a team understand the intent, scope, and success signal of the goal.
+
+Guidelines:
+- Write plain text only
+- No markdown headings, bullets, or preamble
+- Use a professional, actionable tone
+- Return 1 to 3 short paragraphs
+- Capture the goal's purpose, likely scope, and how success could be recognized
+- Do not invent unrelated product names, timelines, metrics, or implementation specifics that are not implied by the title`;
+
 /** Maximum text length in characters */
 export const MAX_TEXT_LENGTH = 2000;
 
 /** Minimum text length in characters */
 export const MIN_TEXT_LENGTH = 1;
+
+/** Maximum goal title length in characters */
+export const MAX_GOAL_TITLE_LENGTH = 200;
 
 /** Rate limit: max requests per IP per hour */
 export const MAX_REQUESTS_PER_HOUR = 10;
@@ -235,6 +251,61 @@ export function validateRefineRequest(
   return { text, type: type as RefinementType };
 }
 
+/**
+ * Validate goal-description drafting request.
+ * Throws ValidationError for invalid input.
+ */
+export function validateGoalDraftRequest(title: unknown): string {
+  if (title === undefined || title === null) {
+    throw new ValidationError("title is required");
+  }
+
+  if (typeof title !== "string") {
+    throw new ValidationError("title must be a string");
+  }
+
+  const trimmedTitle = title.trim();
+  if (!trimmedTitle) {
+    throw new ValidationError("title is required");
+  }
+
+  if (trimmedTitle.length > MAX_GOAL_TITLE_LENGTH) {
+    throw new ValidationError(`title must not exceed ${MAX_GOAL_TITLE_LENGTH} characters`);
+  }
+
+  return trimmedTitle;
+}
+
+function extractLastAssistantText(messages: unknown): string {
+  interface AgentMessage {
+    role: string;
+    content?: string | Array<{ type: string; text: string }>;
+  }
+
+  const lastMessage = (Array.isArray(messages) ? messages : [])
+    .filter((message): message is AgentMessage => Boolean(message) && typeof message === "object" && "role" in message)
+    .filter((message) => message.role === "assistant")
+    .pop();
+
+  if (!lastMessage?.content) {
+    return "";
+  }
+
+  if (typeof lastMessage.content === "string") {
+    return lastMessage.content.trim();
+  }
+
+  if (Array.isArray(lastMessage.content)) {
+    return lastMessage.content
+      .filter((content): content is { type: "text"; text: string } => content.type === "text")
+      .map((content) => content.text)
+      .join("")
+      .trim();
+  }
+
+  return "";
+}
+
 // ── AI Integration ───────────────────────────────────────────────────────────
 
 /**
@@ -277,29 +348,7 @@ export async function refineText(
     // Send message to agent and get response
     await agentResult.session.prompt(prompt);
 
-    // Get the response text from the agent's state
-    interface AgentMessage {
-      role: string;
-      content?: string | Array<{ type: string; text: string }>;
-    }
-    const lastMessage = (agentResult.session.state.messages as AgentMessage[])
-      .filter((m: AgentMessage) => m.role === "assistant")
-      .pop();
-
-    let refinedText = "";
-    if (lastMessage?.content) {
-      // Handle both string and array content types
-      if (typeof lastMessage.content === "string") {
-        refinedText = lastMessage.content.trim();
-      } else if (Array.isArray(lastMessage.content)) {
-        // Extract text from content blocks
-        refinedText = lastMessage.content
-          .filter((c: { type: string; text: string }): c is { type: "text"; text: string } => c.type === "text")
-          .map((c: { type: string; text: string }) => c.text)
-          .join("")
-          .trim();
-      }
-    }
+    const refinedText = extractLastAssistantText(agentResult.session.state.messages);
 
     if (!refinedText) {
       throw new AiServiceError("AI returned empty response");
@@ -327,6 +376,66 @@ export async function refineText(
     throw new AiServiceError(
       err instanceof Error ? err.message : "AI processing failed"
     );
+  }
+}
+
+/**
+ * Draft a goal description using a readonly AI agent.
+ * @param title - Goal title to expand into a description
+ * @param rootDir - Project root directory for AI agent context
+ * @param promptOverrides - Optional prompt overrides (unused for this inline prompt)
+ * @returns Drafted goal description text
+ */
+export async function draftGoalDescription(
+  title: string,
+  rootDir: string,
+  _promptOverrides?: PromptOverrideMap,
+): Promise<string> {
+  await ensureEngineReady();
+
+  if (!createFnAgent) {
+    throw new AiServiceError("AI engine not available");
+  }
+
+  const agentResult = await createFnAgent({
+    cwd: rootDir,
+    systemPrompt: GOAL_DRAFT_SYSTEM_PROMPT,
+    tools: "readonly",
+  });
+
+  if (!agentResult?.session) {
+    throw new AiServiceError("Failed to initialize AI agent");
+  }
+
+  const prompt = `Goal title: ${title}`;
+
+  try {
+    await agentResult.session.prompt(prompt);
+
+    const description = extractLastAssistantText(agentResult.session.state.messages);
+    if (!description) {
+      throw new AiServiceError("AI returned empty response");
+    }
+
+    try {
+      agentResult.session.dispose?.();
+    } catch {
+      // Ignore disposal errors
+    }
+
+    return description;
+  } catch (err) {
+    try {
+      agentResult.session.dispose?.();
+    } catch {
+      // Ignore disposal errors
+    }
+
+    if (err instanceof AiServiceError) {
+      throw err;
+    }
+
+    throw new AiServiceError(err instanceof Error ? err.message : "AI processing failed");
   }
 }
 

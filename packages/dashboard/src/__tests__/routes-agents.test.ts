@@ -38,6 +38,7 @@ import { get as performGet, request as performRequest } from "../test-request.js
 import { resetRuntimeLogSink, setRuntimeLogSink } from "../runtime-logger.js";
 import { resetDiagnosticsSink, setDiagnosticsSink, type LogEntry } from "../ai-session-diagnostics.js";
 import * as updateCheckModule from "../update-check.js";
+import * as aiRefineModule from "../ai-refine.js";
 import { __setAgentReflectionServiceForTests } from "../routes/register-agent-reflection-rating-routes.js";
 
 // Mock @fusion/core for gh CLI auth checks
@@ -3220,6 +3221,97 @@ describe("POST /api/ai/refine-text with projectId scoping", () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toContain("not exceed 2000 characters");
+  });
+});
+
+describe("POST /api/ai/draft-goal-description", () => {
+  let store: TaskStore;
+
+  beforeEach(() => {
+    store = createMockStore({
+      getRootDir: vi.fn().mockReturnValue("/test/project"),
+    });
+    aiRefineModule.__resetRefineState();
+  });
+
+  afterEach(() => {
+    aiRefineModule.__resetRefineState();
+    vi.restoreAllMocks();
+  });
+
+  function buildApp() {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store));
+    return app;
+  }
+
+  it("returns a drafted description for a valid title", async () => {
+    const draftSpy = vi
+      .spyOn(aiRefineModule, "draftGoalDescription")
+      .mockResolvedValueOnce("Grow the ecosystem with clear extension support and measurable adoption.");
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/ai/draft-goal-description",
+      JSON.stringify({ title: "Grow plugin ecosystem" }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      description: "Grow the ecosystem with clear extension support and measurable adoption.",
+    });
+    expect(draftSpy).toHaveBeenCalledWith("Grow plugin ecosystem", "/test/project", undefined);
+  });
+
+  it("returns 400 when title is missing or empty", async () => {
+    const missing = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/ai/draft-goal-description",
+      JSON.stringify({}),
+      { "Content-Type": "application/json" },
+    );
+    expect(missing.status).toBe(400);
+    expect(missing.body.error).toContain("title is required");
+
+    const empty = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/ai/draft-goal-description",
+      JSON.stringify({ title: "   " }),
+      { "Content-Type": "application/json" },
+    );
+    expect(empty.status).toBe(400);
+    expect(empty.body.error).toContain("title is required");
+  });
+
+  it("returns 429 when draft requests are rate limited", async () => {
+    const app = buildApp();
+
+    for (let i = 0; i < 10; i++) {
+      const res = await REQUEST(
+        app,
+        "POST",
+        "/api/ai/draft-goal-description",
+        JSON.stringify({ title: `Goal ${i}` }),
+        { "Content-Type": "application/json" },
+      );
+      expect(res.status).toBe(200);
+    }
+
+    const rateLimited = await REQUEST(
+      app,
+      "POST",
+      "/api/ai/draft-goal-description",
+      JSON.stringify({ title: "Goal 11" }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(rateLimited.status).toBe(429);
+    expect(rateLimited.body.error).toContain("Rate limit exceeded");
   });
 });
 

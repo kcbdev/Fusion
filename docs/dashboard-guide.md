@@ -470,8 +470,14 @@ What it shows:
 Data behavior:
 - Initial load: `GET /api/goals` (returns `{ goals }`)
 - Create: inline Add Goal form posts `title` (required) + `description` (optional) to `POST /api/goals`
+- Add-form drafting: **Draft with AI** sends the typed goal title to `POST /api/ai/draft-goal-description` and drops the returned `{ description }` into the description textarea for review/editing before save
 - Edit: per-card inline form patches title/description via `PATCH /api/goals/:id`
 - Archive/unarchive: `POST /api/goals/:id/archive` and `POST /api/goals/:id/unarchive`
+
+AI drafting behavior:
+- The add-goal form enables **Draft with AI** once the title is non-empty
+- Draft requests are readonly and use the same shared AI-text rate limiter as `/api/ai/refine-text` (10 requests per hour per IP)
+- The backend drafts a concise plain-text strategic goal description from the title only; users can freely edit the generated description before saving
 
 Active-goal cap behavior:
 - Hard cap of 5 active goals (server-enforced)

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Goal } from "@fusion/core";
-import { Plus } from "lucide-react";
+import { Plus, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { draftGoalDescription, getRefineErrorMessage } from "../api";
 import "./GoalsView.css";
 
 export interface GoalsViewProps {
@@ -29,6 +30,7 @@ export function GoalsView({ initialGoals }: GoalsViewProps) {
   const [addDescription, setAddDescription] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [isDraftingDescription, setIsDraftingDescription] = useState(false);
 
   const [editGoalId, setEditGoalId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -104,6 +106,26 @@ export function GoalsView({ initialGoals }: GoalsViewProps) {
     setAddTitle("");
     setAddDescription("");
     setAddError(null);
+    setIsDraftingDescription(false);
+  }
+
+  async function draftAddGoalDescription() {
+    const title = addTitle.trim();
+    if (!title) {
+      setAddError("Title is required.");
+      return;
+    }
+
+    try {
+      setIsDraftingDescription(true);
+      setAddError(null);
+      const description = await draftGoalDescription(title);
+      setAddDescription(description);
+    } catch (error) {
+      setAddError(getRefineErrorMessage(error));
+    } finally {
+      setIsDraftingDescription(false);
+    }
   }
 
   async function submitAddGoal() {
@@ -269,9 +291,21 @@ export function GoalsView({ initialGoals }: GoalsViewProps) {
             onChange={(event) => setAddTitle(event.target.value)}
             data-testid="goals-form-title"
           />
-          <label className="goals-form-label" htmlFor="goals-form-description">
-            Description
-          </label>
+          <div className="goals-form-label-row">
+            <label className="goals-form-label" htmlFor="goals-form-description">
+              Description
+            </label>
+            <button
+              type="button"
+              className="btn goals-form-draft-button"
+              onClick={() => void draftAddGoalDescription()}
+              disabled={!addTitle.trim() || isDraftingDescription}
+              data-testid="goals-form-draft-ai"
+            >
+              <Sparkles aria-hidden="true" />
+              {isDraftingDescription ? "Drafting…" : "Draft with AI"}
+            </button>
+          </div>
           <textarea
             id="goals-form-description"
             className="input"
@@ -286,10 +320,10 @@ export function GoalsView({ initialGoals }: GoalsViewProps) {
             </p>
           ) : null}
           <div className="goals-form-actions">
-            <button type="button" className="btn btn-primary" onClick={() => void submitAddGoal()} disabled={isCreating} data-testid="goals-form-submit">
+            <button type="button" className="btn btn-primary" onClick={() => void submitAddGoal()} disabled={isCreating || isDraftingDescription} data-testid="goals-form-submit">
               Save
             </button>
-            <button type="button" className="btn" onClick={closeAddForm} disabled={isCreating} data-testid="goals-form-cancel">
+            <button type="button" className="btn" onClick={closeAddForm} disabled={isCreating || isDraftingDescription} data-testid="goals-form-cancel">
               Cancel
             </button>
           </div>

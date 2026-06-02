@@ -1785,6 +1785,64 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   });
 
   /**
+   * POST /api/ai/draft-goal-description
+   * AI-powered goal description drafting from a goal title.
+   * Body: { title: string }
+   * Returns: { description: string }
+   *
+   * Rate limited: 10 requests per hour per IP
+   */
+  router.post("/ai/draft-goal-description", async (req, res) => {
+    try {
+      const { title } = req.body;
+      const ip = req.ip || req.socket.remoteAddress || "unknown";
+
+      const { store: scopedStore } = await getProjectContext(req);
+      const rootDir = scopedStore.getRootDir();
+      const settings = await scopedStore.getSettings();
+
+      const {
+        validateGoalDraftRequest,
+        checkRateLimit,
+        getRateLimitResetTime,
+        draftGoalDescription,
+        RateLimitError: _RateLimitError4,
+        ValidationError,
+        AiServiceError: _AiServiceError2,
+      } = await import("./ai-refine.js");
+
+      if (!checkRateLimit(ip)) {
+        const resetTime = getRateLimitResetTime(ip);
+        throw rateLimited(`Rate limit exceeded. Maximum 10 draft requests per hour. Reset at ${resetTime?.toISOString() || "unknown"}`);
+      }
+
+      let validatedTitle: string;
+      try {
+        validatedTitle = validateGoalDraftRequest(title);
+      } catch (err) {
+        if (err instanceof ValidationError) {
+          throw badRequest(err instanceof Error ? err.message : String(err));
+        }
+        throw err;
+      }
+
+      const description = await draftGoalDescription(validatedTitle, rootDir, settings.promptOverrides);
+      res.json({ description });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      if (err instanceof Error && err.name === "RateLimitError") {
+        throw rateLimited(err.message);
+      } else if (err instanceof Error && err.name === "AiServiceError") {
+        rethrowAsApiError(err, "AI service error");
+      } else {
+        rethrowAsApiError(err, "Failed to draft goal description");
+      }
+    }
+  });
+
+  /**
    * POST /api/ai/summarize-title
    * AI-powered title generation from task descriptions.
    * Body: { description: string, provider?: string, modelId?: string }

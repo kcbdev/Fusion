@@ -1,11 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Goal } from "@fusion/core";
+import { draftGoalDescription } from "../../api";
 import { GoalsView } from "../GoalsView";
+
+vi.mock("../../api", async () => ({
+  draftGoalDescription: vi.fn(),
+  getRefineErrorMessage: (error: unknown) => (error instanceof Error ? error.message : "Failed to refine text. Please try again."),
+}));
 
 vi.mock("lucide-react", () => ({
   Plus: () => <span data-testid="icon-plus" />,
+  Sparkles: () => <span data-testid="icon-sparkles" />,
 }));
+
+const mockDraftGoalDescription = vi.mocked(draftGoalDescription);
 
 function makeGoal(overrides: Partial<Goal> & Pick<Goal, "id" | "title">): Goal {
   return {
@@ -21,6 +30,7 @@ function makeGoal(overrides: Partial<Goal> & Pick<Goal, "id" | "title">): Goal {
 describe("GoalsView", () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
+    mockDraftGoalDescription.mockReset();
   });
 
   afterEach(() => {
@@ -137,6 +147,46 @@ describe("GoalsView", () => {
     fireEvent.click(screen.getByTestId("goals-form-submit"));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Title is required.");
+  });
+
+  it("keeps the draft button disabled until a title is provided", () => {
+    render(<GoalsView initialGoals={[]} />);
+
+    fireEvent.click(screen.getByTestId("goals-add-button"));
+
+    const draftButton = screen.getByTestId("goals-form-draft-ai");
+    expect(draftButton).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId("goals-form-title"), { target: { value: "Grow ecosystem" } });
+
+    expect(screen.getByTestId("goals-form-draft-ai")).toBeEnabled();
+  });
+
+  it("drafts a description from the goal title", async () => {
+    mockDraftGoalDescription.mockResolvedValueOnce("Expand the extension ecosystem with better support and adoption goals.");
+
+    render(<GoalsView initialGoals={[]} />);
+
+    fireEvent.click(screen.getByTestId("goals-add-button"));
+    fireEvent.change(screen.getByTestId("goals-form-title"), { target: { value: "Grow ecosystem" } });
+    fireEvent.click(screen.getByTestId("goals-form-draft-ai"));
+
+    await waitFor(() => expect(mockDraftGoalDescription).toHaveBeenCalledWith("Grow ecosystem"));
+    expect(screen.getByTestId("goals-form-description")).toHaveValue(
+      "Expand the extension ecosystem with better support and adoption goals."
+    );
+  });
+
+  it("shows an error when AI drafting fails", async () => {
+    mockDraftGoalDescription.mockRejectedValueOnce(new Error("Too many refinement requests. Please wait an hour."));
+
+    render(<GoalsView initialGoals={[]} />);
+
+    fireEvent.click(screen.getByTestId("goals-add-button"));
+    fireEvent.change(screen.getByTestId("goals-form-title"), { target: { value: "Grow ecosystem" } });
+    fireEvent.click(screen.getByTestId("goals-form-draft-ai"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Too many refinement requests. Please wait an hour.");
   });
 
   it("creates goal via API and closes form", async () => {

@@ -4973,6 +4973,10 @@ export interface RefineTextResponse {
   refined: string;
 }
 
+export interface DraftGoalDescriptionResponse {
+  description: string;
+}
+
 /**
  * Refine task description text using AI.
  * @param text - The text to refine (1-2000 characters)
@@ -5023,11 +5027,13 @@ export function getRefineErrorMessage(error: unknown): string {
     return REFINE_ERROR_MESSAGES.INVALID_TYPE;
   }
 
-  // Text validation errors (400) - pass through from backend
+  // Validation errors (400) - pass through from backend
   if (
     message.startsWith("text must") ||
+    message.startsWith("title must") ||
     message.includes("text is required") ||
-    message.includes("type is required")
+    message.includes("type is required") ||
+    message.includes("title is required")
   ) {
     return error.message;
   }
@@ -5036,6 +5042,20 @@ export function getRefineErrorMessage(error: unknown): string {
   return REFINE_ERROR_MESSAGES.NETWORK;
 }
 
+/**
+ * Draft a goal description using AI from a goal title.
+ * @param title - The goal title to expand into a draft description
+ * @param projectId - Optional project ID for scoped settings resolution
+ * @returns The drafted goal description
+ * @throws Error with message for rate limit (429), validation (400), or server errors
+ */
+export async function draftGoalDescription(title: string, projectId?: string): Promise<string> {
+  const response = await api<DraftGoalDescriptionResponse>(withProjectId("/ai/draft-goal-description", projectId), {
+    method: "POST",
+    body: JSON.stringify({ title }),
+  });
+  return response.description;
+}
 
 export function startSubtaskBreakdown(description: string, projectId?: string): Promise<{ sessionId: string }> {
   return api<{ sessionId: string }>(withProjectId("/subtasks/start-streaming", projectId), {

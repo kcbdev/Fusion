@@ -63,6 +63,20 @@
   color: var(--text-muted);
 }
 
+.goals-form-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.goals-form-draft-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  align-self: flex-start;
+}
+
 .goals-form textarea.input {
   min-height: calc(var(--space-2xl) * 2);
   resize: vertical;

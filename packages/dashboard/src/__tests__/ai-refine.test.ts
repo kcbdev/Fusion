@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   refineText,
+  draftGoalDescription,
   validateRefineRequest,
+  validateGoalDraftRequest,
   checkRateLimit,
   getRateLimitResetTime,
   __resetRefineState,
@@ -11,6 +13,7 @@ import {
   VALID_REFINEMENT_TYPES,
   MIN_TEXT_LENGTH,
   MAX_TEXT_LENGTH,
+  MAX_GOAL_TITLE_LENGTH,
   MAX_REQUESTS_PER_HOUR,
   RATE_LIMIT_WINDOW_MS,
 } from "../ai-refine.js";
@@ -129,6 +132,34 @@ describe("ai-refine module", () => {
 
     it("throws InvalidTypeError for numeric type", () => {
       expect(() => validateRefineRequest("some text", 123)).toThrow(InvalidTypeError);
+    });
+  });
+
+  describe("validateGoalDraftRequest", () => {
+    it("accepts a valid goal title and trims whitespace", () => {
+      expect(validateGoalDraftRequest("  Improve plugin ecosystem  ")).toBe("Improve plugin ecosystem");
+    });
+
+    it("throws ValidationError for missing title", () => {
+      expect(() => validateGoalDraftRequest(undefined)).toThrow(ValidationError);
+      expect(() => validateGoalDraftRequest(undefined)).toThrow("title is required");
+    });
+
+    it("throws ValidationError for non-string title", () => {
+      expect(() => validateGoalDraftRequest(123)).toThrow(ValidationError);
+      expect(() => validateGoalDraftRequest(123)).toThrow("title must be a string");
+    });
+
+    it("throws ValidationError for empty trimmed title", () => {
+      expect(() => validateGoalDraftRequest("   ")).toThrow(ValidationError);
+      expect(() => validateGoalDraftRequest("   ")).toThrow("title is required");
+    });
+
+    it("throws ValidationError for titles exceeding the max length", () => {
+      expect(() => validateGoalDraftRequest("a".repeat(MAX_GOAL_TITLE_LENGTH + 1))).toThrow(ValidationError);
+      expect(() => validateGoalDraftRequest("a".repeat(MAX_GOAL_TITLE_LENGTH + 1))).toThrow(
+        `title must not exceed ${MAX_GOAL_TITLE_LENGTH} characters`
+      );
     });
   });
 
@@ -273,6 +304,50 @@ describe("ai-refine module", () => {
       await expect(refineText("some text", "clarify", "/some/path")).rejects.toThrow(
         "Failed to initialize AI agent"
       );
+    });
+  });
+
+  describe("draftGoalDescription", () => {
+    function createDraftMockAgent(content: string | Array<{ type: string; text: string }>) {
+      return {
+        session: {
+          state: {
+            messages: [{ role: "assistant", content }],
+          },
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+        },
+      };
+    }
+
+    it("drafts a goal description from the last assistant message", async () => {
+      const mockAgent = createDraftMockAgent([
+        { type: "text", text: "Grow the integration ecosystem with clearer extension pathways." },
+        { type: "text", text: " Success means partners can discover and ship supported integrations faster." },
+      ]);
+      mockCreateFnAgent.mockResolvedValueOnce(mockAgent);
+
+      await expect(draftGoalDescription("Grow plugin ecosystem", "/tmp/project")).resolves.toBe(
+        "Grow the integration ecosystem with clearer extension pathways. Success means partners can discover and ship supported integrations faster."
+      );
+      expect(mockCreateFnAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cwd: "/tmp/project",
+          tools: "readonly",
+        })
+      );
+      expect(mockAgent.session.prompt).toHaveBeenCalledWith("Goal title: Grow plugin ecosystem");
+      expect(mockAgent.session.dispose).toHaveBeenCalledTimes(1);
+    });
+
+    it("throws AiServiceError when AI returns an empty response", async () => {
+      const mockAgent = createDraftMockAgent("   ");
+      mockCreateFnAgent.mockResolvedValueOnce(mockAgent);
+
+      await expect(draftGoalDescription("Grow plugin ecosystem", "/tmp/project")).rejects.toThrow(
+        "AI returned empty response"
+      );
+      expect(mockAgent.session.dispose).toHaveBeenCalledTimes(1);
     });
   });
 
