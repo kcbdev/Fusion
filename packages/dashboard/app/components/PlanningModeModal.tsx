@@ -1587,12 +1587,10 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
         },
       });
       onTaskCreated(task);
-      // The server cleans up the planning session after task creation. Drop
-      // the local selection so a future reopen doesn't try to fetch a deleted
-      // id (which would otherwise show "Session not found"). Also broadcast
-      // completion so the footer's useBackgroundSessions prunes its count.
+      // Single-task creation should preserve completed planning history, so
+      // only clear the active selection before closing; keep the sidebar row
+      // in local state to match persisted server truth.
       setSelectedSessionId(null);
-      setPlanningSessions((prev) => prev.filter((s) => s.id !== completedSessionId));
       broadcastCompleted({
         sessionId: completedSessionId,
         status: "complete",
@@ -2501,8 +2499,9 @@ function SummaryView({
 
           <div className="task-detail-section">
             <div className="form-group">
-              <label>Branch strategy</label>
+              <label htmlFor="planning-branch-strategy">Branch strategy</label>
               <select
+                id="planning-branch-strategy"
                 value={branchMode}
                 onChange={(event) => onBranchModeChange(event.target.value as "project-default" | "auto-new" | "existing" | "custom-new")}
                 disabled={isLoading}
@@ -2515,8 +2514,9 @@ function SummaryView({
             </div>
             {isBranchNameRequired && (
               <div className="form-group">
-                <label>Branch name</label>
+                <label htmlFor="planning-branch-name">Branch name</label>
                 <input
+                  id="planning-branch-name"
                   value={branchName}
                   onChange={(event) => onBranchNameChange(event.target.value)}
                   disabled={isLoading}
@@ -2524,8 +2524,9 @@ function SummaryView({
               </div>
             )}
             <div className="form-group">
-              <label>Merge target / base branch (optional)</label>
+              <label htmlFor="planning-base-branch">Merge target / base branch (optional)</label>
               <input
+                id="planning-base-branch"
                 value={baseBranch}
                 onChange={(event) => onBaseBranchChange(event.target.value)}
                 disabled={isLoading}

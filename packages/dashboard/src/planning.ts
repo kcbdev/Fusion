@@ -460,6 +460,11 @@ function unpersistSession(sessionId: string): void {
   _aiSessionStore.delete(sessionId);
 }
 
+/** Release in-memory planning runtime state while keeping persisted history. */
+export function releaseSession(sessionId: string): void {
+  cleanupInMemorySession(sessionId);
+}
+
 function buildSessionFromRow(row: AiSessionRow): Session {
   const payload = safeParseJson<DraftInputPayload & { ip?: string }>(
     row.inputPayload,
@@ -2479,7 +2484,7 @@ export function mergePlanningSubtaskDrafts(
 }
 
 /**
- * Cleanup a session (used after task creation).
+ * Cleanup a session and remove its persisted row.
  */
 export function cleanupSession(sessionId: string): void {
   cleanupInMemorySession(sessionId);

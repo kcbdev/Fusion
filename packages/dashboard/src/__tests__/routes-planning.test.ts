@@ -1670,7 +1670,7 @@ describe("Planning Mode Routes", () => {
         expect(store.updateTask).toHaveBeenCalledWith("FN-099", { size: "S" });
       });
 
-      it("creates a task from a persisted complete session when in-memory session is missing", async () => {
+      it("creates a task from a persisted complete session when in-memory session is missing and keeps the completed session fetchable", async () => {
         (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValue({
           id: "FN-043",
           description: "Build a resumable planning flow",
@@ -1683,29 +1683,50 @@ describe("Planning Mode Routes", () => {
         (store.logEntry as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 
         const sessionId = "session-from-sqlite";
-        const mockAiSessionStore = {
-          get: vi.fn().mockReturnValue({
-            id: sessionId,
-            type: "planning",
-            status: "complete",
-            title: "Build resumable planning",
-            inputPayload: JSON.stringify({ initialPlan: "Build resumable planning sessions" }),
-            conversationHistory: "[]",
-            currentQuestion: null,
-            result: JSON.stringify({
-              title: "Build resumable planning flow",
-              description: "Persist planning results so users can create tasks later",
-              suggestedSize: "M",
-              suggestedDependencies: ["FN-100"],
-              keyDeliverables: ["Persist sessions", "Support resume"],
-            }),
-            thinkingOutput: "",
-            error: null,
-            projectId: null,
-            createdAt: "2026-01-01T00:00:00.000Z",
-            updatedAt: "2026-01-01T00:00:00.000Z",
+        const persistedSession = {
+          id: sessionId,
+          type: "planning",
+          status: "complete",
+          title: "Build resumable planning",
+          inputPayload: JSON.stringify({ initialPlan: "Build resumable planning sessions" }),
+          conversationHistory: "[]",
+          currentQuestion: null,
+          result: JSON.stringify({
+            title: "Build resumable planning flow",
+            description: "Persist planning results so users can create tasks later",
+            suggestedSize: "M",
+            suggestedDependencies: ["FN-100"],
+            keyDeliverables: ["Persist sessions", "Support resume"],
           }),
-          delete: vi.fn(),
+          thinkingOutput: "",
+          error: null,
+          projectId: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          archived: 0,
+        };
+        let storedSession: typeof persistedSession | undefined = persistedSession;
+        const mockAiSessionStore = {
+          get: vi.fn((id: string) => (id === sessionId ? storedSession ?? null : null)),
+          listAll: vi.fn(() =>
+            storedSession
+              ? [
+                  {
+                    id: storedSession.id,
+                    type: storedSession.type,
+                    status: storedSession.status,
+                    title: storedSession.title,
+                    projectId: storedSession.projectId,
+                    lockedByTab: null,
+                    updatedAt: storedSession.updatedAt,
+                    archived: false,
+                  },
+                ]
+              : [],
+          ),
+          delete: vi.fn(() => {
+            storedSession = undefined;
+          }),
         };
 
         const appWithAiSessionStore = express();
@@ -1735,7 +1756,26 @@ describe("Planning Mode Routes", () => {
           "Created via Planning Mode",
           expect.stringContaining("Initial plan: Build resumable planning sessions"),
         );
-        expect(mockAiSessionStore.delete).toHaveBeenCalledWith(sessionId);
+
+        const listRes = await REQUEST(appWithAiSessionStore, "GET", "/api/ai-sessions?includeCompleted=1");
+        expect(listRes.status).toBe(200);
+        expect(listRes.body.sessions).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: sessionId,
+              status: "complete",
+              title: "Build resumable planning",
+            }),
+          ]),
+        );
+
+        const sessionRes = await REQUEST(appWithAiSessionStore, "GET", `/api/ai-sessions/${sessionId}`);
+        expect(sessionRes.status).toBe(200);
+        expect(sessionRes.body).toMatchObject({
+          id: sessionId,
+          status: "complete",
+          result: storedSession?.result,
+        });
       });
 
       it("creates task with explicit summary priority", async () => {

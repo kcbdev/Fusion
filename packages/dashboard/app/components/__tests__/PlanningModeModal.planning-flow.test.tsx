@@ -931,6 +931,107 @@ describe("PlanningModeModal", () => {
       });
     });
 
+    it("lists planning history rows and restores the selected session to the correct view", async () => {
+      const completedSummary: PlanningSummary = {
+        title: "Completed planning session",
+        description: "Recovered summary from history",
+        suggestedSize: "M",
+        suggestedDependencies: [],
+        keyDeliverables: ["Implement"],
+      };
+
+      mockFetchAiSessions.mockResolvedValueOnce([
+        {
+          id: "session-history-complete",
+          type: "planning",
+          status: "complete",
+          title: "Completed planning session",
+          projectId: null,
+          lockedByTab: null,
+          updatedAt: "2026-01-02T00:00:00.000Z",
+          archived: false,
+        },
+        {
+          id: "session-history-draft",
+          type: "planning",
+          status: "draft",
+          title: "New planning session",
+          preview: "Draft plan from history",
+          projectId: null,
+          lockedByTab: null,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          archived: false,
+        },
+      ]);
+      mockFetchAiSession.mockImplementation(async (sessionId: string) => {
+        if (sessionId === "session-history-complete") {
+          return {
+            id: "session-history-complete",
+            type: "planning",
+            status: "complete",
+            title: completedSummary.title,
+            inputPayload: JSON.stringify({ initialPlan: "Recover completed session" }),
+            conversationHistory: "[]",
+            currentQuestion: null,
+            result: JSON.stringify(completedSummary),
+            thinkingOutput: "",
+            error: null,
+            projectId: null,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-02T00:00:00.000Z",
+          };
+        }
+
+        return {
+          id: "session-history-draft",
+          type: "planning",
+          status: "draft",
+          title: "New planning session",
+          inputPayload: JSON.stringify({ initialPlan: "Draft plan from history" }),
+          conversationHistory: "[]",
+          currentQuestion: null,
+          result: null,
+          thinkingOutput: "",
+          error: null,
+          projectId: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        };
+      });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /Completed planning session/i })).toBeDefined();
+      });
+      expect(screen.getByRole("button", { name: /Draft plan from history/i })).toBeDefined();
+
+      fireEvent.click(screen.getByRole("button", { name: /Completed planning session/i }));
+
+      await waitFor(() => {
+        expect(mockFetchAiSession).toHaveBeenCalledWith("session-history-complete");
+        expect(screen.getByText("Planning Complete!")).toBeDefined();
+      });
+      expect(screen.queryByPlaceholderText(/e.g., Build a user authentication/)).toBeNull();
+      expect(screen.getByDisplayValue("Recovered summary from history")).toBeDefined();
+
+      fireEvent.click(screen.getByRole("button", { name: /Draft plan from history/i }));
+
+      await waitFor(() => {
+        expect(mockFetchAiSession).toHaveBeenCalledWith("session-history-draft");
+      });
+      expect(screen.getByDisplayValue("Draft plan from history")).toBeDefined();
+      expect(screen.getByRole("button", { name: "Start Planning" })).toBeDefined();
+    });
+
     it("shows retry panel when resuming an errored session", async () => {
       mockFetchAiSession.mockResolvedValueOnce({
         id: "session-error-1",
@@ -965,7 +1066,7 @@ describe("PlanningModeModal", () => {
       expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
     });
 
-    it("creates a task from a resumed complete session", async () => {
+    it("creates a task from a resumed complete session and keeps the completed session in local history", async () => {
       const resumedSummary: PlanningSummary = {
         title: "Resume-to-task",
         description: "Recovered summary for task creation",
@@ -974,6 +1075,18 @@ describe("PlanningModeModal", () => {
         keyDeliverables: ["Implement", "Verify"],
       };
 
+      mockFetchAiSessions.mockResolvedValueOnce([
+        {
+          id: "session-complete-2",
+          type: "planning",
+          status: "complete",
+          title: "Resume-to-task",
+          projectId: null,
+          lockedByTab: null,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          archived: false,
+        },
+      ]);
       mockFetchAiSession.mockResolvedValueOnce({
         id: "session-complete-2",
         type: "planning",
@@ -1016,6 +1129,7 @@ describe("PlanningModeModal", () => {
 
       await waitFor(() => {
         expect(screen.getByText("Create Single Task")).toBeDefined();
+        expect(screen.getByRole("button", { name: /Resume-to-task/i })).toBeDefined();
       });
 
       const createSingleTaskButton = screen.getByRole("button", { name: "Create Single Task" });
@@ -1034,6 +1148,8 @@ describe("PlanningModeModal", () => {
           expect.objectContaining({ branchSelection: { mode: "project-default" } }),
         );
       });
+
+      expect(screen.getByRole("button", { name: /Resume-to-task/i })).toBeDefined();
     });
 
     it("submits selected summary priority when creating a single task", async () => {

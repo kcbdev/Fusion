@@ -1006,12 +1006,11 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
       const summaryOverride = parsePlanningSummaryOverride(summaryInput);
 
       const { store: scopedStore } = await getProjectContext(req);
-      const { getSession, getSummary, cleanupSession } = await import("../planning.js");
+      const { getSession, getSummary, releaseSession } = await import("../planning.js");
 
       const session = getSession(sessionId);
       let summary = summaryOverride ?? getSummary(sessionId);
       let initialPlan = session?.initialPlan;
-      let usedPersistedFallback = false;
 
       if (!session) {
         if (!aiSessionStore) {
@@ -1083,7 +1082,6 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
           initialPlan = persistedSession.title;
         }
 
-        usedPersistedFallback = true;
       }
 
       if (!summary) {
@@ -1113,12 +1111,10 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
       // Log the planning mode creation
       await scopedStore.logEntry(task.id, "Created via Planning Mode", `Initial plan: ${(initialPlan ?? "").slice(0, 200)}`);
 
-      // Cleanup the session
-      if (usedPersistedFallback) {
-        aiSessionStore?.delete(sessionId);
-      } else {
-        cleanupSession(sessionId);
-      }
+      // Release any live in-memory planning runtime for this session, but
+      // keep the persisted completed row so planning history can still list
+      // and restore the summary after single-task creation.
+      releaseSession(sessionId);
 
       res.status(201).json(task);
     } catch (err: unknown) {

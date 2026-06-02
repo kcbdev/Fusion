@@ -113,6 +113,8 @@ Planning Mode now includes branch controls on the summary screen before you crea
 
 These values are sent with the Planning Mode create-task request as `branchSelection`, so created tasks persist branch/base-branch settings consistently with other branch-aware task creation flows.
 
+Completed single-task planning sessions remain in the Planning Mode history after you create the task, and selecting one restores the completed summary instead of restarting the composer.
+
 ## New Task Modal Branch Strategy
 
 The **New Task** dialog uses the same four-option **Branch strategy** selector and `branchSelection` payload as Planning Mode:
