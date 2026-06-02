@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ProjectSelector } from "../ProjectSelector";
-import type { ProjectInfo } from "@fusion/core";
+import type { ProjectInfo, ProjectStatus } from "@fusion/core";
 
 // Mock lucide-react
 vi.mock("lucide-react", async () => {
@@ -130,6 +130,28 @@ describe("ProjectSelector", () => {
 
     fireEvent.click(screen.getByTestId("project-selector-trigger"));
     expect(screen.getByText("Project Two")).toBeDefined();
+  });
+
+  it("renders fallback status icons for unknown or missing project statuses", () => {
+    expect(() => {
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "Project One", status: "active" }),
+            makeProject({ id: "proj_2", name: "Project Two", status: "removing" as ProjectStatus }),
+            makeProject({ id: "proj_3", name: "Project Three", status: undefined as unknown as ProjectStatus }),
+          ]}
+          currentProject={makeProject({ id: "proj_1", name: "Project One", status: "active" })}
+          onSelect={noop}
+          onViewAll={noop}
+        />
+      );
+    }).not.toThrow();
+
+    fireEvent.click(screen.getByTestId("project-selector-trigger"));
+    expect(screen.getByText("Project Two")).toBeDefined();
+    expect(screen.getByText("Project Three")).toBeDefined();
+    expect(screen.getAllByTestId("alert-icon").length).toBeGreaterThanOrEqual(2);
   });
 
   it("calls onSelect when project is clicked", () => {

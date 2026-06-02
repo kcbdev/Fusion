@@ -106,6 +106,7 @@ Central health tracking keeps mutable project metrics, including:
 - active task counts
 - in-flight agent counts
 - project status (`initializing`, `active`, `paused`, `errored`)
+- dashboard project status badges degrade gracefully if registry or health data briefly carries an unknown or missing status value
 
 ## Global Concurrency Management
 

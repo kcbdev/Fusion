@@ -10,12 +10,44 @@ export interface ProjectHealthBadgeProps {
   showTooltip?: boolean;
 }
 
-const STATUS_CONFIG: Record<ProjectStatus, { label: string; color: string; icon: typeof Play }> = {
+type StatusConfig = { label: string; color: string; icon: typeof Play };
+
+const STATUS_CONFIG: Record<ProjectStatus, StatusConfig> = {
   active: { label: "Active", color: "var(--success)", icon: Play },
   paused: { label: "Paused", color: "var(--warning)", icon: Pause },
   errored: { label: "Error", color: "var(--color-error)", icon: AlertCircle },
   initializing: { label: "Initializing", color: "var(--info)", icon: Loader2 },
 };
+
+const FALLBACK_STATUS_CONFIG: StatusConfig = {
+  label: "Unknown",
+  color: "var(--color-error)",
+  icon: AlertCircle,
+};
+
+function formatStatusLabel(status: string | null | undefined): string {
+  if (!status) {
+    return FALLBACK_STATUS_CONFIG.label;
+  }
+
+  return status
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getStatusConfig(status: string | null | undefined): StatusConfig {
+  const config = STATUS_CONFIG[status as ProjectStatus];
+  if (config) {
+    return config;
+  }
+
+  return {
+    ...FALLBACK_STATUS_CONFIG,
+    label: formatStatusLabel(status),
+  };
+}
 
 /**
  * ProjectHealthBadge - Color-coded badge showing project health status
@@ -30,7 +62,7 @@ export function ProjectHealthBadge({
   showTooltip = true,
 }: ProjectHealthBadgeProps) {
   const [isHovered, setIsHovered] = useState(false);
-  const config = STATUS_CONFIG[status];
+  const config = getStatusConfig(status);
   const StatusIcon = config.icon;
 
   const handleMouseEnter = useCallback(() => {

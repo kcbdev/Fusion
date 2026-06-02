@@ -25,12 +25,23 @@ export interface ProjectSelectorProps {
   recentProjectIds?: string[];
 }
 
-const STATUS_CONFIG: Record<ProjectStatus, { color: string; icon: typeof Play }> = {
+type StatusConfig = { color: string; icon: typeof Play };
+
+const STATUS_CONFIG: Record<ProjectStatus, StatusConfig> = {
   active: { color: "var(--success)", icon: Play },
   paused: { color: "var(--warning)", icon: Pause },
   errored: { color: "var(--color-error)", icon: AlertCircle },
   initializing: { color: "var(--info)", icon: Loader2 },
 };
+
+const FALLBACK_STATUS_CONFIG: StatusConfig = {
+  color: "var(--color-error)",
+  icon: AlertCircle,
+};
+
+function getStatusConfig(status: string | null | undefined): StatusConfig {
+  return STATUS_CONFIG[status as ProjectStatus] ?? FALLBACK_STATUS_CONFIG;
+}
 
 /**
  * ProjectSelector - Project switcher dropdown with keyboard navigation
@@ -223,7 +234,7 @@ export function ProjectSelector({
 
   // Render status icon
   const renderStatusIcon = (status: ProjectStatus) => {
-    const config = STATUS_CONFIG[status];
+    const config = getStatusConfig(status);
     const Icon = config.icon;
     return (
       <Icon

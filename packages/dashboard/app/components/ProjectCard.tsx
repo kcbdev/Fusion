@@ -15,12 +15,44 @@ export interface ProjectCardProps {
   isLoading?: boolean;
 }
 
-const STATUS_CONFIG: Record<ProjectStatus, { label: string; color: string; icon: typeof Play }> = {
+type StatusConfig = { label: string; color: string; icon: typeof Play };
+
+const STATUS_CONFIG: Record<ProjectStatus, StatusConfig> = {
   active: { label: "Active", color: "var(--color-success)", icon: Play },
   paused: { label: "Paused", color: "var(--color-warning)", icon: Pause },
   errored: { label: "Error", color: "var(--color-error)", icon: AlertCircle },
   initializing: { label: "Initializing", color: "var(--color-warning)", icon: Loader2 },
 };
+
+const FALLBACK_STATUS_CONFIG: StatusConfig = {
+  label: "Unknown",
+  color: "var(--color-error)",
+  icon: AlertCircle,
+};
+
+function formatStatusLabel(status: string | null | undefined): string {
+  if (!status) {
+    return FALLBACK_STATUS_CONFIG.label;
+  }
+
+  return status
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getStatusConfig(status: string | null | undefined): StatusConfig {
+  const config = STATUS_CONFIG[status as ProjectStatus];
+  if (config) {
+    return config;
+  }
+
+  return {
+    ...FALLBACK_STATUS_CONFIG,
+    label: formatStatusLabel(status),
+  };
+}
 
 function formatRelativeTime(timestamp: string | undefined): string {
   if (!timestamp) return "Never";
@@ -95,7 +127,7 @@ function ProjectCardInner({
   isLoading = false,
 }: ProjectCardProps) {
   const [removeArmed, setRemoveArmed] = useState(false);
-  const statusConfig = STATUS_CONFIG[project.status];
+  const statusConfig = getStatusConfig(project.status);
   const StatusIcon = statusConfig.icon;
 
   const handleSelect = useCallback(() => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { ProjectCard } from "../ProjectCard";
-import type { RegisteredProject, ProjectHealth } from "@fusion/core";
+import type { RegisteredProject, ProjectHealth, ProjectStatus } from "@fusion/core";
 
 // Mock lucide-react to avoid SVG rendering issues in test env
 vi.mock("lucide-react", () => ({
@@ -175,6 +175,35 @@ describe("ProjectCard", () => {
 
     expect(screen.getByText("Initializing")).toBeDefined();
     expect(screen.getByTestId("loader-icon")).toBeDefined();
+  });
+
+  it("renders a fallback badge for unknown or missing status values", () => {
+    expect(() => {
+      render(
+        <>
+          <ProjectCard
+            project={makeProject({ id: "proj_unknown", status: "removing" as ProjectStatus })}
+            health={makeHealth({ projectId: "proj_unknown", status: "removing" as ProjectStatus })}
+            onSelect={noop}
+            onPause={noop}
+            onResume={noop}
+            onRemove={noop}
+          />
+          <ProjectCard
+            project={makeProject({ id: "proj_missing", status: undefined as unknown as ProjectStatus })}
+            health={makeHealth({ projectId: "proj_missing", status: undefined as unknown as ProjectStatus })}
+            onSelect={noop}
+            onPause={noop}
+            onResume={noop}
+            onRemove={noop}
+          />
+        </>
+      );
+    }).not.toThrow();
+
+    expect(screen.getByText("Removing")).toBeDefined();
+    expect(screen.getByText("Unknown")).toBeDefined();
+    expect(screen.getAllByTestId("alert-icon")).toHaveLength(2);
   });
 
   it("displays health metrics", () => {
