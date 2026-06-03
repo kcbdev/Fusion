@@ -118,7 +118,7 @@ Mission, milestone, slice, and feature read-only text surfaces in Mission Manage
 ### CLI
 
 ```bash
-fn mission create "Reliability initiative" "Reduce execution failures and improve recovery"
+fn mission create "Reliability initiative" "Reduce execution failures and improve recovery" --goal G-001 --goal G-002
 fn mission list
 fn mission show mission_123
 fn mission goals mission_123
@@ -136,19 +136,22 @@ Fusion surfaces the persisted mission↔goal linkage through REST, CLI, and pi-e
 
 | Endpoint | Purpose |
 |---|---|
+| `POST /api/missions` | Create a mission. Optional body field `goalIds: string[]` links goals during creation and returns `linkedGoals` in the response. |
+| `PATCH /api/missions/:missionId` | Update mission fields. Optional `goalIds: string[]` replaces the full linked-goal set; `[]` clears links and `undefined` leaves links unchanged. |
 | `GET /api/missions/:missionId` | Return `MissionWithHierarchy`, including `linkedGoals` as an always-present array of `Goal` objects for the selected mission and optional `eventCount` as the authoritative unfiltered mission activity total. |
 | `GET /api/missions/:missionId/goals` | List linked goals for a mission. Returns `{ goals }`. |
 | `PUT /api/missions/:missionId/goals` | Replace the full linked-goal set with body `{ goalIds: string[] }`. Duplicate ids are deduplicated before reconciliation. |
 | `POST /api/missions/:missionId/goals/:goalId` | Idempotently link one goal to a mission. |
 | `DELETE /api/missions/:missionId/goals/:goalId` | Idempotently unlink one goal from a mission. |
 
-The mission detail payload keeps `linkedGoals` separate from the milestone tree so read paths can surface strategy context without traversing slices/features. All five endpoints validate mission/goal identifier formats and return `404` for missing mission/goal rows.
+The mission detail payload keeps `linkedGoals` separate from the milestone tree so read paths can surface strategy context without traversing slices/features. All goal-link write endpoints preserve the same invariant: missing goals return `404`, archived goals reject with `400 { code: "GOAL_ARCHIVED" }`, duplicate/relinked ids are no-ops, and unlink remains allowed even after a goal is archived.
 
 ### CLI
 
+- `fn mission create ... --goal <goal-id> [--goal <goal-id> ...]` — create a mission and batch-link active goals.
 - `fn mission goals <mission-id>` — list linked goals for a mission.
-- `fn mission link-goal <mission-id> <goal-id>` — idempotently link a goal.
-- `fn mission unlink-goal <mission-id> <goal-id>` — idempotently unlink a goal.
+- `fn mission link-goal <mission-id> <goal-id>` — idempotently link a goal; archived goals reject with `GOAL_ARCHIVED`.
+- `fn mission unlink-goal <mission-id> <goal-id>` — idempotently unlink a goal, including archived goals.
 - Mission detail screens in the dashboard render linked-goal chips in the mission header; selecting a chip opens the Goals view and scrolls/highlights the anchored goal card.
 
 ## Mission Planning Tools (pi extension)
@@ -161,8 +164,8 @@ The canonical per-parameter tool reference lives in `packages/cli/skill/fusion/r
 | `fn_mission_list` | List missions and their current status. |
 | `fn_mission_show` | Show mission details with milestone/slice/feature hierarchy, including a **Linked Goals** section plus milestone/feature acceptance criteria and slice verification when present. |
 | `fn_mission_list_goals` | List the goals linked to a mission. |
-| `fn_mission_link_goal` | Idempotently link a goal to a mission. |
-| `fn_mission_unlink_goal` | Idempotently unlink a goal from a mission. |
+| `fn_mission_link_goal` | Idempotently link a goal to a mission; archived goals reject with `GOAL_ARCHIVED`. |
+| `fn_mission_unlink_goal` | Idempotently unlink a goal from a mission, including archived goals. |
 | `fn_mission_delete` | Delete a mission and its hierarchy. |
 | `fn_mission_update` | Update mission title/description using partial patches. |
 | `fn_milestone_add` | Add a milestone to a mission. |

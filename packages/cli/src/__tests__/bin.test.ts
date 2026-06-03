@@ -615,7 +615,41 @@ describe("bin command routing and fallbacks", () => {
       "Detailed mission description",
       "demo",
       undefined,
+      [],
     );
+  });
+
+  it("routes mission create with repeated --goal flags", async () => {
+    await runBin([
+      "mission",
+      "create",
+      "Test Mission",
+      "Detailed",
+      "mission",
+      "description",
+      "--goal",
+      "G-001",
+      "--goal",
+      "G-002",
+      "--base-branch",
+      "feature/mission",
+    ]);
+
+    expect(commandMocks.runMissionCreate).toHaveBeenCalledWith(
+      "Test Mission",
+      "Detailed mission description",
+      undefined,
+      "feature/mission",
+      ["G-001", "G-002"],
+    );
+  });
+
+  it("surfaces non-zero exit from mission create goal validation failures", async () => {
+    commandMocks.runMissionCreate.mockImplementationOnce(() => {
+      throw new Error("process.exit:1");
+    });
+
+    await expect(runBin(["mission", "create", "Test Mission", "--goal", "G-ARCHIVED"])).rejects.toThrow("process.exit:1");
   });
 
   it.each([

@@ -2787,6 +2787,13 @@ export default function kbExtension(pi: ExtensionAPI) {
           details: { code: "GOAL_NOT_FOUND", goalId: params.goalId },
         };
       }
+      if (goal.status === "archived") {
+        return {
+          content: [{ type: "text", text: `Goal ${params.goalId} is archived and cannot be linked` }],
+          isError: true,
+          details: { code: "GOAL_ARCHIVED", goalId: params.goalId },
+        };
+      }
 
       missionStore.linkGoal(params.missionId, params.goalId);
       const goals = missionStore

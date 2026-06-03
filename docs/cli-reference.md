@@ -653,7 +653,7 @@ Subcommands: `status`.
 Mission hierarchy operations.
 
 ```bash
-fn mission create "Platform hardening" "Security and reliability initiative" --base-branch develop
+fn mission create "Platform hardening" "Security and reliability initiative" --base-branch develop --goal G-001 --goal G-002
 fn mission list
 fn mission show mission_123
 fn mission goals mission_123
@@ -665,13 +665,13 @@ fn mission activate-slice slice_456
 
 Subcommands: `create`, `list|ls`, `show|info`, `goals`, `link-goal`, `unlink-goal`, `delete`, `activate-slice`.
 
-`fn mission create` supports `--base-branch <branch>` to set a mission-level default integration branch used by mission feature/slice triage when no explicit branch override is provided.
+`fn mission create` supports `--base-branch <branch>` to set a mission-level default integration branch used by mission feature/slice triage when no explicit branch override is provided. It also supports repeatable `--goal <goal-id>` flags to link active goals during creation.
 
 Mission ↔ goal linkage commands operate on the persisted `mission_goals` relation:
 
 - `fn mission goals <mission-id>` lists the linked goals for a mission.
-- `fn mission link-goal <mission-id> <goal-id>` idempotently adds a goal link.
-- `fn mission unlink-goal <mission-id> <goal-id>` idempotently removes a goal link.
+- `fn mission link-goal <mission-id> <goal-id>` idempotently adds a goal link; archived goals reject with `GOAL_ARCHIVED` and missing goals still fail with `404`/not found.
+- `fn mission unlink-goal <mission-id> <goal-id>` idempotently removes a goal link, including archived goals.
 
 ---
 

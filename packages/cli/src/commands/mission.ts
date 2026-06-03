@@ -75,14 +75,30 @@ async function promptForTitleAndDescription(
  * Create a new mission with optional title and description.
  * If arguments are omitted, prompts interactively.
  */
+function requireCliLinkableGoal(store: Awaited<ReturnType<typeof getStore>>, goalId: string): Goal {
+  const goal = store.getGoalStore().getGoal(goalId);
+  if (!goal) {
+    console.error(`✗ Goal ${goalId} not found`);
+    process.exit(1);
+  }
+  if (goal.status === "archived") {
+    console.error(`✗ Goal ${goalId} is archived and cannot be linked`);
+    process.exit(1);
+  }
+  return goal;
+}
+
 export async function runMissionCreate(
   titleArg?: string,
   descriptionArg?: string,
   projectName?: string,
   baseBranch?: string,
+  goalIds?: string[],
 ) {
   const store = await getStore({ project: projectName });
   const missionStore = store.getMissionStore();
+  const uniqueGoalIds = Array.from(new Set(goalIds ?? []));
+  const linkableGoals = uniqueGoalIds.map((goalId) => requireCliLinkableGoal(store, goalId));
 
   const { title, description } = titleArg
     ? { title: titleArg.trim(), description: descriptionArg?.trim() || undefined }
@@ -98,11 +114,18 @@ export async function runMissionCreate(
     baseBranch: baseBranch?.trim() || undefined,
   });
 
+  for (const goal of linkableGoals) {
+    missionStore.linkGoal(mission.id, goal.id);
+  }
+
   console.log();
   console.log(`  ✓ Created ${mission.id}: ${mission.title}`);
   console.log(`    Status: ${MISSION_STATUS_LABELS[mission.status]}`);
   if (mission.description) {
     console.log(`    Description: ${mission.description.slice(0, 80)}${mission.description.length > 80 ? "…" : ""}`);
+  }
+  if (linkableGoals.length > 0) {
+    console.log(`    Linked goals: ${linkableGoals.length}`);
   }
   console.log();
 }
@@ -464,11 +487,7 @@ export async function runMissionLinkGoal(missionId: string, goalId: string, proj
     process.exit(1);
   }
 
-  const goal = store.getGoalStore().getGoal(goalId);
-  if (!goal) {
-    console.error(`✗ Goal ${goalId} not found`);
-    process.exit(1);
-  }
+  const goal = requireCliLinkableGoal(store, goalId);
 
   missionStore.linkGoal(missionId, goalId);
 

@@ -108,6 +108,42 @@ describe("extension mission goal tools", () => {
     expect(unlinkAgain.details.goals.map((goal: { id: string }) => goal.id)).toEqual([goalBId]);
   });
 
+  it("rejects archived goals on link and still unlinks archived links", async () => {
+    const missionCreate = api.tools.get("fn_mission_create");
+    const goalCreate = api.tools.get("fn_goal_create");
+    const goalArchive = api.tools.get("fn_goal_archive");
+    const linkGoal = api.tools.get("fn_mission_link_goal");
+    const unlinkGoal = api.tools.get("fn_mission_unlink_goal");
+    expect(missionCreate && goalCreate && goalArchive && linkGoal && unlinkGoal).toBeTruthy();
+
+    const missionResult = await missionCreate!.execute("mission-create", { title: "Mission Alpha" }, undefined, undefined, makeCtx(tmpDir));
+    const activeGoalResult = await goalCreate!.execute("goal-active", { title: "Goal Active" }, undefined, undefined, makeCtx(tmpDir));
+    const archivedGoalResult = await goalCreate!.execute("goal-archived", { title: "Goal Archived" }, undefined, undefined, makeCtx(tmpDir));
+    const missionId = missionResult.details.missionId as string;
+    const activeGoalId = activeGoalResult.details.goalId as string;
+    const archivedGoalId = archivedGoalResult.details.goalId as string;
+
+    await goalArchive!.execute("archive-goal", { id: archivedGoalId }, undefined, undefined, makeCtx(tmpDir));
+
+    await linkGoal!.execute("link-active", { missionId, goalId: activeGoalId }, undefined, undefined, makeCtx(tmpDir));
+    const relink = await linkGoal!.execute("relink-active", { missionId, goalId: activeGoalId }, undefined, undefined, makeCtx(tmpDir));
+    expect(relink.isError).toBeUndefined();
+    expect(relink.details.goals.map((goal: { id: string }) => goal.id)).toEqual([activeGoalId]);
+
+    const archivedLink = await linkGoal!.execute("link-archived", { missionId, goalId: archivedGoalId }, undefined, undefined, makeCtx(tmpDir));
+    expect(archivedLink.isError).toBe(true);
+    expect(archivedLink.details).toEqual({ code: "GOAL_ARCHIVED", goalId: archivedGoalId });
+
+    const linkedArchivedResult = await goalCreate!.execute("goal-linked-then-archived", { title: "Goal Linked Then Archived" }, undefined, undefined, makeCtx(tmpDir));
+    const linkedArchivedGoalId = linkedArchivedResult.details.goalId as string;
+    await linkGoal!.execute("link-before-archive", { missionId, goalId: linkedArchivedGoalId }, undefined, undefined, makeCtx(tmpDir));
+    await goalArchive!.execute("archive-linked-goal", { id: linkedArchivedGoalId }, undefined, undefined, makeCtx(tmpDir));
+
+    const unlinked = await unlinkGoal!.execute("unlink-archived", { missionId, goalId: linkedArchivedGoalId }, undefined, undefined, makeCtx(tmpDir));
+    expect(unlinked.isError).toBeUndefined();
+    expect(unlinked.details.goals.map((goal: { id: string }) => goal.id)).toEqual([activeGoalId]);
+  });
+
   it("returns stable missing mission and goal errors", async () => {
     const missionCreate = api.tools.get("fn_mission_create");
     const goalCreate = api.tools.get("fn_goal_create");

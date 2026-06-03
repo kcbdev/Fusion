@@ -187,11 +187,7 @@ function validateOrderedIds(body: unknown): string[] {
   return orderedIds;
 }
 
-function validateGoalIdsBody(body: unknown): string[] {
-  if (!body || typeof body !== "object") {
-    throw badRequest("Request body must contain goalIds array");
-  }
-  const { goalIds } = body as Record<string, unknown>;
+function validateOptionalGoalIds(goalIds: unknown): string[] {
   if (!Array.isArray(goalIds)) {
     throw badRequest("goalIds must be an array");
   }
@@ -202,6 +198,14 @@ function validateGoalIdsBody(body: unknown): string[] {
     throw badRequest("goalIds must contain valid goal IDs");
   }
   return goalIds;
+}
+
+function validateGoalIdsBody(body: unknown): string[] {
+  if (!body || typeof body !== "object") {
+    throw badRequest("Request body must contain goalIds array");
+  }
+  const { goalIds } = body as Record<string, unknown>;
+  return validateOptionalGoalIds(goalIds);
 }
 
 type TypedRequest = Request<Record<string, string>>;
@@ -327,6 +331,14 @@ export function createMissionRouter(
     return goal;
   }
 
+  function requireLinkableGoal(goalId: string): Goal {
+    const goal = requireGoal(goalId);
+    if (goal.status === "archived") {
+      throw badRequest("Cannot link an archived goal", { code: "GOAL_ARCHIVED", goalId });
+    }
+    return goal;
+  }
+
   function listLinkedGoalsForMission(missionId: string): Goal[] {
     requireMission(missionId);
     const goalStore = getScopedGoalStore();
@@ -339,7 +351,7 @@ export function createMissionRouter(
   function setLinkedGoalsForMission(missionId: string, goalIds: string[]): Goal[] {
     requireMission(missionId);
     const uniqueGoalIds = Array.from(new Set(goalIds));
-    uniqueGoalIds.forEach((goalId) => requireGoal(goalId));
+    uniqueGoalIds.forEach((goalId) => requireLinkableGoal(goalId));
 
     const existingGoalIds = new Set(missionStore.listGoalIdsForMission(missionId));
     const nextGoalIds = new Set(uniqueGoalIds);
@@ -417,10 +429,11 @@ export function createMissionRouter(
   router.post(
     "/",
     catchTypedHandler(async (req, res) => {
-      const { title, description, autoAdvance, baseBranch, branchStrategy } = req.body;
+      const { title, description, autoAdvance, baseBranch, branchStrategy, goalIds } = req.body;
 
       const validatedTitle = validateTitle(title);
       const validatedDescription = validateDescription(description);
+      const validatedGoalIds = goalIds === undefined ? undefined : validateOptionalGoalIds(goalIds);
 
       const input: MissionCreateInput = {
         title: validatedTitle,
@@ -435,13 +448,20 @@ export function createMissionRouter(
       if (autoAdvance !== undefined) {
         updates.autoAdvance = validateBoolean(autoAdvance, "autoAdvance");
       }
-      if (Object.keys(updates).length > 0) {
-        const updatedMission = missionStore.updateMission(mission.id, updates);
-        res.status(201).json(updatedMission);
-        return;
-      }
+      const updatedMission = Object.keys(updates).length > 0
+        ? missionStore.updateMission(mission.id, updates)
+        : mission;
 
-      res.status(201).json(mission);
+      // Mission creation and mission↔goal linking are separate store operations today,
+      // so creation may succeed even when a later goal validation/linking step fails.
+      const linkedGoals = validatedGoalIds === undefined
+        ? listLinkedGoalsForMission(mission.id)
+        : setLinkedGoalsForMission(mission.id, validatedGoalIds);
+
+      res.status(201).json({
+        ...updatedMission,
+        linkedGoals,
+      });
     })
   );
 
@@ -1023,7 +1043,7 @@ export function createMissionRouter(
     catchTypedHandler(async (req, res) => {
       const { missionId, goalId } = req.params;
       requireMission(missionId);
-      const goal = requireGoal(goalId);
+      const goal = requireLinkableGoal(goalId);
       missionStore.linkGoal(missionId, goalId);
       res.json({ goal, goals: listLinkedGoalsForMission(missionId) });
     })
@@ -1081,13 +1101,15 @@ export function createMissionRouter(
     "/:missionId",
     catchTypedHandler(async (req, res) => {
       const { missionId } = req.params;
-      const { title, description, status, autoAdvance, autopilotEnabled, baseBranch, branchStrategy } = req.body;
+      const { title, description, status, autoAdvance, autopilotEnabled, baseBranch, branchStrategy, goalIds } = req.body;
 
       if (!validateMissionId(missionId)) {
         throw badRequest("Invalid mission ID format");
       }
 
       const updates: Partial<Mission> = {};
+      const validatedGoalIds = goalIds === undefined ? undefined : validateOptionalGoalIds(goalIds);
+      validatedGoalIds?.forEach((goalId) => requireLinkableGoal(goalId));
 
       if (title !== undefined) {
         updates.title = validateTitle(title);
@@ -1111,17 +1133,25 @@ export function createMissionRouter(
         updates.branchStrategy = validateMissionBranchStrategy(branchStrategy);
       }
 
-      if (Object.keys(updates).length === 0) {
+      if (Object.keys(updates).length === 0 && validatedGoalIds === undefined) {
         throw badRequest("No valid fields to update");
       }
 
       try {
         const existingMission = missionStore.getMission(missionId);
-        const mission = missionStore.updateMission(missionId, updates);
+        const mission = Object.keys(updates).length > 0
+          ? missionStore.updateMission(missionId, updates)
+          : requireMission(missionId);
         if (missionAutopilot && updates.autopilotEnabled === true && existingMission?.autopilotEnabled !== true) {
           missionAutopilot.watchMission(missionId);
         }
-        res.json(mission);
+        const linkedGoals = validatedGoalIds === undefined
+          ? listLinkedGoalsForMission(missionId)
+          : setLinkedGoalsForMission(missionId, validatedGoalIds);
+        res.json({
+          ...mission,
+          linkedGoals,
+        });
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
         if (errMsg.includes("not found")) {
