@@ -4691,6 +4691,74 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
   });
 
   /**
+   * POST /api/tasks/:id/pr/push-branch
+   * Push the task branch to origin and return refreshed preflight state.
+   */
+  router.post("/tasks/:id/pr/push-branch", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const task = await scopedStore.getTask(req.params.id);
+      if (task.column !== "in-review") {
+        throw badRequest("Task must be in 'in-review' column to push PR branch");
+      }
+
+      if (req.body?.base !== undefined && typeof req.body.base !== "string") {
+        throw badRequest("base must be a string when provided");
+      }
+
+      const repoRoot = scopedStore.getRootDir();
+      const requestedBase = typeof req.body?.base === "string" ? req.body.base.trim() : "";
+      const defaultBaseBranch = requestedBase || await resolveDefaultPrBaseBranch(task, repoRoot);
+      const baseBranch = ensureSafeGitRef(defaultBaseBranch, "base branch");
+      const head = ensureSafeGitRef(`fusion/${task.id.toLowerCase()}`, "head branch");
+      const headRef = `refs/heads/${head}`;
+      const baseRef = await resolvePrBaseRef(repoRoot, baseBranch).catch(() => baseBranch);
+
+      try {
+        await runGitCommand(["rev-parse", "--verify", headRef], repoRoot, 10_000);
+      } catch {
+        throw badRequest(`Branch ${head} does not exist locally. Commit changes before creating a PR.`);
+      }
+
+      let commitCount = 0;
+      try {
+        const commitCountOutput = await runGitCommand(["rev-list", "--count", `${baseRef}..${head}`], repoRoot, 10_000);
+        commitCount = Number.parseInt(commitCountOutput, 10);
+      } catch {
+        throw badRequest(`Branch ${head} does not exist locally. Commit changes before creating a PR.`);
+      }
+
+      if (!Number.isFinite(commitCount) || commitCount <= 0) {
+        throw badRequest("Branch has no commits. Push changes before creating PR.");
+      }
+
+      await runGitCommand(["push", "-u", "origin", head], repoRoot, 60_000);
+      await scopedStore.logEntry(task.id, "Pushed PR branch", head);
+
+      const preflight = await computePrPreflight(task, repoRoot, baseBranch);
+      res.json({
+        result: {
+          pushed: true,
+          head,
+          message: `Pushed ${head} to origin.`,
+        },
+        preflight,
+      });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        throw notFound(`Task ${req.params.id} not found`);
+      }
+      if ((err instanceof Error ? err.message : String(err)).includes("already exists")) {
+        throw conflict(err instanceof Error ? err.message : String(err));
+      }
+      throw toPrApiError(err, "Failed to push PR branch");
+    }
+  });
+
+  /**
    * POST /api/tasks/:id/pr/resolve-conflicts
    * Resolve Create-PR merge conflicts on the task branch, push the branch,
    * and return refreshed preflight state.

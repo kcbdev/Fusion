@@ -80,7 +80,7 @@
   gap: var(--space-sm);
 }
 
-.pr-create-modal__conflict-resolution {
+.pr-create-modal__preflight-remediation {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -276,7 +276,7 @@
   .pr-create-modal__grid-two,
   .pr-create-modal__commit-row,
   .pr-create-modal__file-row,
-  .pr-create-modal__conflict-resolution {
+  .pr-create-modal__preflight-remediation {
     display: flex;
     flex-direction: column;
     align-items: flex-start;

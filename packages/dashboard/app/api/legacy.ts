@@ -2435,6 +2435,17 @@ export interface ResolvePrConflictsResponse {
   preflight: PrPreflightResponse;
 }
 
+export interface PushPrBranchResult {
+  pushed: boolean;
+  head: string;
+  message: string;
+}
+
+export interface PushPrBranchResponse {
+  result: PushPrBranchResult;
+  preflight: PrPreflightResponse;
+}
+
 export interface PrOptionsUser {
   login: string;
   name?: string;
@@ -2478,6 +2489,14 @@ export function fetchPrPreflight(id: string, projectId?: string, base?: string):
 /** Ask Fusion to resolve Create-PR merge conflicts for a task branch */
 export function resolvePrConflicts(id: string, base?: string, projectId?: string): Promise<ResolvePrConflictsResponse> {
   return api<ResolvePrConflictsResponse>(withProjectId(`/tasks/${id}/pr/resolve-conflicts`, projectId), {
+    method: "POST",
+    ...(base ? { body: JSON.stringify({ base }) } : {}),
+  });
+}
+
+/** Push the Create-PR task branch to origin and refresh preflight state */
+export function pushPrBranch(id: string, base?: string, projectId?: string): Promise<PushPrBranchResponse> {
+  return api<PushPrBranchResponse>(withProjectId(`/tasks/${id}/pr/push-branch`, projectId), {
     method: "POST",
     ...(base ? { body: JSON.stringify({ base }) } : {}),
   });

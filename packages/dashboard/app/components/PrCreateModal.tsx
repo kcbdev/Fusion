@@ -8,6 +8,7 @@ import {
   fetchPrOptions,
   fetchPrPreflight,
   generatePrMetadata,
+  pushPrBranch,
   resolvePrConflicts,
   type PrOptionsLabel,
   type PrOptionsResponse,
@@ -139,6 +140,7 @@ export function PrCreateModal({
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pushBranchError, setPushBranchError] = useState<string | null>(null);
   const [resolveConflictError, setResolveConflictError] = useState<string | null>(null);
   const [lastGhError, setLastGhError] = useState<ModalGhError | null>(null);
   const [aiTitle, setAiTitle] = useState("");
@@ -152,6 +154,7 @@ export function PrCreateModal({
   const [preflight, setPreflight] = useState<PrPreflightResponse | null>(null);
   const [baseBranch, setBaseBranch] = useState("");
   const [draft, setDraft] = useState(false);
+  const [pushingBranch, setPushingBranch] = useState(false);
   const [resolvingConflicts, setResolvingConflicts] = useState(false);
   const [reviewers, setReviewers] = useState<PrOptionsUser[]>([]);
   const [assignees, setAssignees] = useState<PrOptionsUser[]>([]);
@@ -163,6 +166,7 @@ export function PrCreateModal({
     const requestId = ++requestSeqRef.current;
     setLoading(true);
     setError(null);
+    setPushBranchError(null);
     setResolveConflictError(null);
     try {
       const [metadata, preflightData, optionsData] = await Promise.all([
@@ -289,6 +293,7 @@ export function PrCreateModal({
 
   const handleBaseChange = useCallback(async (nextBase: string) => {
     setBaseBranch(nextBase);
+    setPushBranchError(null);
     setResolveConflictError(null);
     try {
       const nextPreflight = await fetchPrPreflight(taskId, projectId, nextBase);
@@ -297,6 +302,21 @@ export function PrCreateModal({
       setError(getErrorMessage(loadError));
     }
   }, [projectId, taskId]);
+
+  const handlePushBranch = useCallback(async () => {
+    if (!baseBranch || pushingBranch) return;
+    setPushingBranch(true);
+    setPushBranchError(null);
+    try {
+      const response = await pushPrBranch(taskId, baseBranch, projectId);
+      setPreflight(response.preflight);
+      addToast(response.result.message, "success");
+    } catch (pushError) {
+      setPushBranchError(getErrorMessage(pushError));
+    } finally {
+      setPushingBranch(false);
+    }
+  }, [addToast, baseBranch, projectId, pushingBranch, taskId]);
 
   const handleResolveConflicts = useCallback(async () => {
     if (!baseBranch || resolvingConflicts) return;
@@ -383,8 +403,25 @@ export function PrCreateModal({
               <button type="button" className="btn btn-sm" onClick={() => void handleBaseChange(baseBranch)}>
                 {t("pr.rerunPreflight", "Re-run preflight")}
               </button>
+              {!preflight?.branchOnRemote ? (
+                <div className="card pr-create-modal__preflight-remediation">
+                  <div className="pr-create-modal__conflict-copy">
+                    <p className="pr-create-modal__conflict-title">Push branch to remote</p>
+                    <p className="pr-create-modal__conflict-message">Fusion will push this task&apos;s branch to origin so the PR can be created.</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => void handlePushBranch()}
+                    disabled={pushingBranch || loading}
+                  >
+                    {pushingBranch ? <RefreshCw size={14} className="spin" /> : null}
+                    Push branch to remote
+                  </button>
+                </div>
+              ) : null}
               {preflight?.conflictsWithBase ? (
-                <div className="card pr-create-modal__conflict-resolution">
+                <div className="card pr-create-modal__preflight-remediation">
                   <div className="pr-create-modal__conflict-copy">
                     <p className="pr-create-modal__conflict-title">Resolve conflicts with AI</p>
                     <p className="pr-create-modal__conflict-message">Fusion will use AI to resolve conflicts on this branch and push it.</p>
@@ -485,6 +522,15 @@ export function PrCreateModal({
                 ))}
               </div>
             </details>
+
+              {pushBranchError ? (
+                <div className="form-error pr-error" role="alert">
+                  <p>{pushBranchError}</p>
+                  <div className="pr-error__actions">
+                    <button type="button" className="btn btn-sm pr-error__dismiss" onClick={() => setPushBranchError(null)} aria-label="Dismiss push branch error">×</button>
+                  </div>
+                </div>
+              ) : null}
 
               {resolveConflictError ? (
                 <div className="form-error pr-error" role="alert">
