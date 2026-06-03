@@ -135,6 +135,8 @@ import {
   createTaskDocumentReadTool as sharedCreateTaskDocumentReadTool,
   createTaskDocumentWriteTool as sharedCreateTaskDocumentWriteTool,
   createTaskLogTool as sharedCreateTaskLogTool,
+  createWorkflowListTool as sharedCreateWorkflowListTool,
+  createWorkflowSelectTool as sharedCreateWorkflowSelectTool,
 } from "./agent-tools.js";
 import { getTaskCompletionBlockerForStore } from "./task-completion.js";
 import { createStreamingDeltaNormalizer } from "./streaming-delta.js";
@@ -4609,6 +4611,8 @@ export class TaskExecutor {
         this.createSpawnAgentTool(task.id, worktreePath, settings, taskEnv),
         this.createTaskDocumentWriteTool(task.id),
         this.createTaskDocumentReadTool(task.id),
+        this.createWorkflowListTool(),
+        this.createWorkflowSelectTool(task.id),
         ...(isResearchToolSurfaceEnabled(settings)
           ? createResearchTools({
             store: this.store,
@@ -6358,6 +6362,14 @@ export class TaskExecutor {
 
   private createTaskDocumentReadTool(taskId: string): ToolDefinition {
     return sharedCreateTaskDocumentReadTool(this.store, taskId);
+  }
+
+  private createWorkflowListTool(): ToolDefinition {
+    return sharedCreateWorkflowListTool(this.store);
+  }
+
+  private createWorkflowSelectTool(taskId: string): ToolDefinition {
+    return sharedCreateWorkflowSelectTool(this.store, taskId);
   }
 
   private createTaskAddDepTool(taskId: string): ToolDefinition {

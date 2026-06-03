@@ -7,10 +7,14 @@ export {
   createTaskLogTool,
   createSendMessageTool,
   createReadMessagesTool,
+  createWorkflowListTool,
+  createWorkflowSelectTool,
   taskCreateParams,
   taskDocumentReadParams,
   taskDocumentWriteParams,
   taskLogParams,
+  workflowListParams,
+  workflowSelectParams,
   executeApprovedAgentProvisioning,
 } from "./agent-tools.js";
 export { AgentSemaphore, PRIORITY_MERGE, PRIORITY_EXECUTE, PRIORITY_SPECIFY } from "./concurrency.js";
