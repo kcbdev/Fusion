@@ -230,7 +230,12 @@ export {
   normalizeTitleForTaskId,
 } from "./task-title-id-drift.js";
 export { getPrimaryPrInfo } from "./task-helpers.js";
-export { MANUAL_RETRY_RESET_COUNTER_KEYS, buildManualRetryResetPatch } from "./manual-retry-reset.js";
+export {
+  IN_REVIEW_STALL_DEADLOCK_PAUSE_REASON,
+  MANUAL_RETRY_RESET_COUNTER_KEYS,
+  buildAutoPauseClearPatch,
+  buildManualRetryResetPatch,
+} from "./manual-retry-reset.js";
 export type {
   TaskIdIntegrityAnomaly,
   TaskIdIntegrityAnomalyKind,
