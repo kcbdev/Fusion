@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { BranchGroup, BranchGroupPrState, DirectMergeCommitStrategy, IssueInfo, PrConflictDiagnostics, PrConflictState, PrInfo, Task, TaskReviewData, TaskReviewItem, TaskReviewSummary } from "@fusion/core";
+import type { BranchGroup, BranchGroupPrState, DirectMergeCommitStrategy, IssueInfo, PrConflictDiagnostics, PrConflictState, PrInfo, TaskReviewData, TaskReviewItem, TaskReviewSummary } from "@fusion/core";
 import {
   isGhAvailable,
   isGhAuthenticated,
@@ -3841,131 +3841,10 @@ function prInfoToBranchGroupPrState(prInfo: PrInfo | null): BranchGroupPrState {
   return "open";
 }
 
-/** Build the title for a single managed group PR. */
-export function buildGroupPullRequestTitle(
-  group: Pick<BranchGroup, "id" | "sourceType" | "sourceId">,
-  members: Pick<Task, "id">[],
-): string {
-  return `${group.id}: ${group.sourceType}/${group.sourceId} (${members.length} tasks)`;
-}
-
-/** Build the body for a single managed group PR (member checklist + completion). */
-export function buildGroupPullRequestBody(
-  group: Pick<BranchGroup, "id" | "branchName" | "sourceType" | "sourceId">,
-  members: Pick<Task, "id" | "title">[],
-): string {
-  const lines = members.map((member) => `- ${member.id}: ${member.title || "(untitled)"}`);
-  return [
-    `Automated group PR for ${group.id}.`,
-    `Source: ${group.sourceType}/${group.sourceId}`,
-    `Integration branch: \`${group.branchName}\``,
-    "",
-    "Included tasks:",
-    ...(lines.length > 0 ? lines : ["- (none)"]),
-  ].join("\n");
-}
-
-export interface CreateGroupPrInput {
-  group: Pick<BranchGroup, "id" | "branchName" | "sourceType" | "sourceId">;
-  members: Pick<Task, "id" | "title">[];
-  /** Head branch — the group integration branch. */
-  headBranch: string;
-  /** Base branch — the project default / integration target. */
-  baseBranch: string;
-}
-
 export interface CreateGroupPrResult {
   prNumber: number;
   prUrl: string;
   prState: BranchGroupPrState;
-}
-
-/**
- * Create (or reuse) the single managed GitHub PR for a branch group.
- *
- * Idempotency: if an existing PR is already open for the group head branch on
- * GitHub, it is reused rather than opening a second one. This is the GitHub-side
- * idempotency guard; the coordinator additionally checks the persisted
- * `prNumber` before ever calling this helper.
- *
- * Backend parity: dispatches through `GitHubClient.findPrForBranch` /
- * `GitHubClient.createPr`, which transparently use the `gh` CLI when available
- * and fall back to the REST API, so both paths produce the same result shape.
- */
-export async function createGroupPullRequest(
-  github: Pick<GitHubClient, "findPrForBranch" | "createPr">,
-  input: CreateGroupPrInput,
-): Promise<CreateGroupPrResult> {
-  const existing = await github.findPrForBranch({ head: input.headBranch, state: "all" });
-  if (existing) {
-    return {
-      prNumber: existing.number,
-      prUrl: existing.url,
-      prState: prInfoToBranchGroupPrState(existing),
-    };
-  }
-
-  const created = await github.createPr({
-    title: buildGroupPullRequestTitle(input.group, input.members),
-    body: buildGroupPullRequestBody(input.group, input.members),
-    head: input.headBranch,
-    base: input.baseBranch,
-  });
-  return {
-    prNumber: created.number,
-    prUrl: created.url,
-    prState: prInfoToBranchGroupPrState(created),
-  };
-}
-
-export interface SyncGroupPrInput {
-  group: Pick<BranchGroup, "id" | "branchName" | "sourceType" | "sourceId" | "prNumber">;
-  members: Pick<Task, "id" | "title">[];
-}
-
-/**
- * Push an updated title/body onto the single managed group PR (U6, R6).
- *
- * The body always reflects the *full* current member state (checklist +
- * completion summary), so repeated calls are idempotent body rewrites — each
- * landing pushes the latest state and naturally coalesces with the previous one;
- * no queue is needed (KTD4: idempotency anchors on the persisted `prNumber`).
- *
- * Out-of-band reconciliation: if the persisted PR is no longer open on GitHub
- * (closed/merged out-of-band), this does NOT re-open or edit it — it returns the
- * reconciled `prState` so the caller can persist it instead of erroring.
- *
- * Backend parity: dispatches through `GitHubClient.getPrStatus` / `updatePr`,
- * which use the `gh` CLI when available and fall back to the REST API.
- */
-export async function syncGroupPullRequest(
-  github: Pick<GitHubClient, "getPrStatus" | "updatePr">,
-  input: SyncGroupPrInput,
-): Promise<CreateGroupPrResult> {
-  const prNumber = input.group.prNumber;
-  if (prNumber == null) {
-    throw new Error(`syncGroupPullRequest: group ${input.group.id} has no persisted prNumber`);
-  }
-
-  const { owner, repo } = getCurrentRepoOrThrow();
-  const current = await github.getPrStatus(owner, repo, prNumber);
-  const currentState = prInfoToBranchGroupPrState(current);
-
-  // Out-of-band terminal state: do not re-open or edit a closed/merged PR.
-  if (currentState !== "open") {
-    return { prNumber: current.number, prUrl: current.url, prState: currentState };
-  }
-
-  const updated = await github.updatePr({
-    number: prNumber,
-    title: buildGroupPullRequestTitle(input.group, input.members),
-    body: buildGroupPullRequestBody(input.group, input.members),
-  });
-  return {
-    prNumber: updated.number,
-    prUrl: updated.url,
-    prState: prInfoToBranchGroupPrState(updated),
-  };
 }
 
 /**

@@ -696,7 +696,6 @@ vi.mock("../task-lifecycle.js", () => ({
   processPullRequestMergeTask: vi.fn().mockResolvedValue("waiting"),
   createGroupPrCallback: vi.fn(() => vi.fn()),
   syncGroupPrCallback: vi.fn(() => vi.fn()),
-  closeGroupPrCallback: vi.fn(() => vi.fn()),
 }));
 
 vi.mock("../project-context.js", () => ({

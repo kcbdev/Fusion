@@ -20,7 +20,7 @@ import type { TaskStore } from "@fusion/core";
 import { resolveTaskMergeTarget, getCurrentRepo, isBranchGroupMemberLanded } from "@fusion/core";
 import type { Settings, TaskDetail, PrInfo, MergeResult, BranchGroup, BranchGroupPrState, Task } from "@fusion/core";
 import { activeSessionRegistry, resolveIntegrationBranch } from "@fusion/engine";
-import type { CreateGroupPrFn, SyncGroupPrFn, CloseGroupPrFn, WorktreePool } from "@fusion/engine";
+import type { CreateGroupPrFn, SyncGroupPrFn, WorktreePool } from "@fusion/engine";
 
 /**
  * Minimal interface for GitHub operations needed by the PR merge workflow.
@@ -144,15 +144,37 @@ function buildGroupPullRequestTitle(group: Pick<BranchGroup, "id" | "sourceType"
   return `${group.id}: ${group.sourceType}/${group.sourceId} (${members.length} tasks)`;
 }
 
+/**
+ * Build the body for a single managed group PR. With `checklist: true` (sync
+ * path, U6/R6) each member line gets an [x]/[ ] landed marker and an x/N
+ * "Completion" summary line is added; without it (initial create path) members
+ * are listed as plain bullets. Both variants share the same header/skeleton.
+ */
 function buildGroupPullRequestBody(
   group: Pick<BranchGroup, "id" | "branchName" | "sourceType" | "sourceId">,
   members: Array<Pick<Task, "id" | "title"> & { branchName: string }>,
+  options?: { checklist?: boolean; landed?: (member: Pick<Task, "id" | "title"> & { branchName: string }) => boolean },
 ): string {
-  const lines = members.map((member) => `- ${member.id}: ${member.title || "(untitled)"} — \`${member.branchName}\``);
-  return [
+  const checklist = options?.checklist ?? false;
+  const isLanded = options?.landed ?? (() => false);
+  const lines = members.map((member) => {
+    const title = member.title || "(untitled)";
+    if (checklist) {
+      return `- [${isLanded(member) ? "x" : " "}] ${member.id}: ${title} — \`${member.branchName}\``;
+    }
+    return `- ${member.id}: ${title} — \`${member.branchName}\``;
+  });
+  const header = [
     `Automated group PR for ${group.id}.`,
     `Source: ${group.sourceType}/${group.sourceId}`,
     `Integration branch: \`${group.branchName}\``,
+  ];
+  if (checklist) {
+    const landedCount = members.filter((member) => isLanded(member)).length;
+    header.push(`Completion: ${landedCount}/${members.length} landed`);
+  }
+  return [
+    ...header,
     "",
     "Included tasks:",
     ...(lines.length > 0 ? lines : ["- (none)"]),
@@ -208,20 +230,16 @@ export function createGroupPrCallback(
  * every sync, so repeated pushes are idempotent and coalesce naturally.
  */
 function buildGroupPrSyncBody(group: BranchGroup, members: Task[]): string {
-  const landedCount = members.filter((member) => isBranchGroupMemberLanded(member, group)).length;
-  const lines = members.map((member) => {
-    const landed = isBranchGroupMemberLanded(member, group);
-    return `- [${landed ? "x" : " "}] ${member.id}: ${member.title || "(untitled)"} — \`${getTaskBranchName(member.id)}\``;
+  const membersWithBranch = members.map((member) => ({
+    id: member.id,
+    title: member.title,
+    branchName: getTaskBranchName(member.id),
+  }));
+  const landedById = new Map(members.map((member) => [member.id, isBranchGroupMemberLanded(member, group)]));
+  return buildGroupPullRequestBody(group, membersWithBranch, {
+    checklist: true,
+    landed: (member) => landedById.get(member.id) ?? false,
   });
-  return [
-    `Automated group PR for ${group.id}.`,
-    `Source: ${group.sourceType}/${group.sourceId}`,
-    `Integration branch: \`${group.branchName}\``,
-    `Completion: ${landedCount}/${members.length} landed`,
-    "",
-    "Included tasks:",
-    ...(lines.length > 0 ? lines : ["- (none)"]),
-  ].join("\n");
 }
 
 /**
@@ -256,33 +274,6 @@ export function syncGroupPrCallback(
       body: buildGroupPrSyncBody(group, members),
     });
     return { prNumber: updated.number, prUrl: updated.url, prState: toBranchGroupPrState(updated) };
-  };
-}
-
-/**
- * Build the `closeGroupPr` engine callback (KTD7, U6). Best-effort closes the
- * single managed group PR during terminal reconciliation when a group is
- * abandoned. If the PR is already closed/merged out-of-band, returns the
- * reconciled state rather than erroring.
- */
-export function closeGroupPrCallback(
-  github: Pick<GitHubOperations, "getPrStatus" | "closePr">,
-): CloseGroupPrFn {
-  return async ({ group }) => {
-    if (group.prNumber == null) {
-      throw new Error(`closeGroupPr: group ${group.id} has no persisted prNumber`);
-    }
-    const repo = getCurrentRepo();
-    if (!repo) {
-      throw new Error("closeGroupPr: could not determine repository");
-    }
-    const current = await github.getPrStatus(repo.owner, repo.repo, group.prNumber);
-    const currentState = toBranchGroupPrState(current);
-    if (currentState !== "open") {
-      return { prNumber: current.number, prUrl: current.url, prState: currentState };
-    }
-    const closed = await github.closePr({ number: group.prNumber });
-    return { prNumber: closed.number, prUrl: closed.url, prState: toBranchGroupPrState(closed) };
   };
 }
 

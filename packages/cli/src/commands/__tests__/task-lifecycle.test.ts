@@ -37,7 +37,6 @@ import {
   processPullRequestMergeTask,
   getTaskBranchName,
   syncGroupPrCallback,
-  closeGroupPrCallback,
 } from "../task-lifecycle.js";
 
 interface MockTask {
@@ -1374,28 +1373,3 @@ describe("syncGroupPrCallback (U6)", () => {
   });
 });
 
-describe("closeGroupPrCallback (U6)", () => {
-  const group = { id: "BG-1", prNumber: 42 };
-
-  it("closes an open PR and returns closed state", async () => {
-    const github = {
-      getPrStatus: vi.fn(async () => ({ number: 42, url: "u", status: "open", title: "T", headBranch: "h", baseBranch: "main", commentCount: 0 })),
-      closePr: vi.fn(async () => ({ number: 42, url: "u", status: "closed", title: "T", headBranch: "h", baseBranch: "main", commentCount: 0 })),
-    };
-    const close = closeGroupPrCallback(github as never);
-    const result = await close({ group: group as never });
-    expect(result.prState).toBe("closed");
-    expect(github.closePr).toHaveBeenCalledWith({ number: 42 });
-  });
-
-  it("reconciles (does not close) when already merged out-of-band", async () => {
-    const github = {
-      getPrStatus: vi.fn(async () => ({ number: 42, url: "u", status: "merged", title: "T", headBranch: "h", baseBranch: "main", commentCount: 0 })),
-      closePr: vi.fn(),
-    };
-    const close = closeGroupPrCallback(github as never);
-    const result = await close({ group: group as never });
-    expect(result.prState).toBe("merged");
-    expect(github.closePr).not.toHaveBeenCalled();
-  });
-});
