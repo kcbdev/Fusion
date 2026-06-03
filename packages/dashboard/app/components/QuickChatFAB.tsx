@@ -1508,9 +1508,18 @@ export function QuickChatFAB({
     return byName;
   }, [agents]);
 
+  // Key the reset on skill ids, not array identity: useDiscoveredSkillsCache
+  // (SWR) re-delivers content-identical lists with fresh identities, and an
+  // identity-keyed reset wipes the user's keyboard highlight mid-navigation
+  // when a revalidation lands (see docs/solutions/ui-bugs/
+  // skill-autocomplete-highlight-reset-on-swr-revalidation.md).
+  const filteredSkillsKey = useMemo(
+    () => filteredSkills.map((skill) => skill.id).join(" "),
+    [filteredSkills],
+  );
   useEffect(() => {
     setHighlightedSkillIndex(0);
-  }, [filteredSkills]);
+  }, [filteredSkillsKey]);
 
   useEffect(() => {
     setMentionHighlightIndex(0);
