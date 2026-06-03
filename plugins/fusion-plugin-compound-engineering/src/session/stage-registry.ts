@@ -13,6 +13,13 @@
 export interface CeStageDefinition {
   /** Stage id (stable, kebab-case). */
   stageId: string;
+  /**
+   * Explicit pipeline ordinal. Pipeline progression (nextStageAfter) sorts by
+   * THIS value, NOT by registry/Map insertion order — so a stage registered out
+   * of order, or inserted mid-pipeline later, advances correctly. Lower runs
+   * earlier; values need not be contiguous (gaps leave room to insert between).
+   */
+  order: number;
   /** Bundled skill the orchestrator loads for this stage. */
   skillId: string;
   /**
@@ -45,6 +52,7 @@ export interface CeStageDefinition {
 const STAGE_DEFINITIONS: CeStageDefinition[] = [
   {
     stageId: "strategy",
+    order: 100,
     skillId: "ce-strategy",
     artifactLocation: "STRATEGY.md",
     icon: "Compass",
@@ -53,6 +61,7 @@ const STAGE_DEFINITIONS: CeStageDefinition[] = [
   },
   {
     stageId: "ideate",
+    order: 200,
     skillId: "ce-ideate",
     artifactLocation: "docs/ideation/",
     icon: "Lightbulb",
@@ -61,6 +70,7 @@ const STAGE_DEFINITIONS: CeStageDefinition[] = [
   },
   {
     stageId: "brainstorm",
+    order: 300,
     skillId: "ce-brainstorm",
     artifactLocation: "docs/brainstorms/",
     icon: "Sparkles",
@@ -69,6 +79,7 @@ const STAGE_DEFINITIONS: CeStageDefinition[] = [
   },
   {
     stageId: "plan",
+    order: 400,
     skillId: "ce-plan",
     artifactLocation: "docs/plans/",
     icon: "ListChecks",
@@ -81,6 +92,7 @@ const STAGE_DEFINITIONS: CeStageDefinition[] = [
     // board (tagged CE-originated + recorded as pipeline links). The artifact is
     // the work log / summary for this stage.
     stageId: "work",
+    order: 500,
     skillId: "ce-work",
     artifactLocation: "docs/work/",
     icon: "Hammer",
@@ -95,8 +107,12 @@ export function getStage(stageId: string): CeStageDefinition | undefined {
   return REGISTRY.get(stageId);
 }
 
+/**
+ * All registered stages sorted by their explicit `order` ordinal (NOT Map
+ * insertion order). Ties break by `stageId` for a stable, deterministic order.
+ */
 export function listStages(): CeStageDefinition[] {
-  return [...REGISTRY.values()];
+  return [...REGISTRY.values()].sort((a, b) => a.order - b.order || a.stageId.localeCompare(b.stageId));
 }
 
 /**
@@ -105,4 +121,14 @@ export function listStages(): CeStageDefinition[] {
  */
 export function registerStage(def: CeStageDefinition): void {
   REGISTRY.set(def.stageId, def);
+}
+
+/**
+ * Remove a runtime-registered stage. Production stages from STAGE_DEFINITIONS are
+ * protected (no-op) so tests can't accidentally drop a built-in stage. Used by
+ * tests to keep the shared global registry clean across cases.
+ */
+export function unregisterStage(stageId: string): void {
+  if (STAGE_DEFINITIONS.some((s) => s.stageId === stageId)) return;
+  REGISTRY.delete(stageId);
 }

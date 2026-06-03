@@ -58,6 +58,7 @@ describe("orchestrator happy path", () => {
     // Adding a stage = data only.
     registerStage({
       stageId: "compound",
+      order: 600,
       skillId: "ce-compound",
       artifactLocation: "docs/solutions/",
       icon: "BookOpen",

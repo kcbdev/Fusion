@@ -234,13 +234,22 @@ export class CeSessionStore {
    * silently dropped. Returns the ids transitioned.
    */
   recoverStaleSessions(now = Date.now(), multiple = STALE_INTERVAL_MULTIPLE): string[] {
+    // Only IN-FLIGHT agent turns are subject to the interval-staleness rubric:
+    // `active`/`launching` mean an agent turn should be progressing, so exceeding
+    // the interval band signals a crashed/abandoned turn worth recovering.
+    //
+    // `awaiting_input` is DELIBERATELY excluded: a session waiting on human input
+    // is not a crashed turn — human response time is unbounded, and the interval
+    // rubric measures agent turns, not human waits. Flagging it stale would
+    // misclassify a legitimately-paused session. It is already in its resumable
+    // state, so no recovery action is needed.
     const candidates = this.list().filter(
-      (s) => (s.status === "active" || s.status === "launching" || s.status === "awaiting_input") && this.isStale(s, now, multiple),
+      (s) => (s.status === "active" || s.status === "launching") && this.isStale(s, now, multiple),
     );
     const recovered: string[] = [];
     for (const s of candidates) {
       if (s.currentQuestion) {
-        if (s.status !== "awaiting_input") this.update(s.id, { status: "awaiting_input" });
+        this.update(s.id, { status: "awaiting_input" });
       } else {
         this.update(s.id, { status: "interrupted", error: s.error ?? "Session interrupted — progress preserved, resume to continue" });
       }

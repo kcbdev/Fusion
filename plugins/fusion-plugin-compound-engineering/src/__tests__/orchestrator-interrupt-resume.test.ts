@@ -3,7 +3,7 @@ import type { InteractiveAiSession, InteractiveAiSessionEvent, PlanningQuestion 
 import { vi } from "vitest";
 import { CeOrchestrator, CE_EVENTS } from "../session/orchestrator.js";
 import { CeSessionStore, getCeSessionStore } from "../session/session-store.js";
-import { makeHarness, type TestHarness } from "./_harness.js";
+import { makeHarness, makeScriptedSession, type TestHarness } from "./_harness.js";
 
 /**
  * CHARACTERIZATION TEST — written first (U5 execution note: cover the
@@ -82,10 +82,11 @@ describe("interrupt + resume (no silent loss)", () => {
     expect(h.emitted.map((e) => e.event)).toContain(CE_EVENTS.interrupted);
   });
 
-  it("recoverStaleSessions restores an awaiting_input session left by a crash, and resume returns the same question with full history", () => {
-    // Simulate a session persisted mid-question whose process died: status is
-    // awaiting_input with currentQuestion set, lastActivity well past the stale
-    // band (interval-relative).
+  it("leaves an awaiting_input session (waiting on a human) untouched even far past the stale band, and resume returns the same question with full history", async () => {
+    // A session legitimately paused on a human question: status awaiting_input
+    // with currentQuestion set, lastActivity well past the interval stale band.
+    // Human response time is unbounded, so this is NOT a crashed turn — the
+    // interval rubric must not misclassify it as stale.
     const store = new CeSessionStore(h.db);
     const created = store.create({ stage: "brainstorm", turnIntervalMs: 1000 });
     store.appendHistory(created.id, { role: "user", text: "kick off", at: new Date().toISOString() });
@@ -93,24 +94,107 @@ describe("interrupt + resume (no silent loss)", () => {
     store.update(created.id, {
       status: "awaiting_input",
       currentQuestion: QUESTION,
-      // 10× interval old → unambiguously stale.
+      // 10× interval old → far past the band, yet legitimately awaiting a human.
       lastActivityAt: Date.now() - 10_000,
     });
 
     const recovered = store.recoverStaleSessions();
-    expect(recovered).toContain(created.id);
+    // Not flagged stale / not recovered — a human wait is not a crashed turn.
+    expect(recovered).not.toContain(created.id);
 
     const after = store.get(created.id)!;
-    // Awaiting-input session with a question stays resumable, not dropped.
+    // Awaiting-input session with a question stays resumable, unchanged.
     expect(after.status).toBe("awaiting_input");
     expect(after.currentQuestion?.id).toBe("q1");
 
     // Resume via the orchestrator returns to the same question + full history.
-    const orch = new CeOrchestrator({ ctx: h.ctx, createInteractiveAiSession: vi.fn(), projectRoot: h.projectRoot });
-    const resumed = orch.resume(created.id);
+    // Rehydration re-creates a live session and replays the opening message,
+    // draining the agent's response (the question) during replay.
+    const replaySession = makeScriptedSession([{ type: "question", data: QUESTION }]);
+    const orch = new CeOrchestrator({
+      ctx: h.ctx,
+      createInteractiveAiSession: vi.fn(async () => ({ session: replaySession })),
+      projectRoot: h.projectRoot,
+    });
+    const resumed = await orch.resume(created.id);
     expect(resumed.session.status).toBe("awaiting_input");
     expect(resumed.session.currentQuestion?.id).toBe("q1");
     expect(resumed.session.conversationHistory).toHaveLength(2);
+  });
+
+  it("Bug 5: an interrupted/awaiting session with a currentQuestion + history can be resumed (rehydrated) and then ANSWERED to continue to completion", async () => {
+    // Simulate the post-interrupt / post-restart state: a session persisted
+    // mid-question (awaiting_input, currentQuestion set, full history) whose live
+    // handle was disposed and removed from this.live. This is exactly the state
+    // resume() must be able to back with a real live handle.
+    const store = getCeSessionStore(h.ctx);
+    const created = store.create({ stage: "brainstorm", turnIntervalMs: 5000 });
+    store.appendHistory(created.id, { role: "user", text: "kick off", at: new Date().toISOString() });
+    store.appendHistory(created.id, {
+      role: "agent",
+      text: JSON.stringify({ question: QUESTION }),
+      at: new Date().toISOString(),
+    });
+    store.update(created.id, { status: "awaiting_input", currentQuestion: QUESTION });
+    const sessionId = created.id;
+
+    // The rehydration factory: replays the opening prompt (yields the question,
+    // which replay discards), then on the real answer turn completes the stage.
+    const rehydrated = makeScriptedSession([
+      { type: "question", data: QUESTION },
+      { type: "complete", data: { artifact: "# Done\n" } },
+    ]);
+    const factory = vi.fn(async () => ({ session: rehydrated }));
+
+    const orch = new CeOrchestrator({
+      ctx: h.ctx,
+      createInteractiveAiSession: factory,
+      projectRoot: h.projectRoot,
+      turnTimeoutMs: 5000,
+    });
+
+    // Pre-fix: resume() flips status to awaiting_input but never re-establishes a
+    // live handle, so the subsequent answer() throws "no live handle; call
+    // resume() first" — a dead-end loop. Post-fix: resume rehydrates a live one.
+    const resumed = await orch.resume(sessionId);
+    expect(resumed.session.status).toBe("awaiting_input");
+    expect(resumed.session.currentQuestion?.id).toBe("q1");
+    expect(factory).toHaveBeenCalledTimes(1); // rehydration created a live session.
+
+    // The resumed session is genuinely answerable now — drive it to completion.
+    const done = await orch.answer(sessionId, "q1", "a");
+    expect(done.event?.type).toBe("complete");
+    expect(done.session.status).toBe("completed");
+  });
+
+  it("Bug 4: answering with a wrong questionId throws and leaves the session awaiting_input with its currentQuestion preserved", async () => {
+    const session = questionThenHangSession();
+    const orch = new CeOrchestrator({
+      ctx: h.ctx,
+      createInteractiveAiSession: vi.fn(async () => ({ session })),
+      projectRoot: h.projectRoot,
+      turnTimeoutMs: 20,
+    });
+
+    const started = await orch.start("brainstorm", { openingMessage: "kick off" });
+    expect(started.session.status).toBe("awaiting_input");
+    expect(started.session.currentQuestion?.id).toBe("q1");
+
+    // Answer with the WRONG questionId → must reject without mutating state.
+    await expect(orch.answer(started.session.id, "WRONG-ID", "a")).rejects.toThrow(/q1|WRONG-ID/);
+
+    // The recovery anchor is intact: still awaiting_input with currentQuestion.
+    const after = orch.getState(started.session.id)!;
+    expect(after.status).toBe("awaiting_input");
+    expect(after.currentQuestion?.id).toBe("q1");
+    // No spurious answer turn was appended to history.
+    expect(after.conversationHistory.some((t) => t.text.includes("WRONG-ID"))).toBe(false);
+
+    // The correct questionId is still accepted (the live handle wasn't disturbed).
+    // The session hangs on the answer turn → it interrupts, but it DID accept the
+    // answer, proving the rejection above didn't break the seam.
+    const accepted = await orch.answer(started.session.id, "q1", "a");
+    expect(accepted.session.status).toBe("interrupted");
   });
 
   it("a crash with no pending question is marked interrupted (progress preserved), not silently dropped", () => {

@@ -12,6 +12,7 @@ import plugin, {
 } from "../index.js";
 import { getCePipelineStore } from "../sync/pipeline-store.js";
 import { CeReconciler, reconcileCePipelines } from "../sync/reconciler.js";
+import { registerStage, unregisterStage } from "../session/stage-registry.js";
 import { makeScriptedSession } from "./_harness.js";
 
 /**
@@ -215,6 +216,61 @@ describe("U8 reconciler (convergence + outbound)", () => {
     await moveTo(t2.id, "done"); // now both terminal.
     await reconcileCePipelines(ctx);
     expect(store.getState(cePipelineId)!.currentStage).toBe("work"); // advanced.
+  });
+
+  it("Bug 1: a deleted current-stage task does NOT wedge the pipeline — one terminal + one deleted still advances", async () => {
+    const { cePipelineId, task } = await landPipeline("plan");
+    const store = getCePipelineStore(ctx);
+
+    // Add a SECOND current-stage task linked to the same pipeline/stage, then
+    // DELETE it from the board (loadTasks will yield undefined for it).
+    const doomed = await taskStore.createTask({ description: "second plan task (to delete)" });
+    store.createLink({ taskId: doomed.id, cePipelineId, ceStageId: "plan", ceArtifactPath: null });
+    await taskStore.deleteTask(doomed.id);
+
+    // The remaining task reaches terminal. Pre-fix: the deleted task made
+    // `every(... t && ...)` false, wedging the pipeline at "plan" forever.
+    await moveTo(task.id, "done");
+    await reconcileCePipelines(ctx);
+
+    // Post-fix: terminality is computed over EXISTING tasks only → it advances.
+    expect(store.getState(cePipelineId)!.currentStage).toBe("work");
+  });
+
+  it("Bug 1: if ALL current-stage tasks were deleted, the pipeline is left unchanged (no wedge, no crash)", async () => {
+    const { cePipelineId, task } = await landPipeline("plan");
+    const store = getCePipelineStore(ctx);
+
+    await taskStore.deleteTask(task.id); // every current-stage task gone.
+
+    // Safe non-wedging behavior: state unchanged, no advancement, no throw.
+    await expect(reconcileCePipelines(ctx)).resolves.toBeTruthy();
+    expect(store.getState(cePipelineId)!.currentStage).toBe("plan");
+  });
+
+  it("Bug 3: a stage registered with an `order` between two existing stages is the next stage (not append-at-end)", async () => {
+    // Insert a stage between plan(400) and work(500). Registry/Map insertion
+    // order would append it at the end; the explicit `order` slots it mid-pipeline.
+    registerStage({
+      stageId: "refine",
+      order: 450,
+      skillId: "ce-refine",
+      artifactLocation: "docs/refine/",
+      icon: "Wand",
+      label: "Refine",
+    });
+    try {
+      const { cePipelineId, task } = await landPipeline("plan");
+      const store = getCePipelineStore(ctx);
+
+      await moveTo(task.id, "done");
+      await reconcileCePipelines(ctx);
+
+      // Advances to the inserted stage, NOT to "work" (the old append-at-end).
+      expect(store.getState(cePipelineId)!.currentStage).toBe("refine");
+    } finally {
+      unregisterStage("refine");
+    }
   });
 });
 

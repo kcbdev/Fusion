@@ -74,4 +74,32 @@ describe("interval-relative staleness (FN-4172 rubric)", () => {
     const completed = store.update(s.id, { status: "completed", lastActivityAt: Date.now() - 1_000_000 })!;
     expect(store.isStale(completed)).toBe(false);
   });
+
+  it("Bug 2: a human-slow awaiting_input session past 3× is NOT recovered, while a stuck active one still is", () => {
+    const store = new CeSessionStore(h.db);
+    const now = Date.now();
+
+    // A session legitimately waiting on a human, far past 3× the interval. Human
+    // response time is unbounded — this is not a crashed turn.
+    const waiting = store.create({ stage: "brainstorm", turnIntervalMs: 1000 });
+    store.update(waiting.id, {
+      status: "awaiting_input",
+      currentQuestion: { id: "q", type: "text", question: "?" },
+      lastActivityAt: now - 100_000, // 100× interval
+    });
+
+    // A genuinely stuck in-flight agent turn past the threshold.
+    const stuck = store.create({ stage: "brainstorm", turnIntervalMs: 1000 });
+    store.update(stuck.id, { status: "active", lastActivityAt: now - 100_000 });
+
+    const recovered = store.recoverStaleSessions(now);
+
+    // The human-wait is excluded from the interval rubric entirely.
+    expect(recovered).not.toContain(waiting.id);
+    expect(store.get(waiting.id)!.status).toBe("awaiting_input");
+
+    // The stuck active turn is still recovered (here: no question → interrupted).
+    expect(recovered).toContain(stuck.id);
+    expect(store.get(stuck.id)!.status).toBe("interrupted");
+  });
 });

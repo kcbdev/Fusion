@@ -226,12 +226,22 @@ export class CeOrchestrator {
   /** Answer the awaiting question and continue the loop. */
   async answer(sessionId: string, questionId: string, response: unknown): Promise<CeStepResult> {
     const session = this.requireSession(sessionId);
+    if (session.status !== "awaiting_input") {
+      throw new Error(`Session ${sessionId} is not awaiting input (status=${session.status}).`);
+    }
+    // Validate the questionId BEFORE mutating any persisted state. A stale/wrong
+    // questionId must NOT clear `currentQuestion` or flip status to active —
+    // doing so would destroy the recovery anchor while the seam rejects the
+    // mismatch, leaving the DB diverged from the live session. Reject cleanly and
+    // leave `currentQuestion`/status intact so the session stays answerable.
+    if (questionId !== session.currentQuestion?.id) {
+      throw new Error(
+        `Session ${sessionId} is awaiting question "${session.currentQuestion?.id ?? "(none)"}", not "${questionId}".`,
+      );
+    }
     const live = this.live.get(sessionId);
     if (!live) {
       throw new Error(`Session ${sessionId} has no live handle in this process; call resume() first.`);
-    }
-    if (session.status !== "awaiting_input") {
-      throw new Error(`Session ${sessionId} is not awaiting input (status=${session.status}).`);
     }
     this.store.appendHistory(sessionId, {
       role: "user",
@@ -243,25 +253,144 @@ export class CeOrchestrator {
   }
 
   /**
-   * Resume an `awaiting_input` or `interrupted` session. Returns its persisted
-   * state pointed back at the current question. A resumed session with no live
-   * in-process handle requires a fresh interactive session to continue past the
-   * current question (the persisted question/history is the recovery anchor).
+   * Resume an `awaiting_input`, `interrupted`, or `error` session — and, crucially,
+   * RE-ESTABLISH a live interactive handle so the resumed session can actually be
+   * answered (Bug 5). After an interrupt/timeout the live handle was disposed and
+   * removed from `this.live`; flipping persisted status back to `awaiting_input`
+   * without a live handle was a dead end (resume → answer → "call resume() first").
+   *
+   * When a question is still pending and no live handle exists, we rehydrate via
+   * the factory and REPLAY the persisted conversation history (opening message +
+   * prior answers) to prime the fresh agent back to the current awaiting question,
+   * repopulating `this.live`. Replay is side-effect-suppressed: it reconstructs
+   * the agent's context only — no artifact writes, no event emits, no history
+   * re-append (the DB already reflects the final state).
+   *
+   * If no factory is available (no live handle can ever be created in this
+   * process), we DO NOT advertise a misleading answerable status: the session is
+   * left `interrupted` with a clear error explaining it can't be continued here.
    */
-  resume(sessionId: string): CeStepResult {
+  async resume(sessionId: string): Promise<CeStepResult> {
     const session = this.requireSession(sessionId);
-    if (session.status === "interrupted" || session.status === "error") {
-      // Resumable transition (retry for `error`, resume for `interrupted`): if a
-      // question is still pending, return to awaiting_input; otherwise mark
-      // active so the caller can re-run the turn with fresh input. The persisted
-      // question/history is the no-loss recovery anchor either way.
-      const next = session.currentQuestion
-        ? this.store.update(sessionId, { status: "awaiting_input", error: null }) ?? session
-        : this.store.update(sessionId, { status: "active", error: null }) ?? session;
+
+    // Terminal / already-answerable-with-a-live-handle cases need no rehydration.
+    if (session.status === "completed") return { session };
+    if (session.status === "awaiting_input" && this.live.has(sessionId)) {
+      return { session }; // already live + answerable.
+    }
+
+    // No pending question → nothing to re-prime to. Mark active so the caller can
+    // re-run the turn with fresh input (retry for `error`, resume for others).
+    if (!session.currentQuestion) {
+      const next = this.store.update(sessionId, { status: "active", error: null }) ?? session;
       return { session: next };
     }
-    // Already awaiting_input (or terminal completed) — return as-is (idempotent).
-    return { session };
+
+    // A live handle already exists (e.g. interrupted but not disposed) — just
+    // restore the answerable status.
+    if (this.live.has(sessionId)) {
+      const next = this.store.update(sessionId, { status: "awaiting_input", error: null }) ?? session;
+      return { session: next };
+    }
+
+    // Rehydration path: re-create the live session and replay history back to the
+    // current question.
+    if (!this.factory) {
+      // Honest status: we cannot back an answerable state in this process, so do
+      // not pretend the session is resumable here. Surface a clear error.
+      const next =
+        this.store.update(sessionId, {
+          status: "interrupted",
+          error:
+            "Session cannot be continued in this process: interactive AI sessions are unavailable (no factory on this context). Resume from a route context with the engine loaded.",
+        }) ?? session;
+      return { session: next };
+    }
+
+    try {
+      await this.rehydrate(session);
+    } catch (err) {
+      // Rehydration failed — keep progress, surface the failure, do not advertise
+      // an answerable status we can't back.
+      const next = this.interruptSession(sessionId, err);
+      return { session: next };
+    }
+
+    const next = this.store.update(sessionId, { status: "awaiting_input", error: null }) ?? session;
+    return { session: next };
+  }
+
+  /**
+   * Re-create a live interactive session and REPLAY the persisted conversation so
+   * the fresh agent is primed back to the current awaiting question. Side effects
+   * are suppressed: we drain the seam's events to advance the agent's context but
+   * do NOT persist/emit/write — the DB already holds the authoritative final
+   * state. Populates `this.live[session.id]` on success.
+   */
+  private async rehydrate(session: CeSession): Promise<void> {
+    const stage = getStage(session.stage);
+    if (!stage) throw new Error(`Unknown CE stage: ${session.stage}`);
+
+    const cwd = resolveStageSkillCwd();
+    const systemPrompt = buildStageSystemPrompt(stage);
+    const defaultProvider = getDefaultProvider(this.ctx.settings);
+    const defaultModelId = getDefaultModelId(this.ctx.settings);
+
+    const interactive = await this.factory!({
+      cwd,
+      systemPrompt,
+      tools: "coding",
+      ...(defaultProvider ? { defaultProvider } : {}),
+      ...(defaultModelId ? { defaultModelId } : {}),
+    });
+    const live = interactive.session;
+
+    // Walk the recorded user turns in order. The FIRST user turn is the opening
+    // message (raw text); each subsequent user turn is a serialized
+    // {answer, questionId} produced by answer(). Drive the seam with each, and
+    // drain exactly one event per drive to advance the agent's context — but
+    // suppress all side effects (no persist/emit/artifact-write).
+    const userTurns = session.conversationHistory.filter((t) => t.role === "user");
+    try {
+      for (let i = 0; i < userTurns.length; i++) {
+        const turn = userTurns[i];
+        if (i === 0) {
+          await live.prompt(turn.text);
+        } else {
+          const parsed = this.parseAnswerTurn(turn.text);
+          if (!parsed) continue; // tolerate non-answer user turns.
+          await live.answer(parsed.questionId, parsed.answer);
+        }
+        // Drain the agent's response for this turn to keep the seam in lockstep,
+        // but DISCARD it — replay reconstructs context, it does not re-run the
+        // turn loop's side effects.
+        await live.nextEvent();
+      }
+    } catch (err) {
+      // Replay failed mid-way — dispose the half-primed handle so we don't leave
+      // a broken live session behind, then propagate.
+      try {
+        live.dispose();
+      } catch {
+        // best-effort
+      }
+      throw err;
+    }
+
+    this.live.set(session.id, live);
+  }
+
+  /** Parse a serialized `{ answer, questionId }` user turn produced by answer(). */
+  private parseAnswerTurn(text: string): { questionId: string; answer: unknown } | undefined {
+    try {
+      const obj = JSON.parse(text) as { answer?: unknown; questionId?: unknown };
+      if (typeof obj?.questionId === "string") {
+        return { questionId: obj.questionId, answer: obj.answer };
+      }
+    } catch {
+      // not a JSON answer turn
+    }
+    return undefined;
   }
 
   /** Read-through accessor for routes. */

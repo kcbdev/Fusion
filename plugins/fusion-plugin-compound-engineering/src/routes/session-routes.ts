@@ -98,7 +98,7 @@ export function createSessionRoutes(): PluginRouteDefinition[] {
         const id = (req as RouteRequest).params.id;
         const orch = getOrchestrator(ctx);
         try {
-          const result = orch.resume(id);
+          const result = await orch.resume(id);
           return { status: 200, body: { session: result.session } };
         } catch (err) {
           return { status: 404, body: { error: err instanceof Error ? err.message : String(err) } };

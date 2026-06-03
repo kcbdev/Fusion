@@ -149,8 +149,10 @@ function readArtifactEntry(
     if (st.size > MAX_ARTIFACT_BYTES) {
       return makeError(stage, relPath, `Artifact too large to read (${st.size} bytes)`);
     }
-    // Probe readability (no bytes transferred) so a malformed/unreadable file is
+    // Probe READ PERMISSION only (no bytes transferred) so an unreadable file is
     // surfaced now as an error entry rather than crashing later at render time.
+    // NOTE: this is a permission probe, NOT a content check — malformed/corrupt
+    // file CONTENT is only detected at read time (readCeArtifact), not here.
     accessSync(abs, constants.R_OK);
     return {
       id: makeId(stage, relPath),

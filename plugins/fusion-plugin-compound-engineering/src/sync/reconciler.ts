@@ -55,7 +55,12 @@ export interface ReconcileResult {
   inspected: number;
 }
 
-/** The linear CE stage order. The pipeline advances along this sequence. */
+/**
+ * The linear CE stage order. The pipeline advances along this sequence.
+ * `listStages()` is sorted by each stage's explicit `order` ordinal (NOT Map
+ * insertion order), so a stage registered out of order — or inserted mid-
+ * pipeline later — slots into the correct position here.
+ */
 function stageOrder(): string[] {
   return listStages().map((s) => s.stageId);
 }
@@ -130,9 +135,23 @@ export class CeReconciler {
     const tasks = await this.loadTasks(currentStageLinks);
     if (tasks.length === 0) return undefined;
 
-    // Advancement rule: every current-stage board task has reached a terminal
-    // column (board-authoritative read). Partial completion keeps it running.
-    const allTerminal = tasks.every((t) => t && TERMINAL_COLUMNS.has(t.column));
+    // A deleted/missing task yields `undefined` (treated as ABSENT, not
+    // terminal AND not blocking). Compute terminality over the tasks that still
+    // EXIST so one deleted current-stage task cannot wedge the pipeline forever.
+    const existing = tasks.filter((t): t is Task => t != null);
+    if (existing.length === 0) {
+      // Every current-stage task was deleted — there is nothing left on the
+      // board to gate advancement, but also no completion signal to act on.
+      // Safest non-wedging behavior: leave the pipeline state unchanged (do not
+      // advance off a vanished stage, do not crash). A later sweep with a real
+      // board task re-derives the transition.
+      return undefined;
+    }
+
+    // Advancement rule: every EXISTING current-stage board task has reached a
+    // terminal column (board-authoritative read). Partial completion keeps it
+    // running; deleted tasks are excluded above rather than counted as blocking.
+    const allTerminal = existing.every((t) => TERMINAL_COLUMNS.has(t.column));
     if (!allTerminal) {
       // Still running on the board — make sure our status reflects that and stop.
       if (state.status !== "running") {
