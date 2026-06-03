@@ -4,7 +4,7 @@ import { ProjectEngine } from "../project-engine.js";
 import { runtimeLog } from "../logger.js";
 import { TunnelProcessManager } from "../remote-access/tunnel-process-manager.js";
 import { NtfyNotifier } from "../notifier.js";
-import { NotificationService, OAuthExpiryMonitor, OAuthValidityLogger } from "../notification/index.js";
+import { NotificationService, OAuthAlertStateStore, OAuthExpiryMonitor, OAuthValidityLogger } from "../notification/index.js";
 
 const mocks = vi.hoisted(() => ({
   syncInsightExtractionAutomation: vi.fn(),
@@ -97,6 +97,7 @@ vi.mock("../notification/index.js", () => ({
     start: mocks.notificationServiceStart,
     stop: mocks.notificationServiceStop,
   })),
+  OAuthAlertStateStore: vi.fn().mockImplementation(() => ({})),
   OAuthExpiryMonitor: vi.fn().mockImplementation(() => ({
     start: mocks.oauthExpiryMonitorStart,
     stop: mocks.oauthExpiryMonitorStop,
@@ -113,6 +114,7 @@ vi.mock("../auth-storage.js", () => ({
     getOAuthProviders: vi.fn(() => []),
     get: vi.fn(() => undefined),
   })),
+  getFusionOAuthAlertStatePath: vi.fn(() => "/tmp/oauth-alert-state.json"),
 }));
 
 vi.mock("../runtimes/in-process-runtime.js", () => ({
@@ -305,10 +307,19 @@ describe("ProjectEngine notification ownership wiring", () => {
     await engine.start();
 
     expect(NotificationService).toHaveBeenCalledTimes(1);
+    expect(OAuthAlertStateStore).toHaveBeenCalledTimes(1);
     expect(OAuthExpiryMonitor).toHaveBeenCalledTimes(1);
+    expect(OAuthValidityLogger).toHaveBeenCalledTimes(1);
     expect(NtfyNotifier).toHaveBeenCalledTimes(1);
     const notifierCtorArgs = vi.mocked(NtfyNotifier).mock.calls[0];
     expect(notifierCtorArgs?.[2]).toBe(vi.mocked(NotificationService).mock.results[0]?.value);
+    const alertStateInstance = vi.mocked(OAuthAlertStateStore).mock.results[0]?.value;
+    expect(vi.mocked(OAuthExpiryMonitor).mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ alertState: alertStateInstance }),
+    );
+    expect(vi.mocked(OAuthValidityLogger).mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ alertState: alertStateInstance }),
+    );
 
     expect(mocks.notificationServiceStart).toHaveBeenCalledTimes(1);
     expect(mocks.oauthExpiryMonitorStart).toHaveBeenCalledTimes(1);
@@ -329,7 +340,9 @@ describe("ProjectEngine notification ownership wiring", () => {
     // Root cause guard: if ProjectEngine.start is called more than once, it should not
     // wire a second NotificationService/NtfyNotifier pair for the same store.
     expect(NotificationService).toHaveBeenCalledTimes(1);
+    expect(OAuthAlertStateStore).toHaveBeenCalledTimes(1);
     expect(OAuthExpiryMonitor).toHaveBeenCalledTimes(1);
+    expect(OAuthValidityLogger).toHaveBeenCalledTimes(1);
     expect(NtfyNotifier).toHaveBeenCalledTimes(1);
     expect(mocks.notificationServiceStart).toHaveBeenCalledTimes(1);
     expect(mocks.oauthExpiryMonitorStart).toHaveBeenCalledTimes(1);
@@ -344,7 +357,9 @@ describe("ProjectEngine notification ownership wiring", () => {
     await engine.start();
 
     expect(NotificationService).not.toHaveBeenCalled();
+    expect(OAuthAlertStateStore).not.toHaveBeenCalled();
     expect(OAuthExpiryMonitor).not.toHaveBeenCalled();
+    expect(OAuthValidityLogger).not.toHaveBeenCalled();
     expect(NtfyNotifier).not.toHaveBeenCalled();
 
     await engine.stop();

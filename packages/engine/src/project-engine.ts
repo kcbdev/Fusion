@@ -19,10 +19,10 @@ import type { ProjectRuntimeConfig } from "./project-runtime.js";
 import { PrMonitor } from "./pr-monitor.js";
 import { PrCommentHandler } from "./pr-comment-handler.js";
 import { NtfyNotifier } from "./notifier.js";
-import { NotificationService, OAuthExpiryMonitor, OAuthValidityLogger } from "./notification/index.js";
+import { NotificationService, OAuthAlertStateStore, OAuthExpiryMonitor, OAuthValidityLogger } from "./notification/index.js";
 import type { NotificationChatStore } from "./notification/notification-service.js";
 import { GridlockDetector } from "./gridlock-detector.js";
-import { createFusionAuthStorage } from "./auth-storage.js";
+import { createFusionAuthStorage, getFusionOAuthAlertStatePath } from "./auth-storage.js";
 import { CronRunner, createAiPromptExecutor } from "./cron-runner.js";
 import type { RoutineRunner } from "./routine-runner.js";
 import { aiMergeTask, sweepStaleAutostashes, VerificationError } from "./merger.js";
@@ -427,12 +427,19 @@ export class ProjectEngine {
       });
       await this.notificationService.start();
       const authStorage = createFusionAuthStorage();
+      const oauthAlertState = new OAuthAlertStateStore({
+        statePath: getFusionOAuthAlertStatePath(),
+      });
       this.oauthExpiryMonitor = new OAuthExpiryMonitor({
         authStorage,
         notificationService: this.notificationService,
+        alertState: oauthAlertState,
       });
       await this.oauthExpiryMonitor.start();
-      this.oauthValidityLogger = new OAuthValidityLogger({ authStorage });
+      this.oauthValidityLogger = new OAuthValidityLogger({
+        authStorage,
+        alertState: oauthAlertState,
+      });
       await this.oauthValidityLogger.start();
 
       // Backward-compatibility shim for gridlock notifications.
