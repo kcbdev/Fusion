@@ -31,7 +31,7 @@ function Harness({ transport }: { transport: CeSessionTransport }) {
       <span data-testid="status">{s.session?.status ?? "none"}</span>
       <span data-testid="busy">{s.busy ? "busy" : "idle"}</span>
       <span data-testid="err">{s.error ?? ""}</span>
-      <button onClick={() => void s.start("brainstorm")}>start</button>
+      <button onClick={() => void s.start("brainstorm", { projectId: "p1" })}>start</button>
       <button onClick={() => void s.answer("q1", "yes")}>answer</button>
       <button onClick={() => void s.resume()}>resume</button>
       <button onClick={() => s.reset()}>reset</button>
@@ -58,7 +58,32 @@ describe("useCeSession lifecycle", () => {
       screen.getByText("answer").click();
     });
     expect(screen.getByTestId("status")).toHaveTextContent("completed");
-    expect(transport.answer).toHaveBeenCalledWith("s1", "q1", "yes");
+    // projectId from start() must thread through to answer() (FN: per-request
+    // store resolution selects the session's owning store/live handle).
+    expect(transport.answer).toHaveBeenCalledWith("s1", "q1", "yes", "p1");
+  });
+
+  it("threads the start projectId through resume and poll", async () => {
+    const get = vi.fn(async () => mkSession({ status: "active" }));
+    const transport: CeSessionTransport = {
+      start: vi.fn(async () => mkSession({ status: "interrupted", currentQuestion: Q })),
+      answer: vi.fn(),
+      resume: vi.fn(async () => mkSession({ status: "active" })),
+      get,
+    };
+    render(<Harness transport={transport} />);
+    await act(async () => {
+      screen.getByText("start").click();
+    });
+    await act(async () => {
+      screen.getByText("resume").click();
+    });
+    expect(transport.resume).toHaveBeenCalledWith("s1", "p1");
+    // The poll (active status) must also carry the projectId.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(get).toHaveBeenCalledWith("s1", "p1");
   });
 
   it("polls while active and stops once settled", async () => {
@@ -118,7 +143,7 @@ describe("useCeSession lifecycle", () => {
     await act(async () => {
       screen.getByText("resume").click();
     });
-    expect(transport.resume).toHaveBeenCalledWith("s1");
+    expect(transport.resume).toHaveBeenCalledWith("s1", "p1");
     expect(screen.getByTestId("status")).toHaveTextContent("awaiting_input");
   });
 });

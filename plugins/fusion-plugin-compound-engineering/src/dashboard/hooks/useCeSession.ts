@@ -13,16 +13,16 @@ import {
  */
 export interface CeSessionTransport {
   start(stage: string, opts: { message?: string; projectId?: string }): Promise<CeSession>;
-  answer(sessionId: string, questionId: string, response: unknown): Promise<CeSession>;
-  resume(sessionId: string): Promise<CeSession>;
-  get(sessionId: string): Promise<CeSession>;
+  answer(sessionId: string, questionId: string, response: unknown, projectId?: string): Promise<CeSession>;
+  resume(sessionId: string, projectId?: string): Promise<CeSession>;
+  get(sessionId: string, projectId?: string): Promise<CeSession>;
 }
 
 const defaultTransport: CeSessionTransport = {
   start: (stage, opts) => startSessionApi(stage, opts),
-  answer: (id, qid, response) => answerSessionApi(id, qid, response),
-  resume: (id) => resumeSessionApi(id),
-  get: (id) => getSessionApi(id),
+  answer: (id, qid, response, projectId) => answerSessionApi(id, qid, response, projectId),
+  resume: (id, projectId) => resumeSessionApi(id, projectId),
+  get: (id, projectId) => getSessionApi(id, projectId),
 };
 
 /** Statuses where no further polling is useful (settled or waiting on the user). */
@@ -71,6 +71,10 @@ export function useCeSession(options: UseCeSessionOptions = {}): UseCeSessionRes
   // Keep the live id for the polling effect without re-subscribing on every
   // session field change.
   const sessionIdRef = useRef<string | undefined>(undefined);
+  // The projectId used at start() selects the project-scoped store that owns the
+  // session row + live handle. Every later call (answer/resume/poll) MUST reuse
+  // it, or the request resolves a different store and the session isn't found.
+  const projectIdRef = useRef<string | undefined>(undefined);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -101,8 +105,10 @@ export function useCeSession(options: UseCeSessionOptions = {}): UseCeSessionRes
   );
 
   const start = useCallback(
-    (stage: string, opts: { message?: string; projectId?: string } = {}) =>
-      run(() => transport.start(stage, opts)),
+    (stage: string, opts: { message?: string; projectId?: string } = {}) => {
+      projectIdRef.current = opts.projectId;
+      return run(() => transport.start(stage, opts));
+    },
     [run, transport],
   );
 
@@ -110,7 +116,7 @@ export function useCeSession(options: UseCeSessionOptions = {}): UseCeSessionRes
     (questionId: string, response: unknown) => {
       const id = sessionIdRef.current;
       if (!id) return Promise.resolve();
-      return run(() => transport.answer(id, questionId, response));
+      return run(() => transport.answer(id, questionId, response, projectIdRef.current));
     },
     [run, transport],
   );
@@ -118,11 +124,12 @@ export function useCeSession(options: UseCeSessionOptions = {}): UseCeSessionRes
   const resume = useCallback(() => {
     const id = sessionIdRef.current;
     if (!id) return Promise.resolve();
-    return run(() => transport.resume(id));
+    return run(() => transport.resume(id, projectIdRef.current));
   }, [run, transport]);
 
   const reset = useCallback(() => {
     sessionIdRef.current = undefined;
+    projectIdRef.current = undefined;
     setSession(undefined);
     setError(undefined);
     setBusy(false);
@@ -139,7 +146,7 @@ export function useCeSession(options: UseCeSessionOptions = {}): UseCeSessionRes
     let cancelled = false;
     const timer = setInterval(() => {
       transport
-        .get(id)
+        .get(id, projectIdRef.current)
         .then((next) => {
           if (!cancelled) apply(next);
         })

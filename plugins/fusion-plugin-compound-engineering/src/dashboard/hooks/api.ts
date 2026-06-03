@@ -60,30 +60,40 @@ export async function startSession(
   return data.session;
 }
 
-/** Submit an answer to the awaiting question and advance the session. */
+/**
+ * Submit an answer to the awaiting question and advance the session.
+ *
+ * `projectId` MUST match the one used at `startSession` — it selects the
+ * project-scoped store that holds the session row and its live in-process
+ * handle. Omitting it (or sending a different one) resolves a different store
+ * and the session won't be found.
+ */
 export async function answerSession(
   sessionId: string,
   questionId: string,
   response: unknown,
+  projectId?: string,
 ): Promise<CeSession> {
   const data = await request<{ session: CeSession }>(`/sessions/${encodeURIComponent(sessionId)}/answer`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ questionId, response }),
+    body: JSON.stringify({ questionId, response, projectId }),
   });
   return data.session;
 }
 
-/** Resume an interrupted/error/awaiting session back to its current question. */
-export async function resumeSession(sessionId: string): Promise<CeSession> {
+/** Resume an interrupted/error/awaiting session. `projectId` must match start (see answerSession). */
+export async function resumeSession(sessionId: string, projectId?: string): Promise<CeSession> {
   const data = await request<{ session: CeSession }>(`/sessions/${encodeURIComponent(sessionId)}/resume`, {
     method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ projectId }),
   });
   return data.session;
 }
 
-/** Poll the current persisted session state. */
-export async function getSession(sessionId: string): Promise<CeSession> {
-  const data = await request<{ session: CeSession }>(`/sessions/${encodeURIComponent(sessionId)}`);
+/** Poll the current persisted session state. `projectId` must match start (see answerSession). */
+export async function getSession(sessionId: string, projectId?: string): Promise<CeSession> {
+  const data = await request<{ session: CeSession }>(`/sessions/${encodeURIComponent(sessionId)}${qp({ projectId })}`);
   return data.session;
 }
