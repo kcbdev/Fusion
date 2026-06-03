@@ -37,7 +37,7 @@ function buildParentScript(scenario: Scenario): string {
     const child = superviseSpawn(process.execPath, [${JSON.stringify(fixturePath)}, "keepalive"], {
       stdio: "ignore",
       killGraceMs: 50,
-      maxLifetimeMs: 5_000,
+      maxLifetimeMs: 500,
     });
     console.log(String(child.pid));
     if (${JSON.stringify(scenario)} === "clean-exit") {

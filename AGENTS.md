@@ -2,16 +2,6 @@
 
 ## Essential rules
 
-### STANDING DIRECTIVE: Buttons Are Frozen (2026-05-13)
-
-Do not file, plan, or implement tasks that adjust button mobile-responsiveness, touch-target sizing, or mobile reflow of header/action button rows anywhere in the dashboard (TaskCard, SettingsModal, ChatView, MissionManager, AgentsView, FAB, etc.). **Keep buttons as they are.**
-
-This supersedes earlier guidance about mobile touch targets, primary/secondary control sizing on mobile, and `.touch-target` minimums for buttons. The `Frontend UX Design` workflow step (WS-006) is disabled and must stay disabled.
-
-If you find yourself opening `SettingsModal.css`, `TaskCard.css`, `ChatView.css`, etc. inside an `@media (max-width: 768px)` block to touch a `.btn`, `.modal-close`, `.settings-header-actions`, or `.card-*` button — stop. Confirm with the user in chat before proceeding.
-
-Exception: explicit named user request in chat that overrides this directive.
-
 ### Spec Generation Hygiene
 
 - Do not cite `.fusion/tasks/<id>/<file>` paths in Context/Steps/File Scope unless the file already exists, is explicitly created as a `(new)` Artifact, or is sibling `PROMPT.md`/`task.json`/`attachments/*`.
@@ -163,30 +153,6 @@ Scoped exception (FN-5819): shared-branch-group members (`branchContext.assignme
 
 - FN-5419: git run-audit now includes `pull:fast-forward` and `stash:pop-conflict`; dashboard git surfaces now include the extended `POST /api/git/pull` integration-worktree path plus companion `POST /api/git/stash-resolve`, `POST /api/git/stash-drop`, and `POST /api/git/stash-apply` routes.
 
-### Reliability Mechanism Coverage
-
-- FN-5432 backstop: `packages/engine/src/__tests__/reliability-interactions/dependency-cycle-reconcile.test.ts` extends FN-5256 coverage with long-cycle ambiguous sweep, write-boundary/sweep race, self-defeating+cycle non-contradiction across one maintenance flow, and audit-event shape regression; core regression cases (long cycle, self-loop via update, incremental-update closes a loop, moveTask seam invariant, DependencyCycleError shape) live in `packages/core/src/__tests__/store-dependency-cycle.test.ts`. User-facing pull/stash audit event behavior (`pull:fast-forward`, `stash:pop-conflict`) is documented in `docs/dashboard-guide.md` under Merge Advance Notice / Smart Pull.
-- FN-5403 backstop: `packages/engine/src/__tests__/reliability-interactions/engine-stop-aborts-execution.test.ts` locks stop-ordering behavior so engine shutdown aborts executor AI sessions before drain wait and preserves task-row lifecycle semantics.
-- FN-5704 backstop: `packages/engine/src/__tests__/reliability-interactions/reclaim-self-owned-resume-limbo-escalation.test.ts` guards reclaim/unpause no-progress oscillation recovery by capping repeated no-progress resumes, escalating to preserve-work `todo` rebound, and emitting `task:resume-limbo-escalated` audit metadata while exempting progress/user-paused/autoMerge-off cases.
-- FN-5715 backstop: `packages/engine/src/__tests__/reliability-interactions/mission-validation-trigger-gap.test.ts` guards mission validation trigger continuity so done task completion and startup recovery both route assertion-linked features through validator runs before completion.
-- FN-5738 backstop (superseded by FN-5902): `packages/engine/src/__tests__/reliability-interactions/mission-validation-trigger-gap.test.ts` now guards the inverted contract so legacy zero-link mission features lazily restore a managed assertion, route through validator runs, and never emit `validation_auto_passed_no_assertions` during recovery replays.
-- FN-5741 backstop: `packages/engine/src/__tests__/reliability-interactions/merge-request-shadow-handoff.test.ts` guards Phase-1 write-only-shadow merge-request record + handoff-accepted marker seam (flag OFF = no-op, ON = shadow-only non-authoritative).
-- FN-5742 backstop: `packages/engine/src/__tests__/reliability-interactions/dual-observe-merge-seam.test.ts` guards Phase-2 dual-observe parity (dependency + lease diffs, shadow dequeue parity, manual-required shadow skip) while legacy behavior remains authoritative.
-- FN-5743 backstop: `packages/engine/src/__tests__/reliability-interactions/merge-request-cancel-on-hard-cancel.test.ts` plus `packages/core/src/__tests__/merge-request-record.test.ts` guard Phase-3 cutover semantics (merge-request retry state transitions, authoritative user hard-cancel tombstone, and non-user rebound no-op cancel semantics).
-- FN-5754 backstop: `packages/engine/src/__tests__/reliability-interactions/mission-stranded-feature-retriage.test.ts` guards startup/maintenance stranded-feature re-triage for active autopilot slices, including link-first dedupe, non-defined skip safety, non-autopilot no-op, idempotency, and `mission:stranded-feature-triaged` audit shape.
-- FN-5755 backstop: `packages/engine/src/__tests__/reliability-interactions/mission-validation-trigger-gap.test.ts` extends mission validation coverage so bounded periodic maintenance replays `recoverActiveMissions` for stranded `implementing` features and remains idempotent on repeated passes.
-- FN-5783 backstop: `packages/engine/src/__tests__/reliability-interactions/branch-group-automerge-precedence.test.ts` guards grouped merge precedence so per-task `autoMerge` remains member→integration only, group `autoMerge` gates promotion eligibility, and promotion-gate audit events capture pause/automerge override reasons.
-- FN-5788 backstop: `packages/engine/src/__tests__/reliability-interactions/branch-group-promotion-gate.test.ts` guards merger-side promotion-gate telemetry on shared member landings, including pause/settings/group autoMerge reason mapping and no default-branch auto-promotion side effects.
-- FN-5830 backstop: `packages/engine/src/__tests__/reliability-interactions/branch-group-promotion.test.ts` guards branch-group completion-gate + promotion lifecycle so completion detection drives exactly one shared→default promotion, re-calls stay idempotent, and gated paths emit promotion-gated telemetry without promoting.
-- FN-5820 backstop: `packages/engine/src/__tests__/reliability-interactions/shared-branch-group-lifecycle.test.ts` guards the full shared-branch-group lifecycle—concurrent distinct-worktree execution, member→shared-branch accumulation, single shared→main completion-gate promotion with idempotent re-evaluation, gate-disabled integration-without-promotion, and per-task-derived/ungrouped no-regression.
-- FN-5866 backstop: `packages/engine/src/__tests__/reliability-interactions/post-done-continuation-no-wedge.test.ts` guards the post-done non-continuable-session seam so completed executor work stays cleanly in `in-review` while incomplete tasks still fail normally.
-- FN-5888 backstop: `packages/engine/src/__tests__/reliability-interactions/post-done-continuation-no-wedge.test.ts` also covers the incomplete-task non-continuable-session fresh-session retry path, ensuring within-budget failures clear `sessionFile` and requeue to `todo` with preserved resume state while exhausted budgets still fall through to terminal failure.
-- FN-5889 backstop: `packages/engine/src/__tests__/reliability-interactions/post-done-continuation-no-wedge.test.ts` extends the seam to the step-session post-done continuation path and the `recoverPostDoneNonContinuableWedge` self-heal, so completed work never wedges to `in-review` + `status="failed"` and already-wedged rows are cleared before stall surfacing.
-- FN-5891 backstop: `packages/engine/src/__tests__/mission-execution-loop.test.ts` guards mission validation session model resolution (assigned-agent runtime, validator lane settings, test mode) and infrastructure-error surfacing so validator session failures emit `validation_error` instead of silently entering fix-feature retries.
-- FN-5901 backstop: `packages/engine/src/__tests__/reliability-interactions/mission-validator-run-reaper.test.ts` guards stale mission-validator-run recovery across manual and automatic trigger types, verifies `mission:validator-run-reaped` audit metadata, preserves complete/archived parent feature state during reap, and proves reaped active features resume validation instead of staying wedged behind abandoned `running` rows.
-- FN-5874 backstop: `packages/engine/src/__tests__/reliability-interactions/ai-merge-ff-landed-files.test.ts` guards AI-merge fast-forward finalizer persistence of `mergeDetails.commitSha`, `landedFiles`, and `modifiedFiles`, verifies no-op landings do not fabricate metadata, and confirms normal squash landings do not set FN-5103 attribution-restriction flags; companion coverage in `packages/engine/src/__tests__/self-healing.test.ts` extends `recoverDoneTaskMergeMetadata` so done tasks with empty `mergeDetails` but a recorded `baseCommitSha` are backfilled via owned-commit discovery while FN-5103 skip guards still prevent overwrite.
-
----
 
 ## Reference docs (deeper detail)
 
