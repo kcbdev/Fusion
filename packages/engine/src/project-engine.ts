@@ -27,7 +27,7 @@ import { CronRunner, createAiPromptExecutor } from "./cron-runner.js";
 import type { RoutineRunner } from "./routine-runner.js";
 import { aiMergeTask, sweepStaleAutostashes, VerificationError } from "./merger.js";
 import { runAiMerge } from "./merger-ai.js";
-import { promoteBranchGroup, type BranchGroupPromotionResult } from "./group-merge-coordinator.js";
+import { promoteBranchGroup, type BranchGroupPromotionResult, type CreateGroupPrFn } from "./group-merge-coordinator.js";
 import { PRIORITY_MERGE } from "./concurrency.js";
 import { runtimeLog } from "./logger.js";
 import type { HeartbeatTriggerScheduler } from "./agent-heartbeat.js";
@@ -205,6 +205,14 @@ export interface ProjectEngineOptions {
    * can be "pull-request". Injected from CLI layer.
    */
   processPullRequestMerge?: ProcessPullRequestMergeFn;
+  /**
+   * Creates (or reuses) the single managed GitHub PR for a branch group during
+   * promotion (KTD7). Injected from the CLI layer because it depends on the
+   * dashboard `GitHubClient`; the engine must not statically import it. Mirrors
+   * the `processPullRequestMerge` seam. When absent, PR-mode promotion flips
+   * `prState` to "open" without creating a real PR (legacy behaviour).
+   */
+  createGroupPr?: CreateGroupPrFn;
   /**
    * Returns the merge blocker reason for a task, or null/undefined if
    * the task is eligible for merge. Imported from @fusion/core.
@@ -952,6 +960,7 @@ export class ProjectEngine {
       rootDir: cwd,
       groupId,
       settings: promotionSettings,
+      createGroupPr: this.options.createGroupPr,
       recordAudit: async (event) => {
         await store.recordRunAuditEvent({
           domain: event.domain as any,
@@ -1894,6 +1903,7 @@ export class ProjectEngine {
                 rootDir: cwd,
                 groupId: taskForPromotion.branchContext!.groupId,
                 settings: promotionSettings,
+                createGroupPr: this.options.createGroupPr,
                 recordAudit: async (event) => {
                   await store.recordRunAuditEvent({
                     domain: event.domain as any,

@@ -65,6 +65,7 @@ export {
   type BranchGroupPromotionDecision,
   type BranchGroupCompletionStatus,
   type BranchGroupPromotionResult,
+  type CreateGroupPrFn,
 } from "./group-merge-coordinator.js";
 export {
   resolveMergeIntegrationRoot,

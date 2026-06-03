@@ -20,7 +20,7 @@ import type { TaskStore } from "@fusion/core";
 import { resolveTaskMergeTarget } from "@fusion/core";
 import type { Settings, TaskDetail, PrInfo, MergeResult, BranchGroup, BranchGroupPrState, Task } from "@fusion/core";
 import { activeSessionRegistry, resolveIntegrationBranch } from "@fusion/engine";
-import type { WorktreePool } from "@fusion/engine";
+import type { CreateGroupPrFn, WorktreePool } from "@fusion/engine";
 
 /**
  * Minimal interface for GitHub operations needed by the PR merge workflow.
@@ -161,6 +161,42 @@ function toBranchGroupPrState(prInfo: PrInfo | null): BranchGroupPrState {
   if (prInfo.status === "merged") return "merged";
   if (prInfo.status === "closed") return "closed";
   return "open";
+}
+
+/**
+ * Build the `createGroupPr` engine callback (KTD7) used by the branch-group
+ * promotion coordinator. Closes over a GitHub client so the engine never imports
+ * the dashboard client directly. Pushes the group integration branch to origin
+ * (so `gh pr create --head` / the REST API can find it), then creates or reuses
+ * the single managed PR for the group.
+ *
+ * Idempotency: reuses an existing PR for the group head branch on GitHub. The
+ * coordinator additionally skips this call when a `prNumber` is already persisted,
+ * so a re-promotion never opens a second PR.
+ */
+export function createGroupPrCallback(
+  github: Pick<GitHubOperations, "findPrForBranch" | "createPr">,
+): CreateGroupPrFn {
+  return async ({ cwd, group, members, headBranch, baseBranch }) => {
+    const existing = await github.findPrForBranch({ head: headBranch, state: "all" });
+    if (existing) {
+      return { prNumber: existing.number, prUrl: existing.url, prState: toBranchGroupPrState(existing) };
+    }
+
+    await pushTaskBranchToOrigin(cwd, headBranch);
+    const membersWithBranch = members.map((member) => ({
+      id: member.id,
+      title: member.title,
+      branchName: getTaskBranchName(member.id),
+    }));
+    const created = await github.createPr({
+      title: buildGroupPullRequestTitle(group, members),
+      body: buildGroupPullRequestBody(group, membersWithBranch),
+      head: headBranch,
+      base: baseBranch,
+    });
+    return { prNumber: created.number, prUrl: created.url, prState: toBranchGroupPrState(created) };
+  };
 }
 
 async function hasCommitsRelativeToBranch(cwd: string, branch: string, baseBranch: string): Promise<boolean> {

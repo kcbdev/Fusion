@@ -12,6 +12,28 @@ export interface BranchGroupMergeRouting {
   mergeTarget: MergeTargetResolution;
 }
 
+/**
+ * Injected callback (KTD7) that creates — or reuses — the single managed GitHub
+ * PR for a branch group. Closes over a dashboard-built `GitHubClient` at the CLI
+ * construction sites so the engine never statically imports `@fusion/dashboard`
+ * (avoids the engine ↔ dashboard import cycle). Mirrors the `processPullRequestMerge`
+ * injection seam.
+ *
+ * Returns the GitHub PR number/url and the persisted-state mapping. Idempotency is
+ * enforced both here (reuse an existing open PR for the head branch) and by the
+ * coordinator (skip the call entirely when a `prNumber` is already persisted).
+ */
+export type CreateGroupPrFn = (input: {
+  /** Project working directory — needed to push the head branch to origin. */
+  cwd: string;
+  group: BranchGroup;
+  members: Task[];
+  /** Head branch — the group integration branch. */
+  headBranch: string;
+  /** Base branch — the integration/default target. */
+  baseBranch: string;
+}) => Promise<{ prNumber: number; prUrl: string; prState: BranchGroupPrState }>;
+
 export interface BranchGroupCompletionStatus {
   complete: boolean;
   totalMembers: number;
@@ -118,10 +140,16 @@ async function ensureGroupBranchExists(rootDir: string, branchName: string, star
  * Promotion is intentionally idempotent and must never run inline in aiMergeTask.
  */
 export async function promoteBranchGroup(input: {
-  store: Pick<TaskStore, "getBranchGroup" | "listTasksByBranchGroup" | "updateBranchGroup">;
+  store: Pick<TaskStore, "getBranchGroup" | "getBranchGroupByBranchName" | "listTasksByBranchGroup" | "updateBranchGroup">;
   rootDir: string;
   groupId: string;
   settings: Pick<Settings, "autoMerge" | "globalPause" | "enginePaused"> & Partial<Pick<Settings, "mergeStrategy" | "integrationBranch" | "baseBranch">>;
+  /**
+   * Injected GitHub PR creator (KTD7). When PR mode is active and the group is
+   * complete, the coordinator uses this to create the single managed PR. Omitted
+   * for direct-merge mode and in tests that don't exercise PR creation.
+   */
+  createGroupPr?: CreateGroupPrFn;
   recordAudit?: (event: {
     domain: string;
     mutationType: string;
@@ -219,9 +247,53 @@ export async function promoteBranchGroup(input: {
   }
 
   const isPrMode = input.settings.mergeStrategy === "pull-request";
+
+  let prNumber: number | undefined = group.prNumber;
+  let prUrl: string | undefined = group.prUrl;
+  let prState: BranchGroupPrState = isPrMode ? "open" : "merged";
+
+  if (isPrMode) {
+    // Idempotency (KTD4): never open a second PR. Prefer a PR already persisted
+    // on this group; otherwise reuse any open PR another group row may hold for
+    // the same head branch. Only when neither exists do we invoke the injected
+    // creator. The injected creator itself also reuses an existing GitHub PR.
+    const persistedPr = group.prNumber
+      ? { prNumber: group.prNumber, prUrl: group.prUrl }
+      : (() => {
+          const existing = input.store.getBranchGroupByBranchName(group.branchName);
+          return existing && existing.id !== group.id && existing.prNumber
+            ? { prNumber: existing.prNumber, prUrl: existing.prUrl }
+            : null;
+        })();
+
+    if (persistedPr) {
+      prNumber = persistedPr.prNumber;
+      prUrl = persistedPr.prUrl;
+      prState = "open";
+    } else if (input.createGroupPr) {
+      // GitHub failure must leave the group recoverable: do NOT flip prState to a
+      // lie. The group is already merged to the integration branch locally; we
+      // surface the error so the caller can retry promotion (which is idempotent).
+      const created = await input.createGroupPr({
+        cwd: input.rootDir,
+        group,
+        members,
+        headBranch: group.branchName,
+        baseBranch: integrationBranch,
+      });
+      prNumber = created.prNumber;
+      prUrl = created.prUrl;
+      prState = created.prState;
+    }
+    // If neither a persisted PR nor a createGroupPr callback is available, fall
+    // back to the legacy behaviour (flip prState to "open" without a number).
+  }
+
   const updatedGroup = input.store.updateBranchGroup(group.id, {
     status: "finalized",
-    prState: isPrMode ? "open" : "merged",
+    prState,
+    prNumber: prNumber ?? null,
+    prUrl: prUrl ?? null,
   });
 
   await input.recordAudit?.({

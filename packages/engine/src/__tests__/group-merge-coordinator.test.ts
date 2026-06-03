@@ -337,6 +337,211 @@ describe("promoteBranchGroup", () => {
   });
 });
 
+describe("promoteBranchGroup PR creation (U5)", () => {
+  function makeGroup(overrides?: Partial<any>): any {
+    return {
+      id: "BG-PR-1",
+      sourceType: "planning",
+      sourceId: "planning:x",
+      branchName: "fusion/groups/planning-x",
+      autoMerge: true,
+      prState: "none",
+      status: "open",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      ...overrides,
+    };
+  }
+
+  const landedMember = (id: string, branchName: string) => ({
+    id,
+    title: `${id} title`,
+    column: "done" as const,
+    mergeDetails: {
+      mergeConfirmed: true,
+      mergeTargetSource: "branch-group-integration",
+      mergeTargetBranch: branchName,
+    },
+  });
+
+  function makePrRepo(): string {
+    const rootDir = makeRepo();
+    execSync("git checkout -b fusion/groups/planning-x", { cwd: rootDir });
+    execSync("echo promoted > group.txt", { cwd: rootDir, shell: "/bin/bash" });
+    execSync("git add group.txt && git commit -m group", { cwd: rootDir, shell: "/bin/bash" });
+    execSync("git checkout main", { cwd: rootDir });
+    return rootDir;
+  }
+
+  function makeStore(getGroup: () => any, setGroup: (g: any) => void, members: any[], byBranch?: () => any) {
+    return {
+      getBranchGroup: () => getGroup(),
+      getBranchGroupByBranchName: byBranch ?? (() => null),
+      listTasksByBranchGroup: async () => members,
+      updateBranchGroup: (_id: string, patch: Record<string, unknown>) => {
+        setGroup({ ...getGroup(), ...patch });
+        return getGroup();
+      },
+    } as any;
+  }
+
+  const prSettings = {
+    autoMerge: true,
+    globalPause: false,
+    enginePaused: false,
+    mergeStrategy: "pull-request" as const,
+    baseBranch: "main",
+  };
+
+  it("creates exactly one PR for a complete PR-mode group and persists prNumber/prUrl/prState=open", async () => {
+    const rootDir = makePrRepo();
+    let group = makeGroup();
+    let createCalls = 0;
+    const result = await promoteBranchGroup({
+      rootDir,
+      groupId: group.id,
+      settings: prSettings,
+      store: makeStore(() => group, (g) => { group = g; }, [landedMember("FN-A", group.branchName)]),
+      createGroupPr: async ({ headBranch, baseBranch, members }) => {
+        createCalls += 1;
+        expect(headBranch).toBe("fusion/groups/planning-x");
+        expect(baseBranch).toBe("main");
+        expect(members.map((m: any) => m.id)).toEqual(["FN-A"]);
+        return { prNumber: 42, prUrl: "https://github.com/x/y/pull/42", prState: "open" };
+      },
+    });
+
+    expect(result.reason).toBe("promoted");
+    expect(createCalls).toBe(1);
+    expect(group.status).toBe("finalized");
+    expect(group.prState).toBe("open");
+    expect(group.prNumber).toBe(42);
+    expect(group.prUrl).toBe("https://github.com/x/y/pull/42");
+  });
+
+  it("is idempotent: a persisted prNumber means re-promotion never opens a second PR", async () => {
+    const rootDir = makePrRepo();
+    let createCalls = 0;
+    const createGroupPr = async () => {
+      createCalls += 1;
+      return { prNumber: 7, prUrl: "https://github.com/x/y/pull/7", prState: "open" as const };
+    };
+
+    // First promotion creates the PR.
+    let group = makeGroup();
+    await promoteBranchGroup({
+      rootDir,
+      groupId: group.id,
+      settings: prSettings,
+      store: makeStore(() => group, (g) => { group = g; }, [landedMember("FN-A", group.branchName)]),
+      createGroupPr,
+    });
+    expect(createCalls).toBe(1);
+    expect(group.prNumber).toBe(7);
+
+    // Re-running while the group already has prState=open short-circuits at the
+    // top guard (already-finalized) — the creator is NOT called again.
+    const again = await promoteBranchGroup({
+      rootDir,
+      groupId: group.id,
+      settings: prSettings,
+      store: makeStore(() => group, (g) => { group = g; }, [landedMember("FN-A", group.branchName)]),
+      createGroupPr,
+    });
+    expect(again.reason).toBe("already-finalized");
+    expect(createCalls).toBe(1);
+  });
+
+  it("reuses an existing PR via getBranchGroupByBranchName without invoking the creator", async () => {
+    const rootDir = makePrRepo();
+    let group = makeGroup();
+    let createCalls = 0;
+    const sibling = makeGroup({ id: "BG-PR-OTHER", prNumber: 99, prUrl: "https://github.com/x/y/pull/99", prState: "open" });
+    const result = await promoteBranchGroup({
+      rootDir,
+      groupId: group.id,
+      settings: prSettings,
+      store: makeStore(
+        () => group,
+        (g) => { group = g; },
+        [landedMember("FN-A", group.branchName)],
+        () => sibling,
+      ),
+      createGroupPr: async () => {
+        createCalls += 1;
+        return { prNumber: 1, prUrl: "x", prState: "open" as const };
+      },
+    });
+
+    expect(result.reason).toBe("promoted");
+    expect(createCalls).toBe(0);
+    expect(group.prNumber).toBe(99);
+    expect(group.prUrl).toBe("https://github.com/x/y/pull/99");
+    expect(group.prState).toBe("open");
+  });
+
+  it("does not create a PR for an incomplete group (gate blocks before creation)", async () => {
+    const rootDir = makePrRepo();
+    let group = makeGroup();
+    let createCalls = 0;
+    const result = await promoteBranchGroup({
+      rootDir,
+      groupId: group.id,
+      settings: prSettings,
+      store: makeStore(() => group, (g) => { group = g; }, [{ id: "FN-A", column: "todo" }]),
+      createGroupPr: async () => {
+        createCalls += 1;
+        return { prNumber: 1, prUrl: "x", prState: "open" as const };
+      },
+    });
+
+    expect(result.reason).toBe("incomplete");
+    expect(createCalls).toBe(0);
+    expect(group.prState).toBe("none");
+    expect(group.status).toBe("open");
+  });
+
+  it("leaves the group recoverable when PR creation fails (no partial prState lie)", async () => {
+    const rootDir = makePrRepo();
+    let group = makeGroup();
+    await expect(
+      promoteBranchGroup({
+        rootDir,
+        groupId: group.id,
+        settings: prSettings,
+        store: makeStore(() => group, (g) => { group = g; }, [landedMember("FN-A", group.branchName)]),
+        createGroupPr: async () => {
+          throw new Error("gh: network down");
+        },
+      }),
+    ).rejects.toThrow("gh: network down");
+
+    // prState/status must NOT be flipped to a lie; re-promotion can retry.
+    expect(group.prState).toBe("none");
+    expect(group.status).toBe("open");
+  });
+
+  it("autoMerge:false group is not promoted (PR creation only on eligible/explicit promote)", async () => {
+    const rootDir = makePrRepo();
+    let group = makeGroup({ autoMerge: false });
+    let createCalls = 0;
+    const result = await promoteBranchGroup({
+      rootDir,
+      groupId: group.id,
+      settings: prSettings,
+      store: makeStore(() => group, (g) => { group = g; }, [landedMember("FN-A", group.branchName)]),
+      createGroupPr: async () => {
+        createCalls += 1;
+        return { prNumber: 1, prUrl: "x", prState: "open" as const };
+      },
+    });
+
+    expect(result.reason).toBe("gated");
+    expect(createCalls).toBe(0);
+    expect(group.prState).toBe("none");
+  });
+});
+
 describe("ProjectEngine.promoteBranchGroup (U4 bridge method)", () => {
   // The dashboard promote route calls engine.promoteBranchGroup AS A METHOD.
   // These tests invoke the REAL method body bound to a minimal engine-shaped
@@ -383,6 +588,7 @@ describe("ProjectEngine.promoteBranchGroup (U4 bridge method)", () => {
       context: {
         runtime: { getTaskStore: () => fullStore },
         config: { workingDirectory: rootDir },
+        options: {},
       },
       getSettingsCalls,
     };

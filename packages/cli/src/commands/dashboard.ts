@@ -46,6 +46,7 @@ import {
   getMergeStrategy,
   getTaskBranchName,
   processPullRequestMergeTask,
+  createGroupPrCallback,
 } from "./task-lifecycle.js";
 import { promptForPort } from "./port-prompt.js";
 import { ensureCwdProjectRegistered } from "./ensure-project-registered.js";
@@ -1559,6 +1560,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       getMergeStrategy,
       processPullRequestMerge: (s, wd, taskId, pool) =>
         processPullRequestMergeTask(s, wd, taskId, githubClient, getTaskMergeBlocker, pool),
+      createGroupPr: createGroupPrCallback(githubClient),
       getTaskMergeBlocker,
     });
 
