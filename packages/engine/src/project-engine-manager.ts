@@ -37,6 +37,7 @@ export interface EngineManagerOptions {
   getMergeStrategy?: ProjectEngineOptions["getMergeStrategy"];
   processPullRequestMerge?: ProjectEngineOptions["processPullRequestMerge"];
   createGroupPr?: ProjectEngineOptions["createGroupPr"];
+  syncGroupPr?: ProjectEngineOptions["syncGroupPr"];
   getTaskMergeBlocker?: ProjectEngineOptions["getTaskMergeBlocker"];
   onInsightRunProcessed?: ProjectEngineOptions["onInsightRunProcessed"];
 }
@@ -483,6 +484,7 @@ export class ProjectEngineManager {
       getMergeStrategy: this.options.getMergeStrategy,
       processPullRequestMerge: this.options.processPullRequestMerge,
       createGroupPr: this.options.createGroupPr,
+      syncGroupPr: this.options.syncGroupPr,
       getTaskMergeBlocker: this.options.getTaskMergeBlocker,
       onInsightRunProcessed: this.options.onInsightRunProcessed,
       ...overrides,

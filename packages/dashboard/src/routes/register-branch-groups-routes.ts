@@ -5,6 +5,17 @@ import { badRequest, notFound } from "../api-error.js";
 
 export interface BranchGroupsRouterOptions {
   promoteBranchGroup?: (input: { groupId: string; projectId?: string }) => Promise<Record<string, unknown>>;
+  /**
+   * Terminal reconciliation when a group is abandoned (U6, R7): best-effort
+   * close the single managed GitHub PR. Returns the reconciled prState so the
+   * route can persist it. Injected so the router does not hard-depend on a
+   * GitHub client being available; when omitted, abandon still marks the row
+   * `abandoned`/`closed` without touching GitHub.
+   */
+  closeGroupPr?: (input: {
+    group: BranchGroup;
+    projectId?: string;
+  }) => Promise<{ prNumber: number; prUrl: string; prState: BranchGroup["prState"] } | null>;
 }
 
 function parseProjectId(req: Request): string | undefined {
@@ -106,6 +117,43 @@ export function createBranchGroupsRouter(store: TaskStore, options?: BranchGroup
 
     const result = await promote({ groupId: id, projectId: parseProjectId(req) });
     res.json({ groupId: id, ...result });
+  });
+
+  // Terminal reconciliation: abandon a group. Best-effort closes the single
+  // managed GitHub PR (U6, R7), then marks the row `abandoned` with prState
+  // `closed`. The PR close is best-effort: if it fails or no closeGroupPr is
+  // wired, the row is still marked abandoned/closed (the GitHub PR is left for
+  // out-of-band reconciliation on the next read/sync).
+  router.post("/:id/abandon", async (req, res) => {
+    const id = String(req.params.id ?? "").trim();
+    if (!id) throw badRequest("id is required");
+    const group = store.getBranchGroup(id);
+    if (!group) throw notFound("Branch group not found");
+
+    let prState: BranchGroup["prState"] = group.prState === "merged" ? "merged" : "closed";
+    let prNumber = group.prNumber;
+    let prUrl = group.prUrl;
+
+    if (group.prNumber != null && group.prState === "open" && options?.closeGroupPr) {
+      try {
+        const reconciled = await options.closeGroupPr({ group, projectId: parseProjectId(req) });
+        if (reconciled) {
+          prState = reconciled.prState;
+          prNumber = reconciled.prNumber;
+          prUrl = reconciled.prUrl;
+        }
+      } catch {
+        // Best-effort: leave the GitHub PR for out-of-band reconciliation.
+      }
+    }
+
+    const updated = store.updateBranchGroup(id, {
+      status: "abandoned",
+      prState,
+      prNumber: prNumber ?? null,
+      prUrl: prUrl ?? null,
+    });
+    res.json({ groupId: id, group: await serializeGroup(store, updated) });
   });
 
   return router;

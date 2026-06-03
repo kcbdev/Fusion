@@ -13,6 +13,7 @@ import { createDevServerRouter } from "../dev-server-routes.js";
 import type { AiSessionStore } from "../ai-session-store.js";
 import { createStashRecoveryRouter } from "./register-stash-recovery-routes.js";
 import { createBranchGroupsRouter } from "./register-branch-groups-routes.js";
+import { GitHubClient, closeGroupPullRequest } from "../github.js";
 
 interface IntegratedRoutersOptions {
   router: Router;
@@ -55,6 +56,17 @@ export function registerIntegratedRouters({
         throw new Error("promoteBranchGroup is not available on engine");
       }
       return await promote(groupId);
+    },
+    closeGroupPr: async ({ group }) => {
+      // Best-effort terminal reconciliation: close the single managed GitHub PR
+      // (U6, R7). The route still marks the row abandoned/closed if this returns
+      // null or throws.
+      if (group.prNumber == null) {
+        return null;
+      }
+      const client = new GitHubClient();
+      const result = await closeGroupPullRequest(client, group);
+      return { prNumber: result.prNumber, prUrl: result.prUrl, prState: result.prState };
     },
   }));
 }

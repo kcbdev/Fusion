@@ -82,6 +82,7 @@ import {
   type PostMergeAuditMode,
   type TaskSourceIssue,
   type Task,
+  type BranchGroup,
   type AutostashOrphanRecord,
   normalizeMergeAdvanceAutoSyncMode,
   isMergeRequestContractShadowEnabled,
@@ -5941,6 +5942,14 @@ export interface MergerOptions {
   allowDirtyLocalCheckoutSync?: boolean;
   /** Plugin runner for runtime selection. When provided, enables plugin runtime lookup. */
   pluginRunner?: import("./plugin-runner.js").PluginRunner;
+  /**
+   * Injected group-PR sync callback (KTD7, U6). When a shared branch-group
+   * member lands and its group has a persisted open PR, the merger uses this to
+   * push an updated PR body (member checklist + x/N completion). Failures are
+   * non-fatal and retryable on the next landing. Injected from the CLI layer so
+   * the engine never imports the dashboard GitHub client.
+   */
+  syncGroupPr?: import("./group-merge-coordinator.js").SyncGroupPrFn;
 }
 
 function quoteArg(value: string): string {
@@ -7508,6 +7517,58 @@ export async function aiMergeTask(
       });
     } catch {
       // best-effort audit
+    }
+
+    // U6 (R6): keep the single managed group PR in sync as members land. Only
+    // when the group already has a persisted open PR; the body always reflects
+    // the full current member state, so each landing pushes the latest x/N
+    // (idempotent body rewrite — coalesces naturally, no queue). Failures are
+    // non-fatal and retryable on the next landing / explicit refresh.
+    if (options.syncGroupPr) {
+      try {
+        const latestGroup = await Promise.resolve(
+          (store as any).getBranchGroup?.(groupRouting.branchGroup.id),
+        ) as BranchGroup | null | undefined;
+        if (latestGroup && latestGroup.prNumber != null && latestGroup.prState === "open") {
+          const members = (await Promise.resolve(
+            (store as any).listTasksByBranchGroup?.(latestGroup.id),
+          )) as Task[] | undefined;
+          const reconciled = await options.syncGroupPr({
+            group: latestGroup,
+            members: members ?? [],
+          });
+          // Out-of-band reconciliation: if GitHub reports the PR is no longer
+          // open (closed/merged), persist the corrected prState rather than
+          // leaving a stale "open".
+          if (reconciled.prState !== latestGroup.prState) {
+            await Promise.resolve(
+              (store as any).updateBranchGroup?.(latestGroup.id, {
+                prState: reconciled.prState,
+                prNumber: reconciled.prNumber,
+                prUrl: reconciled.prUrl,
+              }),
+            );
+          }
+        }
+      } catch (err) {
+        // Non-fatal: never fail the merge/landing because PR sync failed.
+        try {
+          await (store as any).recordRunAuditEvent?.({
+            taskId,
+            agentId: "merger",
+            runId: `merge-${taskId}`,
+            domain: "git",
+            mutationType: "merge:branch-group-pr-sync-failed",
+            target: taskId,
+            metadata: {
+              groupId: groupRouting.branchGroup.id,
+              error: err instanceof Error ? err.message : String(err),
+            },
+          });
+        } catch {
+          // best-effort audit
+        }
+      }
     }
   };
   if (groupRouting) {

@@ -34,6 +34,44 @@ export type CreateGroupPrFn = (input: {
   baseBranch: string;
 }) => Promise<{ prNumber: number; prUrl: string; prState: BranchGroupPrState }>;
 
+/** Result shape shared by group-PR sync/close callbacks. */
+export interface GroupPrReconcileResult {
+  prNumber: number;
+  prUrl: string;
+  prState: BranchGroupPrState;
+}
+
+/**
+ * Injected callback (KTD7) that PUSHES an updated body/title onto the single
+ * managed group PR (member checklist + x/N completion) as members land (U6, R6).
+ * Mirrors {@link CreateGroupPrFn}'s injection seam; closes over a dashboard-built
+ * `GitHubClient` at the CLI sites so the engine never imports the dashboard.
+ *
+ * The body always reflects the full current member state, so repeated calls are
+ * idempotent body rewrites that naturally coalesce — no queue is needed.
+ *
+ * Out-of-band reconciliation: when the persisted PR is closed/merged on GitHub,
+ * this returns the reconciled `prState` (closed/merged) rather than re-opening or
+ * erroring, so the caller can persist the corrected state.
+ *
+ * The group passed in carries the persisted `prNumber`; callers must only invoke
+ * this when `prNumber` is set.
+ */
+export type SyncGroupPrFn = (input: {
+  group: BranchGroup;
+  members: Task[];
+}) => Promise<GroupPrReconcileResult>;
+
+/**
+ * Injected callback (KTD7) that closes the single managed group PR (best-effort)
+ * during terminal reconciliation when a group is abandoned (U6, R7). If the PR is
+ * already closed/merged out-of-band, it returns the reconciled state instead of
+ * erroring. Callers must only invoke this when a `prNumber` is persisted.
+ */
+export type CloseGroupPrFn = (input: {
+  group: BranchGroup;
+}) => Promise<GroupPrReconcileResult>;
+
 export interface BranchGroupCompletionStatus {
   complete: boolean;
   totalMembers: number;

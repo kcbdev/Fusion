@@ -219,6 +219,20 @@ export interface MergePrParams {
   method?: "merge" | "squash" | "rebase";
 }
 
+export interface UpdatePrParams {
+  owner?: string;
+  repo?: string;
+  number: number;
+  title?: string;
+  body?: string;
+}
+
+export interface ClosePrParams {
+  owner?: string;
+  repo?: string;
+  number: number;
+}
+
 export interface BadgeBatchRequest {
   alias: string;
   type: "pr" | "issue";
@@ -1911,6 +1925,121 @@ export class GitHubClient {
       commentCount: data.comments,
       lastCommentAt: data.updated_at,
     };
+  }
+
+  /**
+   * Edit the title and/or body of an existing PR by number. Uses gh CLI if
+   * available, otherwise the REST API. Returns the refreshed PR status.
+   *
+   * Used by the group-PR sync path to push an updated member checklist /
+   * completion summary onto the single managed group PR (U6, R6).
+   */
+  async updatePr(params: UpdatePrParams): Promise<PrInfo> {
+    if (this.hasGhAuth()) {
+      try {
+        return await this.updatePrWithGh(params);
+      } catch (err) {
+        if (this.token) {
+          return this.updatePrWithApi(params);
+        }
+        throw new Error(getGhErrorMessage(err));
+      }
+    }
+
+    if (this.token) {
+      return this.updatePrWithApi(params);
+    }
+    throw new Error("GitHub CLI (gh) is not available or not authenticated, and no GITHUB_TOKEN provided.");
+  }
+
+  private async updatePrWithGh(params: UpdatePrParams): Promise<PrInfo> {
+    const resolved = this.resolveRepo(params.owner, params.repo);
+    const args = [
+      "pr", "edit", String(params.number),
+      "--repo", `${resolved.owner}/${resolved.repo}`,
+    ];
+    if (params.title !== undefined) {
+      args.push("--title", params.title);
+    }
+    if (params.body !== undefined) {
+      args.push("--body", params.body);
+    }
+    runGh(args);
+    return this.getPrStatus(resolved.owner, resolved.repo, params.number);
+  }
+
+  private async updatePrWithApi(params: UpdatePrParams): Promise<PrInfo> {
+    const resolved = this.resolveRepo(params.owner, params.repo);
+    const payload: Record<string, string> = {};
+    if (params.title !== undefined) payload.title = params.title;
+    if (params.body !== undefined) payload.body = params.body;
+    const response = await fetch(
+      `${this.baseUrl}/repos/${encodeURIComponent(resolved.owner)}/${encodeURIComponent(resolved.repo)}/pulls/${params.number}`,
+      {
+        method: "PATCH",
+        headers: this.buildHeaders(),
+        body: JSON.stringify(payload),
+      },
+    );
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: response.statusText }));
+      throw new Error(`GitHub API error: ${response.status} ${error.message || response.statusText}`);
+    }
+
+    return this.getPrStatus(resolved.owner, resolved.repo, params.number);
+  }
+
+  /**
+   * Close an existing PR by number without merging. Uses gh CLI if available,
+   * otherwise the REST API. Returns the refreshed PR status.
+   *
+   * Used by terminal reconciliation when a branch group is abandoned (U6, R7).
+   */
+  async closePr(params: ClosePrParams): Promise<PrInfo> {
+    if (this.hasGhAuth()) {
+      try {
+        return await this.closePrWithGh(params);
+      } catch (err) {
+        if (this.token) {
+          return this.closePrWithApi(params);
+        }
+        throw new Error(getGhErrorMessage(err));
+      }
+    }
+
+    if (this.token) {
+      return this.closePrWithApi(params);
+    }
+    throw new Error("GitHub CLI (gh) is not available or not authenticated, and no GITHUB_TOKEN provided.");
+  }
+
+  private async closePrWithGh(params: ClosePrParams): Promise<PrInfo> {
+    const resolved = this.resolveRepo(params.owner, params.repo);
+    runGh([
+      "pr", "close", String(params.number),
+      "--repo", `${resolved.owner}/${resolved.repo}`,
+    ]);
+    return this.getPrStatus(resolved.owner, resolved.repo, params.number);
+  }
+
+  private async closePrWithApi(params: ClosePrParams): Promise<PrInfo> {
+    const resolved = this.resolveRepo(params.owner, params.repo);
+    const response = await fetch(
+      `${this.baseUrl}/repos/${encodeURIComponent(resolved.owner)}/${encodeURIComponent(resolved.repo)}/pulls/${params.number}`,
+      {
+        method: "PATCH",
+        headers: this.buildHeaders(),
+        body: JSON.stringify({ state: "closed" }),
+      },
+    );
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: response.statusText }));
+      throw new Error(`GitHub API error: ${response.status} ${error.message || response.statusText}`);
+    }
+
+    return this.getPrStatus(resolved.owner, resolved.repo, params.number);
   }
 
   /**
@@ -3693,6 +3822,17 @@ export function parseGitHubBadgeUrl(url: string): { owner: string; repo: string 
   return { owner: parsed.owner, repo: parsed.repo };
 }
 
+/** Resolve the current repo, throwing if it can't be determined. */
+function getCurrentRepoOrThrow(): { owner: string; repo: string } {
+  const currentRepo = getCurrentRepo();
+  if (!currentRepo) {
+    throw new Error(
+      "Could not determine repository. Run from a git repository with a GitHub remote.",
+    );
+  }
+  return currentRepo;
+}
+
 /** Map a `PrInfo.status` to the persisted `BranchGroup.prState`. */
 function prInfoToBranchGroupPrState(prInfo: PrInfo | null): BranchGroupPrState {
   if (!prInfo) return "none";
@@ -3775,6 +3915,88 @@ export async function createGroupPullRequest(
     prNumber: created.number,
     prUrl: created.url,
     prState: prInfoToBranchGroupPrState(created),
+  };
+}
+
+export interface SyncGroupPrInput {
+  group: Pick<BranchGroup, "id" | "branchName" | "sourceType" | "sourceId" | "prNumber">;
+  members: Pick<Task, "id" | "title">[];
+}
+
+/**
+ * Push an updated title/body onto the single managed group PR (U6, R6).
+ *
+ * The body always reflects the *full* current member state (checklist +
+ * completion summary), so repeated calls are idempotent body rewrites — each
+ * landing pushes the latest state and naturally coalesces with the previous one;
+ * no queue is needed (KTD4: idempotency anchors on the persisted `prNumber`).
+ *
+ * Out-of-band reconciliation: if the persisted PR is no longer open on GitHub
+ * (closed/merged out-of-band), this does NOT re-open or edit it — it returns the
+ * reconciled `prState` so the caller can persist it instead of erroring.
+ *
+ * Backend parity: dispatches through `GitHubClient.getPrStatus` / `updatePr`,
+ * which use the `gh` CLI when available and fall back to the REST API.
+ */
+export async function syncGroupPullRequest(
+  github: Pick<GitHubClient, "getPrStatus" | "updatePr">,
+  input: SyncGroupPrInput,
+): Promise<CreateGroupPrResult> {
+  const prNumber = input.group.prNumber;
+  if (prNumber == null) {
+    throw new Error(`syncGroupPullRequest: group ${input.group.id} has no persisted prNumber`);
+  }
+
+  const { owner, repo } = getCurrentRepoOrThrow();
+  const current = await github.getPrStatus(owner, repo, prNumber);
+  const currentState = prInfoToBranchGroupPrState(current);
+
+  // Out-of-band terminal state: do not re-open or edit a closed/merged PR.
+  if (currentState !== "open") {
+    return { prNumber: current.number, prUrl: current.url, prState: currentState };
+  }
+
+  const updated = await github.updatePr({
+    number: prNumber,
+    title: buildGroupPullRequestTitle(input.group, input.members),
+    body: buildGroupPullRequestBody(input.group, input.members),
+  });
+  return {
+    prNumber: updated.number,
+    prUrl: updated.url,
+    prState: prInfoToBranchGroupPrState(updated),
+  };
+}
+
+/**
+ * Close the single managed group PR (U6, R7) — best-effort terminal
+ * reconciliation when a branch group is abandoned. If the PR is already
+ * closed/merged out-of-band on GitHub, returns the reconciled state instead of
+ * erroring.
+ */
+export async function closeGroupPullRequest(
+  github: Pick<GitHubClient, "getPrStatus" | "closePr">,
+  group: Pick<BranchGroup, "id" | "prNumber">,
+): Promise<CreateGroupPrResult> {
+  const prNumber = group.prNumber;
+  if (prNumber == null) {
+    throw new Error(`closeGroupPullRequest: group ${group.id} has no persisted prNumber`);
+  }
+
+  const { owner, repo } = getCurrentRepoOrThrow();
+  const current = await github.getPrStatus(owner, repo, prNumber);
+  const currentState = prInfoToBranchGroupPrState(current);
+
+  // Already terminal (closed or merged) — reconcile rather than re-close.
+  if (currentState !== "open") {
+    return { prNumber: current.number, prUrl: current.url, prState: currentState };
+  }
+
+  const closed = await github.closePr({ number: prNumber });
+  return {
+    prNumber: closed.number,
+    prUrl: closed.url,
+    prState: prInfoToBranchGroupPrState(closed),
   };
 }
 

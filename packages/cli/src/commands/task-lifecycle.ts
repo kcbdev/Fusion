@@ -17,10 +17,10 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 const execAsync = promisify(exec);
 import type { TaskStore } from "@fusion/core";
-import { resolveTaskMergeTarget } from "@fusion/core";
+import { resolveTaskMergeTarget, getCurrentRepo, isBranchGroupMemberLanded } from "@fusion/core";
 import type { Settings, TaskDetail, PrInfo, MergeResult, BranchGroup, BranchGroupPrState, Task } from "@fusion/core";
 import { activeSessionRegistry, resolveIntegrationBranch } from "@fusion/engine";
-import type { CreateGroupPrFn, WorktreePool } from "@fusion/engine";
+import type { CreateGroupPrFn, SyncGroupPrFn, CloseGroupPrFn, WorktreePool } from "@fusion/engine";
 
 /**
  * Minimal interface for GitHub operations needed by the PR merge workflow.
@@ -37,6 +37,9 @@ interface GitHubOperations {
     blockingReasons: string[];
   }>;
   mergePr(params: { number: number; method?: "merge" | "squash" | "rebase" }): Promise<PrInfo>;
+  getPrStatus(owner: string, repo: string, number: number): Promise<PrInfo>;
+  updatePr(params: { number: number; title?: string; body?: string }): Promise<PrInfo>;
+  closePr(params: { number: number }): Promise<PrInfo>;
 }
 
 /**
@@ -196,6 +199,90 @@ export function createGroupPrCallback(
       base: baseBranch,
     });
     return { prNumber: created.number, prUrl: created.url, prState: toBranchGroupPrState(created) };
+  };
+}
+
+/**
+ * Build a completion-aware group PR body: a member checklist marking each task
+ * landed/unlanded, plus an x/N completion summary (U6, R6). Rewritten in full on
+ * every sync, so repeated pushes are idempotent and coalesce naturally.
+ */
+function buildGroupPrSyncBody(group: BranchGroup, members: Task[]): string {
+  const landedCount = members.filter((member) => isBranchGroupMemberLanded(member, group)).length;
+  const lines = members.map((member) => {
+    const landed = isBranchGroupMemberLanded(member, group);
+    return `- [${landed ? "x" : " "}] ${member.id}: ${member.title || "(untitled)"} — \`${getTaskBranchName(member.id)}\``;
+  });
+  return [
+    `Automated group PR for ${group.id}.`,
+    `Source: ${group.sourceType}/${group.sourceId}`,
+    `Integration branch: \`${group.branchName}\``,
+    `Completion: ${landedCount}/${members.length} landed`,
+    "",
+    "Included tasks:",
+    ...(lines.length > 0 ? lines : ["- (none)"]),
+  ].join("\n");
+}
+
+/**
+ * Build the `syncGroupPr` engine callback (KTD7, U6). Pushes an updated body
+ * (member checklist + x/N completion) onto the single managed group PR as
+ * members land. Closes over a GitHub client so the engine never imports the
+ * dashboard client.
+ *
+ * Out-of-band reconciliation: reads the PR's current state first; if it is no
+ * longer open (closed/merged on GitHub), returns the reconciled prState rather
+ * than editing or re-opening it, so the caller can persist the corrected state.
+ */
+export function syncGroupPrCallback(
+  github: Pick<GitHubOperations, "getPrStatus" | "updatePr">,
+): SyncGroupPrFn {
+  return async ({ group, members }) => {
+    if (group.prNumber == null) {
+      throw new Error(`syncGroupPr: group ${group.id} has no persisted prNumber`);
+    }
+    const repo = getCurrentRepo();
+    if (!repo) {
+      throw new Error("syncGroupPr: could not determine repository");
+    }
+    const current = await github.getPrStatus(repo.owner, repo.repo, group.prNumber);
+    const currentState = toBranchGroupPrState(current);
+    if (currentState !== "open") {
+      return { prNumber: current.number, prUrl: current.url, prState: currentState };
+    }
+    const updated = await github.updatePr({
+      number: group.prNumber,
+      title: buildGroupPullRequestTitle(group, members),
+      body: buildGroupPrSyncBody(group, members),
+    });
+    return { prNumber: updated.number, prUrl: updated.url, prState: toBranchGroupPrState(updated) };
+  };
+}
+
+/**
+ * Build the `closeGroupPr` engine callback (KTD7, U6). Best-effort closes the
+ * single managed group PR during terminal reconciliation when a group is
+ * abandoned. If the PR is already closed/merged out-of-band, returns the
+ * reconciled state rather than erroring.
+ */
+export function closeGroupPrCallback(
+  github: Pick<GitHubOperations, "getPrStatus" | "closePr">,
+): CloseGroupPrFn {
+  return async ({ group }) => {
+    if (group.prNumber == null) {
+      throw new Error(`closeGroupPr: group ${group.id} has no persisted prNumber`);
+    }
+    const repo = getCurrentRepo();
+    if (!repo) {
+      throw new Error("closeGroupPr: could not determine repository");
+    }
+    const current = await github.getPrStatus(repo.owner, repo.repo, group.prNumber);
+    const currentState = toBranchGroupPrState(current);
+    if (currentState !== "open") {
+      return { prNumber: current.number, prUrl: current.url, prState: currentState };
+    }
+    const closed = await github.closePr({ number: group.prNumber });
+    return { prNumber: closed.number, prUrl: closed.url, prState: toBranchGroupPrState(closed) };
   };
 }
 

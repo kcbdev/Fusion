@@ -23,11 +23,21 @@ vi.mock("node:child_process", () => ({
   },
 }));
 
+vi.mock("@fusion/core", async () => {
+  const actual = await vi.importActual<typeof import("@fusion/core")>("@fusion/core");
+  return {
+    ...actual,
+    getCurrentRepo: vi.fn(() => ({ owner: "owner", repo: "repo" })),
+  };
+});
+
 import { activeSessionRegistry } from "@fusion/engine";
 import {
   cleanupMergedTaskArtifacts,
   processPullRequestMergeTask,
   getTaskBranchName,
+  syncGroupPrCallback,
+  closeGroupPrCallback,
 } from "../task-lifecycle.js";
 
 interface MockTask {
@@ -1310,5 +1320,82 @@ describe("cleanupMergedTaskArtifacts FN-5455", () => {
     await expect(
       cleanupMergedTaskArtifacts("/repo", { id: "FN-5872-B", worktree: "/repo/wt-fn-5872-missing" } as never),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("syncGroupPrCallback (U6)", () => {
+  const group = {
+    id: "BG-1",
+    branchName: "fusion/groups/x",
+    sourceType: "planning" as const,
+    sourceId: "PS-1",
+    prNumber: 42,
+    prUrl: "https://github.com/owner/repo/pull/42",
+    prState: "open" as const,
+    status: "open" as const,
+    autoMerge: false,
+    createdAt: 0,
+    updatedAt: 0,
+  };
+  const members = [
+    { id: "FN-A", title: "Alpha" },
+    { id: "FN-B", title: "Beta" },
+  ] as never[];
+
+  it("edits the PR body when the PR is open and returns the persisted shape", async () => {
+    const github = {
+      getPrStatus: vi.fn(async () => ({ number: 42, url: "https://github.com/owner/repo/pull/42", status: "open", title: "T", headBranch: "h", baseBranch: "main", commentCount: 0 })),
+      updatePr: vi.fn(async () => ({ number: 42, url: "https://github.com/owner/repo/pull/42", status: "open", title: "T2", headBranch: "h", baseBranch: "main", commentCount: 0 })),
+    };
+    const sync = syncGroupPrCallback(github as never);
+    const result = await sync({ group: group as never, members });
+    expect(result).toEqual({ prNumber: 42, prUrl: "https://github.com/owner/repo/pull/42", prState: "open" });
+    expect(github.updatePr).toHaveBeenCalledTimes(1);
+    const body = (github.updatePr.mock.calls[0][0] as { body: string }).body;
+    expect(body).toContain("Completion: 0/2 landed");
+    expect(body).toContain("FN-A: Alpha");
+  });
+
+  it("reconciles (does not edit) when the PR is closed out-of-band", async () => {
+    const github = {
+      getPrStatus: vi.fn(async () => ({ number: 42, url: "https://github.com/owner/repo/pull/42", status: "closed", title: "T", headBranch: "h", baseBranch: "main", commentCount: 0 })),
+      updatePr: vi.fn(),
+    };
+    const sync = syncGroupPrCallback(github as never);
+    const result = await sync({ group: group as never, members });
+    expect(result.prState).toBe("closed");
+    expect(github.updatePr).not.toHaveBeenCalled();
+  });
+
+  it("throws when the group has no persisted prNumber", async () => {
+    const github = { getPrStatus: vi.fn(), updatePr: vi.fn() };
+    const sync = syncGroupPrCallback(github as never);
+    await expect(sync({ group: { ...group, prNumber: undefined } as never, members })).rejects.toThrow(/no persisted prNumber/);
+  });
+});
+
+describe("closeGroupPrCallback (U6)", () => {
+  const group = { id: "BG-1", prNumber: 42 };
+
+  it("closes an open PR and returns closed state", async () => {
+    const github = {
+      getPrStatus: vi.fn(async () => ({ number: 42, url: "u", status: "open", title: "T", headBranch: "h", baseBranch: "main", commentCount: 0 })),
+      closePr: vi.fn(async () => ({ number: 42, url: "u", status: "closed", title: "T", headBranch: "h", baseBranch: "main", commentCount: 0 })),
+    };
+    const close = closeGroupPrCallback(github as never);
+    const result = await close({ group: group as never });
+    expect(result.prState).toBe("closed");
+    expect(github.closePr).toHaveBeenCalledWith({ number: 42 });
+  });
+
+  it("reconciles (does not close) when already merged out-of-band", async () => {
+    const github = {
+      getPrStatus: vi.fn(async () => ({ number: 42, url: "u", status: "merged", title: "T", headBranch: "h", baseBranch: "main", commentCount: 0 })),
+      closePr: vi.fn(),
+    };
+    const close = closeGroupPrCallback(github as never);
+    const result = await close({ group: group as never });
+    expect(result.prState).toBe("merged");
+    expect(github.closePr).not.toHaveBeenCalled();
   });
 });

@@ -27,7 +27,7 @@ import { CronRunner, createAiPromptExecutor } from "./cron-runner.js";
 import type { RoutineRunner } from "./routine-runner.js";
 import { aiMergeTask, sweepStaleAutostashes, VerificationError } from "./merger.js";
 import { runAiMerge } from "./merger-ai.js";
-import { promoteBranchGroup, type BranchGroupPromotionResult, type CreateGroupPrFn } from "./group-merge-coordinator.js";
+import { promoteBranchGroup, type BranchGroupPromotionResult, type CreateGroupPrFn, type SyncGroupPrFn } from "./group-merge-coordinator.js";
 import { PRIORITY_MERGE } from "./concurrency.js";
 import { runtimeLog } from "./logger.js";
 import type { HeartbeatTriggerScheduler } from "./agent-heartbeat.js";
@@ -213,6 +213,13 @@ export interface ProjectEngineOptions {
    * `prState` to "open" without creating a real PR (legacy behaviour).
    */
   createGroupPr?: CreateGroupPrFn;
+  /**
+   * Pushes an updated body onto the single managed group PR as members land
+   * (KTD7, U6). Injected from the CLI layer alongside `createGroupPr`; closes
+   * over the dashboard `GitHubClient`. When absent, member landings do not sync
+   * the PR body.
+   */
+  syncGroupPr?: SyncGroupPrFn;
   /**
    * Returns the merge blocker reason for a task, or null/undefined if
    * the task is eligible for merge. Imported from @fusion/core.
@@ -1982,6 +1989,7 @@ export class ProjectEngine {
                 usageLimitPauser,
                 agentStore,
                 signal: this.mergeAbortController.signal,
+                syncGroupPr: this.options.syncGroupPr,
                 onSession: (session: { dispose: () => void }) => {
                   this.activeMergeSession = session;
                 },

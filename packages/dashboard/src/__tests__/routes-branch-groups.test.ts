@@ -5,6 +5,7 @@ import express from "express";
 import type { BranchGroup, Task, TaskStore } from "@fusion/core";
 import { evaluateBranchGroupCompletion, ProjectEngine } from "@fusion/engine";
 import { createApiRoutes } from "../routes.js";
+import { createBranchGroupsRouter } from "../routes/register-branch-groups-routes.js";
 import { request as REQUEST } from "../test-request.js";
 
 function buildTask(id: string, groupId: string, landed: boolean): Task {
@@ -123,9 +124,11 @@ describe("branch group routes", () => {
       recordRunAuditEvent: vi.fn(async () => {}),
     };
     // Minimal ProjectEngine-shaped context the real method body reads.
+    // `options` must be present: the method reads this.options.createGroupPr (U5).
     const engineContext = {
       runtime: { getTaskStore: () => engineStore },
       config: { workingDirectory: "/tmp/project" },
+      options: {},
     };
     // Bind the REAL method (the same one the dashboard route invokes).
     const realPromote = (ProjectEngine.prototype as unknown as {
@@ -195,5 +198,94 @@ describe("branch group routes", () => {
     const res = await REQUEST(app, "POST", "/api/branch-groups/assign", JSON.stringify({ taskId: "FN-99", branchName: "feature/cli-onboarding" }), { "content-type": "application/json" });
     expect(res.status).toBe(200);
     expect((store.ensureBranchGroupForSource as unknown as ReturnType<typeof vi.fn>)).toHaveBeenCalled();
+  });
+});
+
+describe("branch group abandon (U6, R7)", () => {
+  function buildOpenGroup(): BranchGroup {
+    return {
+      id: "BG-AB",
+      sourceType: "planning",
+      sourceId: "PS-AB",
+      branchName: "feature/shared-ab",
+      autoMerge: false,
+      prState: "open",
+      prNumber: 55,
+      prUrl: "https://example/pr/55",
+      status: "open",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+  }
+
+  function buildAbandonStore(initial: BranchGroup) {
+    let current = { ...initial };
+    const updateBranchGroup = vi.fn((_id: string, patch: Partial<BranchGroup>) => {
+      current = { ...current, ...patch, status: patch.status ?? current.status };
+      return current;
+    });
+    const store = {
+      getRootDir: vi.fn(() => "/tmp/project"),
+      getBranchGroup: vi.fn(() => current),
+      listTasksByBranchGroup: vi.fn(async () => [] as Task[]),
+      updateBranchGroup,
+    } as unknown as TaskStore;
+    return { store, updateBranchGroup, getCurrent: () => current };
+  }
+
+  function mount(store: TaskStore, closeGroupPr?: ReturnType<typeof vi.fn>) {
+    const app = express();
+    app.use(express.json());
+    app.use("/branch-groups", createBranchGroupsRouter(store, { closeGroupPr }));
+    return app;
+  }
+
+  it("closes the GitHub PR (close callback invoked) and sets prState=closed", async () => {
+    const { store, updateBranchGroup } = buildAbandonStore(buildOpenGroup());
+    const closeGroupPr = vi.fn(async () => ({ prNumber: 55, prUrl: "https://example/pr/55", prState: "closed" as const }));
+    const app = mount(store, closeGroupPr);
+
+    const res = await REQUEST(app, "POST", "/branch-groups/BG-AB/abandon", JSON.stringify({}), { "content-type": "application/json" });
+    expect(res.status).toBe(200);
+    expect(closeGroupPr).toHaveBeenCalledTimes(1);
+    expect(updateBranchGroup).toHaveBeenCalledWith("BG-AB", expect.objectContaining({ status: "abandoned", prState: "closed" }));
+    expect(res.body.group.status).toBe("abandoned");
+    expect(res.body.group.prState).toBe("closed");
+  });
+
+  it("still marks the row abandoned/closed when the close callback throws (best-effort)", async () => {
+    const { store, updateBranchGroup } = buildAbandonStore(buildOpenGroup());
+    const closeGroupPr = vi.fn(async () => { throw new Error("github down"); });
+    const app = mount(store, closeGroupPr);
+
+    const res = await REQUEST(app, "POST", "/branch-groups/BG-AB/abandon", JSON.stringify({}), { "content-type": "application/json" });
+    expect(res.status).toBe(200);
+    expect(updateBranchGroup).toHaveBeenCalledWith("BG-AB", expect.objectContaining({ status: "abandoned", prState: "closed" }));
+    expect(res.body.group.prState).toBe("closed");
+  });
+
+  it("does not invoke close when there is no persisted PR", async () => {
+    const noPr = { ...buildOpenGroup(), prNumber: undefined, prUrl: undefined, prState: "none" as const };
+    const { store } = buildAbandonStore(noPr);
+    const closeGroupPr = vi.fn(async () => ({ prNumber: 0, prUrl: "", prState: "closed" as const }));
+    const app = mount(store, closeGroupPr);
+
+    const res = await REQUEST(app, "POST", "/branch-groups/BG-AB/abandon", JSON.stringify({}), { "content-type": "application/json" });
+    expect(res.status).toBe(200);
+    expect(closeGroupPr).not.toHaveBeenCalled();
+    expect(res.body.group.status).toBe("abandoned");
+  });
+
+  it("preserves prState=merged on abandon if the group was already merged", async () => {
+    const merged = { ...buildOpenGroup(), prState: "merged" as const };
+    const { store } = buildAbandonStore(merged);
+    const closeGroupPr = vi.fn();
+    const app = mount(store, closeGroupPr as unknown as ReturnType<typeof vi.fn>);
+
+    const res = await REQUEST(app, "POST", "/branch-groups/BG-AB/abandon", JSON.stringify({}), { "content-type": "application/json" });
+    expect(res.status).toBe(200);
+    // Already merged → do not close; keep merged terminal state.
+    expect(closeGroupPr).not.toHaveBeenCalled();
+    expect(res.body.group.prState).toBe("merged");
   });
 });
