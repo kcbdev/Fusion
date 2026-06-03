@@ -11164,20 +11164,11 @@ ${stepsSection}`;
   async selectTaskWorkflow(taskId: string, workflowId: string): Promise<string[]> {
     const def = await this.getWorkflowDefinition(workflowId);
     if (!def) throw new Error(`Workflow '${workflowId}' not found`);
-    // Compile first so a non-linear graph aborts before we mutate anything.
-    const inputs = compileWorkflowToSteps(def.ir);
-
+    // Validate by compiling first so a non-linear graph aborts before any
+    // mutation (including removal of the prior selection's steps).
+    compileWorkflowToSteps(def.ir);
     this.removeMaterializedSelection(taskId);
-
-    const ids: string[] = [];
-    for (const input of inputs) {
-      const step = await this.createWorkflowStep({
-        ...input,
-        templateId: `${WORKFLOW_COMPILED_STEP_TEMPLATE_PREFIX}${workflowId}`,
-        enabled: true,
-      });
-      ids.push(step.id);
-    }
+    const ids = await this.materializeWorkflowSteps(workflowId, def.ir);
 
     await this.updateTask(taskId, { enabledWorkflowSteps: ids });
     this.writeTaskWorkflowSelection(taskId, workflowId, ids);
