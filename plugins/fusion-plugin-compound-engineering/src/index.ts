@@ -1,6 +1,8 @@
 import { definePlugin } from "@fusion/plugin-sdk";
 import { COMPOUND_ENGINEERING_SKILLS } from "./skills.js";
 import { installBundledCeSkills } from "./skill-installation.js";
+import { ensureCeSchema } from "./schema.js";
+import { createSessionRoutes } from "./routes/session-routes.js";
 
 export { CompoundEngineeringDashboardView } from "./dashboard-view.js";
 export { COMPOUND_ENGINEERING_SKILLS } from "./skills.js";
@@ -10,6 +12,10 @@ export {
   resolveDefaultInstallTargetRoot,
   isPluginLocalPath,
 } from "./skill-installation.js";
+export { ensureCeSchema } from "./schema.js";
+export { CeSessionStore, getCeSessionStore } from "./session/session-store.js";
+export { CeOrchestrator } from "./session/orchestrator.js";
+export { getStage, listStages, registerStage } from "./session/stage-registry.js";
 
 const plugin = definePlugin({
   manifest: {
@@ -24,6 +30,9 @@ const plugin = definePlugin({
   state: "installed",
   skills: COMPOUND_ENGINEERING_SKILLS,
   hooks: {
+    // Idempotent DDL for the plugin-local CE tables (ce_sessions). Runs against
+    // the same DB route handlers reach via ctx.taskStore.getDatabase() (U5).
+    onSchemaInit: ensureCeSchema,
     // Install the bundled, pinned ce-* SKILL.md files into a plugin-local,
     // discoverable directory on load. The engine ingests
     // PluginSkillContribution only as a name; physical discovery requires the
@@ -51,7 +60,7 @@ const plugin = definePlugin({
       }
     },
   },
-  routes: [],
+  routes: [...createSessionRoutes()],
   dashboardViews: [
     {
       viewId: "compound-engineering",

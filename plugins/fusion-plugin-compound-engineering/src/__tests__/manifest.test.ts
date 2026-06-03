@@ -31,8 +31,21 @@ describe("compound engineering plugin manifest", () => {
     expect(manifest.dashboardViews).toEqual(plugin.dashboardViews);
   });
 
-  it("ships an empty routes scaffold (U1)", () => {
-    expect(plugin.routes).toEqual([]);
+  it("registers the session orchestration routes (U5)", () => {
+    const paths = (plugin.routes ?? []).map((r) => `${r.method} ${r.path}`);
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        "POST /sessions",
+        "POST /sessions/:id/answer",
+        "POST /sessions/:id/resume",
+        "GET /sessions/:id",
+        "GET /sessions",
+      ]),
+    );
+  });
+
+  it("wires onSchemaInit for the plugin-local CE tables (U5)", () => {
+    expect(typeof plugin.hooks.onSchemaInit).toBe("function");
   });
 
   it("registers the bundled CE pipeline-stage skills on plugin and manifest (U2)", () => {

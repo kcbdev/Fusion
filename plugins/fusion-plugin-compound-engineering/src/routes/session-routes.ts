@@ -1,0 +1,134 @@
+import type { PluginContext, PluginRouteDefinition, PluginRouteResponse } from "@fusion/core";
+import { CeOrchestrator } from "../session/orchestrator.js";
+import { getCeSessionStore } from "../session/session-store.js";
+
+/**
+ * Session routes (U5): start / answer / resume / get-session-state.
+ *
+ * STREAMING TRANSPORT — HONEST STATEMENT.
+ * Plugin routes return `{status, body}` with no native server-push; the loader
+ * `emitEvent` is a logging stub, so there is no real plugin→client push path
+ * today. v1 therefore uses POLLING: clients poll `GET /sessions/:id` for the
+ * current persisted state (status, currentQuestion, conversationHistory). This
+ * keeps U5 plugin-local and shippable and uses NO raw EventSource. The
+ * orchestrator still emits observable events via `ctx.emitEvent` (a no-silent-
+ * loss requirement); turning those into true client push needs a host
+ * event-publish seam (publish-to-`/api/events`) — that is a carry-forward for
+ * U6/follow-up, not faked here as push.
+ */
+
+interface RouteRequest {
+  params: Record<string, string>;
+  query?: Record<string, string | string[] | undefined>;
+  body?: unknown;
+}
+
+/**
+ * Cache the orchestrator per TaskStore so live in-process interactive-session
+ * handles survive across requests within a process (a fresh orchestrator per
+ * request would lose the live handle needed to answer a question).
+ */
+const orchestratorCache = new WeakMap<object, CeOrchestrator>();
+
+function getOrchestrator(ctx: PluginContext): CeOrchestrator {
+  const key = ctx.taskStore as object;
+  const cached = orchestratorCache.get(key);
+  if (cached) return cached;
+  const orch = new CeOrchestrator({ ctx });
+  orchestratorCache.set(key, orch);
+  return orch;
+}
+
+function badRequest(message: string): PluginRouteResponse {
+  return { status: 400, body: { error: message } };
+}
+
+function asString(v: unknown): string | undefined {
+  return typeof v === "string" && v.length > 0 ? v : undefined;
+}
+
+export function createSessionRoutes(): PluginRouteDefinition[] {
+  return [
+    {
+      method: "POST",
+      path: "/sessions",
+      description: "Start an interactive CE stage session.",
+      handler: async (req: unknown, ctx: PluginContext): Promise<PluginRouteResponse> => {
+        const body = (req as RouteRequest).body as Record<string, unknown> | undefined;
+        const stageId = asString(body?.stage);
+        const openingMessage = asString(body?.message) ?? "";
+        if (!stageId) return badRequest("`stage` is required");
+
+        const orch = getOrchestrator(ctx);
+        try {
+          const result = await orch.start(stageId, {
+            openingMessage,
+            projectId: asString(body?.projectId) ?? null,
+          });
+          return { status: 201, body: { session: result.session, event: result.event } };
+        } catch (err) {
+          return { status: 400, body: { error: err instanceof Error ? err.message : String(err) } };
+        }
+      },
+    },
+    {
+      method: "POST",
+      path: "/sessions/:id/answer",
+      description: "Answer the awaiting question and continue the session.",
+      handler: async (req: unknown, ctx: PluginContext): Promise<PluginRouteResponse> => {
+        const request = req as RouteRequest;
+        const id = request.params.id;
+        const body = request.body as Record<string, unknown> | undefined;
+        const questionId = asString(body?.questionId);
+        if (!questionId) return badRequest("`questionId` is required");
+        if (!("response" in (body ?? {}))) return badRequest("`response` is required");
+
+        const orch = getOrchestrator(ctx);
+        try {
+          const result = await orch.answer(id, questionId, (body as Record<string, unknown>).response);
+          return { status: 200, body: { session: result.session, event: result.event } };
+        } catch (err) {
+          return { status: 409, body: { error: err instanceof Error ? err.message : String(err) } };
+        }
+      },
+    },
+    {
+      method: "POST",
+      path: "/sessions/:id/resume",
+      description: "Resume an awaiting_input or interrupted session to its current question.",
+      handler: async (req: unknown, ctx: PluginContext): Promise<PluginRouteResponse> => {
+        const id = (req as RouteRequest).params.id;
+        const orch = getOrchestrator(ctx);
+        try {
+          const result = orch.resume(id);
+          return { status: 200, body: { session: result.session } };
+        } catch (err) {
+          return { status: 404, body: { error: err instanceof Error ? err.message : String(err) } };
+        }
+      },
+    },
+    {
+      method: "GET",
+      path: "/sessions/:id",
+      description: "Get current persisted session state (polling transport).",
+      handler: async (req: unknown, ctx: PluginContext): Promise<PluginRouteResponse> => {
+        const id = (req as RouteRequest).params.id;
+        const session = getCeSessionStore(ctx).get(id);
+        if (!session) return { status: 404, body: { error: `Session ${id} not found` } };
+        return { status: 200, body: { session } };
+      },
+    },
+    {
+      method: "GET",
+      path: "/sessions",
+      description: "List CE sessions (optionally filtered by status/stage).",
+      handler: async (req: unknown, ctx: PluginContext): Promise<PluginRouteResponse> => {
+        const query = (req as RouteRequest).query ?? {};
+        const status = typeof query.status === "string" ? query.status : undefined;
+        const stage = typeof query.stage === "string" ? query.stage : undefined;
+        const sessions = getCeSessionStore(ctx).list({ status: status as never, stage });
+        return { status: 200, body: { sessions } };
+      },
+    },
+  ];
+}
