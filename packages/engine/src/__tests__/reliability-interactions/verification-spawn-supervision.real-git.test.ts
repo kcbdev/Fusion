@@ -101,13 +101,20 @@ async function spawnParent(scenario: Scenario): Promise<{ parent: ReturnType<typ
 describe("reliability interactions: FN-5189 verification spawn supervision", () => {
   const spawnedParents = new Set<ReturnType<typeof spawn>>();
 
-  afterEach(() => {
+  afterEach(async () => {
     for (const parent of spawnedParents) {
       if (parent.exitCode === null && parent.signalCode === null) {
         try {
           parent.kill("SIGKILL");
         } catch {
           // ignore cleanup failures
+        }
+        // Wait for the parent to fully exit so the subprocess guard
+        // does not flag it as "left running" under concurrent load.
+        try {
+          await once(parent, "exit");
+        } catch {
+          // Already exited
         }
       }
     }

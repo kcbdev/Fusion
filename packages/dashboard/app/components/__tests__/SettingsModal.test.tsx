@@ -247,7 +247,7 @@ type PersistSettingInput = {
 };
 
 async function expectSettingPersists({ section, label, kind, value, scope, expectedKey }: PersistSettingInput) {
-  const user = userEvent.setup();
+  const user = userEvent.setup({ delay: null });
   renderModal();
   await waitForSettingsModalReady();
   await user.click(screen.getByRole("button", { name: new RegExp(`^${section}$`, "i") }));
@@ -282,7 +282,7 @@ async function expectSettingPersists({ section, label, kind, value, scope, expec
 }
 
 async function assertProjectModelSavePayload(provider: string, modelId: string, expectedKeys: string[]) {
-  const user = userEvent.setup();
+  const user = userEvent.setup({ delay: null });
   renderModal({ initialSection: "project-models" });
   await waitForSettingsModalReady();
 
