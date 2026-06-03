@@ -8779,6 +8779,18 @@ export async function toggleExecutionSkill(
   });
 }
 
+/** Install a catalog skill from skills.sh */
+export async function installSkill(
+  source: string,
+  skill: string | undefined,
+  projectId?: string,
+): Promise<{ success: true }> {
+  return api<{ success: true }>(withProjectId("/skills/install", projectId), {
+    method: "POST",
+    body: JSON.stringify({ source, skill }),
+  });
+}
+
 /** Fetch the skills.sh catalog */
 export async function fetchSkillsCatalog(
   query?: string,

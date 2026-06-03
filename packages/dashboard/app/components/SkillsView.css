@@ -199,6 +199,18 @@
   border-color: var(--text-muted);
 }
 
+.skills-view-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.skills-view-card-install {
+  align-self: flex-start;
+  flex-shrink: 0;
+}
+
 .skills-view-card-title {
   font-weight: 600;
   color: var(--text);
@@ -408,6 +420,10 @@
 
   .skills-view-grid {
     grid-template-columns: 1fr;
+  }
+
+  .skills-view-card-header {
+    flex-wrap: wrap;
   }
 
   .skills-view-item {

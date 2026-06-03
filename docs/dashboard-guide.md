@@ -756,6 +756,8 @@ For setup prerequisites, security caveats for tokenized URLs/QR links, and troub
 
 ## Skills API
 
+The Skills view now supports the full browse-and-install loop for skills.sh entries: use **Skills Catalog** to search the catalog, click **Install** on any card with a source repository, and the dashboard will run the same installer as the CLI (`npx skills add <owner/repo> -y -a pi`, with `--skill <slug>` when applicable). On success, the view refreshes **Discovered Skills** immediately so the newly installed skill appears without a page reload.
+
 The Skills API provides endpoints for managing execution skills. Skills are toggled via project-scoped settings in `.fusion/settings.json`.
 
 ![Skills view](./screenshots/skills-view.png)
@@ -869,6 +871,49 @@ Toggle a skill's enabled/disabled state.
 - `404 Not Found` — Adapter not configured
   ```json
   { "error": "Skills adapter not configured", "code": "adapter_not_configured" }
+  ```
+
+### POST /api/skills/install
+
+Install a catalog skill into the current project.
+
+**Request Body:**
+```json
+{
+  "source": "owner/repo",
+  "skill": "example-skill"
+}
+```
+
+**Behavior:**
+- Validates `source` in `owner/repo` format before spawning anything
+- Runs `npx skills add <source> -y -a pi`
+- Appends `--skill <skill>` when `skill` is provided
+- Uses the scoped project root as `cwd`, so installed files land in the current project's skill directories
+
+**Response:** `200 OK`
+```json
+{
+  "success": true
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` — missing source
+  ```json
+  { "error": "source is required", "code": "invalid_body" }
+  ```
+- `400 Bad Request` — malformed source
+  ```json
+  { "error": "Invalid source format. Use owner/repo.", "code": "invalid_source" }
+  ```
+- `404 Not Found` — adapter not configured
+  ```json
+  { "error": "Skills adapter not configured", "code": "adapter_not_configured" }
+  ```
+- `502 Bad Gateway` — installer failed/timed out/could not start
+  ```json
+  { "error": "installer failed", "code": "install_failed" }
   ```
 
 ### GET /api/skills/catalog
