@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline as streamPipeline } from "node:stream/promises";
+import { listEligibleExecutorAgents } from "@fusion/engine";
 import { ApiError, badRequest, notFound, rateLimited } from "../api-error.js";
 import { createSessionDiagnostics } from "../ai-session-diagnostics.js";
 import { writeSSEEvent } from "../sse-buffer.js";
@@ -741,7 +742,6 @@ async function persistImportedSkills(
       const customRoleCount = importItems.filter((item) => item.input.role === "custom").length;
       const importsAnExecutor = importItems.some((item) => item.input.role === "executor");
       if (customRoleCount > 0 && !importsAnExecutor) {
-        const { listEligibleExecutorAgents } = await import("@fusion/engine");
         const existingExecutors = await listEligibleExecutorAgents(agentStore).catch(() => []);
         if (existingExecutors.length === 0) {
           importWarnings.push(

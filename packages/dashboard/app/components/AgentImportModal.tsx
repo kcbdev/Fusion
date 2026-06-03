@@ -137,6 +137,7 @@ export function AgentImportModal({ isOpen, onClose, onImported, projectId, initi
   const [companyName, setCompanyName] = useState("Unknown");
   const [agents, setAgents] = useState<AgentPreview[]>([]);
   const [skills, setSkills] = useState<SkillPreview[]>([]);
+  const [previewWarnings, setPreviewWarnings] = useState<string[]>([]);
   const [selectedAgentNames, setSelectedAgentNames] = useState<string[]>([]);
   const [selectedSkillNames, setSelectedSkillNames] = useState<string[]>([]);
   const [isParsing, setIsParsing] = useState(false);
@@ -215,6 +216,7 @@ export function AgentImportModal({ isOpen, onClose, onImported, projectId, initi
     setCompanyName("Unknown");
     setAgents([]);
     setSkills([]);
+    setPreviewWarnings([]);
     setSelectedAgentNames([]);
     setSelectedSkillNames([]);
     setIsParsing(false);
@@ -345,6 +347,7 @@ export function AgentImportModal({ isOpen, onClose, onImported, projectId, initi
         created: string[];
         skipped: string[];
         errors: Array<{ name: string; error: string }>;
+        warnings?: string[];
       };
 
       const previewAgents = (data.agents && data.agents.length > 0)
@@ -355,6 +358,7 @@ export function AgentImportModal({ isOpen, onClose, onImported, projectId, initi
       setCompanyName(data.companyName ?? "Unknown");
       setAgents(previewAgents);
       setSkills(previewSkills);
+      setPreviewWarnings(Array.isArray(data.warnings) ? data.warnings : []);
       setSelectedAgentNames(previewAgents.map((agent) => agent.name));
       setSelectedSkillNames(previewSkills.map((skill) => skill.name));
       setStep("preview");
@@ -677,6 +681,17 @@ export function AgentImportModal({ isOpen, onClose, onImported, projectId, initi
                 <span className="agent-import-company-label">Company</span>
                 <span className="agent-import-company-name">{companyName}</span>
               </div>
+
+              {previewWarnings.length > 0 && (
+                <div className="agent-import-result-warnings">
+                  {previewWarnings.map((warning, idx) => (
+                    <div key={idx} className="agent-import-result-warning">
+                      <AlertTriangle size={12} />
+                      <span>{warning}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               <div className="agent-import-count">
                 <FileText size={14} />
