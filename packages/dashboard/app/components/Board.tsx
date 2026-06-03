@@ -244,7 +244,9 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
     if (visualViewport) {
       handleViewportResize = () => {
         scheduleStabilization();
-        visualViewport.removeEventListener("resize", handleViewportResize!);
+        if (typeof visualViewport.removeEventListener === "function") {
+          visualViewport.removeEventListener("resize", handleViewportResize!);
+        }
         handleViewportResize = null;
       };
       visualViewport.addEventListener("resize", handleViewportResize);
@@ -252,8 +254,8 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
 
     return () => {
       window.removeEventListener("pageshow", handlePageShow);
-      if (handleViewportResize) {
-        visualViewport?.removeEventListener("resize", handleViewportResize);
+      if (handleViewportResize && typeof visualViewport?.removeEventListener === "function") {
+        visualViewport.removeEventListener("resize", handleViewportResize);
       }
       if (rafId !== null) {
         window.cancelAnimationFrame(rafId);
