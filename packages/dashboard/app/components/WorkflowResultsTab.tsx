@@ -4,7 +4,8 @@ import { Check, ChevronDown, ChevronUp, Maximize2, Pencil, X } from "lucide-reac
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AgentLogEntry, WorkflowStep, WorkflowStepResult } from "@fusion/core";
-import { fetchWorkflowSteps } from "../api";
+import { fetchWorkflowSteps, fetchTaskWorkflow, selectTaskWorkflow } from "../api";
+import { WorkflowSelector } from "./WorkflowSelector";
 import { useAgentLogs } from "../hooks/useAgentLogs";
 import type { Components } from "react-markdown";
 import { linkifyFilePaths, linkifyReactChildren } from "../utils/filePathLinkify";
@@ -206,6 +207,31 @@ export function WorkflowResultsTab({
   const [expandedViewStepId, setExpandedViewStepId] = useState<string | null>(null);
   const [allWorkflowSteps, setAllWorkflowSteps] = useState<WorkflowStep[]>([]);
   const [isEditing, setIsEditing] = useState(false);
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
+
+  // Load the task's current workflow selection (if any).
+  useEffect(() => {
+    let cancelled = false;
+    fetchTaskWorkflow(taskId, projectId)
+      .then((res) => {
+        if (!cancelled) setSelectedWorkflowId(res.workflowId);
+      })
+      .catch(() => {
+        /* selection is optional; ignore load failures */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [taskId, projectId]);
+
+  const handleWorkflowSelect = useCallback(
+    async (workflowId: string | null) => {
+      const res = await selectTaskWorkflow(taskId, workflowId, projectId);
+      setSelectedWorkflowId(res.workflowId);
+      onWorkflowStepsChange?.(res.enabledWorkflowSteps);
+    },
+    [taskId, projectId, onWorkflowStepsChange],
+  );
 
   // Check if any result has pending status
   const hasPendingStep = results.some((r) => r.status === "pending");
@@ -635,6 +661,16 @@ export function WorkflowResultsTab({
 
   return (
     <div className="workflow-results-tab" data-task-id={taskId}>
+      {canEdit && onWorkflowStepsChange && (
+        <div className="workflow-selector-row">
+          <WorkflowSelector
+            value={selectedWorkflowId}
+            onChange={handleWorkflowSelect}
+            projectId={projectId}
+            label="Custom workflow"
+          />
+        </div>
+      )}
       {showConfiguredStepsState ? (
         <div className="workflow-configured-steps" data-testid="workflow-configured-steps">
           <div className="workflow-configured-header" data-testid="workflow-configured-header">

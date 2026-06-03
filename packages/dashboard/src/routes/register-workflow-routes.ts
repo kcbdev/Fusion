@@ -136,14 +136,15 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
       const workflowId = (req.body ?? {}).workflowId;
       if (workflowId === null || workflowId === undefined) {
         await store.clearTaskWorkflowSelection(req.params.taskId);
-        res.json({ workflowId: null });
+        res.json({ workflowId: null, enabledWorkflowSteps: [] });
         return;
       }
       if (typeof workflowId !== "string") {
         throw badRequest("workflowId must be a string or null");
       }
+      let enabledWorkflowSteps: string[] = [];
       try {
-        await store.selectTaskWorkflow(req.params.taskId, workflowId);
+        enabledWorkflowSteps = await store.selectTaskWorkflow(req.params.taskId, workflowId);
       } catch (selectErr: unknown) {
         if (selectErr instanceof WorkflowCompileError || selectErr instanceof WorkflowIrError) {
           throw new ApiError(422, selectErr.message);
@@ -153,7 +154,7 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
         }
         throw selectErr;
       }
-      res.json({ workflowId });
+      res.json({ workflowId, enabledWorkflowSteps });
     } catch (err: unknown) {
       if (err instanceof ApiError) throw err;
       rethrowAsApiError(err);

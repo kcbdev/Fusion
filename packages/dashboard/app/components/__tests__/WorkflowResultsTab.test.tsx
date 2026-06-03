@@ -8,6 +8,9 @@ import type { AgentLogEntry, WorkflowStep, WorkflowStepResult } from "@fusion/co
 
 vi.mock("../../api", () => ({
   fetchWorkflowSteps: vi.fn(),
+  fetchTaskWorkflow: vi.fn().mockResolvedValue({ workflowId: null }),
+  selectTaskWorkflow: vi.fn().mockResolvedValue({ workflowId: null, enabledWorkflowSteps: [] }),
+  fetchWorkflows: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("../../hooks/useAgentLogs", () => ({

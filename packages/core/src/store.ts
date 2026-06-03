@@ -11161,7 +11161,7 @@ ${stepsSection}`;
    * (no orphaned steps). Throws WorkflowCompileError for non-linear graphs
    * before any state is written.
    */
-  async selectTaskWorkflow(taskId: string, workflowId: string): Promise<void> {
+  async selectTaskWorkflow(taskId: string, workflowId: string): Promise<string[]> {
     const def = await this.getWorkflowDefinition(workflowId);
     if (!def) throw new Error(`Workflow '${workflowId}' not found`);
     // Compile first so a non-linear graph aborts before we mutate anything.
@@ -11181,6 +11181,7 @@ ${stepsSection}`;
 
     await this.updateTask(taskId, { enabledWorkflowSteps: ids });
     this.writeTaskWorkflowSelection(taskId, workflowId, ids);
+    return ids;
   }
 
   /** Clear a task's workflow selection and its enabled steps. */

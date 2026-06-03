@@ -4959,16 +4959,20 @@ export function fetchTaskWorkflow(taskId: string, projectId?: string): Promise<{
   );
 }
 
-/** Select (or clear, with null) a workflow for a task. */
+/** Select (or clear, with null) a workflow for a task. Returns the resulting
+ *  enabled step ids so callers can reflect the change without a refetch. */
 export function selectTaskWorkflow(
   taskId: string,
   workflowId: string | null,
   projectId?: string,
-): Promise<{ workflowId: string | null }> {
-  return api<{ workflowId: string | null }>(withProjectId(`/tasks/${encodeURIComponent(taskId)}/workflow`, projectId), {
-    method: "PUT",
-    body: JSON.stringify({ workflowId }),
-  });
+): Promise<{ workflowId: string | null; enabledWorkflowSteps: string[] }> {
+  return api<{ workflowId: string | null; enabledWorkflowSteps: string[] }>(
+    withProjectId(`/tasks/${encodeURIComponent(taskId)}/workflow`, projectId),
+    {
+      method: "PUT",
+      body: JSON.stringify({ workflowId }),
+    },
+  );
 }
 
 /** Read the project default workflow. */
