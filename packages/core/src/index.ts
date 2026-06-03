@@ -60,6 +60,11 @@ export type {
   WorkflowDefinitionUpdate,
   WorkflowNodeLayout,
 } from "./workflow-definition-types.js";
+export {
+  compileWorkflowToSteps,
+  validateLinearity,
+  WorkflowCompileError,
+} from "./workflow-compiler.js";
 
 // ── Engine wiring (set by @fusion/engine at module load) ────────────
 export {
