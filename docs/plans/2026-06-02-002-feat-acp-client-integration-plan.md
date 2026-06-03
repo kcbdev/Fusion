@@ -1,7 +1,7 @@
 ---
 title: "feat: Add ACP (Agent Client Protocol) client integration"
 type: feat
-status: active
+status: completed
 date: 2026-06-02
 deepened: 2026-06-02
 depth: deep
