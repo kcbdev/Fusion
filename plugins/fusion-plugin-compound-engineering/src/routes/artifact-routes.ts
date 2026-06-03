@@ -1,5 +1,6 @@
 import type { PluginContext, PluginRouteDefinition, PluginRouteResponse } from "@fusion/core";
 import { discoverArtifacts, readArtifactById } from "../artifacts/discovery.js";
+import { asString } from "./route-helpers.js";
 
 /**
  * Artifact routes (U3): list discovered CE artifacts grouped by stage, and read
@@ -17,10 +18,6 @@ import { discoverArtifacts, readArtifactById } from "../artifacts/discovery.js";
 interface RouteRequest {
   params: Record<string, string>;
   query?: Record<string, string | string[] | undefined>;
-}
-
-function asString(v: unknown): string | undefined {
-  return typeof v === "string" && v.length > 0 ? v : undefined;
 }
 
 async function resolveProjectRoot(ctx: PluginContext, projectId?: string): Promise<string> {

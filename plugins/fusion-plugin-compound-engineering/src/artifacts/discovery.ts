@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { accessSync, constants, readdirSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 
 /**
@@ -120,6 +120,18 @@ function makeId(stage: CeArtifactStage, relPath: string): string {
   return `${stage}:${relPath}`;
 }
 
+/** Build a uniform `error` entry, deriving `id`/`name` from `(stage, relPath)`. */
+function makeError(stage: CeArtifactStage, relPath: string, message: string): CeArtifactError {
+  return {
+    id: makeId(stage, relPath),
+    stage,
+    path: relPath,
+    name: relPath.split("/").pop() ?? relPath,
+    kind: "error",
+    error: message,
+  };
+}
+
 function readArtifactEntry(
   stage: CeArtifactStage,
   root: string,
@@ -130,30 +142,16 @@ function readArtifactEntry(
   const name = relPath.split("/").pop() ?? relPath;
   // Defense in depth: refuse anything that escaped the conventional location.
   if (!isWithin(root, locationAbs, abs)) {
-    return {
-      id: makeId(stage, relPath),
-      stage,
-      path: relPath,
-      name,
-      kind: "error",
-      error: "Path is outside its conventional location",
-    };
+    return makeError(stage, relPath, "Path is outside its conventional location");
   }
   try {
     const st = statSync(abs);
     if (st.size > MAX_ARTIFACT_BYTES) {
-      return {
-        id: makeId(stage, relPath),
-        stage,
-        path: relPath,
-        name,
-        kind: "error",
-        error: `Artifact too large to read (${st.size} bytes)`,
-      };
+      return makeError(stage, relPath, `Artifact too large to read (${st.size} bytes)`);
     }
-    // Read eagerly so a malformed/unreadable file is surfaced now as an error
-    // entry rather than crashing later at render time.
-    readFileSync(abs, "utf8");
+    // Probe readability (no bytes transferred) so a malformed/unreadable file is
+    // surfaced now as an error entry rather than crashing later at render time.
+    accessSync(abs, constants.R_OK);
     return {
       id: makeId(stage, relPath),
       stage,
@@ -164,14 +162,7 @@ function readArtifactEntry(
       kind: "artifact",
     };
   } catch (err) {
-    return {
-      id: makeId(stage, relPath),
-      stage,
-      path: relPath,
-      name,
-      kind: "error",
-      error: err instanceof Error ? err.message : String(err),
-    };
+    return makeError(stage, relPath, err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -205,14 +196,13 @@ function discoverLocation(root: string, loc: ConventionalLocation): CeArtifactGr
       entries.push(readArtifactEntry(loc.stage, root, locationAbs, locationAbs, toPosix(loc.path)));
     } else {
       // A conventional file path that is actually a directory is malformed.
-      entries.push({
-        id: makeId(loc.stage, toPosix(loc.path)),
-        stage: loc.stage,
-        path: toPosix(loc.path),
-        name: loc.path.split("/").pop() ?? loc.path,
-        kind: "error",
-        error: "Expected a file at the conventional location but found a directory",
-      });
+      entries.push(
+        makeError(
+          loc.stage,
+          toPosix(loc.path),
+          "Expected a file at the conventional location but found a directory",
+        ),
+      );
     }
     return { stage: loc.stage, label: loc.label, present, entries: sortEntries(entries) };
   }
@@ -222,26 +212,18 @@ function discoverLocation(root: string, loc: ConventionalLocation): CeArtifactGr
   let names: string[] = [];
   try {
     if (!st.isDirectory()) {
-      entries.push({
-        id: makeId(loc.stage, toPosix(loc.path)),
-        stage: loc.stage,
-        path: toPosix(loc.path),
-        name: loc.path.split("/").pop() ?? loc.path,
-        kind: "error",
-        error: "Expected a directory at the conventional location but found a file",
-      });
+      entries.push(
+        makeError(
+          loc.stage,
+          toPosix(loc.path),
+          "Expected a directory at the conventional location but found a file",
+        ),
+      );
       return { stage: loc.stage, label: loc.label, present, entries: sortEntries(entries) };
     }
     names = readdirSync(locationAbs);
   } catch (err) {
-    entries.push({
-      id: makeId(loc.stage, toPosix(loc.path)),
-      stage: loc.stage,
-      path: toPosix(loc.path),
-      name: loc.path.split("/").pop() ?? loc.path,
-      kind: "error",
-      error: err instanceof Error ? err.message : String(err),
-    });
+    entries.push(makeError(loc.stage, toPosix(loc.path), err instanceof Error ? err.message : String(err)));
     return { stage: loc.stage, label: loc.label, present, entries: sortEntries(entries) };
   }
 
@@ -257,14 +239,7 @@ function discoverLocation(root: string, loc: ConventionalLocation): CeArtifactGr
     try {
       childStat = statSync(abs);
     } catch (err) {
-      entries.push({
-        id: makeId(loc.stage, relPath),
-        stage: loc.stage,
-        path: relPath,
-        name: childName,
-        kind: "error",
-        error: err instanceof Error ? err.message : String(err),
-      });
+      entries.push(makeError(loc.stage, relPath, err instanceof Error ? err.message : String(err)));
       continue;
     }
     if (!childStat.isFile()) continue;

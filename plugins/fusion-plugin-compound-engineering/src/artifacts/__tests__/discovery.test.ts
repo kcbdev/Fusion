@@ -3,10 +3,14 @@ import * as realFs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Mock node:fs so we can observe/inject behaviour around readFileSync without
-// relying on vi.spyOn (ESM namespace exports are not configurable). The hooks
-// below default to passthrough and individual tests override them.
+// Mock node:fs so we can observe/inject behaviour around readFileSync and
+// accessSync without relying on vi.spyOn (ESM namespace exports are not
+// configurable). The list scan probes readability with accessSync (no bytes
+// read); readFileSync is only used when an artifact's content is actually
+// fetched (readArtifactById). The hooks below default to passthrough and
+// individual tests override them.
 let readFileHook: ((path: realFs.PathOrFileDescriptor, original: typeof realFs.readFileSync, args: unknown[]) => unknown) | undefined;
+let accessHook: ((path: realFs.PathLike, original: typeof realFs.accessSync, args: unknown[]) => unknown) | undefined;
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof realFs>();
@@ -15,6 +19,10 @@ vi.mock("node:fs", async (importOriginal) => {
     readFileSync: (path: realFs.PathOrFileDescriptor, ...args: unknown[]) => {
       if (readFileHook) return readFileHook(path, actual.readFileSync, args);
       return (actual.readFileSync as (...a: unknown[]) => unknown)(path, ...args);
+    },
+    accessSync: (path: realFs.PathLike, ...args: unknown[]) => {
+      if (accessHook) return accessHook(path, actual.accessSync, args);
+      return (actual.accessSync as (...a: unknown[]) => unknown)(path, ...args);
     },
   };
 });
@@ -32,6 +40,7 @@ describe("discoverArtifacts", () => {
   afterEach(() => {
     if (root) rmSync(root, { recursive: true, force: true });
     readFileHook = undefined;
+    accessHook = undefined;
     vi.restoreAllMocks();
   });
 
@@ -113,8 +122,9 @@ describe("discoverArtifacts", () => {
     const readable = join(root, "docs/plans/good.md");
     writeFileSync(readable, "good");
 
-    // Simulate a malformed/unreadable artifact: the specific file throws on read.
-    readFileHook = (path, original, args) => {
+    // Simulate a malformed/unreadable artifact: the specific file throws when
+    // the list scan probes readability (accessSync).
+    accessHook = (path, original, args) => {
       if (typeof path === "string" && path.endsWith("good.md")) {
         throw new Error("EIO: simulated read failure");
       }
@@ -147,14 +157,16 @@ describe("discoverArtifacts", () => {
     writeFileSync(join(root, "docs/random/r.md"), "unrelated"); // docs subtree but not conventional
 
     const opened: string[] = [];
-    readFileHook = (path, original, args) => {
+    // The list scan probes readability with accessSync (no bytes read); track
+    // exactly which paths it touches.
+    accessHook = (path, original, args) => {
       if (typeof path === "string") opened.push(path);
       return (original as (...a: unknown[]) => unknown)(path, ...args);
     };
 
     const result = discoverArtifacts(root);
 
-    // Only the two conventional artifacts were read.
+    // Only the two conventional artifacts were probed.
     expect(opened.some((p) => p.endsWith("STRATEGY.md"))).toBe(true);
     expect(opened.some((p) => p.endsWith(join("ideation", "keep.md")))).toBe(true);
     // Nothing outside the allowlist was opened.

@@ -2,6 +2,7 @@ import type { PluginContext, PluginRouteDefinition, PluginRouteResponse } from "
 import { CeOrchestrator } from "../session/orchestrator.js";
 import { getCeSessionStore } from "../session/session-store.js";
 import { getCePipelineStore } from "../sync/pipeline-store.js";
+import { asString } from "./route-helpers.js";
 
 /**
  * Session routes (U5): start / answer / resume / get-session-state.
@@ -42,10 +43,6 @@ function getOrchestrator(ctx: PluginContext): CeOrchestrator {
 
 function badRequest(message: string): PluginRouteResponse {
   return { status: 400, body: { error: message } };
-}
-
-function asString(v: unknown): string | undefined {
-  return typeof v === "string" && v.length > 0 ? v : undefined;
 }
 
 export function createSessionRoutes(): PluginRouteDefinition[] {

@@ -51,7 +51,7 @@ describe("stage skill reachability (carry-forward, resolver-layer proof)", () =>
     expect(existsSync(installedSkillMd)).toBe(true);
 
     // resolveStageSkillCwd returns a plugin-local directory (never a global one).
-    const cwd = resolveStageSkillCwd(stage);
+    const cwd = resolveStageSkillCwd();
     expect(cwd).toMatch(/\.fusion-ce-skills$/);
   });
 

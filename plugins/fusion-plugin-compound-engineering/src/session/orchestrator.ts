@@ -9,6 +9,7 @@ import type {
 } from "@fusion/core";
 import { resolveDefaultInstallTargetRoot } from "../skill-installation.js";
 import { getCePipelineStore, type CePipelineStore } from "../sync/pipeline-store.js";
+import { createCeTaskWithLink } from "../sync/ce-task.js";
 import { getDefaultModelId, getDefaultProvider, getEnabledStages } from "../settings.js";
 import type { CeSession, CeSessionStore } from "./session-store.js";
 import { getCeSessionStore } from "./session-store.js";
@@ -21,18 +22,11 @@ import { getStage, type CeStageDefinition } from "./stage-registry.js";
 export const WORK_STAGE_ID = "work";
 
 /**
- * The CE marker plugin id recorded on every CE-originated board task and link.
- * Kept as a constant so U8's sync code reuses the same identity.
+ * CE provenance identity constants. Defined in `../sync/ce-task.ts` (so the
+ * reconciler can reuse them without importing this module) and re-exported here
+ * for existing consumers (index.ts, tests) that import them from the orchestrator.
  */
-export const CE_PLUGIN_ID = "fusion-plugin-compound-engineering";
-
-/**
- * SourceType chosen for CE-originated automated work. The work stage is a step in
- * the CE pipeline, so `workflow_step` is the closest existing provenance value
- * (vs. inventing a new SourceType). The CE marker + back-reference convenience
- * copy ride in `sourceMetadata`; the authoritative link is the pipeline-link row.
- */
-export const CE_WORK_SOURCE_TYPE = "workflow_step" as const;
+export { CE_PLUGIN_ID, CE_WORK_SOURCE_TYPE } from "../sync/ce-task.js";
 
 /**
  * COMPLETION-PAYLOAD → TASKS CONTRACT (U7).
@@ -115,13 +109,12 @@ export interface OrchestratorDeps {
  * resolver layer (like U2 did) in the tests — the U4 options surface cannot yet
  * carry an explicit skill-path, so a complete fix needs U4's options to gain a
  * `requestedSkillNames`/`additionalSkillPaths` field forwarded into
- * `createFnAgent`. That gap is documented as a carry-forward for U6/follow-up.
+ * `createFnAgent`. That gap is documented as a carry-forward for the follow-up,
+ * which will re-expand this to derive a per-stage/per-project path.
  */
-export function resolveStageSkillCwd(stage: CeStageDefinition, projectRoot?: string): string {
+export function resolveStageSkillCwd(): string {
   // The install target root holds `<skillId>/SKILL.md` for each installed
   // skill; using it as the discovery root makes the stage's skill loadable.
-  void stage;
-  void projectRoot;
   return resolveDefaultInstallTargetRoot();
 }
 
@@ -203,7 +196,7 @@ export class CeOrchestrator {
     });
     this.store.appendHistory(session.id, { role: "user", text: opts.openingMessage, at: new Date().toISOString() });
 
-    const cwd = resolveStageSkillCwd(stage, this.projectRoot);
+    const cwd = resolveStageSkillCwd();
     const systemPrompt = buildStageSystemPrompt(stage);
 
     // Setting-gated model selection (U9): pass the operator's default
@@ -392,25 +385,12 @@ export class CeOrchestrator {
       const description = spec.description.trim();
       if (!description) continue; // createTask rejects blank descriptions.
 
-      const task = await this.ctx.taskStore.createTask({
+      // Shared contract: create the CE-tagged board task AND its authoritative
+      // pipeline-link row (FN-5719) in one place (see createCeTaskWithLink).
+      await createCeTaskWithLink(this.ctx.taskStore, this.pipelineStore, {
         title: spec.title,
         description,
-        column: spec.column as never,
-        source: {
-          sourceType: CE_WORK_SOURCE_TYPE,
-          sourceSessionId: cePipelineId,
-          sourceMetadata: {
-            pluginId: CE_PLUGIN_ID,
-            cePipelineId,
-            ceStageId,
-            ceArtifactPath,
-          },
-        },
-      });
-
-      // Authoritative back-reference (FN-5719): the link row, not task-row JSON.
-      this.pipelineStore.createLink({
-        taskId: task.id,
+        column: spec.column,
         cePipelineId,
         ceStageId,
         ceArtifactPath,

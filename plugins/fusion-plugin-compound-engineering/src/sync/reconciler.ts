@@ -1,9 +1,6 @@
 import type { PluginContext, Task } from "@fusion/core";
 import { listStages } from "../session/stage-registry.js";
-import {
-  CE_PLUGIN_ID,
-  CE_WORK_SOURCE_TYPE,
-} from "../session/orchestrator.js";
+import { createCeTaskWithLink } from "./ce-task.js";
 import {
   getCePipelineStore,
   type CePipelineLink,
@@ -92,9 +89,7 @@ export class CeReconciler {
     // re-derived from board truth below, so a queue entry for an already-handled
     // transition is harmless.
     const pending = this.store.listPendingSync();
-    const pipelineIds = new Set<string>();
     for (const entry of pending) {
-      pipelineIds.add(entry.cePipelineId);
       this.store.markSyncProcessed(entry.id);
       result.drained++;
     }
@@ -103,7 +98,6 @@ export class CeReconciler {
     // ones with queued entries. This is what recovers a dropped/never-enqueued
     // hook event — board truth is compared against pipeline state regardless of
     // whether a queue row exists.
-    void pipelineIds;
     const states = this.store.listAllState();
     for (const state of states) {
       result.inspected++;
@@ -126,14 +120,14 @@ export class CeReconciler {
   ): Promise<{ created: boolean } | undefined> {
     if (state.status === "completed") return undefined;
 
-    // Links produced by this pipeline AT its current stage are the board tasks
-    // whose completion gates advancement.
-    const links = this.store
-      .listByPipeline(state.cePipelineId)
-      .filter((l) => l.ceStageId === state.currentStage);
-    if (links.length === 0) return undefined;
+    // All links for this pipeline (fetched once, reused by advance's idempotency
+    // check). The board tasks whose completion gates advancement are this
+    // pipeline's links AT its current stage.
+    const links = this.store.listByPipeline(state.cePipelineId);
+    const currentStageLinks = links.filter((l) => l.ceStageId === state.currentStage);
+    if (currentStageLinks.length === 0) return undefined;
 
-    const tasks = await this.loadTasks(links);
+    const tasks = await this.loadTasks(currentStageLinks);
     if (tasks.length === 0) return undefined;
 
     // Advancement rule: every current-stage board task has reached a terminal
@@ -164,7 +158,7 @@ export class CeReconciler {
     // Advancing only moves the CE-owned fields + creates a NEW board task; it
     // never mutates the already-terminal board tasks, so the two writers never
     // contend over the same cell.
-    const created = await this.advance(state, next);
+    const created = await this.advance(state, next, links);
     return { created };
   }
 
@@ -173,44 +167,39 @@ export class CeReconciler {
    * by creating the next-stage board task (board-owned write on a NEW row).
    * Idempotent: if a link for the next stage already exists, we don't duplicate.
    */
-  private async advance(state: CePipelineState, nextStage: string): Promise<boolean> {
+  private async advance(
+    state: CePipelineState,
+    nextStage: string,
+    links: CePipelineLink[],
+  ): Promise<boolean> {
     // Idempotency guard: if we already advanced (a next-stage link exists), just
     // ensure state is consistent and skip the outbound create.
-    const already = this.store
-      .listByPipeline(state.cePipelineId)
-      .some((l) => l.ceStageId === nextStage);
+    const already = links.some((l) => l.ceStageId === nextStage);
 
-    this.store.transitionState(state.cePipelineId, {
-      currentStage: nextStage,
-      status: already ? "running" : "awaiting_board",
-    });
+    if (already) {
+      this.store.transitionState(state.cePipelineId, {
+        currentStage: nextStage,
+        status: "running",
+      });
+      return false;
+    }
 
-    if (already) return false;
-
-    const task = await this.ctx.taskStore.createTask({
+    // Shared contract: create the CE-tagged next-stage board task AND its
+    // authoritative pipeline-link row (FN-5719) in one place.
+    const task = await createCeTaskWithLink(this.ctx.taskStore, this.store, {
       title: `CE ${nextStage}: continue pipeline`,
       description: `Continue the compound-engineering pipeline at the "${nextStage}" stage.`,
-      source: {
-        sourceType: CE_WORK_SOURCE_TYPE,
-        sourceSessionId: state.cePipelineId,
-        sourceMetadata: {
-          pluginId: CE_PLUGIN_ID,
-          cePipelineId: state.cePipelineId,
-          ceStageId: nextStage,
-          ceArtifactPath: state.lastArtifactPath,
-        },
-      },
-    });
-
-    this.store.createLink({
-      taskId: task.id,
       cePipelineId: state.cePipelineId,
       ceStageId: nextStage,
       ceArtifactPath: state.lastArtifactPath,
     });
 
-    // Pipeline is now waiting on the freshly-created board task.
-    this.store.transitionState(state.cePipelineId, { status: "awaiting_board" });
+    // Single state write on the create path: advance to the next stage and mark
+    // the pipeline as waiting on the freshly-created board task.
+    this.store.transitionState(state.cePipelineId, {
+      currentStage: nextStage,
+      status: "awaiting_board",
+    });
 
     this.ctx.emitEvent("compound-engineering:pipeline-advanced", {
       cePipelineId: state.cePipelineId,
