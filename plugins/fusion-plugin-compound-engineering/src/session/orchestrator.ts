@@ -9,6 +9,7 @@ import type {
 } from "@fusion/core";
 import { resolveDefaultInstallTargetRoot } from "../skill-installation.js";
 import { getCePipelineStore, type CePipelineStore } from "../sync/pipeline-store.js";
+import { getDefaultModelId, getDefaultProvider, getEnabledStages } from "../settings.js";
 import type { CeSession, CeSessionStore } from "./session-store.js";
 import { getCeSessionStore } from "./session-store.js";
 import { getStage, type CeStageDefinition } from "./stage-registry.js";
@@ -185,6 +186,10 @@ export class CeOrchestrator {
   async start(stageId: string, opts: StartStageOptions): Promise<CeStepResult> {
     const stage = getStage(stageId);
     if (!stage) throw new Error(`Unknown CE stage: ${stageId}`);
+    // Setting-gated launch (U9): only stages the operator enabled may launch.
+    if (!getEnabledStages(this.ctx.settings).includes(stageId)) {
+      throw new Error(`CE stage is not enabled: ${stageId}`);
+    }
     if (!this.factory) {
       throw new Error(
         "Interactive AI sessions are not available (createInteractiveAiSession is only injected on route contexts with the engine loaded).",
@@ -201,9 +206,21 @@ export class CeOrchestrator {
     const cwd = resolveStageSkillCwd(stage, this.projectRoot);
     const systemPrompt = buildStageSystemPrompt(stage);
 
+    // Setting-gated model selection (U9): pass the operator's default
+    // provider/model through to the host factory; omitted keys let the host
+    // pick its own defaults.
+    const defaultProvider = getDefaultProvider(this.ctx.settings);
+    const defaultModelId = getDefaultModelId(this.ctx.settings);
+
     let interactive;
     try {
-      interactive = await this.factory({ cwd, systemPrompt, tools: "coding" });
+      interactive = await this.factory({
+        cwd,
+        systemPrompt,
+        tools: "coding",
+        ...(defaultProvider ? { defaultProvider } : {}),
+        ...(defaultModelId ? { defaultModelId } : {}),
+      });
     } catch (err) {
       return { session: this.failSession(session.id, err), event: undefined };
     }

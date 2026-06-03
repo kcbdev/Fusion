@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import manifest from "../../manifest.json";
 import plugin from "../index.js";
 import { COMPOUND_ENGINEERING_SKILLS } from "../skills.js";
+import { settingsSchema } from "../settings.js";
 
 describe("compound engineering plugin manifest", () => {
   it("exports expected plugin id", () => {
@@ -72,5 +73,23 @@ describe("compound engineering plugin manifest", () => {
 
   it("registers an onLoad hook that installs bundled skills (U2)", () => {
     expect(typeof plugin.hooks?.onLoad).toBe("function");
+  });
+
+  it("wires the settings schema onto the runtime manifest and manifest.json (U9)", () => {
+    const expectedKeys = [
+      "defaultProvider",
+      "defaultModelId",
+      "enabledStages",
+      "reconcileOnHooks",
+      "reconcileIntervalMinutes",
+    ].sort();
+    expect(plugin.manifest.settingsSchema).toBe(settingsSchema);
+    expect(Object.keys(settingsSchema).sort()).toEqual(expectedKeys);
+    // manifest.json mirrors the same keys (runtime/JSON alignment).
+    expect(Object.keys(manifest.settingsSchema).sort()).toEqual(expectedKeys);
+    // Spot-check one entry stays aligned between JSON and runtime.
+    expect(manifest.settingsSchema.reconcileIntervalMinutes.defaultValue).toBe(
+      settingsSchema.reconcileIntervalMinutes.defaultValue,
+    );
   });
 });

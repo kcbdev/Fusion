@@ -6,6 +6,8 @@ import { createSessionRoutes } from "./routes/session-routes.js";
 import { createArtifactRoutes } from "./routes/artifact-routes.js";
 import { getCePipelineStore } from "./sync/pipeline-store.js";
 import { reconcileCePipelines } from "./sync/reconciler.js";
+import { settingsSchema } from "./settings.js";
+import { getReconcileOnHooks } from "./settings.js";
 
 export { CompoundEngineeringDashboardView } from "./dashboard-view.js";
 export { COMPOUND_ENGINEERING_SKILLS } from "./skills.js";
@@ -35,6 +37,14 @@ export {
   CE_WORK_SOURCE_TYPE,
 } from "./session/orchestrator.js";
 export { getStage, listStages, registerStage } from "./session/stage-registry.js";
+export {
+  settingsSchema,
+  getDefaultProvider,
+  getDefaultModelId,
+  getEnabledStages,
+  getReconcileOnHooks,
+  getReconcileIntervalMinutes,
+} from "./settings.js";
 
 const plugin = definePlugin({
   manifest: {
@@ -45,6 +55,7 @@ const plugin = definePlugin({
     author: "Fusion Team",
     fusionVersion: ">=0.1.0",
     skills: COMPOUND_ENGINEERING_SKILLS.map((s) => ({ skillId: s.skillId, name: s.name })),
+    settingsSchema,
   },
   state: "installed",
   skills: COMPOUND_ENGINEERING_SKILLS,
@@ -70,6 +81,10 @@ const plugin = definePlugin({
         fromColumn,
         toColumn,
       });
+      // Setting-gated auto-drain (U9): when disabled, the enqueue still happens
+      // so an on-demand reconcile (route/refresh) converges later; we just skip
+      // the inline sweep.
+      if (!getReconcileOnHooks(ctx.settings)) return;
       void Promise.resolve()
         .then(() => reconcileCePipelines(ctx))
         .catch((err) => ctx.logger.warn(`CE reconcile (onTaskMoved) failed: ${String(err)}`));
@@ -84,6 +99,7 @@ const plugin = definePlugin({
         reason: "task_completed",
         toColumn: "done",
       });
+      if (!getReconcileOnHooks(ctx.settings)) return;
       void Promise.resolve()
         .then(() => reconcileCePipelines(ctx))
         .catch((err) => ctx.logger.warn(`CE reconcile (onTaskCompleted) failed: ${String(err)}`));
