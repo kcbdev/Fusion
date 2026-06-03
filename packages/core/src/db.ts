@@ -1856,18 +1856,61 @@ export class Database {
 
     const cutoffIso = new Date(Date.now() - retentionMs).toISOString();
     let deletedTotal = 0;
+    const recordChanges = (table: string, result: { changes: number | bigint }) => {
+      const changes = typeof result.changes === "bigint" ? Number(result.changes) : result.changes;
+      deletedByTable[table] = changes;
+      deletedTotal += changes;
+    };
 
     for (const table of Database.OPERATIONAL_LOG_TABLES) {
       if (!this.tableExists(table)) continue;
       try {
-        const result = this.db
-          .prepare(`DELETE FROM "${table}" WHERE timestamp < ?`)
-          .run(cutoffIso);
-        const changes = typeof result.changes === "bigint" ? Number(result.changes) : result.changes;
-        deletedByTable[table] = changes;
-        deletedTotal += changes;
+        recordChanges(
+          table,
+          this.db.prepare(`DELETE FROM "${table}" WHERE timestamp < ?`).run(cutoffIso),
+        );
       } catch (error) {
         console.warn(`[fusion:db] Failed to prune operational log table ${table}`, error);
+      }
+    }
+
+    if (this.tableExists("agentRuns")) {
+      try {
+        recordChanges(
+          "agentRuns",
+          this.db
+            .prepare("DELETE FROM agentRuns WHERE endedAt IS NOT NULL AND endedAt < ?")
+            .run(cutoffIso),
+        );
+      } catch (error) {
+        console.warn("[fusion:db] Failed to prune operational log table agentRuns", error);
+      }
+    }
+
+    if (this.tableExists("agentConfigRevisions")) {
+      try {
+        recordChanges(
+          "agentConfigRevisions",
+          this.db
+            .prepare(
+              `DELETE FROM agentConfigRevisions
+               WHERE createdAt < ?
+                 AND id NOT IN (
+                   SELECT id FROM (
+                     SELECT id,
+                            ROW_NUMBER() OVER (
+                              PARTITION BY agentId
+                              ORDER BY createdAt DESC, rowid DESC
+                            ) AS rn
+                     FROM agentConfigRevisions
+                   ) ranked
+                   WHERE rn = 1
+                 )`,
+            )
+            .run(cutoffIso),
+        );
+      } catch (error) {
+        console.warn("[fusion:db] Failed to prune operational log table agentConfigRevisions", error);
       }
     }
 

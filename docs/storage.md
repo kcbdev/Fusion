@@ -21,6 +21,8 @@
 - `TaskStore.deleteTask` keeps that JSONL file on disk for forensics, but all live read APIs (`getAgentLogs*`, `getAgentLogCount`) gate on task liveness and return zero entries once `deletedAt` is set.
 - Archived-task snapshot behavior (`taskToArchiveEntry` / `archiveTask`) is unchanged in spirit: archive payloads still embed a capped agent-log snapshot, now sourced from the JSONL file instead of `fusion.db`.
 - Retention is now independent from SQLite operational-log pruning. `settings.agentLogFileRetentionDays` controls age-based pruning of JSONL entries for soft-deleted and archived tasks only. Default: `0` (disabled).
+- SQLite operational-log pruning is controlled separately by `settings.operationalLogRetentionDays`. It now prunes `activityLog`, `runAuditEvents`, `agentHeartbeats`, terminal `agentRuns` rows by `endedAt`, and `agentConfigRevisions` by `createdAt`.
+- Safety invariants for operational pruning: in-flight `agentRuns` (`endedAt IS NULL`) are never deleted, and the most-recent `agentConfigRevisions` row per agent is always preserved even when older than the retention window.
 
 ### Activity-log no-op `task:moved` cleanup (FN-5940)
 

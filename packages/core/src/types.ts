@@ -3733,9 +3733,12 @@ export interface ProjectSettings {
    *  Allowed values: 0 (off, default) or one of 7 | 14 | 30 | 60 | 90. Uses messages.updatedAt inactivity age. */
   mailAutoCleanupDays?: number;
   /** Number of days to retain append-only operational-log rows (activityLog,
-   *  runAuditEvents, agentHeartbeats) before periodic maintenance prunes them.
-   *  Agent logs are now stored in per-task JSONL files — see agentLogFileRetentionDays.
-   *  Default: 30. Set 0 to disable pruning. Uses each row's `timestamp` column. */
+   *  runAuditEvents, agentHeartbeats, terminal agentRuns by `endedAt`, and
+   *  agentConfigRevisions by `createdAt`) before periodic maintenance prunes
+   *  them. In-flight agentRuns (`endedAt IS NULL`) and the most-recent config
+   *  revision per agent are always preserved. Agent logs are now stored in
+   *  per-task JSONL files — see agentLogFileRetentionDays. Default: 30. Set 0
+   *  to disable pruning. */
   operationalLogRetentionDays?: number;
   /** Number of days to retain per-task agent-log JSONL files for soft-deleted
    *  and archived tasks. Only affects tasks that are no longer active. Entries

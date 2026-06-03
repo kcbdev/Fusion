@@ -2882,6 +2882,45 @@ describe("Database operational-log retention and recovery-table cleanup", () => 
     ).run(id, timestamp);
   }
 
+  function insertAgent(agentId: string): void {
+    const now = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO agents (id, name, role, state, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(agentId, `Agent ${agentId}`, "executor", "idle", now, now);
+  }
+
+  function insertAgentRun({
+    id,
+    agentId,
+    startedAt,
+    endedAt,
+    status,
+  }: {
+    id: string;
+    agentId: string;
+    startedAt: string;
+    endedAt: string | null;
+    status: string;
+  }): void {
+    db.prepare(
+      "INSERT INTO agentRuns (id, agentId, data, startedAt, endedAt, status) VALUES (?, ?, '{}', ?, ?, ?)",
+    ).run(id, agentId, startedAt, endedAt, status);
+  }
+
+  function insertAgentConfigRevision({
+    id,
+    agentId,
+    createdAt,
+  }: {
+    id: string;
+    agentId: string;
+    createdAt: string;
+  }): void {
+    db.prepare(
+      "INSERT INTO agentConfigRevisions (id, agentId, data, createdAt) VALUES (?, ?, '{}', ?)",
+    ).run(id, agentId, createdAt);
+  }
+
   it("pruneOperationalLogs deletes rows older than the retention window", () => {
     const old = new Date(Date.now() - 200 * 86_400_000).toISOString();
     const recent = new Date(Date.now() - 1 * 86_400_000).toISOString();
@@ -2897,11 +2936,99 @@ describe("Database operational-log retention and recovery-table cleanup", () => 
     expect(remaining.map((r) => r.id)).toEqual(["recent-1"]);
   });
 
+  it("pruneOperationalLogs deletes old terminal agent runs but keeps recent ones", () => {
+    insertAgent("agent-1");
+    const old = new Date(Date.now() - 200 * 86_400_000).toISOString();
+    const recent = new Date(Date.now() - 1 * 86_400_000).toISOString();
+
+    insertAgentRun({ id: "run-old-completed", agentId: "agent-1", startedAt: old, endedAt: old, status: "completed" });
+    insertAgentRun({ id: "run-old-failed", agentId: "agent-1", startedAt: old, endedAt: old, status: "failed" });
+    insertAgentRun({ id: "run-recent-completed", agentId: "agent-1", startedAt: recent, endedAt: recent, status: "completed" });
+
+    const result = db.pruneOperationalLogs(90 * 86_400_000);
+    expect(result.deletedByTable.agentRuns).toBe(2);
+    expect(result.deletedTotal).toBe(2);
+
+    const remaining = db
+      .prepare("SELECT id FROM agentRuns ORDER BY id")
+      .all() as Array<{ id: string }>;
+    expect(remaining.map((row) => row.id)).toEqual(["run-recent-completed"]);
+  });
+
+  it("pruneOperationalLogs never deletes in-flight agent runs", () => {
+    insertAgent("agent-1");
+    const old = new Date(Date.now() - 365 * 86_400_000).toISOString();
+    insertAgentRun({ id: "run-active-old", agentId: "agent-1", startedAt: old, endedAt: null, status: "active" });
+
+    const result = db.pruneOperationalLogs(7 * 86_400_000);
+    expect(result.deletedByTable.agentRuns).toBe(0);
+    expect(result.deletedTotal).toBe(0);
+    expect(db.prepare("SELECT id, endedAt, status FROM agentRuns").all()).toEqual([
+      { id: "run-active-old", endedAt: null, status: "active" },
+    ]);
+  });
+
+  it("pruneOperationalLogs deletes old config revisions but preserves the latest per agent", () => {
+    insertAgent("agent-1");
+    insertAgent("agent-2");
+    const old = new Date(Date.now() - 200 * 86_400_000).toISOString();
+    const mid = new Date(Date.now() - 120 * 86_400_000).toISOString();
+    const recent = new Date(Date.now() - 1 * 86_400_000).toISOString();
+
+    insertAgentConfigRevision({ id: "agent-1-old-1", agentId: "agent-1", createdAt: old });
+    insertAgentConfigRevision({ id: "agent-1-old-2", agentId: "agent-1", createdAt: mid });
+    insertAgentConfigRevision({ id: "agent-1-recent", agentId: "agent-1", createdAt: recent });
+    insertAgentConfigRevision({ id: "agent-2-old-1", agentId: "agent-2", createdAt: old });
+    insertAgentConfigRevision({ id: "agent-2-old-2", agentId: "agent-2", createdAt: mid });
+
+    const result = db.pruneOperationalLogs(90 * 86_400_000);
+    expect(result.deletedByTable.agentConfigRevisions).toBe(3);
+    expect(result.deletedTotal).toBe(3);
+
+    const remaining = db
+      .prepare("SELECT id FROM agentConfigRevisions ORDER BY agentId, createdAt, id")
+      .all() as Array<{ id: string }>;
+    expect(remaining.map((row) => row.id)).toEqual(["agent-1-recent", "agent-2-old-2"]);
+  });
+
   it("pruneOperationalLogs is a no-op when retention is disabled (<= 0)", () => {
     insertActivity("old-1", new Date(Date.now() - 200 * 86_400_000).toISOString());
+    insertAgent("agent-1");
+    insertAgentRun({
+      id: "run-old-completed",
+      agentId: "agent-1",
+      startedAt: new Date(Date.now() - 200 * 86_400_000).toISOString(),
+      endedAt: new Date(Date.now() - 200 * 86_400_000).toISOString(),
+      status: "completed",
+    });
+    insertAgentConfigRevision({
+      id: "revision-old",
+      agentId: "agent-1",
+      createdAt: new Date(Date.now() - 200 * 86_400_000).toISOString(),
+    });
+
     const result = db.pruneOperationalLogs(0);
     expect(result.deletedTotal).toBe(0);
     expect(db.prepare("SELECT count(*) AS c FROM activityLog").get()).toMatchObject({ c: 1 });
+    expect(db.prepare("SELECT count(*) AS c FROM agentRuns").get()).toMatchObject({ c: 1 });
+    expect(db.prepare("SELECT count(*) AS c FROM agentConfigRevisions").get()).toMatchObject({ c: 1 });
+  });
+
+  it("pruneOperationalLogs is idempotent for new retention targets", () => {
+    insertAgent("agent-1");
+    const old = new Date(Date.now() - 200 * 86_400_000).toISOString();
+    insertAgentRun({ id: "run-old-completed", agentId: "agent-1", startedAt: old, endedAt: old, status: "completed" });
+    insertAgentConfigRevision({ id: "revision-old", agentId: "agent-1", createdAt: old });
+    insertAgentConfigRevision({ id: "revision-latest", agentId: "agent-1", createdAt: new Date(Date.now() - 1 * 86_400_000).toISOString() });
+
+    const first = db.pruneOperationalLogs(90 * 86_400_000);
+    expect(first.deletedByTable.agentRuns).toBe(1);
+    expect(first.deletedByTable.agentConfigRevisions).toBe(1);
+
+    const second = db.pruneOperationalLogs(90 * 86_400_000);
+    expect(second.deletedByTable.agentRuns).toBe(0);
+    expect(second.deletedByTable.agentConfigRevisions).toBe(0);
+    expect(second.deletedTotal).toBe(0);
   });
 
   it("dropOrphanRecoveryTables removes lost_and_found scratch tables", () => {
