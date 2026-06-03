@@ -26,6 +26,13 @@ function createTaskInDb(
   ).run(taskId, description, options?.column ?? "triage", status ?? null, now, now, options?.deletedAt ?? null);
 }
 
+function createGoalInDb(database: Database, goalId: string, title = "Test goal"): void {
+  const now = new Date().toISOString();
+  database.prepare(
+    "INSERT INTO goals (id, title, description, status, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)"
+  ).run(goalId, title, null, "active", now, now);
+}
+
 describe("MissionStore", () => {
   let tmpDir: string;
   let fusionDir: string;
@@ -238,6 +245,7 @@ describe("MissionStore", () => {
         completedMilestones: 0,
         totalFeatures: 0,
         completedFeatures: 0,
+        linkedGoalCount: 0,
         progressPercent: 0,
       });
     });
@@ -301,6 +309,19 @@ describe("MissionStore", () => {
 
       const summary = store.getMissionSummary(mission.id);
       expect(summary.progressPercent).toBe(33);
+    });
+
+    it("getMissionSummary reports linked goal counts", () => {
+      const mission = store.createMission({ title: "Goal-linked mission" });
+      createGoalInDb(db, "G-001", "North Star");
+      createGoalInDb(db, "G-002", "Reliability");
+
+      expect(store.getMissionSummary(mission.id).linkedGoalCount).toBe(0);
+
+      store.linkGoal(mission.id, "G-001");
+      store.linkGoal(mission.id, "G-002");
+
+      expect(store.getMissionSummary(mission.id).linkedGoalCount).toBe(2);
     });
 
     it("findNextPendingSlice skips completed slices in earlier milestones", () => {
@@ -376,6 +397,7 @@ describe("MissionStore", () => {
         completedMilestones: 0,
         totalFeatures: 0,
         completedFeatures: 0,
+        linkedGoalCount: 0,
         progressPercent: 0,
       });
 
@@ -386,6 +408,7 @@ describe("MissionStore", () => {
         completedMilestones: 0,
         totalFeatures: 0,
         completedFeatures: 0,
+        linkedGoalCount: 0,
         progressPercent: 0,
       });
 
@@ -396,6 +419,7 @@ describe("MissionStore", () => {
         completedMilestones: 1,
         totalFeatures: 2,
         completedFeatures: 1,
+        linkedGoalCount: 0,
         progressPercent: 50,
       });
     });
@@ -408,8 +432,11 @@ describe("MissionStore", () => {
       store.updateFeature(f1.id, { status: "done" });
       const f2 = store.addFeature(slice.id, { title: "F2" });
       store.updateFeature(f2.id, { status: "done" });
-      const f3 = store.addFeature(slice.id, { title: "F3" });
-      // f3 not done
+      store.addFeature(slice.id, { title: "F3" });
+      createGoalInDb(db, "G-003", "North Star");
+      createGoalInDb(db, "G-004", "Reliability");
+      store.linkGoal(mission.id, "G-003");
+      store.linkGoal(mission.id, "G-004");
 
       const singleSummary = store.getMissionSummary(mission.id);
       const batchedResult = store.listMissionsWithSummaries().find((m) => m.id === mission.id)!;
@@ -418,6 +445,7 @@ describe("MissionStore", () => {
       expect(batchedResult.summary.completedMilestones).toBe(singleSummary.completedMilestones);
       expect(batchedResult.summary.totalFeatures).toBe(singleSummary.totalFeatures);
       expect(batchedResult.summary.completedFeatures).toBe(singleSummary.completedFeatures);
+      expect(batchedResult.summary.linkedGoalCount).toBe(singleSummary.linkedGoalCount);
       expect(batchedResult.summary.progressPercent).toBe(singleSummary.progressPercent);
     });
 

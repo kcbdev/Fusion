@@ -121,6 +121,8 @@ export interface MissionSummary {
   totalFeatures: number;
   /** Number of features with status "done" */
   completedFeatures: number;
+  /** Number of goals linked to the mission */
+  linkedGoalCount: number;
   /** Computed progress percentage (0–100), based on features or milestones */
   progressPercent: number;
 }
@@ -765,6 +767,11 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       }
     }
 
+    const linkedGoalRow = this.db
+      .prepare("SELECT COUNT(*) AS count FROM mission_goals WHERE missionId = ?")
+      .get(missionId) as { count?: number | bigint } | undefined;
+    const linkedGoalCount = Number(linkedGoalRow?.count ?? 0);
+
     let progressPercent = 0;
     if (totalFeatures > 0) {
       progressPercent = Math.round((completedFeatures / totalFeatures) * 100);
@@ -777,6 +784,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       completedMilestones,
       totalFeatures,
       completedFeatures,
+      linkedGoalCount,
       progressPercent,
     };
   }
@@ -813,7 +821,15 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     ).all() as unknown as FeatureRow[];
     const allFeatures = featureRows.map((row) => this.rowToFeature(row));
 
-    // 5. Group in-memory: slices by milestoneId, features by sliceId
+    // 5. Batch query linked goal counts
+    const linkedGoalRows = this.db.prepare(
+      "SELECT missionId, COUNT(*) AS count FROM mission_goals GROUP BY missionId"
+    ).all() as Array<{ missionId: string; count?: number | bigint }>;
+    const linkedGoalCountByMissionId = new Map(
+      linkedGoalRows.map((row) => [row.missionId, Number(row.count ?? 0)]),
+    );
+
+    // 6. Group in-memory: slices by milestoneId, features by sliceId
     const slicesByMilestoneId = new Map<string, Slice[]>();
     for (const slice of allSlices) {
       const list = slicesByMilestoneId.get(slice.milestoneId) || [];
@@ -828,7 +844,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       featuresBySliceId.set(feature.sliceId, list);
     }
 
-    // 6. Group milestones by missionId
+    // 7. Group milestones by missionId
     const milestonesByMissionId = new Map<string, Milestone[]>();
     for (const milestone of allMilestones) {
       const list = milestonesByMissionId.get(milestone.missionId) || [];
@@ -836,7 +852,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       milestonesByMissionId.set(milestone.missionId, list);
     }
 
-    // 7. Compute summary for each mission using grouped data
+    // 8. Compute summary for each mission using grouped data
     return missions.map((mission) => {
       const milestones = milestonesByMissionId.get(mission.id) || [];
       const totalMilestones = milestones.length;
@@ -854,6 +870,8 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
         }
       }
 
+      const linkedGoalCount = linkedGoalCountByMissionId.get(mission.id) ?? 0;
+
       let progressPercent = 0;
       if (totalFeatures > 0) {
         progressPercent = Math.round((completedFeatures / totalFeatures) * 100);
@@ -868,6 +886,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
           completedMilestones,
           totalFeatures,
           completedFeatures,
+          linkedGoalCount,
           progressPercent,
         },
       };

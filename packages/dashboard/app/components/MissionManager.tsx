@@ -4174,6 +4174,10 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
     const progressPercent = health?.estimatedCompletionPercent ?? summary?.progressPercent ?? 0;
     const showSummaryBlock = hasContent || totalTasks > 0 || tasksFailed > 0 || Boolean(health?.lastActivityAt);
     const isInterviewStyle = options?.interviewStyle === true;
+    const showUnlinkedIndicator =
+      m.status === "active" &&
+      !isInterviewStyle &&
+      (mission.summary?.linkedGoalCount ?? 0) === 0;
 
     return (
       <div
@@ -4219,6 +4223,16 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
             >
               {m.status}
             </span>
+            {showUnlinkedIndicator && (
+              <span
+                className="mission-status-badge mission-status-badge--sm mission-status-badge--unlinked"
+                title="No goals linked to this mission"
+                aria-label="No goals linked to this mission"
+                data-testid={`mission-unlinked-indicator-${m.id}`}
+              >
+                Unlinked
+              </span>
+            )}
             {isInterviewStyle && (
               <span className="mission-status-badge mission-status-badge--sm mission-interview-status mission-interview-status--awaiting_input">
                 Interview in progress

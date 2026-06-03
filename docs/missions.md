@@ -23,9 +23,9 @@ Mission: Improve Reliability
         Task: FN-214
 ```
 
-## Mission ↔ Goal persistence
+## Mission → Goal linkage
 
-Missions and goals are stored independently, but Fusion now persists an optional many-to-many linkage in the `mission_goals` join table.
+Missions and goals are stored independently, with an optional many-to-many linkage persisted in the `mission_goals` join table.
 
 - Columns: `missionId`, `goalId`, `createdAt`
 - Primary key: `(missionId, goalId)`
@@ -33,14 +33,24 @@ Missions and goals are stored independently, but Fusion now persists an optional
 - Delete behavior: both foreign keys use `ON DELETE CASCADE`, so removing either parent deletes only the corresponding join rows
 - Reverse lookups are indexed via `idxMissionGoalsGoalId`
 
-`MissionStore` owns the linkage CRUD surface:
+`MissionStore` owns the persisted linkage CRUD surface:
 
 - `linkGoal(missionId, goalId)` — idempotently create a link and return `{ missionId, goalId, createdAt }`
 - `unlinkGoal(missionId, goalId)` — remove a link and report whether anything changed
 - `listGoalIdsForMission(missionId)` — list linked goals in deterministic creation order
 - `listMissionIdsForGoal(goalId)` — list linked missions in deterministic creation order
 
-Existing missions are **not** backfilled with goal links as part of this schema change; that decision is deferred to FN-5898.
+### No-backfill decision
+
+Existing missions are intentionally **not** auto-linked to any goals. Fusion does not run a migration backfill for pre-existing missions, so a mission with no links should be treated as genuinely unlinked until an operator or agent associates it with one or more goals.
+
+### Manual linkage workflow
+
+Mission ↔ goal links are created and removed deliberately as part of normal planning and operations work. Read surfaces can show current associations, and operator-facing write surfaces can add or remove links when a mission should explicitly support a goal. The workflow is intentionally manual so teams can choose the correct strategic relationship per mission instead of inheriting guessed links from older data.
+
+### Unlinked mission indicator
+
+Mission Manager shows an **Unlinked** indicator on active mission cards when `linkedGoalCount` is zero. This is a read-only attention badge so operators can quickly find active missions that still need an explicit goal association.
 
 ## Creating Missions
 

@@ -371,6 +371,12 @@
   padding: calc(var(--space-xs) / 4) calc(var(--space-sm) - (var(--space-xs) / 4));
 }
 
+.mission-status-badge--unlinked {
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
+}
+
 /* ── Shared Controls ── */
 .mission-icon-btn {
   display: inline-flex;

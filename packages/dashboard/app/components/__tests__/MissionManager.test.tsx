@@ -109,6 +109,7 @@ const mockMissions = [
       completedMilestones: 1,
       totalFeatures: 5,
       completedFeatures: 3,
+      linkedGoalCount: 1,
       progressPercent: 60,
     },
     createdAt: "2026-01-02T00:00:00.000Z",
@@ -881,6 +882,79 @@ describe("MissionManager", () => {
       expect(screen.getByText("planning")).toBeDefined();
       expect(screen.getByText("active")).toBeDefined();
     });
+  });
+
+  it("shows the unlinked indicator only for active missions without linked goals", async () => {
+    const missions = [
+      {
+        id: "M-U1",
+        title: "Needs goal link",
+        description: "Active mission without linked goals",
+        status: "active",
+        interviewState: "not_started",
+        milestones: [],
+        summary: {
+          totalMilestones: 0,
+          completedMilestones: 0,
+          totalFeatures: 0,
+          completedFeatures: 0,
+          linkedGoalCount: 0,
+          progressPercent: 0,
+        },
+        createdAt: "2026-01-03T00:00:00.000Z",
+        updatedAt: "2026-01-03T00:00:00.000Z",
+      },
+      {
+        id: "M-U2",
+        title: "Already linked",
+        description: "Active mission with linked goals",
+        status: "active",
+        interviewState: "not_started",
+        milestones: [],
+        summary: {
+          totalMilestones: 0,
+          completedMilestones: 0,
+          totalFeatures: 0,
+          completedFeatures: 0,
+          linkedGoalCount: 2,
+          progressPercent: 0,
+        },
+        createdAt: "2026-01-02T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      },
+      {
+        id: "M-U3",
+        title: "Planning mission",
+        description: "Non-active mission without linked goals",
+        status: "planning",
+        interviewState: "not_started",
+        milestones: [],
+        summary: {
+          totalMilestones: 0,
+          completedMilestones: 0,
+          totalFeatures: 0,
+          completedFeatures: 0,
+          linkedGoalCount: 0,
+          progressPercent: 0,
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    ];
+
+    globalThis.fetch = createFetchMockWithHealth(missions as Array<Record<string, unknown>>, {
+      "M-U1": getMockMissionHealth("M-U1"),
+      "M-U2": getMockMissionHealth("M-U2"),
+      "M-U3": getMockMissionHealth("M-U3"),
+    });
+    render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mission-unlinked-indicator-M-U1")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("mission-unlinked-indicator-M-U2")).toBeNull();
+    expect(screen.queryByTestId("mission-unlinked-indicator-M-U3")).toBeNull();
   });
 
   it("shows summary stats when mission has summary data", async () => {
