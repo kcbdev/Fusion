@@ -149,7 +149,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 102;
+const SCHEMA_VERSION = 103;
 
 export { SCHEMA_VERSION };
 
@@ -383,6 +383,19 @@ CREATE TABLE IF NOT EXISTS workflow_steps (
   defaultOn INTEGER DEFAULT 0,
   modelProvider TEXT,
   modelId TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL
+);
+
+-- Named workflow definitions authored as WorkflowIr graphs (+ editor layout).
+-- The ir and layout columns are JSON-encoded TEXT; ir is validated via
+-- parseWorkflowIr before persistence at the store layer.
+CREATE TABLE IF NOT EXISTS workflows (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  ir TEXT NOT NULL,
+  layout TEXT NOT NULL DEFAULT '{}',
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL
 );
@@ -4035,6 +4048,23 @@ export class Database {
           this.db.exec(`DROP TABLE IF EXISTS agentLogEntries`);
         });
       }
+    }
+
+    // Migration 103: Named workflow definitions (WorkflowIr graphs + layout).
+    if (version < 103) {
+      this.applyMigration(103, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS workflows (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            ir TEXT NOT NULL,
+            layout TEXT NOT NULL DEFAULT '{}',
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL
+          )
+        `);
+      });
     }
 
   }

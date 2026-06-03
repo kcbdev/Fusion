@@ -54,6 +54,12 @@ export type {
   WorkflowIrNodeKind,
 } from "./workflow-ir-types.js";
 export { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
+export type {
+  WorkflowDefinition,
+  WorkflowDefinitionInput,
+  WorkflowDefinitionUpdate,
+  WorkflowNodeLayout,
+} from "./workflow-definition-types.js";
 
 // ── Engine wiring (set by @fusion/engine at module load) ────────────
 export {

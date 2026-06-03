@@ -7,6 +7,7 @@ import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, 
 import { createActivityLogSnapshot, createRunAuditSnapshot, createTaskMetadataSnapshot, toTaskMetadataRecord, validateSnapshotEnvelope, type ActivityLogSnapshot, type RunAuditSnapshot, type TaskMetadataSnapshot } from "./shared-mesh-state.js";
 import { VALID_TRANSITIONS, DEFAULT_SETTINGS, isGlobalOnlySettingsKey, WORKFLOW_STEP_TEMPLATES, validateDocumentKey } from "./types.js";
 import { DEFAULT_PROJECT_SETTINGS } from "./settings-schema.js";
+import { parseWorkflowIr, serializeWorkflowIr } from "./workflow-ir.js";
 import { resolveWorktrunkSettings, validateWorktrunkSettings } from "./worktrunk-settings.js";
 import { normalizeTaskPriority } from "./task-priority.js";
 import { canAgentTakeImplementationTaskForExplicitRouting } from "./agent-role-policy.js";
@@ -1133,6 +1134,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private lastTaskIdIntegrityLogSignature: string | null = null;
   /** Cached workflow steps — invalidated on create/update/delete */
   private workflowStepsCache: import("./types.js").WorkflowStep[] | null = null;
+  private workflowDefinitionsCache: import("./workflow-definition-types.js").WorkflowDefinition[] | null = null;
   /** Plugin-contributed workflow step templates injected by engine runtime. */
   private _pluginWorkflowStepTemplates: Array<{ pluginId: string; template: WorkflowStepTemplate }> = [];
   /** Global settings store (`~/.fusion/settings.json`) */
@@ -10841,6 +10843,184 @@ ${stepsSection}`;
     } catch {
       // Best-effort: task cleanup is non-critical
     }
+  }
+
+  // ── Workflow definitions (named WorkflowIr graphs) ─────────────────────
+
+  /** Allocate the next workflow-definition id (WF-001, WF-002, …) using a
+   *  monotonic counter persisted in __meta. Never reuses ids across deletes. */
+  private nextWorkflowDefinitionId(): string {
+    const row = this.db.prepare("SELECT value FROM __meta WHERE key = 'nextWorkflowDefinitionId'").get() as
+      | { value: string }
+      | undefined;
+    const next = row ? parseInt(row.value, 10) || 1 : 1;
+    this.db
+      .prepare(
+        "INSERT INTO __meta (key, value) VALUES ('nextWorkflowDefinitionId', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      )
+      .run(String(next + 1));
+    return `WF-${String(next).padStart(3, "0")}`;
+  }
+
+  private toWorkflowDefinition(row: {
+    id: string;
+    name: string;
+    description: string;
+    ir: string;
+    layout: string;
+    createdAt: string;
+    updatedAt: string;
+  }): import("./workflow-definition-types.js").WorkflowDefinition {
+    return {
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      ir: parseWorkflowIr(row.ir),
+      layout: this.parseWorkflowLayout(row.layout),
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  private parseWorkflowLayout(
+    raw: string,
+  ): Record<string, import("./workflow-definition-types.js").WorkflowNodeLayout> {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === "object") {
+        return parsed as Record<string, import("./workflow-definition-types.js").WorkflowNodeLayout>;
+      }
+    } catch {
+      // Corrupt layout JSON falls back to empty (auto-layout) rather than failing the read.
+    }
+    return {};
+  }
+
+  /** Create a named workflow definition. The IR is validated via parseWorkflowIr. */
+  async createWorkflowDefinition(
+    input: import("./workflow-definition-types.js").WorkflowDefinitionInput,
+  ): Promise<import("./workflow-definition-types.js").WorkflowDefinition> {
+    return this.withConfigLock(async () => {
+      const name = input.name?.trim();
+      if (!name) throw new Error("Workflow name is required");
+      // Validate the IR shape up front so we never persist a malformed graph.
+      const ir = parseWorkflowIr(input.ir);
+      const layout = input.layout ?? {};
+      const now = new Date().toISOString();
+      const id = this.nextWorkflowDefinitionId();
+      const definition: import("./workflow-definition-types.js").WorkflowDefinition = {
+        id,
+        name,
+        description: input.description ?? "",
+        ir,
+        layout,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      this.db
+        .prepare(
+          `INSERT INTO workflows (id, name, description, ir, layout, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          definition.id,
+          definition.name,
+          definition.description,
+          serializeWorkflowIr(definition.ir),
+          JSON.stringify(definition.layout),
+          definition.createdAt,
+          definition.updatedAt,
+        );
+
+      this.workflowDefinitionsCache = null;
+      this.db.bumpLastModified();
+      return definition;
+    });
+  }
+
+  /** List all workflow definitions, oldest first. Cached until a mutation. */
+  async listWorkflowDefinitions(): Promise<import("./workflow-definition-types.js").WorkflowDefinition[]> {
+    if (this.workflowDefinitionsCache) return this.workflowDefinitionsCache;
+    const rows = this.db.prepare("SELECT * FROM workflows ORDER BY createdAt ASC").all() as Array<{
+      id: string;
+      name: string;
+      description: string;
+      ir: string;
+      layout: string;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    this.workflowDefinitionsCache = rows.map((row) => this.toWorkflowDefinition(row));
+    return this.workflowDefinitionsCache;
+  }
+
+  /** Get a single workflow definition by id, or undefined when absent. */
+  async getWorkflowDefinition(
+    id: string,
+  ): Promise<import("./workflow-definition-types.js").WorkflowDefinition | undefined> {
+    const row = this.db.prepare("SELECT * FROM workflows WHERE id = ?").get(id) as
+      | {
+          id: string;
+          name: string;
+          description: string;
+          ir: string;
+          layout: string;
+          createdAt: string;
+          updatedAt: string;
+        }
+      | undefined;
+    return row ? this.toWorkflowDefinition(row) : undefined;
+  }
+
+  /** Update a workflow definition. The IR (when supplied) is re-validated. */
+  async updateWorkflowDefinition(
+    id: string,
+    updates: import("./workflow-definition-types.js").WorkflowDefinitionUpdate,
+  ): Promise<import("./workflow-definition-types.js").WorkflowDefinition> {
+    return this.withConfigLock(async () => {
+      const existing = await this.getWorkflowDefinition(id);
+      if (!existing) throw new Error(`Workflow '${id}' not found`);
+
+      const name = updates.name !== undefined ? updates.name.trim() : existing.name;
+      if (!name) throw new Error("Workflow name is required");
+      const ir = updates.ir !== undefined ? parseWorkflowIr(updates.ir) : existing.ir;
+      const next: import("./workflow-definition-types.js").WorkflowDefinition = {
+        ...existing,
+        name,
+        description: updates.description !== undefined ? updates.description : existing.description,
+        ir,
+        layout: updates.layout !== undefined ? updates.layout : existing.layout,
+        updatedAt: new Date().toISOString(),
+      };
+
+      this.db
+        .prepare(
+          `UPDATE workflows SET name = ?, description = ?, ir = ?, layout = ?, updatedAt = ? WHERE id = ?`,
+        )
+        .run(
+          next.name,
+          next.description,
+          serializeWorkflowIr(next.ir),
+          JSON.stringify(next.layout),
+          next.updatedAt,
+          id,
+        );
+
+      this.workflowDefinitionsCache = null;
+      this.db.bumpLastModified();
+      return next;
+    });
+  }
+
+  /** Delete a workflow definition. Throws when the id does not exist. */
+  async deleteWorkflowDefinition(id: string): Promise<void> {
+    const deleted = this.db.prepare("DELETE FROM workflows WHERE id = ?").run(id) as { changes?: number };
+    if ((deleted.changes || 0) === 0) {
+      throw new Error(`Workflow '${id}' not found`);
+    }
+    this.workflowDefinitionsCache = null;
+    this.db.bumpLastModified();
   }
 
   /**
