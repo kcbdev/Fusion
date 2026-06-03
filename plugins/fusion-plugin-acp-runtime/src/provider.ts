@@ -20,11 +20,13 @@ import {
   type Agent,
   type Client,
   type ContentBlock,
+  type RequestPermissionResponse,
   type StopReason,
 } from "@agentclientprotocol/sdk";
 import { spawnAgent, captureStderr, forceKill, unregisterProcess } from "./process-manager.js";
 import { createEventBridge } from "./event-bridge.js";
-import type { AcpCallbacks } from "./types.js";
+import { resolvePermission } from "./control-handler.js";
+import type { AcpCallbacks, PermissionGate } from "./types.js";
 
 /** Default bound for the `initialize` handshake. */
 export const DEFAULT_INITIALIZE_TIMEOUT_MS = 30_000;
@@ -69,23 +71,85 @@ export function createDefaultClientHandler(): Client {
   };
 }
 
+/** A bridging client handler plus a drain control for its in-flight permissions. */
+export interface BridgingClientHandler {
+  /** The ACP `Client` impl handed to `ClientSideConnection`. */
+  handler: Client;
+  /**
+   * Resolve every in-flight `requestPermission` with `{ cancelled }` and mark the
+   * handler cancelled so any request arriving afterward is answered cancelled
+   * immediately (U5 cancel-drain — KTD4a). Idempotent.
+   */
+  cancelPending(): void;
+}
+
 /**
- * The real client handler (U4): bridges every `session/update` notification into
- * the engine callbacks via an event bridge so streamed agent text/thinking/tool
- * activity surfaces in Fusion. The permission floor is still the safe default —
- * U5 replaces `requestPermission` with the per-category action gate.
+ * The real client handler (U4 + U5): bridges every `session/update` notification
+ * into the engine callbacks, AND answers `session/request_permission` through the
+ * per-category action gate (U5 — the SECURITY FLOOR).
+ *
+ * Permission requests are routed to `resolvePermission`, which classifies each
+ * call per-category against the live `gate` and selects `allow_once` only (never
+ * `*_always`). When no `gate` is supplied the resolver default-denies.
+ *
+ * Cancel-drain (KTD4a / Risk: in-flight permission deadlock): every pending
+ * `requestPermission` promise is tracked; `cancelPending()` resolves them all
+ * with `{ cancelled }`. A request that arrives AFTER cancel is answered
+ * `{ cancelled }` immediately so the agent never blocks on teardown.
  */
-export function createBridgingClientHandler(callbacks: AcpCallbacks): Client {
+export function createBridgingClientHandler(
+  callbacks: AcpCallbacks,
+  gate?: PermissionGate,
+): BridgingClientHandler {
   const bridge = createEventBridge(callbacks);
-  return {
+
+  const cancelledResponse: RequestPermissionResponse = {
+    outcome: { outcome: "cancelled" },
+  };
+
+  let cancelled = false;
+  // Each entry resolves its pending requestPermission with a cancelled outcome.
+  const pending = new Set<(response: RequestPermissionResponse) => void>();
+
+  function cancelPending(): void {
+    cancelled = true;
+    for (const resolveCancelled of [...pending]) {
+      resolveCancelled(cancelledResponse);
+    }
+    pending.clear();
+  }
+
+  const handler: Client = {
     async sessionUpdate(params) {
       bridge.handleSessionUpdate(params.update);
     },
-    async requestPermission() {
-      // U5 replaces this with the per-category gate; default-cancel for now.
-      return { outcome: { outcome: "cancelled" } };
+    async requestPermission(params): Promise<RequestPermissionResponse> {
+      // A request arriving after cancel is answered cancelled immediately.
+      if (cancelled) return cancelledResponse;
+
+      // Race the real gate resolution against a cancel-drain so an in-flight
+      // request is answered the moment teardown drains it (never deadlocks).
+      return await new Promise<RequestPermissionResponse>((resolve) => {
+        let settled = false;
+        const finish = (response: RequestPermissionResponse) => {
+          if (settled) return;
+          settled = true;
+          pending.delete(drain);
+          resolve(response);
+        };
+        const drain = (response: RequestPermissionResponse) => finish(response);
+        pending.add(drain);
+
+        resolvePermission(params.toolCall, params.options, gate).then(
+          (response) => finish(response),
+          // resolvePermission never rejects, but stay safe: deny-by-cancel.
+          () => finish(cancelledResponse),
+        );
+      });
     },
   };
+
+  return { handler, cancelPending };
 }
 
 export interface AcpConnection {

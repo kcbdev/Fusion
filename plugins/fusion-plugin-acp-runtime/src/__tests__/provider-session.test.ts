@@ -105,7 +105,7 @@ describe("session driving helpers", () => {
 
     const conn = await connect({
       ...baseOpts({ ACP_FIXTURE_RICH_PROMPT: "1" }),
-      clientHandler: createBridgingClientHandler({ onText, onThinking, onToolStart, onToolEnd }),
+      clientHandler: createBridgingClientHandler({ onText, onThinking, onToolStart, onToolEnd }).handler,
     });
     try {
       const { sessionId } = await newAcpSession(conn, { cwd: process.cwd() });

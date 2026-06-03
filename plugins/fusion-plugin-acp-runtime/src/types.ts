@@ -20,22 +20,54 @@ export interface AcpCallbacks {
   onToolEnd?: (toolName: string, isError: boolean, result?: unknown) => void;
 }
 
+/** Per-category permission disposition (mirrors the engine policy shape). */
+export type GateDisposition = "allow" | "block" | "require-approval";
+
+/**
+ * Fusion action-gate categories the ACP `toolCall.kind` is classified into
+ * (KTD3a). `"exempt"` is implicit (read-only / benign) and always allows.
+ */
+export type FusionCategory =
+  | "git_write"
+  | "file_write_delete"
+  | "command_execution"
+  | "network_api"
+  | "task_agent_mutation";
+
+/** Approval lifecycle status as returned by the gate's lookup closure. */
+export type ApprovalStatus = "pending" | "approved" | "denied" | "completed";
+
 /**
  * Narrow structural view of the engine's `AgentActionGateContext`
  * (`packages/engine/src/agent-action-gate.ts`). The plugin reads only these
  * members; typing them locally avoids a hard dependency on `@fusion/engine`.
  *
- * All HITL closures are optional: when absent, the permission floor (U5)
- * default-denies `require-approval` categories rather than throwing.
+ * `permissionPolicy.rules` is the per-category disposition map the U5 floor
+ * consults — NEVER a preset id (S1/KTD3a). All HITL closures except
+ * `createApprovalRequest` are optional: when the HITL machinery is absent, the
+ * permission floor (U5) default-denies `require-approval` categories rather than
+ * throwing (Risk S1).
  */
 export interface PermissionGate {
-  permissionPolicy?: unknown;
-  evaluate?: (toolName: string, args: unknown) => unknown;
-  resolveGateOutcome?: (evaluation: unknown) => unknown;
-  createApprovalRequest?: (...args: unknown[]) => Promise<unknown> | unknown;
-  findApprovalByDedupeKey?: (...args: unknown[]) => Promise<unknown> | unknown;
-  pauseForApproval?: (...args: unknown[]) => Promise<unknown> | unknown;
-  markApprovalCompleted?: (...args: unknown[]) => Promise<unknown> | unknown;
+  permissionPolicy?: {
+    rules?: Record<string, GateDisposition>;
+  };
+  /** Register an approval request; returns the created record (with an `id`). */
+  createApprovalRequest?: (
+    decision: unknown,
+    args: Record<string, unknown>,
+  ) => Promise<unknown> | unknown;
+  /** Look up a prior decision by dedupe key (decision reuse). */
+  findApprovalByDedupeKey?: (
+    dedupeKey: string,
+  ) => Promise<{ id: string; status: ApprovalStatus } | null> | { id: string; status: ApprovalStatus } | null;
+  /** Block until the human resolves the referenced approval request. */
+  pauseForApproval?: (info: {
+    approvalRequestId: string;
+    decision: unknown;
+  }) => Promise<void> | void;
+  /** Mark an approval request finalized after the decision is consumed. */
+  markApprovalCompleted?: (approvalRequestId: string) => Promise<void> | void;
 }
 
 /** Plugin-local copy of the engine's AgentRuntimeOptions (subset this runtime reads). */

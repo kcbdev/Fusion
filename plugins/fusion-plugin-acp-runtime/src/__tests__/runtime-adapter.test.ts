@@ -43,7 +43,7 @@ describe("AcpRuntimeAdapter (U3)", () => {
 
   it("createSession persists actionGateContext and cwd on the session", async () => {
     const adapter = makeAdapter();
-    const gate = { permissionPolicy: { preset: "unrestricted" } };
+    const gate = { permissionPolicy: { rules: { command_execution: "allow" as const } } };
     // cwd must be a real, spawnable directory (it is the subprocess cwd too).
     const cwd = os.tmpdir();
     const { session } = await adapter.createSession(

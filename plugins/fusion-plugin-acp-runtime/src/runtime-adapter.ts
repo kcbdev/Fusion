@@ -53,6 +53,15 @@ export class AcpRuntimeAdapter implements AgentRuntime {
       onToolEnd: options.onToolEnd,
     };
 
+    // Build the bridging client handler with the per-run permission gate (U5):
+    // its `requestPermission` classifies each call per-category against the live
+    // gate (KTD3a) and selects `allow_once` only (S2). `cancelPending` drains
+    // in-flight permission requests on teardown so the agent never deadlocks.
+    const { handler: clientHandler, cancelPending } = createBridgingClientHandler(
+      callbacks,
+      options.actionGateContext,
+    );
+
     // Spawn + initialize (U2). fs capabilities are advertised only where the
     // resolved settings enable them (KTD6); the subprocess env is built from the
     // allow-list, never inherited process.env (KTD6b).
@@ -62,7 +71,7 @@ export class AcpRuntimeAdapter implements AgentRuntime {
       cwd: options.cwd,
       env: buildSpawnEnv(this.settings.envAllowList),
       advertiseFs: { read: this.settings.fsRead, write: this.settings.fsWrite },
-      clientHandler: createBridgingClientHandler(callbacks),
+      clientHandler,
     });
 
     // Open the ACP session over the task worktree (empty mcpServers — KTD5).
@@ -90,6 +99,9 @@ export class AcpRuntimeAdapter implements AgentRuntime {
       dispose: () => {
         if (disposed) return;
         disposed = true;
+        // Drain in-flight permission requests BEFORE the registry kill so a
+        // blocked agent is released (KTD4a — the SIGKILL is still authoritative).
+        cancelPending();
         connection.dispose();
       },
     };
