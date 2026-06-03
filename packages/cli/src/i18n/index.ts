@@ -26,13 +26,27 @@ export function detectEnvLocale(env: NodeJS.ProcessEnv = process.env): Locale | 
   if (!raw) return undefined;
 
   // Strip encoding/modifier (`.UTF-8`, `@euro`) and normalize `_` to `-`.
-  const code = raw.split(/[.:@\s]/)[0].replace("_", "-");
+  const code = raw.split(/[.:@\s]/)[0].replaceAll("_", "-");
   if (isLocale(code)) return code;
 
-  const lang = code.split("-")[0].toLowerCase();
+  const lower = code.toLowerCase();
+  // Script/region-aware Chinese resolution BEFORE the bare-language fallback,
+  // so Traditional-script tags (zh_Hant, zh_Hant_TW, zh_HK, zh_MO) are not
+  // silently served Simplified. Region-only zh_CN/zh_TW already matched above.
+  if (lower.startsWith("zh")) {
+    if (
+      lower.includes("hant") ||
+      lower.includes("-tw") ||
+      lower.includes("-hk") ||
+      lower.includes("-mo")
+    ) {
+      return "zh-TW";
+    }
+    return "zh-CN";
+  }
+
+  const lang = lower.split("-")[0];
   if (isLocale(lang)) return lang;
-  // A bare `zh` resolves to Simplified, mirroring the shared fallback chain.
-  if (lang === "zh") return "zh-CN";
   return undefined;
 }
 

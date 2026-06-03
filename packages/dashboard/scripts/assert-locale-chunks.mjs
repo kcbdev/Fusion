@@ -12,6 +12,13 @@ const here = dirname(fileURLToPath(import.meta.url));
 const assetsDir = join(here, "..", "dist", "client", "assets");
 const namespaces = ["common", "app", "errors"];
 
+// Derive the expected per-namespace chunk floor from the authored locale set
+// rather than hardcoding a count, so adding a locale needs no edit here.
+const localesDir = join(here, "..", "..", "i18n", "locales");
+const expectedLocaleCount = readdirSync(localesDir, { withFileTypes: true }).filter(
+  (d) => d.isDirectory(),
+).length;
+
 if (!existsSync(assetsDir)) {
   console.error(`assert-locale-chunks: ${assetsDir} not found — run the client build first.`);
   process.exit(1);
@@ -23,9 +30,9 @@ const errors = [];
 // One chunk per dashboard namespace per locale (5 locales) → at least 5 each.
 for (const ns of namespaces) {
   const matches = files.filter((f) => new RegExp(`^${ns}-[^/]+\\.js$`).test(f));
-  if (matches.length < 5) {
+  if (matches.length < expectedLocaleCount) {
     errors.push(
-      `expected >=5 split chunks for namespace "${ns}" (one per locale), found ${matches.length}`,
+      `expected >=${expectedLocaleCount} split chunks for namespace "${ns}" (one per locale), found ${matches.length}`,
     );
   }
 }

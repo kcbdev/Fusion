@@ -8,6 +8,7 @@ import { createActivityLogSnapshot, createRunAuditSnapshot, createTaskMetadataSn
 import { VALID_TRANSITIONS, DEFAULT_SETTINGS, isGlobalOnlySettingsKey, WORKFLOW_STEP_TEMPLATES, validateDocumentKey } from "./types.js";
 import { DEFAULT_PROJECT_SETTINGS } from "./settings-schema.js";
 import { resolveWorktrunkSettings, validateWorktrunkSettings } from "./worktrunk-settings.js";
+import { validateLocale } from "./settings-validation.js";
 import { normalizeTaskPriority } from "./task-priority.js";
 import { canAgentTakeImplementationTaskForExplicitRouting } from "./agent-role-policy.js";
 import { GlobalSettingsStore } from "./global-settings.js";
@@ -3249,6 +3250,18 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       }
 
       (globalPatch as Record<string, unknown>)["experimentalFeatures"] = mergedMap;
+    }
+
+    // Validate the optional UI locale at the write boundary: drop unrecognized
+    // values rather than persisting junk into settings.json. Runtime consumers
+    // also guard via isLocale, but the contract is `language?: Locale`.
+    if ("language" in globalPatch) {
+      const validatedLanguage = validateLocale((globalPatch as Record<string, unknown>)["language"]);
+      if (validatedLanguage === undefined) {
+        delete (globalPatch as Record<string, unknown>)["language"];
+      } else {
+        globalPatch.language = validatedLanguage;
+      }
     }
 
     const updatedGlobal = await this.globalSettingsStore.updateSettings(globalPatch);

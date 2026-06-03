@@ -23,6 +23,21 @@ describe("detectEnvLocale", () => {
     expect(detectEnvLocale({ LANG: "de_DE.UTF-8" })).toBeUndefined();
     expect(detectEnvLocale({})).toBeUndefined();
   });
+
+  it("resolves Traditional-script Chinese tags to zh-TW, not Simplified", () => {
+    expect(detectEnvLocale({ LANG: "zh_Hant_TW.UTF-8" })).toBe("zh-TW");
+    expect(detectEnvLocale({ LANG: "zh_Hant" })).toBe("zh-TW");
+    expect(detectEnvLocale({ LANG: "zh_HK.UTF-8" })).toBe("zh-TW");
+    expect(detectEnvLocale({ LANG: "zh_MO" })).toBe("zh-TW");
+    // Simplified-script and mainland tags stay Simplified.
+    expect(detectEnvLocale({ LANG: "zh_Hans_CN" })).toBe("zh-CN");
+    expect(detectEnvLocale({ LANG: "zh_SG" })).toBe("zh-CN");
+  });
+
+  it("normalizes multi-underscore POSIX tags", () => {
+    expect(detectEnvLocale({ LANG: "en_US_POSIX" })).toBe("en");
+    expect(detectEnvLocale({ LANGUAGE: "fr_FR.UTF-8" })).toBe("fr");
+  });
 });
 
 describe("resolveCliLocale precedence", () => {

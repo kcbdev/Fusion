@@ -4,6 +4,7 @@ import {
   type GlobalSettings,
   DEFAULT_SETTINGS,
   resolveWorktrunkSettings,
+  SUPPORTED_LOCALES,
 } from "@fusion/core";
 import { probeWorktrunk, resolveWorktrunkBinary } from "@fusion/engine";
 import { resolveProject } from "../project-context.js";
@@ -28,9 +29,10 @@ export const VALID_SETTINGS = [
   "worktrunk.enabled",
   "worktrunk.binaryPath",
   "worktrunk.onFailure",
+  "language",
 ] as const;
 
-const GLOBAL_ONLY_SETTINGS = ["ntfyEnabled", "ntfyTopic", "defaultModel"] as const;
+const GLOBAL_ONLY_SETTINGS = ["ntfyEnabled", "ntfyTopic", "defaultModel", "language"] as const;
 const PROJECT_ONLY_SETTINGS = [
   "maxConcurrent",
   "maxWorktrees",
@@ -64,6 +66,7 @@ const ENUM_SETTINGS: Record<string, readonly string[]> = {
   worktreeNaming: ["random", "task-id", "task-title"],
   unavailableNodePolicy: ["block", "fallback-local"],
   "worktrunk.onFailure": ["fail", "fallback-native"],
+  language: SUPPORTED_LOCALES,
 };
 
 const STRING_SETTINGS: readonly string[] = [

@@ -56,6 +56,7 @@
     "verify:locale-chunks": "node scripts/assert-locale-chunks.mjs",
     "prebuild": "node scripts/sync-locales.mjs",
     "build": "vite build && tsc",
+    "prebuild:client": "node scripts/sync-locales.mjs",
     "build:client": "vite build",
     "predev:serve": "node scripts/sync-locales.mjs",
     "dev": "pnpm build && pnpm typecheck && pnpm dev:serve",
