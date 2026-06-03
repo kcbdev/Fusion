@@ -11091,13 +11091,52 @@ ${stepsSection}`;
     });
   }
 
-  /** Delete a workflow definition. Throws when the id does not exist. */
+  /** Delete a workflow definition, cascading to per-task selections, their
+   *  materialized step rows, and the project default. Throws when the id does
+   *  not exist. */
   async deleteWorkflowDefinition(id: string): Promise<void> {
     const deleted = this.db.prepare("DELETE FROM workflows WHERE id = ?").run(id) as { changes?: number };
     if ((deleted.changes || 0) === 0) {
       throw new Error(`Workflow '${id}' not found`);
     }
     this.workflowDefinitionsCache = null;
+
+    // Cascade: clear the project default when it pointed at this workflow.
+    try {
+      if ((await this.getDefaultWorkflowId()) === id) {
+        await this.setDefaultWorkflowId(null);
+      }
+    } catch {
+      // Best-effort: a dangling default falls back gracefully at task creation.
+    }
+
+    // Cascade: drop selections referencing this workflow, their materialized
+    // step rows, and reset the affected tasks' enabled steps.
+    const selections = this.db
+      .prepare("SELECT taskId, stepIds FROM task_workflow_selection WHERE workflowId = ?")
+      .all(id) as Array<{ taskId: string; stepIds: string }>;
+    for (const row of selections) {
+      try {
+        const stepIds = JSON.parse(row.stepIds) as unknown;
+        if (Array.isArray(stepIds)) {
+          for (const stepId of stepIds) {
+            if (typeof stepId === "string") {
+              this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
+            }
+          }
+        }
+      } catch {
+        // Corrupt stepIds list — still remove the selection row below.
+      }
+      this.db.prepare("DELETE FROM task_workflow_selection WHERE taskId = ?").run(row.taskId);
+      try {
+        await this.updateTask(row.taskId, { enabledWorkflowSteps: [] });
+      } catch {
+        // Task may be deleted/archived; dangling step ids resolve to undefined
+        // at execution time and are skipped.
+      }
+    }
+    if (selections.length > 0) this.workflowStepsCache = null;
     this.db.bumpLastModified();
   }
 

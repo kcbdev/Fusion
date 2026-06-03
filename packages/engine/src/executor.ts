@@ -1582,11 +1582,24 @@ export class TaskExecutor {
 
   /** Returns the set of task IDs currently being executed. */
   getExecutingTaskIds(): Set<string> {
-    return new Set([...this.executing, ...this.recoveringCompleted, ...this.resumingUnpaused]);
+    // Graph-routed tasks count as executing for their WHOLE interpreter run —
+    // between seams the inner execute() has released this.executing, but the
+    // graph still owns the lifecycle; self-healing/recovery must not touch it.
+    return new Set([
+      ...this.executing,
+      ...this.recoveringCompleted,
+      ...this.resumingUnpaused,
+      ...TaskExecutor.processWideGraphRouting,
+    ]);
   }
 
   isTaskActive(taskId: string): boolean {
-    return this.executing.has(taskId) || this.activeSessions.has(taskId) || this.recoveringCompleted.has(taskId);
+    return (
+      this.executing.has(taskId)
+      || this.activeSessions.has(taskId)
+      || this.recoveringCompleted.has(taskId)
+      || TaskExecutor.processWideGraphRouting.has(taskId)
+    );
   }
 
   isEphemeralDeletionPending(agentId: string): boolean {
@@ -1699,6 +1712,11 @@ export class TaskExecutor {
     this.options.stuckTaskDetector?.untrackTask(taskId);
     this.clearWorkflowRerunWatchdog(taskId);
     this.clearCompletedTaskWatchdog(taskId);
+    // Defensive graph-interpreter cleanup: a pause/abort mid-graph must not
+    // leave a stale completion interceptor or routing claim behind. The graph
+    // runner's own finally blocks also clear these; double-delete is harmless.
+    this.graphCompletionInterceptors.delete(taskId);
+    TaskExecutor.processWideGraphRouting.delete(taskId);
 
     // FN-5256: claim each surface synchronously BEFORE awaiting any async
     // abort. Without this, two concurrent disposal calls for the same task
@@ -2828,6 +2846,7 @@ export class TaskExecutor {
         || this.activeStepExecutors.has(task.id)
         || this.activeWorkflowStepSessions.has(task.id)
         || this.resumingUnpaused.has(task.id)
+        || TaskExecutor.processWideGraphRouting.has(task.id)
       ) {
         executorLog.log(`${task.id}: skipping recoverCompletedTask — task has active execution in flight`);
         return false;
@@ -3065,6 +3084,10 @@ export class TaskExecutor {
           executorLog.log(`${task.id} completed-task recovery already running - skipping duplicate startup recovery`);
           continue;
         }
+        if (TaskExecutor.processWideGraphRouting.has(task.id)) {
+          executorLog.log(`${task.id} owned by the workflow graph interpreter — skipping completed-task fast-path`);
+          continue;
+        }
         executorLog.log(`${task.id} is already complete — fast-pathing to in-review`);
         this.recoveringCompleted.add(task.id);
         scheduleResume(() => {
@@ -3261,9 +3284,23 @@ export class TaskExecutor {
       planning: async () => ({ outcome: "success", value: "pre-specified" }),
       execute: async (seamTask) => {
         const result = await this.runImplementationPhase(seamTask);
-        return result.taskDone
-          ? { outcome: "success", value: "implemented" }
-          : { outcome: "failure", value: "implementation-incomplete" };
+        if (result.taskDone) {
+          return { outcome: "success", value: "implemented" };
+        }
+        // Distinguish pause/abort from genuine implementation failure so the
+        // failure handler can leave paused tasks to the pause machinery.
+        let paused = this.pausedAborted.has(seamTask.id);
+        if (!paused) {
+          try {
+            paused = Boolean((await this.store.getTask(seamTask.id)).paused);
+          } catch {
+            // Best-effort pause probe; fall through to the failure value.
+          }
+        }
+        return {
+          outcome: "failure",
+          value: paused ? "implementation-paused" : "implementation-incomplete",
+        };
       },
       review: async (seamTask) => {
         // The legacy "review" stage is the in-review handoff: per-step AI review
@@ -3278,11 +3315,28 @@ export class TaskExecutor {
         if (!this.mergeRequester) {
           return { outcome: "failure", value: "merge-unavailable" };
         }
-        const result = await this.mergeRequester(seamTask.id);
-        if (result.merged || result.noOp) {
-          return { outcome: "success", value: result.noOp ? "merge-noop" : "merged" };
+        // Bound the wait: a wedged merge queue must not strand the graph walk
+        // holding the routing claim. On timeout the run fails cleanly and the
+        // task is parked for human review; the queue can still finish later.
+        const GRAPH_MERGE_TIMEOUT_MS = 30 * 60 * 1000;
+        let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+        const timeout = new Promise<"timeout">((resolve) => {
+          timeoutHandle = setTimeout(() => resolve("timeout"), GRAPH_MERGE_TIMEOUT_MS);
+          timeoutHandle.unref?.();
+        });
+        try {
+          const result = await Promise.race([this.mergeRequester(seamTask.id), timeout]);
+          if (result === "timeout") {
+            executorLog.warn(`${seamTask.id}: graph merge seam timed out after ${GRAPH_MERGE_TIMEOUT_MS}ms`);
+            return { outcome: "failure", value: "merge-timeout" };
+          }
+          if (result.merged || result.noOp) {
+            return { outcome: "success", value: result.noOp ? "merge-noop" : "merged" };
+          }
+          return { outcome: "failure", value: result.reason ?? result.error ?? "merge-failed" };
+        } finally {
+          if (timeoutHandle) clearTimeout(timeoutHandle);
         }
-        return { outcome: "failure", value: result.reason ?? result.error ?? "merge-failed" };
       },
       schedule: async () => ({ outcome: "success" }),
     };
@@ -3340,9 +3394,19 @@ export class TaskExecutor {
     this.clearCompletedTaskWatchdog(task.id);
     this.options.stuckTaskDetector?.untrackTask(task.id);
     try {
-      await this.store.logEntry(task.id, message, undefined, this.getRunContextFor(task.id));
-      await this.store.updateTask(task.id, { error: message }, this.getRunContextFor(task.id));
       const live = await this.store.getTask(task.id);
+      // A paused/aborted implementation is not a graph failure — leave the
+      // pause machinery in charge instead of parking the task in review.
+      if (live.paused || this.pausedAborted.has(task.id)) {
+        executorLog.log(`${task.id}: graph run ended while task is paused — leaving pause state untouched`);
+        await this.store.logEntry(task.id, `${message} (task paused — not parked)`, undefined, this.getRunContextFor(task.id));
+        return;
+      }
+      await this.store.logEntry(task.id, message, undefined, this.getRunContextFor(task.id));
+      // status "failed" doubles as the self-healing exemption: review-task
+      // revival sweeps skip tasks carrying a non-null status, preventing the
+      // FN-5704-style loop of re-running the graph from scratch.
+      await this.store.updateTask(task.id, { error: message, status: "failed" }, this.getRunContextFor(task.id));
       if (live.column === "in-progress") {
         await this.persistTokenUsage(task.id);
         await this.handoffTaskToReview(live, "workflow-graph-failed");
