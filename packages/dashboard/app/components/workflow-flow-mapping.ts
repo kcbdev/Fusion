@@ -56,7 +56,21 @@ export function flowToIr(
   const irNodes: WorkflowIr["nodes"] = nodes.map((node) => {
     const data = node.data;
     const config: Record<string, unknown> = { ...(data.config ?? {}) };
-    if (data.label) config.name = data.label;
+    // `irToFlow` synthesizes display labels for unnamed nodes (matching the
+    // fallback below), so only persist a label that the user actually set —
+    // otherwise saving an untouched workflow injects synthetic names like
+    // "start"/"end"/"Merge boundary" and breaks IR round-trips.
+    const fallbackLabel = data.kind === "merge" ? "Merge boundary" : node.id;
+    if (
+      data.kind !== "start" &&
+      data.kind !== "end" &&
+      data.label &&
+      data.label !== fallbackLabel
+    ) {
+      config.name = data.label;
+    } else {
+      delete config.name;
+    }
     if (data.kind === "merge") {
       config.seam = "merge";
       return { id: node.id, kind: "prompt", config };

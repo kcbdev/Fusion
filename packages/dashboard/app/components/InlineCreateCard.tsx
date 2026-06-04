@@ -647,6 +647,7 @@ export function InlineCreateCard({
     onPlanningMode?.(trimmed);
     // Clear the input after triggering planning mode
     setDescription("");
+    setSelectedWorkflowId(null);
     setDependencies([]);
     setExecutorProvider(undefined);
     setExecutorModelId(undefined);
@@ -672,6 +673,7 @@ export function InlineCreateCard({
     onSubtaskBreakdown?.(trimmed);
     // Clear the input after triggering subtask breakdown
     setDescription("");
+    setSelectedWorkflowId(null);
     setDependencies([]);
     setExecutorProvider(undefined);
     setExecutorModelId(undefined);

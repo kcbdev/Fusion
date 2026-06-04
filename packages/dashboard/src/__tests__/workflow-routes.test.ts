@@ -135,6 +135,26 @@ describe("workflow routes (U4)", () => {
     expect((read.body as { workflowId: string }).workflowId).toBe(wfId);
   });
 
+  it("PUT /tasks/:taskId/workflow rejects an omitted workflowId but clears on explicit null", async () => {
+    const wf = await post("/api/workflows", { name: "QA", ir: linearIr() });
+    const wfId = (wf.body as { id: string }).id;
+    const task = await store.createTask({ description: "T", enabledWorkflowSteps: [] });
+    await put(`/api/tasks/${task.id}/workflow`, { workflowId: wfId });
+
+    // Malformed body ({}) must not silently wipe the selection.
+    const omitted = await put(`/api/tasks/${task.id}/workflow`, {});
+    expect(omitted.status).toBe(400);
+    const stillSelected = await get(`/api/tasks/${task.id}/workflow`);
+    expect((stillSelected.body as { workflowId: string }).workflowId).toBe(wfId);
+
+    // Explicit null is the only clear signal.
+    const cleared = await put(`/api/tasks/${task.id}/workflow`, { workflowId: null });
+    expect(cleared.status).toBe(200);
+    expect((cleared.body as { workflowId: string | null }).workflowId).toBeNull();
+    const read = await get(`/api/tasks/${task.id}/workflow`);
+    expect((read.body as { workflowId: string | null }).workflowId).toBeNull();
+  });
+
   it("PUT /project/default-workflow then create task inherits the default", async () => {
     const wf = await post("/api/workflows", { name: "Def", ir: linearIr() });
     const wfId = (wf.body as { id: string }).id;
@@ -180,5 +200,34 @@ describe("workflow routes (U4)", () => {
       command: "rm -rf /",
     });
     expect(res.status).toBe(400);
+  });
+
+  it("approve-cli 400s when a CLI-approval reason lingers but the task is not paused", async () => {
+    const task = await store.createTask({ description: "T", enabledWorkflowSteps: [] });
+    // Stale reason string with no active pause must not be approvable.
+    await store.updateTask(task.id, {
+      paused: false,
+      pausedReason: "workflow-cli-approval:build: npm run build",
+    });
+    const res = await post(`/api/tasks/${task.id}/workflow/approve-cli`, {});
+    expect(res.status).toBe(400);
+    expect(await store.isWorkflowCliCommandApproved("npm run build")).toBe(false);
+  });
+
+  it("POST /workflow/input resumes without clearing pausedReason", async () => {
+    const task = await store.createTask({ description: "T", enabledWorkflowSteps: [] });
+    await store.updateTask(task.id, {
+      paused: true,
+      pausedReason: "workflow-await-input:ask: please confirm",
+    });
+
+    const res = await post(`/api/tasks/${task.id}/workflow/input`, { text: "yes" });
+    expect(res.status).toBe(200);
+
+    const detail = await store.getTask(task.id);
+    expect(detail.paused).toBeFalsy();
+    // The route deliberately leaves pausedReason intact; the await-input node
+    // consumes the marker itself on re-run.
+    expect(detail.pausedReason).toBe("workflow-await-input:ask: please confirm");
   });
 });

@@ -102,10 +102,36 @@ export function validateLinearity(ir: WorkflowIr): WorkflowCompileError | null {
   }
 
   // Reachability: the single main path must reach end and cover every node.
+  // While walking, enforce the canonical seam pipeline: each of execute/review/
+  // merge may appear at most once and only in that order. The compiler treats
+  // seams as a fixed execute → review → merge boundary (merge flips pre- to
+  // post-merge), so out-of-order or duplicate seams would compile inconsistently
+  // with the runtime contract.
+  const expectedSeamOrder = ["execute", "review", "merge"] as const;
+  const seenSeams = new Set<string>();
+  let nextExpectedSeamIndex = 0;
   const visited = new Set<string>();
   let cursor: string | undefined = startNode.id;
   while (cursor && !visited.has(cursor)) {
     visited.add(cursor);
+    const node = nodesById.get(cursor);
+    const seam = node ? seamOf(node) : undefined;
+    if (seam) {
+      if (seenSeams.has(seam)) {
+        return new WorkflowCompileError(`seam '${seam}' appears more than once`);
+      }
+      while (
+        nextExpectedSeamIndex < expectedSeamOrder.length &&
+        expectedSeamOrder[nextExpectedSeamIndex] !== seam
+      ) {
+        nextExpectedSeamIndex += 1;
+      }
+      if (expectedSeamOrder[nextExpectedSeamIndex] !== seam) {
+        return new WorkflowCompileError("seams must follow the execute -> review -> merge order");
+      }
+      seenSeams.add(seam);
+      nextExpectedSeamIndex += 1;
+    }
     if (cursor === endNode.id) break;
     cursor = mainEdge(outgoing.get(cursor) ?? [])?.to;
   }

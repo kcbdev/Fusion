@@ -2529,6 +2529,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     const allowResurrection = existing.allowResurrection === true;
     if (input.forceResurrect === true || allowResurrection) {
+      this.purgeTaskWorkflowSelectionRows(id);
       this.db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
       this.db.bumpLastModified();
       return;
@@ -3779,18 +3780,26 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       resolvedWorkflowSteps = undefined;
     }
 
-    const task = await this.createTaskWithDistributedReservation(input, {
-      createTaskWithId: async (taskId) => {
-        await this.assertNoDependencyCycle(taskId, input.dependencies ?? [], "createTask");
-        return this._createTaskInternal(
-          input,
-          title,
-          resolvedWorkflowSteps,
-          taskId,
-          { invokeTaskCreatedHook: shouldInvokeTaskCreatedHook && !hasPendingSummarization },
-        );
-      },
-    });
+    let task: Task;
+    try {
+      task = await this.createTaskWithDistributedReservation(input, {
+        createTaskWithId: async (taskId) => {
+          await this.assertNoDependencyCycle(taskId, input.dependencies ?? [], "createTask");
+          return this._createTaskInternal(
+            input,
+            title,
+            resolvedWorkflowSteps,
+            taskId,
+            { invokeTaskCreatedHook: shouldInvokeTaskCreatedHook && !hasPendingSummarization },
+          );
+        },
+      });
+    } catch (err) {
+      // The task row was never created, so any default-workflow steps we
+      // materialized above would orphan with no task/selection pointing at them.
+      this.cleanupOrphanedMaterializedSteps(pendingWorkflowSelection?.stepIds);
+      throw err;
+    }
 
     // Record the inherited workflow selection now that the task row exists.
     if (pendingWorkflowSelection) {
@@ -3942,12 +3951,20 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       resolvedWorkflowSteps = undefined;
     }
 
-    const createdTask = await this._createTaskInternal(input, title, resolvedWorkflowSteps, id, {
-      createdAt: options.createdAt,
-      updatedAt: options.updatedAt,
-      promptOverride: options.prompt,
-      invokeTaskCreatedHook: options.invokeTaskCreatedHook,
-    });
+    let createdTask: Task;
+    try {
+      createdTask = await this._createTaskInternal(input, title, resolvedWorkflowSteps, id, {
+        createdAt: options.createdAt,
+        updatedAt: options.updatedAt,
+        promptOverride: options.prompt,
+        invokeTaskCreatedHook: options.invokeTaskCreatedHook,
+      });
+    } catch (err) {
+      // The task row was never created, so any default-workflow steps we
+      // materialized above would orphan with no task/selection pointing at them.
+      this.cleanupOrphanedMaterializedSteps(pendingWorkflowSelection?.stepIds);
+      throw err;
+    }
 
     // Record the inherited workflow selection now that the task row exists.
     if (pendingWorkflowSelection) {
@@ -7827,6 +7844,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   private deleteTaskById(taskId: string): void {
     this.clearLinkedAgentTaskIds(taskId);
+    this.purgeTaskWorkflowSelectionRows(taskId);
     this.db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId);
     this.db.bumpLastModified();
   }
@@ -8454,6 +8472,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       this.db.transaction(() => {
         rewrittenLineageChildren = this.rewriteLineageChildrenForRemoval(id, lineageChildIds);
         this.clearLinkedAgentTaskIds(id, task.updatedAt);
+        this.purgeTaskWorkflowSelectionRows(id);
         this.db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
         this.db.bumpLastModified();
       });
@@ -10472,6 +10491,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       const archivedAt = task.columnMovedAt ?? task.updatedAt ?? new Date().toISOString();
       const entry = await this.taskToArchiveEntry(task, archivedAt);
       this.archiveDb.upsert(entry);
+      this.purgeTaskWorkflowSelectionRows(task.id);
       this.db.prepare("DELETE FROM tasks WHERE id = ?").run(task.id);
       await rm(this.taskDir(task.id), { recursive: true, force: true });
       if (this.isWatching) {
@@ -10507,6 +10527,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       this.archiveDb.upsert(entry);
 
       // Remove task from tasks table
+      this.purgeTaskWorkflowSelectionRows(task.id);
       this.db.prepare('DELETE FROM tasks WHERE id = ?').run(task.id);
       this.db.bumpLastModified();
 
@@ -11018,16 +11039,21 @@ ${stepsSection}`;
   /** Allocate the next workflow-definition id (WF-001, WF-002, …) using a
    *  monotonic counter persisted in __meta. Never reuses ids across deletes. */
   private nextWorkflowDefinitionId(): string {
-    const row = this.db.prepare("SELECT value FROM __meta WHERE key = 'nextWorkflowDefinitionId'").get() as
-      | { value: string }
-      | undefined;
-    const next = row ? parseInt(row.value, 10) || 1 : 1;
-    this.db
-      .prepare(
-        "INSERT INTO __meta (key, value) VALUES ('nextWorkflowDefinitionId', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-      )
-      .run(String(next + 1));
-    return `WF-${String(next).padStart(3, "0")}`;
+    // Serialize the read+increment in one write transaction so two TaskStore
+    // instances cannot both observe the same counter and allocate the same
+    // WF-id (which would collide on the workflows primary key).
+    return this.db.transactionImmediate(() => {
+      const row = this.db.prepare("SELECT value FROM __meta WHERE key = 'nextWorkflowDefinitionId'").get() as
+        | { value: string }
+        | undefined;
+      const next = row ? parseInt(row.value, 10) || 1 : 1;
+      this.db
+        .prepare(
+          "INSERT INTO __meta (key, value) VALUES ('nextWorkflowDefinitionId', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        )
+        .run(String(next + 1));
+      return `WF-${String(next).padStart(3, "0")}`;
+    });
   }
 
   private toWorkflowDefinition(row: {
@@ -11322,6 +11348,49 @@ ${stepsSection}`;
     this.db.prepare("DELETE FROM task_workflow_selection WHERE taskId = ?").run(taskId);
   }
 
+  /** Purge a task's workflow selection and its materialized WorkflowStep rows
+   *  when the task row itself is being physically removed. `task_workflow_selection`
+   *  has no FK to `tasks(id)` (SQLite can't add one to an existing table without a
+   *  rebuild), so deletion must be mirrored here to avoid orphaned selection rows
+   *  and unreclaimable compiled steps. Best-effort and synchronous: unlike
+   *  clearTaskWorkflowSelection it does not touch enabledWorkflowSteps, since the
+   *  owning task row no longer exists. */
+  private purgeTaskWorkflowSelectionRows(taskId: string): void {
+    const row = this.db
+      .prepare("SELECT stepIds FROM task_workflow_selection WHERE taskId = ?")
+      .get(taskId) as { stepIds: string } | undefined;
+    if (!row) return;
+    try {
+      const parsed = JSON.parse(row.stepIds) as unknown;
+      if (Array.isArray(parsed)) {
+        for (const stepId of parsed) {
+          if (typeof stepId === "string") {
+            this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
+          }
+        }
+      }
+    } catch {
+      // Corrupt stepIds list — still remove the selection row below.
+    }
+    this.db.prepare("DELETE FROM task_workflow_selection WHERE taskId = ?").run(taskId);
+    this.workflowStepsCache = null;
+  }
+
+  /** Delete a set of freshly materialized WorkflowStep rows that were never
+   *  successfully attached to a task/selection (e.g. the owning task create
+   *  failed). Best-effort; tolerates already-removed ids. */
+  private cleanupOrphanedMaterializedSteps(stepIds: string[] | undefined): void {
+    if (!stepIds || stepIds.length === 0) return;
+    for (const stepId of stepIds) {
+      try {
+        this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
+      } catch {
+        // Best-effort cleanup.
+      }
+    }
+    this.workflowStepsCache = null;
+  }
+
   /** Persist pre-compiled workflow steps as fresh WorkflowStep rows and return
    *  their ids in execution order. Steps are tagged so they stay out of the
    *  step manager. Compile via compileWorkflowToSteps before calling. */
@@ -11372,8 +11441,23 @@ ${stepsSection}`;
     // referencing already-deleted step ids.
     const priorSelection = this.getTaskWorkflowSelection(taskId);
     const ids = await this.materializeWorkflowSteps(workflowId, inputs);
-    await this.updateTask(taskId, { enabledWorkflowSteps: ids });
-    this.writeTaskWorkflowSelection(taskId, workflowId, ids);
+    try {
+      await this.updateTask(taskId, { enabledWorkflowSteps: ids });
+      this.writeTaskWorkflowSelection(taskId, workflowId, ids);
+    } catch (err) {
+      // The owner write (updateTask / selection upsert) failed, so the steps we
+      // just materialized would orphan with no selection row pointing at them.
+      // Delete them before propagating; the prior selection is left untouched.
+      for (const stepId of ids) {
+        try {
+          this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
+        } catch {
+          // Best-effort cleanup; surface the original error below.
+        }
+      }
+      this.workflowStepsCache = null;
+      throw err;
+    }
 
     if (priorSelection) {
       for (const stepId of priorSelection.stepIds) {

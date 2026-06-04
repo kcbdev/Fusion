@@ -134,7 +134,13 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
     try {
       const { store } = await getProjectContext(req);
       const workflowId = (req.body ?? {}).workflowId;
-      if (workflowId === null || workflowId === undefined) {
+      // Only an explicit null clears the selection. An omitted field
+      // (e.g. a malformed `{}` body) must fail validation rather than
+      // silently wiping the task's workflow.
+      if (workflowId === undefined) {
+        throw badRequest("workflowId is required (string to select, null to clear)");
+      }
+      if (workflowId === null) {
         await store.clearTaskWorkflowSelection(req.params.taskId);
         res.json({ workflowId: null, enabledWorkflowSteps: [] });
         return;
@@ -174,7 +180,12 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
       // would let any client approve an arbitrary command the task is not
       // actually paused on, bypassing trust-on-first-use entirely.
       const command = match ? match[1].trim() : "";
-      if (!command) throw badRequest("No pending CLI command to approve for this task");
+      // Require an active CLI-approval pause: a non-empty command parsed from
+      // pausedReason AND the task actually paused. This rejects approvals
+      // against a stale reason string on an already-resumed task.
+      if (!task.paused || !command) {
+        throw badRequest("No pending CLI command to approve for this task");
+      }
       await store.approveWorkflowCliCommand(command);
       await store.updateTask(req.params.taskId, { status: null, paused: false, pausedReason: null });
       res.json({ approved: command });
@@ -192,7 +203,12 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
       const text = (req.body?.text as string | undefined)?.trim();
       if (!text) throw badRequest("Input text is required");
       await store.addSteeringComment(req.params.taskId, text);
-      await store.updateTask(req.params.taskId, { status: null, paused: false, pausedReason: null });
+      // Do NOT clear pausedReason here: runAwaitInputNode checks
+      // (live.pausedReason ?? "").startsWith(marker) to confirm this specific
+      // node previously paused the task. Clearing it would make every re-run
+      // re-pause without ever consuming the answer. The node clears the marker
+      // itself once it consumes the input.
+      await store.updateTask(req.params.taskId, { status: null, paused: false });
       res.json({ ok: true });
     } catch (err: unknown) {
       if (err instanceof ApiError) throw err;

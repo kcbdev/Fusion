@@ -151,7 +151,15 @@ function InnerEditor({
   );
 
   const updateSelectedData = useCallback(
-    (patch: Partial<WorkflowFlowNodeData> | { config: Record<string, unknown> }) => {
+    (
+      patch:
+        | Partial<WorkflowFlowNodeData>
+        | {
+            config:
+              | Record<string, unknown>
+              | ((prev: Record<string, unknown>) => Record<string, unknown>);
+          },
+    ) => {
       if (!selectedNodeId) return;
       setNodes((ns) =>
         ns.map((n) =>
@@ -160,7 +168,14 @@ function InnerEditor({
                 ...n,
                 data: {
                   ...n.data,
-                  ...("config" in patch ? { config: { ...n.data.config, ...patch.config } } : patch),
+                  ...("config" in patch
+                    ? {
+                        config:
+                          typeof patch.config === "function"
+                            ? patch.config((n.data.config ?? {}) as Record<string, unknown>)
+                            : { ...(n.data.config ?? {}), ...patch.config },
+                      }
+                    : patch),
                 },
               }
             : n,
@@ -269,8 +284,16 @@ function InnerEditor({
         addToast(getErrorMessage(err) || "Failed to load skills", "error");
       });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentExecutor, selectedNode?.id]);
+  }, [
+    currentExecutor,
+    selectedNode?.id,
+    selectedNode?.data.kind,
+    projectId,
+    addToast,
+    models.length,
+    agents.length,
+    skills.length,
+  ]);
 
   const overlayProps = useOverlayDismiss(onClose);
 
@@ -544,9 +567,13 @@ function InnerEditor({
                       onChange={(e) => {
                         const val = e.target.value.trim();
                         if (val === "") {
-                          const patch: Record<string, unknown> = { ...selectedNode.data.config };
-                          delete patch.maxRetries;
-                          updateSelectedData({ config: patch });
+                          updateSelectedData({
+                            config: (prev) => {
+                              const next = { ...prev };
+                              delete next.maxRetries;
+                              return next;
+                            },
+                          });
                         } else {
                           const num = parseInt(val, 10);
                           if (!isNaN(num)) updateSelectedData({ config: { maxRetries: num } });

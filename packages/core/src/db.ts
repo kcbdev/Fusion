@@ -149,7 +149,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 104;
+const SCHEMA_VERSION = 105;
 
 export { SCHEMA_VERSION };
 
@@ -4088,6 +4088,29 @@ export class Database {
             stepIds TEXT NOT NULL DEFAULT '[]',
             updatedAt TEXT NOT NULL
           )
+        `);
+      });
+    }
+
+    // Migration 105: task_workflow_selection has no FK to tasks(id) (SQLite can't
+    // add one to an existing table without a rebuild), so physical task deletes
+    // before this version could leave orphaned selection rows and unreclaimable
+    // compiled workflow_steps. Drop any already-orphaned rows and their steps.
+    if (version < 105) {
+      this.applyMigration(105, () => {
+        // Delete the compiled steps referenced by orphaned selections first, then
+        // the orphaned selection rows themselves. json_each expands the stepIds
+        // JSON array; the WHERE guards against malformed (non-array) stepIds.
+        this.db.exec(`
+          DELETE FROM workflow_steps WHERE id IN (
+            SELECT je.value
+            FROM task_workflow_selection sel
+            JOIN json_each(sel.stepIds) je
+            WHERE json_valid(sel.stepIds)
+              AND sel.taskId NOT IN (SELECT id FROM tasks)
+          );
+          DELETE FROM task_workflow_selection
+          WHERE taskId NOT IN (SELECT id FROM tasks);
         `);
       });
     }

@@ -3243,8 +3243,18 @@ export class TaskExecutor {
         runCustomNode: (node, nodeTask) => this.runGraphCustomNode(node, nodeTask, settings),
         onEvent: (event) => executorLog.log(`[workflow-graph] ${event.type} ${event.taskId}: ${event.detail}`),
       });
-      const detail = await this.store.getTask(task.id);
-      const result = await runner.run(detail, settings);
+      let result: WorkflowGraphTaskRunResult;
+      try {
+        const detail = await this.store.getTask(task.id);
+        result = await runner.run(detail, settings);
+      } catch (err) {
+        // A thrown interpreter error must not strand the task in-progress: fall
+        // back to the legacy pipeline so the normal executor lock + flow runs.
+        executorLog.error(
+          `[workflow-graph] ${task.id} interpreter threw — falling back to legacy pipeline: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return false;
+      }
       if (result.disposition === "fell-back") {
         executorLog.log(`[workflow-graph] ${task.id} fell back to legacy pipeline: ${result.reason}`);
         return false;
@@ -3362,20 +3372,44 @@ export class TaskExecutor {
     // pausedReason). A pre-existing steering comment (e.g. one added at task
     // creation) must never short-circuit the pause on the node's first run —
     // otherwise the node consumes a stale comment and never asks the user.
-    const pausedByThisNode = (live.pausedReason ?? "").startsWith(marker);
-    if (!live.paused && pausedByThisNode && steering.length > 0) {
-      // Input has arrived (user replied and unpaused): consume the latest comment.
-      const latest = steering[steering.length - 1] as { text?: string; comment?: string };
-      const answer = (latest?.text ?? latest?.comment ?? "").toString();
-      await this.store.updateTask(live.id, { status: null }, this.getRunContextFor(live.id));
-      await this.store.logEntry(live.id, `Workflow input received for node '${node.id}'`, undefined, this.getRunContextFor(live.id));
-      return { outcome: "success", value: "input-received", contextPatch: { [`input:${node.id}`]: answer } };
+    const pausedReason = live.pausedReason ?? "";
+    const pausedByThisNode = pausedReason.startsWith(marker);
+    if (!live.paused && pausedByThisNode) {
+      // Correlate the reply to THIS pause: the marker embeds a watermark
+      // (`${marker}@${pauseEpochMs}: …`) recorded when the node paused. Only
+      // count steering comments created at/after that watermark as the answer,
+      // so an unpause-without-reply can't consume a comment that predates the
+      // pause. The watermark is epoch milliseconds (colon-free) so it never
+      // collides with the `:` that separates the marker from the question, nor
+      // with the dashboard's colon-delimited question parser.
+      const watermark = (() => {
+        const m = pausedReason.slice(marker.length).match(/^@(\d+)/);
+        const t = m ? Number(m[1]) : NaN;
+        return Number.isFinite(t) ? t : undefined;
+      })();
+      const replies = watermark === undefined
+        ? steering
+        : steering.filter((c) => {
+            const created = Date.parse((c as { createdAt?: string }).createdAt ?? "");
+            return Number.isFinite(created) ? created >= watermark : false;
+          });
+      if (replies.length > 0) {
+        // Input has arrived (user replied and unpaused): consume the latest
+        // post-pause comment and clear this node's marker so a future fresh
+        // visit re-asks instead of silently consuming a stale comment.
+        const latest = replies[replies.length - 1] as { text?: string; comment?: string };
+        const answer = (latest?.text ?? latest?.comment ?? "").toString();
+        await this.store.updateTask(live.id, { status: null, pausedReason: null }, this.getRunContextFor(live.id));
+        await this.store.logEntry(live.id, `Workflow input received for node '${node.id}'`, undefined, this.getRunContextFor(live.id));
+        return { outcome: "success", value: "input-received", contextPatch: { [`input:${node.id}`]: answer } };
+      }
+      // Unpaused but no post-pause reply yet — re-park below and keep waiting.
     }
 
     await this.store.logEntry(live.id, `Workflow paused for user input: ${question}`, undefined, this.getRunContextFor(live.id));
     await this.store.updateTask(
       live.id,
-      { status: "awaiting-user-input", paused: true, pausedReason: `${marker}: ${question}` },
+      { status: "awaiting-user-input", paused: true, pausedReason: `${marker}@${Date.now()}: ${question}` },
       this.getRunContextFor(live.id),
     );
     // Failure outcome ends the walk; handleGraphFailure leaves paused tasks
@@ -3522,6 +3556,15 @@ export class TaskExecutor {
         const skipApproval = cfg.cliSkipApproval === true || cfg.autoApprove === true;
         if (!skipApproval && !(await this.store.isWorkflowCliCommandApproved(rawCommand))) {
           return this.pauseForCliApproval(node, live, rawCommand);
+        }
+        // We are proceeding to execute. If this task was previously paused by
+        // THIS node's CLI-approval gate, clear that status/pausedReason now —
+        // otherwise the task keeps the "awaiting-cli-approval" status through
+        // later graph nodes even though approval already happened (mirrors the
+        // status reset in runAwaitInputNode).
+        const approvalMarker = `workflow-cli-approval:${node.id}`;
+        if ((live.pausedReason ?? "").startsWith(approvalMarker)) {
+          await this.store.updateTask(live.id, { status: null, pausedReason: null }, this.getRunContextFor(live.id));
         }
         const env = prompt ? { ...process.env, FUSION_NODE_PROMPT: prompt } : undefined;
         const out = await this.runRawCliCommand(

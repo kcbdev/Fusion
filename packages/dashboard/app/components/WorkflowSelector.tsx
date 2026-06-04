@@ -34,12 +34,16 @@ export function WorkflowSelector({
 
   useEffect(() => {
     let cancelled = false;
+    setWorkflows([]);
     setLoading(true);
     fetchWorkflows(projectId)
       .then((data) => {
         if (!cancelled) setWorkflows(data);
       })
-      .catch((err) => addToast?.(getErrorMessage(err) || "Failed to load workflows", "error"))
+      .catch((err) => {
+        if (!cancelled) setWorkflows([]);
+        addToast?.(getErrorMessage(err) || "Failed to load workflows", "error");
+      })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
@@ -103,11 +107,13 @@ export function ProjectDefaultWorkflowField({ projectId, addToast, onManage }: P
 
   useEffect(() => {
     let cancelled = false;
+    setValue(null);
     fetchProjectDefaultWorkflow(projectId)
       .then((res) => {
         if (!cancelled) setValue(res.workflowId);
       })
       .catch(() => {
+        if (!cancelled) setValue(null);
         /* default is optional; ignore load failures */
       });
     return () => {

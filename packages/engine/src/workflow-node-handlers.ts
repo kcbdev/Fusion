@@ -77,7 +77,13 @@ export function createGateHandler(runCustomNode?: WorkflowCustomNodeRunner): Wor
 
     const hasExecutableConfig =
       typeof node.config?.prompt === "string" || typeof node.config?.scriptName === "string";
-    if (hasExecutableConfig && runCustomNode) {
+    if (hasExecutableConfig) {
+      // Fail closed: an executable gate with no runner must NOT auto-pass — that
+      // would silently bypass the gate and let the workflow continue. Mirror the
+      // prompt/script handler, which throws in the same situation.
+      if (!runCustomNode) {
+        throw new WorkflowIrError(`No custom-node runner registered for node: ${node.id}`);
+      }
       return runCustomNode(node, context.task, context.context);
     }
 

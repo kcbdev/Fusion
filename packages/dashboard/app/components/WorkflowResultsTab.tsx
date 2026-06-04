@@ -4,6 +4,7 @@ import { Check, ChevronDown, ChevronUp, Maximize2, Pencil, X } from "lucide-reac
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AgentLogEntry, WorkflowStep, WorkflowStepResult } from "@fusion/core";
+import { getErrorMessage } from "@fusion/core";
 import { fetchWorkflowSteps, fetchTaskWorkflow, selectTaskWorkflow, submitTaskWorkflowInput, approveTaskWorkflowCli } from "../api";
 import { WorkflowSelector } from "./WorkflowSelector";
 import { useAgentLogs } from "../hooks/useAgentLogs";
@@ -233,6 +234,17 @@ export function WorkflowResultsTab({
   const [allWorkflowSteps, setAllWorkflowSteps] = useState<WorkflowStep[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
+  const [resumeError, setResumeError] = useState<string | null>(null);
+
+  // Reset the paused-action UI whenever the blocked node/task changes, so a new
+  // awaiting-user-input / awaiting-cli-approval pause starts with fresh controls
+  // instead of a stale "Resuming…" banner.
+  useEffect(() => {
+    setInputText("");
+    setSubmitting(false);
+    setSubmitted(false);
+    setResumeError(null);
+  }, [taskId, taskStatus, taskPausedReason]);
 
   // Load the task's current workflow selection (if any).
   useEffect(() => {
@@ -690,10 +702,13 @@ export function WorkflowResultsTab({
   const handleSubmitInput = async () => {
     if (!inputText.trim() || submitting) return;
     setSubmitting(true);
+    setResumeError(null);
     try {
       await submitTaskWorkflowInput(taskId, inputText, projectId);
       setInputText("");
       setSubmitted(true);
+    } catch (err) {
+      setResumeError(getErrorMessage(err) || "Failed to resume task");
     } finally {
       setSubmitting(false);
     }
@@ -702,9 +717,12 @@ export function WorkflowResultsTab({
   const handleApproveCli = async () => {
     if (submitting) return;
     setSubmitting(true);
+    setResumeError(null);
     try {
       await approveTaskWorkflowCli(taskId, projectId);
       setSubmitted(true);
+    } catch (err) {
+      setResumeError(getErrorMessage(err) || "Failed to approve command");
     } finally {
       setSubmitting(false);
     }
@@ -736,6 +754,9 @@ export function WorkflowResultsTab({
               >
                 {submitting ? "Submitting…" : "Submit & resume"}
               </button>
+              {resumeError && (
+                <span className="workflow-input-error" role="alert">{resumeError}</span>
+              )}
             </div>
           )}
         </div>
@@ -760,6 +781,9 @@ export function WorkflowResultsTab({
                 {submitting ? "Approving…" : "Approve & run"}
               </button>
               <span className="workflow-input-keep-paused">To reject, keep the task paused and do not approve.</span>
+              {resumeError && (
+                <span className="workflow-input-error" role="alert">{resumeError}</span>
+              )}
             </div>
           )}
         </div>

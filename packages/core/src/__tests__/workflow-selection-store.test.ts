@@ -118,6 +118,27 @@ describe("TaskStore workflow selection (U3)", () => {
     expect(detail.enabledWorkflowSteps ?? []).toHaveLength(0);
   });
 
+  it("force-resurrecting over a tombstoned task purges its prior workflow selection", async () => {
+    const wf = await store.createWorkflowDefinition({ name: "QA", ir: linearIr() });
+    const task = await store.createTask({ description: "T", enabledWorkflowSteps: [] });
+    await store.selectTaskWorkflow(task.id, wf.id);
+    const priorIds = store.getTaskWorkflowSelection(task.id)!.stepIds;
+    expect(priorIds).toHaveLength(2);
+
+    // Soft-delete then physically resurrect the same id; the physical purge of
+    // the old tasks row must drop the orphaned selection + its compiled steps.
+    await store.deleteTask(task.id);
+    await store.createTaskWithReservedId(
+      { description: "resurrected", enabledWorkflowSteps: [], forceResurrect: true },
+      { taskId: task.id, applyDefaultWorkflowSteps: false },
+    );
+
+    expect(store.getTaskWorkflowSelection(task.id)).toBeUndefined();
+    for (const id of priorIds) {
+      expect(await store.getWorkflowStep(id)).toBeUndefined();
+    }
+  });
+
   it("throws when selecting an unknown workflow", async () => {
     const task = await store.createTask({ description: "T", enabledWorkflowSteps: [] });
     await expect(store.selectTaskWorkflow(task.id, "WF-404")).rejects.toThrow(/not found/i);

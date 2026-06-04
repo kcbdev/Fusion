@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 import { WorkflowIrError } from "../workflow-ir.js";
+import { isBuiltinWorkflowId } from "../builtin-workflows.js";
 import type { WorkflowIr } from "../workflow-ir-types.js";
 import { createTaskStoreTestHarness } from "./store-test-helpers.js";
 
@@ -43,11 +44,12 @@ describe("TaskStore workflow definitions (U1)", () => {
     });
 
     expect(created.id).toBe("WF-001");
-    const list = await store.listWorkflowDefinitions();
-    expect(list).toHaveLength(1);
-    expect(list[0].name).toBe("Quality Gate");
-    expect(list[0].ir.nodes).toHaveLength(3);
-    expect(list[0].layout.lint).toEqual({ x: 120, y: 0 });
+    // The list prepends read-only built-ins; assert on the user workflows only.
+    const userList = (await store.listWorkflowDefinitions()).filter((w) => !isBuiltinWorkflowId(w.id));
+    expect(userList).toHaveLength(1);
+    expect(userList[0].name).toBe("Quality Gate");
+    expect(userList[0].ir.nodes).toHaveLength(3);
+    expect(userList[0].layout.lint).toEqual({ x: 120, y: 0 });
   });
 
   it("rejects a workflow whose IR is missing start/end", async () => {
@@ -55,7 +57,7 @@ describe("TaskStore workflow definitions (U1)", () => {
     await expect(
       store.createWorkflowDefinition({ name: "Broken", ir: bad }),
     ).rejects.toBeInstanceOf(WorkflowIrError);
-    expect(await store.listWorkflowDefinitions()).toHaveLength(0);
+    expect((await store.listWorkflowDefinitions()).filter((w) => !isBuiltinWorkflowId(w.id))).toHaveLength(0);
   });
 
   it("requires a non-empty name", async () => {
@@ -88,7 +90,7 @@ describe("TaskStore workflow definitions (U1)", () => {
     expect(updated.description).toBe("now with a prompt step");
     expect(updated.ir.nodes.some((n) => n.id === "review")).toBe(true);
     expect(updated.layout.start).toEqual({ x: 5, y: 5 });
-    expect(new Date(updated.updatedAt).getTime()).toBeGreaterThanOrEqual(
+    expect(new Date(updated.updatedAt).getTime()).toBeGreaterThan(
       new Date(created.updatedAt).getTime(),
     );
   });
@@ -108,7 +110,7 @@ describe("TaskStore workflow definitions (U1)", () => {
     const created = await store.createWorkflowDefinition({ name: "Temp", ir: makeIr() });
     await store.deleteWorkflowDefinition(created.id);
     expect(await store.getWorkflowDefinition(created.id)).toBeUndefined();
-    expect(await store.listWorkflowDefinitions()).toHaveLength(0);
+    expect((await store.listWorkflowDefinitions()).filter((w) => !isBuiltinWorkflowId(w.id))).toHaveLength(0);
   });
 
   it("throws when deleting a non-existent workflow", async () => {

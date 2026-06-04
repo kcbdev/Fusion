@@ -1706,16 +1706,11 @@ function TaskCardComponent({
             {pausedByAgent ? "paused by agent" : "paused"}
           </span>
         )}
-        {isAwaitingInput && (
-          <span className="card-status-badge awaiting-input">
-            Needs input
-          </span>
-        )}
         {!isPaused && visualStatus && visualStatus !== "queued" && (
           <span
-            className={`card-status-badge card-status-badge--${task.column}${isAwaitingApproval ? " awaiting-approval" : ""}${ACTIVE_STATUSES.has(visualStatus) ? " pulsing" : ""}${isFailed ? " failed" : ""}${isStuck ? " stuck" : ""}`}
+            className={`card-status-badge card-status-badge--${task.column}${isAwaitingApproval ? " awaiting-approval" : ""}${isAwaitingInput ? " awaiting-input" : ""}${ACTIVE_STATUSES.has(visualStatus) ? " pulsing" : ""}${isFailed ? " failed" : ""}${isStuck ? " stuck" : ""}`}
           >
-            {isStuck ? "Stuck" : isAwaitingApproval ? "Awaiting Approval" : getTaskStatusLabel(visualStatus)}
+            {isStuck ? "Stuck" : isAwaitingApproval ? "Awaiting Approval" : isAwaitingInput ? "Needs input" : getTaskStatusLabel(visualStatus)}
           </span>
         )}
         {hasInReviewStall && stallCopy && (

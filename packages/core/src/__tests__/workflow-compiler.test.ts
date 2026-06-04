@@ -145,6 +145,48 @@ describe("compileWorkflowToSteps (U2)", () => {
     expect(err).toBeInstanceOf(WorkflowCompileError);
   });
 
+  it("rejects seams that are out of the execute -> review -> merge order", () => {
+    const ir: WorkflowIr = {
+      version: "v1",
+      name: "misordered-seams",
+      nodes: [
+        { id: "start", kind: "start" },
+        { id: "merge", kind: "prompt", config: { seam: "merge" } },
+        { id: "review", kind: "prompt", config: { seam: "review" } },
+        { id: "end", kind: "end" },
+      ],
+      edges: [
+        { from: "start", to: "merge", condition: "success" },
+        { from: "merge", to: "review", condition: "success" },
+        { from: "review", to: "end", condition: "success" },
+      ],
+    };
+    const err = validateLinearity(ir);
+    expect(err).toBeInstanceOf(WorkflowCompileError);
+    expect(err?.message).toMatch(/execute -> review -> merge order/);
+  });
+
+  it("rejects a graph with a duplicated seam role", () => {
+    const ir: WorkflowIr = {
+      version: "v1",
+      name: "dup-merge",
+      nodes: [
+        { id: "start", kind: "start" },
+        { id: "merge1", kind: "prompt", config: { seam: "merge" } },
+        { id: "merge2", kind: "prompt", config: { seam: "merge" } },
+        { id: "end", kind: "end" },
+      ],
+      edges: [
+        { from: "start", to: "merge1", condition: "success" },
+        { from: "merge1", to: "merge2", condition: "success" },
+        { from: "merge2", to: "end", condition: "success" },
+      ],
+    };
+    const err = validateLinearity(ir);
+    expect(err).toBeInstanceOf(WorkflowCompileError);
+    expect(err?.message).toMatch(/appears more than once/);
+  });
+
   it("returns an empty step set for a graph with only start/seams/end", () => {
     const ir = graph([]);
     expect(compileWorkflowToSteps(ir)).toEqual([]);

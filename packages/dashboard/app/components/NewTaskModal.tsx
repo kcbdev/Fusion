@@ -157,6 +157,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       description.trim() !== "" ||
       dependencies.length > 0 ||
       pendingImages.length > 0 ||
+      selectedWorkflowId !== null ||
       executorModel !== "" ||
       validatorModel !== "" ||
       planningModel !== "" ||
@@ -173,7 +174,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       githubTrackingEnabled ||
       githubRepoOverrideTrimmed !== "";
     setHasDirtyState(isDirty);
-  }, [description, dependencies, pendingImages, executorModel, validatorModel, planningModel, thinkingLevel, selectedWorkflowSteps, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, branchMode, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed]);
+  }, [description, dependencies, pendingImages, selectedWorkflowId, executorModel, validatorModel, planningModel, thinkingLevel, selectedWorkflowSteps, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, branchMode, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed]);
 
   const handleClose = useCallback(async () => {
     if (hasDirtyState) {
@@ -196,6 +197,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
     setThinkingLevel("");
     setSelectedPresetId("");
     setPresetMode("default");
+    setSelectedWorkflowId(null);
     setSelectedWorkflowSteps([]);
     setWorkflowStepsExplicitlySet(false);
     setSelectedAgentId(null);

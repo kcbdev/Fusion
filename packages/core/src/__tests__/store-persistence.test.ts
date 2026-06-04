@@ -428,5 +428,26 @@ describe("TaskStore", () => {
       const listed = tasks.find((t) => t.id === paused.id);
       expect(listed?.pausedReason).toBe("worktrunk_operation_failed");
     });
+
+    it("survives a disk-backed store reload", async () => {
+      // The original bug was "pause state vanished on reload" — an in-memory
+      // cache could mask a missing persist column, so close and reopen the
+      // store from disk before asserting.
+      harness.store().close();
+      await harness.reopenDiskBackedStore();
+
+      const task = await harness.store().createTask({ description: "Pause across reload" });
+      await harness.store().updateTask(task.id, {
+        paused: true,
+        pausedReason: "workflow-input:ask: What environment should this deploy to?",
+      });
+
+      harness.store().close();
+      await harness.reopenDiskBackedStore();
+
+      const reloaded = await harness.store().getTask(task.id);
+      expect(reloaded.paused).toBe(true);
+      expect(reloaded.pausedReason).toBe("workflow-input:ask: What environment should this deploy to?");
+    });
   });
 });
