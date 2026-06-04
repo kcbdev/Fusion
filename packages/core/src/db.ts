@@ -149,7 +149,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 105;
+const SCHEMA_VERSION = 106;
 
 export { SCHEMA_VERSION };
 
@@ -322,7 +322,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   checkoutLeaseRenewedAt TEXT,
   checkoutLeaseEpoch INTEGER DEFAULT 0,
   deletedAt TEXT,
-  allowResurrection INTEGER DEFAULT 0
+  allowResurrection INTEGER DEFAULT 0,
+  transitionPending TEXT
 );
 
 -- Config table (single row with project settings)
@@ -4178,6 +4179,17 @@ export class Database {
           DELETE FROM task_workflow_selection
           WHERE taskId NOT IN (SELECT id FROM tasks);
         `);
+      });
+    }
+
+    // Migration 106: Crash-safe transition marker (workflow-columns U3). Stores
+    // JSON {toColumn, hooksRemaining, startedAt} written in the same txn as a
+    // column change; recovery re-runs the remaining idempotent post-commit hooks
+    // and clears it. Additive-only, nullable, no backfill — existing rows have
+    // no in-flight transition.
+    if (version < 106) {
+      this.applyMigration(106, () => {
+        this.addColumnIfMissing("tasks", "transitionPending", "TEXT");
       });
     }
 

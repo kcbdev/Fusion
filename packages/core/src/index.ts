@@ -65,6 +65,71 @@ export type {
   WorkflowJoinBranchFailure,
 } from "./workflow-ir-types.js";
 export { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
+
+// ── Trait model (U2) ─────────────────────────────────────────────────
+export type {
+  TraitDefinition,
+  TraitFlags,
+  TraitConfigSchema,
+  TraitConfigField,
+  TraitHookDescriptors,
+  TraitHookKind,
+  TraitHookImpl,
+  RestrictedTraitFlag,
+} from "./trait-types.js";
+export { RESTRICTED_TRAIT_FLAGS, traitHookKey } from "./trait-types.js";
+export {
+  TraitRegistry,
+  TraitRegistrationError,
+  getTraitRegistry,
+  getTrait,
+  listTraits,
+  resolveColumnFlags,
+  validateColumnTraits,
+  registerTraitHookImpl,
+  __resetTraitRegistryForTests,
+} from "./trait-registry.js";
+export type {
+  TraitRegistrationReason,
+  TraitViolation,
+  TraitViolationCode,
+  TraitViolationSeverity,
+  TraitAuditWarning,
+} from "./trait-registry.js";
+export {
+  BUILTIN_TRAIT_IDS,
+  BUILTIN_TRAIT_DEFINITIONS,
+  registerBuiltinTraits,
+} from "./builtin-traits.js";
+export type { BuiltinTraitId } from "./builtin-traits.js";
+// ── Typed transition contract + crash-safe marker (U3) ───────────────
+export type {
+  TransitionRejection,
+  TransitionRejectionCode,
+  TransitionResult,
+  TransitionPending,
+} from "./transition-types.js";
+export {
+  TRANSITION_REJECTION_CODES,
+  makeTransitionRejection,
+  makeTransitionPending,
+  transitionOk,
+  transitionRejected,
+  serializeTransitionRejection,
+  deserializeTransitionRejection,
+  serializeTransitionPending,
+  deserializeTransitionPending,
+} from "./transition-types.js";
+export type {
+  TransitionPendingDbHandle,
+  ReconcileHooksResult,
+} from "./transition-pending.js";
+export {
+  readTransitionPending,
+  writeTransitionPending,
+  clearTransitionPending,
+  reconcileHooksRemaining,
+} from "./transition-pending.js";
 export type {
   WorkflowDefinition,
   WorkflowDefinitionInput,
