@@ -120,6 +120,9 @@ commensurably. Untimed packages are named in a logged warning.
   package duration is apportioned evenly across lanes (logged as `even-apportionment`).
 - **Inspect the plan without running it:** `node scripts/ci-test-shard.mjs --dry-run --total 4`
   (optionally `--shard N`) prints the planned `pnpm` commands and per-shard weight totals.
+- **Measure per-process startup cost:** `node scripts/ci-test-shard.mjs --cold-start-probe <package-name>`
+  runs the package's cheapest test file in isolation and reports `wall − test time` overhead
+  (the signal behind the deferred vitest-4 upgrade gate).
 
 ### Snapshot staleness policy
 
@@ -127,7 +130,9 @@ The snapshot carries `capturedAt`. If it is older than **30 days**, the planner 
 prominent warning and proceeds (balance degrades gracefully toward the file-count status
 quo, never below it) — it does **not** fail the build. Refresh is **manual/scheduled from
 the default branch only**: each CI shard uploads per-shard JSON timing artifacts (U1), and
-`node scripts/ci-test-shard.mjs --write-timings` merges them into the snapshot. A future
+`node scripts/ci-test-shard.mjs --write-timings` merges them into the snapshot. Download the
+shard artifacts into `.timings/` first (the default lookup directory), or pass
+`--inputs-dir <path>` to point at wherever they were downloaded. A future
 scheduled job can gate on freshness via `node scripts/ci-test-shard.mjs --check-timings-staleness`,
 which exits non-zero when the snapshot is missing or older than the 30-day budget.
 
@@ -153,6 +158,10 @@ pnpm --filter @fusion/core exec vitest run src/__tests__/central-db.test.ts --si
 packages affected by your branch diff (plus their reverse-dependents) and skips
 packages whose content hasn't changed since they last passed. A per-package
 pass-cache lives at `node_modules/.cache/fusion/test-cache.json`.
+
+To see which mode a run would pick — and why — without running any tests:
+`node scripts/test-changed.mjs --print-mode` prints the
+`[test-changed] mode=… reason=… packages=…` decision line and exits.
 
 ### What a cache entry's hash covers (dependency-aware invalidation)
 

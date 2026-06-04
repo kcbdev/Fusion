@@ -29,6 +29,7 @@ import {
   countPackageTestFiles,
   loadPlanningTimings,
   computePackageDurationWeight,
+  laneShardFraction,
   sumFileDurations,
   enumerateDashboardLanes,
   laneProjectNames,
@@ -616,4 +617,40 @@ test("U6: --dry-run prints planned commands and per-shard weight for all 4 shard
   assert.ok(laneNames.length >= 10, `expected the dashboard lane chain, saw ${laneNames.length}`);
   // Dashboard must NOT be virtual-sliced.
   assert.doesNotMatch(result.stdout, /--filter @fusion\/dashboard test --shard/);
+});
+
+test("U6 fix: laneShardFraction sums chained --shard invocations, capped at 1", () => {
+  // Single half-shard lane (app backfill style): genuinely runs 1/4.
+  assert.equal(laneShardFraction("vitest run --project p --shard=1/4"), 0.25);
+  // Chained halves in one lane (api backfill style): runs the FULL project.
+  assert.equal(
+    laneShardFraction("run-heap --shard=1/2 && run-heap --shard=2/2"),
+    1,
+  );
+  // No shard flag: whole project.
+  assert.equal(laneShardFraction("vitest run --project p"), 1);
+  // Over-complete chains clamp at 1.
+  assert.equal(
+    laneShardFraction("a --shard=1/2 && b --shard=2/2 && c --shard=1/2"),
+    1,
+  );
+});
+
+test("U6 fix: computePackageDurationWeight excludes slow-tier files from weighting", (t) => {
+  const projectRoot = mkdtempSync(path.join(tmpdir(), "u6-slow-excl-"));
+  t.after(() => rmSync(projectRoot, { recursive: true, force: true }));
+  mkdirSync(path.join(projectRoot, "packages/eng/src/__tests__"), { recursive: true });
+  writeFileSync(path.join(projectRoot, "packages/eng/src/__tests__/fast.test.ts"), "");
+  writeFileSync(path.join(projectRoot, "packages/eng/src/__tests__/heavy.slow.test.ts"), "");
+  const snapshotPath = writeSnapshot(projectRoot, new Date().toISOString(), {
+    "@x/eng": { files: { "packages/eng/src/__tests__/fast.test.ts": 400 } },
+  });
+  const timings = loadPlanningTimings({ snapshotPath });
+  const weighted = computePackageDurationWeight({ name: "@x/eng", dir: "packages/eng" }, timings, {
+    projectRoot,
+  });
+  // Only the fast file counts: 400ms timed, zero untimed fallback for the
+  // slow file (which the package `test` script never runs).
+  assert.equal(weighted.weight, 400);
+  assert.equal(weighted.partiallyUntimed, false);
 });

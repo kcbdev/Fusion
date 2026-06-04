@@ -413,9 +413,6 @@ export const TIMINGS_STALENESS_DAYS = 30;
 /** Dashboard package name; its `test` chain is distributed lane-by-lane. */
 export const DASHBOARD_PACKAGE_NAME = "@fusion/dashboard";
 
-/** Engine package name; kept on `vitest --shard` virtual slicing, by duration. */
-export const ENGINE_PACKAGE_NAME = "@fusion/engine";
-
 /**
  * Load the committed timing snapshot into a flat per-file duration map plus a
  * derived median per-file duration (used to scale the file-count fallback so
@@ -525,7 +522,14 @@ export function sumFileDurations(files, fileDurations) {
  */
 export function computePackageDurationWeight(pkg, timings, options = {}) {
   const projectRoot = options.projectRoot ?? process.cwd();
-  const files = listPackageTestFiles(pkg.dir, { projectRoot }).map((f) => `${pkg.dir}/${f}`);
+  // Exclude `*.slow.test.*` from weighting: the slow tier never runs in a
+  // package's `test` script (it has its own CI gate), so counting those files
+  // — always untimed, hence median-fallback-weighted — inflates the package's
+  // shard weight with work the shard does not execute.
+  const files = listPackageTestFiles(pkg.dir, {
+    projectRoot,
+    extraExclude: (p) => /\.slow\.test\./.test(p),
+  }).map((f) => `${pkg.dir}/${f}`);
 
   const fallbackPerFile = timings.medianPerFileMs > 0 ? timings.medianPerFileMs : DURATION_BUCKET_MS;
   const { durationMs, timedCount, untimedCount } = sumFileDurations(files, timings.fileDurations);
@@ -660,6 +664,26 @@ export function resolveDashboardProjectFiles(dashboardDir, options = {}) {
  * @param {{ projectRoot?: string }} [options]
  * @returns {{ units: Array<{ name: string, lane: string, runKind: "dashboard-lane", weight: number, splittable: false }>, lanes: string[], method: string, untimed: string[] }}
  */
+/**
+ * Fraction of a project a lane command actually runs, derived from its
+ * `--shard=i/n` flags. A lane may chain MULTIPLE --shard invocations of the
+ * same project (e.g. `--shard=1/2 && --shard=2/2` runs the full project):
+ * sum the fractions across all matches, capped at 1. A lane with a single
+ * `--shard=i/n` invocation genuinely runs 1/n. No --shard flag means the
+ * whole project.
+ *
+ * @param {string} command
+ * @returns {number} (0, 1]
+ */
+export function laneShardFraction(command) {
+  const shardMatches = [...command.matchAll(/--shard[=\s]+(\d+)\/(\d+)/g)];
+  if (shardMatches.length === 0) return 1;
+  return Math.min(
+    1,
+    shardMatches.reduce((sum, m) => sum + 1 / Number(m[2]), 0),
+  );
+}
+
 export function buildDashboardLaneUnits(pkg, timings, options = {}) {
   const projectRoot = options.projectRoot ?? process.cwd();
   const pkgJson = JSON.parse(readFileSync(path.join(projectRoot, pkg.dir, "package.json"), "utf8"));
@@ -674,8 +698,7 @@ export function buildDashboardLaneUnits(pkg, timings, options = {}) {
     const units = lanes.map((lane) => {
       const command = scripts[lane] ?? "";
       const projects = laneProjectNames(command);
-      const shardMatch = /--shard[=\s]+(\d+)\/(\d+)/.exec(command);
-      const shardFraction = shardMatch ? 1 / Number(shardMatch[2]) : 1;
+      const shardFraction = laneShardFraction(command);
       const files = new Set();
       for (const project of projects) for (const f of projectFiles[project] ?? []) files.add(f);
       const { durationMs, timedCount, untimedCount } = sumFileDurations([...files], timings.fileDurations);
