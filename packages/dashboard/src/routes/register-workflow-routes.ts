@@ -1,6 +1,7 @@
 import type { WorkflowIr } from "@fusion/core";
 import { ColumnTraitValidationError, OccupiedColumnsError, InvalidRehomeTargetError, WorkflowCompileError, WorkflowIrError, compileWorkflowToSteps, listTraits } from "@fusion/core";
 import { ApiError, badRequest, conflict, notFound } from "../api-error.js";
+import { emitWorkflowSseEvent } from "../sse.js";
 import type { ApiRoutesContext } from "./types.js";
 
 /**
@@ -59,13 +60,14 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
   // POST /api/workflows — create a workflow. Body: { name, description?, ir, layout? }
   router.post("/workflows", async (req, res) => {
     try {
-      const { store } = await getProjectContext(req);
+      const { store, projectId } = await getProjectContext(req);
       const { name, description, layout } = req.body ?? {};
       if (!name || typeof name !== "string" || !name.trim()) {
         throw badRequest("name is required");
       }
       const ir = requireIr(req.body);
       const created = await store.createWorkflowDefinition({ name, description, ir, layout });
+      emitWorkflowSseEvent("workflow:created", created, projectId);
       res.status(201).json(created);
     } catch (err: unknown) {
       if (err instanceof ApiError) throw err;
@@ -95,7 +97,7 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
   // PATCH /api/workflows/:id — partial update. Body: { name?, description?, ir?, layout? }
   router.patch("/workflows/:id", async (req, res) => {
     try {
-      const { store } = await getProjectContext(req);
+      const { store, projectId } = await getProjectContext(req);
       const { name, description, ir, layout, rehomeTo } = req.body ?? {};
       if (name !== undefined && (typeof name !== "string" || !name.trim())) {
         throw badRequest("name must be a non-empty string");
@@ -113,6 +115,7 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
         layout,
         ...(rehomeTo !== undefined ? { rehomeTo } : {}),
       });
+      emitWorkflowSseEvent("workflow:updated", updated, projectId);
       res.json(updated);
     } catch (err: unknown) {
       if (err instanceof ApiError) throw err;
@@ -139,8 +142,9 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
   // DELETE /api/workflows/:id
   router.delete("/workflows/:id", async (req, res) => {
     try {
-      const { store } = await getProjectContext(req);
+      const { store, projectId } = await getProjectContext(req);
       await store.deleteWorkflowDefinition(req.params.id);
+      emitWorkflowSseEvent("workflow:deleted", { id: req.params.id }, projectId);
       res.status(204).send();
     } catch (err: unknown) {
       if (err instanceof ApiError) throw err;

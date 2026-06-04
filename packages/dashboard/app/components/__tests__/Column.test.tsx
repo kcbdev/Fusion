@@ -192,6 +192,44 @@ describe("Column workflow mode (U9)", () => {
     );
     expect(screen.getByTestId("promote-FN-7")).toBeDefined();
   });
+
+  it("#1410: clears the inline capacity banner when the task list changes via SSE", async () => {
+    const onPromote = vi.fn().mockRejectedValue({
+      details: { code: "capacity-exhausted", retryable: true },
+    });
+    const holdTask = { ...makeTask("FN-7"), column: "hold-col" as ColumnType };
+    const { rerender } = render(
+      <Column
+        {...defaultProps}
+        column={"hold-col" as ColumnType}
+        workflowMode
+        columnDisplayName="Hold"
+        columnFlags={{ hold: true }}
+        onPromote={onPromote}
+        tasks={[holdTask]}
+      />,
+    );
+
+    // Trigger a capacity-exhausted promote → inline banner appears.
+    fireEvent.click(screen.getByTestId("promote-FN-7"));
+    await waitFor(() => expect(screen.getByTestId("column-inline-feedback")).toBeDefined());
+    expect(screen.getByTestId("column-inline-feedback").textContent).toContain("capacity");
+
+    // An SSE-driven task list change (occupant moved out) re-renders the column
+    // with a different roster → the stale banner is cleared.
+    rerender(
+      <Column
+        {...defaultProps}
+        column={"hold-col" as ColumnType}
+        workflowMode
+        columnDisplayName="Hold"
+        columnFlags={{ hold: true }}
+        onPromote={onPromote}
+        tasks={[{ ...makeTask("FN-8"), column: "hold-col" as ColumnType }]}
+      />,
+    );
+    await waitFor(() => expect(screen.queryByTestId("column-inline-feedback")).toBeNull());
+  });
 });
 
 describe("Column memoization", () => {

@@ -8,6 +8,7 @@ import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { fetchWorkflowSteps, fetchBoardWorkflows, promoteTask, type ModelInfo, type BoardWorkflowsPayload } from "../api";
 import { useBlockerFanout } from "../hooks/useBlockerFanout";
 import { recordResumeEvent } from "../utils/resumeInstrumentation";
+import { subscribeSse } from "../sse-bus";
 
 /** localStorage key for persisted lane collapse state (per project). */
 const LANE_COLLAPSE_STORAGE_KEY = "kb-dashboard-lane-collapsed";
@@ -286,8 +287,9 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
   // `tasks` — that refetched on every SSE tick. Instead we refetch on project
   // change and when the tab regains visibility/focus. A stale-response guard
   // (monotonic sequence ref) drops out-of-order responses.
-  // TODO: replace the visibility/focus staleness stopgap with a
-  // `workflow:updated` SSE event when one exists.
+  // A `workflow:updated` (and create/delete) SSE event now drives invalidation
+  // when a definition's lanes / column traits change. The visibility/focus
+  // refetch below is retained as a stopgap for missed events / reconnects.
   const boardWorkflowsFetchSeqRef = useRef(0);
   useEffect(() => {
     const runFetch = () => {
@@ -308,11 +310,20 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
     };
     if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible);
     if (typeof window !== "undefined") window.addEventListener("focus", onVisible);
+    const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+    const unsubscribe = subscribeSse(`/api/events${query}`, {
+      events: {
+        "workflow:created": runFetch,
+        "workflow:updated": runFetch,
+        "workflow:deleted": runFetch,
+      },
+    });
     return () => {
       // Advance the seq so any in-flight response is dropped on cleanup.
       boardWorkflowsFetchSeqRef.current++;
       if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible);
       if (typeof window !== "undefined") window.removeEventListener("focus", onVisible);
+      unsubscribe();
     };
   }, [projectId]);
 

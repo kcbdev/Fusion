@@ -195,6 +195,16 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, onMoveTask, 
   const countFlashing = useFlashOnIncrease(tasks.length);
   const { confirm } = useConfirm();
 
+  // Clear the inline capacity-exhausted banner once the column's task list
+  // changes via SSE (e.g. an occupant moves out and capacity frees up). The
+  // banner reflects a point-in-time promote rejection; a changed roster means
+  // the stale constraint may no longer hold. Keyed on the task-id signature so
+  // it only fires on real membership changes, not every parent re-render.
+  const taskIdSignature = useMemo(() => tasks.map((task) => task.id).join(","), [tasks]);
+  useEffect(() => {
+    setInlineFeedback(null);
+  }, [taskIdSignature]);
+
   // Close the column dropdown menu when the user clicks anywhere else.
   useEffect(() => {
     if (!isMenuOpen) return;
