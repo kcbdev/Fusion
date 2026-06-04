@@ -6000,7 +6000,24 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     updates: { title?: string; description?: string; priority?: TaskPriority | null; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; currentStep?: number; blockedBy?: string | null; overlapBlockedBy?: string | null; assignedAgentId?: string | null; pausedByAgentId?: string | null; pausedReason?: string | null; tokenBudgetSoftAlertedAt?: string | null; worktrunkFallbackAlertedAt?: string | null; worktrunkFailure?: import("./types.js").Task["worktrunkFailure"] | null; tokenBudgetHardAlertedAt?: string | null; tokenBudgetOverride?: import("./types.js").TaskTokenBudgetOverride | null; dispatchStormCount?: number | null; lastDispatchAt?: string | null; assigneeUserId?: string | null; scopeOverride?: boolean | null; scopeOverrideReason?: string | null; scopeAutoWiden?: string[] | null; nodeId?: string | null; effectiveNodeId?: string | null; effectiveNodeSource?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; checkoutNodeId?: string | null; checkoutRunId?: string | null; checkoutLeaseRenewedAt?: string | null; checkoutLeaseEpoch?: number | null; paused?: boolean; baseBranch?: string | null; autoMerge?: boolean | null; branch?: string | null; executionStartBranch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; executionMode?: import("./types.js").ExecutionMode | null; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; resumeLimboCount?: number | null; resumeLimboTipSha?: string | null; resumeLimboStepSignature?: string | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; worktreeSessionRetryCount?: number | null; completionHandoffLimboRecoveryCount?: number | null; verificationFailureCount?: number | null; mergeConflictBounceCount?: number | null; mergeAuditBounceCount?: number | null; mergeTransientRetryCount?: number | null; branchConflictRecoveryCount?: number | null; reviewerContextRetryCount?: number | null; reviewerFallbackRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; noCommitsExpected?: boolean | null; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; firstExecutionAt?: string | null; cumulativeActiveMs?: number | null; executionStartedAt?: string | null; executionCompletedAt?: string | null; review?: import("./types.js").TaskReview | null; reviewState?: import("./types.js").TaskReviewState | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; sourceIssue?: import("./types.js").TaskSourceIssue | null; sourceMetadataPatch?: Record<string, unknown> | null; githubTracking?: import("./types.js").TaskGithubTracking | null; tokenUsage?: import("./types.js").TaskTokenUsage | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
     runContext?: RunMutationContext,
   ): Promise<Task> {
-    return this.withTaskLock(id, async () => {
+    return this.withTaskLock(id, () => this.updateTaskUnlocked(id, updates, runContext));
+  }
+
+  /**
+   * The body of {@link updateTask} WITHOUT acquiring the per-task lock. Callers
+   * that already hold `withTaskLock(id)` — e.g. workflow-selection mutations
+   * that bundle a `task_workflow_selection`/`workflow_steps` write with the
+   * `enabledWorkflowSteps` update — invoke this directly so the whole sequence
+   * runs under a single lock acquisition. The per-task lock is non-reentrant,
+   * so calling the public `updateTask` from inside an outer `withTaskLock(id)`
+   * would deadlock; this variant exists to avoid that.
+   */
+  private async updateTaskUnlocked(
+    id: string,
+    updates: Parameters<TaskStore["updateTask"]>[1],
+    runContext?: RunMutationContext,
+  ): Promise<Task> {
+    {
       if (updates.dependencies !== undefined) {
         await this.assertNoDependencyCycle(
           id,
@@ -6663,7 +6680,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       }
       this.emitTaskLifecycleEventSafely("task:updated", [task]);
       return task;
-    });
+    }
   }
 
   /**
@@ -11431,47 +11448,55 @@ ${stepsSection}`;
    * before any state is written.
    */
   async selectTaskWorkflow(taskId: string, workflowId: string): Promise<string[]> {
-    const def = await this.getWorkflowDefinition(workflowId);
-    if (!def) throw new Error(`Workflow '${workflowId}' not found`);
-    // Compile once up front: a non-linear graph aborts before any mutation.
-    const inputs = compileWorkflowToSteps(def.ir);
+    // Hold the task lock across the whole sequence (materialize → owner write →
+    // prior-step cleanup) so it can't interleave with a concurrent select/clear
+    // or executor updateTask on the same task. updateTaskUnlocked is used inside
+    // because the per-task lock is non-reentrant.
+    return this.withTaskLock(taskId, async () => {
+      const def = await this.getWorkflowDefinition(workflowId);
+      if (!def) throw new Error(`Workflow '${workflowId}' not found`);
+      // Compile once up front: a non-linear graph aborts before any mutation.
+      const inputs = compileWorkflowToSteps(def.ir);
 
-    // Materialize the new steps and point the task at them BEFORE deleting the
-    // prior selection's rows, so a mid-flight failure never leaves the task
-    // referencing already-deleted step ids.
-    const priorSelection = this.getTaskWorkflowSelection(taskId);
-    const ids = await this.materializeWorkflowSteps(workflowId, inputs);
-    try {
-      await this.updateTask(taskId, { enabledWorkflowSteps: ids });
-      this.writeTaskWorkflowSelection(taskId, workflowId, ids);
-    } catch (err) {
-      // The owner write (updateTask / selection upsert) failed, so the steps we
-      // just materialized would orphan with no selection row pointing at them.
-      // Delete them before propagating; the prior selection is left untouched.
-      for (const stepId of ids) {
-        try {
-          this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
-        } catch {
-          // Best-effort cleanup; surface the original error below.
+      // Materialize the new steps and point the task at them BEFORE deleting the
+      // prior selection's rows, so a mid-flight failure never leaves the task
+      // referencing already-deleted step ids.
+      const priorSelection = this.getTaskWorkflowSelection(taskId);
+      const ids = await this.materializeWorkflowSteps(workflowId, inputs);
+      try {
+        await this.updateTaskUnlocked(taskId, { enabledWorkflowSteps: ids });
+        this.writeTaskWorkflowSelection(taskId, workflowId, ids);
+      } catch (err) {
+        // The owner write (updateTask / selection upsert) failed, so the steps we
+        // just materialized would orphan with no selection row pointing at them.
+        // Delete them before propagating; the prior selection is left untouched.
+        for (const stepId of ids) {
+          try {
+            this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
+          } catch {
+            // Best-effort cleanup; surface the original error below.
+          }
         }
+        this.workflowStepsCache = null;
+        throw err;
       }
-      this.workflowStepsCache = null;
-      throw err;
-    }
 
-    if (priorSelection) {
-      for (const stepId of priorSelection.stepIds) {
-        this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
+      if (priorSelection) {
+        for (const stepId of priorSelection.stepIds) {
+          this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
+        }
+        this.workflowStepsCache = null;
       }
-      this.workflowStepsCache = null;
-    }
-    return ids;
+      return ids;
+    });
   }
 
   /** Clear a task's workflow selection and its enabled steps. */
   async clearTaskWorkflowSelection(taskId: string): Promise<void> {
-    this.removeMaterializedSelection(taskId);
-    await this.updateTask(taskId, { enabledWorkflowSteps: [] });
+    await this.withTaskLock(taskId, async () => {
+      this.removeMaterializedSelection(taskId);
+      await this.updateTaskUnlocked(taskId, { enabledWorkflowSteps: [] });
+    });
   }
 
   /**

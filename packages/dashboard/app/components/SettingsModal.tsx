@@ -344,6 +344,7 @@ const KNOWN_EXPERIMENTAL_FEATURES: Record<string, string> = {
   sandbox: "Sandbox (command isolation)",
   chatRooms: "Chat Rooms",
   agentOnboarding: "Planning-style Agent Onboarding",
+  workflowGraphExecutor: "Workflow Graph Engine (run custom workflows)",
 };
 
 const EXPERIMENTAL_FEATURE_LEGACY_ALIASES: Record<string, string> = {
