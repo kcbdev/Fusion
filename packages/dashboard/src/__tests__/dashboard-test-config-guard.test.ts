@@ -27,10 +27,16 @@ describe("dashboard test config guard", () => {
     expect(scripts["test:quality:app"]).toContain("test:quality:app:app");
     expect(scripts["test:quality:app"]).toContain("test:quality:app:chat");
     expect(scripts["test:quality:app"]).toContain("test:quality:app:settings");
+    // The backfill lane (plan U2 / R7) closes the curated-gate hole: every
+    // app test file that no curated lane enumerates runs here.
+    expect(scripts["test:quality:app"]).toContain("test:quality:app:backfill");
+    // The API gate runs the curated lane AND the backfill lane.
+    expect(scripts["test:quality:api"]).toContain("test:quality:api:curated");
+    expect(scripts["test:quality:api"]).toContain("test:quality:api:backfill");
     expect(scripts["test:quality:app"]).not.toContain("dashboard-app-quality --project dashboard-api-quality");
   });
 
-  it("pins every app-quality shard to the heap wrapper and keeps split settings shards", () => {
+  it("pins every app-quality shard to the heap wrapper", () => {
     const { scripts } = readDashboardPackageJson();
 
     for (const key of [
@@ -41,6 +47,26 @@ describe("dashboard test config guard", () => {
       "test:quality:app:components-b",
       "test:quality:app:app",
       "test:quality:app:chat",
+      "test:quality:app:settings",
+      "test:quality:app:backfill-1",
+      "test:quality:app:backfill-2",
+      "test:quality:app:backfill-3",
+      "test:quality:app:backfill-4",
+    ]) {
+      expect(scripts[key]).toContain("node scripts/run-vitest-with-heap.mjs --heap=6144");
+    }
+  });
+
+  it("runs the settings lane unfiltered so no describe block can fall through a -t name filter", () => {
+    // Plan U2 / R7 structural fix: the settings lane used to be split into six
+    // `-t` name-filtered sub-runs, which meant a SettingsModal describe block
+    // matching none of the substrings ran in NO project. The whole
+    // SettingsModal.test.tsx file fits one heap-6144 lane, so the lane now runs
+    // the project unfiltered. Guard against a regression back to `-t` filters.
+    const { scripts } = readDashboardPackageJson();
+    expect(scripts["test:quality:app:settings"]).toContain("--project dashboard-app-quality-settings");
+    expect(scripts["test:quality:app:settings"]).not.toContain("-t ");
+    for (const removed of [
       "test:quality:app:settings-a1",
       "test:quality:app:settings-a2",
       "test:quality:app:settings-a3",
@@ -48,11 +74,8 @@ describe("dashboard test config guard", () => {
       "test:quality:app:settings-c",
       "test:quality:app:settings-d",
     ]) {
-      expect(scripts[key]).toContain("node scripts/run-vitest-with-heap.mjs --heap=6144");
+      expect(scripts[removed]).toBeUndefined();
     }
-
-    expect(scripts["test:quality:app:settings"]).toContain("settings-a1");
-    expect(scripts["test:quality:app:settings"]).toContain("settings-d");
   });
 
   it("keeps the split quality projects declared in vitest config", () => {
@@ -67,7 +90,9 @@ describe("dashboard test config guard", () => {
       "dashboard-app-quality-app",
       "dashboard-app-quality-chat",
       "dashboard-app-quality-settings",
+      "dashboard-app-quality-backfill",
       "dashboard-api-quality",
+      "dashboard-api-quality-backfill",
     ]) {
       expect(vitestConfig).toContain(`name: \"${projectName}\"`);
     }

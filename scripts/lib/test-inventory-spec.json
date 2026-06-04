@@ -1,0 +1,49 @@
+{
+  "$comment": "Capture spec for scripts/check-test-inventory.mjs (plan U2). Each package lists the vitest project names to enumerate via `vitest list --json`. For @fusion/dashboard, `curatedProjects` is the set of executed quality+backfill projects the curated-gate guard checks coverage against; `projects` is what --capture enumerates. Omitting `projects` captures the default (all) projects.",
+  "packages": [
+    {
+      "name": "@fusion/core",
+      "dir": "packages/core"
+    },
+    {
+      "name": "@fusion/engine",
+      "dir": "packages/engine",
+      "projects": ["engine-default", "engine-reliability", "engine-slow"]
+    },
+    {
+      "name": "@fusion/engine-slow",
+      "dir": "packages/engine",
+      "projects": ["engine-slow"]
+    },
+    {
+      "name": "@fusion/dashboard",
+      "dir": "packages/dashboard",
+      "projects": [
+        "dashboard-app-quality-foundation-api",
+        "dashboard-app-quality-foundation-ui",
+        "dashboard-app-quality-foundation-hooks-utils",
+        "dashboard-app-quality-components-a",
+        "dashboard-app-quality-components-b",
+        "dashboard-app-quality-app",
+        "dashboard-app-quality-chat",
+        "dashboard-app-quality-settings",
+        "dashboard-app-quality-backfill",
+        "dashboard-api-quality",
+        "dashboard-api-quality-backfill"
+      ],
+      "curatedProjects": [
+        "dashboard-app-quality-foundation-api",
+        "dashboard-app-quality-foundation-ui",
+        "dashboard-app-quality-foundation-hooks-utils",
+        "dashboard-app-quality-components-a",
+        "dashboard-app-quality-components-b",
+        "dashboard-app-quality-app",
+        "dashboard-app-quality-chat",
+        "dashboard-app-quality-settings",
+        "dashboard-app-quality-backfill",
+        "dashboard-api-quality",
+        "dashboard-api-quality-backfill"
+      ]
+    }
+  ]
+}

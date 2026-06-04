@@ -99,3 +99,41 @@ jobs:
           path: .timings/timings-*.json
           if-no-files-found: ignore
           retention-days: 14
+
+  # Plan U2 / R7: the dashboard quality gate used to enumerate its test files by
+  # hand, so any unenumerated app/ or src/ test file ran in NO project. This
+  # guard fails when a dashboard test file is neither executed by a quality
+  # project (curated + backfill lanes) nor on the reviewed skip-list. Cheap:
+  # it only runs `vitest list`, not the tests.
+  test-inventory-guard:
+    name: Dashboard curated-gate guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and pnpm
+        uses: ./.github/actions/setup-node-pnpm
+
+      - name: Assert every dashboard test file is gated or skip-listed
+        run: node scripts/check-test-inventory.mjs --dashboard-curated
+
+  # Plan U2 / R8: the engine-slow tier (src/**/*.slow.test.ts) previously ran in
+  # NO automated gate — only via the local `test:full`. This job runs it and
+  # asserts a non-empty execution, so a glob/config drift that silently empties
+  # the tier fails CI instead of passing vacuously. Engine slow tests do real
+  # git operations, so a full clone (fetch-depth: 0) is required.
+  test-slow:
+    name: Engine slow tier
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js and pnpm
+        uses: ./.github/actions/setup-node-pnpm
+
+      - name: Run engine-slow with non-empty-execution assertion
+        run: node scripts/assert-engine-slow-nonempty.mjs

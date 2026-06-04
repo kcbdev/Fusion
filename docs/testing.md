@@ -37,7 +37,65 @@ pnpm --filter @fusion/dashboard test:build          # built client output contra
 
 Run `test:deep` when changing broad dashboard architecture, shared modal/view infrastructure, or route registration. Run `test:browser-smoke` for layout/responsive/navigation/modal/CSS changes. Run `test:build` for Vite output, lazy-loading, chunking, or client-dist changes.
 
-When adding a new test file under `app/components/__tests__`, also add its basename to `qualityAppTests` in `packages/dashboard/vitest.config.ts` — otherwise the curated gate silently skips it.
+New test files under `app/**` or `src/**` are picked up automatically by the
+**backfill lanes** (`dashboard-app-quality-backfill` / `dashboard-api-quality-backfill`),
+which include the broad globs and exclude only the files an explicit curated lane
+already runs plus the skip-list. You do not need to register a new file by hand for
+it to run — the curated-gate hole that silently skipped unenumerated files is closed
+(see "Curated-gate completeness" below). Add a file to a curated `qualityApp*`/`qualityApi`
+list only when you want it in a specific fast lane rather than the backfill catch-all.
+
+## Curated-gate completeness and the skip-list
+
+The dashboard quality gate is a chain of curated lanes plus two backfill lanes.
+Together they must execute **every** `*.test.{ts,tsx}` under `packages/dashboard/app`
+and `packages/dashboard/src`, or the file must be on the reviewed skip-list. This is
+enforced by a guard (CI job `Dashboard curated-gate guard` in `pr-checks.yml`):
+
+```bash
+node scripts/check-test-inventory.mjs --dashboard-curated
+```
+
+It fails when a dashboard test file is neither executed by a quality project nor
+skip-listed. The skip-list lives at `scripts/lib/dashboard-curated-skiplist.json`;
+every entry needs a non-empty `reason` (empty reasons are rejected). Skip-list policy:
+
+- A file goes on the skip-list only when it genuinely cannot be gated yet — today
+  that is pre-existing-failing orphans (tests that were never executed in CI and
+  fail in isolation) and `build-output.test.ts` (runs standalone via `test:build`
+  after a Vite build). Each carries a one-line reason.
+- To remove a file from the skip-list: fix the test, confirm it passes under its
+  project, delete the skip-list entry. The backfill lane then executes it.
+- The skip-list is shared verbatim with `vitest.config.ts`, which excludes the same
+  globs from the backfill projects — one source of truth.
+
+## Test-inventory harness
+
+`scripts/check-test-inventory.mjs` is the standard coverage-superset verification
+step. Node stdlib only.
+
+```bash
+# Snapshot the executed-test inventory (per package/project, normalized test ids).
+node scripts/check-test-inventory.mjs --capture before.json
+# ... make a change ...
+node scripts/check-test-inventory.mjs --capture after.json
+# Fail (exit 1) if any test id present in `before` is missing from `after`.
+node scripts/check-test-inventory.mjs --diff before.json after.json
+```
+
+The capture spec (which packages/projects to enumerate) lives in
+`scripts/lib/test-inventory-spec.json`. The diff lists the exact missing test ids;
+a renamed file shows up as a remove (old path) + add (new path), so the rename is
+reviewable. New test ids never fail the diff.
+
+## Engine slow tier (CI gate)
+
+The `engine-slow` vitest project (`packages/engine/src/**/*.slow.test.ts`) holds the
+long real-git suites. It runs locally via `pnpm --filter @fusion/engine test:slow` and
+in CI via the `Engine slow tier` job in `pr-checks.yml`, which uses
+`scripts/assert-engine-slow-nonempty.mjs` to **fail if zero tests executed** (so a glob
+or config drift that silently empties the tier breaks CI instead of passing vacuously).
+The CI job uses `fetch-depth: 0` because these tests run real git operations.
 
 ## Targeted commands
 

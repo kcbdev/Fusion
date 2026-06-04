@@ -1,9 +1,22 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { computeMaxWorkers } from "../core/src/__test-utils__/vitest-workers";
 
 const maxWorkers = computeMaxWorkers({ defaultCap: 3 });
+
+// Curated-gate skip-list (plan U2 / R7). Files listed here run in NO project on
+// purpose (pre-existing failures discovered when the curated-gate hole was
+// closed). The skip-list is the single source of truth shared with
+// scripts/check-test-inventory.mjs's --dashboard-curated guard. Express the
+// dashboard-relative globs so the backfill projects can exclude them.
+const curatedSkipList: { entries: { file: string; reason: string }[] } = JSON.parse(
+  readFileSync(resolve(__dirname, "../../scripts/lib/dashboard-curated-skiplist.json"), "utf8"),
+);
+const skipListDashboardGlobs = curatedSkipList.entries
+  .map((entry) => entry.file.replace(/^packages\/dashboard\//, ""))
+  .filter((file) => file.length > 0);
 
 const qualityAppFoundationApiTests = [
   // API-client regressions are numerous but lightweight; keep them in their
@@ -216,6 +229,26 @@ const qualityApiTests = [
   "scripts/__tests__/run-vitest-with-heap.test.ts",
 ];
 
+// Backfill projects (plan U2 / R7). Historically the curated quality lanes
+// enumerated their files by hand, so any app/ or src/ test file that nobody
+// added to a curated list ran in NO project — not locally, not in CI. The
+// backfill projects close that hole structurally: they include the broad
+// globs and EXCLUDE only (a) files already executed by a curated lane and
+// (b) the explicit skip-list. A brand-new test file therefore lands in
+// backfill automatically; it can never silently fall through again.
+const backfillAppExclude = [
+  ...qualityAppTests,
+  ...skipListDashboardGlobs.filter((file) => file.startsWith("app/")),
+  "app/__tests__/build-output.test.ts",
+];
+const qualityAppBackfillTests = ["app/**/*.test.{ts,tsx}"];
+
+const backfillApiExclude = [
+  ...qualityApiTests,
+  ...skipListDashboardGlobs.filter((file) => file.startsWith("src/")),
+];
+const qualityApiBackfillTests = ["src/**/*.test.{ts,tsx}"];
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -364,6 +397,26 @@ export default defineConfig({
           name: "dashboard-api-quality",
           environment: "node",
           include: qualityApiTests,
+          css: { include: [] },
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "dashboard-app-quality-backfill",
+          environment: "jsdom",
+          include: qualityAppBackfillTests,
+          exclude: backfillAppExclude,
+          css: { include: [/app\//] },
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "dashboard-api-quality-backfill",
+          environment: "node",
+          include: qualityApiBackfillTests,
+          exclude: backfillApiExclude,
           css: { include: [] },
         },
       },
