@@ -5,7 +5,9 @@ import {
   createDefaultNodeHandlers,
   createNoopLegacySeams,
   SPLIT_ACTIVE_CONTEXT_KEY,
+  type CodeNodeRunner,
   type ForeachActiveContext,
+  type ParseStepsHandlerDeps,
   type WorkflowCustomNodeRunner,
   type WorkflowLegacySeams,
 } from "./workflow-node-handlers.js";
@@ -46,6 +48,13 @@ export interface WorkflowGraphExecutorDeps {
   seams?: WorkflowLegacySeams;
   /** Executes custom (non-seam) prompt/script/gate nodes. */
   runCustomNode?: WorkflowCustomNodeRunner;
+  /** Step-inversion (U12, KTD-12): dependencies for the `parse-steps` node
+   *  handler (artifact read, projection write, pin-protection probe, audit).
+   *  Absent → a parse-steps node fails cleanly. */
+  parseStepsDeps?: ParseStepsHandlerDeps;
+  /** Step-inversion (U14, KTD-15): runner for the `code` node (esbuild compile +
+   *  child-process execution). Absent → a code node fails cleanly. */
+  runCode?: CodeNodeRunner;
   maxRetriesPerNode?: number;
   /** Per-branch run-state persistence (U13). Optional — fully in-memory without it. */
   branchPersistence?: WorkflowBranchPersistence;
@@ -112,7 +121,10 @@ export class WorkflowGraphExecutor {
   public constructor(private readonly deps: WorkflowGraphExecutorDeps) {
     this.maxRetriesPerNode = Math.max(1, Math.floor(deps.maxRetriesPerNode ?? 2));
     this.handlers = {
-      ...createDefaultNodeHandlers(deps.seams ?? createNoopLegacySeams(), deps.runCustomNode),
+      ...createDefaultNodeHandlers(deps.seams ?? createNoopLegacySeams(), deps.runCustomNode, {
+        parseSteps: deps.parseStepsDeps,
+        runCode: deps.runCode,
+      }),
       ...(deps.handlers ?? {}),
     };
   }

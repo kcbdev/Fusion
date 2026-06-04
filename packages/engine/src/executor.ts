@@ -9,7 +9,8 @@ import { delimiter, isAbsolute, join, relative, resolve as resolvePath } from "n
 import { existsSync, realpathSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode } from "@fusion/core";
-import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled } from "@fusion/core";
+import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, resolveWorkflowIrForTask } from "@fusion/core";
+import type { TaskStep, WorkflowIr } from "@fusion/core";
 import {
   buildWorkflowObservationFromTask,
   buildWorkflowObservation,
@@ -17,6 +18,8 @@ import {
   type WorkflowRunObservation,
 } from "@fusion/core";
 import { WorkflowGraphTaskRunner, type WorkflowGraphTaskRunResult } from "./workflow-graph-task-runner.js";
+import { createCodeNodeRunner } from "./code-node-runner.js";
+import type { ParseStepsHandlerDeps, CodeNodeRunner } from "./workflow-node-handlers.js";
 import type { WorkflowBranchPersistence, WorkflowBranchRunState } from "./workflow-graph-branches.js";
 import type {
   WorkflowStepInstancePersistence,
@@ -3296,6 +3299,13 @@ export class TaskExecutor {
         // the active instance's step to its persisted per-step baseline (git reset
         // + session rewind + step→pending) before re-entering step-execute.
         onReworkReset: (active) => this.applyGraphRethinkReset(task.id, active),
+        // Step-inversion (KTD-12, U12): parse-steps node handler deps — artifact
+        // read (through task-documents with PROMPT.md fallback), step-list write
+        // (graph-source projection), pin-protection probe, and audit.
+        parseStepsDeps: this.buildParseStepsDeps(),
+        // Step-inversion (KTD-15, U14): code node runner — esbuild compile +
+        // child-process execution with the harness contract.
+        runCode: this.buildCodeNodeRunner(),
       });
       let result: WorkflowGraphTaskRunResult;
       try {
@@ -3364,6 +3374,129 @@ export class TaskExecutor {
       loadInstanceStates: (taskId, runId) => store.loadWorkflowRunStepInstances?.(taskId, runId) ?? [],
       clearStaleInstanceStates: (taskId, keepRunId) => store.clearWorkflowRunStepInstances?.(taskId, keepRunId),
     };
+  }
+
+  /**
+   * Resolve which artifact/parser governs a graph-owned task's step list from its
+   * workflow's `parse-steps` declaration (KTD-12). Returns undefined for legacy
+   * tasks (no parse-steps node) so reconcile/resume keep their unchanged behavior.
+   * Used by reconcile read-through to know which artifact backs the step source.
+   */
+  private resolveTaskStepSource(ir: WorkflowIr | undefined): { artifact: string; parser: string } | undefined {
+    if (!ir) return undefined;
+    for (const node of ir.nodes) {
+      if (node.kind !== "parse-steps") continue;
+      const cfg = (node.config ?? {}) as { artifact?: unknown; parser?: unknown };
+      const parser = typeof cfg.parser === "string" ? cfg.parser : undefined;
+      if (!parser) continue;
+      const artifact = typeof cfg.artifact === "string" && cfg.artifact.trim() !== "" ? cfg.artifact : "PROMPT.md";
+      return { artifact, parser };
+    }
+    return undefined;
+  }
+
+  /**
+   * Build the parse-steps node handler deps (KTD-12, U12): artifact read through
+   * the task-documents machinery (PROMPT.md falls back to the task's own PROMPT
+   * content the way step-init does), step-list write through the graph-source
+   * projection (`updateTask({ steps })`), pin-protection probe (persisted instance
+   * rows exist → re-parse illegal, KTD-3), and a logEntry-backed audit sink.
+   */
+  private buildParseStepsDeps(): ParseStepsHandlerDeps {
+    return {
+      readArtifact: async (task, key): Promise<string | undefined> => {
+        // Declared artifacts ride the task-documents layer.
+        try {
+          const doc = await this.store.getTaskDocument(task.id, key);
+          if (doc) return doc.content;
+        } catch {
+          // Fall through to the PROMPT fallback below.
+        }
+        // Default step-source artifact (PROMPT.md): fall back to the task's PROMPT
+        // content (the same source the legacy step-init reads).
+        if (key === "PROMPT.md") {
+          try {
+            const detail = await this.store.getTask(task.id);
+            if (typeof detail.prompt === "string") return detail.prompt;
+          } catch {
+            // No PROMPT available.
+          }
+        }
+        return undefined;
+      },
+      writeSteps: async (task, steps: TaskStep[]): Promise<void> => {
+        await this.store.updateTask(task.id, { steps });
+      },
+      hasExpandedForeach: async (task): Promise<boolean> => {
+        const store = this.store as unknown as {
+          loadWorkflowRunStepInstances?: (taskId: string, runId: string) => WorkflowStepInstanceState[];
+        };
+        if (typeof store.loadWorkflowRunStepInstances !== "function") return false;
+        try {
+          // Any persisted instance row for this task (any run) means a foreach has
+          // expanded — re-parsing would desynchronize the pinned instance set.
+          const rows = store.loadWorkflowRunStepInstances(task.id, `${task.id}:run`);
+          return Array.isArray(rows) && rows.length > 0;
+        } catch {
+          return false;
+        }
+      },
+      audit: (reason, detail) => {
+        // The detail string carries the task id (handler convention); emit on the
+        // engine log so the routable failure is auditable without a taskId arg.
+        executorLog.warn(`[parse-steps] ${reason}: ${detail}`);
+      },
+    };
+  }
+
+  /**
+   * Build the code node runner (KTD-15, U14): worktree cwd resolution, pre-read of
+   * declared artifacts into the harness ctx, and customFields writes through the
+   * U11 validation authority. Drives the esbuild-compile + child-process runner
+   * in code-node-runner.ts.
+   */
+  private buildCodeNodeRunner(): CodeNodeRunner {
+    return createCodeNodeRunner({
+      resolveCwd: async (task): Promise<string> => {
+        try {
+          return (await this.store.getTask(task.id)).worktree || this.rootDir;
+        } catch {
+          return this.rootDir;
+        }
+      },
+      readArtifacts: async (task): Promise<Record<string, string>> => {
+        const out: Record<string, string> = {};
+        try {
+          const docs = await this.store.getTaskDocuments(task.id);
+          for (const doc of docs) out[doc.key] = doc.content;
+        } catch {
+          // No documents — pass an empty artifact map.
+        }
+        // Surface PROMPT.md from the task prompt when not already a document.
+        if (out["PROMPT.md"] === undefined) {
+          try {
+            const detail = await this.store.getTask(task.id);
+            if (typeof detail.prompt === "string") out["PROMPT.md"] = detail.prompt;
+          } catch {
+            // No prompt available.
+          }
+        }
+        return out;
+      },
+      writeCustomFields: async (task, patch) => {
+        if (typeof this.store.updateTaskCustomFields !== "function") {
+          return {
+            ok: false as const,
+            rejection: { code: "no-fields-defined" as const, fieldId: "", detail: "custom fields unsupported by store" },
+          };
+        }
+        const result = await this.store.updateTaskCustomFields(task.id, patch);
+        return result.ok ? { ok: true as const } : { ok: false as const, rejection: result.rejection };
+      },
+      audit: (reason, detail) => {
+        executorLog.warn(`[code-node] ${reason}: ${detail}`);
+      },
+    });
   }
 
   /**
@@ -11361,6 +11494,26 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
   private async reconcileStepsFromGitHistory(taskId: string, detail: TaskDetail, worktreePath: string): Promise<void> {
     const baseCommitSha = detail.baseCommitSha;
     if (!baseCommitSha) return;
+
+    // Step-inversion read-through (KTD-12, U12): for graph-owned tasks, resolve
+    // which artifact/parser governs the step list from the workflow's parse-steps
+    // declaration so reconcile knows the step source. The `complete step N`
+    // commit convention is parser-agnostic (every parser yields the same step
+    // ordering the agent commits against), so the git-history reconcile below is
+    // unchanged — this read-through records the governing source for diagnostics
+    // and is the seam a future parser-specific reconcile would consult. Legacy
+    // tasks (no parse-steps node) resolve to undefined and are untouched.
+    try {
+      const ir = await resolveWorkflowIrForTask(this.store, taskId);
+      const stepSource = this.resolveTaskStepSource(ir);
+      if (stepSource) {
+        executorLog.log(
+          `${taskId}: reconcile step source governed by parse-steps(artifact=${stepSource.artifact}, parser=${stepSource.parser})`,
+        );
+      }
+    } catch {
+      // Read-through is diagnostic only; never block reconcile on it.
+    }
 
     const pendingOrInProgressSteps = detail.steps.filter(
       (s, i) => (s.status === "pending" || s.status === "in-progress") && i > 0,

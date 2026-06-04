@@ -1,5 +1,5 @@
-import { WorkflowIrError } from "@fusion/core";
-import type { TaskDetail, WorkflowIrNode } from "@fusion/core";
+import { WorkflowIrError, getStepParser } from "@fusion/core";
+import type { TaskDetail, TaskStep, WorkflowIrNode } from "@fusion/core";
 
 import type { WorkflowNodeHandler, WorkflowNodeResult } from "./workflow-graph-executor.js";
 
@@ -285,16 +285,238 @@ export function createStepReviewHandler(seams: WorkflowLegacySeams): WorkflowNod
   };
 }
 
+// ── parse-steps node (U12, KTD-12) ──────────────────────────────────────────
+
+/** The implicit default step-source artifact when a workflow declares no
+ *  artifacts (mirrors core's IMPLICIT_DEFAULT_ARTIFACT). */
+export const PARSE_STEPS_DEFAULT_ARTIFACT = "PROMPT.md";
+
+/**
+ * Engine-side dependencies the `parse-steps` handler needs (U12, KTD-12). All
+ * injected so the handler stays unit-testable with fakes and the graph layer
+ * stays engine-agnostic. The production wiring (executor.ts) reads the artifact
+ * through the task-documents machinery (falling back to the task's PROMPT
+ * content for the default `PROMPT.md` artifact), writes the parsed step list
+ * through the graph-source projection (`updateTask({ steps })`), and reports
+ * whether the foreach pin is already established (KTD-3 pin protection).
+ */
+export interface ParseStepsHandlerDeps {
+  /**
+   * Read an artifact's text content for a task. Resolves `undefined` when the
+   * artifact does not exist (the handler maps that to `parse-error`). The
+   * executor wires this to the task-documents read path with a PROMPT.md
+   * fallback to the task's own PROMPT content.
+   */
+  readArtifact: (task: TaskDetail, key: string) => Promise<string | undefined>;
+  /**
+   * Write the canonical parsed step list through the projection sink (the single
+   * graph-side step-list writer, KTD-12). All statuses are `pending`;
+   * `dependsOn` is preserved. The executor wires this to
+   * `store.updateTask(taskId, { steps })`.
+   */
+  writeSteps: (task: TaskDetail, steps: TaskStep[]) => Promise<void>;
+  /**
+   * Pin-protection probe (KTD-3): resolves true when a foreach has already
+   * expanded for this task+run — either persisted instance rows exist OR a
+   * foreach expanded earlier in this walk. Re-parsing after expansion is illegal
+   * (it would silently desynchronize the pinned instance set), so the handler
+   * fails with an audited `pin-mismatch` outcome. Optional — absent means no
+   * pin established (always safe to parse).
+   */
+  hasExpandedForeach?: (task: TaskDetail) => Promise<boolean> | boolean;
+  /** Optional audit sink: called with a stable reason code on every routable
+   *  failure outcome (`parse-error`, `pin-mismatch`) so the run audit records it.
+   *  Never throws into the handler. */
+  audit?: (reason: string, detail: string) => void;
+}
+
+/**
+ * Handler for the `parse-steps` node kind (U12, KTD-12). Reads the declared
+ * artifact, resolves the parser from the core registry, runs it, and writes the
+ * step list through the projection — the ONLY graph-side step-list writer.
+ *
+ * Outcomes:
+ *   - unknown parser           → `outcome:failure value:"parse-error"` (audited)
+ *   - missing artifact         → `outcome:failure value:"parse-error"` (audited)
+ *   - parser throws            → `outcome:failure value:"parse-error"` (audited, never crashes)
+ *   - clean empty parse        → `outcome:success value:"no-steps"` (routable; defaults to success)
+ *   - foreach already expanded → `outcome:failure value:"pin-mismatch"` (audited, KTD-3)
+ *   - steps parsed             → `outcome:success` (steps written through projection)
+ */
+export function createParseStepsHandler(deps: ParseStepsHandlerDeps): WorkflowNodeHandler {
+  const audit = (reason: string, detail: string): void => {
+    try {
+      deps.audit?.(reason, detail);
+    } catch {
+      // Audit must never affect the run.
+    }
+  };
+
+  return async (node, ctx) => {
+    const cfg = (node.config ?? {}) as { artifact?: unknown; parser?: unknown };
+    const parserId = typeof cfg.parser === "string" ? cfg.parser : "";
+    const artifactKey =
+      typeof cfg.artifact === "string" && cfg.artifact.trim() !== ""
+        ? cfg.artifact
+        : PARSE_STEPS_DEFAULT_ARTIFACT;
+
+    // Pin protection (KTD-3): re-parsing after a foreach has expanded is illegal.
+    try {
+      if (deps.hasExpandedForeach && (await deps.hasExpandedForeach(ctx.task))) {
+        audit(
+          "pin-mismatch",
+          `parse-steps node '${node.id}' reached after a foreach already expanded for task ${ctx.task.id}`,
+        );
+        return { outcome: "failure", value: "pin-mismatch" };
+      }
+    } catch (err) {
+      // A pin-probe failure must fail closed (never silently re-parse).
+      const message = err instanceof Error ? err.message : String(err);
+      audit("pin-mismatch", `parse-steps node '${node.id}' pin probe failed: ${message}`);
+      return { outcome: "failure", value: "pin-mismatch" };
+    }
+
+    // Resolve the parser from the registry (built-ins + plugin parsers, KTD-12).
+    const parser = getStepParser(parserId);
+    if (!parser) {
+      audit(
+        "parse-error",
+        `parse-steps node '${node.id}' references unknown parser '${parserId}'`,
+      );
+      return { outcome: "failure", value: "parse-error" };
+    }
+
+    // Read the artifact content.
+    let content: string | undefined;
+    try {
+      content = await deps.readArtifact(ctx.task, artifactKey);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      audit(
+        "parse-error",
+        `parse-steps node '${node.id}' artifact '${artifactKey}' read failed: ${message}`,
+      );
+      return { outcome: "failure", value: "parse-error" };
+    }
+    if (content === undefined) {
+      audit(
+        "parse-error",
+        `parse-steps node '${node.id}' artifact '${artifactKey}' not found for task ${ctx.task.id}`,
+      );
+      return { outcome: "failure", value: "parse-error" };
+    }
+
+    // Run the parser; a throw (malformed artifact) maps to parse-error.
+    let parsedSteps;
+    try {
+      parsedSteps = parser.parse(content).steps;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      audit(
+        "parse-error",
+        `parse-steps node '${node.id}' parser '${parserId}' threw: ${message}`,
+      );
+      return { outcome: "failure", value: "parse-error" };
+    }
+
+    // Clean empty parse → routable no-steps outcome (defaults to success).
+    if (parsedSteps.length === 0) {
+      // Still write the (empty) projection so a re-parse is idempotent and the
+      // foreach reads a definitive zero-step list.
+      try {
+        await deps.writeSteps(ctx.task, []);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        audit(
+          "parse-error",
+          `parse-steps node '${node.id}' failed to write empty step list: ${message}`,
+        );
+        return { outcome: "failure", value: "parse-error" };
+      }
+      return { outcome: "success", value: "no-steps" };
+    }
+
+    // Project the parsed steps onto the task step list — all pending, dependsOn
+    // preserved. This is the single graph-side step-list write (KTD-12).
+    const steps: TaskStep[] = parsedSteps.map((s) => {
+      const step: TaskStep = { name: s.name, status: "pending" };
+      if (s.dependsOn && s.dependsOn.length > 0) step.dependsOn = s.dependsOn;
+      return step;
+    });
+    try {
+      await deps.writeSteps(ctx.task, steps);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      audit(
+        "parse-error",
+        `parse-steps node '${node.id}' failed to write ${steps.length} steps: ${message}`,
+      );
+      return { outcome: "failure", value: "parse-error" };
+    }
+
+    return { outcome: "success" };
+  };
+}
+
+// ── code node (U14, KTD-15) ─────────────────────────────────────────────────
+
+/**
+ * Runs a `code` node's source against the harness contract (U14, KTD-15) and
+ * returns the result mapped to graph behavior. Injected so the handler stays
+ * engine-agnostic; the production wiring (executor.ts) drives the esbuild
+ * compile + child-process runner in code-node-runner.ts, assembling the ctx
+ * (task subset, walk context, declared artifacts, `foreach:active` instance) and
+ * routing the returned `{ outcome, value, contextPatch, customFields }`.
+ */
+export type CodeNodeRunner = (
+  node: WorkflowIrNode,
+  task: TaskDetail,
+  context: Record<string, unknown>,
+) => Promise<WorkflowNodeResult>;
+
+/**
+ * Handler for the `code` node kind (U14, KTD-15). Delegates to the injected
+ * runner. Fail-closed: a code node with no runner wired must NOT silently
+ * succeed (it would route an unverified path forward) — it fails with an audited
+ * value, mirroring the step-execute/step-review unwired posture.
+ */
+export function createCodeNodeHandler(runCode?: CodeNodeRunner): WorkflowNodeHandler {
+  return async (node, ctx) => {
+    if (!runCode) {
+      return { outcome: "failure", value: "code-node-unwired" };
+    }
+    return runCode(node, ctx.task, ctx.context);
+  };
+}
+
+export interface DefaultNodeHandlerDeps {
+  /** parse-steps node deps (U12). When absent, a parse-steps node fails cleanly. */
+  parseSteps?: ParseStepsHandlerDeps;
+  /** code node runner (U14). When absent, a code node fails cleanly. */
+  runCode?: CodeNodeRunner;
+}
+
 export function createDefaultNodeHandlers(
   seams: WorkflowLegacySeams,
   runCustomNode?: WorkflowCustomNodeRunner,
-): Record<"prompt" | "script" | "gate" | "step-review", WorkflowNodeHandler> {
+  deps?: DefaultNodeHandlerDeps,
+): Record<
+  "prompt" | "script" | "gate" | "step-review" | "parse-steps" | "code",
+  WorkflowNodeHandler
+> {
   const promptLike = createPromptLikeHandler(seams, runCustomNode);
+  // parse-steps without deps fails closed (would otherwise have no handler at
+  // all and throw "No handler registered"); a clean failure is the safe posture.
+  const parseSteps: WorkflowNodeHandler = deps?.parseSteps
+    ? createParseStepsHandler(deps.parseSteps)
+    : async () => ({ outcome: "failure", value: "parse-steps-unwired" });
   return {
     prompt: promptLike,
     script: promptLike,
     gate: createGateHandler(runCustomNode),
     "step-review": createStepReviewHandler(seams),
+    "parse-steps": parseSteps,
+    code: createCodeNodeHandler(deps?.runCode),
   };
 }
 

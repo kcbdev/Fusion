@@ -35,9 +35,15 @@ export {
 export {
   createDefaultNodeHandlers,
   createNoopLegacySeams,
+  createParseStepsHandler,
+  createCodeNodeHandler,
+  PARSE_STEPS_DEFAULT_ARTIFACT,
   type WorkflowCustomNodeRunner,
   type WorkflowLegacySeams,
   type WorkflowSeamName,
+  type ParseStepsHandlerDeps,
+  type CodeNodeRunner,
+  type DefaultNodeHandlerDeps,
 } from "./workflow-node-handlers.js";
 export {
   WorkflowGraphTaskRunner,
@@ -474,6 +480,36 @@ export {
   PluginTraitHasDependentsError,
   type PluginTraitDependent,
 } from "./plugin-trait-adapter.js";
+// Step-inversion U12 (KTD-12): plugin step-parser adapter.
+export {
+  registerPluginStepParsers,
+  unregisterPluginStepParsers,
+  pluginParserRegistryId,
+  pluginParserToRegistryParser,
+  PluginParserError,
+  PLUGIN_PARSER_TIMEOUT_MS,
+  type PluginStepParserContribution,
+} from "./plugin-parser-adapter.js";
+// Step-inversion U14 (KTD-15): code-node runner + save-time validation helper.
+export {
+  runCodeNode,
+  createCodeNodeRunner,
+  compileCodeNodeSource,
+  validateCodeNodeSources,
+  buildCodeNodeTaskSubset,
+  resolveCodeNodeTimeout,
+  CodeNodeError,
+  CODE_NODE_DEFAULT_TIMEOUT_MS,
+  CODE_NODE_MAX_TIMEOUT_MS,
+  CODE_NODE_MAX_SOURCE_BYTES,
+  CODE_NODE_OUTPUT_CAP_BYTES,
+  type CodeNodeContext,
+  type CodeNodeResult,
+  type CodeNodeRunnerDeps,
+  type CodeNodeTaskSubset,
+  type CodeNodeFailureReason,
+  type RunCodeNodeOptions,
+} from "./code-node-runner.js";
 // Agent runtime abstraction
 export { type AgentRuntime, type AgentRuntimeOptions, type AgentSessionResult } from "./agent-runtime.js";
 export {

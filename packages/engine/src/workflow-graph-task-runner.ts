@@ -3,7 +3,9 @@ import { isExperimentalFeatureEnabled } from "@fusion/core";
 
 import { WorkflowGraphExecutor, type WorkflowNodeOutcome } from "./workflow-graph-executor.js";
 import type {
+  CodeNodeRunner,
   ForeachActiveContext,
+  ParseStepsHandlerDeps,
   WorkflowCustomNodeRunner,
   WorkflowLegacySeams,
 } from "./workflow-node-handlers.js";
@@ -61,6 +63,12 @@ export interface WorkflowGraphTaskRunnerDeps {
    *  re-entering step-execute when a rework edge was triggered by an
    *  `outcome:rethink`. Wired to `resetStepToBaseline` in production. */
   onReworkReset?: (active: ForeachActiveContext, reason: string) => void | Promise<void>;
+  /** Step-inversion (U12, KTD-12): `parse-steps` node handler deps. Additive;
+   *  a workflow with no parse-steps node never invokes it. */
+  parseStepsDeps?: ParseStepsHandlerDeps;
+  /** Step-inversion (U14, KTD-15): `code` node runner. Additive; a workflow with
+   *  no code node never invokes it. */
+  runCode?: CodeNodeRunner;
 }
 
 /**
@@ -164,6 +172,8 @@ export class WorkflowGraphTaskRunner {
         branchSemaphore: this.deps.branchSemaphore,
         stepInstancePersistence: this.deps.stepInstancePersistence,
         onReworkReset: this.deps.onReworkReset,
+        parseStepsDeps: this.deps.parseStepsDeps,
+        runCode: this.deps.runCode,
         runId: `${task.id}:${definition.id}`,
         onBranchProgress: (progress) => {
           this.branchProgress.set(progress.branchId, progress);
