@@ -145,6 +145,11 @@ import {
   createTaskLogTool as sharedCreateTaskLogTool,
   createWorkflowListTool as sharedCreateWorkflowListTool,
   createWorkflowSelectTool as sharedCreateWorkflowSelectTool,
+  createTaskPromoteTool as sharedCreateTaskPromoteTool,
+  createWorkflowCreateTool as sharedCreateWorkflowCreateTool,
+  createWorkflowUpdateTool as sharedCreateWorkflowUpdateTool,
+  createWorkflowDeleteTool as sharedCreateWorkflowDeleteTool,
+  createTraitListTool as sharedCreateTraitListTool,
 } from "./agent-tools.js";
 import { getTaskCompletionBlockerForStore } from "./task-completion.js";
 import { createStreamingDeltaNormalizer } from "./streaming-delta.js";
@@ -4790,6 +4795,11 @@ export class TaskExecutor {
         this.createTaskDocumentReadTool(task.id),
         this.createWorkflowListTool(),
         this.createWorkflowSelectTool(task.id),
+        this.createTaskPromoteTool(task.id),
+        this.createWorkflowCreateTool(),
+        this.createWorkflowUpdateTool(),
+        this.createWorkflowDeleteTool(),
+        this.createTraitListTool(),
         ...(isResearchToolSurfaceEnabled(settings)
           ? createResearchTools({
             store: this.store,
@@ -6547,6 +6557,26 @@ export class TaskExecutor {
 
   private createWorkflowSelectTool(taskId: string): ToolDefinition {
     return sharedCreateWorkflowSelectTool(this.store, taskId);
+  }
+
+  private createTaskPromoteTool(taskId: string): ToolDefinition {
+    return sharedCreateTaskPromoteTool(this.store, taskId);
+  }
+
+  private createWorkflowCreateTool(): ToolDefinition {
+    return sharedCreateWorkflowCreateTool(this.store);
+  }
+
+  private createWorkflowUpdateTool(): ToolDefinition {
+    return sharedCreateWorkflowUpdateTool(this.store);
+  }
+
+  private createWorkflowDeleteTool(): ToolDefinition {
+    return sharedCreateWorkflowDeleteTool(this.store);
+  }
+
+  private createTraitListTool(): ToolDefinition {
+    return sharedCreateTraitListTool();
   }
 
   private createTaskAddDepTool(taskId: string): ToolDefinition {
