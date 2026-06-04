@@ -243,7 +243,11 @@ describe("WorkflowNodeEditor — U10 columns/traits/holds", () => {
     vi.mocked(compileWorkflow).mockResolvedValue({ steps: [] });
 
     render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
-    fireEvent.click((await screen.findByText("Save")).closest("button")!);
+    // Wait for the column panel to hydrate before saving — saving earlier
+    // races the async columns state and flowToIr would emit a v1 IR.
+    await screen.findByText("Save");
+    await waitFor(() => expect(screen.getAllByLabelText(/Column name/i).length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByText("Save").closest("button")!);
 
     await waitFor(() => expect(updateWorkflow).toHaveBeenCalled());
     const [, updates] = vi.mocked(updateWorkflow).mock.calls[0];
