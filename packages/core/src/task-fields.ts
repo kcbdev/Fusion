@@ -24,7 +24,6 @@
 
 import type {
   WorkflowFieldDefinition,
-  WorkflowFieldType,
 } from "./workflow-ir-types.js";
 
 // ---------------------------------------------------------------------------
@@ -187,7 +186,6 @@ function validateValue(
         return reject("type-mismatch", `field '${field.id}' (url) expects a string, got ${typeof value}`);
       }
       try {
-        // eslint-disable-next-line no-new
         new URL(value);
       } catch {
         return reject("type-mismatch", `field '${field.id}' value '${value}' is not a valid URL`);
@@ -298,11 +296,6 @@ export function applyFieldDefaults(
 // ---------------------------------------------------------------------------
 // Reconciliation on workflow edit / switch
 // ---------------------------------------------------------------------------
-
-/** Two field types are "enum-kind" siblings (enum / multi-enum). */
-function isEnumKind(type: WorkflowFieldType): boolean {
-  return type === "enum" || type === "multi-enum";
-}
 
 /**
  * A stored value for `field` is type-compatible with a new field definition iff

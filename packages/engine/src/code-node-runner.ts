@@ -39,11 +39,23 @@
  */
 
 import { execFile } from "node:child_process";
+import { createRequire } from "node:module";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { transformSync } from "esbuild";
+// esbuild is loaded lazily at first compile: a top-level import would run its
+// environment invariant check (TextEncoder) at module-load time in any process
+// that merely imports @fusion/engine — including jsdom test environments where
+// that invariant fails. Lazy loading confines esbuild to actual code-node use.
+let cachedTransformSync: typeof import("esbuild").transformSync | undefined;
+function getTransformSync(): typeof import("esbuild").transformSync {
+  if (!cachedTransformSync) {
+    const req = createRequire(import.meta.url);
+    cachedTransformSync = (req("esbuild") as typeof import("esbuild")).transformSync;
+  }
+  return cachedTransformSync;
+}
 import type { CustomFieldRejection, TaskDetail, WorkflowIrNode } from "@fusion/core";
 
 import type { WorkflowNodeResult } from "./workflow-graph-executor.js";
@@ -148,7 +160,7 @@ export async function compileCodeNodeSource(source: string): Promise<string> {
     // `transformSync` runs a short-lived per-call child that exits cleanly,
     // avoiding esbuild's long-lived service process (which the test harness's
     // subprocess guard would otherwise flag as a lingering child).
-    const out = transformSync(source, {
+    const out = getTransformSync()(source, {
       loader: "ts",
       format: "esm",
       target: "node18",

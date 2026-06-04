@@ -60,14 +60,6 @@ export interface TaskFieldsSectionProps {
   readOnly?: boolean;
 }
 
-function optionLabel(field: WorkflowFieldDefinition, value: string): string {
-  return field.options?.find((o) => o.value === value)?.label ?? value;
-}
-
-function optionColor(field: WorkflowFieldDefinition, value: string): string | undefined {
-  return field.options?.find((o) => o.value === value)?.color;
-}
-
 /** Resolve the effective widget for a field, applying the per-type default. */
 function resolveWidget(field: WorkflowFieldDefinition): NonNullable<WorkflowFieldDefinition["render"]>["widget"] {
   const explicit = field.render?.widget;
