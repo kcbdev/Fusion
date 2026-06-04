@@ -111,6 +111,56 @@ test("fails when protected .fusion existence changes after baseline", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// U3: --before-fast (cheap single-probe baseline). Detection must be preserved.
+// ---------------------------------------------------------------------------
+
+test("--before-fast still detects an injected temp leak (guard strength preserved)", () => {
+  withFixture(({ cwd, home }) => {
+    // Prime a full baseline so --before-fast has a prior unstable classification.
+    assert.equal(runScript(["--before"], { cwd, home }).status, 0);
+    // Fast before-pass (reuses prior classification, skips the 2s probe).
+    const fast = runScript(["--before-fast"], { cwd, home });
+    assert.equal(fast.status, 0);
+    assert.match(fast.stdout, /Baseline recorded \(fast\)/);
+
+    // Inject a leak after the fast baseline.
+    const leak = path.join(tmpdir(), `fusion-test-leak-fast-${process.pid}`);
+    mkdirSync(leak, { recursive: true });
+    try {
+      const after = runScript([], { cwd, home });
+      assert.equal(after.status, 1, after.stdout);
+      assert.match(after.stderr, /leaked temp director/i);
+    } finally {
+      rmSync(leak, { recursive: true, force: true });
+    }
+  });
+});
+
+test("--before-fast still detects a protected .fusion mutation after baseline", () => {
+  withFixture(({ cwd, home }) => {
+    assert.equal(runScript(["--before"], { cwd, home }).status, 0);
+    assert.equal(runScript(["--before-fast"], { cwd, home }).status, 0);
+    writeFileSync(path.join(cwd, ".fusion", "fast-mutated.txt"), "x");
+    const after = runScript([], { cwd, home });
+    assert.equal(after.status, 1);
+    assert.match(after.stderr, /protected live \.fusion data changed/i);
+  });
+});
+
+test("--before-fast falls back to the full probe when no prior baseline exists", () => {
+  withFixture(({ cwd, home }) => {
+    // No --before has run for this cwd-namespaced baseline; --before-fast must
+    // still produce a usable baseline (full path) and the after-check passes.
+    const fast = runScript(["--before-fast"], { cwd, home });
+    assert.equal(fast.status, 0);
+    // Full fallback prints the non-fast baseline message.
+    assert.match(fast.stdout, /Baseline recorded:/);
+    const after = runScript([], { cwd, home });
+    assert.equal(after.status, 0);
+  });
+});
+
 test("passes when HOME .fusion is externally active during baseline and check", () => {
   withFixture(({ cwd, home }) => {
     const churnScript = `

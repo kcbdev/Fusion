@@ -7,8 +7,24 @@ import {
   detectMissingArtifacts,
   detectMissingOrStaleArtifacts,
   ensureTestArtifacts,
+  isStale,
   REQUIRED_BUILD_PACKAGES,
 } from "../ensure-test-artifacts.mjs";
+
+const ENGINE_ENTRY = REQUIRED_BUILD_PACKAGES.find((pkg) => pkg.name === "@fusion/engine");
+
+/**
+ * A git stub that returns a fixed blob sha for engine src, and reports it as a
+ * git work tree. Lets us drive the content-hash cache deterministically.
+ */
+function fakeGitForEngine(blobSha) {
+  return (args) => {
+    if (args[0] === "rev-parse") return "true";
+    if (args[0] === "ls-files") return `100644 ${blobSha} 0\tpackages/engine/src/index.ts`;
+    if (args[0] === "status") return ""; // clean
+    return null;
+  };
+}
 
 test("detectMissingArtifacts returns missing package list", () => {
   const missing = detectMissingArtifacts("/repo", () => false);
@@ -417,3 +433,80 @@ test("ensureTestArtifacts remediation labels missing artifact paths", () => {
   assert.equal(exitCode, 3);
   assert.match(stderr, /\[test-bootstrap\] missing: plugins\/fusion-plugin-dependency-graph\/dist\/dashboard-view.js/);
 });
+
+// ---------------------------------------------------------------------------
+// U3: content-hash artifact cache — branch-switch no-rebuild + real-change
+// rebuild + dirty-file mtime fallback.
+// ---------------------------------------------------------------------------
+
+// An fs where engine src mtime (3000) is newer than dist (1000): the mtime path
+// would flag engine as stale. The content-hash cache should override that when
+// the source hash is unchanged since the last build.
+function engineStaleByMtimeFs() {
+  return createStaleFsForPackage(
+    { sourceDir: "/repo/packages/engine/src", artifactPathFragment: "packages/engine/dist/" },
+    { artifactMtime: 1000, sourceMtime: 3000 },
+  );
+}
+
+test("isStale: content-hash cache hit skips rebuild even when mtimes say stale (branch-switch)", () => {
+  const { statFn, readdirFn } = engineStaleByMtimeFs();
+  const git = fakeGitForEngine("blobA");
+  // Cache records the exact source hash for the current (blobA) clean content,
+  // so isStale's content-hash short-circuit must report not-stale.
+  const matchingHash = sourceHashFor(git);
+  const artifactCache = { version: 1, entries: { "@fusion/engine": { sourceHash: matchingHash } } };
+
+  const stale = isStale(ENGINE_ENTRY, "/repo", statFn, readdirFn, () => true, { artifactCache, gitFn: git });
+  assert.equal(stale, false, "cache hit on unchanged content must not be stale");
+});
+
+test("isStale: real source change (different blob sha) rebuilds despite cached hash", () => {
+  const { statFn, readdirFn } = engineStaleByMtimeFs();
+  const oldHash = sourceHashFor(fakeGitForEngine("blobOLD"));
+  const artifactCache = { version: 1, entries: { "@fusion/engine": { sourceHash: oldHash } } };
+
+  // Current content is blobNEW → hash differs from cache → fall through to mtime,
+  // which reports stale (src 3000 > dist 1000).
+  const git = fakeGitForEngine("blobNEW");
+  const stale = isStale(ENGINE_ENTRY, "/repo", statFn, readdirFn, () => true, { artifactCache, gitFn: git });
+  assert.equal(stale, true, "changed source content must rebuild");
+});
+
+test("isStale: dirty/untracked git work tree falls back to mtime (no false cache hit)", () => {
+  const { statFn, readdirFn } = engineStaleByMtimeFs();
+  // git stub reports the file as DIRTY: status returns a modification line, so
+  // the content hash reflects working-tree bytes. With a cache keyed to the
+  // clean blob, the hash won't match → mtime fallback → stale.
+  const cleanHash = sourceHashFor(fakeGitForEngine("blobA"));
+  const artifactCache = { version: 1, entries: { "@fusion/engine": { sourceHash: cleanHash } } };
+
+  const dirtyGit = (args) => {
+    if (args[0] === "rev-parse") return "true";
+    if (args[0] === "ls-files") return `100644 blobA 0\tpackages/engine/src/index.ts`;
+    if (args[0] === "status") return ` M packages/engine/src/index.ts`;
+    return null;
+  };
+  const stale = isStale(ENGINE_ENTRY, "/repo", statFn, readdirFn, () => true, { artifactCache, gitFn: dirtyGit });
+  assert.equal(stale, true, "dirty working tree must not produce a false cache hit");
+});
+
+test("isStale: not a git work tree falls back to mtime", () => {
+  const { statFn, readdirFn } = engineStaleByMtimeFs();
+  const noGit = (args) => (args[0] === "rev-parse" ? "false" : null);
+  const artifactCache = { version: 1, entries: { "@fusion/engine": { sourceHash: "whatever" } } };
+  const stale = isStale(ENGINE_ENTRY, "/repo", statFn, readdirFn, () => true, { artifactCache, gitFn: noGit });
+  assert.equal(stale, true, "no git → mtime fallback → stale");
+});
+
+// Helper: compute the engine source hash the production code would for a given
+// git stub, by re-importing computeContentHash with the same inputs/version.
+import { computeContentHash as _computeContentHash } from "../lib/content-hash.mjs";
+function sourceHashFor(gitFn) {
+  return _computeContentHash({
+    rootDir: "/repo",
+    inputPaths: ENGINE_ENTRY.staleAgainstGlobs.map((g) => g.sourcePath),
+    versionPrefix: "artifact-v1",
+    gitFn,
+  });
+}

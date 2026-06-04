@@ -28,6 +28,7 @@ import {
   knownIsolatedHomeBasenames,
   __setCleanupRmSyncForTests,
   emitModeDecision,
+  pruneFusionTestHomes,
 } from "../test-changed.mjs";
 
 import { mkdirSync, writeFileSync, mkdtempSync, rmSync, existsSync } from "node:fs";
@@ -856,4 +857,78 @@ test("emitModeDecision: distinct full reasons round-trip from decideExecutionPla
 
   const forced = decideExecutionPlan({ forceFullSuite: true });
   assert.equal(emitModeDecision(forced, () => {}), "[test-changed] mode=full reason=forced packages=0");
+});
+
+// ---------------------------------------------------------------------------
+// U3: cache-fresh fast path — when every changed package is cache-fresh,
+// applyCacheToPlan yields zero active packages, which is the signal that lets
+// main() skip the skill-sync spawn, artifact-ensure, HOME creation, and prune.
+// ---------------------------------------------------------------------------
+
+test("applyCacheToPlan: all packages cache-fresh → activePackages empty (fast-path trigger)", () => {
+  const sha = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+  const gitFn = fakeGit(sha);
+  const packageDirByName = dirByName([["@fusion/core", "packages/core"]]);
+  const hash = hashWithFakeGit("packages/core", sha);
+
+  const cache = {
+    version: 1,
+    entries: { "@fusion/core": { hash, passedAt: new Date().toISOString(), command: "test" } },
+  };
+
+  const { cachedPackages, activePackages } = applyCacheToPlan(
+    { mode: "changed", packages: ["@fusion/core"] },
+    { gitFn, packageDirByName, readCacheFn: () => cache },
+  );
+
+  assert.deepEqual(activePackages, []);
+  assert.deepEqual(cachedPackages, ["@fusion/core"]);
+});
+
+test("applyCacheToPlan: a changed (non-cached) package keeps the run active (no false fast path)", () => {
+  const gitFn = fakeGit("1111111111111111111111111111111111111111");
+  const packageDirByName = dirByName([["@fusion/core", "packages/core"]]);
+  const staleCache = {
+    version: 1,
+    entries: { "@fusion/core": { hash: "OLDHASH", passedAt: new Date().toISOString(), command: "test" } },
+  };
+
+  const { activePackages } = applyCacheToPlan(
+    { mode: "changed", packages: ["@fusion/core"] },
+    { gitFn, packageDirByName, readCacheFn: () => staleCache },
+  );
+
+  assert.deepEqual(activePackages, ["@fusion/core"]);
+});
+
+test("pruneFusionTestHomes: bounded — removes at most maxEntries per call", () => {
+  const created = [];
+  try {
+    for (let i = 0; i < 5; i++) {
+      const dir = path.join(tmpdir(), `fusion-test-home-root-prune-budget-${process.pid}-${i}`);
+      mkdirSync(dir, { recursive: true });
+      created.push(dir);
+    }
+    // Cap at 2 → at least 3 of ours survive this call.
+    pruneFusionTestHomes(2);
+    const survivors = created.filter((dir) => existsSync(dir));
+    assert.ok(survivors.length >= 3, `expected >=3 survivors with cap=2, got ${survivors.length}`);
+  } finally {
+    for (const dir of created) rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pruneFusionTestHomes: only targets the fusion-test-home-root- prefix", () => {
+  const ours = path.join(tmpdir(), `fusion-test-home-root-prune-prefix-${process.pid}`);
+  const foreign = path.join(tmpdir(), `not-ours-prune-prefix-${process.pid}`);
+  mkdirSync(ours, { recursive: true });
+  mkdirSync(foreign, { recursive: true });
+  try {
+    pruneFusionTestHomes();
+    assert.equal(existsSync(ours), false, "our prefixed dir should be pruned");
+    assert.equal(existsSync(foreign), true, "foreign dir must be left untouched");
+  } finally {
+    rmSync(ours, { recursive: true, force: true });
+    rmSync(foreign, { recursive: true, force: true });
+  }
 });

@@ -1,8 +1,14 @@
 #!/usr/bin/env node
 
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import {
+  computeContentHash,
+  defaultGitRunner,
+  fusionCacheDir,
+  readJsonCache,
+} from "./lib/content-hash.mjs";
 
 export const REQUIRED_BUILD_PACKAGES = [
   { name: "@fusion/core", requiredArtifacts: ["packages/core/dist/index.js"] },
@@ -46,6 +52,83 @@ export const REQUIRED_BUILD_PACKAGES = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// U3: content-hash artifact cache.
+//
+// The mtime-based staleness check (collectNewestSourceMtimeMs vs the dist
+// artifact mtime) fires spuriously on branch switches: `git checkout` rewrites
+// source-file mtimes to "now" even when content is identical, so dist looks
+// stale and we pay a needless `tsc` rebuild inside the inner-loop budget.
+//
+// The fix: after a successful build, cache a git-blob content hash of the
+// package's source inputs. On the next run, if the current content hash matches
+// the cached one, the dist is up to date regardless of mtimes — skip the
+// rebuild. A real source edit changes the hash and rebuilds.
+//
+// Correctness over speed:
+//   - computeContentHash hashes working-tree bytes for dirty/untracked files,
+//     so an unstaged source edit busts the hash (git's index blob SHA would be
+//     stale). See scripts/lib/content-hash.mjs.
+//   - If git is unavailable, or the cache has no entry yet, we FALL BACK to the
+//     mtime comparison — we never silently skip a needed rebuild.
+// ---------------------------------------------------------------------------
+
+const ARTIFACT_CACHE_VERSION = 1;
+
+function artifactCachePath(rootDir) {
+  return path.join(fusionCacheDir(rootDir), "artifact-cache.json");
+}
+
+function readArtifactCache(rootDir) {
+  const cache = readJsonCache(artifactCachePath(rootDir), null);
+  if (!cache || cache.version !== ARTIFACT_CACHE_VERSION || typeof cache.entries !== "object") {
+    return { version: ARTIFACT_CACHE_VERSION, entries: {} };
+  }
+  return cache;
+}
+
+/**
+ * Compute the source content hash for a package entry, or null when it has no
+ * source globs (missing-only packages don't use the staleness cache) or git is
+ * unavailable so we must fall back to mtime.
+ */
+function computeArtifactSourceHash(pkgEntry, rootDir, gitFn = defaultGitRunner) {
+  if (!pkgEntry?.staleAgainstGlobs?.length) return null;
+  // Probe git availability once; computeContentHash also tolerates null but we
+  // want an explicit "fall back to mtime" signal when not in a git work tree.
+  const probe = gitFn(["rev-parse", "--is-inside-work-tree"], rootDir);
+  if (probe !== "true") return null;
+  const inputPaths = pkgEntry.staleAgainstGlobs.map((glob) => glob.sourcePath);
+  return computeContentHash({
+    rootDir,
+    inputPaths,
+    versionPrefix: `artifact-v${ARTIFACT_CACHE_VERSION}`,
+    gitFn,
+  });
+}
+
+/**
+ * Persist the source content hash for each freshly-built package so the next
+ * run can skip the rebuild when content is unchanged.
+ */
+export function recordArtifactBuild(pkgEntries, rootDir, gitFn = defaultGitRunner) {
+  try {
+    const cache = readArtifactCache(rootDir);
+    let wrote = false;
+    for (const pkgEntry of pkgEntries) {
+      const hash = computeArtifactSourceHash(pkgEntry, rootDir, gitFn);
+      if (hash === null) continue;
+      cache.entries[pkgEntry.name] = { sourceHash: hash, builtAt: new Date().toISOString() };
+      wrote = true;
+    }
+    if (!wrote) return;
+    mkdirSync(fusionCacheDir(rootDir), { recursive: true });
+    writeFileSync(artifactCachePath(rootDir), JSON.stringify(cache, null, 2));
+  } catch {
+    // Cache write is best-effort; a failure just means we mtime-check next time.
+  }
+}
+
 function collectNewestSourceMtimeMs(sourceDir, statFn, readdirFn) {
   let newest = 0;
   const stack = [sourceDir];
@@ -87,8 +170,26 @@ export function isStale(
   statFn = statSync,
   readdirFn = readdirSync,
   existsFn = existsSync,
+  cacheOptions = {},
 ) {
   if (!pkgEntry?.staleAgainstGlobs?.length) return false;
+
+  // U3: content-hash short-circuit. If the package's source content hash matches
+  // the hash captured at the last successful build, dist is up to date even
+  // when mtimes say otherwise (branch-switch churn). Only trust this when the
+  // cache opts in AND a hash is computable (git available, not dirty-fallback).
+  const { artifactCache, gitFn } = cacheOptions;
+  if (artifactCache) {
+    const entry = artifactCache.entries?.[pkgEntry.name];
+    if (entry?.sourceHash) {
+      const currentHash = computeArtifactSourceHash(pkgEntry, rootDir, gitFn);
+      if (currentHash !== null && currentHash === entry.sourceHash) {
+        return false; // Content unchanged since last build — not stale.
+      }
+      // Hash mismatch or unavailable → fall through to the mtime check below,
+      // which never under-reports staleness.
+    }
+  }
 
   let minArtifactMtimeMs = Number.POSITIVE_INFINITY;
   for (const artifactPath of pkgEntry.requiredArtifacts) {
@@ -119,11 +220,12 @@ export function detectMissingOrStaleArtifacts(
   existsFn = existsSync,
   statFn = statSync,
   readdirFn = readdirSync,
+  cacheOptions = {},
 ) {
   return REQUIRED_BUILD_PACKAGES.filter((pkg) => {
     const missing = pkg.requiredArtifacts.some((artifactPath) => !existsFn(path.join(rootDir, artifactPath)));
     if (missing) return true;
-    return isStale(pkg, rootDir, statFn, readdirFn, existsFn);
+    return isStale(pkg, rootDir, statFn, readdirFn, existsFn, cacheOptions);
   });
 }
 
@@ -218,7 +320,41 @@ export function ensureTestArtifacts(
   runOptions = {},
 ) {
   const resolvedRootDir = resolveWorkspaceRoot(rootDir);
-  const missingOrStale = detectMissingOrStaleArtifacts(resolvedRootDir, existsFn, statFn, readdirFn);
+
+  // U3: load the content-hash cache so branch-switch mtime churn doesn't force a
+  // rebuild. The default-runner (real CLI) path uses it; injected test runners
+  // can opt in via runOptions.artifactCache / runOptions.gitFn but default to
+  // disabled so existing mtime-based tests keep exercising the mtime path.
+  const useContentCache = runFn === run || runOptions.artifactCache !== undefined;
+  const cacheOptions = useContentCache
+    ? {
+        artifactCache: runOptions.artifactCache ?? readArtifactCache(resolvedRootDir),
+        gitFn: runOptions.gitFn ?? defaultGitRunner,
+      }
+    : {};
+
+  const missingOrStale = detectMissingOrStaleArtifacts(resolvedRootDir, existsFn, statFn, readdirFn, cacheOptions);
+
+  // U3: seed the content-hash cache for packages whose dist is already fresh
+  // (by mtime or a prior build) but have no cache entry yet. This "adopts" the
+  // current source content as the built baseline so the NEXT run — e.g. after a
+  // branch switch rewrites mtimes to "now" without changing content — gets a
+  // content-hash hit instead of a spurious tsc rebuild. We never seed a package
+  // that is currently missing/stale (those still build below and record then).
+  if (useContentCache) {
+    const staleNames = new Set(missingOrStale.map((pkg) => pkg.name));
+    const cache = cacheOptions.artifactCache;
+    const toSeed = REQUIRED_BUILD_PACKAGES.filter(
+      (pkg) =>
+        pkg.staleAgainstGlobs?.length &&
+        !staleNames.has(pkg.name) &&
+        !cache?.entries?.[pkg.name]?.sourceHash,
+    );
+    if (toSeed.length > 0) {
+      recordArtifactBuild(toSeed, resolvedRootDir, cacheOptions.gitFn ?? defaultGitRunner);
+    }
+  }
+
   if (missingOrStale.length === 0) return [];
 
   const names = missingOrStale.map((pkg) => pkg.name);
@@ -233,6 +369,13 @@ export function ensureTestArtifacts(
     });
   } else {
     runFn("pnpm", [...names.flatMap((name) => ["--filter", name]), "build"], resolvedRootDir);
+  }
+
+  // Build succeeded (the real runner exits the process on failure, so reaching
+  // here means a clean build). Record content hashes for the packages we built
+  // so the next run can skip the rebuild on unchanged content.
+  if (useContentCache) {
+    recordArtifactBuild(missingOrStale, resolvedRootDir, cacheOptions.gitFn ?? defaultGitRunner);
   }
   return names;
 }

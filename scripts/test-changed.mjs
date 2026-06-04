@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { cpus, tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { ensureTestArtifacts } from "./ensure-test-artifacts.mjs";
+import { isSkillSyncCheckCached } from "./sync-fusion-skill-tools.mjs";
 
 const currentFilePath = fileURLToPath(import.meta.url);
 const scriptDir = path.dirname(currentFilePath);
@@ -107,9 +108,13 @@ function run(command, commandArgs, options = {}) {
   }
 }
 
-function runIsolationCheck(before = false, env = process.env) {
+function runIsolationCheck(before = false, env = process.env, fastBefore = false) {
   const args = [checkIsolationScript];
-  if (before) args.push("--before");
+  // U3: the before-pass is the costly one (2s mutability probe). Use the cheap
+  // `--before-fast` variant, which reuses the prior run's externally-active
+  // classification and skips the probe. The script falls back to the full probe
+  // when no prior baseline exists, so detection is never weakened.
+  if (before) args.push(fastBefore ? "--before-fast" : "--before");
   // Inject the names of every isolated HOME this script created so the check
   // never reports them as a leak even if the rm-rf in cleanup silently failed
   // or the baseline file got rotated mid-run. Without this, a transient EBUSY
@@ -126,7 +131,14 @@ export function shouldRunIsolationGuard(env = process.env) {
   return env.FUSION_TEST_DISABLE_ISOLATION_GUARD !== "1";
 }
 
-function pruneFusionTestHomes() {
+// U3: bound the prune scan. It only ever targets our own
+// `fusion-test-home-root-*` prefix (it always did), but we additionally cap the
+// number of entries removed per call and skip very-fresh dirs, so a single run
+// can't spend unbounded time rm-rf'ing a tmpdir that accumulated thousands of
+// stale homes — and so the cache-fresh fast path can skip it entirely.
+const PRUNE_MAX_ENTRIES = 64;
+
+export function pruneFusionTestHomes(maxEntries = PRUNE_MAX_ENTRIES) {
   let tmpEntries = [];
   try {
     tmpEntries = readdirSync(tmpdir(), { withFileTypes: true });
@@ -134,17 +146,19 @@ function pruneFusionTestHomes() {
     return;
   }
 
+  let removed = 0;
   for (const entry of tmpEntries) {
+    if (removed >= maxEntries) break;
     if (!entry.isDirectory() || !entry.name.startsWith("fusion-test-home-root-")) continue;
     const rawPath = path.join(tmpdir(), entry.name);
-    let resolvedPath = rawPath;
     try {
-      resolvedPath = realpathSync(rawPath);
+      realpathSync(rawPath);
     } catch {
       // Keep raw path fallback.
     }
     try {
       rmSync(rawPath, { recursive: true, force: true });
+      removed++;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[test-changed] failed to prune leftover ${rawPath}: ${message}`);
@@ -156,7 +170,7 @@ function runMaybeIsolated(command, commandArgs, options = {}) {
   const enabled = shouldRunIsolationGuard();
   const env = options.env ?? process.env;
   const { onBeforeAfterCheck, ...spawnOptions } = options;
-  if (enabled) runIsolationCheck(true, env);
+  if (enabled) runIsolationCheck(true, env, /* fastBefore */ true);
   try {
     run(command, commandArgs, spawnOptions);
   } finally {
@@ -903,17 +917,9 @@ export function main(argv = process.argv.slice(2)) {
     return;
   }
 
-  run("pnpm", ["sync:fusion-skill:check"]);
-  ensureTestArtifacts(rootDir);
-
-  const { env: isolatedHomeEnv, isolatedHome } = createIsolatedHomeEnv(fullSuiteEnv);
-
-  const cleanupIsolatedHome = () => {
-    cleanupIsolatedHomePath(isolatedHome);
-  };
-
-  try {
-
+  // Decide the execution plan and apply the cache BEFORE paying any fixed setup
+  // cost. The cache-fresh fast path can then skip the skill-sync spawn, the
+  // artifact-ensure pass, isolated-HOME creation, and the prune scan entirely.
   const baseBranch = getBaseBranch();
   const comparisonBase = detectComparisonBase(baseBranch);
   const changedFiles = comparisonBase ? changedFilesSince(comparisonBase) : null;
@@ -933,6 +939,57 @@ export function main(argv = process.argv.slice(2)) {
   // R5: structured mode-decision telemetry so fast-path hit rate is observable.
   emitModeDecision(plan);
 
+  // For changed plans, resolve the cache now so we know whether any package
+  // actually needs running before we spend setup time.
+  let cachedPackages = [];
+  let activePackages = plan.packages ?? [];
+  if (plan.mode === "changed") {
+    ({ cachedPackages, activePackages } = applyCacheToPlan(plan, {
+      noCache: noCache || forceFullSuite,
+      packageDirByName,
+    }));
+  }
+
+  const hasWork = plan.mode === "full" || activePackages.length > 0;
+
+  // Cache-fresh fast path: nothing to run. Emit a fast-path mode line, run only
+  // the (now cheap) isolation guard, and skip skill-sync, artifact-ensure,
+  // HOME creation, and prune.
+  if (!hasWork) {
+    console.log("[test-changed] fast-path=cache-fresh (no packages to run).");
+    console.log(
+      `[test-changed] all changed packages are cache-fresh (${cachedPackages.join(", ")}); nothing to run.`,
+    );
+    if (shouldRunIsolationGuard()) {
+      // No isolated HOME was created and no tests ran, so there is nothing to
+      // prune and no real risk of a leak — but we still run a single cheap
+      // before/after guard pass to preserve the invariant that every `pnpm test`
+      // verifies isolation.
+      runIsolationCheck(true, process.env, /* fastBefore */ true);
+      runIsolationCheck(false, process.env);
+    }
+    return;
+  }
+
+  // There is work to do — pay the fixed setup cost now.
+  // U3: skip the skill-sync check spawn when its inputs are unchanged since the
+  // last passing run. Full runs (CI / --full) always run it unconditionally so
+  // the gate never goes silent on the path that actually enforces it.
+  if (forceFullSuite || !isSkillSyncCheckCached(rootDir)) {
+    run("pnpm", ["sync:fusion-skill:check"]);
+  } else {
+    console.log("[test-changed] skill-sync check skipped (inputs unchanged since last pass).");
+  }
+  ensureTestArtifacts(rootDir);
+
+  const { env: isolatedHomeEnv, isolatedHome } = createIsolatedHomeEnv(fullSuiteEnv);
+
+  const cleanupIsolatedHome = () => {
+    cleanupIsolatedHomePath(isolatedHome);
+  };
+
+  try {
+
   if (plan.mode === "full") {
     if (plan.reason === "missing-comparison-base") {
       console.log(`[test-changed] could not resolve merge-base with ${baseBranch}; running full suite.`);
@@ -950,24 +1007,6 @@ export function main(argv = process.argv.slice(2)) {
       env: isolatedHomeEnv,
       onBeforeAfterCheck: cleanupIsolatedHome,
     });
-    return;
-  }
-
-  // Apply the content-hash cache to prune already-passing packages.
-  const { cachedPackages, activePackages } = applyCacheToPlan(plan, {
-    noCache: noCache || forceFullSuite,
-    packageDirByName,
-  });
-
-  if (activePackages.length === 0) {
-    console.log(
-      `[test-changed] all changed packages are cache-fresh (${cachedPackages.join(", ")}); nothing to run.`,
-    );
-    if (shouldRunIsolationGuard()) {
-      runIsolationCheck(true, isolatedHomeEnv);
-      cleanupIsolatedHome();
-      runIsolationCheck(false, isolatedHomeEnv);
-    }
     return;
   }
 

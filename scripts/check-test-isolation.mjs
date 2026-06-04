@@ -171,6 +171,50 @@ function sleepMs(ms) {
   spawnSync(process.platform === "win32" ? "powershell" : "sleep", process.platform === "win32" ? ["-NoProfile", "-Command", `Start-Sleep -Milliseconds ${ms}`] : [String(ms / 1000)], { stdio: "ignore" });
 }
 
+function readPreviousBaseline() {
+  if (!existsSync(BASELINE_FILE)) return null;
+  try {
+    return JSON.parse(readFileSync(BASELINE_FILE, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+// U3: fast baseline. The expensive part of recordBaseline() is the 2s mutability
+// probe (5 snapshots × 500ms) that classifies which protected .fusion dirs are
+// externally-active (a live dashboard). That classification is stable across
+// back-to-back inner-loop runs, so when the previous run already recorded it we
+// reuse it and skip the probe. Detection is NOT weakened: the post-run check
+// still runs its own independent mutability probe on any candidate violation
+// before failing, and engine-lock detection is race-free. If no previous
+// baseline exists (first run, rotated tmp), we fall back to the full probe.
+function recordBaselineFast() {
+  const previous = readPreviousBaseline();
+  if (!previous || !Array.isArray(previous.unstableProtectedDirs)) {
+    recordBaseline();
+    return;
+  }
+
+  const latestProtected = snapshotProtectedFusion();
+  // Re-confirm engine-lock-active dirs cheaply (no sleep) so a dashboard that
+  // started since the previous run is still classified unstable up front.
+  const unstableProtectedDirs = new Set(previous.unstableProtectedDirs);
+  for (const entry of latestProtected) {
+    if (isFusionEngineActive(entry.dir)) unstableProtectedDirs.add(entry.dir);
+  }
+
+  const payload = {
+    tmpNames: snapshotTmp().map((e) => e.name),
+    protectedFusion: latestProtected,
+    unstableProtectedDirs: [...unstableProtectedDirs],
+  };
+  writeFileSync(BASELINE_FILE, JSON.stringify(payload));
+  console.log(`[test-isolation] Baseline recorded (fast): ${payload.tmpNames.length} temp dir(s), ${payload.protectedFusion.length} protected .fusion root(s).`);
+  if (unstableProtectedDirs.size > 0) {
+    console.log(`[test-isolation] Reusing ${unstableProtectedDirs.size} externally-active protected dir(s) from prior run.`);
+  }
+}
+
 function recordBaseline() {
   const samples = [snapshotProtectedFusion()];
   for (let i = 0; i < 4; i++) {
@@ -331,7 +375,9 @@ function checkAgainstBaseline() {
 }
 
 const args = process.argv.slice(2);
-if (args.includes("--before")) {
+if (args.includes("--before-fast")) {
+  recordBaselineFast();
+} else if (args.includes("--before")) {
   recordBaseline();
 } else {
   checkAgainstBaseline();

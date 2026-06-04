@@ -19,6 +19,10 @@ import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { isMainThread } from "node:worker_threads";
 import { assertOutsideRealFusionPath } from "../test-safety.js";
+import {
+  resolveReservedPortsFromEnv,
+  shouldRunPortProbe,
+} from "./port-probe-policy.js";
 
 type FsModule = typeof import("node:fs");
 type FsPromisesModule = typeof import("node:fs/promises");
@@ -475,13 +479,9 @@ function shouldBlockRealTestCli(commandLine: string): boolean {
 //   - any ports listed in FUSION_RESERVED_PORTS (comma-separated escape hatch)
 //   - any port detected by a synchronous probe of localhost candidates
 // Detection runs once per worker at setup time so the regex set is stable.
-function parsePortList(value: string | undefined): number[] {
-  if (!value) return [];
-  return value
-    .split(",")
-    .map((part) => Number.parseInt(part.trim(), 10))
-    .filter((port) => Number.isInteger(port) && port > 0 && port < 65_536);
-}
+// parsePortList / shouldRunPortProbe / resolveReservedPortsFromEnv live in
+// ./port-probe-policy.ts so they can be unit-tested without importing this
+// side-effectful setup module.
 
 async function probeFusionHealthPort(port: number, timeoutMs: number): Promise<boolean> {
   try {
@@ -504,12 +504,15 @@ async function detectLiveFusionPorts(candidates: readonly number[]): Promise<num
   return results.filter((port): port is number => port !== null);
 }
 
+// U3: the per-worker 4040–4045 discovery probe exists to detect a *live local*
+// dashboard so tests can't kill it. In CI there is never a live dashboard, so
+// shouldRunPortProbe() (in ./port-probe-policy.ts) skips the six
+// fetch-with-250ms-timeout calls per worker. This conditions only *discovery*;
+// the reserved-port block wrapper (RESERVED_PORT_KILL_PATTERNS) is untouched and
+// the default plus any declared ports remain in the guard set regardless.
 async function resolveReservedFusionPorts(): Promise<number[]> {
-  const reserved = new Set<number>([4040]);
-  for (const port of parsePortList(process.env.FUSION_RESERVED_PORTS)) reserved.add(port);
-  for (const port of parsePortList(process.env.PORT)) reserved.add(port);
-  for (const port of parsePortList(process.env.FUSION_SERVER_PORT)) reserved.add(port);
-  if (process.env.FUSION_TEST_SKIP_PORT_PROBE !== "1") {
+  const reserved = resolveReservedPortsFromEnv(process.env);
+  if (shouldRunPortProbe(process.env)) {
     const probeRange = [4040, 4041, 4042, 4043, 4044, 4045];
     for (const port of await detectLiveFusionPorts(probeRange)) reserved.add(port);
   }
