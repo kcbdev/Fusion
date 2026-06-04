@@ -341,10 +341,11 @@ describe("branch group abandon (U6, R7)", () => {
     const res = await REQUEST(app, "POST", "/branch-groups/BG-AB/abandon", JSON.stringify({}), { "content-type": "application/json" });
     expect(res.status).toBe(200);
     expect(closeGroupPr).not.toHaveBeenCalled();
-    expect(updateBranchGroup).toHaveBeenCalledWith(
+    expect(updateBranchGroup).toHaveBeenLastCalledWith(
       "BG-AB",
       expect.objectContaining({ status: "abandoned", prState: "none" }),
     );
+    expect(res.body.group.prState).toBe("none");
   });
 });
 

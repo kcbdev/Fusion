@@ -2018,7 +2018,12 @@ describe("MissionStore", () => {
 
       const task = await ts.createTask({ title: "Task", description: "Linked task" });
       ms.linkFeatureToTask(feature.id, task.id);
-      db.prepare("UPDATE tasks SET missionId = NULL WHERE id = ?").run(task.id);
+      // Clear missionId on THIS test's in-memory TaskStore db (the outer `db`
+      // belongs to a different store) so the lookup genuinely exercises the
+      // feature-linkage fallback instead of the normal task→mission path.
+      (ts as unknown as { db: { prepare(sql: string): { run(...args: unknown[]): unknown } } }).db
+        .prepare("UPDATE tasks SET missionId = NULL WHERE id = ?")
+        .run(task.id);
 
       expect(ms.listGoalIdsForTask(task.id)).toEqual([goal.id]);
       expect(ms.listGoalsForTask(task.id)).toEqual([goal]);

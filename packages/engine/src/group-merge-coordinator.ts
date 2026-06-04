@@ -287,7 +287,10 @@ async function promoteBranchGroupInner(input: PromoteBranchGroupInput): Promise<
     };
   }
 
-  if (group.prState === "open") {
+  // Legacy fallback rows are exactly `finalized + prState:"open" + prNumber:null`
+  // (the old code flipped prState without creating a PR) — the repair path must
+  // not be short-circuited by the open-state guard for them.
+  if (!needsPrRepair && group.prState === "open") {
     return {
       groupId: group.id,
       promoted: false,

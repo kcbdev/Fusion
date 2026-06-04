@@ -866,6 +866,39 @@ describe("promoteBranchGroup finalized-but-PR-less repair (Fix #4 part 2)", () =
     expect(mainAfter).toBe(mainBefore);
   });
 
+  it("repairs the legacy fallback state: finalized + prState 'open' + prNumber null still creates the PR", async () => {
+    // The old code flipped prState to "open" without creating a PR — re-running
+    // with createGroupPr wired must not be short-circuited by the open-state guard.
+    const rootDir = makePrRepo();
+    let group = makeGroup({ status: "finalized", prState: "open", prNumber: null, prUrl: null });
+    let createCalls = 0;
+    const store = {
+      getBranchGroup: () => group,
+      getBranchGroupByBranchName: () => null,
+      listTasksByBranchGroup: async () => [landedMember("FN-A", group.branchName)],
+      updateBranchGroup: (_id: string, patch: Record<string, unknown>) => {
+        group = { ...group, ...patch };
+        return group;
+      },
+    } as any;
+
+    const result = await promoteBranchGroup({
+      rootDir,
+      groupId: group.id,
+      settings: prSettings,
+      store,
+      createGroupPr: async () => {
+        createCalls += 1;
+        return { prNumber: 91, prUrl: "https://github.com/x/y/pull/91", prState: "open" as const };
+      },
+    });
+
+    expect(result.reason).toBe("promoted");
+    expect(createCalls).toBe(1);
+    expect(group.prNumber).toBe(91);
+    expect(group.prState).toBe("open");
+  });
+
   it("a finalized group that already has a prNumber is still short-circuited (no repair, no PR re-create)", async () => {
     const rootDir = makePrRepo();
     let group = makeGroup({ status: "finalized", prState: "open", prNumber: 5, prUrl: "https://github.com/x/y/pull/5" });
