@@ -549,6 +549,74 @@ describe("POST /api/plugins mode:install — bundled plugin path fallback", () =
     );
   });
 
+  it("installs bundled compound engineering plugin when relative path misses cwd", async () => {
+    const bundledManifest = {
+      ...VALID_MANIFEST,
+      id: "fusion-plugin-compound-engineering",
+      name: "Compound Engineering",
+    };
+    // Only the staged bundled copy under dist/plugins exists — the
+    // cwd-relative path must miss so the bundled fallback is exercised.
+    mockExistsSync.mockImplementation((p: string) => p.includes("dist/plugins/fusion-plugin-compound-engineering/manifest.json"));
+    mockAccess.mockImplementation((p: string) => {
+      if (p.includes("dist/plugins/fusion-plugin-compound-engineering")) return Promise.resolve();
+      return Promise.reject(new Error("not found"));
+    });
+    mockReadFile.mockResolvedValue(JSON.stringify(bundledManifest));
+    (pluginStore.registerPlugin as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...INSTALLED_PLUGIN,
+      id: "fusion-plugin-compound-engineering",
+      name: "Compound Engineering",
+    });
+
+    const res = await REQUEST(buildApp(), "POST", "/api/plugins", {
+      mode: "install",
+      path: "./plugins/fusion-plugin-compound-engineering",
+    });
+
+    expect(res.status).toBe(201);
+    expect(pluginStore.registerPlugin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        manifest: expect.objectContaining({ id: "fusion-plugin-compound-engineering" }),
+        path: expect.stringContaining("fusion-plugin-compound-engineering"),
+      }),
+    );
+  });
+
+  it("installs bundled cli printing press plugin when relative path misses cwd", async () => {
+    const bundledManifest = {
+      ...VALID_MANIFEST,
+      id: "fusion-plugin-cli-printing-press",
+      name: "CLI Printing Press",
+    };
+    // Only the staged bundled copy under dist/plugins exists — the
+    // cwd-relative path must miss so the bundled fallback is exercised.
+    mockExistsSync.mockImplementation((p: string) => p.includes("dist/plugins/fusion-plugin-cli-printing-press/manifest.json"));
+    mockAccess.mockImplementation((p: string) => {
+      if (p.includes("dist/plugins/fusion-plugin-cli-printing-press")) return Promise.resolve();
+      return Promise.reject(new Error("not found"));
+    });
+    mockReadFile.mockResolvedValue(JSON.stringify(bundledManifest));
+    (pluginStore.registerPlugin as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...INSTALLED_PLUGIN,
+      id: "fusion-plugin-cli-printing-press",
+      name: "CLI Printing Press",
+    });
+
+    const res = await REQUEST(buildApp(), "POST", "/api/plugins", {
+      mode: "install",
+      path: "./plugins/fusion-plugin-cli-printing-press",
+    });
+
+    expect(res.status).toBe(201);
+    expect(pluginStore.registerPlugin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        manifest: expect.objectContaining({ id: "fusion-plugin-cli-printing-press" }),
+        path: expect.stringContaining("fusion-plugin-cli-printing-press"),
+      }),
+    );
+  });
+
   it("returns 404 with helpful message when local and bundled paths are unresolved", async () => {
     mockExistsSync.mockReturnValue(false);
     mockAccess.mockRejectedValue(new Error("not found"));
