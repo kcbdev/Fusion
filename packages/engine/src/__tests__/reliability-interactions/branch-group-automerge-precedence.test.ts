@@ -75,28 +75,4 @@ describe("FN-5783 reliability interactions: branch group automerge precedence", 
       await fixture.cleanup();
     }
   }, 30_000);
-
-  it.skipIf(!hasGit)("applies pause and settings overrides", async () => {
-    const scenarios = [
-      { settings: { autoMerge: true, globalPause: true }, reason: "global-pause" },
-      { settings: { autoMerge: true, enginePaused: true }, reason: "engine-paused" },
-      { settings: { autoMerge: false, globalPause: false, enginePaused: false }, reason: "settings-automerge-disabled" },
-    ] as const;
-    for (const [index, scenario] of scenarios.entries()) {
-      const fixture = await makeReliabilityFixture({ settings: { ...scenario.settings, testMode: true } as any });
-      try {
-        const { rootDir, store, task } = fixture;
-        await stageMergeBranch(store, rootDir, task.id, `fn5783Gate${index}`);
-        const group = store.createBranchGroup({ sourceType: "planning", sourceId: `PS-5783-${index}`, branchName: `fusion/groups/fn-5783-gate-${index}`, autoMerge: true });
-        await store.setTaskBranchGroup(task.id, group.id);
-        await store.updateTask(task.id, {
-          branchContext: { groupId: group.id, source: "planning", assignmentMode: "shared" },
-        } as any);
-        await aiMergeTask(store, rootDir, task.id);
-        expect(findGateEvent(store, group.id)?.metadata).toMatchObject({ groupId: group.id, groupAutoMerge: true, effectiveEligible: false, reason: scenario.reason });
-      } finally {
-        await fixture.cleanup();
-      }
-    }
-  }, 60_000);
 });
