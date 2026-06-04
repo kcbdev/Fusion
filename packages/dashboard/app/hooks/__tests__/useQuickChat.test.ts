@@ -1013,6 +1013,10 @@ describe("useQuickChat", () => {
     expect(mockStreamChatResponse).not.toHaveBeenCalled();
     expect(localStorage.getItem(getChatPendingMessageKey("session-a"))).toBe("Queued follow-up");
 
+    // The hook attached to the in-flight generation rather than flushing.
+    expect(mockAttachChatStream).toHaveBeenCalledTimes(1);
+    expect(attachHandlers.length).toBeGreaterThan(0);
+
     // Once the attached generation completes, the queued message flushes.
     act(() => {
       attachHandlers[0]?.onDone?.({ messageId: "msg-001" });
@@ -1025,6 +1029,35 @@ describe("useQuickChat", () => {
       expect(result.current.pendingMessage).toBe("");
       expect(localStorage.getItem(getChatPendingMessageKey("session-a"))).toBeNull();
     });
+  });
+
+  it("does not let the session-activation auto-flush send a restored queue while server validation is pending", async () => {
+    // The restore effect's fetchChatSession check takes one network RTT in
+    // production. The session-activation auto-flush effect runs in the same
+    // commit that restores pendingMessageRef, so without the pre-session
+    // gate it would send the restored queue before the check resolves and
+    // re-open the stale-isGenerating loss path (FN-5852).
+    const staleSessionA = makeSession({ id: "session-a", agentId: "agent-001" });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+    // Server check never resolves within the test — simulates in-flight RTT.
+    mockFetchChatSession.mockReturnValue(new Promise(() => {}) as never);
+
+    localStorage.setItem(getChatPendingMessageKey("session-a")!, "Queued follow-up");
+
+    const { result } = renderHook(() => useQuickChat("proj-123"));
+
+    await act(async () => {
+      await result.current.selectSession(staleSessionA);
+    });
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+
+    // The restored queue is intact and nothing was sent.
+    expect(result.current.pendingMessage).toBe("Queued follow-up");
+    expect(mockStreamChatResponse).not.toHaveBeenCalled();
+    expect(localStorage.getItem(getChatPendingMessageKey("session-a"))).toBe("Queued follow-up");
   });
 
   it("pre-session queueing does not write a null localStorage key", async () => {

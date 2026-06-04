@@ -662,7 +662,7 @@ export function useQuickChat(
     // lacks), so flushing from local state alone fires a send that aborts a
     // live generation server-side and can lose the queued message (FN-5852).
     let cancelled = false;
-    void Promise.resolve(fetchChatSession(sessionId, projectId))
+    void fetchChatSession(sessionId, projectId)
       .then(({ session: refreshedSession }) => {
         if (
           cancelled ||
@@ -1051,6 +1051,15 @@ export function useQuickChat(
 
   useEffect(() => {
     if (!activeSession || isStreamingRef.current || streamRef.current) {
+      return;
+    }
+
+    // Only the pre-session queue (a send issued before session init
+    // completed) may auto-flush on session activation. Restored queued
+    // messages must wait for the restore effect's authoritative
+    // fetchChatSession check — flushing them here would race ahead of it
+    // and re-open the stale-isGenerating loss path (FN-5852).
+    if (!queuedPreSessionCompletionRef.current) {
       return;
     }
 

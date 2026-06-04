@@ -2152,6 +2152,36 @@ describe("useChat", () => {
     });
   });
 
+  it("keeps a restored queued message un-flushed while the server validation fetch is pending", async () => {
+    // Production latency case: the authoritative fetch takes one network
+    // RTT. Nothing may flush (or delete) the restored queue in the interim.
+    const sessionA = makeSession({ id: "session-001", agentId: "agent-001" });
+    mockFetchChatSessions.mockResolvedValue({ sessions: [sessionA] });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+    // Server check never resolves within the test — simulates in-flight RTT.
+    mockFetchChatSession.mockReturnValue(new Promise(() => {}) as never);
+
+    localStorage.setItem(getChatPendingMessageKey("session-001")!, "Queued follow-up");
+
+    const { result } = renderHook(() => useChat("proj-123"));
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.selectSession("session-001");
+    });
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+
+    expect(result.current.pendingMessage).toBe("Queued follow-up");
+    expect(mockStreamChatResponse).not.toHaveBeenCalled();
+    expect(localStorage.getItem(getChatPendingMessageKey("session-001"))).toBe("Queued follow-up");
+  });
+
   it("preserves queued messages across session switches and rehydrates them when returning", async () => {
     const sessionA = {
       ...makeSession({ id: "session-001", agentId: "agent-001" }),
