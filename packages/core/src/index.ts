@@ -81,6 +81,14 @@ export type {
 export { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
 export { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "./builtin-stepwise-coding-workflow-ir.js";
 export { BUILTIN_WORKFLOW_SETTINGS } from "./builtin-workflow-settings.js";
+export {
+  MOVED_SETTINGS_KEYS,
+  SETTINGS_MIGRATION_VERSION,
+  SETTINGS_MIGRATION_MARKER_KEY,
+  isMovedSettingsKey,
+  stripMovedSettingsKeys,
+  patchContainsMovedKey,
+} from "./moved-settings.js";
 
 // ── Trait model (U2) ─────────────────────────────────────────────────
 export type {

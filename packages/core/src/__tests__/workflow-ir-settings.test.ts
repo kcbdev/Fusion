@@ -216,14 +216,49 @@ describe("built-in workflow settings parity anchor (U1, R4)", () => {
     expect(builtin.settings).toEqual(BUILTIN_WORKFLOW_SETTINGS);
   });
 
-  it("each declaration default strictly equals the legacy DEFAULT_PROJECT_SETTINGS literal", () => {
+  it("the moved-key catalog has left DEFAULT_PROJECT_SETTINGS (U4 hard-move) and pins its legacy defaults", () => {
     const legacy = DEFAULT_PROJECT_SETTINGS as Record<string, unknown>;
+    // Post-U4 hard-move: every catalog key has been REMOVED from
+    // DEFAULT_PROJECT_SETTINGS (the type-vs-schema split keeps the type field but
+    // drops the default literal), so the legacy object no longer carries them.
     for (const setting of BUILTIN_WORKFLOW_SETTINGS) {
-      // Catalog keys must exist as a known project-settings key.
-      expect(Object.prototype.hasOwnProperty.call(legacy, setting.id)).toBe(true);
-      // A declared default must byte-equal the legacy literal; an omitted
-      // default corresponds to a legacy `undefined` literal.
-      expect(setting.default).toStrictEqual(legacy[setting.id]);
+      expect(Object.prototype.hasOwnProperty.call(legacy, setting.id)).toBe(false);
     }
+    // The declaration defaults are now the single source of truth; pin the legacy
+    // values explicitly so they can never silently drift from what they were when
+    // they lived in DEFAULT_PROJECT_SETTINGS.
+    const expectedDefaults: Record<string, unknown> = {
+      workflowStepTimeoutMs: 360_000,
+      workflowStepScopeEnforcement: "block",
+      planOnlyScopeLeakEnforcement: "warn",
+      workflowRevisionForkOnScopeMismatch: true,
+      strictScopeEnforcement: false,
+      runStepsInNewSessions: false,
+      maxParallelSteps: 2,
+      buildRetryCount: 0,
+      verificationFixRetries: 3,
+      maxPostReviewFixes: 1,
+      requirePrApproval: false,
+      requirePlanApproval: false,
+      reviewHandoffPolicy: "disabled",
+      maxReviewerContextRetries: 2,
+      maxReviewerFallbackRetries: 2,
+      reflectionEnabled: false,
+      // Per-phase model lanes have undefined legacy defaults → declaration omits default.
+    };
+    for (const setting of BUILTIN_WORKFLOW_SETTINGS) {
+      if (Object.prototype.hasOwnProperty.call(expectedDefaults, setting.id)) {
+        expect(setting.default).toStrictEqual(expectedDefaults[setting.id]);
+      } else {
+        // Model-lane keys: no default.
+        expect(setting.default).toBeUndefined();
+      }
+    }
+  });
+
+  it("buildTimeoutMs is NOT in the catalog and stays a plain project setting", () => {
+    const declaredIds = new Set(BUILTIN_WORKFLOW_SETTINGS.map((s) => s.id));
+    expect(declaredIds.has("buildTimeoutMs")).toBe(false);
+    expect((DEFAULT_PROJECT_SETTINGS as Record<string, unknown>).buildTimeoutMs).toBe(300_000);
   });
 });

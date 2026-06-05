@@ -91,13 +91,11 @@ export const BUILTIN_WORKFLOW_SETTINGS: WorkflowSettingDefinition[] = [
     default: 0,
     description: "Number of times to retry a failing build before giving up.",
   },
-  {
-    id: "buildTimeoutMs",
-    name: "Build timeout (ms)",
-    type: "number",
-    default: 300_000,
-    description: "Maximum time a build command may run before it is timed out.",
-  },
+  // NOTE (U4 catalog-shrink): `buildTimeoutMs` was REMOVED from this catalog —
+  // it has NO reader anywhere in the engine, so per the per-task-reader rule
+  // (KTD-5) it stays a plain project setting and is NOT moved to workflow
+  // settings. It is therefore absent from `MOVED_SETTINGS_KEYS` and remains in
+  // `DEFAULT_PROJECT_SETTINGS`.
   {
     id: "verificationFixRetries",
     name: "Verification fix retries",

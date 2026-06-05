@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 
 import { BUILTIN_WORKFLOW_SETTINGS } from "../builtin-workflow-settings.js";
-import { DEFAULT_PROJECT_SETTINGS } from "../types.js";
 import type { WorkflowIr } from "../workflow-ir-types.js";
 import {
   resolveEffectiveSettings,
@@ -59,19 +58,21 @@ function makeStore(opts: {
 }
 
 describe("resolveEffectiveSettings (per-task)", () => {
-  it("parity anchor: builtin:coding with no stored values → declaration defaults equal legacy defaults", async () => {
+  it("parity anchor: builtin:coding with no stored values → effective equals declaration defaults", async () => {
     const store = makeStore({
       selection: { t1: { workflowId: "builtin:coding", stepIds: [] } },
     });
     const eff = await resolveEffectiveSettings(store, { id: "t1" });
-    // Every catalog key with a default equals the legacy DEFAULT_PROJECT_SETTINGS literal.
-    const legacy = DEFAULT_PROJECT_SETTINGS as Record<string, unknown>;
+    // Every catalog key with a default contributes its declaration default to the
+    // effective map. (Post-U4 hard-move the legacy DEFAULT_PROJECT_SETTINGS literals
+    // for these keys are GONE — the declaration default is now the single source of
+    // truth, byte-equal to what the legacy literal used to be.)
     for (const s of BUILTIN_WORKFLOW_SETTINGS) {
       if (s.default === undefined) {
         // Absent-default lanes contribute nothing to the effective map.
         expect(Object.prototype.hasOwnProperty.call(eff, s.id)).toBe(false);
       } else {
-        expect(eff[s.id]).toStrictEqual(legacy[s.id]);
+        expect(eff[s.id]).toStrictEqual(s.default);
       }
     }
   });

@@ -39,11 +39,13 @@ function readEngineSources(): { file: string; text: string }[] {
 const declDefault = new Map(BUILTIN_WORKFLOW_SETTINGS.map((s) => [s.id, s.default]));
 
 describe("workflow-settings fallback alignment (KTD-3, item 4)", () => {
-  it("(a) every built-in declaration default equals the legacy DEFAULT_PROJECT_SETTINGS literal", () => {
+  it("(a) the moved-key catalog has left DEFAULT_PROJECT_SETTINGS (U4 hard-move)", () => {
+    // Post-U4 hard-move: the moved keys were REMOVED from DEFAULT_PROJECT_SETTINGS
+    // (the parity literal is gone — the declaration default is now the single
+    // source of truth). The legacy object must no longer carry any catalog key.
     const legacy = DEFAULT_PROJECT_SETTINGS as Record<string, unknown>;
     for (const s of BUILTIN_WORKFLOW_SETTINGS) {
-      expect(Object.prototype.hasOwnProperty.call(legacy, s.id)).toBe(true);
-      expect(s.default).toStrictEqual(legacy[s.id]);
+      expect(Object.prototype.hasOwnProperty.call(legacy, s.id)).toBe(false);
     }
   });
 
