@@ -6793,6 +6793,7 @@ export default interface Resources {
       "foreachWorktree": "Per-step worktree",
       "gateBlocks": "Gate (blocks)",
       "gateMode": "Gate mode",
+      "insertTemplate": "Insert template {{name}}",
       "interpreterOnly": "This workflow branches, so it runs on the graph interpreter — it can't compile to the linear step engine, but it will still run.",
       "joinAll": "All branches",
       "joinAny": "Any branch",
@@ -6822,6 +6823,13 @@ export default interface Resources {
       "summaryHoldRelease": "Release: {{release}}",
       "summaryNotConfigured": "Not configured",
       "summaryReviewType": "{{type}} review",
+      "templateFilterLabel": "Filter templates",
+      "templateFilterPlaceholder": "Filter templates",
+      "templateSeamConflict": "This fragment duplicates the \"{{seam}}\" seam already on the canvas, so it can't be inserted.",
+      "templatesBuiltinSteps": "Built-in steps",
+      "templatesFragments": "Fragments",
+      "templatesPluginSteps": "Plugin steps",
+      "templatesSection": "Templates",
       "trivialGraphHint": "This workflow only runs start → end. Add steps from the palette above to build it out."
     },
     "workflowSelector": {
@@ -6831,6 +6839,15 @@ export default interface Resources {
       "switchConfirm": "Switch and abort"
     },
     "workflows": {
+      "aiEdit": "Design with AI",
+      "aiFailed": "Failed to design workflow",
+      "aiPromptPlaceholder": "e.g. Run lint and tests before merge, then post a changelog comment after merge",
+      "aiPromptRequired": "Describe the workflow you want",
+      "aiReplaceConfirm": "Replace the current graph with the AI design? Unsaved changes will be lost.",
+      "aiReplaceConfirmLabel": "Replace",
+      "aiReplaceTitle": "Replace graph?",
+      "aiSubmit": "Design with AI",
+      "aiToggle": "Describe it instead",
       "clickToEditDescription": "Click to edit description",
       "clickToRename": "Click to rename",
       "createDescription": "Description (optional)",

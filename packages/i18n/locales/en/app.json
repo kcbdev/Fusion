@@ -6831,6 +6831,15 @@
     "trivialGraphHint": "This workflow only runs start → end. Add steps from the palette above to build it out."
   },
   "workflows": {
+    "aiEdit": "Design with AI",
+    "aiFailed": "Failed to design workflow",
+    "aiPromptPlaceholder": "e.g. Run lint and tests before merge, then post a changelog comment after merge",
+    "aiPromptRequired": "Describe the workflow you want",
+    "aiReplaceConfirm": "Replace the current graph with the AI design? Unsaved changes will be lost.",
+    "aiReplaceConfirmLabel": "Replace",
+    "aiReplaceTitle": "Replace graph?",
+    "aiSubmit": "Design with AI",
+    "aiToggle": "Describe it instead",
     "clickToEditDescription": "Click to edit description",
     "clickToRename": "Click to rename",
     "created": "Created workflow \"{{name}}\"",

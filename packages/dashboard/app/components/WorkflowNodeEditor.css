@@ -1001,3 +1001,83 @@
   text-transform: uppercase;
   color: var(--text-tertiary);
 }
+
+/* ── U10/R11: Design-with-AI affordances ─────────────────────────────────── */
+
+/* Create-dialog disclosure (above the template picker). */
+.wf-ai-create {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+
+.wf-ai-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  align-self: flex-start;
+  padding: var(--space-2xs) var(--space-xs);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.wf-ai-toggle:hover {
+  background: var(--bg-hover);
+}
+
+.wf-ai-create-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.wf-ai-prompt {
+  width: 100%;
+  resize: vertical;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.wf-ai-prompt:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.wf-ai-actions {
+  display: flex;
+  gap: var(--space-xs);
+}
+
+/* Toolbar popover panel anchored under the "Design with AI" button. */
+.wf-ai-edit-wrap {
+  position: relative;
+}
+
+.wf-ai-panel {
+  position: absolute;
+  top: calc(100% + var(--space-2xs));
+  right: 0;
+  z-index: 20;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  box-shadow: var(--shadow-md, 0 4px 16px rgba(0, 0, 0, 0.2));
+}

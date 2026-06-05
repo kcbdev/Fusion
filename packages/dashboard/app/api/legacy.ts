@@ -5182,6 +5182,34 @@ export function migrateLegacyWorkflowSteps(projectId?: string): Promise<MigrateL
   });
 }
 
+/** Result of POST /api/workflows/design (U10/R11). The server validates the
+ *  AI-produced IR (parseWorkflowIr), triages compilability (`interpreterOnly`),
+ *  and strips trust-escalating flags (`strippedApprovalFlags`). Persists nothing
+ *  — the client decides what to do with the returned graph. */
+export interface DesignWorkflowResult {
+  ir: import("@fusion/core").WorkflowIr;
+  layout: import("@fusion/core").WorkflowDefinition["layout"];
+  interpreterOnly: boolean;
+  strippedApprovalFlags: boolean;
+}
+
+/** Design a workflow from a natural-language prompt (U10/R11). When `workflowId`
+ *  is supplied the route reads that workflow's persisted IR server-side and folds
+ *  it into the prompt as the base graph (the client never posts IR). An optional
+ *  AbortSignal cancels the in-flight request. Validation failures reject with an
+ *  ApiError carrying the server message; 429 on rate limit. */
+export function designWorkflow(
+  input: { prompt: string; workflowId?: string },
+  projectId?: string,
+  signal?: AbortSignal,
+): Promise<DesignWorkflowResult> {
+  return api<DesignWorkflowResult>(withProjectId("/workflows/design", projectId), {
+    method: "POST",
+    body: JSON.stringify(input),
+    signal,
+  });
+}
+
 /** Read the workflow currently selected for a task. */
 export function fetchTaskWorkflow(taskId: string, projectId?: string): Promise<{ workflowId: string | null }> {
   return api<{ workflowId: string | null }>(

@@ -12,6 +12,7 @@ vi.mock("../../api", () => ({
   compileWorkflow: vi.fn(),
   exportWorkflow: vi.fn(),
   importWorkflow: vi.fn(),
+  designWorkflow: vi.fn(),
   ApiRequestError: class ApiRequestError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -33,7 +34,7 @@ vi.mock("../../api", () => ({
 }));
 
 import { fireEvent } from "@testing-library/react";
-import { fetchWorkflows, fetchTraits, fetchStepParsers, updateWorkflow, compileWorkflow, createWorkflow, deleteWorkflow, fetchModels, migrateLegacyWorkflowSteps, exportWorkflow, importWorkflow, ApiRequestError, fetchWorkflowStepTemplates, fetchPluginWorkflowStepTemplates } from "../../api";
+import { fetchWorkflows, fetchTraits, fetchStepParsers, updateWorkflow, compileWorkflow, createWorkflow, deleteWorkflow, fetchModels, migrateLegacyWorkflowSteps, exportWorkflow, importWorkflow, designWorkflow, ApiRequestError, fetchWorkflowStepTemplates, fetchPluginWorkflowStepTemplates } from "../../api";
 import type { TraitCatalogEntry } from "../../api";
 import type { WorkflowStepTemplate } from "@fusion/core";
 import { WorkflowNodeEditor } from "../WorkflowNodeEditor";
@@ -1627,5 +1628,221 @@ describe("WorkflowNodeEditor — U9 palette Templates section", () => {
     expect(screen.getByTestId("wf-tpl-fragment-WF-FRAG-A")).toBeDisabled();
     expect(screen.getByTestId("wf-tpl-step-qa-check")).toBeDisabled();
     expect(screen.getByTestId("wf-tpl-plugin-acme-scan")).toBeDisabled();
+  });
+});
+
+// ── U10: Design-with-AI editor affordances ──────────────────────────────────
+
+describe("WorkflowNodeEditor — U10 design-with-AI", () => {
+  // A distinctive designed IR: a single script node so the canvas renders
+  // `wf-node-script` (absent from the active v2Def, which has a prompt node).
+  function designedResult(over: Partial<import("../../api").DesignWorkflowResult> = {}) {
+    return {
+      ir: {
+        version: "v1" as const,
+        name: "AI designed",
+        nodes: [
+          { id: "start", kind: "start" as const },
+          { id: "ai-lint", kind: "script" as const, config: { scriptName: "lint" } },
+          { id: "end", kind: "end" as const },
+        ],
+        edges: [
+          { from: "start", to: "ai-lint", condition: "success" as const },
+          { from: "ai-lint", to: "end", condition: "success" as const },
+        ],
+      },
+      layout: { start: { x: 0, y: 0 }, "ai-lint": { x: 120, y: 0 }, end: { x: 240, y: 0 } },
+      interpreterOnly: false,
+      strippedApprovalFlags: false,
+      ...over,
+    };
+  }
+
+  beforeEach(() => {
+    vi.mocked(fetchTraits).mockResolvedValue(TRAIT_CATALOG);
+    vi.mocked(fetchStepParsers).mockResolvedValue(["step-headings", "json-steps"]);
+    vi.mocked(fetchModels).mockResolvedValue({ models: [] });
+    vi.mocked(migrateLegacyWorkflowSteps).mockResolvedValue({ migrated: 0, skipped: 0 });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  // ── Create dialog flow ─────────────────────────────────────────────────────
+
+  it("toggle reveals the prompt textarea; success creates the workflow from the returned IR and closes the dialog", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([]);
+    vi.mocked(designWorkflow).mockResolvedValue(designedResult());
+    vi.mocked(createWorkflow).mockResolvedValue({ ...v2Def(), id: "WF-AI", name: "AI: do the thing" });
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    fireEvent.click(await screen.findByTestId("wf-new-workflow"));
+    await screen.findByTestId("wf-create-dialog");
+
+    // Textarea hidden until toggled.
+    expect(screen.queryByTestId("wf-ai-prompt")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("wf-ai-toggle"));
+    const prompt = await screen.findByTestId("wf-ai-prompt");
+    fireEvent.change(prompt, { target: { value: "do the thing" } });
+    fireEvent.click(screen.getByTestId("wf-ai-submit"));
+
+    await waitFor(() => expect(designWorkflow).toHaveBeenCalledWith(
+      { prompt: "do the thing" },
+      undefined,
+      expect.any(AbortSignal),
+    ));
+    await waitFor(() => expect(createWorkflow).toHaveBeenCalled());
+    const [input] = vi.mocked(createWorkflow).mock.calls[0];
+    // createWorkflow seeded from the returned IR (node ids/count match).
+    const ir = (input as { ir: { nodes: Array<{ id: string }> } }).ir;
+    expect(ir.nodes.map((n) => n.id)).toEqual(["start", "ai-lint", "end"]);
+    // Dialog closed.
+    await waitFor(() => expect(screen.queryByTestId("wf-create-dialog")).not.toBeInTheDocument());
+  });
+
+  it("422 rejection shows the inline error; createWorkflow not called; dialog stays open", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([]);
+    vi.mocked(designWorkflow).mockRejectedValue(
+      new ApiRequestError("The AI response was not valid JSON.", 422),
+    );
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    fireEvent.click(await screen.findByTestId("wf-new-workflow"));
+    await screen.findByTestId("wf-create-dialog");
+    fireEvent.click(screen.getByTestId("wf-ai-toggle"));
+    fireEvent.change(await screen.findByTestId("wf-ai-prompt"), { target: { value: "bad" } });
+    fireEvent.click(screen.getByTestId("wf-ai-submit"));
+
+    const err = await screen.findByTestId("wf-ai-error");
+    expect(err).toHaveTextContent("The AI response was not valid JSON.");
+    expect(err).toHaveAttribute("role", "alert");
+    expect(createWorkflow).not.toHaveBeenCalled();
+    expect(screen.getByTestId("wf-create-dialog")).toBeInTheDocument();
+  });
+
+  it("in-flight: submit disabled + Cancel visible; cancel aborts and re-enables", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([]);
+    let rejectFn: ((e: unknown) => void) | undefined;
+    vi.mocked(designWorkflow).mockImplementation((_input, _pid, signal) => {
+      return new Promise((_resolve, reject) => {
+        rejectFn = reject;
+        signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      });
+    });
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    fireEvent.click(await screen.findByTestId("wf-new-workflow"));
+    await screen.findByTestId("wf-create-dialog");
+    fireEvent.click(screen.getByTestId("wf-ai-toggle"));
+    fireEvent.change(await screen.findByTestId("wf-ai-prompt"), { target: { value: "slow one" } });
+    fireEvent.click(screen.getByTestId("wf-ai-submit"));
+
+    // In-flight: submit disabled, Cancel visible, section aria-busy.
+    await waitFor(() => expect(screen.getByTestId("wf-ai-submit")).toBeDisabled());
+    expect(screen.getByTestId("wf-ai-cancel")).toBeInTheDocument();
+    expect(screen.getByTestId("wf-ai-create")).toHaveAttribute("aria-busy", "true");
+
+    // Cancel aborts → re-enables, no error shown.
+    fireEvent.click(screen.getByTestId("wf-ai-cancel"));
+    await waitFor(() => expect(screen.getByTestId("wf-ai-submit")).not.toBeDisabled());
+    expect(screen.queryByTestId("wf-ai-error")).not.toBeInTheDocument();
+    expect(createWorkflow).not.toHaveBeenCalled();
+    expect(rejectFn).toBeDefined();
+  });
+
+  it("interpreterOnly result seeds the info banner after the workflow loads", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([]);
+    vi.mocked(designWorkflow).mockResolvedValue(designedResult({ interpreterOnly: true }));
+    vi.mocked(createWorkflow).mockResolvedValue({ ...v2Def(), id: "WF-AI", name: "AI branchy" });
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    fireEvent.click(await screen.findByTestId("wf-new-workflow"));
+    await screen.findByTestId("wf-create-dialog");
+    fireEvent.click(screen.getByTestId("wf-ai-toggle"));
+    fireEvent.change(await screen.findByTestId("wf-ai-prompt"), { target: { value: "branchy" } });
+    fireEvent.click(screen.getByTestId("wf-ai-submit"));
+
+    expect(await screen.findByTestId("wf-interpreter-only-banner")).toBeInTheDocument();
+  });
+
+  // ── Toolbar flow ───────────────────────────────────────────────────────────
+
+  it("hides the toolbar Design-with-AI button for built-ins", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([builtinDef()]);
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    await screen.findByTestId("wf-readonly-banner");
+    expect(screen.queryByTestId("wf-ai-edit")).not.toBeInTheDocument();
+  });
+
+  it("toolbar flow over a clean canvas: success confirms then replaces the graph and leaves it dirty", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
+    vi.mocked(designWorkflow).mockResolvedValue(designedResult());
+
+    renderWithConfirm(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    // Open the panel and submit against the active workflow (no edits = clean).
+    fireEvent.click(await screen.findByTestId("wf-ai-edit"));
+    fireEvent.change(await screen.findByTestId("wf-ai-edit-prompt"), { target: { value: "rebuild it" } });
+    fireEvent.click(screen.getByTestId("wf-ai-edit-submit"));
+
+    await waitFor(() => expect(designWorkflow).toHaveBeenCalledWith(
+      { prompt: "rebuild it", workflowId: "WF-002" },
+      undefined,
+      expect.any(AbortSignal),
+    ));
+    // Always-confirm replace dialog (even though clean).
+    const dialog = await screen.findByRole("dialog", { name: /Replace graph/i });
+    fireEvent.click(within(dialog).getByRole("button", { name: /Replace/i }));
+
+    // Canvas replaced: the designed script node appears.
+    await waitFor(() => expect(screen.getByTestId("wf-node-script")).toBeInTheDocument());
+    // Dirty: closing now prompts the discard guard.
+    fireEvent.click(screen.getByLabelText("Close workflow editor"));
+    expect(await screen.findByRole("dialog", { name: /Discard unsaved changes/i })).toBeInTheDocument();
+  });
+
+  it("toolbar flow: cancelling the replace confirm keeps the canvas unchanged", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
+    vi.mocked(designWorkflow).mockResolvedValue(designedResult());
+
+    renderWithConfirm(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    // Make a dirty edit first (inline rename) so we can prove it survives a cancel.
+    fireEvent.click(await screen.findByTestId("wf-workflow-name"));
+    const input = await screen.findByTestId("wf-workflow-name-input");
+    fireEvent.change(input, { target: { value: "Kept name" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    fireEvent.click(screen.getByTestId("wf-ai-edit"));
+    fireEvent.change(await screen.findByTestId("wf-ai-edit-prompt"), { target: { value: "replace pls" } });
+    fireEvent.click(screen.getByTestId("wf-ai-edit-submit"));
+
+    const dialog = await screen.findByRole("dialog", { name: /Replace graph/i });
+    fireEvent.click(within(dialog).getByRole("button", { name: /Cancel/i }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: /Replace graph/i })).not.toBeInTheDocument(),
+    );
+
+    // The designed script node was NOT inserted; the prior edit is intact.
+    expect(screen.queryByTestId("wf-node-script")).not.toBeInTheDocument();
+    expect(screen.getByTestId("wf-workflow-name")).toHaveTextContent("Kept name");
+  });
+
+  it("toolbar flow: 422 shows the inline panel error and leaves the canvas untouched", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
+    vi.mocked(designWorkflow).mockRejectedValue(
+      new ApiRequestError("Invalid workflow IR", 422),
+    );
+
+    renderWithConfirm(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    fireEvent.click(await screen.findByTestId("wf-ai-edit"));
+    fireEvent.change(await screen.findByTestId("wf-ai-edit-prompt"), { target: { value: "nope" } });
+    fireEvent.click(screen.getByTestId("wf-ai-edit-submit"));
+
+    const err = await screen.findByTestId("wf-ai-edit-error");
+    expect(err).toHaveTextContent("Invalid workflow IR");
+    expect(err).toHaveAttribute("role", "alert");
+    // No replace confirm appeared; canvas unchanged (no script node).
+    expect(screen.queryByRole("dialog", { name: /Replace graph/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("wf-node-script")).not.toBeInTheDocument();
   });
 });

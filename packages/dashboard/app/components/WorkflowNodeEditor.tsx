@@ -14,7 +14,7 @@ import {
   type Edge as FlowEdge,
 } from "@xyflow/react";
 import { useTranslation } from "react-i18next";
-import { X, Plus, Trash2, Save, MessageSquare, Terminal, Shield, GitMerge, Loader2, HelpCircle, PauseCircle, Split, Merge, Repeat, ClipboardCheck, ListChecks, Code2, LayoutGrid, Workflow, Download, Upload, ChevronDown, ChevronRight, Library } from "lucide-react";
+import { X, Plus, Trash2, Save, MessageSquare, Terminal, Shield, GitMerge, Loader2, HelpCircle, PauseCircle, Split, Merge, Repeat, ClipboardCheck, ListChecks, Code2, LayoutGrid, Workflow, Download, Upload, ChevronDown, ChevronRight, Library, Sparkles } from "lucide-react";
 import type { WorkflowDefinition, WorkflowIrColumn, TraitViolation, WorkflowStepTemplate } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
 import {
@@ -25,6 +25,7 @@ import {
   compileWorkflow,
   exportWorkflow,
   importWorkflow,
+  designWorkflow,
   ApiRequestError,
   migrateLegacyWorkflowSteps,
   fetchModels,
@@ -236,10 +237,16 @@ interface WorkflowCreateTemplate {
 function CreateWorkflowDialog({
   workflows,
   onCreate,
+  onDesign,
   onClose,
 }: {
   workflows: WorkflowDefinition[];
   onCreate: (name: string, description: string, template: WorkflowCreateTemplate) => Promise<void>;
+  /** U10/R11: design a brand-new workflow from a prompt. Resolves on success
+   *  (the parent seeds + activates the workflow and closes the dialog); throws on
+   *  failure so the dialog surfaces the server message inline without closing.
+   *  `signal` aborts the in-flight design request. */
+  onDesign: (prompt: string, name: string, signal: AbortSignal) => Promise<void>;
   onClose: () => void;
 }) {
   const { t } = useTranslation("app");
@@ -247,6 +254,14 @@ function CreateWorkflowDialog({
   const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // U10/R11: AI-design disclosure state. `aiOpen` reveals the prompt textarea;
+  // `aiPrompt` holds the request; `aiBusy` flags the in-flight design call (the
+  // submit disables + a spinner + Cancel show); `aiError` is the inline failure.
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const aiAbortRef = useRef<AbortController | null>(null);
   // Tracks whether the user has edited the name; once true, selecting a template
   // no longer overwrites it (R7: prefill only when untouched).
   const [nameTouched, setNameTouched] = useState(false);
@@ -352,6 +367,40 @@ function CreateWorkflowDialog({
     [name, description, selected, onCreate, t],
   );
 
+  // U10/R11: submit the AI design request. On success the parent seeds the
+  // workflow and closes the dialog; on failure the server message renders inline
+  // (role="alert") and the dialog stays open. The fetch is cancelable via the
+  // Cancel button (AbortController); an abort re-enables the controls silently.
+  const handleAiSubmit = useCallback(async () => {
+    const trimmed = aiPrompt.trim();
+    if (!trimmed) {
+      setAiError(t("workflows.aiPromptRequired", "Describe the workflow you want"));
+      return;
+    }
+    const controller = new AbortController();
+    aiAbortRef.current = controller;
+    setAiBusy(true);
+    setAiError(null);
+    try {
+      await onDesign(trimmed, name.trim(), controller.signal);
+      // Success closes the dialog from the parent.
+    } catch (err) {
+      if (controller.signal.aborted) {
+        // User-initiated cancel: re-enable silently (no error message).
+        return;
+      }
+      setAiError(getErrorMessage(err) || t("workflows.aiFailed", "Failed to design workflow"));
+    } finally {
+      if (aiAbortRef.current === controller) aiAbortRef.current = null;
+      setAiBusy(false);
+    }
+  }, [aiPrompt, name, onDesign, t]);
+
+  const handleAiCancel = useCallback(() => {
+    aiAbortRef.current?.abort();
+    setAiBusy(false);
+  }, []);
+
   // Section boundaries for group headers (built-ins / your workflows). Blank is
   // always index 0; built-ins follow, then user workflows.
   const firstBuiltinIndex = templates.findIndex((tmpl) => tmpl.id !== null && tmpl.builtin);
@@ -386,6 +435,72 @@ function CreateWorkflowDialog({
         </div>
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
+            {/* U10/R11: AI-design disclosure. Toggling reveals a prompt textarea
+                + "Design with AI" submit; submitting designs a brand-new workflow
+                from the result (the parent seeds + activates it). In-flight: the
+                submit disables + spins, aria-busy is set on the section, and a
+                Cancel aborts the fetch. Failure renders inline (role="alert"). */}
+            <div className="wf-ai-create" aria-busy={aiBusy} data-testid="wf-ai-create">
+              <button
+                type="button"
+                className="wf-ai-toggle"
+                data-testid="wf-ai-toggle"
+                aria-expanded={aiOpen}
+                onClick={() => {
+                  setAiOpen((o) => !o);
+                  setAiError(null);
+                }}
+              >
+                <Sparkles size={13} />{" "}
+                {t("workflows.aiToggle", "Describe it instead")}
+              </button>
+              {aiOpen && (
+                <div className="wf-ai-create-body">
+                  <textarea
+                    className="wf-ai-prompt"
+                    data-testid="wf-ai-prompt"
+                    rows={3}
+                    value={aiPrompt}
+                    disabled={aiBusy}
+                    placeholder={t(
+                      "workflows.aiPromptPlaceholder",
+                      "e.g. Run lint and tests before merge, then post a changelog comment after merge",
+                    )}
+                    onChange={(e) => {
+                      setAiPrompt(e.target.value);
+                      if (aiError) setAiError(null);
+                    }}
+                  />
+                  {aiError && (
+                    <p className="wf-create-error" role="alert" data-testid="wf-ai-error">
+                      {aiError}
+                    </p>
+                  )}
+                  <div className="wf-ai-actions">
+                    <button
+                      type="button"
+                      className="btn btn-primary wf-ai-submit"
+                      data-testid="wf-ai-submit"
+                      disabled={aiBusy}
+                      onClick={() => void handleAiSubmit()}
+                    >
+                      {aiBusy ? <Loader2 size={13} className="wf-spin" /> : <Sparkles size={13} />}{" "}
+                      {t("workflows.aiSubmit", "Design with AI")}
+                    </button>
+                    {aiBusy && (
+                      <button
+                        type="button"
+                        className="btn wf-ai-cancel"
+                        data-testid="wf-ai-cancel"
+                        onClick={handleAiCancel}
+                      >
+                        {t("common.cancel", "Cancel")}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
             <div className="wf-field">
               <span id="wf-template-label">{t("workflows.templatePickerLabel", "Start from")}</span>
               <div
@@ -575,6 +690,21 @@ function InnerEditor({
   const [importWarnings, setImportWarnings] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
+
+  // U10/R11: toolbar "Design with AI" panel state. `aiPanelOpen` toggles the
+  // popover; `aiEditPrompt` holds the request; `aiEditBusy` flags the in-flight
+  // call (submit disables + spins, Cancel shows); `aiEditError` is the inline
+  // failure. The proposed replacement applies only through the dirty-guard
+  // confirm — and always confirms (destructive whole-graph replace).
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiEditPrompt, setAiEditPrompt] = useState("");
+  const [aiEditBusy, setAiEditBusy] = useState(false);
+  const [aiEditError, setAiEditError] = useState<string | null>(null);
+  const aiEditAbortRef = useRef<AbortController | null>(null);
+  // U10/R11: when a create-from-AI result is interpreter-only, the new workflow
+  // becomes active and its load effect resets the banner — so we stash the flag
+  // here and the load effect re-raises it once for the workflow it activates.
+  const pendingInterpreterOnlyRef = useRef(false);
 
   const activeWorkflow = useMemo(() => workflows.find((w) => w.id === activeId), [workflows, activeId]);
   const isBuiltin = !!activeWorkflow && isBuiltinWorkflowId(activeWorkflow.id);
@@ -867,7 +997,14 @@ function InnerEditor({
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
     setValidationError(null);
-    setInterpreterOnly(false);
+    // Honor a pending AI interpreter-only flag exactly once for the workflow it
+    // just activated; otherwise the banner clears on load (U10/R11).
+    if (pendingInterpreterOnlyRef.current) {
+      pendingInterpreterOnlyRef.current = false;
+      setInterpreterOnly(true);
+    } else {
+      setInterpreterOnly(false);
+    }
   }, [activeWorkflow, setNodes, setEdges]);
 
   // Server-reported node error (e.g. seam-in-branch) attributed to a node id.
@@ -1026,6 +1163,93 @@ function InnerEditor({
     setNodes((ns) => applyAutoLayout(ns, autoLayout(ns, edges, columns)));
   }, [setNodes, edges, columns]);
 
+  // U10/R11: toolbar "Design with AI" submit. Designs against the ACTIVE workflow
+  // (passing its id; the server reads the persisted IR — the client never posts
+  // IR). On success the returned graph REPLACES the canvas, but only after a
+  // confirm — and we ALWAYS confirm (even when clean) because this is a
+  // destructive whole-graph replace. On confirm we map the returned {ir, layout}
+  // through irToFlow on a definition-shaped object (mirroring the load effect's
+  // mapping); the result is intentionally left UNSAVED so the user explicitly
+  // saves (the dirty snapshot is the active workflow's, so the replaced graph
+  // reads dirty). On failure the canvas is untouched and the panel shows the
+  // server message inline. The fetch is cancelable via the panel's Cancel button.
+  const handleAiEditSubmit = useCallback(async () => {
+    if (!activeWorkflow || isBuiltin) return;
+    const trimmed = aiEditPrompt.trim();
+    if (!trimmed) {
+      setAiEditError(t("workflows.aiPromptRequired", "Describe the workflow you want"));
+      return;
+    }
+    const controller = new AbortController();
+    aiEditAbortRef.current = controller;
+    setAiEditBusy(true);
+    setAiEditError(null);
+    try {
+      const result = await designWorkflow(
+        { prompt: trimmed, workflowId: activeWorkflow.id },
+        projectId,
+        controller.signal,
+      );
+      // Always confirm before the destructive replace.
+      const ok = await confirm({
+        title: t("workflows.aiReplaceTitle", "Replace graph?"),
+        message: t(
+          "workflows.aiReplaceConfirm",
+          "Replace the current graph with the AI design? Unsaved changes will be lost.",
+        ),
+        confirmLabel: t("workflows.aiReplaceConfirmLabel", "Replace"),
+        danger: true,
+      });
+      if (!ok) return; // Cancel keeps the current canvas untouched.
+      // Map the returned IR through irToFlow on a definition-shaped object,
+      // mirroring the active-workflow load effect's mapping.
+      const flow = irToFlow({
+        ...activeWorkflow,
+        ir: result.ir,
+        layout: result.layout,
+      });
+      setNodes(flow.nodes);
+      setEdges(flow.edges);
+      setColumns(columnsOf({ ...activeWorkflow, ir: result.ir }));
+      setFields(fieldsOf({ ...activeWorkflow, ir: result.ir }));
+      setSelectedNodeId(null);
+      setSelectedEdgeId(null);
+      setValidationError(null);
+      // Leave the loaded snapshot pointing at the (still-persisted) base so the
+      // replaced graph reads dirty — the user must explicitly Save.
+      setInterpreterOnly(result.interpreterOnly);
+      if (result.strippedApprovalFlags) {
+        addToast(
+          t("workflows.importStripped", "Auto-approval flags were removed from imported nodes"),
+          "warning",
+        );
+      }
+      setAiPanelOpen(false);
+      setAiEditPrompt("");
+    } catch (err) {
+      if (controller.signal.aborted) return; // user cancel: re-enable silently
+      setAiEditError(getErrorMessage(err) || t("workflows.aiFailed", "Failed to design workflow"));
+    } finally {
+      if (aiEditAbortRef.current === controller) aiEditAbortRef.current = null;
+      setAiEditBusy(false);
+    }
+  }, [
+    activeWorkflow,
+    isBuiltin,
+    aiEditPrompt,
+    projectId,
+    confirm,
+    t,
+    setNodes,
+    setEdges,
+    addToast,
+  ]);
+
+  const handleAiEditCancel = useCallback(() => {
+    aiEditAbortRef.current?.abort();
+    setAiEditBusy(false);
+  }, []);
+
   const updateSelectedData = useCallback(
     (
       patch:
@@ -1170,6 +1394,44 @@ function InnerEditor({
       setWorkflows((ws) => [...ws, created]);
       setActiveId(created.id);
       addToast(t("workflows.created", 'Created workflow "{{name}}"', { name: created.name }), "success");
+      closeCreateDialog();
+    },
+    [projectId, addToast, t, closeCreateDialog],
+  );
+
+  // U10/R11: design a brand-new workflow from a prompt in the create dialog.
+  // Calls the server design route (no IR posted), then creates the workflow
+  // seeded from the returned {ir, layout} via the existing create path. The name
+  // comes from the dialog's name field if filled, else "AI: <first 30 chars>".
+  // After activation: interpreterOnly surfaces the existing info banner; a strip
+  // shows the shared importStripped toast (reused per spec). Throws on failure so
+  // the dialog renders the server message inline and stays open (nothing created).
+  const handleDesignNewWorkflow = useCallback(
+    async (prompt: string, dialogName: string, signal: AbortSignal) => {
+      const result = await designWorkflow({ prompt }, projectId, signal);
+      const fallbackName = `AI: ${prompt.slice(0, 30)}`;
+      const workflowName = dialogName || fallbackName;
+      const created = await createWorkflow(
+        {
+          name: workflowName,
+          kind: "workflow",
+          ir: result.ir,
+          layout: result.layout,
+        },
+        projectId,
+      );
+      // Stash the interpreter-only flag BEFORE activating so the new workflow's
+      // load effect re-raises the banner instead of clearing it (U10/R11).
+      pendingInterpreterOnlyRef.current = result.interpreterOnly;
+      setWorkflows((ws) => [...ws, created]);
+      setActiveId(created.id);
+      addToast(t("workflows.created", 'Created workflow "{{name}}"', { name: created.name }), "success");
+      if (result.strippedApprovalFlags) {
+        addToast(
+          t("workflows.importStripped", "Auto-approval flags were removed from imported nodes"),
+          "warning",
+        );
+      }
       closeCreateDialog();
     },
     [projectId, addToast, t, closeCreateDialog],
@@ -1734,6 +1996,77 @@ function InnerEditor({
                       ))}
                     </div>
                     <div className="wf-editor-actions">
+                      {/* U10/R11: "Design with AI" opens a popover panel targeting
+                          the active workflow (workflowId). Hidden for built-ins. */}
+                      <div className="wf-ai-edit-wrap">
+                        <button
+                          className="wf-editor-action"
+                          data-testid="wf-ai-edit"
+                          aria-expanded={aiPanelOpen}
+                          onClick={() => {
+                            setAiPanelOpen((o) => !o);
+                            setAiEditError(null);
+                          }}
+                        >
+                          <Sparkles size={13} /> {t("workflows.aiEdit", "Design with AI")}
+                        </button>
+                        {aiPanelOpen && (
+                          <div
+                            className="wf-ai-panel"
+                            data-testid="wf-ai-panel"
+                            role="dialog"
+                            aria-busy={aiEditBusy}
+                            aria-label={t("workflows.aiEdit", "Design with AI")}
+                          >
+                            <textarea
+                              className="wf-ai-prompt"
+                              data-testid="wf-ai-edit-prompt"
+                              rows={3}
+                              value={aiEditPrompt}
+                              disabled={aiEditBusy}
+                              placeholder={t(
+                                "workflows.aiPromptPlaceholder",
+                                "e.g. Run lint and tests before merge, then post a changelog comment after merge",
+                              )}
+                              onChange={(e) => {
+                                setAiEditPrompt(e.target.value);
+                                if (aiEditError) setAiEditError(null);
+                              }}
+                            />
+                            {aiEditError && (
+                              <p className="wf-create-error" role="alert" data-testid="wf-ai-edit-error">
+                                {aiEditError}
+                              </p>
+                            )}
+                            <div className="wf-ai-actions">
+                              <button
+                                type="button"
+                                className="btn btn-primary wf-ai-submit"
+                                data-testid="wf-ai-edit-submit"
+                                disabled={aiEditBusy}
+                                onClick={() => void handleAiEditSubmit()}
+                              >
+                                {aiEditBusy ? (
+                                  <Loader2 size={13} className="wf-spin" />
+                                ) : (
+                                  <Sparkles size={13} />
+                                )}{" "}
+                                {t("workflows.aiSubmit", "Design with AI")}
+                              </button>
+                              {aiEditBusy && (
+                                <button
+                                  type="button"
+                                  className="btn wf-ai-cancel"
+                                  data-testid="wf-ai-edit-cancel"
+                                  onClick={handleAiEditCancel}
+                                >
+                                  {t("common.cancel", "Cancel")}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                       <button
                         className="wf-editor-action"
                         onClick={handleAutoLayout}
@@ -2690,6 +3023,7 @@ function InnerEditor({
           <CreateWorkflowDialog
             workflows={workflows}
             onCreate={handleCreateWorkflow}
+            onDesign={handleDesignNewWorkflow}
             onClose={closeCreateDialog}
           />
         )}
