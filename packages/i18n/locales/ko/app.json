@@ -2439,12 +2439,12 @@
     "viewActivityLog": "활동 로그 보기",
     "viewProjects": "프로젝트 보기",
     "viewUsage": "사용량 보기",
-    "workflowSteps": "워크플로 단계",
     "workingBranch": "작업 브랜치",
     "activePlanningSessions_one": "",
     "mailboxWithCount_one": "",
     "resumePlanningSessionCount_one": "",
-    "unreadMessages_one": ""
+    "unreadMessages_one": "",
+    "workflows": ""
   },
   "health": {
     "activeTasks": "활성 작업",
@@ -3459,7 +3459,7 @@
     "terminal": "터미널",
     "todos": "할 일",
     "usage": "사용량",
-    "workflowSteps": "워크플로우 단계"
+    "workflows": ""
   },
   "newTaskModal": {
     "addDependencies": "의존성 추가",

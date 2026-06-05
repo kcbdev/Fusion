@@ -2443,8 +2443,8 @@
     "viewActivityLog": "Ver registro de actividad",
     "viewProjects": "Ver proyectos",
     "viewUsage": "Ver uso",
-    "workflowSteps": "Pasos del flujo de trabajo",
-    "workingBranch": "Rama de trabajo"
+    "workingBranch": "Rama de trabajo",
+    "workflows": ""
   },
   "health": {
     "activeTasks": "Tareas activas",
@@ -3459,7 +3459,7 @@
     "terminal": "Terminal",
     "todos": "Pendientes",
     "usage": "Uso",
-    "workflowSteps": "Pasos del flujo de trabajo"
+    "workflows": ""
   },
   "newTaskModal": {
     "addDependencies": "Añadir dependencias",

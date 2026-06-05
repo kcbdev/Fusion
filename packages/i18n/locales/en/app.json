@@ -2443,7 +2443,7 @@
     "viewActivityLog": "View Activity Log",
     "viewProjects": "View Projects",
     "viewUsage": "View usage",
-    "workflowSteps": "Workflow Steps",
+    "workflows": "Workflows",
     "workingBranch": "Working branch"
   },
   "health": {
@@ -3459,7 +3459,7 @@
     "terminal": "Terminal",
     "todos": "Todos",
     "usage": "Usage",
-    "workflowSteps": "Workflow Steps"
+    "workflows": "Workflows"
   },
   "newTaskModal": {
     "addDependencies": "Add dependencies",

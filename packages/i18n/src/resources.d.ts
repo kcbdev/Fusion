@@ -2445,7 +2445,7 @@ export default interface Resources {
       "viewActivityLog": "View Activity Log",
       "viewProjects": "View Projects",
       "viewUsage": "View usage",
-      "workflowSteps": "Workflow Steps",
+      "workflows": "Workflows",
       "workingBranch": "Working branch"
     },
     "health": {
@@ -3461,7 +3461,7 @@ export default interface Resources {
       "terminal": "Terminal",
       "todos": "Todos",
       "usage": "Usage",
-      "workflowSteps": "Workflow Steps"
+      "workflows": "Workflows"
     },
     "newTaskModal": {
       "addDependencies": "Add dependencies",

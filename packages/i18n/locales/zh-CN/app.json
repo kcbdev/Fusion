@@ -2439,12 +2439,12 @@
     "viewActivityLog": "查看活动日志",
     "viewProjects": "查看项目",
     "viewUsage": "查看用量",
-    "workflowSteps": "工作流步骤",
     "workingBranch": "工作分支",
     "activePlanningSessions_one": "",
     "mailboxWithCount_one": "",
     "resumePlanningSessionCount_one": "",
-    "unreadMessages_one": ""
+    "unreadMessages_one": "",
+    "workflows": ""
   },
   "health": {
     "activeTasks": "活动任务",
@@ -3459,7 +3459,7 @@
     "terminal": "终端",
     "todos": "待办",
     "usage": "用量",
-    "workflowSteps": "工作流步骤"
+    "workflows": ""
   },
   "newTaskModal": {
     "addDependencies": "添加依赖项",
