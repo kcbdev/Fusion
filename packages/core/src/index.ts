@@ -61,6 +61,7 @@ export type {
   WorkflowIrNodeKind,
   WorkflowIrColumn,
   WorkflowIrColumnTrait,
+  WorkflowColumnAgent,
   WorkflowHoldRelease,
   WorkflowJoinMode,
   WorkflowJoinBranchFailure,
@@ -75,6 +76,17 @@ export type {
   WorkflowNodeExecutorKind,
   WorkflowNodeExecutorConfig,
 } from "./workflow-ir-types.js";
+export {
+  instanceNodeId,
+  parseInstanceNodeId,
+  resolveColumnAgentBinding,
+  resolveEffectiveAgent,
+} from "./column-agent-resolver.js";
+export type {
+  ParsedInstanceNodeId,
+  EffectiveAgentInput,
+  EffectiveAgentResult,
+} from "./column-agent-resolver.js";
 export { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
 export { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "./builtin-stepwise-coding-workflow-ir.js";
 
@@ -296,8 +308,13 @@ export {
   normalizeAgentPermissionPolicy,
   resolveEffectiveAgentPermissionPolicy,
   isAgentPermissionPolicyPresetId,
+  isPolicyBroaderThanDefault,
 } from "./agent-permission-policy.js";
 export type { BuiltInAgentPermissionPolicyPreset } from "./agent-permission-policy.js";
+export {
+  validateColumnAgentBindings,
+  ColumnAgentBindingError,
+} from "./column-agent-binding-validation.js";
 export { AgentStore, DEFAULT_AGENT_HEARTBEAT_INTERVAL_MS } from "./agent-store.js";
 export type { AgentStoreEvents } from "./agent-store.js";
 export {
@@ -767,7 +784,7 @@ export {
 } from "./plugin-types.js";
 export { PluginStore } from "./plugin-store.js";
 export type { PluginStoreEvents, PluginRegistrationInput, PluginUpdateInput } from "./plugin-store.js";
-export { PluginLoader } from "./plugin-loader.js";
+export { PluginLoader, resolvePluginEntryPath } from "./plugin-loader.js";
 export { scanPluginSecurity } from "./plugin-security-scan.js";
 export type { PluginSecurityScanResult, PluginSecurityFinding } from "./plugin-security-scan.js";
 export type {

@@ -23,12 +23,7 @@ vi.mock("../../api", () => ({
   fetchTaskDetail: vi.fn(),
   batchUpdateTaskModels: vi.fn(),
   fetchNodes: vi.fn().mockResolvedValue([]),
-  fetchBoardWorkflows: vi.fn().mockResolvedValue({
-    flagEnabled: false,
-    defaultWorkflowId: null,
-    workflows: [],
-    taskWorkflowIds: {},
-  }),
+  fetchBoardWorkflows: vi.fn().mockResolvedValue({ flagEnabled: false, defaultWorkflowId: "", workflows: [], taskWorkflowIds: {} }),
   api: vi.fn().mockResolvedValue({ sessions: [] }),
 }));
 
