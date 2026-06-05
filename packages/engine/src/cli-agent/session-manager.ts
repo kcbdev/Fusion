@@ -320,6 +320,10 @@ interface LiveSession {
   terminated: boolean;
   /** Bytes buffered toward the high watermark since last drain to consumers. */
   inflightBytes: number;
+  /** Captured exit result (set once on exit/kill), for one-shot waiters. */
+  exitResult: { exitCode: number; signal: number | undefined } | null;
+  /** Resolvers waiting on process exit (one-shot sessions). */
+  exitWaiters: ((result: { exitCode: number; signal: number | undefined }) => void)[];
 }
 
 // ── Manager options ──────────────────────────────────────────────────────────
@@ -456,6 +460,8 @@ export class CliSessionManager {
       paused: false,
       terminated: false,
       inflightBytes: 0,
+      exitResult: null,
+      exitWaiters: [],
     };
     this.sessions.set(record.id, live);
 
@@ -535,10 +541,19 @@ export class CliSessionManager {
     }
   }
 
+  /** Settle one-shot exit waiters exactly once with the captured result. */
+  private settleExit(live: LiveSession, exitCode: number, signal: number | undefined): void {
+    if (live.exitResult) return;
+    live.exitResult = { exitCode, signal };
+    const waiters = live.exitWaiters.splice(0);
+    for (const w of waiters) w(live.exitResult);
+  }
+
   private handleExit(live: LiveSession, exitCode: number, signal?: number): void {
     if (live.terminated) return;
     live.terminated = true;
     this.sessions.delete(live.id);
+    this.settleExit(live, exitCode, signal);
 
     for (const stream of live.streams) stream.close();
     live.streams.clear();
@@ -576,6 +591,19 @@ export class CliSessionManager {
     const live = this.require(sessionId);
     if (live.ready) return Promise.resolve();
     return new Promise((resolve) => live.readyWaiters.push(resolve));
+  }
+
+  /**
+   * Resolve once the session's PTY has exited (or been killed), yielding the
+   * captured exit result. Powers one-shot (validator/planning/CE) sessions that
+   * run a non-interactive invocation to completion. A killed session resolves
+   * with `{ exitCode: -1, signal: 9 }`. Throws if the session id is unknown AND
+   * not already exited within this manager's memory.
+   */
+  waitForExit(sessionId: string): Promise<{ exitCode: number; signal: number | undefined }> {
+    const live = this.require(sessionId);
+    if (live.exitResult) return Promise.resolve(live.exitResult);
+    return new Promise((resolve) => live.exitWaiters.push(resolve));
   }
 
   // ── Injection ──────────────────────────────────────────────────────────
@@ -763,6 +791,8 @@ export class CliSessionManager {
     }
     live.terminated = true;
     this.sessions.delete(live.id);
+    // A killed PTY exited via signal — surface a nonzero result to one-shot waiters.
+    this.settleExit(live, -1, 9);
 
     for (const stream of live.streams) stream.close();
     live.streams.clear();

@@ -213,8 +213,9 @@ export class CliConfirmAdvanceRegistry {
  * Whether a session is read-only (one-shot validator/planning, U9). Server-side
  * enforcement (not just client) — input/inject is rejected for these.
  *
- * U9's one-shot sessions are not yet wired, so the current signal is the
- * autonomy posture `readOnly` flag (forward-compatible) plus validator/planning
+ * U9's one-shot sessions (validator/planning/CE) are wired via the engine's
+ * `runOneShotSession`, which persists the autonomy posture `readOnly` flag on
+ * the session record. This check honors that flag plus validator/planning
  * purposes which are inherently read-only.
  */
 export function isReadOnlySession(session: CliSession): boolean {
