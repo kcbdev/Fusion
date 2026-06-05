@@ -1616,7 +1616,7 @@ export class ChatManager {
       // is available. The chat lane has no ambient task, so fn_workflow_select
       // has no default target — an agent must pass an explicit task_id.
       const workflowTools = this.taskStore
-        ? createWorkflowAuthoringTools(this.taskStore, "")
+        ? createWorkflowAuthoringTools(this.taskStore, "", { stripApprovalFlags: true })
         : [];
 
       const customTools = [...messagingTools, ...workflowTools];

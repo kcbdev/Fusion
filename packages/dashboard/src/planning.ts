@@ -848,7 +848,7 @@ export async function createSession(
     builtinToolsAllowlist: [...PLANNING_BUILTIN_WEB_TOOLS],
     customTools: [
       ...createPlanningBoardTools(store),
-      ...createWorkflowAuthoringTools(store, PLANNING_NO_AMBIENT_TASK_ID),
+      ...createWorkflowAuthoringTools(store, PLANNING_NO_AMBIENT_TASK_ID, { stripApprovalFlags: true }),
     ],
     onThinking: () => {
       // Non-streaming path ignores thinking output
@@ -1392,7 +1392,7 @@ async function createPlanningAgent(
     builtinToolsAllowlist: [...PLANNING_BUILTIN_WEB_TOOLS],
     customTools: [
       ...createPlanningBoardTools(store),
-      ...createWorkflowAuthoringTools(store, PLANNING_NO_AMBIENT_TASK_ID),
+      ...createWorkflowAuthoringTools(store, PLANNING_NO_AMBIENT_TASK_ID, { stripApprovalFlags: true }),
     ],
     ...(modelProvider && modelId
       ? {

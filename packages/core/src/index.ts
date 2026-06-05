@@ -48,6 +48,7 @@ export {
 export {
   parseWorkflowIr,
   serializeWorkflowIr,
+  stripApprovalBypassFlags,
   WorkflowIrError,
   DEFAULT_WORKFLOW_COLUMN_IDS,
 } from "./workflow-ir.js";

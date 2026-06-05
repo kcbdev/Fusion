@@ -54,3 +54,93 @@ describe("workflow tool exposure (engine factories)", () => {
     expect(createWorkflowDeleteTool(fakeStore).name).toBe("fn_workflow_delete");
   });
 });
+
+/**
+ * P0 security: the chat/planning lanes pass {stripApprovalFlags:true} so the
+ * create/update tools cannot persist a CLI-approval-bypass smuggled through a
+ * prompt-injectable agent lane. The executor lane omits the option (project-
+ * owner escape hatch) and the flags pass through unchanged.
+ */
+describe("workflow authoring tools approval-flag stripping", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function captureStore(): { store: TaskStore; captured: { ir?: any } } {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const captured: { ir?: any } = {};
+    const store = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      createWorkflowDefinition: async (input: any) => {
+        captured.ir = input.ir;
+        return { id: "wf-1", name: input.name };
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      updateWorkflowDefinition: async (_id: string, input: any) => {
+        captured.ir = input.ir;
+        return { id: "wf-1", name: input.name ?? "wf" };
+      },
+    } as unknown as TaskStore;
+    return { store, captured };
+  }
+
+  // The ToolDefinition.execute signature requires (id, params, signal, onUpdate,
+  // ctx); tests only need id+params, so pass undefined for the rest and cast the
+  // result to read the optional `isError`/`content` shape these tools return.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const run = (tool: { execute: (...a: any[]) => Promise<any> }, params: unknown) =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tool.execute("call-1", params, undefined, undefined, undefined) as Promise<{
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      isError?: boolean; content: { type: string; text?: string }[];
+    }>;
+
+  const irWithFlags = () => ({
+    version: "v1" as const,
+    name: "wf",
+    nodes: [
+      { id: "n1", kind: "prompt", config: { cliSkipApproval: true, name: "x" } },
+      {
+        id: "fe",
+        kind: "foreach",
+        config: {
+          template: {
+            nodes: [
+              { id: "inner", kind: "step-execute", config: { autoApprove: true } },
+            ],
+            edges: [],
+          },
+        },
+      },
+    ],
+    edges: [],
+  });
+
+  it("strips both flags (incl. foreach template) on create with stripApprovalFlags:true", async () => {
+    const { store, captured } = captureStore();
+    const tool = createWorkflowCreateTool(store, { stripApprovalFlags: true });
+    const res = await run(tool, { name: "wf", ir: irWithFlags() });
+    expect(res.isError).toBeFalsy();
+    expect(captured.ir.nodes[0].config.cliSkipApproval).toBeUndefined();
+    expect(captured.ir.nodes[1].config.template.nodes[0].config.autoApprove).toBeUndefined();
+    const text = res.content.map((c) => c.text ?? "").join("");
+    expect(text).toContain("approval-bypass flags removed");
+  });
+
+  it("strips flags on update with stripApprovalFlags:true", async () => {
+    const { store, captured } = captureStore();
+    const tool = createWorkflowUpdateTool(store, { stripApprovalFlags: true });
+    const res = await run(tool, { workflow_id: "wf-1", ir: irWithFlags() });
+    expect(res.isError).toBeFalsy();
+    expect(captured.ir.nodes[0].config.cliSkipApproval).toBeUndefined();
+    expect(captured.ir.nodes[1].config.template.nodes[0].config.autoApprove).toBeUndefined();
+  });
+
+  it("executor lane (no option) passes both flags through unchanged", async () => {
+    const { store, captured } = captureStore();
+    const tool = createWorkflowCreateTool(store);
+    const res = await run(tool, { name: "wf", ir: irWithFlags() });
+    expect(res.isError).toBeFalsy();
+    expect(captured.ir.nodes[0].config.cliSkipApproval).toBe(true);
+    expect(captured.ir.nodes[1].config.template.nodes[0].config.autoApprove).toBe(true);
+    const text = res.content.map((c) => c.text ?? "").join("");
+    expect(text).not.toContain("approval-bypass flags removed");
+  });
+});

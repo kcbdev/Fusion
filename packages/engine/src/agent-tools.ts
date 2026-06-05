@@ -12,7 +12,7 @@ import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, relative, resolve } from "node:path";
 import type { AgentStore, AgentState, AgentCapability, AgentUpdateInput, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore } from "@fusion/core";
-import { listTraits, isBuiltinWorkflowId } from "@fusion/core";
+import { listTraits, isBuiltinWorkflowId, stripApprovalBypassFlags } from "@fusion/core";
 import { promoteHeldTask } from "./hold-release.js";
 import { DASHBOARD_USER_ID, canAgentTakeImplementationTaskForExplicitRouting, dailyMemoryPath, ensureOpenClawMemoryFiles, extractAgentProvisioningRequest, formatRoleMismatchReason, getMemoryBackendCapabilities, getProjectMemory, isEphemeralAgent, memoryLongTermPath, normalizeMessageParticipant, reconcileDeterministicDuplicate, resolveAgentProvisioningPolicy, resolveMemoryBackend, resolveResearchSettings, resolveTaskGithubTracking, resolveTitleSummarizerSettingsModel, runDeterministicDuplicateGuard, scheduleQmdProjectMemoryRefresh, searchProjectMemory, shouldSkipBackgroundQmdRefresh, summarizeTitle } from "@fusion/core";
 import { ResearchOrchestrator } from "./research-orchestrator.js";
@@ -1201,7 +1201,10 @@ export function createTaskPromoteTool(store: TaskStore, currentTaskId: string): 
  * Create a `fn_workflow_create` tool — a thin wrapper over the store's workflow
  * definition create. The IR is validated server-side; a malformed graph rejects.
  */
-export function createWorkflowCreateTool(store: TaskStore): ToolDefinition {
+export function createWorkflowCreateTool(
+  store: TaskStore,
+  opts?: WorkflowAuthoringToolOptions,
+): ToolDefinition {
   return {
     name: "fn_workflow_create",
     label: "Create Workflow",
@@ -1226,16 +1229,23 @@ export function createWorkflowCreateTool(store: TaskStore): ToolDefinition {
     parameters: workflowCreateParams,
     execute: async (_id: string, params: Static<typeof workflowCreateParams>) => {
       try {
+        let approvalNote = "";
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let ir = params.ir as any;
+        if (opts?.stripApprovalFlags) {
+          const result = stripApprovalBypassFlags(ir);
+          ir = result.ir;
+          if (result.stripped) approvalNote = " (approval-bypass flags removed)";
+        }
         const created = await store.createWorkflowDefinition({
           name: params.name,
           description: params.description,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ir: params.ir as any,
+          ir,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           layout: params.layout as any,
         });
         return {
-          content: [{ type: "text" as const, text: `Created workflow ${created.id} (${created.name}).` }],
+          content: [{ type: "text" as const, text: `Created workflow ${created.id} (${created.name}).${approvalNote}` }],
           details: { workflowId: created.id, name: created.name },
         };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1256,7 +1266,10 @@ export function createWorkflowCreateTool(store: TaskStore): ToolDefinition {
  * throws an OccupiedColumnsError; we surface it as a structured response carrying
  * the per-column occupant counts so the agent can retry with `rehome_to`.
  */
-export function createWorkflowUpdateTool(store: TaskStore): ToolDefinition {
+export function createWorkflowUpdateTool(
+  store: TaskStore,
+  opts?: WorkflowAuthoringToolOptions,
+): ToolDefinition {
   return {
     name: "fn_workflow_update",
     label: "Update Workflow",
@@ -1270,17 +1283,24 @@ export function createWorkflowUpdateTool(store: TaskStore): ToolDefinition {
     parameters: workflowUpdateParams,
     execute: async (_id: string, params: Static<typeof workflowUpdateParams>) => {
       try {
+        let approvalNote = "";
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let ir = params.ir as any;
+        if (opts?.stripApprovalFlags && ir !== undefined && ir !== null) {
+          const result = stripApprovalBypassFlags(ir);
+          ir = result.ir;
+          if (result.stripped) approvalNote = " (approval-bypass flags removed)";
+        }
         const updated = await store.updateWorkflowDefinition(params.workflow_id, {
           name: params.name,
           description: params.description,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ir: params.ir as any,
+          ir,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           layout: params.layout as any,
           rehomeTo: params.rehome_to,
         });
         return {
-          content: [{ type: "text" as const, text: `Updated workflow ${updated.id} (${updated.name}).` }],
+          content: [{ type: "text" as const, text: `Updated workflow ${updated.id} (${updated.name}).${approvalNote}` }],
           details: { workflowId: updated.id, name: updated.name },
         };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1410,16 +1430,30 @@ export function createTraitListTool(): ToolDefinition {
  * the default task for `fn_workflow_select`; lanes with no ambient task pass a
  * placeholder (an agent can still target any task via the `task_id` param).
  */
+/**
+ * Options for the workflow authoring tool set.
+ *
+ * `stripApprovalFlags` removes the `cliSkipApproval`/`autoApprove` approval-
+ * bypass flags from every node config (incl. nested foreach templates) before
+ * the create/update tools persist the IR. Chat and planning lanes are prompt-
+ * injectable, so they pass `true`; the executor lane (project-owner escape
+ * hatch) omits it so the dashboard editor can deliberately set those flags.
+ */
+export interface WorkflowAuthoringToolOptions {
+  stripApprovalFlags?: boolean;
+}
+
 export function createWorkflowAuthoringTools(
   store: TaskStore,
   currentTaskId: string,
+  opts?: WorkflowAuthoringToolOptions,
 ): ToolDefinition[] {
   return [
     createWorkflowListTool(store),
     createWorkflowGetTool(store),
     createWorkflowSelectTool(store, currentTaskId),
-    createWorkflowCreateTool(store),
-    createWorkflowUpdateTool(store),
+    createWorkflowCreateTool(store, opts),
+    createWorkflowUpdateTool(store, opts),
     createWorkflowDeleteTool(store),
     createTraitListTool(),
   ];

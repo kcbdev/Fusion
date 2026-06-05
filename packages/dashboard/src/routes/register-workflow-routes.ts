@@ -1,5 +1,5 @@
 import type { WorkflowDefinition, WorkflowDefinitionKind, WorkflowIr, WorkflowIrNode } from "@fusion/core";
-import { ColumnTraitValidationError, OccupiedColumnsError, InvalidRehomeTargetError, WorkflowCompileError, WorkflowIrError, SCHEMA_VERSION, assertColumnTraitsValid, compileWorkflowToSteps, layoutForIr, listTraits, listStepParsers, parseWorkflowIr, resolvePlanningSettingsModel } from "@fusion/core";
+import { ColumnTraitValidationError, OccupiedColumnsError, InvalidRehomeTargetError, WorkflowCompileError, WorkflowIrError, SCHEMA_VERSION, assertColumnTraitsValid, compileWorkflowToSteps, layoutForIr, listTraits, listStepParsers, parseWorkflowIr, resolvePlanningSettingsModel, stripApprovalBypassFlags } from "@fusion/core";
 import { createFnAgent as engineCreateFnAgent, validateCodeNodeSources } from "@fusion/engine";
 import { ApiError, badRequest, conflict, notFound, rateLimited } from "../api-error.js";
 import { emitWorkflowSseEvent } from "../sse.js";
@@ -755,31 +755,12 @@ function assertImportTraitsValid(ir: WorkflowIr): void {
 }
 
 /** Strip `cliSkipApproval`/`autoApprove` from every node config in the IR,
- *  including configs nested inside foreach `template.nodes`. Returns true when
- *  anything was removed so the response can flag it (R10 trust boundary). */
+ *  including configs nested inside foreach `template.nodes` (any depth). Returns
+ *  true when anything was removed so the response can flag it (R10 trust
+ *  boundary). Delegates to the shared @fusion/core helper so the route and the
+ *  chat/planning authoring tools cannot diverge. */
 function stripApprovalFlags(ir: WorkflowIr): boolean {
-  const nodes = (ir as { nodes?: WorkflowIrNode[] }).nodes;
-  if (!Array.isArray(nodes)) return false;
-  let stripped = false;
-  const stripNode = (node: WorkflowIrNode): void => {
-    const cfg = node.config as Record<string, unknown> | undefined;
-    if (cfg && typeof cfg === "object") {
-      if ("cliSkipApproval" in cfg) {
-        delete cfg.cliSkipApproval;
-        stripped = true;
-      }
-      if ("autoApprove" in cfg) {
-        delete cfg.autoApprove;
-        stripped = true;
-      }
-      const template = (cfg as { template?: { nodes?: unknown } }).template;
-      if (template && Array.isArray(template.nodes)) {
-        for (const inner of template.nodes as WorkflowIrNode[]) stripNode(inner);
-      }
-    }
-  };
-  for (const node of nodes) stripNode(node);
-  return stripped;
+  return stripApprovalBypassFlags(ir).stripped;
 }
 
 /** Collect non-blocking warnings for script nodes (and any config carrying a
