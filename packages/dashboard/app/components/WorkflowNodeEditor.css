@@ -102,6 +102,54 @@
   background: var(--bg-tertiary);
 }
 
+/* U5/R10: sidebar import affordance + persistent inline error/warning regions. */
+.wf-editor-import {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.wf-editor-import:hover {
+  background: var(--bg-tertiary);
+}
+
+.wf-editor-import:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.wf-editor-import-error {
+  padding: var(--space-xs) var(--space-sm);
+  background: color-mix(in srgb, var(--ws-error) 8%, var(--bg-secondary));
+  border: 1px solid var(--ws-error);
+  border-radius: var(--radius-sm);
+  color: var(--ws-error);
+  font-size: 0.8rem;
+}
+
+.wf-editor-import-warnings {
+  padding: var(--space-xs) var(--space-sm);
+  background: color-mix(in srgb, var(--ws-warning) 8%, var(--bg-secondary));
+  border: 1px solid var(--ws-warning);
+  border-radius: var(--radius-sm);
+  color: var(--ws-warning);
+  font-size: 0.8rem;
+}
+
+.wf-editor-import-warning {
+  margin: 0;
+}
+
+.wf-editor-import-warning + .wf-editor-import-warning {
+  margin-top: var(--space-xs);
+}
+
 .wf-editor-list {
   list-style: none;
   margin: 0;
@@ -215,6 +263,7 @@
 }
 
 .wf-palette-btn,
+.wf-editor-action,
 .wf-editor-delete,
 .wf-editor-save {
   display: inline-flex;
@@ -230,8 +279,14 @@
 }
 
 .wf-palette-btn:hover,
+.wf-editor-action:hover,
 .wf-editor-delete:hover {
   background: var(--bg-tertiary);
+}
+
+.wf-editor-action:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .wf-editor-actions {

@@ -1,5 +1,5 @@
-import type { WorkflowIr, WorkflowIrNode } from "@fusion/core";
-import { ColumnTraitValidationError, OccupiedColumnsError, InvalidRehomeTargetError, WorkflowCompileError, WorkflowIrError, compileWorkflowToSteps, listTraits, listStepParsers } from "@fusion/core";
+import type { WorkflowDefinition, WorkflowDefinitionKind, WorkflowIr, WorkflowIrNode } from "@fusion/core";
+import { ColumnTraitValidationError, OccupiedColumnsError, InvalidRehomeTargetError, WorkflowCompileError, WorkflowIrError, SCHEMA_VERSION, assertColumnTraitsValid, compileWorkflowToSteps, listTraits, listStepParsers, parseWorkflowIr } from "@fusion/core";
 import { validateCodeNodeSources } from "@fusion/engine";
 import { ApiError, badRequest, conflict, notFound } from "../api-error.js";
 import { emitWorkflowSseEvent } from "../sse.js";
@@ -372,4 +372,221 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
       rethrowAsApiError(err);
     }
   });
+
+  // GET /api/workflows/:id/export — emit a portable, versioned JSON envelope for
+  // a single workflow or fragment (U5/R9/KTD-5). Built-ins are exportable too —
+  // the lookup mirrors GET /workflows/:id (built-ins resolved by
+  // getWorkflowDefinition). The envelope carries the server's SCHEMA_VERSION so
+  // import can version-gate it; the client triggers a file download.
+  router.get("/workflows/:id/export", async (req, res) => {
+    try {
+      const { store } = await getProjectContext(req);
+      const def = await store.getWorkflowDefinition(req.params.id);
+      if (!def) throw notFound(`Workflow '${req.params.id}' not found`);
+      res.json({
+        fusionWorkflowExport: 1,
+        schemaVersion: SCHEMA_VERSION,
+        kind: def.kind,
+        name: def.name,
+        description: def.description,
+        ir: def.ir,
+        layout: def.layout,
+      });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err);
+    }
+  });
+
+  // POST /api/workflows/import — validate a workflow export envelope at the write
+  // boundary and create a fresh definition (U5/R10/KTD-5). Validation order is
+  // strict: ANY failure short-circuits with a 4xx and ZERO writes.
+  //   1. envelope marker            → 400
+  //   2. schemaVersion > server's   → 409 (forward-incompatible)
+  //   3. parseWorkflowIr            → 422 (parser message)
+  //   4. trait availability         → 422 (names the missing trait)
+  //   5. strip cliSkipApproval/autoApprove from every node config (incl. foreach
+  //      template nodes) — trust boundary; flagged in the response.
+  //   6. scriptName existence       → non-blocking WARNINGS
+  //   7. fresh id + name collision suffix → store.createWorkflowDefinition
+  router.post("/workflows/import", async (req, res) => {
+    try {
+      const { store, projectId } = await getProjectContext(req);
+      const envelope = (req.body ?? {}) as Record<string, unknown>;
+
+      // 1. Envelope marker.
+      if (envelope.fusionWorkflowExport !== 1) {
+        throw badRequest(
+          "Not a Fusion workflow export file (missing or invalid fusionWorkflowExport marker)",
+        );
+      }
+
+      // 2. Schema version gate: equal/older accepted, newer rejected.
+      const schemaVersion = envelope.schemaVersion;
+      if (typeof schemaVersion === "number" && schemaVersion > SCHEMA_VERSION) {
+        throw conflict(
+          `This file was exported from a newer Fusion (schema version ${schemaVersion}); this server supports up to ${SCHEMA_VERSION}. Update Fusion to import it.`,
+        );
+      }
+
+      // 3. Parse/validate the IR (parser message surfaced as 422).
+      let ir: WorkflowIr;
+      try {
+        ir = parseWorkflowIr(envelope.ir as WorkflowIr);
+      } catch (parseErr: unknown) {
+        if (parseErr instanceof WorkflowIrError) {
+          throw new ApiError(422, parseErr.message);
+        }
+        throw new ApiError(
+          422,
+          parseErr instanceof Error ? parseErr.message : "Invalid workflow IR",
+        );
+      }
+
+      // 4. Trait availability (v2 columns) — names the missing/unknown trait.
+      try {
+        assertImportTraitsValid(ir);
+      } catch (traitErr: unknown) {
+        if (traitErr instanceof ColumnTraitValidationError) {
+          throw new ApiError(422, traitErr.message);
+        }
+        throw traitErr;
+      }
+
+      // 5. Strip trust-escalating flags from every node config (incl. foreach
+      // templates). Operates on the parsed IR so the stored definition can never
+      // carry an approval bypass smuggled through an untrusted file.
+      const strippedApprovalFlags = stripApprovalFlags(ir);
+
+      // 6. scriptName warnings (non-blocking): a script node referencing a name
+      // absent from the project's configured scripts is importable, but flagged.
+      const settings = await store.getSettingsFast();
+      const knownScripts = new Set(Object.keys(settings.scripts ?? {}));
+      const warnings = collectScriptNameWarnings(ir, knownScripts);
+
+      // 7. Fresh id is server-minted by createWorkflowDefinition; resolve a
+      // collision-free name (case-sensitive exact match across the merged set,
+      // built-ins included).
+      const existingNames = new Set(
+        (await store.listWorkflowDefinitions()).map((w) => w.name),
+      );
+      const rawName =
+        typeof envelope.name === "string" && envelope.name.trim()
+          ? envelope.name.trim()
+          : "Imported workflow";
+      const name = resolveImportName(rawName, existingNames);
+
+      const kind: WorkflowDefinitionKind =
+        envelope.kind === "fragment" ? "fragment" : "workflow";
+      const layout =
+        envelope.layout && typeof envelope.layout === "object"
+          ? (envelope.layout as WorkflowDefinition["layout"])
+          : {};
+
+      let workflow: WorkflowDefinition;
+      try {
+        workflow = await store.createWorkflowDefinition({
+          name,
+          description:
+            typeof envelope.description === "string" ? envelope.description : "",
+          kind,
+          ir,
+          layout,
+        });
+      } catch (createErr: unknown) {
+        // The store re-validates IR/traits; surface those as 422 (the envelope is
+        // the untrusted input) rather than a 500.
+        if (createErr instanceof WorkflowIrError) throw new ApiError(422, createErr.message);
+        if (createErr instanceof ColumnTraitValidationError) {
+          throw new ApiError(422, createErr.message);
+        }
+        throw createErr;
+      }
+
+      emitWorkflowSseEvent("workflow:created", workflow, projectId);
+      res.status(201).json({ workflow, strippedApprovalFlags, warnings });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err);
+    }
+  });
+}
+
+/** Validate trait availability for an imported IR exactly as the store does on
+ *  create (v1 IRs with no columns are a no-op). Kept local to the import route so
+ *  the 422 fires BEFORE any write — the store would also reject, but importing
+ *  must short-circuit on the untrusted envelope, not after a partial write. */
+function assertImportTraitsValid(ir: WorkflowIr): void {
+  const columns = (ir as { columns?: Parameters<typeof assertColumnTraitsValid>[0] }).columns;
+  if (Array.isArray(columns) && columns.length > 0) {
+    // Throws ColumnTraitValidationError naming the unknown trait.
+    assertColumnTraitsValid(columns);
+  }
+}
+
+/** Strip `cliSkipApproval`/`autoApprove` from every node config in the IR,
+ *  including configs nested inside foreach `template.nodes`. Returns true when
+ *  anything was removed so the response can flag it (R10 trust boundary). */
+function stripApprovalFlags(ir: WorkflowIr): boolean {
+  const nodes = (ir as { nodes?: WorkflowIrNode[] }).nodes;
+  if (!Array.isArray(nodes)) return false;
+  let stripped = false;
+  const stripNode = (node: WorkflowIrNode): void => {
+    const cfg = node.config as Record<string, unknown> | undefined;
+    if (cfg && typeof cfg === "object") {
+      if ("cliSkipApproval" in cfg) {
+        delete cfg.cliSkipApproval;
+        stripped = true;
+      }
+      if ("autoApprove" in cfg) {
+        delete cfg.autoApprove;
+        stripped = true;
+      }
+      const template = (cfg as { template?: { nodes?: unknown } }).template;
+      if (template && Array.isArray(template.nodes)) {
+        for (const inner of template.nodes as WorkflowIrNode[]) stripNode(inner);
+      }
+    }
+  };
+  for (const node of nodes) stripNode(node);
+  return stripped;
+}
+
+/** Collect non-blocking warnings for script nodes (and any config carrying a
+ *  `scriptName`) whose script is absent from the project's configured scripts.
+ *  Recurses into foreach templates so nested script nodes are covered too. */
+function collectScriptNameWarnings(ir: WorkflowIr, knownScripts: Set<string>): string[] {
+  const nodes = (ir as { nodes?: WorkflowIrNode[] }).nodes;
+  if (!Array.isArray(nodes)) return [];
+  const warnings: string[] = [];
+  const visit = (node: WorkflowIrNode): void => {
+    const cfg = node.config as Record<string, unknown> | undefined;
+    if (cfg && typeof cfg === "object") {
+      const scriptName = cfg.scriptName;
+      if (typeof scriptName === "string" && scriptName.trim() && !knownScripts.has(scriptName)) {
+        warnings.push(
+          `Node '${node.id}' references script '${scriptName}', which is not configured in this project. Add it under Settings → Scripts before running this workflow.`,
+        );
+      }
+      const template = (cfg as { template?: { nodes?: unknown } }).template;
+      if (template && Array.isArray(template.nodes)) {
+        for (const inner of template.nodes as WorkflowIrNode[]) visit(inner);
+      }
+    }
+  };
+  for (const node of nodes) visit(node);
+  return warnings;
+}
+
+/** Case-sensitive exact-match collision policy (R10/KTD-5): append " (imported)"
+ *  then " (imported 2)", " (imported 3)" … until the name is unique. */
+function resolveImportName(baseName: string, existing: Set<string>): string {
+  if (!existing.has(baseName)) return baseName;
+  let candidate = `${baseName} (imported)`;
+  let n = 2;
+  while (existing.has(candidate)) {
+    candidate = `${baseName} (imported ${n})`;
+    n += 1;
+  }
+  return candidate;
 }

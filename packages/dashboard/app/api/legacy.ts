@@ -5108,6 +5108,61 @@ export function compileWorkflow(id: string, projectId?: string): Promise<{ steps
   });
 }
 
+/** A workflow export envelope (U5/R9/KTD-5). `schemaVersion` is the SERVER's
+ *  schema version at export time — the import route version-gates against it
+ *  (the app build aliases @fusion/core to types-only, so the value can only come
+ *  from the server, never an app-side core import). */
+export interface WorkflowExportEnvelope {
+  fusionWorkflowExport: 1;
+  schemaVersion: number;
+  kind: import("@fusion/core").WorkflowDefinition["kind"];
+  name: string;
+  description: string;
+  ir: import("@fusion/core").WorkflowIr;
+  layout: import("@fusion/core").WorkflowDefinition["layout"];
+}
+
+/** Fetch a workflow's export envelope and trigger a browser download as
+ *  `<name>.workflow.json` (U5/R9). Built-ins are exportable too. Mirrors the
+ *  SettingsModal export pattern (Blob + createObjectURL + a.download). */
+export async function exportWorkflow(id: string, projectId?: string): Promise<WorkflowExportEnvelope> {
+  const envelope = await api<WorkflowExportEnvelope>(
+    withProjectId(`/workflows/${encodeURIComponent(id)}/export`, projectId),
+  );
+  const safeName = (envelope.name || "workflow").replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "workflow";
+  const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${safeName}.workflow.json`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  return envelope;
+}
+
+/** Result of POST /api/workflows/import (U5/R10). `strippedApprovalFlags` is set
+ *  when `cliSkipApproval`/`autoApprove` were removed from any node config at the
+ *  trust boundary; `warnings` lists non-blocking issues (e.g. unknown scriptName). */
+export interface ImportWorkflowResult {
+  workflow: import("@fusion/core").WorkflowDefinition;
+  strippedApprovalFlags: boolean;
+  warnings: string[];
+}
+
+/** Import a workflow export envelope (U5/R10). The server is the sole validator;
+ *  validation failures reject with an ApiError carrying the server message. */
+export function importWorkflow(
+  envelope: unknown,
+  projectId?: string,
+): Promise<ImportWorkflowResult> {
+  return api<ImportWorkflowResult>(withProjectId("/workflows/import", projectId), {
+    method: "POST",
+    body: JSON.stringify(envelope),
+  });
+}
+
 /** Result of the lazy legacy-step migration (U2/R5). `migrated` is the number of
  *  newly converted user steps; `skipped` the count already migrated; when the
  *  defaultOn subset was non-empty a combined "Migrated steps" workflow id is set. */

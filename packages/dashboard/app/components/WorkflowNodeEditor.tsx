@@ -14,7 +14,7 @@ import {
   type Edge as FlowEdge,
 } from "@xyflow/react";
 import { useTranslation } from "react-i18next";
-import { X, Plus, Trash2, Save, MessageSquare, Terminal, Shield, GitMerge, Loader2, HelpCircle, PauseCircle, Split, Merge, Repeat, ClipboardCheck, ListChecks, Code2, LayoutGrid, Workflow } from "lucide-react";
+import { X, Plus, Trash2, Save, MessageSquare, Terminal, Shield, GitMerge, Loader2, HelpCircle, PauseCircle, Split, Merge, Repeat, ClipboardCheck, ListChecks, Code2, LayoutGrid, Workflow, Download, Upload } from "lucide-react";
 import type { WorkflowDefinition, WorkflowIrColumn, TraitViolation } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
 import {
@@ -23,6 +23,9 @@ import {
   updateWorkflow,
   deleteWorkflow,
   compileWorkflow,
+  exportWorkflow,
+  importWorkflow,
+  ApiRequestError,
   migrateLegacyWorkflowSteps,
   fetchModels,
   fetchAgents,
@@ -349,6 +352,15 @@ function InnerEditor({
   );
   const [showMigrationNotice, setShowMigrationNotice] = useState(false);
 
+  // U5/R10: import affordance state. `importError` renders a PERSISTENT inline
+  // error region (not a toast) for client parse failures and server 4xx
+  // validation failures; `importWarnings` renders non-blocking notes in the same
+  // region. The hidden file input is reset after every attempt.
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importWarnings, setImportWarnings] = useState<string[]>([]);
+  const [importing, setImporting] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
+
   const activeWorkflow = useMemo(() => workflows.find((w) => w.id === activeId), [workflows, activeId]);
   const isBuiltin = !!activeWorkflow && isBuiltinWorkflowId(activeWorkflow.id);
 
@@ -474,6 +486,68 @@ function InnerEditor({
       // Best-effort persistence; the in-session dismissal still hides it.
     }
   }, [migrationNoticeStorageKey]);
+
+  // U5/R9: export the active workflow as a downloaded JSON envelope. Enabled for
+  // built-ins; the caller gates on `isDirty` (a stale export is impossible
+  // because the server reads the persisted definition). Network failures toast.
+  const handleExport = useCallback(async () => {
+    if (!activeWorkflow) return;
+    try {
+      await exportWorkflow(activeWorkflow.id, projectId);
+    } catch (err) {
+      addToast(getErrorMessage(err) || t("workflows.exportFailed", "Failed to export workflow"), "error");
+    }
+  }, [activeWorkflow, projectId, addToast, t]);
+
+  // U5/R10: import a workflow envelope from a selected file. Validation failures
+  // (client JSON.parse or server 4xx) populate the PERSISTENT inline error region
+  // — never a toast. Network/5xx errors toast. The file input resets after every
+  // attempt so re-selecting the same file fires `onChange` again.
+  const handleImportFile = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      // Reset the input immediately so the same file can be re-picked later.
+      if (importInputRef.current) importInputRef.current.value = "";
+      if (!file) return;
+      setImportError(null);
+      setImportWarnings([]);
+      setImporting(true);
+      try {
+        const text = await file.text();
+        let envelope: unknown;
+        try {
+          envelope = JSON.parse(text);
+        } catch {
+          setImportError(t("workflows.importInvalidJson", "That file isn't valid JSON."));
+          return;
+        }
+        const result = await importWorkflow(envelope, projectId);
+        await loadWorkflows();
+        setActiveId(result.workflow.id);
+        addToast(
+          t("workflows.imported", 'Imported workflow "{{name}}"', { name: result.workflow.name }),
+          "success",
+        );
+        if (result.strippedApprovalFlags) {
+          addToast(
+            t("workflows.importStripped", "Auto-approval flags were removed from imported nodes"),
+            "warning",
+          );
+        }
+        if (result.warnings.length > 0) setImportWarnings(result.warnings);
+      } catch (err) {
+        // 4xx → persistent inline validation error; anything else → toast.
+        if (err instanceof ApiRequestError && err.status >= 400 && err.status < 500) {
+          setImportError(getErrorMessage(err) || t("workflows.importFailed", "Import failed"));
+        } else {
+          addToast(getErrorMessage(err) || t("workflows.importFailed", "Import failed"), "error");
+        }
+      } finally {
+        setImporting(false);
+      }
+    },
+    [projectId, loadWorkflows, addToast, t],
+  );
 
   // Load the active workflow graph into the canvas.
   useEffect(() => {
@@ -1151,6 +1225,43 @@ function InnerEditor({
             >
               <Plus size={14} /> {t("workflows.newWorkflow", "New workflow")}
             </button>
+            {/* U5/R10: keyboard-accessible import affordance triggering a hidden
+                file input; validation failures render in the persistent inline
+                region below (role="alert"), not a toast. */}
+            <button
+              type="button"
+              className="wf-editor-import"
+              data-testid="wf-import"
+              disabled={importing}
+              onClick={() => importInputRef.current?.click()}
+              title={t("workflows.importTooltip", "Import a workflow from a JSON file")}
+            >
+              {importing ? <Loader2 size={14} className="wf-spin" /> : <Upload size={14} />}{" "}
+              {t("workflows.import", "Import")}
+            </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".json"
+              className="wf-editor-import-input"
+              data-testid="wf-import-input"
+              style={{ display: "none" }}
+              onChange={handleImportFile}
+            />
+            {importError && (
+              <div className="wf-editor-import-error" role="alert" data-testid="wf-import-error">
+                {importError}
+              </div>
+            )}
+            {importWarnings.length > 0 && (
+              <div className="wf-editor-import-warnings" data-testid="wf-import-warnings">
+                {importWarnings.map((w, i) => (
+                  <p key={i} className="wf-editor-import-warning">
+                    {w}
+                  </p>
+                ))}
+              </div>
+            )}
             {loading ? (
               <div className="wf-editor-empty">
                 <Loader2 size={16} className="wf-spin" /> Loading…
@@ -1265,6 +1376,17 @@ function InnerEditor({
                     <span className="wf-editor-readonly-note">
                       {t("workflows.readOnlyBuiltin", "Read-only built-in workflow")}
                     </span>
+                    <button
+                      className="wf-editor-action"
+                      data-testid="wf-export"
+                      onClick={handleExport}
+                      title={t(
+                        "workflows.exportTooltip",
+                        "Download as JSON — contains your full prompt and command text",
+                      )}
+                    >
+                      <Download size={13} /> {t("workflows.export", "Export")}
+                    </button>
                     <button className="wf-editor-save wf-editor-duplicate-primary" onClick={handleDuplicate}>
                       <Plus size={13} /> {t("workflows.duplicateToCustomize", "Duplicate to customize")}
                     </button>
@@ -1289,6 +1411,22 @@ function InnerEditor({
                         data-testid="wf-auto-layout"
                       >
                         <LayoutGrid size={13} /> {t("workflowNodes.autoLayout", "Auto-layout")}
+                      </button>
+                      <button
+                        className="wf-editor-action"
+                        data-testid="wf-export"
+                        onClick={handleExport}
+                        disabled={isDirty}
+                        title={
+                          isDirty
+                            ? t("workflows.exportDirtyTooltip", "Save before exporting")
+                            : t(
+                                "workflows.exportTooltip",
+                                "Download as JSON — contains your full prompt and command text",
+                              )
+                        }
+                      >
+                        <Download size={13} /> {t("workflows.export", "Export")}
                       </button>
                       <button className="wf-editor-delete" onClick={handleDeleteWorkflow}>
                         <Trash2 size={13} /> {t("common.delete", "Delete")}

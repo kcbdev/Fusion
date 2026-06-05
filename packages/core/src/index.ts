@@ -453,6 +453,7 @@ export {
   toJson,
   toJsonNullable,
   fromJson,
+  SCHEMA_VERSION,
 } from "./db.js";
 export {
   ProjectIdentityConflictError,

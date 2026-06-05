@@ -10,6 +10,16 @@ vi.mock("../../api", () => ({
   updateWorkflow: vi.fn(),
   deleteWorkflow: vi.fn(),
   compileWorkflow: vi.fn(),
+  exportWorkflow: vi.fn(),
+  importWorkflow: vi.fn(),
+  ApiRequestError: class ApiRequestError extends Error {
+    status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.name = "ApiRequestError";
+      this.status = status;
+    }
+  },
   migrateLegacyWorkflowSteps: vi.fn(),
   fetchTraits: vi.fn(),
   fetchStepParsers: vi.fn(),
@@ -19,7 +29,7 @@ vi.mock("../../api", () => ({
 }));
 
 import { fireEvent } from "@testing-library/react";
-import { fetchWorkflows, fetchTraits, fetchStepParsers, updateWorkflow, compileWorkflow, createWorkflow, deleteWorkflow, fetchModels, migrateLegacyWorkflowSteps } from "../../api";
+import { fetchWorkflows, fetchTraits, fetchStepParsers, updateWorkflow, compileWorkflow, createWorkflow, deleteWorkflow, fetchModels, migrateLegacyWorkflowSteps, exportWorkflow, importWorkflow, ApiRequestError } from "../../api";
 import type { TraitCatalogEntry } from "../../api";
 import { WorkflowNodeEditor } from "../WorkflowNodeEditor";
 import { ConfirmDialogProvider } from "../../hooks/useConfirm";
@@ -1129,5 +1139,130 @@ describe("WorkflowNodeEditor — U2 legacy-step migration notice", () => {
     render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} projectId="p1" />);
     await screen.findByTestId("wf-new-workflow");
     expect(screen.queryByTestId("wf-migration-notice")).not.toBeInTheDocument();
+  });
+});
+
+// ── U5: import/export ───────────────────────────────────────────────────────
+
+describe("WorkflowNodeEditor — U5 import/export", () => {
+  beforeEach(() => {
+    vi.mocked(fetchTraits).mockResolvedValue(TRAIT_CATALOG);
+    vi.mocked(fetchStepParsers).mockResolvedValue(["step-headings", "json-steps"]);
+    vi.mocked(fetchModels).mockResolvedValue({ models: [] });
+    vi.mocked(migrateLegacyWorkflowSteps).mockResolvedValue({ migrated: 0, skipped: 0 });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it("export button is enabled on a clean canvas and disabled after an edit", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    const exportBtn = await screen.findByTestId("wf-export");
+    // Clean canvas → enabled.
+    await waitFor(() => expect(exportBtn).not.toBeDisabled());
+
+    // Make an edit: rename the workflow (click the name, type a new value).
+    fireEvent.click(screen.getByTestId("wf-workflow-name"));
+    const nameInput = await screen.findByTestId("wf-workflow-name-input");
+    fireEvent.change(nameInput, { target: { value: "Custom edited" } });
+
+    await waitFor(() => expect(screen.getByTestId("wf-export")).toBeDisabled());
+  });
+
+  it("export click downloads via exportWorkflow", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
+    vi.mocked(exportWorkflow).mockResolvedValue({
+      fusionWorkflowExport: 1,
+      schemaVersion: 109,
+      kind: "workflow",
+      name: "Custom",
+      description: "",
+      ir: v2Def().ir,
+      layout: {},
+    });
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    const exportBtn = await screen.findByTestId("wf-export");
+    await waitFor(() => expect(exportBtn).not.toBeDisabled());
+    fireEvent.click(exportBtn);
+    await waitFor(() => expect(exportWorkflow).toHaveBeenCalledWith("WF-002", undefined));
+  });
+
+  it("import success refreshes the list, activates the imported workflow, and toasts", async () => {
+    const addToast = vi.fn();
+    vi.mocked(fetchWorkflows).mockResolvedValue([]);
+    const imported: WorkflowDefinition = { ...v2Def(), id: "WF-IMP", name: "Brought in" };
+    vi.mocked(importWorkflow).mockResolvedValue({
+      workflow: imported,
+      strippedApprovalFlags: false,
+      warnings: [],
+    });
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={addToast} />);
+    await screen.findByTestId("wf-import");
+    // After the import resolves, loadWorkflows re-runs; return the imported one.
+    vi.mocked(fetchWorkflows).mockResolvedValue([imported]);
+
+    const fileInput = screen.getByTestId("wf-import-input") as HTMLInputElement;
+    const file = new File([JSON.stringify({ fusionWorkflowExport: 1 })], "wf.json", { type: "application/json" });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    await waitFor(() => expect(importWorkflow).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(addToast).toHaveBeenCalledWith(expect.stringMatching(/Brought in/), "success"),
+    );
+    // Imported workflow is now active in the sidebar (its list item carries the
+    // active class) and rendered into the canvas — appearing more than once.
+    await waitFor(() => expect(screen.getAllByText("Brought in").length).toBeGreaterThan(0));
+    const activeItem = document.querySelector(".wf-editor-list-item.active");
+    expect(activeItem).toHaveTextContent("Brought in");
+  });
+
+  it("import 4xx renders the persistent inline error region; list unchanged", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([]);
+    vi.mocked(importWorkflow).mockRejectedValue(
+      new ApiRequestError("Not a Fusion workflow export file", 400),
+    );
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    await screen.findByTestId("wf-import");
+
+    const fileInput = screen.getByTestId("wf-import-input") as HTMLInputElement;
+    const file = new File([JSON.stringify({ nope: true })], "wf.json", { type: "application/json" });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    const errorRegion = await screen.findByTestId("wf-import-error");
+    expect(errorRegion).toHaveTextContent("Not a Fusion workflow export file");
+    expect(errorRegion).toHaveAttribute("role", "alert");
+    // List unchanged: still no workflows.
+    expect(screen.getByText(/No workflows yet/i)).toBeInTheDocument();
+  });
+
+  it("import strip notice toast fires when approval flags were removed", async () => {
+    const addToast = vi.fn();
+    const imported: WorkflowDefinition = { ...v2Def(), id: "WF-IMP2", name: "Stripped in" };
+    vi.mocked(fetchWorkflows).mockResolvedValue([]);
+    vi.mocked(importWorkflow).mockResolvedValue({
+      workflow: imported,
+      strippedApprovalFlags: true,
+      warnings: [],
+    });
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={addToast} />);
+    await screen.findByTestId("wf-import");
+    vi.mocked(fetchWorkflows).mockResolvedValue([imported]);
+
+    const fileInput = screen.getByTestId("wf-import-input") as HTMLInputElement;
+    const file = new File([JSON.stringify({ fusionWorkflowExport: 1 })], "wf.json", { type: "application/json" });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    await waitFor(() =>
+      expect(addToast).toHaveBeenCalledWith(
+        expect.stringMatching(/Auto-approval flags were removed/),
+        "warning",
+      ),
+    );
   });
 });
