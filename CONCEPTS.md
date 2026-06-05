@@ -13,6 +13,9 @@ User-level settings persisted server-side that apply across all Surfaces and all
 ### Three-Tier Setting
 The named persistence pattern for a user preference on the dashboard: a device-local cache for instant reads, a write-through to Global Settings so other Surfaces see it, and a hydrate-on-mount from the server when no local value exists. A local or in-flight user choice always wins over server hydration, and changes propagate to other open tabs.
 
+### Translation Placeholder
+An empty-string value for a catalog key in a non-English locale, marking "not yet translated." Placeholders are intentionally backfilled when keys are added; at runtime they are treated as missing (never rendered), falling back through the locale chain to English. A non-empty value — even an English one left in a non-en catalog — is rendered as-is.
+
 ### Supported Locale
 A language tag in the closed set Fusion ships translations for. Any external tag (browser, environment, flag) is normalized into this set or rejected — never passed through raw. Chinese tags route by script and region so Traditional-script users are never silently served Simplified, and the two Chinese variants never collapse into a generic base tag.
 
