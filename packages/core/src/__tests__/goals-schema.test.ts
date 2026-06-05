@@ -90,7 +90,7 @@ describe("goals schema", () => {
     expect(table?.name).toBe("goals");
   });
 
-  it("reports schema version 101", () => {
-    expect(db.getSchemaVersion()).toBe(108);
+  it("reports schema version 109", () => {
+    expect(db.getSchemaVersion()).toBe(109);
   });
 });
