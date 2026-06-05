@@ -11,8 +11,8 @@ import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/p
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, relative, resolve } from "node:path";
-import type { AgentStore, AgentState, AgentCapability, AgentUpdateInput, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore } from "@fusion/core";
-import { listTraits, isBuiltinWorkflowId, WorkflowSettingRejectionError, resolveEffectiveSettingsById } from "@fusion/core";
+import type { AgentStore, AgentState, AgentCapability, AgentUpdateInput, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore, WorkflowSettingDefinition } from "@fusion/core";
+import { listTraits, isBuiltinWorkflowId, WorkflowSettingRejectionError, resolveEffectiveSettingsById, resolveWorkflowIrById, findOrphanedSettingValues, BUILTIN_WORKFLOW_SETTINGS } from "@fusion/core";
 import { promoteHeldTask } from "./hold-release.js";
 import { DASHBOARD_USER_ID, canAgentTakeImplementationTaskForExplicitRouting, dailyMemoryPath, ensureOpenClawMemoryFiles, extractAgentProvisioningRequest, formatRoleMismatchReason, getMemoryBackendCapabilities, getProjectMemory, isEphemeralAgent, memoryLongTermPath, normalizeMessageParticipant, reconcileDeterministicDuplicate, resolveAgentProvisioningPolicy, resolveMemoryBackend, resolveResearchSettings, resolveTaskGithubTracking, resolveTitleSummarizerSettingsModel, runDeterministicDuplicateGuard, scheduleQmdProjectMemoryRefresh, searchProjectMemory, shouldSkipBackgroundQmdRefresh, summarizeTitle } from "@fusion/core";
 import { ResearchOrchestrator } from "./research-orchestrator.js";
@@ -1407,6 +1407,23 @@ export function createWorkflowDeleteTool(store: TaskStore): ToolDefinition {
  * values (post drop-on-orphan), so an agent sees what it wrote and what the engine
  * will actually consume.
  */
+/**
+ * Resolve the setting DECLARATIONS for a workflow. Mirrors the store's private
+ * `resolveWorkflowSettingDeclarations` (and the dashboard route helper of the
+ * same shape): the resolved IR's `settings` when present, else the built-in
+ * catalog for built-in ids. Used to compute the `orphaned` value entries.
+ */
+async function resolveWorkflowSettingDeclarationsForTool(
+  store: TaskStore,
+  workflowId: string,
+): Promise<WorkflowSettingDefinition[] | undefined> {
+  const ir = await resolveWorkflowIrById(store, workflowId);
+  const declared = ir.version === "v2" ? ir.settings : undefined;
+  if (declared && declared.length > 0) return declared;
+  if (isBuiltinWorkflowId(workflowId)) return BUILTIN_WORKFLOW_SETTINGS;
+  return declared;
+}
+
 export function createWorkflowSettingsTool(store: TaskStore): ToolDefinition {
   return {
     name: "fn_workflow_settings",
@@ -1447,12 +1464,14 @@ export function createWorkflowSettingsTool(store: TaskStore): ToolDefinition {
         try {
           const stored = store.getWorkflowSettingValues(workflowId, projectId);
           const effective = await resolveEffectiveSettingsById(store, workflowId, projectId);
+          const declarations = await resolveWorkflowSettingDeclarationsForTool(store, workflowId);
+          const orphaned = findOrphanedSettingValues(declarations, stored);
           return {
             content: [{
               type: "text" as const,
-              text: JSON.stringify({ workflowId, stored, effective }, null, 2),
+              text: JSON.stringify({ workflowId, stored, effective, orphaned }, null, 2),
             }],
-            details: { workflowId, stored, effective },
+            details: { workflowId, stored, effective, orphaned },
           };
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (err: any) {
@@ -1475,12 +1494,15 @@ export function createWorkflowSettingsTool(store: TaskStore): ToolDefinition {
       }
       try {
         const next = await store.updateWorkflowSettingValues(workflowId, projectId, values);
+        const effective = await resolveEffectiveSettingsById(store, workflowId, projectId);
+        const declarations = await resolveWorkflowSettingDeclarationsForTool(store, workflowId);
+        const orphaned = findOrphanedSettingValues(declarations, next);
         return {
           content: [{
             type: "text" as const,
             text: `Updated workflow settings for ${workflowId}: ${JSON.stringify(next)}`,
           }],
-          details: { workflowId, stored: next },
+          details: { workflowId, stored: next, effective, orphaned },
         };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {

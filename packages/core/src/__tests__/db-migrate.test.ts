@@ -1045,6 +1045,11 @@ describe("schema migration", () => {
     const valuesColumn = columns.find((column) => column.name === "values");
     expect(valuesColumn?.dflt_value).toBe("'{}'");
 
+    // The per-projectId lookup index is created alongside the table so migrated
+    // DBs match the fresh schema.
+    const indexes = db.prepare("PRAGMA index_list(workflow_settings)").all() as Array<{ name: string }>;
+    expect(indexes.some((index) => index.name === "idx_workflow_settings_project")).toBe(true);
+
     expect(db.getSchemaVersion()).toBe(109);
     db.close();
   });

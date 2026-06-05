@@ -16,17 +16,26 @@
  * shapes (`form.<key>` and `<key>:`) and explicitly allow descriptor mentions.
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { MOVED_SETTINGS_KEYS } from "@fusion/core";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const componentsDir = join(here, "..", "components");
+const sectionsDir = join(componentsDir, "settings", "sections");
 
-/** Files that compose the modal's editable surface (shell + Project sections). */
+/**
+ * Files that compose the modal's editable surface: the shell plus every
+ * extracted section component. The sections are discovered by walking the
+ * directory (not a hardcoded list) so a newly added section is swept
+ * automatically and a moved-key binding cannot slip in unnoticed.
+ */
 const SURFACE_FILES = [
-  "SettingsModal.tsx",
+  { dir: componentsDir, file: "SettingsModal.tsx" },
+  ...readdirSync(sectionsDir)
+    .filter((name) => name.endsWith(".tsx"))
+    .map((file) => ({ dir: sectionsDir, file })),
 ];
 
 /**
@@ -41,8 +50,8 @@ const PRESET_NESTED_KEYS = new Set([
 ]);
 
 describe("SettingsModal moved-key removal sweep", () => {
-  for (const file of SURFACE_FILES) {
-    const source = readFileSync(join(componentsDir, file), "utf8");
+  for (const { dir, file } of SURFACE_FILES) {
+    const source = readFileSync(join(dir, file), "utf8");
 
     for (const key of MOVED_SETTINGS_KEYS) {
       it(`${file} does not read form.${key}`, () => {

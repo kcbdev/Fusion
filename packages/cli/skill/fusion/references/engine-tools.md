@@ -21,7 +21,7 @@ These tools are **not** part of the user-invokable extension surface. They are i
 | `fn_workflow_create` | executor | Create a custom workflow definition from a graph IR (validated server-side). v2 IR supports step-inversion constructs: `parse-steps`, `foreach` (mode/isolation/concurrency/maxReworkCycles), `step-execute`, `step-review`, `code` nodes, `rework` edges, plus `artifacts`, custom `fields`, and typed `settings` declarations | `name` (string), `description?` (string), `ir` (object), `layout?` (object) |
 | `fn_workflow_update` | executor | Update a custom workflow definition's name/description/ir/layout (built-ins cannot be edited; same step-inversion IR constructs as create; editing `fields` orphans rather than destroys existing task values; editing `settings` declarations drops orphaned setting values on resolution) | `workflow_id` (string), `name?` (string), `description?` (string), `ir?` (object), `layout?` (object), `rehome_to?` (string) |
 | `fn_workflow_delete` | executor | Delete a custom workflow definition (built-ins cannot be deleted); selecting tasks are re-homed to the default workflow's entry column | `workflow_id` (string) |
-| `fn_workflow_settings` | executor | Read/write a workflow's per-`(workflow, project)` setting **values** (`get` returns `{stored, effective}`; `set` writes `values`, with `null` clearing an override). Validated against the named workflow's declared settings; built-in **values** are writable though built-in **declarations** are not; invalid values return a typed rejection list and persist nothing | `action` (`get` \| `set`), `workflow_id` (string), `values?` (object keyed by setting id) |
+| `fn_workflow_settings` | executor | Read/write a workflow's per-`(workflow, project)` setting **values** (`get` returns `{stored, effective, orphaned}`; `set` writes `values` and returns `{stored, effective, orphaned}`, with `null` clearing an override — including any stored value for an orphaned key). Validated against the named workflow's declared settings; built-in **values** are writable though built-in **declarations** are not; invalid values return a typed rejection list and persist nothing | `action` (`get` \| `set`), `workflow_id` (string), `values?` (object keyed by setting id) |
 | `fn_task_promote` | executor | Promote a held task out of a manual-release hold column (defaults to the current task) | `task_id?` (string) |
 | `fn_trait_list` | executor | List the registered column trait catalog (built-in and plugin traits) | none |
 | `fn_memory_search` | triage, executor, heartbeat | Search project memory plus per-agent layered memory snippets | `query` (string), `limit?` (number) |
@@ -124,12 +124,15 @@ An invalid value (e.g. an enum violation) is rejected with a typed list and pers
 // [{ "code": "enum-violation", "settingId": "reviewHandoffPolicy", "message": "..." }]
 ```
 
-Read values — `effective` is what the engine actually consumes (declaration defaults filled in, orphaned values dropped); `stored` is the raw override map:
+Read values — `effective` is what the engine actually consumes (declaration defaults filled in, orphaned values dropped); `stored` is the raw override map; `orphaned` lists stored entries with no current declaration (or a value that no longer validates). `set` returns the same `{stored, effective, orphaned}` shape:
 
 ```jsonc
 // fn_workflow_settings
 { "action": "get", "workflow_id": "builtin:coding" }
 // → { "workflowId": "builtin:coding",
 //     "stored":    { "workflowStepTimeoutMs": 600000 },
-//     "effective": { "workflowStepTimeoutMs": 600000, "reviewHandoffPolicy": "disabled", ... } }
+//     "effective": { "workflowStepTimeoutMs": 600000, "reviewHandoffPolicy": "disabled", ... },
+//     "orphaned":  [] }
 ```
+
+Patching a key to `null` clears any stored value for it — including a value left behind under an orphaned key — so `set` doubles as the way to drop orphans. To see the full declaration catalog (every setting id, type, and default) call `fn_workflow_get` on `builtin:coding`, whose IR `settings` array is the canonical catalog.

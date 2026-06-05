@@ -14,7 +14,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { isGlobalSettingsKey, isProjectSettingsKey } from "@fusion/core";
-import { splitSettingsSave } from "../components/settings/save-split";
+import { splitSettingsSave, MODEL_LANE_KEYS } from "../components/settings/save-split";
 
 // Sanity-anchor the scope of the concrete keys this test relies on, so the
 // assertions below remain meaningful if core's catalog ever shifts.
@@ -24,6 +24,16 @@ describe("scope anchors", () => {
     expect(isGlobalSettingsKey("ntfyTopic")).toBe(true);
     expect(isProjectSettingsKey("maxConcurrent")).toBe(true);
     expect(isProjectSettingsKey("integrationBranch")).toBe(true);
+  });
+
+  it("every MODEL_LANE_KEYS entry is a project settings key", () => {
+    // MODEL_LANE_KEYS only gates project-branch behavior, which is reached only
+    // for keys that pass isProjectSettingsKey. Any entry that fails this check is
+    // dead (e.g. a per-phase model lane that moved to workflow settings).
+    expect(MODEL_LANE_KEYS.length).toBeGreaterThan(0);
+    for (const key of MODEL_LANE_KEYS) {
+      expect(isProjectSettingsKey(key)).toBe(true);
+    }
   });
 });
 

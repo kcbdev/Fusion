@@ -550,7 +550,7 @@
   background: var(--text-muted);
 }
 .settings-content > * {
-  animation: settingsFadeIn var(--transition-normal);
+  animation: settingsFadeIn var(--duration-normal) ease;
 }
 @keyframes settingsFadeIn {
   from {

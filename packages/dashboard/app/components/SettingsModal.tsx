@@ -423,6 +423,9 @@ export function SettingsModal({
     webhookEvents: undefined,
   });
   const [loading, setLoading] = useState(true);
+  // Guards the Save action against double-submit (rapid clicks / Enter) while the
+  // parallel global+project writes are in flight.
+  const [isSaving, setIsSaving] = useState(false);
   // Track initial values to detect explicit clears for null-as-delete semantics
   const [initialValues, setInitialValues] = useState<Settings | null>(null);
   // Track scoped settings for inheritance detection (fetched alongside merged settings)
@@ -1605,6 +1608,7 @@ export function SettingsModal({
         const parts: string[] = [];
         if (result.globalCount > 0) parts.push(`${result.globalCount} global`);
         if (result.projectCount > 0) parts.push(`${result.projectCount} project`);
+        if (result.workflowSettingsCount > 0) parts.push(`${result.workflowSettingsCount} workflow setting value(s)`);
         addToast(`Imported ${parts.join(", ")} setting(s)`, "success");
         setImportDialogOpen(false);
         setImportPreview(null);
@@ -1916,6 +1920,7 @@ export function SettingsModal({
   }, []);
 
   const handleSave = useCallback(async () => {
+    if (isSaving) return;
     if (prefixError || presetDraft) return;
 
     const limits = form.researchSettings?.limits;
@@ -1937,6 +1942,7 @@ export function SettingsModal({
     }
     setResearchLimitError(null);
 
+    setIsSaving(true);
     try {
       const payload = {
         ...form,
@@ -1982,8 +1988,10 @@ export function SettingsModal({
       onClose();
     } catch (err) {
       addToast(getErrorMessage(err), "error");
+    } finally {
+      setIsSaving(false);
     }
-  }, [form, globalMaxConcurrent, prefixError, presetDraft, initialValues, initialScopedValues, onClose, addToast, projectId, activeSection]);
+  }, [form, globalMaxConcurrent, prefixError, presetDraft, initialValues, initialScopedValues, onClose, addToast, projectId, activeSection, isSaving, t]);
 
   const handleSaveMemory = useCallback(async () => {
     try {
@@ -2709,7 +2717,7 @@ export function SettingsModal({
             <button className="btn btn-sm" onClick={onClose}>
               {t("settings.actions.cancel", "Cancel")}
             </button>
-            <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={loading}>
+            <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={loading || isSaving}>
               {t("settings.actions.save", "Save")}
             </button>
           </div>

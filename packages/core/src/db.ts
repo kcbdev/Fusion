@@ -625,6 +625,7 @@ CREATE TABLE IF NOT EXISTS workflow_settings (
   updatedAt TEXT NOT NULL,
   PRIMARY KEY (workflowId, projectId)
 );
+CREATE INDEX IF NOT EXISTS idx_workflow_settings_project ON workflow_settings(projectId);
 
 -- Task documents (key-value store per task with revision tracking)
 CREATE TABLE IF NOT EXISTS task_documents (
@@ -4317,6 +4318,7 @@ export class Database {
             updatedAt TEXT NOT NULL,
             PRIMARY KEY (workflowId, projectId)
           );
+          CREATE INDEX IF NOT EXISTS idx_workflow_settings_project ON workflow_settings(projectId);
         `);
       });
     }

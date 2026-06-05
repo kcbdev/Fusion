@@ -25,6 +25,9 @@ import {
   MOVED_SETTINGS_KEYS,
   stripMovedSettingsKeys,
 } from "./moved-settings.js";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("settings-export");
 
 /** Current export format version emitted by {@link exportSettings}. */
 export const SETTINGS_EXPORT_VERSION = 2;
@@ -279,18 +282,18 @@ async function applyWorkflowSettingsSection(
         const rejectedIds = extractRejectedSettingIds(err);
         if (rejectedIds.length === 0) {
           // Unknown error (not a value-rejection) — log and skip this workflow.
-          console.warn(
-            `[settings-import] skipped workflow setting values for '${workflowId}': ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          );
+          log.warn("[settings-import] skipped workflow setting values", {
+            workflowId,
+            error: err instanceof Error ? err.message : String(err),
+          });
           break;
         }
         for (const id of rejectedIds) {
           delete patch[id];
-          console.warn(
-            `[settings-import] dropped invalid workflow setting value '${id}' for workflow '${workflowId}'`,
-          );
+          log.warn("[settings-import] dropped invalid workflow setting value", {
+            workflowId,
+            settingId: id,
+          });
         }
       }
     }

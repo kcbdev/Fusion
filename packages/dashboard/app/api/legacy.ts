@@ -6275,6 +6275,7 @@ export interface SettingsImportResponse {
   success: boolean;
   globalCount: number;
   projectCount: number;
+  workflowSettingsCount: number;
   error?: string;
 }
 

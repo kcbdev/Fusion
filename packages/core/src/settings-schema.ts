@@ -13,8 +13,14 @@ type CompleteSettings<T> = { [K in keyof Required<T>]: Required<T>[K] | undefine
  * on the `ProjectSettings` type for the engine's flat `settings.<key>` reads and
  * the U3 effective-settings merge. `DEFAULT_PROJECT_SETTINGS` is therefore
  * type-checked against `ProjectSettings` MINUS these keys — the type-vs-schema
- * split documented in `moved-settings.ts`. This union MUST stay in lockstep with
- * `MOVED_SETTINGS_KEYS` (the parity/consistency tests enforce coherence).
+ * split documented in `moved-settings.ts`.
+ *
+ * This union is NOT compile-time-enforced against `MOVED_SETTINGS_KEYS`.
+ * Enforcement lives in `src/__tests__/settings-consistency.test.ts` (every key
+ * must belong to exactly one regime). A STALE entry here only loosens the `Omit`
+ * type — at worst it lets `DEFAULT_PROJECT_SETTINGS` drop a key it should keep;
+ * it can never re-add a key to the schema object. A MISSING entry surfaces as a
+ * type error on `DEFAULT_PROJECT_SETTINGS` if that key still has a default.
  */
 type MovedProjectSettingsKey =
   | "workflowStepTimeoutMs"

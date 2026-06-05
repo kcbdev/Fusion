@@ -254,6 +254,15 @@ function InnerEditor({
     }
   }, [initialPanel, activeWorkflow]);
 
+  // Reset the one-shot scroll latch whenever the deep-link target changes (e.g.
+  // the panel is closed and re-opened with `?panel=settings`), so a fresh open
+  // scrolls the settings panel into view again instead of staying latched.
+  useEffect(() => {
+    return () => {
+      didScrollToSettings.current = false;
+    };
+  }, [initialPanel]);
+
   // Server-reported node error (e.g. seam-in-branch) attributed to a node id.
   const [serverNodeError, setServerNodeError] = useState<{ nodeId: string; message: string } | null>(null);
 

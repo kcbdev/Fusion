@@ -771,7 +771,7 @@ function ValuesTab({
                     <button
                       className="wf-settings-orphan-delete"
                       aria-label={t("workflowSettings.deleteOrphan", "Delete orphaned value")}
-                      disabled={staleContext}
+                      disabled={staleContext || saving}
                       onClick={() => deleteOrphan(o.id)}
                     >
                       <Trash2 size={12} />
@@ -848,6 +848,7 @@ export function WorkflowSettingsPanel({
         <DefinitionsTab settings={settings} onChange={onChange} readOnly={readOnly} addToast={addToast} />
       ) : (
         <ValuesTab
+          key={workflowId}
           workflowId={workflowId}
           settings={settings}
           boundProjectId={boundProjectId}

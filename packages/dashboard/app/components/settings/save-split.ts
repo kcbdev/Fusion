@@ -25,16 +25,18 @@
 import { isGlobalSettingsKey, isProjectSettingsKey } from "@fusion/core";
 import type { GlobalSettings, Settings } from "@fusion/core";
 
-/** Model-lane keys whose project overrides track inheritance explicitly. */
+/**
+ * Project-scoped model-override keys whose overrides track inheritance
+ * explicitly (changed-only writes with null-as-delete in the project branch).
+ *
+ * The per-phase model lanes (planning/validator/execution/titleSummarizer
+ * providers, models, and fallbacks) MOVED to workflow settings (U4) and are no
+ * longer project keys, so `isProjectSettingsKey` filters them out before the
+ * project branch is reached — listing them here would be dead. Only the two
+ * project-level default overrides remain.
+ */
 export const MODEL_LANE_KEYS = [
-  "planningProvider", "planningModelId",
-  "validatorProvider", "validatorModelId",
-  "executionProvider", "executionModelId",
-  "titleSummarizerProvider", "titleSummarizerModelId",
   "defaultProviderOverride", "defaultModelIdOverride",
-  "planningFallbackProvider", "planningFallbackModelId",
-  "validatorFallbackProvider", "validatorFallbackModelId",
-  "titleSummarizerFallbackProvider", "titleSummarizerFallbackModelId",
 ] as const;
 
 const MODEL_LANE_KEY_SET = new Set<string>(MODEL_LANE_KEYS);
