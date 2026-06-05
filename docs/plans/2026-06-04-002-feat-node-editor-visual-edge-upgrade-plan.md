@@ -1,7 +1,7 @@
 ---
 title: "feat: Node editor visual redesign + success/failure edge authoring"
 type: feat
-status: active
+status: completed
 date: 2026-06-04
 depth: standard
 origin: none (solo planning bootstrap)

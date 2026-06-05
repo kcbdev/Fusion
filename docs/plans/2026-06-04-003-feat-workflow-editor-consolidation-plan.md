@@ -1,7 +1,7 @@
 ---
 title: "feat: Workflow editor consolidation — primary entry, step migration, import/export, AI design"
 type: feat
-status: active
+status: completed
 date: 2026-06-04
 depth: deep
 origin: none (solo planning bootstrap)
