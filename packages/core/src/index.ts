@@ -1528,6 +1528,25 @@ export type {
 export { ChatStore } from "./chat-store.js";
 export type { ChatStoreEvents } from "./chat-store.js";
 export {
+  CLI_AGENT_STATES,
+  CLI_TERMINATION_REASONS,
+  CLI_SESSION_PURPOSES,
+  isCliAgentState,
+  isCliTerminationReason,
+  isCliSessionPurpose,
+} from "./cli-session-types.js";
+export type {
+  CliAgentState,
+  CliTerminationReason,
+  CliSessionPurpose,
+  CliAutonomyPosture,
+  CliSession,
+  CliSessionCreateInput,
+  CliSessionUpdateInput,
+} from "./cli-session-types.js";
+export { CliSessionStore } from "./cli-session-store.js";
+export type { CliSessionStoreEvents } from "./cli-session-store.js";
+export {
   choosePreferredStoredCredential,
   extractClaudeCliStoredCredential,
   extractCodexCliStoredCredential,

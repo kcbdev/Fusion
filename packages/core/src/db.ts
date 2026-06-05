@@ -149,7 +149,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 108;
+const SCHEMA_VERSION = 109;
 
 export { SCHEMA_VERSION };
 
@@ -1232,6 +1232,22 @@ export const MIGRATION_ONLY_TABLE_SCHEMAS: Record<string, Record<string, string>
     updatedAt: "TEXT NOT NULL",
     cliSessionFile: "TEXT",
     inFlightGeneration: "TEXT",
+  },
+  cli_sessions: {
+    id: "TEXT PRIMARY KEY",
+    taskId: "TEXT",
+    chatSessionId: "TEXT",
+    purpose: "TEXT NOT NULL",
+    projectId: "TEXT NOT NULL",
+    adapterId: "TEXT NOT NULL",
+    agentState: "TEXT NOT NULL DEFAULT 'starting'",
+    terminationReason: "TEXT",
+    nativeSessionId: "TEXT",
+    resumeAttempts: "INTEGER NOT NULL DEFAULT 0",
+    autonomyPosture: "TEXT",
+    worktreePath: "TEXT",
+    createdAt: "TEXT NOT NULL",
+    updatedAt: "TEXT NOT NULL",
   },
   chat_messages: {
     id: "TEXT PRIMARY KEY",
@@ -4288,6 +4304,43 @@ export class Database {
           CREATE INDEX IF NOT EXISTS idx_workflow_run_step_instances_task_run ON workflow_run_step_instances(taskId, runId);
         `);
         this.addColumnIfMissing("tasks", "customFields", "TEXT DEFAULT '{}'");
+      });
+    }
+
+    // Migration 109: Durable CLI agent session records (CLI Agent Executor U1).
+    // Adds cli_sessions — one row per long-lived CLI agent session (task
+    // execution, planning, validator, ce, or chat) — so a crashed/restarted
+    // Fusion instance can reason about, resume, or reap sessions from their
+    // persisted state (agentState + terminationReason + resumeAttempts +
+    // nativeSessionId). taskId/chatSessionId are the nullable owning-entity
+    // references; autonomyPosture is JSON. Additive-only, idempotent
+    // (table-exists guard); no backfill.
+    // agentState ∈ starting|ready|busy|waitingOnInput|done|dead|needsAttention.
+    // terminationReason ∈ completed|userExited|killed|crashed|authFailed|engineDeath.
+    // purpose ∈ execute|planning|validator|ce|chat.
+    if (version < 109) {
+      this.applyMigration(109, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS cli_sessions (
+            id TEXT PRIMARY KEY,
+            taskId TEXT,
+            chatSessionId TEXT,
+            purpose TEXT NOT NULL,
+            projectId TEXT NOT NULL,
+            adapterId TEXT NOT NULL,
+            agentState TEXT NOT NULL DEFAULT 'starting',
+            terminationReason TEXT,
+            nativeSessionId TEXT,
+            resumeAttempts INTEGER NOT NULL DEFAULT 0,
+            autonomyPosture TEXT,
+            worktreePath TEXT,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_cli_sessions_taskId ON cli_sessions(taskId);
+          CREATE INDEX IF NOT EXISTS idx_cli_sessions_chatSessionId ON cli_sessions(chatSessionId);
+          CREATE INDEX IF NOT EXISTS idx_cli_sessions_project_state ON cli_sessions(projectId, agentState);
+        `);
       });
     }
 
