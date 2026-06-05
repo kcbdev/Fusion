@@ -141,6 +141,10 @@ export function resolveColumnAgentBinding(
     const cfg = foreachNode.config as Partial<WorkflowForeachConfig> | undefined;
     const templateNodes = cfg?.template?.nodes ?? [];
     const templateNode = templateNodes.find((n) => n.id === parsed.templateNodeId);
+    // Disambiguation guard (PR #1432 review): a bogus prefix candidate can name a
+    // real foreach while its templateNodeId doesn't exist under it — skip it so a
+    // later exact parse isn't masked. A template with no nodes still inherits.
+    if (templateNodes.length > 0 && !templateNode) continue;
 
     // Template node's own column wins; otherwise inherit the foreach node's column.
     if (templateNode?.column !== undefined) {

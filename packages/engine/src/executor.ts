@@ -9,7 +9,7 @@ import { delimiter, isAbsolute, join, relative, resolve as resolvePath } from "n
 import { existsSync, realpathSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode } from "@fusion/core";
-import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId } from "@fusion/core";
+import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, isWorkflowColumnsEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId } from "@fusion/core";
 import type { TaskStep, WorkflowIr, WorkflowFieldDefinition, WorkflowColumnAgent, EffectiveAgentInput } from "@fusion/core";
 import {
   buildWorkflowObservationFromTask,
@@ -3295,6 +3295,11 @@ export class TaskExecutor {
    *  `resumeTaskForAgent` second pass to re-dispatch column-bound tasks the
    *  `assignedAgentId` filter misses. Best-effort: an unresolvable IR yields false. */
   private async taskEffectiveAgentMatches(task: Task, agentId: string): Promise<boolean> {
+    // R10 kill-switch (PR #1432 review): this path resolves the IR directly (it
+    // does not go through the per-run resolver map), so it needs its own flag
+    // guard — resume pass 2 must be inert when workflowColumns is off.
+    const settings = await this.store.getSettings();
+    if (!isWorkflowColumnsEnabled(settings)) return false;
     const ir = await resolveWorkflowIrForTask(this.store, task.id);
     if (!ir || ir.version !== "v2") return false;
 
@@ -3597,11 +3602,19 @@ export class TaskExecutor {
       // node callback. Resolve the IR ONCE per run (never an uncached per-node
       // fetch — mirrors the hold-release.ts irCache posture); best-effort, so a
       // resolution failure simply yields no bindings (R8 graceful degradation).
+      // R10 kill-switch (PR #1432 review): column agents require BOTH flags. The
+      // graph executor gate above covers workflowGraphExecutor; this guard makes
+      // disabling workflowColumns alone actually render bindings inert at
+      // execution time (the documented rollback) — no resolver installed means
+      // every downstream consumer (custom nodes, seams, watcher) sees no binding.
+      const columnAgentsEnabled = isWorkflowColumnsEnabled(settings);
       let columnAgentIr: WorkflowIr | undefined;
-      try {
-        columnAgentIr = await resolveWorkflowIrForTask(this.store, task.id);
-      } catch {
-        columnAgentIr = undefined;
+      if (columnAgentsEnabled) {
+        try {
+          columnAgentIr = await resolveWorkflowIrForTask(this.store, task.id);
+        } catch {
+          columnAgentIr = undefined;
+        }
       }
       const resolveBindingForNode = (nodeId: string): WorkflowColumnAgent | undefined =>
         columnAgentIr ? resolveColumnAgentBinding(columnAgentIr, nodeId) : undefined;
@@ -3609,7 +3622,9 @@ export class TaskExecutor {
       // execute / step-execute seams (which key off a governing node id stamped
       // into context), so the coding/step session runs as the column agent under
       // the SAME binding lookup the custom-node seam uses (KTD-2 single resolver).
-      this.graphColumnAgentResolver.set(task.id, resolveBindingForNode);
+      if (columnAgentsEnabled) {
+        this.graphColumnAgentResolver.set(task.id, resolveBindingForNode);
+      }
 
       const runner = new WorkflowGraphTaskRunner({
         store: this.store,

@@ -586,6 +586,13 @@ function InnerEditor({
   // Lazy-loaded executor resources
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
+  // The agent fetches are project-scoped, but this cache survives project
+  // switches — both load paths short-circuit on agents.length > 0, which would
+  // keep showing (and let the editor bind) the PREVIOUS project's registry.
+  // Reset on project change so the next consumer refetches (PR #1432 review).
+  useEffect(() => {
+    setAgents([]);
+  }, [projectId]);
   const [skills, setSkills] = useState<DiscoveredSkill[]>([]);
 
   const currentExecutor = (selectedNode?.data.config?.executor as ExecutorKind | undefined) ?? "model";

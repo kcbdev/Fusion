@@ -228,7 +228,9 @@ describe("column-agent principal alignment (plan U5)", () => {
       store.getSettings.mockResolvedValue({
         globalPause: false,
         enginePaused: false,
-        experimentalFeatures: { workflowGraphExecutor: true },
+        // R10: column agents require BOTH flags — pass 2 is gated on
+        // workflowColumns too (kill-switch, PR #1432 review).
+        experimentalFeatures: { workflowGraphExecutor: true, workflowColumns: true },
       } as any);
       store.listTasks.mockResolvedValue([task] as any);
       store.getTaskWorkflowSelection = vi.fn().mockReturnValue({ workflowId: "wf-1", stepIds: [] });
@@ -288,6 +290,21 @@ describe("column-agent principal alignment (plan U5)", () => {
       expect(matchSpy.mock.calls[0][1]).toBe("agent-X");
       await expect(matchSpy.mock.results[0].value).resolves.toBe(false);
       expect(executeSpy).not.toHaveBeenCalled();
+    });
+
+    it("kill-switch: workflowColumns off → pass 2 is inert even with a live override binding (R10)", async () => {
+      // The documented rollback is disabling workflowColumns alone; pass 2
+      // resolves the IR directly (not via the per-run resolver map), so it
+      // carries its own flag guard (PR #1432 review).
+      const task = singleSessionTask({ assignedAgentId: "agent-Y" });
+      const store = resumeStore(task, irWithExecuteSeamColumn(OVERRIDE_COL));
+      store.getSettings.mockResolvedValue({
+        globalPause: false,
+        enginePaused: false,
+        experimentalFeatures: { workflowGraphExecutor: true, workflowColumns: false },
+      } as any);
+      const { executor } = makeExecutor(store, { "agent-X": makeColumnAgent() });
+      await expect((executor as any).taskEffectiveAgentMatches(task, "agent-X")).resolves.toBe(false);
     });
 
     it("step-execute template node binding governs → pass 2 matches a foreach-template-bound column agent (walks template subgraphs)", async () => {
@@ -522,6 +539,36 @@ describe("column-agent principal alignment (plan U5)", () => {
       expect(find).toHaveBeenCalledWith("openai", "gpt-y");
       expect(setModel).toHaveBeenCalledWith({ provider: "openai", modelId: "gpt-y" });
       // Column-agent tracking cleared; reverse heartbeat guard released.
+      expect((executor as any).activeSessions.get(task.id).lastEffectiveColumnAgentId).toBeNull();
+      expect(executor.isAgentEffectivelyExecuting("agent-X")).toBe(false);
+      expect(loggedLines(store).some((l) => l.includes("binding released"))).toBe(true);
+    });
+
+    it("defer binding stays but the task regains own settings → release path fires (FN-5893)", async () => {
+      // Second release surface: the binding is still present, but a mid-flight
+      // task edit gave it a complete own model pair, so `defer` now resolves to
+      // own-settings. The watcher must release exactly like binding removal.
+      const store = createMockStore();
+      const find = vi.fn().mockReturnValue({ provider: "openai", modelId: "gpt-own" });
+      const task = singleSessionTask({
+        assignedAgentId: "agent-Y",
+        modelProvider: "openai",
+        modelId: "gpt-own",
+      });
+      const { executor } = makeExecutor(store, {
+        "agent-Y": makeAssignedAgent({ id: "agent-Y", runtimeConfig: { model: "openai/gpt-own" } }),
+      });
+      (executor as any)._modelRegistry = { find };
+
+      const { setModel } = activeGraphSession(executor, task.id, "exec-node", {
+        agentId: "agent-X",
+        mode: "defer",
+      });
+      (executor as any).effectiveColumnAgentByTask.set(task.id, "agent-X");
+
+      await store._triggerAsync("task:updated", task);
+
+      expect(setModel).toHaveBeenCalledWith({ provider: "openai", modelId: "gpt-own" });
       expect((executor as any).activeSessions.get(task.id).lastEffectiveColumnAgentId).toBeNull();
       expect(executor.isAgentEffectivelyExecuting("agent-X")).toBe(false);
       expect(loggedLines(store).some((l) => l.includes("binding released"))).toBe(true);

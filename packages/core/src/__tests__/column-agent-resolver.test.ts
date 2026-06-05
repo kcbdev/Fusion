@@ -201,6 +201,14 @@ describe("resolveColumnAgentBinding — foreach instance inheritance (U2)", () =
     expect(resolveColumnAgentBinding(ir, nodeId)).toBeUndefined();
   });
 
+  it("skips a candidate whose templateNodeId doesn't exist under the foreach", () => {
+    // PR #1432 review: a bogus prefix candidate can name a real foreach while its
+    // parsed templateNodeId resolves to nothing — it must be skipped, not treated
+    // as inheriting the foreach's column.
+    const ir = foreachIr({ foreachColumn: "review", reviewAgent: overrideBinding });
+    expect(resolveColumnAgentBinding(ir, instanceNodeId("fe", 0, "nope"))).toBeUndefined();
+  });
+
   it("resolves bindings when the foreach node id itself contains '#'", () => {
     // The instance-id format is delimiter-ambiguous; the resolver validates each
     // candidate split against real foreach nodes instead of trusting the first '#'
