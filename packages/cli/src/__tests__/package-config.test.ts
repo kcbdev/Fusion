@@ -276,12 +276,18 @@ describe("Workspace bootstrap script contract", () => {
     const defaultTest = dashboardPkg.scripts?.test;
     const defaultAppQuality = dashboardPkg.scripts?.["test:quality:app"];
     const defaultApiQuality = dashboardPkg.scripts?.["test:quality:api"];
+    const apiCurated = dashboardPkg.scripts?.["test:quality:api:curated"];
     const deepTest = dashboardPkg.scripts?.["test:deep"];
 
     expect(defaultTest).toBe("pnpm run test:quality:app && pnpm run test:quality:api");
     expect(defaultAppQuality).toContain("test:quality:app:foundation-api");
     expect(defaultAppQuality).toContain("test:quality:app:settings");
-    expect(hasProjectArg(defaultApiQuality, "dashboard-api-quality")).toBe(true);
+    // The api lane chains curated + backfill sub-lanes; the curated sub-lane
+    // carries the explicit quality project, and the backfill lane is the
+    // curated-gate completeness net (broad glob minus curated minus skip-list).
+    expect(defaultApiQuality).toContain("test:quality:api:curated");
+    expect(defaultApiQuality).toContain("test:quality:api:backfill");
+    expect(hasProjectArg(apiCurated, "dashboard-api-quality")).toBe(true);
     expect(hasProjectArg(defaultTest, "dashboard-app")).toBe(false);
     expect(hasProjectArg(defaultTest, "dashboard-api")).toBe(false);
 

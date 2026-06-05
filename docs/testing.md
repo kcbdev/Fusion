@@ -37,7 +37,104 @@ pnpm --filter @fusion/dashboard test:build          # built client output contra
 
 Run `test:deep` when changing broad dashboard architecture, shared modal/view infrastructure, or route registration. Run `test:browser-smoke` for layout/responsive/navigation/modal/CSS changes. Run `test:build` for Vite output, lazy-loading, chunking, or client-dist changes.
 
-When adding a new test file under `app/components/__tests__`, also add its basename to `qualityAppTests` in `packages/dashboard/vitest.config.ts` — otherwise the curated gate silently skips it.
+New test files under `app/**` or `src/**` are picked up automatically by the
+**backfill lanes** (`dashboard-app-quality-backfill` / `dashboard-api-quality-backfill`),
+which include the broad globs and exclude only the files an explicit curated lane
+already runs plus the skip-list. You do not need to register a new file by hand for
+it to run — the curated-gate hole that silently skipped unenumerated files is closed
+(see "Curated-gate completeness" below). Add a file to a curated `qualityApp*`/`qualityApi`
+list only when you want it in a specific fast lane rather than the backfill catch-all.
+
+## Curated-gate completeness and the skip-list
+
+The dashboard quality gate is a chain of curated lanes plus two backfill lanes.
+Together they must execute **every** `*.test.{ts,tsx}` under `packages/dashboard/app`
+and `packages/dashboard/src`, or the file must be on the reviewed skip-list. This is
+enforced by a guard (CI job `Dashboard curated-gate guard` in `pr-checks.yml`):
+
+```bash
+node scripts/check-test-inventory.mjs --dashboard-curated
+```
+
+It fails when a dashboard test file is neither executed by a quality project nor
+skip-listed. The skip-list lives at `scripts/lib/dashboard-curated-skiplist.json`;
+every entry needs a non-empty `reason` (empty reasons are rejected). Skip-list policy:
+
+- A file goes on the skip-list only when it genuinely cannot be gated yet — today
+  that is pre-existing-failing orphans (tests that were never executed in CI and
+  fail in isolation) and `build-output.test.ts` (runs standalone via `test:build`
+  after a Vite build). Each carries a one-line reason.
+- To remove a file from the skip-list: fix the test, confirm it passes under its
+  project, delete the skip-list entry. The backfill lane then executes it.
+- The skip-list is shared verbatim with `vitest.config.ts`, which excludes the same
+  globs from the backfill projects — one source of truth.
+
+## Test-inventory harness
+
+`scripts/check-test-inventory.mjs` is the standard coverage-superset verification
+step. Node stdlib only.
+
+```bash
+# Snapshot the executed-test inventory (per package/project, normalized test ids).
+node scripts/check-test-inventory.mjs --capture before.json
+# ... make a change ...
+node scripts/check-test-inventory.mjs --capture after.json
+# Fail (exit 1) if any test id present in `before` is missing from `after`.
+node scripts/check-test-inventory.mjs --diff before.json after.json
+```
+
+The capture spec (which packages/projects to enumerate) lives in
+`scripts/lib/test-inventory-spec.json`. The diff lists the exact missing test ids;
+a renamed file shows up as a remove (old path) + add (new path), so the rename is
+reviewable. New test ids never fail the diff.
+
+## Engine slow tier (CI gate)
+
+The `engine-slow` vitest project (`packages/engine/src/**/*.slow.test.ts`) holds the
+long real-git suites. It runs locally via `pnpm --filter @fusion/engine test:slow` and
+in CI via the `Engine slow tier` job in `pr-checks.yml`, which uses
+`scripts/assert-engine-slow-nonempty.mjs` to **fail if zero tests executed** (so a glob
+or config drift that silently empties the tier breaks CI instead of passing vacuously).
+The CI job uses `fetch-depth: 0` because these tests run real git operations.
+
+## CI shard balancing (duration-weighted)
+
+`scripts/ci-test-shard.mjs` packs the 4 CI shards (`pnpm test:ci:shard --shard N --total 4`,
+called from `pr-checks.yml`) by **measured duration**, not test-file count, using the
+committed `scripts/test-timings.json` snapshot (U1/R4). A package's weight is the sum of
+its files' recorded durations; files (or whole packages) absent from the snapshot fall
+back to the snapshot's **median per-file duration** so untimed packages weigh
+commensurably. Untimed packages are named in a logged warning.
+
+- **Engine** keeps `vitest --shard X/Y` virtual slicing (its `test` is a single vitest
+  invocation: `--project=engine-default --project=engine-reliability`); slices are now
+  weighted by duration.
+- **Dashboard** is *not* `--shard`-sliced — its `test` script is a chain of many separate
+  vitest invocations, so a forwarded `--shard` cannot apply coherently. Instead each leaf
+  lane in the chain (enumerated programmatically from `packages/dashboard/package.json` by
+  expanding the `pnpm run <name>` graph under `test`) is a separately-weighted schedulable
+  unit; a shard runs `pnpm --filter @fusion/dashboard run <lane>` for its assigned lanes.
+  Every lane is assigned to exactly one shard. **Lane weight** is the sum of durations of
+  the files the lane's `--project`s execute, derived from the vitest config project
+  `include`/`exclude` globs (imported via `tsx`); if the config cannot be imported the
+  package duration is apportioned evenly across lanes (logged as `even-apportionment`).
+- **Inspect the plan without running it:** `node scripts/ci-test-shard.mjs --dry-run --total 4`
+  (optionally `--shard N`) prints the planned `pnpm` commands and per-shard weight totals.
+- **Measure per-process startup cost:** `node scripts/ci-test-shard.mjs --cold-start-probe <package-name>`
+  runs the package's cheapest test file in isolation and reports `wall − test time` overhead
+  (the signal behind the deferred vitest-4 upgrade gate).
+
+### Snapshot staleness policy
+
+The snapshot carries `capturedAt`. If it is older than **30 days**, the planner prints a
+prominent warning and proceeds (balance degrades gracefully toward the file-count status
+quo, never below it) — it does **not** fail the build. Refresh is **manual/scheduled from
+the default branch only**: each CI shard uploads per-shard JSON timing artifacts (U1), and
+`node scripts/ci-test-shard.mjs --write-timings` merges them into the snapshot. Download the
+shard artifacts into `.timings/` first (the default lookup directory), or pass
+`--inputs-dir <path>` to point at wherever they were downloaded. A future
+scheduled job can gate on freshness via `node scripts/ci-test-shard.mjs --check-timings-staleness`,
+which exits non-zero when the snapshot is missing or older than the 30-day budget.
 
 ## Targeted commands
 
@@ -54,6 +151,69 @@ For a single Vitest file, use package-local `exec vitest`:
 ```bash
 pnpm --filter @fusion/core exec vitest run src/__tests__/central-db.test.ts --silent=passed-only --reporter=dot
 ```
+
+## Changed-only test cache (`pnpm test`)
+
+`pnpm test` runs `scripts/test-changed.mjs`, which selects only the workspace
+packages affected by your branch diff (plus their reverse-dependents) and skips
+packages whose content hasn't changed since they last passed. A per-package
+pass-cache lives at `node_modules/.cache/fusion/test-cache.json`.
+
+To see which mode a run would pick — and why — without running any tests:
+`node scripts/test-changed.mjs --print-mode` prints the
+`[test-changed] mode=… reason=… packages=…` decision line and exits.
+
+### What a cache entry's hash covers (dependency-aware invalidation)
+
+Each package's cache hash (`computePackageHash`) folds in, so any of these
+changing forces that package to re-run:
+
+- **The package's own tracked files**, hashed via the **working-tree bytes** for
+  any file that is dirty (unstaged/uncommitted edits) or untracked-not-ignored,
+  and via git's index blob SHA only when the file is fully clean. This means an
+  **unstaged edit to a tracked file busts the cache** — no false HIT on a stale
+  index blob.
+- **Every transitive workspace dependency's own hash.** A change to `@fusion/core`
+  invalidates the cache entries of `engine`, `dashboard`, `cli`, and everything
+  else that (transitively) depends on it, even when the dependent's own files are
+  untouched. This is the R11 correctness fix: a dependent is never cache-skipped
+  when a dependency it consumes has changed.
+- **Shared inputs folded into *every* package**: `pnpm-lock.yaml`,
+  `tsconfig.base.json`, and the shared `packages/core/src/__test-utils__` tree.
+  The test-utils tree is imported by nearly every package's vitest config via a
+  relative cross-package path, including packages that have **no** `@fusion/core`
+  workspace dependency (mobile, droid-cli, pi-\*, and the plugins). Folding it in
+  globally (like `tsconfig.base.json`) guarantees an edit there invalidates the
+  whole workspace.
+
+The hash carries a version prefix (`HASH_VERSION_PREFIX`). Bumping it (done in U4:
+`v1` → `v2`) invalidates every pre-existing entry exactly once; old-format cache
+files are discarded gracefully rather than crashed on.
+
+### Escape hatches
+
+If you suspect a stale or wrong cache result (e.g. a flaky test that happened to
+pass got cached, or you want to force a clean re-run), bypass the cache:
+
+```bash
+pnpm test --no-cache          # bypass cache reads AND writes for this run
+FUSION_TEST_NO_CACHE=1 pnpm test
+```
+
+`--no-cache` re-runs every selected package without consulting or clearing the
+cache file; a subsequent normal `pnpm test` still hits the cache. `pnpm test:full`
+already passes `--no-cache` (a full run means full). These flags already exist;
+this section documents them.
+
+### TTL rationale (7-day expiry)
+
+Entries older than **7 days** are treated as a MISS even on a hash match
+(`CACHE_MAX_AGE_MS`). The TTL is intentionally retained even though dep-aware
+hashing makes content-staleness impossible: it guards against **environmental
+drift** that the content hash cannot see — toolchain/Node upgrades, OS or native
+dependency changes, and other host-level shifts that can change test outcomes
+without changing any hashed file. Seven days bounds that blind spot while keeping
+the cache useful across a normal work week.
 
 ## Engine test helper convention
 

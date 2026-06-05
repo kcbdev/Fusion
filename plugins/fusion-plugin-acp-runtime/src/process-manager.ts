@@ -1,3 +1,4 @@
+// port-4040-allowlist: doc comments below reference the "never kill port 4040" rule; no kill targets it.
 // Subprocess lifecycle for the ACP runtime.
 //
 // Mirrors the hardening conventions in

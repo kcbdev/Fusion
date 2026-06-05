@@ -8,6 +8,8 @@ import { createHash } from "node:crypto";
 import { cpus, tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { ensureTestArtifacts } from "./ensure-test-artifacts.mjs";
+import { isSkillSyncCheckCached } from "./sync-fusion-skill-tools.mjs";
+import { computeContentHash, createRepoContentSnapshot } from "./lib/content-hash.mjs";
 
 const currentFilePath = fileURLToPath(import.meta.url);
 const scriptDir = path.dirname(currentFilePath);
@@ -87,8 +89,39 @@ const rootDir = process.env.FUSION_PROJECT_DIR
 /** @type {string} Cache format version — bump when the shape or hash inputs change. */
 const CACHE_FORMAT_VERSION = 1;
 
-/** @type {string} Constant mixed into every content hash so format rev busts all entries. */
-const HASH_VERSION_PREFIX = "v1";
+/**
+ * @type {string} Constant mixed into every content hash so format rev busts all entries.
+ *
+ * U4 bumped v1 -> v2: the hash now (a) folds in every transitive workspace
+ * dependency's own-hash, (b) folds in the shared `packages/core/src/__test-utils__`
+ * tree globally, and (c) hashes working-tree bytes for dirty/untracked files
+ * instead of trusting the (stale) index blob SHA. Any of these shifts the digest,
+ * so the bump invalidates every pre-U4 entry exactly once.
+ */
+const HASH_VERSION_PREFIX = "v2";
+
+/**
+ * @type {string[]} Repo-relative paths whose content is folded into EVERY
+ * package's hash. These are shared inputs that any package's test run depends on
+ * regardless of the workspace dependency graph:
+ *   - pnpm-lock.yaml / tsconfig.base.json: global build/resolution config.
+ *   - packages/core/src/__test-utils__: the shared vitest setup/teardown/workers
+ *     helpers are imported by nearly every package's vitest config via a relative
+ *     cross-package path (e.g. `../../core/src/__test-utils__/vitest-setup.ts`),
+ *     INCLUDING packages that have no `@fusion/core` workspace dependency
+ *     (mobile, droid-cli, pi-*, and every plugin/example). Dep-aware hashing
+ *     alone would miss those, so we fold the tree in globally — the simplest
+ *     provably-correct choice (mirrors the tsconfig.base.json treatment).
+ *
+ * NOTE: this list intentionally overlaps `shouldForceFullSuite`'s
+ * `fullSuitePaths` (which decides full-suite mode, a different axis than cache
+ * busting). When adding a new shared root config input, consider both lists.
+ */
+const SHARED_HASH_INPUT_PATHS = [
+  "pnpm-lock.yaml",
+  "tsconfig.base.json",
+  "packages/core/src/__test-utils__",
+];
 
 /** @type {number} Max age (ms) for a cache entry to count as a pass. */
 const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -107,9 +140,13 @@ function run(command, commandArgs, options = {}) {
   }
 }
 
-function runIsolationCheck(before = false, env = process.env) {
+function runIsolationCheck(before = false, env = process.env, fastBefore = false) {
   const args = [checkIsolationScript];
-  if (before) args.push("--before");
+  // U3: the before-pass is the costly one (2s mutability probe). Use the cheap
+  // `--before-fast` variant, which reuses the prior run's externally-active
+  // classification and skips the probe. The script falls back to the full probe
+  // when no prior baseline exists, so detection is never weakened.
+  if (before) args.push(fastBefore ? "--before-fast" : "--before");
   // Inject the names of every isolated HOME this script created so the check
   // never reports them as a leak even if the rm-rf in cleanup silently failed
   // or the baseline file got rotated mid-run. Without this, a transient EBUSY
@@ -126,7 +163,14 @@ export function shouldRunIsolationGuard(env = process.env) {
   return env.FUSION_TEST_DISABLE_ISOLATION_GUARD !== "1";
 }
 
-function pruneFusionTestHomes() {
+// U3: bound the prune scan. It only ever targets our own
+// `fusion-test-home-root-*` prefix (it always did), but we additionally cap the
+// number of entries removed per call and skip very-fresh dirs, so a single run
+// can't spend unbounded time rm-rf'ing a tmpdir that accumulated thousands of
+// stale homes — and so the cache-fresh fast path can skip it entirely.
+const PRUNE_MAX_ENTRIES = 64;
+
+export function pruneFusionTestHomes(maxEntries = PRUNE_MAX_ENTRIES) {
   let tmpEntries = [];
   try {
     tmpEntries = readdirSync(tmpdir(), { withFileTypes: true });
@@ -134,17 +178,19 @@ function pruneFusionTestHomes() {
     return;
   }
 
+  let removed = 0;
   for (const entry of tmpEntries) {
+    if (removed >= maxEntries) break;
     if (!entry.isDirectory() || !entry.name.startsWith("fusion-test-home-root-")) continue;
     const rawPath = path.join(tmpdir(), entry.name);
-    let resolvedPath = rawPath;
     try {
-      resolvedPath = realpathSync(rawPath);
+      realpathSync(rawPath);
     } catch {
       // Keep raw path fallback.
     }
     try {
       rmSync(rawPath, { recursive: true, force: true });
+      removed++;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[test-changed] failed to prune leftover ${rawPath}: ${message}`);
@@ -156,7 +202,7 @@ function runMaybeIsolated(command, commandArgs, options = {}) {
   const enabled = shouldRunIsolationGuard();
   const env = options.env ?? process.env;
   const { onBeforeAfterCheck, ...spawnOptions } = options;
-  if (enabled) runIsolationCheck(true, env);
+  if (enabled) runIsolationCheck(true, env, /* fastBefore */ true);
   try {
     run(command, commandArgs, spawnOptions);
   } finally {
@@ -307,6 +353,48 @@ export function buildReverseDependencyMap(workspacePackages) {
   return reverseDependencyMap;
 }
 
+/**
+ * Build forward dependency map: package name → [workspace dependency names].
+ * Only workspace-internal dependencies are included (external npm deps are
+ * already captured by the shared pnpm-lock.yaml hash).
+ *
+ * @param {{ name: string, dependencyNames?: string[] }[]} workspacePackages
+ * @returns {Map<string, string[]>}
+ */
+export function buildForwardDependencyMap(workspacePackages) {
+  const workspaceNames = new Set(workspacePackages.map((p) => p.name));
+  const forwardDependencyMap = new Map();
+  for (const pkg of workspacePackages) {
+    const deps = (pkg.dependencyNames ?? []).filter((dep) => workspaceNames.has(dep) && dep !== pkg.name);
+    forwardDependencyMap.set(pkg.name, [...new Set(deps)]);
+  }
+  return forwardDependencyMap;
+}
+
+/**
+ * Collect the transitive closure of workspace dependencies for a package
+ * (excluding the package itself), returned sorted for hash stability.
+ *
+ * @param {string} packageName
+ * @param {Map<string, string[]>} forwardDependencyMap
+ * @returns {string[]} sorted transitive dependency names
+ */
+export function collectTransitiveDependencies(packageName, forwardDependencyMap) {
+  const seen = new Set();
+  const queue = [...(forwardDependencyMap.get(packageName) ?? [])];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (seen.has(current) || current === packageName) continue;
+    seen.add(current);
+    for (const next of forwardDependencyMap.get(current) ?? []) {
+      if (!seen.has(next)) queue.push(next);
+    }
+  }
+
+  return [...seen].sort((a, b) => a.localeCompare(b));
+}
+
 export function expandWithReverseDependents(packageNames, reverseDependencyMap) {
   const expanded = new Set(packageNames);
   const queue = [...packageNames];
@@ -341,6 +429,9 @@ function isTestIrrelevantRootPath(file) {
 }
 
 export function shouldForceFullSuite(changedFiles) {
+  // NOTE: overlaps SHARED_HASH_INPUT_PATHS by intent (different axis: this list
+  // forces full-suite mode; that one busts every package's cache hash). When
+  // adding a new shared root config input, consider both lists.
   const fullSuitePaths = [
     "package.json",
     "pnpm-lock.yaml",
@@ -504,62 +595,135 @@ export function writeCache(filePath, cache) {
 }
 
 /**
- * Compute a stable content hash for a package directory.
+ * Adapt a 1-arg test-changed gitFn `(args) => string|null` into the 2-arg
+ * `(args, cwd) => string|null` shape that scripts/lib/content-hash.mjs expects.
+ * The cwd is ignored because the inner-loop gitFn already runs with cwd=rootDir.
  *
- * The hash is SHA-256 over:
- *   - The constant version prefix HASH_VERSION_PREFIX
- *   - The blob SHA of pnpm-lock.yaml at HEAD
- *   - The blob SHA of tsconfig.base.json at HEAD
- *   - Every (relativePath, blobSha) pair from `git ls-files -s <pkgDir>`,
- *     sorted lexicographically by path for stability.
+ * @param {(args: string[]) => string|null} gitFn
+ * @returns {(args: string[], cwd: string) => string|null}
+ */
+function adaptGitFnForContentHash(gitFn) {
+  return (args) => gitFn(args);
+}
+
+/**
+ * Compute the OWN content hash for a single package directory: a SHA-256 over
+ * just that directory's files, WITHOUT any shared inputs or transitive deps.
  *
- * Using git blob SHAs means we never read file contents ourselves — git
- * already hashes them, so this is fast even for large packages.
+ * R11 / U4 correctness: this defers to scripts/lib/content-hash.mjs, which hashes
+ * the working-tree bytes of dirty (modified-tracked) and untracked-not-ignored
+ * files instead of the stale index blob SHA. The pre-U4 implementation used
+ * `git ls-files -s` (index only), so an UNSTAGED edit to a tracked file produced
+ * an identical hash → a false cache HIT that skipped a package whose on-disk
+ * source had actually changed. Routing through computeContentHash fixes that.
+ *
+ * Results are memoized per (packageDir, gitFn) for the lifetime of a `memo` Map
+ * so that folding a dependency's own-hash into many dependents stays O(packages),
+ * not O(packages^2).
  *
  * @param {string} packageDir  Relative path to the package dir (e.g. "packages/engine")
  * @param {(args: string[]) => string|null} gitFn  Injectable git runner (for tests)
+ * @param {Map<string, string>} [memo]  Per-call memo keyed by packageDir.
  * @returns {string} 64-char hex SHA-256
  */
-export function computePackageHash(packageDir, gitFn = gitOutput) {
+export function computeOwnHash(packageDir, gitFn = gitOutput, memo, snapshot) {
+  if (memo?.has(packageDir)) return memo.get(packageDir);
+
+  const ownHash = computeContentHash({
+    rootDir,
+    inputPaths: [packageDir],
+    versionPrefix: `${HASH_VERSION_PREFIX}:own`,
+    gitFn: adaptGitFnForContentHash(gitFn),
+    snapshot,
+  });
+
+  memo?.set(packageDir, ownHash);
+  return ownHash;
+}
+
+/**
+ * Compute the hash for the SHARED inputs folded into every package's hash
+ * (pnpm-lock.yaml, tsconfig.base.json, and the shared __test-utils__ tree).
+ * Memoized per call so it's computed at most once per run.
+ *
+ * @param {(args: string[]) => string|null} gitFn
+ * @param {Map<string, string>} [memo]
+ * @returns {string}
+ */
+function computeSharedInputsHash(gitFn = gitOutput, memo, snapshot) {
+  const memoKey = "\0shared-inputs\0";
+  if (memo?.has(memoKey)) return memo.get(memoKey);
+
+  const sharedHash = computeContentHash({
+    rootDir,
+    inputPaths: SHARED_HASH_INPUT_PATHS,
+    versionPrefix: `${HASH_VERSION_PREFIX}:shared`,
+    gitFn: adaptGitFnForContentHash(gitFn),
+    snapshot,
+  });
+
+  memo?.set(memoKey, sharedHash);
+  return sharedHash;
+}
+
+/**
+ * Compute the dependency-aware cache hash for a package directory.
+ *
+ * The hash is SHA-256 over, in a stable order:
+ *   - The constant version prefix HASH_VERSION_PREFIX.
+ *   - The shared-inputs hash (pnpm-lock.yaml + tsconfig.base.json + the shared
+ *     packages/core/src/__test-utils__ tree).
+ *   - The package's own dirty-aware content hash.
+ *   - Every TRANSITIVE workspace dependency's own dirty-aware hash, sorted by
+ *     dependency name.
+ *
+ * Folding transitive dependencies in means a change to (say) @fusion/core busts
+ * the cache entry of every package that transitively depends on it, even when
+ * the dependent's own files are untouched — closing the R11 correctness hole
+ * where a stale-but-own-hash-matching dependent could be cache-skipped after its
+ * dependency's source changed.
+ *
+ * @param {string} packageDir  Relative path to the package dir (e.g. "packages/engine")
+ * @param {(args: string[]) => string|null} gitFn  Injectable git runner (for tests)
+ * @param {object} [options]
+ * @param {string} [options.packageName]  Package name, to resolve transitive deps.
+ * @param {Map<string, string[]>} [options.forwardDependencyMap]  name → [dep names].
+ * @param {Map<string, string>} [options.packageDirByName]  name → relative dir.
+ * @param {Map<string, string>} [options.memo]  Per-run own-hash memo (perf).
+ * @param {object} [options.snapshot]  Repo-wide content snapshot (from
+ *        createRepoContentSnapshot — 2 git spawns total) shared across all hash
+ *        computations in a run; without it each own-hash pays its own spawns.
+ * @returns {string} 64-char hex SHA-256
+ */
+export function computePackageHash(packageDir, gitFn = gitOutput, options = {}) {
+  const { packageName, forwardDependencyMap, packageDirByName, memo = new Map(), snapshot } = options;
+
   const hash = createHash("sha256");
   hash.update(HASH_VERSION_PREFIX);
   hash.update("\0");
 
-  // Bust when lock file or shared TS config changes.
-  for (const rootFile of ["pnpm-lock.yaml", "tsconfig.base.json"]) {
-    // `git ls-files -s <path>` → "<mode> <blobSha> <stage>\t<path>"
-    const out = gitFn(["ls-files", "-s", rootFile]);
-    const blobSha = out ? out.split(/\s+/)[1] ?? "" : "";
-    hash.update(rootFile);
-    hash.update("=");
-    hash.update(blobSha);
-    hash.update("\0");
-  }
+  // Shared inputs (lockfile, base tsconfig, shared __test-utils__ tree).
+  hash.update("shared=");
+  hash.update(computeSharedInputsHash(gitFn, memo, snapshot));
+  hash.update("\0");
 
-  // All tracked files inside the package directory.
-  const lsOut = gitFn(["ls-files", "-s", packageDir]);
-  const entries = [];
-  if (lsOut) {
-    for (const line of lsOut.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      // Format: <mode> SP <object> SP <stage> TAB <file>
-      const tabIdx = trimmed.indexOf("\t");
-      if (tabIdx === -1) continue;
-      const fields = trimmed.slice(0, tabIdx).split(/\s+/);
-      const blobSha = fields[1] ?? "";
-      const filePath = trimmed.slice(tabIdx + 1);
-      entries.push({ filePath, blobSha });
+  // This package's own dirty-aware content.
+  hash.update("own=");
+  hash.update(computeOwnHash(packageDir, gitFn, memo, snapshot));
+  hash.update("\0");
+
+  // Transitive workspace dependencies' own hashes (sorted by name for stability).
+  if (packageName && forwardDependencyMap && packageDirByName) {
+    const transitiveDeps = collectTransitiveDependencies(packageName, forwardDependencyMap);
+    for (const depName of transitiveDeps) {
+      const depDir = packageDirByName.get(depName);
+      if (!depDir) continue; // Unknown dir (defensive); skip rather than crash.
+      hash.update("dep:");
+      hash.update(depName);
+      hash.update("=");
+      hash.update(computeOwnHash(depDir, gitFn, memo, snapshot));
+      hash.update("\0");
     }
-  }
-
-  // Sort for determinism (git output is usually sorted, but let's be explicit).
-  entries.sort((a, b) => a.filePath.localeCompare(b.filePath));
-  for (const { filePath, blobSha } of entries) {
-    hash.update(filePath);
-    hash.update("=");
-    hash.update(blobSha);
-    hash.update("\0");
   }
 
   return hash.digest("hex");
@@ -590,6 +754,7 @@ function relativeTime(isoTimestamp) {
  * @property {() => CacheFile} [readCacheFn]            Injectable cache reader.
  * @property {(cache: CacheFile) => void} [writeCacheFn] Injectable cache writer.
  * @property {Map<string, string>} [packageDirByName]   pkg-name → relative dir.
+ * @property {Map<string, string[]>} [forwardDependencyMap] pkg-name → workspace dep names.
  */
 
 /**
@@ -614,6 +779,12 @@ export function applyCacheToPlan(plan, options = {}) {
     readCacheFn,
     writeCacheFn,
     packageDirByName = new Map(),
+    forwardDependencyMap = new Map(),
+    // Shared per-RUN memo + repo snapshot: main() passes the same pair to
+    // recordCachePass so the record pass re-spawns zero git and re-hashes
+    // nothing (test runs don't modify hashed source).
+    memo = new Map(),
+    snapshot,
   } = options;
 
   // Full suite runs always bypass cache (full means full).
@@ -630,7 +801,13 @@ export function applyCacheToPlan(plan, options = {}) {
 
   for (const pkg of plan.packages ?? []) {
     const pkgDir = packageDirByName.get(pkg) ?? `packages/${pkg.replace(/^@[^/]+\//, "")}`;
-    const computedHash = computePackageHash(pkgDir, gitFn);
+    const computedHash = computePackageHash(pkgDir, gitFn, {
+      packageName: pkg,
+      forwardDependencyMap,
+      packageDirByName,
+      memo,
+      snapshot,
+    });
     const entry = cache.entries[pkg];
 
     const isHit =
@@ -664,6 +841,11 @@ export function recordCachePass(packages, packageDirByName, options = {}) {
     gitFn = gitOutput,
     readCacheFn,
     writeCacheFn,
+    forwardDependencyMap = new Map(),
+    // When main() passes the memo/snapshot already populated by
+    // applyCacheToPlan, every hash below is a memo hit — zero git spawns.
+    memo = new Map(),
+    snapshot,
   } = options;
 
   if (noCache || packages.length === 0) return;
@@ -674,7 +856,13 @@ export function recordCachePass(packages, packageDirByName, options = {}) {
 
   for (const pkg of packages) {
     const pkgDir = packageDirByName.get(pkg) ?? `packages/${pkg.replace(/^@[^/]+\//, "")}`;
-    const hash = computePackageHash(pkgDir, gitFn);
+    const hash = computePackageHash(pkgDir, gitFn, {
+      packageName: pkg,
+      forwardDependencyMap,
+      packageDirByName,
+      memo,
+      snapshot,
+    });
     cache.entries[pkg] = { hash, passedAt: now, command: "test" };
   }
 
@@ -840,6 +1028,25 @@ export function decideExecutionPlan({
   };
 }
 
+/**
+ * R5: Emit one structured line describing why the inner loop chose its mode.
+ * Shape: `[test-changed] mode=<changed|full> reason=<reason> packages=<n>`.
+ *
+ * For changed plans the reason is `changed-packages`; for full plans the
+ * reason mirrors decideExecutionPlan's reason field.
+ *
+ * @param {{ mode: string, reason?: string, packages?: string[] }} plan
+ * @param {(line: string) => void} [log]
+ * @returns {string} the emitted line (for testing)
+ */
+export function emitModeDecision(plan, log = console.log) {
+  const reason = plan.mode === "changed" ? (plan.reason ?? "changed-packages") : (plan.reason ?? "unknown");
+  const packageCount = plan.mode === "changed" ? (plan.packages?.length ?? 0) : 0;
+  const line = `[test-changed] mode=${plan.mode} reason=${reason} packages=${packageCount}`;
+  log(line);
+  return line;
+}
+
 export function normalizeForwardedArgs(argv) {
   const normalized = [];
 
@@ -864,7 +1071,101 @@ export function main(argv = process.argv.slice(2)) {
 
   const forwardedArgs = normalizeForwardedArgs(argv);
 
-  run("pnpm", ["sync:fusion-skill:check"]);
+  // Dry mode-decision probe (R5): compute and print the mode/reason line without
+  // running tests. Used by `node scripts/test-changed.mjs --print-mode`.
+  if (argv.includes("--print-mode") || argv.includes("--help")) {
+    const baseBranch = getBaseBranch();
+    const comparisonBase = detectComparisonBase(baseBranch);
+    const changedFiles = comparisonBase ? changedFilesSince(comparisonBase) : null;
+    const workspacePackages = listWorkspacePackageInfos();
+    const packageNameByDir = listWorkspacePackages(workspacePackages);
+    const reverseDependencyMap = buildReverseDependencyMap(workspacePackages);
+    const plan = decideExecutionPlan({
+      forceFullSuite,
+      comparisonBase,
+      changedFiles,
+      packageNameByDir,
+      reverseDependencyMap,
+    });
+    emitModeDecision(plan);
+    return;
+  }
+
+  // Decide the execution plan and apply the cache BEFORE paying any fixed setup
+  // cost. The cache-fresh fast path can then skip the skill-sync spawn, the
+  // artifact-ensure pass, isolated-HOME creation, and the prune scan entirely.
+  const baseBranch = getBaseBranch();
+  const comparisonBase = detectComparisonBase(baseBranch);
+  const changedFiles = comparisonBase ? changedFilesSince(comparisonBase) : null;
+  const workspacePackages = listWorkspacePackageInfos();
+  const packageNameByDir = listWorkspacePackages(workspacePackages);
+  const packageDirByName = buildPackageDirByName(workspacePackages);
+  const reverseDependencyMap = buildReverseDependencyMap(workspacePackages);
+  const forwardDependencyMap = buildForwardDependencyMap(workspacePackages);
+
+  const plan = decideExecutionPlan({
+    forceFullSuite,
+    comparisonBase,
+    changedFiles,
+    packageNameByDir,
+    reverseDependencyMap,
+  });
+
+  // R5: structured mode-decision telemetry so fast-path hit rate is observable.
+  emitModeDecision(plan);
+
+  // For changed plans, resolve the cache now so we know whether any package
+  // actually needs running before we spend setup time.
+  let cachedPackages = [];
+  let activePackages = plan.packages ?? [];
+  // One repo-wide content snapshot (2 git spawns) + one own-hash memo for the
+  // entire run: applyCacheToPlan populates them, recordCachePass reuses them,
+  // so per-package git spawns and re-hashing happen exactly once per run.
+  const hashMemo = new Map();
+  let hashSnapshot;
+  if (plan.mode === "changed") {
+    if (!(noCache || forceFullSuite)) {
+      hashSnapshot = createRepoContentSnapshot({ rootDir });
+    }
+    ({ cachedPackages, activePackages } = applyCacheToPlan(plan, {
+      noCache: noCache || forceFullSuite,
+      packageDirByName,
+      forwardDependencyMap,
+      memo: hashMemo,
+      snapshot: hashSnapshot,
+    }));
+  }
+
+  const hasWork = plan.mode === "full" || activePackages.length > 0;
+
+  // Cache-fresh fast path: nothing to run. Emit a fast-path mode line, run only
+  // the (now cheap) isolation guard, and skip skill-sync, artifact-ensure,
+  // HOME creation, and prune.
+  if (!hasWork) {
+    console.log("[test-changed] fast-path=cache-fresh (no packages to run).");
+    console.log(
+      `[test-changed] all changed packages are cache-fresh (${cachedPackages.join(", ")}); nothing to run.`,
+    );
+    if (shouldRunIsolationGuard()) {
+      // No isolated HOME was created and no tests ran, so there is nothing to
+      // prune and no real risk of a leak — but we still run a single cheap
+      // before/after guard pass to preserve the invariant that every `pnpm test`
+      // verifies isolation.
+      runIsolationCheck(true, process.env, /* fastBefore */ true);
+      runIsolationCheck(false, process.env);
+    }
+    return;
+  }
+
+  // There is work to do — pay the fixed setup cost now.
+  // U3: skip the skill-sync check spawn when its inputs are unchanged since the
+  // last passing run. Full runs (CI / --full) always run it unconditionally so
+  // the gate never goes silent on the path that actually enforces it.
+  if (forceFullSuite || !isSkillSyncCheckCached(rootDir)) {
+    run("pnpm", ["sync:fusion-skill:check"]);
+  } else {
+    console.log("[test-changed] skill-sync check skipped (inputs unchanged since last pass).");
+  }
   ensureTestArtifacts(rootDir);
 
   const { env: isolatedHomeEnv, isolatedHome } = createIsolatedHomeEnv(fullSuiteEnv);
@@ -874,22 +1175,6 @@ export function main(argv = process.argv.slice(2)) {
   };
 
   try {
-
-  const baseBranch = getBaseBranch();
-  const comparisonBase = detectComparisonBase(baseBranch);
-  const changedFiles = comparisonBase ? changedFilesSince(comparisonBase) : null;
-  const workspacePackages = listWorkspacePackageInfos();
-  const packageNameByDir = listWorkspacePackages(workspacePackages);
-  const packageDirByName = buildPackageDirByName(workspacePackages);
-  const reverseDependencyMap = buildReverseDependencyMap(workspacePackages);
-
-  const plan = decideExecutionPlan({
-    forceFullSuite,
-    comparisonBase,
-    changedFiles,
-    packageNameByDir,
-    reverseDependencyMap,
-  });
 
   if (plan.mode === "full") {
     if (plan.reason === "missing-comparison-base") {
@@ -911,24 +1196,6 @@ export function main(argv = process.argv.slice(2)) {
     return;
   }
 
-  // Apply the content-hash cache to prune already-passing packages.
-  const { cachedPackages, activePackages } = applyCacheToPlan(plan, {
-    noCache: noCache || forceFullSuite,
-    packageDirByName,
-  });
-
-  if (activePackages.length === 0) {
-    console.log(
-      `[test-changed] all changed packages are cache-fresh (${cachedPackages.join(", ")}); nothing to run.`,
-    );
-    if (shouldRunIsolationGuard()) {
-      runIsolationCheck(true, isolatedHomeEnv);
-      cleanupIsolatedHome();
-      runIsolationCheck(false, isolatedHomeEnv);
-    }
-    return;
-  }
-
   const filterArgs = activePackages.flatMap((pkg) => ["--filter", pkg]);
   console.log(`[test-changed] running tests for changed packages: ${activePackages.join(", ")}`);
   if (cachedPackages.length > 0) {
@@ -941,7 +1208,12 @@ export function main(argv = process.argv.slice(2)) {
   });
 
   // Tests passed — record in cache (never cache failures; process.exit on failure above).
-  recordCachePass(activePackages, packageDirByName, { noCache });
+  recordCachePass(activePackages, packageDirByName, {
+    noCache,
+    forwardDependencyMap,
+    memo: hashMemo,
+    snapshot: hashSnapshot,
+  });
   } finally {
     cleanupIsolatedHome();
   }

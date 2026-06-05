@@ -166,7 +166,10 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-async function waitForFrameContains(lastFrame: () => string | undefined, text: string, timeoutMs = 3000) {
+// 10s bound: ink schedules frames on timer ticks and has flaked past 3s under
+// loaded CI shards while passing instantly in isolation. vi.waitFor polls, so
+// a generous bound adds zero time to passing runs.
+async function waitForFrameContains(lastFrame: () => string | undefined, text: string, timeoutMs = 10_000) {
   await vi.waitFor(() => {
     expect(lastFrame() ?? "").toContain(text);
   }, { timeout: timeoutMs });

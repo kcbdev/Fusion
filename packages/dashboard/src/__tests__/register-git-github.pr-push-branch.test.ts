@@ -117,17 +117,21 @@ describe("POST /pr/push-branch", () => {
   });
 
   it("pushes the branch, logs it, and returns recomputed preflight", async () => {
+    // runGitCommand drives the route's own rev-parse/rev-list/push sequence.
     mockRunGitCommand
-      .mockResolvedValueOnce("deadbeef\n")
-      .mockResolvedValueOnce("2\n")
-      .mockResolvedValueOnce("");
-    queueTryRunSuccess("deadbeef\n");
-    queueTryRunSuccess("refs/heads/fusion/fn-001\n");
-    queueRunSuccess("2\n");
-    queueRunSuccess("");
-    queueRunSuccess("abc123\tAdd feature\tDev\n");
-    queueRunSuccess("3\t1\tsrc/a.ts\n");
-    queueRunSuccess("M\tsrc/a.ts\n");
+      .mockResolvedValueOnce("deadbeef\n") // rev-parse --verify refs/heads/fusion/fn-001
+      .mockResolvedValueOnce("2\n") // rev-list --count main..fusion/fn-001
+      .mockResolvedValueOnce(""); // push -u origin fusion/fn-001
+
+    // prRouteCommandRunner drives resolvePrBaseRef (pre-push) + computePrPreflight (post-push).
+    queueTryRunSuccess("main"); // resolvePrBaseRef (pre-push) local base check resolves to "main"
+    queueTryRunSuccess("main"); // computePrPreflight -> resolvePrBaseRef local base check
+    queueTryRunSuccess("fusion/fn-001\n"); // computePrPreflight -> ls-remote (branchOnRemote)
+    queueRunSuccess("2\n"); // computePrPreflight -> rev-list --count (commitsPresent)
+    queueRunSuccess(""); // computePrPreflight -> merge-tree (no conflicts)
+    queueRunSuccess("abc123\tAdd feature\tDev\n"); // computePrPreflight -> git log
+    queueRunSuccess("3\t1\tsrc/a.ts\n"); // computePrPreflight -> git diff --numstat
+    queueRunSuccess("M\tsrc/a.ts\n"); // computePrPreflight -> git diff --name-status
 
     const store = createStore(createTask());
     const app = createServer(store);
@@ -145,12 +149,15 @@ describe("POST /pr/push-branch", () => {
     expect(response.body.preflight.branchOnRemote).toBe(true);
     expect(response.body.preflight.commitsPresent).toBe(true);
     expect(store.logEntry).toHaveBeenCalledWith("FN-001", "Pushed PR branch", "fusion/fn-001");
+    expect(tryRunQueue).toHaveLength(0);
+    expect(runQueue).toHaveLength(0);
   });
 
   it("returns a structured badRequest when the branch has no commits", async () => {
+    queueTryRunSuccess("main"); // resolvePrBaseRef (pre-push) local base check
     mockRunGitCommand
-      .mockResolvedValueOnce("deadbeef\n")
-      .mockResolvedValueOnce("0\n");
+      .mockResolvedValueOnce("deadbeef\n") // rev-parse --verify refs/heads/fusion/fn-001
+      .mockResolvedValueOnce("0\n"); // rev-list --count main..fusion/fn-001 -> no commits
 
     const app = createServer(createStore(createTask()));
     const response = await performRequest(app, "POST", "/api/tasks/FN-001/pr/push-branch", JSON.stringify({ base: "main" }), { "content-type": "application/json" });
@@ -158,19 +165,25 @@ describe("POST /pr/push-branch", () => {
     expect(response.status).toBe(400);
     expect(response.body.error).toContain("Branch has no commits");
     expect(mockRunGitCommand).toHaveBeenCalledTimes(2);
+    expect(tryRunQueue).toHaveLength(0);
   });
 
   it("maps git push failures to a structured API error", async () => {
+    queueTryRunSuccess("main"); // resolvePrBaseRef (pre-push) local base check
     mockRunGitCommand
-      .mockResolvedValueOnce("deadbeef\n")
-      .mockResolvedValueOnce("2\n")
-      .mockRejectedValueOnce(new Error("network unreachable"));
+      .mockResolvedValueOnce("deadbeef\n") // rev-parse --verify refs/heads/fusion/fn-001
+      .mockResolvedValueOnce("2\n") // rev-list --count main..fusion/fn-001
+      .mockRejectedValueOnce(new Error("network unreachable")); // push fails
 
     const app = createServer(createStore(createTask()));
     const response = await performRequest(app, "POST", "/api/tasks/FN-001/pr/push-branch", JSON.stringify({ base: "main" }), { "content-type": "application/json" });
 
+    // classifyGhError maps the "network" substring to a structured network error (502).
     expect(response.status).toBe(502);
-    expect(response.body.error).toContain("network unreachable");
-    expect(response.body.details.githubError.code).toBe("unknown");
+    expect(response.body.error).toContain("Network error while talking to GitHub");
+    expect(response.body.details.githubError.code).toBe("network");
+    expect(response.body.details.githubError.retryable).toBe(true);
+    expect(response.body.details.githubError.cause.stderr ?? "").toBeDefined();
+    expect(tryRunQueue).toHaveLength(0);
   });
 });

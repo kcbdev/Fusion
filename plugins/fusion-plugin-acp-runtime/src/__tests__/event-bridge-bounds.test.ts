@@ -203,7 +203,10 @@ describe("plan output bounds (S5)", () => {
   });
 });
 
-  it("a plan-ONLY stream stops emitting once the per-turn cap is crossed", async () => {
+  // Generous timeout: this test does CPU-bound string flooding (~25 plan
+  // events x 100 entries x 2k chars) and has timed out at the default 5s
+  // under loaded CI shards while passing easily in isolation.
+  it("a plan-ONLY stream stops emitting once the per-turn cap is crossed", { timeout: 20_000 }, async () => {
     const { createEventBridge, PER_CHUNK_CAP_CHARS, PER_TURN_OUTPUT_CAP_CHARS, MAX_PLAN_ENTRIES } =
       await import("../event-bridge.js");
     const thinking: string[] = [];

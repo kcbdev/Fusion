@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { type TaskStore } from "@fusion/core";
 import { evaluateBranchGroupCompletion, promoteBranchGroup } from "../../group-merge-coordinator.js";
@@ -250,7 +250,7 @@ describe("FN-5820 reliability interactions: shared branch group lifecycle", () =
   it.skipIf(!hasGit)("CASE 4: auto-merge gate disabled still integrates members into shared branch without promotion", async () => {
     const fixture = await makeReliabilityFixture({ taskId: "FN-5820-RI-G", settings: { testMode: true, autoMerge: false } as any });
     try {
-      const { rootDir, store, task } = fixture;
+      const { rootDir, store, task, manager } = fixture;
       const second = await store.createTask({
         id: "FN-5820-RI-H",
         title: "FN-5820-RI-H",
@@ -258,6 +258,17 @@ describe("FN-5820 reliability interactions: shared branch group lifecycle", () =
         column: "in-review",
         baseBranch: "main",
         branch: "fusion/fn-5820-ri-h",
+        prompt: "## File Scope\n- packages/engine/src/__tests__/reliability-interactions/**/*.ts\n",
+        steps: [],
+      } as any);
+      // FN-5819 (absorbed): a non-group in-review task must be untouched by maintenance too.
+      const nongroup = await store.createTask({
+        id: "FN-5820-RI-H-NONGROUP",
+        title: "FN-5820-RI-H-NONGROUP",
+        description: "non-group in-review",
+        column: "in-review",
+        baseBranch: "main",
+        branch: "fusion/fn-5820-ri-h-nongroup",
         prompt: "## File Scope\n- packages/engine/src/__tests__/reliability-interactions/**/*.ts\n",
         steps: [],
       } as any);
@@ -287,6 +298,17 @@ describe("FN-5820 reliability interactions: shared branch group lifecycle", () =
       expect(git(rootDir, `git show ${group.branchName}:packages/engine/src/fn5820Case4B.ts`)).toContain("fn5820Case4B");
       expect(() => git(rootDir, "git show main:packages/engine/src/fn5820Case4A.ts")).toThrow();
       expect(() => git(rootDir, "git show main:packages/engine/src/fn5820Case4B.ts")).toThrow();
+
+      // FN-5819 (absorbed): runMaintenance() must not retroactively move in-review
+      // shared-group members (or unrelated in-review tasks) backward while autoMerge is off.
+      const moveSpy = vi.spyOn(store, "moveTask");
+      await (manager as any).runMaintenance();
+      expect(moveSpy.mock.calls.some(([id, column]) => id === task.id && column === "todo")).toBe(false);
+      expect(moveSpy.mock.calls.some(([id, column]) => id === second.id && column === "todo")).toBe(false);
+      expect(moveSpy.mock.calls.some(([id, column]) => id === task.id && column === "in-progress")).toBe(false);
+      expect(moveSpy.mock.calls.some(([id, column]) => id === second.id && column === "in-progress")).toBe(false);
+      expect((await store.getTask(nongroup.id))?.column).toBe("in-review");
+      moveSpy.mockRestore();
 
       await store.updateTask(task.id, { column: "done" } as any);
       await store.updateTask(second.id, { column: "done" } as any);
