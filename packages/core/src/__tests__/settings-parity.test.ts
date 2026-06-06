@@ -364,6 +364,9 @@ describe("settings key parity", () => {
     const projectKeySet = new Set(PROJECT_SETTINGS_KEYS as readonly string[]);
     const overlap = (GLOBAL_SETTINGS_KEYS as readonly string[]).filter((key) => projectKeySet.has(key));
     expect(overlap).toEqual([
+      // worktreeIsolationEnabled is deliberately dual-scope (U11/R23): global
+      // default with per-project override; simple mode forces it on regardless.
+      "worktreeIsolationEnabled",
       "testMode",
       "mergeRequestContractShadowEnabled",
       "taskTokenBudget",

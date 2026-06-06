@@ -547,6 +547,13 @@ export interface PluginDashboardViewDefinition {
   placement?: "primary" | "overflow" | "more";
   /** Optional short description used by navigation/help UI. */
   description?: string;
+  /**
+   * Simple-mode compatibility declaration (U11). When `true`, this view remains
+   * visible in the dashboard's simple UI mode; when omitted/`false`, the view is
+   * treated as advanced-only and hidden in simple mode. Additive and optional so
+   * existing plugin manifests stay valid (they default to advanced-only).
+   */
+  simpleMode?: boolean;
 }
 
 // ── Plugin Runtimes ─────────────────────────────────────────────────

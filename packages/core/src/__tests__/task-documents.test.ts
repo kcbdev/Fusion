@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { Database } from "../db.js";
+import { Database, SCHEMA_VERSION } from "../db.js";
 import { TaskStore } from "../store.js";
 
 function makeTmpDir(): string {
@@ -51,7 +51,7 @@ describe("TaskStore task documents", () => {
 
     expect(tableNames.has("task_documents")).toBe(true);
     expect(tableNames.has("task_document_revisions")).toBe(true);
-    expect(db.getSchemaVersion()).toBe(112);
+    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
 
     const index = db
       .prepare(

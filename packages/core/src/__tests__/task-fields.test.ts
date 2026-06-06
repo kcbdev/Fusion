@@ -149,6 +149,31 @@ describe("validateCustomFieldPatch — unknown field & no-fields", () => {
   });
 });
 
+describe("validateCustomFieldPatch — reserved engine-internal keys (U13 LFG override)", () => {
+  it("accepts a `__`-prefixed reserved key even when NO workflow fields are defined", () => {
+    const r = validateCustomFieldPatch(undefined, { __lfgMode: true });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.normalized).toEqual({ __lfgMode: true });
+    const r2 = validateCustomFieldPatch([], { __lfgMode: false });
+    expect(r2.ok).toBe(true);
+    if (r2.ok) expect(r2.normalized).toEqual({ __lfgMode: false });
+  });
+  it("passes a reserved key through alongside validated declared fields", () => {
+    const r = validateCustomFieldPatch(ALL_TYPES, { s: "hi", __lfgMode: true });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.normalized).toEqual({ s: "hi", __lfgMode: true });
+  });
+  it("normalizes a null/undefined reserved value to a delete sentinel", () => {
+    const r = validateCustomFieldPatch(undefined, { __lfgMode: undefined });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.normalized).toEqual({ __lfgMode: null });
+  });
+  it("a declared-field rejection still fails even when a reserved key is present", () => {
+    const r = validateCustomFieldPatch(ALL_TYPES, { b: "not-bool", __lfgMode: true });
+    expect(r.ok).toBe(false);
+  });
+});
+
 // ── Defaults ──────────────────────────────────────────────────────────────
 
 describe("applyFieldDefaults", () => {

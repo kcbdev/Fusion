@@ -219,15 +219,44 @@ function validateValue(
  *
  * Validation is fail-fast: the first offending key produces the rejection.
  */
+/**
+ * Reserved-key prefix for ENGINE-INTERNAL custom fields (company-model U13). A
+ * `__`-prefixed key (e.g. `__lfgMode`, the per-task LFG override carrier) is NOT a
+ * workflow-declared custom field — it is engine state riding the opaque
+ * customFields JSON column. Such keys are EXEMPT from workflow-field validation:
+ * they pass through to storage as-is (booleans/strings/numbers only) and never
+ * collide with a kebab/identifier workflow field id (the `__` prefix is reserved).
+ * See {@link withTaskLfgOverride}/{@link getTaskLfgOverride} in ce-board-template.
+ */
+export const RESERVED_CUSTOM_FIELD_PREFIX = "__";
+
+/** True for an engine-internal reserved custom-field key (see the prefix doc). */
+function isReservedCustomFieldKey(key: string): boolean {
+  return key.startsWith(RESERVED_CUSTOM_FIELD_PREFIX);
+}
+
 export function validateCustomFieldPatch(
   fields: WorkflowFieldDefinition[] | undefined,
   patch: Record<string, unknown>,
 ): CustomFieldPatchResult {
-  const keys = Object.keys(patch);
+  const allKeys = Object.keys(patch);
+  // Reserved engine-internal keys (`__`-prefixed) bypass workflow-field
+  // validation entirely — they are not declared fields, they are engine state.
+  const reservedKeys = allKeys.filter(isReservedCustomFieldKey);
+  const keys = allKeys.filter((k) => !isReservedCustomFieldKey(k));
   const byId = new Map<string, WorkflowFieldDefinition>((fields ?? []).map((f) => [f.id, f]));
 
+  const passthroughReserved = (normalized: Record<string, unknown>): Record<string, unknown> => {
+    for (const key of reservedKeys) {
+      const value = patch[key];
+      // null/undefined = delete (mirrors the declared-field delete semantics).
+      normalized[key] = value === null || value === undefined ? null : value;
+    }
+    return normalized;
+  };
+
   if (byId.size === 0) {
-    if (keys.length === 0) return { ok: true, normalized: {} };
+    if (keys.length === 0) return { ok: true, normalized: passthroughReserved({}) };
     return {
       ok: false,
       rejection: makeCustomFieldRejection(
@@ -261,7 +290,7 @@ export function validateCustomFieldPatch(
     if (!res.ok) return res;
     normalized[key] = res.value;
   }
-  return { ok: true, normalized };
+  return { ok: true, normalized: passthroughReserved(normalized) };
 }
 
 // ---------------------------------------------------------------------------

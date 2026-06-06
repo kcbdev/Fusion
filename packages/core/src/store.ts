@@ -17,7 +17,13 @@ import {
 import { parseWorkflowIr, serializeWorkflowIr, downgradeIrToV1IfPure } from "./workflow-ir.js";
 import { stepsToWorkflowIr, stepToFragmentIr, layoutForIr } from "./workflow-steps-to-ir.js";
 import { isWorkflowColumnsEnabled } from "./workflow-columns-settings.js";
-import { resolveAllowedColumns, workflowHasColumn } from "./workflow-transitions.js";
+import {
+  resolveAllowedColumns,
+  workflowHasColumn,
+  validateCompanyBoardMove,
+} from "./workflow-transitions.js";
+import type { MoveActor } from "./workflow-transitions.js";
+import { isCompanyBoardIr, resolveCompanyRoleColumnId } from "./company-board-template.js";
 import {
   type PluginGateVerdict,
   findWorkflowColumn,
@@ -34,6 +40,7 @@ import {
   resolveEntryColumnId,
   resolveSwitchReconciliation,
   runReconciliationAbort,
+  validateCompanyBoardColumnEdit,
 } from "./workflow-reconciliation.js";
 import {
   type DefaultWorkflowMoveContext,
@@ -104,6 +111,8 @@ import { ArchiveDatabase } from "./archive-db.js";
 import { detectLegacyData, migrateFromLegacy } from "./db-migrate.js";
 import { buildSnippet, extractGoalCitations } from "./goal-citation-extractor.js";
 import { MissionStore } from "./mission-store.js";
+import { BoardStore } from "./board-store.js";
+import { TaskReviewerStore } from "./task-reviewer-store.js";
 import { PluginStore } from "./plugin-store.js";
 import { InsightStore } from "./insight-store.js";
 import { ResearchStore } from "./research-store.js";
@@ -260,6 +269,7 @@ interface TaskRow {
   scopeOverrideReason: string | null;
   scopeAutoWiden: string | null;
   assignedAgentId: string | null;
+  boardId: string | null;
   pausedByAgentId: string | null;
   assigneeUserId: string | null;
   nodeId: string | null;
@@ -1205,6 +1215,16 @@ interface MoveTaskOptions {
    * endpoint. When set, implies `bypassGuards`.
    */
   recoveryRehome?: boolean;
+  /**
+   * U3 (R5): the actor performing the move, for company-model board movement
+   * rules. Defaults to the human owner (`{ kind: "human" }`) so every existing
+   * UI/HTTP drag caller stays exempt from the agent restrictions; agent-tool
+   * move callers pass `{ kind: "agent", agentId }` so the adjacent-forward /
+   * Lead-Reviewer-only-backward rules apply. Consulted ONLY on the flag-ON
+   * workflow path for boards whose IR carries the company template markers; it
+   * is inert for legacy/custom workflows and flag-off moves.
+   */
+  actor?: MoveActor;
 }
 
 interface MoveTaskInternalOptions {
@@ -1352,6 +1372,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
   /** Cached MissionStore instance */
   private missionStore: MissionStore | null = null;
+  /** Cached BoardStore instance (company-model U1) */
+  private boardStore: BoardStore | null = null;
+  private taskReviewerStore: TaskReviewerStore | null = null;
   /** Cached PluginStore instance */
   private pluginStore: PluginStore | null = null;
   /** Cached InsightStore instance */
@@ -1854,6 +1877,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       missionId: row.missionId || undefined,
       sliceId: row.sliceId || undefined,
       assignedAgentId: row.assignedAgentId || undefined,
+      boardId: row.boardId || undefined,
       pausedByAgentId: row.pausedByAgentId || undefined,
       assigneeUserId: row.assigneeUserId || undefined,
       nodeId: row.nodeId || undefined,
@@ -2264,7 +2288,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       "dependencies", "steps", "customFields", "comments", "review", "reviewState", "workflowStepResults", "steeringComments",
       "attachments", "prInfo", "prInfos", "issueInfo", "githubTracking", "sourceIssueProvider", "sourceIssueRepository", "sourceIssueExternalIssueId", "sourceIssueNumber", "sourceIssueUrl", "mergeDetails",
       "breakIntoSubtasks", "noCommitsExpected", "enabledWorkflowSteps", "modifiedFiles",
-      "missionId", "sliceId", "scopeOverride", "scopeOverrideReason", "scopeAutoWiden", "assignedAgentId", "pausedByAgentId", "assigneeUserId", "nodeId", "effectiveNodeId", "effectiveNodeSource",
+      "missionId", "sliceId", "scopeOverride", "scopeOverrideReason", "scopeAutoWiden", "assignedAgentId", "boardId", "pausedByAgentId", "assigneeUserId", "nodeId", "effectiveNodeId", "effectiveNodeSource",
       "sourceType", "sourceAgentId", "sourceRunId", "sourceSessionId", "sourceMessageId", "sourceParentTaskId", "sourceMetadata",
       "checkedOutBy", "checkedOutAt", "checkoutNodeId", "checkoutRunId", "checkoutLeaseRenewedAt", "checkoutLeaseEpoch", "deletedAt", "allowResurrection",
       // `log` is fetched in slim mode so the server can aggregate
@@ -2313,7 +2337,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       "dependencies", "steps", "customFields", "attachments", "steeringComments",
       "comments", "review", "reviewState", "workflowStepResults", "prInfo", "prInfos", "issueInfo", "githubTracking", "sourceIssueProvider", "sourceIssueRepository", "sourceIssueExternalIssueId", "sourceIssueNumber", "sourceIssueUrl", "mergeDetails",
       "breakIntoSubtasks", "noCommitsExpected", "enabledWorkflowSteps", "modifiedFiles",
-      "missionId", "sliceId", "scopeOverride", "scopeOverrideReason", "scopeAutoWiden", "assignedAgentId", "pausedByAgentId", "assigneeUserId", "nodeId", "effectiveNodeId", "effectiveNodeSource",
+      "missionId", "sliceId", "scopeOverride", "scopeOverrideReason", "scopeAutoWiden", "assignedAgentId", "boardId", "pausedByAgentId", "assigneeUserId", "nodeId", "effectiveNodeId", "effectiveNodeSource",
       "sourceType", "sourceAgentId", "sourceRunId", "sourceSessionId", "sourceMessageId", "sourceParentTaskId", "sourceMetadata",
       "checkedOutBy", "checkedOutAt", "checkoutNodeId", "checkoutRunId", "checkoutLeaseRenewedAt", "checkoutLeaseEpoch", "deletedAt", "allowResurrection",
     ];
@@ -2441,6 +2465,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.scopeOverrideReason ?? null,
       toJson(task.scopeAutoWiden || []),
       task.assignedAgentId ?? null,
+      task.boardId ?? null,
       task.pausedByAgentId ?? null,
       task.assigneeUserId ?? null,
       task.nodeId ?? null,
@@ -2483,7 +2508,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         dependencies, steps, customFields, log, attachments, steeringComments,
         comments, review, reviewState, workflowStepResults, prInfo, prInfos, issueInfo, githubTracking,
         sourceIssueProvider, sourceIssueRepository, sourceIssueExternalIssueId, sourceIssueNumber, sourceIssueUrl,
-        mergeDetails, breakIntoSubtasks, noCommitsExpected, autoMerge, enabledWorkflowSteps, modifiedFiles, missionId, sliceId, scopeOverride, scopeOverrideReason, scopeAutoWiden, assignedAgentId, pausedByAgentId, assigneeUserId, nodeId, effectiveNodeId, effectiveNodeSource, sourceType, sourceAgentId, sourceRunId, sourceSessionId, sourceMessageId, sourceParentTaskId, sourceMetadata, checkedOutBy, checkedOutAt, checkoutNodeId, checkoutRunId, checkoutLeaseRenewedAt, checkoutLeaseEpoch, deletedAt, allowResurrection
+        mergeDetails, breakIntoSubtasks, noCommitsExpected, autoMerge, enabledWorkflowSteps, modifiedFiles, missionId, sliceId, scopeOverride, scopeOverrideReason, scopeAutoWiden, assignedAgentId, boardId, pausedByAgentId, assigneeUserId, nodeId, effectiveNodeId, effectiveNodeSource, sourceType, sourceAgentId, sourceRunId, sourceSessionId, sourceMessageId, sourceParentTaskId, sourceMetadata, checkedOutBy, checkedOutAt, checkoutNodeId, checkoutRunId, checkoutLeaseRenewedAt, checkoutLeaseEpoch, deletedAt, allowResurrection
       ) VALUES (${placeholders})
     `).run(...values);
     this.db.bumpLastModified();
@@ -2510,7 +2535,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         dependencies, steps, customFields, log, attachments, steeringComments,
         comments, review, reviewState, workflowStepResults, prInfo, prInfos, issueInfo, githubTracking,
         sourceIssueProvider, sourceIssueRepository, sourceIssueExternalIssueId, sourceIssueNumber, sourceIssueUrl,
-        mergeDetails, breakIntoSubtasks, noCommitsExpected, autoMerge, enabledWorkflowSteps, modifiedFiles, missionId, sliceId, scopeOverride, scopeOverrideReason, scopeAutoWiden, assignedAgentId, pausedByAgentId, assigneeUserId, nodeId, effectiveNodeId, effectiveNodeSource, sourceType, sourceAgentId, sourceRunId, sourceSessionId, sourceMessageId, sourceParentTaskId, sourceMetadata, checkedOutBy, checkedOutAt, checkoutNodeId, checkoutRunId, checkoutLeaseRenewedAt, checkoutLeaseEpoch, deletedAt, allowResurrection
+        mergeDetails, breakIntoSubtasks, noCommitsExpected, autoMerge, enabledWorkflowSteps, modifiedFiles, missionId, sliceId, scopeOverride, scopeOverrideReason, scopeAutoWiden, assignedAgentId, boardId, pausedByAgentId, assigneeUserId, nodeId, effectiveNodeId, effectiveNodeSource, sourceType, sourceAgentId, sourceRunId, sourceSessionId, sourceMessageId, sourceParentTaskId, sourceMetadata, checkedOutBy, checkedOutAt, checkoutNodeId, checkoutRunId, checkoutLeaseRenewedAt, checkoutLeaseEpoch, deletedAt, allowResurrection
       ) VALUES (${placeholders})
       ON CONFLICT(id) DO UPDATE SET
         lineageId = excluded.lineageId,
@@ -2611,6 +2636,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         scopeOverrideReason = excluded.scopeOverrideReason,
         scopeAutoWiden = excluded.scopeAutoWiden,
         assignedAgentId = excluded.assignedAgentId,
+        boardId = excluded.boardId,
         pausedByAgentId = excluded.pausedByAgentId,
         assigneeUserId = excluded.assigneeUserId,
         nodeId = excluded.nodeId,
@@ -4416,6 +4442,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       branchContext: input.branchContext,
       autoMerge: input.autoMerge,
       column: input.column || "triage",
+      // Board homing (company-model U1/U8): when the caller supplies a board id
+      // (e.g. CEO routing via fn_task_create), stamp it onto the task so it homes
+      // on that board. Absent → undefined, the default-board migration homes it.
+      boardId: input.boardId,
       dependencies: input.dependencies || [],
       breakIntoSubtasks: input.breakIntoSubtasks === true ? true : undefined,
       noCommitsExpected: input.noCommitsExpected === true ? true : undefined,
@@ -6463,6 +6493,89 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
             `Valid targets: ${allowed.join(", ") || "none"}`,
         );
       }
+      // 2b. U3 (R5): company-model actor-aware movement. For a board whose IR
+      //     carries the company template markers, an agent move must be adjacent-
+      //     forward, and only the Lead/Reviewer may move backward; the human
+      //     owner is unrestricted. Skipped for engine/recovery/scheduler moves
+      //     (bypassGuards) — those are system moves, not actor-driven — and inert
+      //     for non-company workflows (validateCompanyBoardMove returns undefined).
+      //     Actor defaults to the human owner so existing UI/HTTP callers stay
+      //     exempt.
+      if (!bypassGuards && options?.recoveryRehome !== true) {
+        const actorRejection = validateCompanyBoardMove(
+          workflowIr,
+          fromColumn,
+          toColumn,
+          options?.actor ?? { kind: "human" },
+        );
+        if (actorRejection) {
+          throw new TransitionRejectionError(
+            makeTransitionRejection(
+              "guard-rejected",
+              "transition.rejected.invalidTransition",
+              false,
+              actorRejection.message,
+            ),
+            `Invalid transition: '${fromColumn}' → '${toColumn}'. ${actorRejection.message}`,
+          );
+        }
+      }
+      // 2c. U6 (R11/R16): Reviewer verdict gate on the EXIT from in-review. On a
+      //     company-model board, a task entering in-review starts a task-keyed
+      //     Reviewer run; the persisted write-once verdict gates the exit toward
+      //     done / post-review columns. The verdict must be `pass` — otherwise the
+      //     forward move is rejected (typed). There is NO human exemption: the
+      //     human movement matrix (block 2b) already rejects any human move out of
+      //     in-review (KTD "the movement matrix is strict for everyone"), so only
+      //     an agent move can reach here. Inert for non-company boards,
+      //     system/recovery moves (bypassGuards), backward moves, and moves not
+      //     leaving in-review.
+      if (
+        !bypassGuards &&
+        options?.recoveryRehome !== true &&
+        isCompanyBoardIr(workflowIr)
+      ) {
+        const reviewerColumnId = resolveCompanyRoleColumnId(workflowIr, "reviewer");
+        const leavingReview = reviewerColumnId !== undefined && fromColumn === reviewerColumnId;
+        if (leavingReview) {
+          const fromIdx = workflowIr.version === "v2"
+            ? workflowIr.columns.findIndex((c) => c.id === fromColumn)
+            : -1;
+          const toIdx = workflowIr.version === "v2"
+            ? workflowIr.columns.findIndex((c) => c.id === toColumn)
+            : -1;
+          const forward = fromIdx >= 0 && toIdx > fromIdx;
+          if (forward) {
+            const reviewerStore = this.getTaskReviewerStore();
+            const verdict = reviewerStore.getLatestVerdict(id);
+            if (verdict?.status !== "pass") {
+              const detail = verdict
+                ? `latest Reviewer verdict is '${verdict.status}', not 'pass'`
+                : "no Reviewer verdict has been recorded yet";
+              throw new TransitionRejectionError(
+                makeTransitionRejection(
+                  "guard-rejected",
+                  "transition.rejected.reviewerVerdictPending",
+                  true,
+                  `The Reviewer must pass before this task can leave in-review (${detail})`,
+                ),
+                `Cannot move ${id} out of in-review: ${detail}`,
+              );
+            }
+          } else if (fromIdx >= 0 && toIdx >= 0 && toIdx < fromIdx) {
+            // BACKWARD reopen out of in-review (FN issue #2). A Lead/Reviewer
+            // agent reopen of a PASSED card records no fail run, so the rework-
+            // round baseline is unchanged: ReviewerGate.driveReviewForTask would
+            // skip on re-entry (reworkRound >= priorFails) and this exit gate
+            // would re-accept the STALE pass. Supersede the live pass so a fresh
+            // Reviewer run is forced on re-entry. Write-once is preserved — only
+            // the separate invalidatedAt marker is written, never the row status.
+            // No-op when the latest verdict isn't a live pass (the rework flow's
+            // fail runs already cover that case).
+            this.getTaskReviewerStore().invalidateLatestPassVerdict(id);
+          }
+        }
+      }
       // 3. Sync trait guards (in-lock). Skipped entirely when bypassGuards
       //    (engine/recovery moves, KTD-9). The default workflow's merge-blocker
       //    trait reads the same getTaskMergeBlocker.
@@ -6584,6 +6697,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         bypassGuards,
         movedAt,
         settings: settingsForInReview,
+        // U7: company boards defer autoMerge stamping to verdict completion.
+        isCompanyBoard: workflowIr ? isCompanyBoardIr(workflowIr) : false,
         options: {
           preserveStatus: options?.preserveStatus,
           preserveResumeState: options?.preserveResumeState,
@@ -10066,6 +10181,23 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         action: "Task archived",
       });
 
+      // U9: pending agent messages can never be delivered once the task is
+      // archived — discard them and leave a visible note on the task log.
+      const pendingMessages = (task.steeringComments ?? []).filter(
+        (c) => c.targetAgentId && (c.deliveryState ?? "pending") === "pending",
+      );
+      if (pendingMessages.length > 0) {
+        for (const message of pendingMessages) {
+          message.deliveryState = "discarded";
+          message.deliveredAt = task.columnMovedAt;
+        }
+        task.log.push({
+          timestamp: task.columnMovedAt,
+          action: `Discarded ${pendingMessages.length} undelivered queued message${pendingMessages.length === 1 ? "" : "s"} on archive`,
+          outcome: pendingMessages.map((m) => `→ ${m.targetAgentId}`).join(", "),
+        });
+      }
+
       let rewrittenLineageChildren: Task[] = [];
 
       if (!cleanup) {
@@ -10906,6 +11038,161 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     });
 
     return updated;
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // U9: Per-task, per-agent queued messaging.
+  //
+  // Built on top of the existing steering-comment channel (the executor already
+  // injects new steering comments into running sessions and into the dispatch
+  // prompt). An *addressed* message is a steering comment carrying a
+  // `targetAgentId` plus a `deliveryState` lifecycle, so it is only injected into
+  // that agent's context and can be queued while the agent is parked. These
+  // methods are pure-additive over the steering storage (task JSON) — no schema
+  // migration is required, and the messages survive a store reopen because they
+  // live in the same `steeringComments` blob as ordinary steering.
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Queue a message addressed to a specific agent within a task (U9, R10).
+   *
+   * The message is written to the unified comments (for thread display) AND to
+   * `steeringComments` tagged with `targetAgentId` + `deliveryState: "pending"`.
+   * If the target agent is actively running the task it is injected on its next
+   * turn (executor live listener, filtered by `targetAgentId`); otherwise it
+   * stays pending until the task next activates in that agent's column, where the
+   * dispatch path injects it and marks it delivered. Pure-additive: no flag gate
+   * (the flag-gated *behavior* lives on the injection/dispatch paths).
+   */
+  async queueAgentMessage(
+    id: string,
+    targetAgentId: string,
+    text: string,
+    author: "user" | "agent" = "user",
+    runContext?: RunMutationContext,
+  ): Promise<{ task: Task; messageId: string }> {
+    // Write to unified comments (skip refinement — addressed steering is for
+    // agent injection, not follow-up tasks), mirroring addSteeringComment.
+    const task = await this.addComment(id, text, author, { skipRefinement: true }, runContext);
+    const messageId = task.comments![task.comments!.length - 1].id;
+
+    const updated = await this.withTaskLock(id, async () => {
+      const dir = this.taskDir(id);
+      const currentTask = await this.readTaskJson(dir);
+
+      const message: import("./types.js").SteeringComment = {
+        id: messageId,
+        text,
+        createdAt: new Date().toISOString(),
+        author,
+        targetAgentId,
+        deliveryState: "pending",
+      };
+
+      if (!currentTask.steeringComments) {
+        currentTask.steeringComments = [];
+      }
+      currentTask.steeringComments.push(message);
+      currentTask.updatedAt = new Date().toISOString();
+
+      await this.atomicWriteTaskJson(dir, currentTask);
+      if (this.isWatching) this.taskCache.set(id, { ...currentTask });
+
+      this.emit("task:updated", currentTask);
+      return currentTask;
+    });
+
+    return { task: updated, messageId };
+  }
+
+  /**
+   * List addressed agent messages on a task (U9). Returns only steering comments
+   * that carry a `targetAgentId` (ordinary broadcast steering is excluded).
+   * Filter by `state` and/or `targetAgentId`. A message with `targetAgentId` but
+   * no explicit `deliveryState` is treated as `pending`.
+   */
+  async listAgentMessages(
+    id: string,
+    filter?: {
+      state?: import("./types.js").AgentMessageDeliveryState;
+      targetAgentId?: string;
+    },
+  ): Promise<import("./types.js").SteeringComment[]> {
+    const dir = this.taskDir(id);
+    const task = await this.readTaskJson(dir);
+    const all = Array.isArray(task.steeringComments) ? task.steeringComments : [];
+    return all.filter((c) => {
+      if (!c.targetAgentId) return false;
+      if (filter?.targetAgentId && c.targetAgentId !== filter.targetAgentId) return false;
+      const effectiveState = c.deliveryState ?? "pending";
+      if (filter?.state && effectiveState !== filter.state) return false;
+      return true;
+    });
+  }
+
+  /**
+   * Cancel a still-pending addressed message (U9). Flips `pending` → `cancelled`
+   * so it is never injected. No-op (returns the task unchanged) if the message is
+   * already past pending or is not an addressed message. UI cancel-affordance hook.
+   */
+  async cancelQueuedMessage(id: string, messageId: string, runContext?: RunMutationContext): Promise<Task> {
+    const cancelled = await this.withTaskLock(id, async () => {
+      const dir = this.taskDir(id);
+      const task = await this.readTaskJson(dir);
+      const messages = task.steeringComments ?? [];
+      const message = messages.find((c) => c.id === messageId && c.targetAgentId);
+      if (!message) return { task, didCancel: false };
+      const effectiveState = message.deliveryState ?? "pending";
+      if (effectiveState !== "pending") return { task, didCancel: false };
+
+      message.deliveryState = "cancelled";
+      message.deliveredAt = new Date().toISOString();
+      task.steeringComments = messages;
+      task.updatedAt = message.deliveredAt;
+
+      await this.atomicWriteTaskJson(dir, task);
+      if (this.isWatching) this.taskCache.set(id, { ...task });
+      this.emit("task:updated", task);
+      return { task, didCancel: true };
+    });
+
+    if (!cancelled.didCancel) return cancelled.task;
+    // Log outside the message lock, mirroring other lifecycle logging. logEntry
+    // re-reads + returns the task with the appended note.
+    return this.logEntry(id, `Queued message ${messageId} cancelled before delivery`, undefined, runContext);
+  }
+
+  /**
+   * Mark addressed messages for `targetAgentId` as delivered (U9). Called by the
+   * executor once pending messages have been injected into that agent's context
+   * (live session injection or dispatch-prompt inclusion). Flips `pending` →
+   * `delivered`. Returns the ids that transitioned (empty when nothing pending).
+   */
+  async markAgentMessagesDelivered(id: string, targetAgentId: string, messageIds?: string[]): Promise<string[]> {
+    const delivered: string[] = [];
+    await this.withTaskLock(id, async () => {
+      const dir = this.taskDir(id);
+      const task = await this.readTaskJson(dir);
+      const messages = task.steeringComments ?? [];
+      const idSet = messageIds ? new Set(messageIds) : undefined;
+      const now = new Date().toISOString();
+      for (const message of messages) {
+        if (message.targetAgentId !== targetAgentId) continue;
+        if ((message.deliveryState ?? "pending") !== "pending") continue;
+        if (idSet && !idSet.has(message.id)) continue;
+        message.deliveryState = "delivered";
+        message.deliveredAt = now;
+        delivered.push(message.id);
+      }
+      if (delivered.length === 0) return task;
+      task.steeringComments = messages;
+      task.updatedAt = now;
+      await this.atomicWriteTaskJson(dir, task);
+      if (this.isWatching) this.taskCache.set(id, { ...task });
+      this.emit("task:updated", task);
+      return task;
+    });
+    return delivered;
   }
 
   async updateTaskComment(id: string, commentId: string, text: string): Promise<Task> {
@@ -13152,6 +13439,14 @@ ${stepsSection}`;
       // Residual A: reject save-blocking trait composition conflicts server-side
       // when the IR is being changed.
       if (updates.ir !== undefined) this.assertWorkflowIrTraitsValid(ir);
+      // U3 (R1/R2): when the flag is ON and the EXISTING workflow is a company
+      // board (carries the template's role markers), enforce the locked-role-
+      // column and custom-column placement rules server-side — independently of
+      // the editor. A non-company workflow is untouched (the validator no-ops on
+      // a non-company existing IR), and flag-off is byte-identical (gate below).
+      if (updates.ir !== undefined && flagOn) {
+        validateCompanyBoardColumnEdit(existing.ir, ir);
+      }
       const next: WorkflowDefinition = {
         ...existing,
         name,
@@ -14809,6 +15104,177 @@ ${notificationsSection}`;
       this.missionStore = new MissionStore(this.fusionDir, this.db, this);
     }
     return this.missionStore;
+  }
+
+  /**
+   * Get the BoardStore instance for company-model Board operations (U1).
+   * Lazily initializes the BoardStore on first access.
+   */
+  getBoardStore(): BoardStore {
+    if (!this.boardStore) {
+      this.boardStore = new BoardStore(this.fusionDir, this.db, this);
+    }
+    return this.boardStore;
+  }
+
+  /**
+   * Get the TaskReviewerStore for company-model Reviewer verdict runs (U6).
+   * Lazily initializes the store on first access. Shares the central DB so the
+   * `task_reviewer_runs` rows live alongside the other task data.
+   */
+  getTaskReviewerStore(): TaskReviewerStore {
+    if (!this.taskReviewerStore) {
+      this.taskReviewerStore = new TaskReviewerStore(this.db);
+    }
+    return this.taskReviewerStore;
+  }
+
+  /**
+   * The board id a task is homed on (company-model U1), or undefined. Read-only
+   * helper consumed by the workflow-IR resolver's board→IR primary path.
+   */
+  getTaskBoardId(taskId: string): string | undefined {
+    const row = this.db.prepare(`SELECT boardId FROM tasks WHERE id = ?`).get(taskId) as
+      | { boardId: string | null }
+      | undefined;
+    return row?.boardId || undefined;
+  }
+
+  /**
+   * Re-home a task onto a different board (company-model U10, R13). Stamps the
+   * stored board id directly; the caller is responsible for moving the task to
+   * the target board's entry column and aborting any active session. Throws when
+   * the task does not exist (so a cross-board move never silently no-ops). Passing
+   * `null` clears the board reference (falls the task back to the default board).
+   */
+  setTaskBoard(taskId: string, boardId: string | null): void {
+    const result = this.db
+      .prepare(`UPDATE tasks SET boardId = ? WHERE id = ? AND deletedAt IS NULL`)
+      .run(boardId, taskId);
+    if (result.changes === 0) {
+      throw new Error(`Task ${taskId} not found (cannot re-home to board ${boardId ?? "null"})`);
+    }
+  }
+
+  /**
+   * Re-map the `column` value of every task homed on a board onto the conformed
+   * column ids, per a convert-to-simple (R17) conform plan (company-model U12).
+   *
+   * On-demand convert re-points a board at a conformed company-template workflow,
+   * but a task already sitting in a source column whose id changes (e.g. a `wip`
+   * column renamed to `in-progress`, or an unclassifiable column carried under a
+   * de-collided `-custom` id) would otherwise be stranded in a column the new IR
+   * no longer defines — a "limbo" the board can never render or move it out of.
+   * This mirrors the one-shot lanes→boards migration's column rewrite
+   * (`convertLanesToBoards` in db.ts) for the on-demand path so the two never
+   * drift. A raw rewrite (not `moveTask`) matches the migration's semantics and
+   * skips the movement matrix / onEnter effects — a conform is a system rewrite,
+   * not a board move.
+   *
+   * `columnMap` keys are SOURCE column ids; values are the conformed target id. A
+   * task whose column is absent from the map is left untouched (already a valid
+   * template/carried id, or homed elsewhere). The rewrite is recorded in each
+   * affected task's log (the conform audit, R17). Returns the rewritten task ids.
+   */
+  conformTaskColumns(boardId: string, columnMap: Record<string, string>): string[] {
+    const rows = this.db
+      .prepare(`SELECT id, "column" AS column FROM tasks WHERE boardId = ? AND deletedAt IS NULL`)
+      .all(boardId) as Array<{ id: string; column: string }>;
+    const rewritten: string[] = [];
+    const now = new Date().toISOString();
+    for (const row of rows) {
+      const target = columnMap[row.column];
+      if (!target || target === row.column) continue;
+      this.db
+        .prepare(`UPDATE tasks SET "column" = ?, columnMovedAt = ?, updatedAt = ? WHERE id = ?`)
+        .run(target, now, now, row.id);
+      rewritten.push(row.id);
+    }
+    if (rewritten.length > 0) this.db.bumpLastModified();
+    return rewritten;
+  }
+
+  /**
+   * Whether the board a task is homed on has the R20 plan-approval hold enabled
+   * (company-model U5). Returns false when the task has no board, the board row
+   * is missing, or the flag column is 0. Read-only; consulted by the triage
+   * (Lead) finalize path to decide whether to park the task awaiting approval.
+   */
+  getTaskBoardRequiresPlanApproval(taskId: string): boolean {
+    const boardId = this.getTaskBoardId(taskId);
+    if (!boardId) return false;
+    const row = this.db
+      .prepare(`SELECT requirePlanApproval FROM boards WHERE id = ?`)
+      .get(boardId) as { requirePlanApproval: number | null } | undefined;
+    return (row?.requirePlanApproval ?? 0) === 1;
+  }
+
+  /**
+   * Release a task parked in the R20 plan-approval hold (company-model U5).
+   * A task with status `awaiting-approval` advances to in-progress (company-model
+   * board, where the Lead's column is `todo`) by clearing the marker and moving
+   * the task forward. Callable from the U12 approval route. The actor is the
+   * board's Lead agent (forward-moves of the Lead's own column are permitted by
+   * U3). On a non-company board (legacy triage flow), the task moves `todo`
+   * exactly like the existing approve-plan route.
+   *
+   * @returns the updated task, or throws if the task is not awaiting approval.
+   */
+  async approvePlanForTask(
+    taskId: string,
+    options: { actorAgentId?: string; targetColumn?: Column } = {},
+  ): Promise<Task> {
+    const task = await this.getTask(taskId);
+    if (task.status !== "awaiting-approval") {
+      throw new Error(`Task ${taskId} is not awaiting plan approval (status=${task.status ?? "null"})`);
+    }
+    await this.logEntry(taskId, "Plan approved by user");
+    // Clear the hold marker first so the move sees a normal task.
+    await this.updateTask(taskId, { status: null });
+    const target = options.targetColumn
+      ?? (task.column === "triage" ? ("todo" as Column) : ("in-progress" as Column));
+    const moveOpts = options.actorAgentId
+      ? { actor: { kind: "agent" as const, agentId: options.actorAgentId } }
+      : undefined;
+    const updated = await this.moveTask(taskId, target, moveOpts);
+    return updated;
+  }
+
+  /**
+   * The workflow id a board references (company-model U1), or undefined. Read-only
+   * helper consumed by the workflow-IR resolver's board→IR primary path.
+   */
+  getBoardWorkflowId(boardId: string): string | undefined {
+    const row = this.db.prepare(`SELECT workflowId FROM boards WHERE id = ?`).get(boardId) as
+      | { workflowId: string | null }
+      | undefined;
+    return row?.workflowId || undefined;
+  }
+
+  /**
+   * Company-model U2 deletion guard: list every board column that staffs the
+   * given agent via a WorkflowColumnAgent binding. Used by AgentStore.deleteAgent
+   * to reject deleting an agent that is still staffed somewhere (an unguarded
+   * delete would strand a column binding pointing at a non-existent agent).
+   *
+   * Returns one entry per (board, column) the agent staffs. Empty when none.
+   */
+  async findColumnsStaffingAgent(
+    agentId: string,
+  ): Promise<Array<{ boardId: string; boardName: string; columnId: string }>> {
+    const hits: Array<{ boardId: string; boardName: string; columnId: string }> = [];
+    const boards = this.getBoardStore().listBoards();
+    const irCache = new Map<string, WorkflowIr>();
+    for (const board of boards) {
+      const ir = await resolveWorkflowIrById(this, board.workflowId, irCache);
+      if (ir.version !== "v2") continue;
+      for (const col of ir.columns) {
+        if (col.agent?.agentId === agentId) {
+          hits.push({ boardId: board.id, boardName: board.name, columnId: col.id });
+        }
+      }
+    }
+    return hits;
   }
 
   /**

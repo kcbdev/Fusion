@@ -31,20 +31,6 @@ export interface WorkflowIrNode {
   config?: Record<string, unknown>;
 }
 
-/** Default bounded-rework budget when a rework region omits `maxReworkCycles`
- *  (KTD-5 foreach default; U6 reuses it for the top-level review loop). */
-export const DEFAULT_MAX_REWORK_CYCLES = 3;
-/** Defensive clamp on any rework budget (KTD-5; shared by foreach + U6). */
-export const MAX_REWORK_CYCLES_CAP = 10;
-
-/** Resolve a bounded-rework budget from a config bag, applying the shared
- *  default + clamp. Used by the foreach sub-walk and the top-level rework loop so
- *  the bound semantics cannot drift between the two. */
-export function resolveMaxReworkCycles(raw: unknown): number {
-  const n = typeof raw === "number" ? raw : DEFAULT_MAX_REWORK_CYCLES;
-  return Math.max(1, Math.min(MAX_REWORK_CYCLES_CAP, Math.floor(n)));
-}
-
 /**
  * Executor kinds selectable on a prompt/execute node's `config.executor` (CLI
  * Agent Executor, U7). The engine reads `config.executor` as an open string; this
@@ -89,6 +75,20 @@ export interface WorkflowNodeExecutorConfig {
   cliNotify?: Record<string, unknown>;
 }
 
+/** Default bounded-rework budget when a rework region omits `maxReworkCycles`
+ *  (KTD-5 foreach default; U6 reuses it for the top-level review loop). */
+export const DEFAULT_MAX_REWORK_CYCLES = 3;
+/** Defensive clamp on any rework budget (KTD-5; shared by foreach + U6). */
+export const MAX_REWORK_CYCLES_CAP = 10;
+
+/** Resolve a bounded-rework budget from a config bag, applying the shared
+ *  default + clamp. Used by the foreach sub-walk and the top-level rework loop so
+ *  the bound semantics cannot drift between the two. */
+export function resolveMaxReworkCycles(raw: unknown): number {
+  const n = typeof raw === "number" ? raw : DEFAULT_MAX_REWORK_CYCLES;
+  return Math.max(1, Math.min(MAX_REWORK_CYCLES_CAP, Math.floor(n)));
+}
+
 export interface WorkflowIrEdge {
   from: string;
   to: string;
@@ -98,9 +98,8 @@ export interface WorkflowIrEdge {
    *  by the foreach `maxReworkCycles`; U6 generalizes the same mechanism to the
    *  top-level walk so a PR review region (await-review → pr-respond → back to
    *  await-review) is a legal bounded cycle too. The bound on a top-level rework
-   *  edge is `maxReworkCycles` on this edge's `to` node config (the loop-region
-   *  head, which must set `reworkRegion: true`), defaulting to
-   *  {@link DEFAULT_MAX_REWORK_CYCLES}. Either way, rework edges are
+   *  edge is `maxReworkCycles` on this edge's `from` node config (the loop head),
+   *  defaulting to {@link DEFAULT_MAX_REWORK_CYCLES}. Either way, rework edges are
    *  exempt from "Cycle detected"; every other back-edge still throws. */
   kind?: "rework";
 }
@@ -233,6 +232,37 @@ export interface WorkflowColumnAgent {
   mode: "defer" | "override";
 }
 
+/** Per-column work-engine binding (company-model U13). A column may declare the
+ *  work engine that runs when a task dwells there. The default engine (absent
+ *  field) is the standard pipeline resolved at dispatch (triage/executor/
+ *  validator). A `ce-stage` engine names a Compound Engineering stage id (resolved
+ *  by the bundled CE plugin's stage registry → bundled skill → artifact location)
+ *  that runs as the column's work engine. This is the least-invasive carrier for
+ *  "this column runs a CE stage": a first-class typed field mirroring
+ *  {@link WorkflowColumnAgent} (execution config, not a board-transition trait),
+ *  additive and omitted entirely when unset so legacy/default boards stay
+ *  byte-identical. Engine DISPATCH (consuming this field at the executor seam) is
+ *  sub-part B; this unit only defines + validates the representation and stamps it
+ *  onto the CE board template. */
+export interface WorkflowColumnEngine {
+  /** Engine kind. Open-ended union; only `ce-stage` is recognized in U13. */
+  kind: "ce-stage";
+  /** The CE stage id (e.g. `ce-plan`, `ce-work`, `ce-code-review`, `ce-compound`,
+   *  `resolve-pr-feedback`) the column runs. Resolved against the CE plugin's
+   *  stage registry at dispatch (sub-part B); existence is NOT checked here (no
+   *  plugin/registry at the IR layer), mirroring how column-agent existence is
+   *  enforced at write time and falls back at read time. Non-empty. */
+  stageId: string;
+}
+
+/** The three locked role columns of a company-model board (U3, R1). A column's
+ *  `role` is the identity of the agent slot the board mandates there: the Lead
+ *  staffs todo, the Executor in-progress, the Reviewer in-review. Only the
+ *  company board template carries these markers — legacy/default workflows never
+ *  set them, so flag-off boards stay byte-identical and the company-model
+ *  placement/movement rules (which key off the markers) never fire for them. */
+export type WorkflowColumnRole = "lead" | "executor" | "reviewer";
+
 /** A workflow-defined board column. */
 export interface WorkflowIrColumn {
   id: string;
@@ -242,6 +272,23 @@ export interface WorkflowIrColumn {
    *  omitted entirely when unset — never serialized as `agent: null` — so legacy
    *  and default workflows stay byte-identical (R9). */
   agent?: WorkflowColumnAgent;
+  /** Company-model role marker (U3, R1). Present only on the three mandatory
+   *  role columns of a company board template; absent everywhere else. The
+   *  company-model placement (workflow-reconciliation) and movement
+   *  (workflow-transitions) rules key off this marker, so a board that carries
+   *  it is a company-model board and one that doesn't is left on the legacy
+   *  path. Additive — omitted entirely when unset. */
+  role?: WorkflowColumnRole;
+  /** Company-model lock marker (U3, R1). A locked column is non-deletable and
+   *  non-renamable: the save-validation path rejects edits that remove or rename
+   *  it. The three role columns are locked. Additive — omitted when unset. */
+  locked?: boolean;
+  /** Per-column work-engine binding (company-model U13). Present only on CE board
+   *  columns that run a Compound Engineering stage as their work engine; absent
+   *  everywhere else (default engine resolved at dispatch). Additive — omitted
+   *  entirely when unset, so legacy/default/company-template boards stay
+   *  byte-identical. Dispatch consumption is sub-part B. */
+  engine?: WorkflowColumnEngine;
 }
 
 /** Release conditions for a `hold` node (KTD-2, R3). */

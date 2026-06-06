@@ -910,6 +910,55 @@ function validateColumns(ir: WorkflowIrV2): void {
       throw new WorkflowIrError(`Workflow IR column '${column.id}' traits must be an array`);
     }
     validateColumnAgent(column);
+    validateColumnRole(column);
+    validateColumnEngine(column);
+  }
+}
+
+/** Recognized per-column work-engine kinds (company-model U13). */
+const COLUMN_ENGINE_KINDS: ReadonlySet<string> = new Set(["ce-stage"]);
+
+/** Validate a column's optional work-engine binding (company-model U13). Mirrors
+ *  `validateColumnAgent`: absent → no-op; present → `kind` must be a recognized
+ *  engine kind and `stageId` a non-empty string. Stage *existence* is NOT checked
+ *  here (no plugin/stage registry at the IR layer); it is resolved at dispatch
+ *  (sub-part B) and falls back to the standard engine when missing. */
+function validateColumnEngine(column: WorkflowIrColumn): void {
+  const engine = column.engine;
+  if (engine === undefined) return;
+  if (!engine || typeof engine !== "object") {
+    throw new WorkflowIrError(`Workflow IR column '${column.id}' engine must be an object`);
+  }
+  if (typeof engine.kind !== "string" || !COLUMN_ENGINE_KINDS.has(engine.kind)) {
+    throw new WorkflowIrError(
+      `Workflow IR column '${column.id}' engine kind must be 'ce-stage' (got '${String(engine.kind)}')`,
+    );
+  }
+  if (typeof engine.stageId !== "string" || engine.stageId === "") {
+    throw new WorkflowIrError(
+      `Workflow IR column '${column.id}' engine must have a non-empty stageId`,
+    );
+  }
+}
+
+/** Recognized company-model role markers (U3, R1). */
+const COLUMN_ROLES: ReadonlySet<string> = new Set(["lead", "executor", "reviewer"]);
+
+/** Validate a column's optional company-model `role`/`locked` markers (U3, R1).
+ *  Mirrors `validateColumnAgent`: absent → no-op; present → `role` must be one of
+ *  the three recognized values and `locked` must be a boolean. The markers are
+ *  config data (only the company board template sets them); existence/placement
+ *  rules live in workflow-reconciliation, not here. */
+function validateColumnRole(column: WorkflowIrColumn): void {
+  if (column.role !== undefined && !COLUMN_ROLES.has(column.role)) {
+    throw new WorkflowIrError(
+      `Workflow IR column '${column.id}' role must be 'lead', 'executor', or 'reviewer' (got '${String(column.role)}')`,
+    );
+  }
+  if (column.locked !== undefined && typeof column.locked !== "boolean") {
+    throw new WorkflowIrError(
+      `Workflow IR column '${column.id}' locked must be a boolean when present`,
+    );
   }
 }
 
@@ -1083,6 +1132,11 @@ export function downgradeIrToV1IfPure(ir: WorkflowIr): WorkflowIr {
     // A permanent-agent binding is a v2-only feature (column-agent plan, R9): a
     // graph that staffs a column can never round-trip through a pre-v2 binary.
     if (col.agent !== undefined) return ir;
+    // Company-model role/lock markers (U3, R1) are v2-only features: a board
+    // template that carries them must stay v2.
+    if (col.role !== undefined || col.locked !== undefined) return ir;
+    // A per-column work-engine binding (company-model U13) is a v2-only feature.
+    if (col.engine !== undefined) return ir;
   }
 
   // Every node must sit in its default seam-derived column. A node placed

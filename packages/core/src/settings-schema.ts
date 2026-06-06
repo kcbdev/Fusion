@@ -66,6 +66,8 @@ type ProjectSettingsSchema = Omit<ProjectSettings, MovedProjectSettingsKey>;
 
 /** Default values for global (user-level) settings. */
 export const DEFAULT_GLOBAL_SETTINGS = {
+  uiMode: "simple",
+  worktreeIsolationEnabled: true,
   themeMode: "dark",
   colorTheme: "default",
   dashboardFontScalePct: 100,
@@ -271,6 +273,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   worktreeInitCommand: undefined,
   testCommand: undefined,
   buildCommand: undefined,
+  worktreeIsolationEnabled: undefined,
   recycleWorktrees: false,
   executorAllowSiblingBranchRename: false,
   worktreeNaming: "random",
@@ -342,6 +345,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   specStalenessEnabled: false,
   specStalenessMaxAgeMs: 6 * 60 * 60 * 1000,
   taskStuckTimeoutMs: 600_000,
+  awaitingInputReminderHours: 4,
   runtimeStopDrainMs: 2_000,
   engineActiveSinceMs: undefined,
   engineActivationGraceMs: 5 * 60_000,

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { once } from "node:events";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { Database } from "../db.js";
+import { Database, SCHEMA_VERSION } from "../db.js";
 import { TaskStore } from "../store.js";
 import type { RunAuditEventInput, RunAuditEventFilter } from "../types.js";
 
@@ -584,7 +584,7 @@ describe("Run Audit", () => {
     });
 
     it("schema version is bumped to 40", () => {
-      expect(db.getSchemaVersion()).toBe(112);
+      expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     });
   });
 });

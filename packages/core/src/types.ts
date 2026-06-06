@@ -184,6 +184,16 @@ export type CompletionDocumentationMode = (typeof COMPLETION_DOCUMENTATION_MODES
 export const THEME_MODES = ["dark", "light", "system"] as const;
 export type ThemeMode = (typeof THEME_MODES)[number];
 
+/** UI complexity mode (company-model plan U11, R14/R23).
+ *  - "simple" (default): advanced surfaces are hidden and worktree isolation is
+ *    forced on (the disable toggle is an advanced-mode-only surface).
+ *  - "advanced": every surface is visible and the stored worktree-isolation
+ *    setting is honored — advanced mode is the worktree-force-on opt-out.
+ *  Gating is UI-only; routes and data stay live (R15). Distinct from and
+ *  unrelated to the `experimentalFeatures.companyModel` semantics flag. */
+export const UI_MODES = ["simple", "advanced"] as const;
+export type UiMode = (typeof UI_MODES)[number];
+
 /** Color theme options for the dashboard */
 export const COLOR_THEMES = [
   "default",
@@ -560,6 +570,7 @@ export type NtfyNotificationEvent =
   | "failed"
   | "awaiting-approval"
   | "awaiting-user-review"
+  | "awaiting-user-input"
   | "planning-awaiting-input"
   | "gridlock"
   | "board-stall-unrecovered"
@@ -580,6 +591,7 @@ export const NOTIFICATION_EVENTS = [
   "failed",
   "awaiting-approval",
   "awaiting-user-review",
+  "awaiting-user-input",
   "planning-awaiting-input",
   "gridlock",
   "board-stall-unrecovered",
@@ -1208,11 +1220,43 @@ export interface TaskAttachment {
   createdAt: string;
 }
 
+/**
+ * Delivery lifecycle for a per-agent addressed steering message (U9). Only set
+ * on messages that carry a {@link SteeringComment.targetAgentId}; legacy
+ * untargeted steering comments leave both fields undefined and behave exactly
+ * as before (always injected, no lifecycle).
+ *
+ * - `pending`   — queued, not yet injected into the target agent's context.
+ * - `delivered` — injected into the target agent's turn/dispatch context.
+ * - `cancelled` — user cancelled before delivery; never injected.
+ * - `discarded` — the task was archived/soft-deleted while still pending.
+ */
+export type AgentMessageDeliveryState =
+  | "pending"
+  | "delivered"
+  | "cancelled"
+  | "discarded";
+
 export interface SteeringComment {
   id: string;
   text: string;
   createdAt: string;
   author: "user" | "agent";
+  /**
+   * U9: when set, this steering comment is *addressed* to a specific agent
+   * (the column/effective agent id). It is only injected into that agent's
+   * context — never another agent's session — and carries a
+   * {@link deliveryState} lifecycle. Undefined for legacy untargeted steering
+   * (broadcast to whatever agent is running, no lifecycle).
+   */
+  targetAgentId?: string;
+  /**
+   * U9: delivery lifecycle, present only when {@link targetAgentId} is set.
+   * Treat an addressed comment with no explicit state as `pending`.
+   */
+  deliveryState?: AgentMessageDeliveryState;
+  /** U9: timestamp the message transitioned out of `pending` (delivered/cancelled/discarded). */
+  deliveredAt?: string;
 }
 
 export interface TaskComment {
@@ -2272,6 +2316,13 @@ export interface Task {
   executionMode?: ExecutionMode;
   /** Explicitly assigned agent ID for task-agent linking. Distinct from Agent.taskId active execution state. */
   assignedAgentId?: string;
+  /** The Board this task is homed on (company-model U1). Every task gains a board
+   *  at migration v114; the board owns the workflow/column config, superseding the
+   *  per-task `task_workflow_selection`. The resolver chain resolves a task's
+   *  workflow IR through this board reference as the primary path; tasks without a
+   *  boardId fall back to the legacy selection path unchanged. Company-model
+   *  *semantics* (teams, movement rules) stay behind `experimentalFeatures.companyModel`. */
+  boardId?: string;
   /** Per-task node override. When set, this task routes to the specified node instead of the project's default node. Undefined means use the project default. Use empty string to explicitly clear. */
   nodeId?: string;
   /** The node this task is actually routed to (resolved from nodeId override or project default). Set by the scheduler at dispatch time. */
@@ -2395,6 +2446,10 @@ export interface TaskCreateInput {
   /** Initial column id. Widened to {@link ColumnId} (#1403) so a custom-column
    *  task can be replicated/created; flag-OFF creation only ever uses legacy ids. */
   column?: ColumnId;
+  /** The Board to home this task on (company-model U1/U8). When set (e.g. CEO
+   *  routing via fn_task_create), the task is stamped with this stored board id;
+   *  absent leaves it to the default-board migration. */
+  boardId?: string;
   dependencies?: string[];
   breakIntoSubtasks?: boolean;
   /** When true, this task is expected to complete without creating git commits. */
@@ -2697,6 +2752,16 @@ export interface WorktrunkSettings {
 }
 
 export interface GlobalSettings {
+  /** UI complexity mode (company-model plan U11, R14/R23). Default: "simple".
+   *  Carries across surfaces (dashboard + TUI) as a user-level preference.
+   *  Gates advanced surfaces (UI-only) and forces worktree isolation on while
+   *  simple. See {@link resolveUiMode} / {@link resolveWorktreeEnabled}. */
+  uiMode?: UiMode;
+  /** Stored worktree-isolation preference (the advanced-mode disable toggle).
+   *  When unset, defaults to enabled. Simple mode forces this on regardless of
+   *  the stored value — read it ONLY through {@link resolveWorktreeEnabled},
+   *  never directly, so the simple-mode force-on can never be bypassed. */
+  worktreeIsolationEnabled?: boolean;
   /** Theme mode preference: dark, light, or system (follows OS). Default: "dark". */
   themeMode?: ThemeMode;
   /** Color theme preference for accent colors and styling. Default: "default". */
@@ -3374,6 +3439,12 @@ export interface ProjectSettings {
   testCommand?: string;
   /** Custom build command for the project (e.g. "pnpm build") */
   buildCommand?: string;
+  /** Project-level override of the stored worktree-isolation preference (the
+   *  advanced-mode disable toggle). When undefined, the global
+   *  `worktreeIsolationEnabled` applies (default enabled). Simple mode forces
+   *  isolation on regardless — read ONLY through {@link resolveWorktreeEnabled},
+   *  never directly. */
+  worktreeIsolationEnabled?: boolean;
   /** When true, completed task worktrees are returned to an idle pool instead
    *  of being deleted. New tasks acquire a warm worktree from the pool,
    *  preserving build caches (node_modules, target/, dist/). Default: false. */
@@ -3649,6 +3720,13 @@ export interface ProjectSettings {
    *  than this duration, the task is considered stuck and will be terminated and retried.
    *  Default: 600000 (10 minutes). Set to 0 to disable. */
   taskStuckTimeoutMs?: number;
+  /** Hours a task may sit parked in `awaiting-user-input` before the engine
+   *  re-sends its notification once with a "still waiting" flavor. A task blocked
+   *  on a structured CE question is intentionally never flagged stuck, so without
+   *  this reminder a parked question can go unanswered forever with no follow-up.
+   *  Checked by the stuck-task detector's periodic loop (every ~30s) but only for
+   *  tasks already past the threshold. Default: 4. Set to 0 to disable. */
+  awaitingInputReminderHours?: number;
   /** Maximum milliseconds InProcessRuntime.stop() waits for in-flight tasks to drain
    *  AFTER aborting their AI sessions. Default: 2000. Set to 0 to skip drain waits
    *  entirely (test/CI). Set to 30000 to preserve the historical 30s grace window. */
@@ -4074,6 +4152,71 @@ export {
 export interface BoardConfig {
   nextId: number;
   settings?: Settings;
+}
+
+/**
+ * A persisted Board (company-model U1) — the first-class task container that
+ * wraps a workflow config. Each board references its own workflow definition
+ * (built-in or custom) via `workflowId`; tasks land on a board (`Task.boardId`)
+ * rather than selecting a workflow per-task. Board containment is universal and
+ * unflagged — the migration assigns every task a board; company-model
+ * *semantics* (teams, movement rules, CEO) stay behind
+ * `experimentalFeatures.companyModel` in later units.
+ *
+ * Distinct from the legacy `board.ts` transition utility and from `BoardConfig`
+ * (the legacy nextId/settings blob). The board's column/agent config lives in
+ * its referenced workflow IR — the board row carries only identity + ordering.
+ */
+export interface Board {
+  id: string;
+  /** Stable project-identity id this board belongs to. */
+  projectId: string;
+  name: string;
+  description: string;
+  /** The workflow definition (built-in id like `builtin:coding`, or a custom
+   *  workflow id) whose IR supplies this board's columns + agent staffing. */
+  workflowId: string;
+  /** Sort order within the project's board list (ascending). */
+  ordering: number;
+  /** R20 plan-approval hold (company-model U5). When true on a company-model
+   *  board, the Lead's spec generation parks the task in `todo` with
+   *  status=`awaiting-approval` instead of advancing to in-progress; an explicit
+   *  user approval (`approvePlanForTask`) releases it. Defaults to false. */
+  requirePlanApproval: boolean;
+  /** R22 LFG mode (company-model U13). When true on a CE board, every stage runs
+   *  in its headless/pipeline form — no blocking questions, autonomous defaults,
+   *  the plan-approval hold is skipped — so a task flows Todo → done/PR with zero
+   *  user touchpoints. Per-board default, overridable per task (see
+   *  `getTaskLfgOverride`/`resolveEffectiveLfgMode`). Defaults to false; engine
+   *  consumption is sub-part B. */
+  lfgMode: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Input for creating a Board. `description`/`ordering` default when omitted. */
+export interface BoardCreateInput {
+  projectId?: string;
+  name: string;
+  description?: string;
+  workflowId: string;
+  ordering?: number;
+  /** R20 plan-approval hold; defaults to false when omitted. */
+  requirePlanApproval?: boolean;
+  /** R22 LFG mode (company-model U13); defaults to false when omitted. */
+  lfgMode?: boolean;
+}
+
+/** Partial update for a Board. Only supplied fields are written. */
+export interface BoardUpdate {
+  name?: string;
+  description?: string;
+  workflowId?: string;
+  ordering?: number;
+  /** R20 plan-approval hold (company-model U5). */
+  requirePlanApproval?: boolean;
+  /** R22 LFG mode (company-model U13). */
+  lfgMode?: boolean;
 }
 
 export interface DistributedTaskIdReserveInput {
@@ -5636,8 +5779,33 @@ export interface AgentHeartbeatRun {
   heartbeatProcedureSource?: "default" | "custom" | "default-no-task-override";
 }
 
-/** Capabilities/roles an agent can have */
-export type AgentCapability = "triage" | "executor" | "reviewer" | "merger" | "scheduler" | "engineer" | "custom";
+/**
+ * Capabilities/roles an agent can have.
+ *
+ * Company-model roles (U2): `lead` and `ceo` are the new first-class roles —
+ * the Lead structures incoming work on a board's Todo column, the CEO is the
+ * project-level global-chat router. Both are seeded by {@link seedBoardTeam}.
+ *
+ * Deprecated aliases (kept for back-compat; role-policy helpers in
+ * `agent-role-policy.ts` treat them as aliases so existing agents keep working):
+ *  - `triage`   — the Lead absorbs triage's spec-generation work; new boards
+ *    have no triage column. Existing triage-role agents still function.
+ *  - `engineer` — superseded by `executor` (the slot is action-shaped, not
+ *    coding-shaped). An `engineer`-role agent counts as an `executor` for
+ *    implementation-task routing.
+ */
+export type AgentCapability =
+  | "lead"
+  | "ceo"
+  | "executor"
+  | "reviewer"
+  | "merger"
+  | "scheduler"
+  | "custom"
+  /** @deprecated The Lead absorbs triage; treated as an alias by role-policy helpers. */
+  | "triage"
+  /** @deprecated Superseded by `executor`; treated as an alias by role-policy helpers. */
+  | "engineer";
 
 /** A configurable agent role prompt template. */
 export interface AgentPromptTemplate {
@@ -6902,3 +7070,14 @@ export {
 export type { ResolvedModelSelection } from "./model-resolution.js";
 export { resolveResearchSettings } from "./research-settings.js";
 export type { ResolvedResearchSettings } from "./research-settings.js";
+export { resolveUiMode } from "./ui-mode.js";
+// Board-scoped board payload wire types (U10), re-exported here so the dashboard
+// client picks them up through the `@fusion/core` → types.ts vite alias. Shared
+// with the server route so the wire contract is single-sourced.
+export type {
+  BoardColumn,
+  BoardTeamMember,
+  BoardPayload,
+  BoardSummary,
+  BoardWorkflowsPayload,
+} from "./board-wire-types.js";

@@ -4,6 +4,7 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { TaskStore } from "../store.js";
+import { SCHEMA_VERSION } from "../db.js";
 
 function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), "kb-merge-request-record-test-"));
@@ -38,7 +39,7 @@ describe("TaskStore merge request record + completion handoff marker", () => {
       .all() as Array<{ name: string }>;
 
     expect(tableRows).toEqual([{ name: "completion_handoff_markers" }, { name: "merge_requests" }]);
-    expect(db.getSchemaVersion()).toBe(112);
+    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
   });
 
   it("upserts merge request records", async () => {

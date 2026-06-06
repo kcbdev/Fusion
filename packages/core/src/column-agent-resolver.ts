@@ -169,6 +169,12 @@ export interface EffectiveAgentInput {
   ownModelProvider?: string;
   /** The work's own model id, if any. */
   ownModelId?: string;
+  /** When false, a lone COMPLETE model pair does NOT suppress a `defer` column
+   *  agent — the task runs as the column agent with the model pair riding as
+   *  the session model override (company-model R7: custom model, same agent).
+   *  Defaults to true, preserving the original KTD-5 all-or-nothing rule for
+   *  legacy/advanced workflows. An own agent identity always suppresses. */
+  modelPairSuppressesDefer?: boolean;
 }
 
 /** Discriminated result of effective-agent resolution: callers and audit logs can
@@ -190,6 +196,9 @@ function hasOwnSettings(input: EffectiveAgentInput): boolean {
     input.ownModelProvider !== "" &&
     typeof input.ownModelId === "string" &&
     input.ownModelId !== "";
+  // Company-model boards (modelPairSuppressesDefer === false): a custom model
+  // pair alone keeps the column agent; only an explicit agent identity wins.
+  if (input.modelPairSuppressesDefer === false) return hasOwnAgent;
   return hasOwnAgent || hasCompletePair;
 }
 
@@ -216,4 +225,47 @@ export function resolveEffectiveAgent(input: EffectiveAgentInput): EffectiveAgen
     return { source: "own-settings" };
   }
   return { source: "column-agent", agentId: binding.agentId };
+}
+
+// ── Company-model column-by-id resolution (U4) ───────────────────────────────
+// The graph-executor seam path resolves the column agent by *node* id
+// (`resolveColumnAgentBinding`), because that path knows the governing node. The
+// company-model ephemeral-bypass path (engine `EphemeralWorkerManager.onTaskStart`,
+// `task-agent-sync`) only knows the task's CURRENT *column* — so it needs a
+// column-keyed counterpart. Both ultimately read the same `column.agent` field, so
+// the precedence decision still flows through the one shared `resolveEffectiveAgent`
+// resolver (no reimplemented precedence — KTD-2/KTD-5).
+
+/** The agent binding (if any) declared directly on `columnId`. A column WITHOUT an
+ *  `agent` field yields `undefined` (same guarantee as `resolveColumnAgentBinding`).
+ *  Returns `undefined` for v1 IRs (no columns). */
+export function resolveColumnAgentForColumn(
+  ir: WorkflowIr,
+  columnId: string | undefined,
+): WorkflowColumnAgent | undefined {
+  if (ir.version !== "v2" || columnId === undefined) return undefined;
+  return ir.columns.find((c) => c.id === columnId)?.agent;
+}
+
+/** Resolve the EFFECTIVE execution agent id for a company-model task on `columnId`,
+ *  applying the column binding's defer/override precedence against the task's OWN
+ *  settings (an explicit advanced per-task `assignedAgentId` / complete model pair).
+ *  Returns the agent id when the column agent governs, else `undefined` (the caller
+ *  falls back to the task's own `assignedAgentId` / the legacy path). The precedence
+ *  itself is delegated to {@link resolveEffectiveAgent} so it is never reimplemented
+ *  (U4, KTD-2/KTD-5). */
+export function resolveCompanyExecutionAgentId(
+  ir: WorkflowIr,
+  columnId: string | undefined,
+  ownSettings: Omit<EffectiveAgentInput, "binding">,
+): string | undefined {
+  const binding = resolveColumnAgentForColumn(ir, columnId);
+  // Company-model rule (R7): a per-task model pair never suppresses the column
+  // agent — the task runs as the column agent with the custom model.
+  const effective = resolveEffectiveAgent({
+    binding,
+    ...ownSettings,
+    modelPairSuppressesDefer: false,
+  });
+  return effective.source === "column-agent" ? effective.agentId : undefined;
 }

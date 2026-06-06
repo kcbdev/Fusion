@@ -4,7 +4,7 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { Database } from "../db.js";
+import { Database, SCHEMA_VERSION } from "../db.js";
 
 function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), "kb-goals-schema-test-"));
@@ -91,6 +91,6 @@ describe("goals schema", () => {
   });
 
   it("reports schema version 101", () => {
-    expect(db.getSchemaVersion()).toBe(112);
+    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
   });
 });
