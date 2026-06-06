@@ -1,5 +1,5 @@
 import "./ProjectSelector.css";
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ChevronDown,
@@ -8,30 +8,68 @@ import {
   Grid3X3,
   Search,
   Clock,
+  Star,
   X,
 } from "lucide-react";
 import type { ProjectInfo } from "../api";
 import type { ProjectStatus } from "@fusion/core";
 import { getTrailingPath } from "../utils/pathDisplay";
 import { getProjectStatusConfig, isInitializingStatus } from "../utils/projectStatusConfig";
+import { useProjectBookmarks } from "../hooks/useProjectBookmarks";
 
 export interface ProjectSelectorProps {
   projects: ProjectInfo[];
   currentProject: ProjectInfo | null;
-  onSelect: (project: ProjectInfo) => void;
+  onSelect?: (project: ProjectInfo) => void;
   onViewAll: () => void;
   recentProjectIds?: string[];
 }
 
 /**
- * ProjectSelector - Project switcher dropdown with keyboard navigation
+ * HighlightMatch — Renders text with matching substring highlighted (bold + accent underline).
+ * Used to show which part of a project name/path matches the autocomplete query.
+ */
+function HighlightMatch({
+  text,
+  query,
+}: {
+  text: string;
+  query: string;
+}): ReactNode {
+  if (!query.trim()) return <>{text}</>;
+
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const matchIndex = lowerText.indexOf(lowerQuery);
+
+  if (matchIndex === -1) return <>{text}</>;
+
+  const before = text.slice(0, matchIndex);
+  const match = text.slice(matchIndex, matchIndex + query.length);
+  const after = text.slice(matchIndex + query.length);
+
+  return (
+    <>
+      {before}
+      <mark className="project-selector__highlight">{match}</mark>
+      {after}
+    </>
+  );
+}
+
+/**
+ * ProjectSelector - Project switcher dropdown with autocomplete/type-ahead
  * 
  * Features:
  * - Dropdown trigger showing current project name + chevron
+ * - Always-visible search input with type-ahead filtering
+ * - Text highlighting showing matched portions of project names/paths
  * - Dropdown menu with project list, status icons, "View All Projects" option
  * - Keyboard navigation: arrow keys, enter to select, escape to close
- * - Search/filter when 5+ projects
- * - Recent projects section at top (last 3 accessed)
+ * - Recent projects section (last 3 accessed)
+ * - Bookmarked projects section (star toggle, persisted in localStorage)
+ * - Exact match detection: auto-highlights and Enter-selects the exact match
+ * - No matches state with clear messaging
  */
 export function ProjectSelector({
   projects,
@@ -47,6 +85,8 @@ export function ProjectSelector({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const itemRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
+  const { bookmarkedIds, toggleBookmark, isBookmarked } = useProjectBookmarks();
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -60,6 +100,7 @@ export function ProjectSelector({
         !triggerRef.current.contains(e.target as Node)
       ) {
         setIsOpen(false);
+        setSearchQuery("");
       }
     };
 
@@ -74,6 +115,7 @@ export function ProjectSelector({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setIsOpen(false);
+        setSearchQuery("");
         triggerRef.current?.focus();
       }
     };
@@ -82,12 +124,12 @@ export function ProjectSelector({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
-  // Focus search input when dropdown opens (if search is visible)
+  // Focus search input when dropdown opens (always visible for autocomplete)
   useEffect(() => {
-    if (isOpen && projects.length >= 5) {
+    if (isOpen) {
       setTimeout(() => searchInputRef.current?.focus(), 0);
     }
-  }, [isOpen, projects.length]);
+  }, [isOpen]);
 
   // Get recent projects
   const recentProjects = useMemo(() => {
@@ -108,28 +150,57 @@ export function ProjectSelector({
     );
   }, [projects, searchQuery]);
 
-  // Organize projects for display: recent first, then others
+  // Detect exact match (case-insensitive name match)
+  const exactMatch = useMemo((): ProjectInfo | null => {
+    if (!searchQuery.trim()) return null;
+    const query = searchQuery.toLowerCase();
+    // Exclude current project — it's not shown in the dropdown
+    const candidates = filteredProjects.filter(
+      (p) => p.id !== currentProject?.id
+    );
+    const nameMatches = candidates.filter(
+      (p) => p.name.toLowerCase() === query
+    );
+    if (nameMatches.length === 1) return nameMatches[0];
+    return null;
+  }, [filteredProjects, searchQuery, currentProject]);
+
+  // Organize projects for display: bookmarked first, then recent, then others
   const displayProjects = useMemo(() => {
     const recentIds = new Set(recentProjects.map((p) => p.id));
     const currentId = currentProject?.id;
 
-    // Exclude current project from list
+    // Bookmarked projects (excluding current)
+    const bookmarked = filteredProjects.filter(
+      (p) =>
+        p.id !== currentId &&
+        bookmarkedIds.has(p.id) &&
+        !recentIds.has(p.id)
+    );
+
+    // Exclude current, bookmarked, and recent from "others"
+    const bookmarkedAndRecentIds = new Set([
+      ...bookmarked.map((p) => p.id),
+      ...recentIds,
+    ]);
     const others = filteredProjects.filter(
-      (p) => p.id !== currentId && !recentIds.has(p.id)
+      (p) => p.id !== currentId && !bookmarkedAndRecentIds.has(p.id)
     );
 
     return {
+      bookmarked: searchQuery.trim() ? [] : bookmarked,
       recent: searchQuery.trim() ? [] : recentProjects,
       others,
     };
-  }, [filteredProjects, recentProjects, currentProject, searchQuery]);
+  }, [filteredProjects, recentProjects, currentProject, searchQuery, bookmarkedIds]);
 
   // Calculate total items for keyboard navigation
   const totalItems = useMemo(() => {
+    const bookmarkedCount = displayProjects.bookmarked.length;
     const recentCount = displayProjects.recent.length;
     const othersCount = displayProjects.others.length;
     const viewAllCount = 1;
-    return recentCount + othersCount + viewAllCount;
+    return bookmarkedCount + recentCount + othersCount + viewAllCount;
   }, [displayProjects]);
 
   // Handle keyboard navigation within dropdown
@@ -151,19 +222,28 @@ export function ProjectSelector({
         case "Enter":
           e.preventDefault();
           if (highlightedIndex >= 0) {
+            const bookmarkedCount = displayProjects.bookmarked.length;
             const recentCount = displayProjects.recent.length;
             const othersCount = displayProjects.others.length;
 
-            if (highlightedIndex < recentCount) {
+            if (highlightedIndex < bookmarkedCount) {
+              // Select bookmarked project
+              onSelect(displayProjects.bookmarked[highlightedIndex]);
+            } else if (highlightedIndex < bookmarkedCount + recentCount) {
               // Select recent project
-              onSelect(displayProjects.recent[highlightedIndex]);
-            } else if (highlightedIndex < recentCount + othersCount) {
+              onSelect(displayProjects.recent[highlightedIndex - bookmarkedCount]);
+            } else if (highlightedIndex < bookmarkedCount + recentCount + othersCount) {
               // Select other project
-              onSelect(displayProjects.others[highlightedIndex - recentCount]);
+              onSelect(displayProjects.others[highlightedIndex - bookmarkedCount - recentCount]);
             } else {
               // View All
               onViewAll();
             }
+            setIsOpen(false);
+            setSearchQuery("");
+          } else if (exactMatch) {
+            // Auto-select exact match on Enter when nothing is highlighted
+            onSelect?.(exactMatch);
             setIsOpen(false);
             setSearchQuery("");
           }
@@ -178,15 +258,41 @@ export function ProjectSelector({
           break;
       }
     },
-    [highlightedIndex, totalItems, displayProjects, onSelect, onViewAll]
+    [highlightedIndex, totalItems, displayProjects, onSelect, onViewAll, exactMatch]
   );
 
-  // Reset highlight when dropdown opens or search changes
+  // Auto-highlight first result when filtering (type-ahead behavior)
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && searchQuery.trim()) {
+      if (exactMatch) {
+        // Auto-highlight the exact match item
+        const bookmarkedCount = displayProjects.bookmarked.length;
+        const recentCount = displayProjects.recent.length;
+        const matchIdx = displayProjects.others.findIndex(
+          (p) => p.id === exactMatch.id
+        );
+        if (matchIdx >= 0) {
+          setHighlightedIndex(bookmarkedCount + recentCount + matchIdx);
+        }
+      } else if (displayProjects.others.length > 0) {
+        // Highlight first item in others section
+        setHighlightedIndex(displayProjects.bookmarked.length + displayProjects.recent.length);
+      } else {
+        setHighlightedIndex(-1);
+      }
+    } else if (isOpen && !searchQuery.trim()) {
       setHighlightedIndex(-1);
     }
-  }, [isOpen, searchQuery]);
+  }, [isOpen, searchQuery, exactMatch, displayProjects]);
+
+  // Scroll highlighted item into view for keyboard navigation
+  useEffect(() => {
+    if (highlightedIndex < 0) return;
+    const el = itemRefs.current.get(highlightedIndex);
+    if (el) {
+      el.scrollIntoView({ block: "nearest" });
+    }
+  }, [highlightedIndex]);
 
   // Handle project selection
   const handleSelectProject = useCallback(
@@ -207,11 +313,14 @@ export function ProjectSelector({
 
   // Toggle dropdown
   const toggleDropdown = useCallback(() => {
-    setIsOpen((prev) => !prev);
-    if (isOpen) {
-      setSearchQuery("");
-    }
-  }, [isOpen]);
+    setIsOpen((prev) => {
+      if (!prev) {
+        // Opening — always clear search for a fresh type-ahead
+        setSearchQuery("");
+      }
+      return !prev;
+    });
+  }, []);
 
   // Render status icon
   const renderStatusIcon = (status: ProjectStatus) => {
@@ -223,6 +332,36 @@ export function ProjectSelector({
         style={{ color: config.color }}
         className={isInitializingStatus(status) ? "animate-spin" : ""}
       />
+    );
+  };
+
+  // Render bookmark star toggle (span to avoid nested <button> inside listbox items)
+  const renderBookmarkToggle = (projectId: string) => {
+    const bookmarked = isBookmarked(projectId);
+    return (
+      <span
+        role="button"
+        tabIndex={0}
+        className={`project-selector__bookmark ${bookmarked ? "bookmarked" : ""}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          toggleBookmark(projectId);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.stopPropagation();
+            e.preventDefault();
+            toggleBookmark(projectId);
+          }
+        }}
+        aria-label={bookmarked ? t("projectSelector.removeBookmark", "Remove bookmark") : t("projectSelector.addBookmark", "Bookmark project")}
+        data-testid={`bookmark-toggle-${projectId}`}
+      >
+        <Star
+          size={14}
+          fill={bookmarked ? "currentColor" : "none"}
+        />
+      </span>
     );
   };
 
@@ -262,40 +401,51 @@ export function ProjectSelector({
           onKeyDown={handleDropdownKeyDown}
           data-testid="project-selector-dropdown"
         >
-          {/* Search input (shown when 5+ projects) */}
-          {projects.length >= 5 && (
-            <div className="project-selector__search">
-              <Search size={14} className="project-selector__search-icon" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                placeholder={t("projectSelector.searchPlaceholder", "Search projects...")}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="project-selector__search-input"
-              />
-              {searchQuery && (
-                <button
-                  className="project-selector__search-clear"
-                  onClick={() => setSearchQuery("")}
-                  aria-label={t("projectSelector.clearSearch", "Clear search")}
-                >
-                  <X size={12} />
-                </button>
-              )}
+          {/* Search input — always visible for autocomplete/type-ahead */}
+          <div className="project-selector__search">
+            <Search size={14} className="project-selector__search-icon" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder={t("projectSelector.searchPlaceholder", "Search projects...")}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="project-selector__search-input"
+              data-testid="project-selector-search-input"
+              aria-label={t("projectSelector.searchAriaLabel", "Type to search projects")}
+            />
+            {searchQuery && (
+              <button
+                className="project-selector__search-clear"
+                onClick={() => setSearchQuery("")}
+                aria-label={t("projectSelector.clearSearch", "Clear search")}
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+
+          {/* Exact match indicator */}
+          {exactMatch && (
+            <div className="project-selector__exact-match" data-testid="project-selector-exact-match">
+              {t("projectSelector.exactMatch", "Exact match — press Enter to select")}
             </div>
           )}
 
-          {/* Recent projects section */}
-          {displayProjects.recent.length > 0 && (
+          {/* Bookmarked projects section */}
+          {displayProjects.bookmarked.length > 0 && (
             <div className="project-selector__section">
               <div className="project-selector__section-header">
-                <Clock size={12} />
-                <span>{t("projectSelector.recent", "Recent")}</span>
+                <Star size={12} fill="currentColor" />
+                <span>{t("projectSelector.bookmarked", "Bookmarked")}</span>
               </div>
-              {displayProjects.recent.map((project, index) => (
+              {displayProjects.bookmarked.map((project, index) => (
                 <button
                   key={project.id}
+                  ref={(el) => {
+                    if (el) itemRefs.current.set(index, el);
+                    else itemRefs.current.delete(index);
+                  }}
                   className={`project-selector__item ${
                     highlightedIndex === index ? "highlighted" : ""
                   }`}
@@ -307,6 +457,7 @@ export function ProjectSelector({
                   <span className="project-selector__item-name">
                     {project.name}
                   </span>
+                  {renderBookmarkToggle(project.id)}
                   {currentProject?.id === project.id && (
                     <Check size={14} className="project-selector__item-check" />
                   )}
@@ -315,25 +466,22 @@ export function ProjectSelector({
             </div>
           )}
 
-          {/* All projects section */}
-          <div className="project-selector__section">
-            {displayProjects.recent.length > 0 && (
+          {/* Recent projects section */}
+          {displayProjects.recent.length > 0 && (
+            <div className="project-selector__section">
               <div className="project-selector__section-header">
-                <Folder size={12} />
-                <span>{t("projectSelector.allProjects", "All Projects")}</span>
+                <Clock size={12} />
+                <span>{t("projectSelector.recent", "Recent")}</span>
               </div>
-            )}
-
-            {displayProjects.others.length === 0 && searchQuery ? (
-              <div className="project-selector__no-results">
-                {t("projectSelector.noResults", "No projects match your search")}
-              </div>
-            ) : (
-              displayProjects.others.map((project, index) => {
-                const actualIndex = displayProjects.recent.length + index;
+              {displayProjects.recent.map((project, index) => {
+                const actualIndex = displayProjects.bookmarked.length + index;
                 return (
                   <button
                     key={project.id}
+                    ref={(el) => {
+                      if (el) itemRefs.current.set(actualIndex, el);
+                      else itemRefs.current.delete(actualIndex);
+                    }}
                     className={`project-selector__item ${
                       highlightedIndex === actualIndex ? "highlighted" : ""
                     }`}
@@ -342,14 +490,74 @@ export function ProjectSelector({
                     aria-selected={currentProject?.id === project.id}
                   >
                     {renderStatusIcon(project.status)}
+                    <span className="project-selector__item-name">
+                      {project.name}
+                    </span>
+                    {renderBookmarkToggle(project.id)}
+                    {currentProject?.id === project.id && (
+                      <Check size={14} className="project-selector__item-check" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* All projects section */}
+          <div className="project-selector__section">
+            {(displayProjects.bookmarked.length > 0 || displayProjects.recent.length > 0) && (
+              <div className="project-selector__section-header">
+                <Folder size={12} />
+                <span>{t("projectSelector.allProjects", "All Projects")}</span>
+              </div>
+            )}
+
+            {displayProjects.others.length === 0 && searchQuery ? (
+              <div className="project-selector__no-results" data-testid="project-selector-no-results">
+                <Search size={14} className="project-selector__no-results-icon" />
+                <span>
+                  {t("projectSelector.noResults", "No projects match \"{{query}}\"", { query: searchQuery })}
+                </span>
+              </div>
+            ) : (
+              displayProjects.others.map((project, index) => {
+                const actualIndex = displayProjects.bookmarked.length + displayProjects.recent.length + index;
+                const isExactMatch = exactMatch?.id === project.id;
+                return (
+                  <button
+                    key={project.id}
+                    ref={(el) => {
+                      if (el) itemRefs.current.set(actualIndex, el);
+                      else itemRefs.current.delete(actualIndex);
+                    }}
+                    className={`project-selector__item ${
+                      highlightedIndex === actualIndex ? "highlighted" : ""
+                    } ${isExactMatch ? "exact-match" : ""}`}
+                    onClick={() => handleSelectProject(project)}
+                    role="option"
+                    aria-selected={currentProject?.id === project.id}
+                    data-testid={`project-selector-item-${project.id}`}
+                  >
+                    {renderStatusIcon(project.status)}
                     <div className="project-selector__item-info">
                       <span className="project-selector__item-name">
-                        {project.name}
+                        <HighlightMatch text={project.name} query={searchQuery} />
                       </span>
-                      <span className="project-selector__item-path">
-                        {getTrailingPath(project.path, 2)}
-                      </span>
+                      {project.path && (
+                        <span className="project-selector__item-path">
+                          <HighlightMatch
+                            text={getTrailingPath(project.path, 2)}
+                            query={searchQuery}
+                          />
+                        </span>
+                      )}
                     </div>
+                    {isExactMatch && (
+                      <span className="project-selector__exact-badge">
+                        {t("projectSelector.exact", "Exact")}
+                      </span>
+                    )}
+                    {renderBookmarkToggle(project.id)}
                     {currentProject?.id === project.id && (
                       <Check size={14} className="project-selector__item-check" />
                     )}
@@ -362,6 +570,11 @@ export function ProjectSelector({
           {/* View All option */}
           <div className="project-selector__footer">
             <button
+              ref={(el) => {
+                const viewAllIndex = totalItems - 1;
+                if (el) itemRefs.current.set(viewAllIndex, el);
+                else itemRefs.current.delete(viewAllIndex);
+              }}
               className={`project-selector__view-all ${
                 highlightedIndex === totalItems - 1 ? "highlighted" : ""
               }`}

@@ -71,11 +71,29 @@
   z-index: 100;
   min-width: 240px;
   max-width: 360px;
+  max-height: min(480px, calc(100vh - 120px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: var(--space-sm);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
   box-shadow: var(--shadow-lg);
+  scrollbar-width: thin;
+  scrollbar-color: var(--text-dim) transparent;
+}
+
+.project-selector__dropdown::-webkit-scrollbar {
+  width: 6px;
+}
+
+.project-selector__dropdown::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.project-selector__dropdown::-webkit-scrollbar-thumb {
+  background-color: var(--text-dim);
+  border-radius: 3px;
 }
 
 .project-selector-item,
@@ -199,9 +217,57 @@
 }
 
 .project-selector__no-results {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
   padding: var(--space-sm) calc(var(--space-sm) + var(--space-xs));
   color: var(--text-muted);
   font-size: 13px;
+}
+
+.project-selector__no-results-icon {
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+
+/* Autocomplete highlight — marks the matched text substring */
+.project-selector__highlight {
+  background: transparent;
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: var(--todo);
+  text-underline-offset: 2px;
+  text-decoration-thickness: 2px;
+}
+
+/* Exact match indicator banner */
+.project-selector__exact-match {
+  padding: var(--space-xs) calc(var(--space-sm) + var(--space-xs));
+  margin-bottom: var(--space-xs);
+  font-size: 12px;
+  color: var(--todo);
+  background: color-mix(in srgb, var(--todo) 8%, transparent);
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+
+/* Exact match badge shown on item */
+.project-selector__exact-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--todo) 15%, transparent);
+  color: var(--todo);
+  flex-shrink: 0;
+}
+
+/* Exact match item subtle highlight */
+.project-selector__item.exact-match {
+  background: color-mix(in srgb, var(--todo) 5%, transparent);
 }
 
 .project-selector__footer {
@@ -277,6 +343,44 @@
 .project-selector-check,
 .project-selector__item-check {
   color: var(--todo);
+}
+
+/* Bookmark star toggle */
+.project-selector__bookmark {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+  opacity: 0;
+  transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+}
+
+/* Show star on row hover or when bookmarked */
+.project-selector__item:hover .project-selector__bookmark,
+.project-selector__item.highlighted .project-selector__bookmark,
+.project-selector__bookmark.bookmarked {
+  opacity: 1;
+}
+
+.project-selector__bookmark:hover {
+  color: var(--todo);
+  background: var(--card-hover);
+}
+
+.project-selector__bookmark.bookmarked {
+  color: var(--todo);
+}
+
+.project-selector__bookmark:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
 }
 
 /* Light theme overrides for project selector */

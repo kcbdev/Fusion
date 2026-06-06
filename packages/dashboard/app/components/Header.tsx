@@ -2,8 +2,9 @@ import { useState, useEffect, useRef, useCallback, useMemo, type KeyboardEvent a
 import { useTranslation } from "react-i18next";
 import { Settings, Pause, Play, Square, LayoutGrid, List, Terminal, Lightbulb, Search, X, Activity, MoreHorizontal, Clock, Folder, History, GitBranch, Monitor, Server, Workflow, Bot, Target, ChevronRight, FileCode, Loader2, Grid3X3, Mail, MessageSquare, ChevronDown, Check, Zap, Sparkles, FileText, Brain, CheckSquare, Lock } from "lucide-react";
 import "./Header.css";
-// Header renders an inline ProjectSelector dropdown using project-selector-* classes.
+// ProjectSelector styles used by the imported standalone component.
 import "./ProjectSelector.css";
+import { ProjectSelector as StandaloneProjectSelector } from "./ProjectSelector";
 import type { ProjectInfo } from "../api";
 import type { NodeConfig, ProjectStatus } from "@fusion/core";
 import { fetchScripts } from "../api";
@@ -30,125 +31,8 @@ const PROJECT_STATUS_CONFIG: Record<ProjectStatus, { color: string }> = {
   initializing: { color: "var(--info)" },
 };
 
-/**
- * ProjectSelector - A component for project navigation.
- * Shows project dropdown for switching projects and navigating to project management.
- */
-function ProjectSelector({
-  projects,
-  currentProject,
-  onViewAll,
-  onSelectProject,
-}: {
-  projects: ProjectInfo[];
-  currentProject: ProjectInfo | null;
-  onViewAll: () => void;
-  onSelectProject?: (project: ProjectInfo) => void;
-}) {
-  const { t } = useTranslation("app");
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isOpen]);
-
-  // Close on Escape
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen]);
-
-  const handleSelectProject = useCallback(
-    (project: ProjectInfo) => {
-      onSelectProject?.(project);
-      setIsOpen(false);
-    },
-    [onSelectProject]
-  );
-
-  return (
-    <div className="project-selector" ref={dropdownRef}>
-      {projects.length > 0 && (
-        <>
-          <button
-            className={`project-selector-trigger${isOpen ? " project-selector-trigger--open" : ""}`}
-            onClick={() => setIsOpen((prev) => !prev)}
-            title={currentProject?.name ? t("header.switchProjectCurrent", "Switch project (current: {{name}})", { name: currentProject.name }) : t("header.switchProject", "Switch project")}
-            aria-label={t("header.switchProject", "Switch project")}
-            aria-expanded={isOpen}
-            aria-haspopup="listbox"
-            data-testid="project-selector-trigger"
-          >
-            <span className="project-selector-trigger-label">
-              {currentProject?.name ?? t("header.projects", "Projects")}
-            </span>
-            <ChevronDown size={12} className={`project-selector-chevron${isOpen ? " project-selector-chevron--open" : ""}`} />
-          </button>
-          {isOpen && (
-            <div
-              className="project-selector-dropdown"
-              role="listbox"
-              aria-label={t("header.selectProject", "Select project")}
-              data-testid="project-selector-dropdown"
-            >
-              {projects.map((project) => {
-                const isCurrent = currentProject?.id === project.id;
-                const statusColor = PROJECT_STATUS_CONFIG[project.status]?.color;
-                return (
-                  <button
-                    key={project.id}
-                    className={`project-selector-item${isCurrent ? " project-selector-item--current" : ""}`}
-                    onClick={() => handleSelectProject(project)}
-                    role="option"
-                    aria-selected={isCurrent}
-                  >
-                    <span
-                      className="project-selector-dot"
-                      style={{ backgroundColor: statusColor || "var(--text-muted)" }}
-                    />
-                    <div className="project-selector-info">
-                      <span className="project-selector-name">{project.name}</span>
-                      <span className="project-selector-path">
-                        {getTrailingPath(project.path, 2)}
-                      </span>
-                    </div>
-                    {isCurrent && <Check size={14} className="project-selector-check" />}
-                  </button>
-                );
-              })}
-              <div className="project-selector-divider" role="presentation" />
-              <button
-                className="project-selector-manage"
-                onClick={() => {
-                  onViewAll();
-                  setIsOpen(false);
-                }}
-                data-testid="manage-projects-action"
-              >
-                {t("header.manageProjects", "Manage Projects")}
-              </button>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
+// Inline ProjectSelector removed — now imports StandaloneProjectSelector from ./ProjectSelector
+// which has scroll fix, autocomplete, and bookmarking features.
 
 // GitHub logo icon (Octocat mark) - uses currentColor for theme compatibility
 function GitHubLogo({ size = 16 }: { size?: number }) {
@@ -953,11 +837,11 @@ export function Header({
 
         {/* Project Selector - Back button when project selected, dropdown when 2+ projects (tablet + desktop) */}
         {!isMobile && projects.length >= 1 && onViewAllProjects && (
-          <ProjectSelector
+          <StandaloneProjectSelector
             projects={projects}
             currentProject={currentProject ?? null}
             onViewAll={onViewAllProjects}
-            onSelectProject={onSelectProject}
+            onSelect={onSelectProject}
           />
         )}
 

@@ -3,6 +3,18 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ProjectSelector } from "../ProjectSelector";
 import type { ProjectInfo, ProjectStatus } from "@fusion/core";
 
+// Mock useProjectBookmarks
+const mockToggleBookmark = vi.fn();
+let mockBookmarkedIds: Set<string> = new Set();
+
+vi.mock("../../hooks/useProjectBookmarks", () => ({
+  useProjectBookmarks: () => ({
+    bookmarkedIds: mockBookmarkedIds,
+    toggleBookmark: mockToggleBookmark,
+    isBookmarked: (id: string) => mockBookmarkedIds.has(id),
+  }),
+}));
+
 // Mock lucide-react
 vi.mock("lucide-react", async () => {
   const actual = await vi.importActual("lucide-react");
@@ -14,6 +26,9 @@ vi.mock("lucide-react", async () => {
     Grid3X3: () => <span data-testid="grid-icon">⊞</span>,
     Search: () => <span data-testid="search-icon">🔍</span>,
     Clock: () => <span data-testid="clock-icon">🕐</span>,
+    Star: ({ fill }: { fill?: string }) => (
+      <span data-testid="star-icon" data-fill={fill ?? "none"}>★</span>
+    ),
     X: () => <span data-testid="x-icon">✕</span>,
     Play: () => <span data-testid="play-icon">▶</span>,
     Pause: () => <span data-testid="pause-icon">⏸</span>,
@@ -41,6 +56,9 @@ const noop = () => {};
 describe("ProjectSelector", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockBookmarkedIds = new Set();
+    // JSDOM does not implement scrollIntoView — mock it for itemRefs
+    Element.prototype.scrollIntoView = vi.fn();
   });
 
   it("renders without crashing", () => {
@@ -231,14 +249,12 @@ describe("ProjectSelector", () => {
     expect(screen.getByPlaceholderText("Search projects...")).toBeDefined();
   });
 
-  it("does not show search input when fewer than 5 projects", () => {
+  it("shows search input even with only 2 projects (autocomplete always available)", () => {
     render(
       <ProjectSelector
         projects={[
-          makeProject({ id: "proj_1" }),
-          makeProject({ id: "proj_2" }),
-          makeProject({ id: "proj_3" }),
-          makeProject({ id: "proj_4" }),
+          makeProject({ id: "proj_1", name: "Alpha" }),
+          makeProject({ id: "proj_2", name: "Beta" }),
         ]}
         currentProject={makeProject({ id: "proj_1" })}
         onSelect={noop}
@@ -247,7 +263,8 @@ describe("ProjectSelector", () => {
     );
 
     fireEvent.click(screen.getByTestId("project-selector-trigger"));
-    expect(screen.queryByPlaceholderText("Search projects...")).toBeNull();
+    // Search input should always be present for autocomplete
+    expect(screen.getByTestId("project-selector-search-input")).toBeDefined();
   });
 
   it("filters projects based on search query", () => {
@@ -369,5 +386,422 @@ describe("ProjectSelector", () => {
 
     fireEvent.click(screen.getByTestId("project-selector-trigger"));
     // Should have checkmark for current project (though in dropdown it might not be visible due to filtering)
+  });
+
+  // === Bookmark-specific tests ===
+
+  describe("bookmarks", () => {
+    it("shows bookmark toggle on each project item", () => {
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "Project One" }),
+            makeProject({ id: "proj_2", name: "Project Two" }),
+          ]}
+          currentProject={makeProject({ id: "proj_1" })}
+          onSelect={noop}
+          onViewAll={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      const bookmarkToggle = screen.getByTestId("bookmark-toggle-proj_2");
+      expect(bookmarkToggle).toBeDefined();
+    });
+
+    it("calls toggleBookmark when star is clicked", () => {
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "Project One" }),
+            makeProject({ id: "proj_2", name: "Project Two" }),
+          ]}
+          currentProject={makeProject({ id: "proj_1" })}
+          onSelect={noop}
+          onViewAll={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      const bookmarkToggle = screen.getByTestId("bookmark-toggle-proj_2");
+      fireEvent.click(bookmarkToggle);
+      expect(mockToggleBookmark).toHaveBeenCalledWith("proj_2");
+    });
+
+    it("does not trigger onSelect when star is clicked", () => {
+      const onSelect = vi.fn();
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "Project One" }),
+            makeProject({ id: "proj_2", name: "Project Two" }),
+          ]}
+          currentProject={makeProject({ id: "proj_1" })}
+          onSelect={onSelect}
+          onViewAll={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      const bookmarkToggle = screen.getByTestId("bookmark-toggle-proj_2");
+      fireEvent.click(bookmarkToggle);
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it("shows Bookmarked section when projects are bookmarked", () => {
+      mockBookmarkedIds = new Set(["proj_2"]);
+
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "Project One" }),
+            makeProject({ id: "proj_2", name: "Project Two" }),
+            makeProject({ id: "proj_3", name: "Project Three" }),
+          ]}
+          currentProject={makeProject({ id: "proj_1" })}
+          onSelect={noop}
+          onViewAll={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      expect(screen.getByText("Bookmarked")).toBeDefined();
+      expect(screen.getByText("Project Two")).toBeDefined();
+    });
+
+    it("displays bookmarked projects at top of list", () => {
+      mockBookmarkedIds = new Set(["proj_3"]);
+
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "Project One" }),
+            makeProject({ id: "proj_2", name: "Project Two" }),
+            makeProject({ id: "proj_3", name: "Project Three" }),
+          ]}
+          currentProject={makeProject({ id: "proj_1" })}
+          onSelect={noop}
+          onViewAll={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+
+      // "Bookmarked" section header should exist
+      expect(screen.getByText("Bookmarked")).toBeDefined();
+
+      // The "All Projects" section should also exist since we have non-bookmarked items
+      expect(screen.getByText("All Projects")).toBeDefined();
+    });
+
+    it("bookmark toggle shows filled star for bookmarked projects", () => {
+      mockBookmarkedIds = new Set(["proj_2"]);
+
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "Project One" }),
+            makeProject({ id: "proj_2", name: "Project Two" }),
+          ]}
+          currentProject={makeProject({ id: "proj_1" })}
+          onSelect={noop}
+          onViewAll={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      const bookmarkedStar = screen.getByTestId("bookmark-toggle-proj_2");
+      // Star inside should have data-fill="currentColor" for bookmarked
+      const starIcon = bookmarkedStar.querySelector('[data-testid="star-icon"]');
+      expect(starIcon?.getAttribute("data-fill")).toBe("currentColor");
+    });
+
+    it("does not show Bookmarked section when no projects are bookmarked", () => {
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "Project One" }),
+            makeProject({ id: "proj_2", name: "Project Two" }),
+          ]}
+          currentProject={makeProject({ id: "proj_1" })}
+          onSelect={noop}
+          onViewAll={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      expect(screen.queryByText("Bookmarked")).toBeNull();
+    });
+
+    it("does not show current project in bookmarked section", () => {
+      mockBookmarkedIds = new Set(["proj_1"]);
+
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "Project One" }),
+            makeProject({ id: "proj_2", name: "Project Two" }),
+          ]}
+          currentProject={makeProject({ id: "proj_1" })}
+          onSelect={noop}
+          onViewAll={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      // Current project should not appear in Bookmarked section
+      // (it's excluded from all lists)
+      expect(screen.queryByText("Bookmarked")).toBeNull();
+    });
+
+    it("bookmark toggle has correct aria-label", () => {
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "Project One" }),
+            makeProject({ id: "proj_2", name: "Project Two" }),
+          ]}
+          currentProject={makeProject({ id: "proj_1" })}
+          onSelect={noop}
+          onViewAll={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      const toggle = screen.getByTestId("bookmark-toggle-proj_2");
+      expect(toggle.getAttribute("aria-label")).toBe("Bookmark project");
+    });
+
+    it("bookmarked project toggle shows remove aria-label", () => {
+      mockBookmarkedIds = new Set(["proj_2"]);
+
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "Project One" }),
+            makeProject({ id: "proj_2", name: "Project Two" }),
+          ]}
+          currentProject={makeProject({ id: "proj_1" })}
+          onSelect={noop}
+          onViewAll={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      const toggle = screen.getByTestId("bookmark-toggle-proj_2");
+      expect(toggle.getAttribute("aria-label")).toBe("Remove bookmark");
+    });
+
+    it("dropdown stays open when bookmark is toggled", () => {
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "Project One" }),
+            makeProject({ id: "proj_2", name: "Project Two" }),
+          ]}
+          currentProject={makeProject({ id: "proj_1" })}
+          onSelect={noop}
+          onViewAll={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      const bookmarkToggle = screen.getByTestId("bookmark-toggle-proj_2");
+      fireEvent.click(bookmarkToggle);
+      // Dropdown should still be open
+      expect(screen.getByTestId("project-selector-dropdown")).toBeDefined();
+    });
+  });
+
+  // === Autocomplete-specific tests ===
+
+  describe("autocomplete", () => {
+    it("highlights matching text in project names", () => {
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "Project Alpha" }),
+            makeProject({ id: "proj_2", name: "Project Beta" }),
+            makeProject({ id: "proj_3", name: "Unrelated" }),
+          ]}
+          currentProject={makeProject({ id: "proj_1" })}
+          onSelect={noop}
+          onViewAll={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      const searchInput = screen.getByPlaceholderText("Search projects...");
+      fireEvent.change(searchInput, { target: { value: "Beta" } });
+
+      // Should show the matched project with highlighted text
+      const mark = screen.getByText("Beta");
+      expect(mark.tagName).toBe("MARK");
+      expect(mark.closest(".project-selector__item")).toBeDefined();
+    });
+
+    it("detects exact match and shows indicator", () => {
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "My App" }),
+            makeProject({ id: "proj_2", name: "My Application" }),
+            makeProject({ id: "proj_3", name: "Other" }),
+          ]}
+          currentProject={makeProject({ id: "proj_3" })}
+          onSelect={noop}
+          onViewAll={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      const searchInput = screen.getByPlaceholderText("Search projects...");
+      fireEvent.change(searchInput, { target: { value: "My App" } });
+
+      // Should show exact match indicator
+      expect(screen.getByTestId("project-selector-exact-match")).toBeDefined();
+      // Should show "Exact" badge on the matching item
+      expect(screen.getByText("Exact")).toBeDefined();
+    });
+
+    it("does not show exact match indicator for partial match", () => {
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "My App" }),
+            makeProject({ id: "proj_2", name: "My Application" }),
+            makeProject({ id: "proj_3", name: "Other" }),
+          ]}
+          currentProject={makeProject({ id: "proj_3" })}
+          onSelect={noop}
+          onViewAll={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      const searchInput = screen.getByPlaceholderText("Search projects...");
+      // "My" matches multiple projects — not an exact match
+      fireEvent.change(searchInput, { target: { value: "My" } });
+
+      expect(screen.queryByTestId("project-selector-exact-match")).toBeNull();
+    });
+
+    it("auto-selects exact match on Enter when nothing is highlighted", () => {
+      const onSelect = vi.fn();
+      const exactProject = makeProject({ id: "proj_1", name: "Unique Project" });
+
+      render(
+        <ProjectSelector
+          projects={[
+            exactProject,
+            makeProject({ id: "proj_2", name: "Other Project" }),
+          ]}
+          currentProject={makeProject({ id: "proj_2" })}
+          onSelect={onSelect}
+          onViewAll={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      const searchInput = screen.getByPlaceholderText("Search projects...");
+      fireEvent.change(searchInput, { target: { value: "Unique Project" } });
+
+      // Press Enter without highlighting anything first
+      fireEvent.keyDown(screen.getByTestId("project-selector-dropdown"), { key: "Enter" });
+      expect(onSelect).toHaveBeenCalledWith(exactProject);
+    });
+
+    it("shows no results message when search matches nothing", () => {
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "Alpha" }),
+            makeProject({ id: "proj_2", name: "Beta" }),
+          ]}
+          currentProject={makeProject({ id: "proj_1" })}
+          onSelect={noop}
+          onViewAll={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      const searchInput = screen.getByPlaceholderText("Search projects...");
+      fireEvent.change(searchInput, { target: { value: "zzznonexistent" } });
+
+      expect(screen.getByTestId("project-selector-no-results")).toBeDefined();
+    });
+
+    it("clear button clears search query", () => {
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "Alpha" }),
+            makeProject({ id: "proj_2", name: "Beta" }),
+          ]}
+          currentProject={makeProject({ id: "proj_1" })}
+          onSelect={noop}
+          onViewAll={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      const searchInput = screen.getByPlaceholderText("Search projects...");
+      fireEvent.change(searchInput, { target: { value: "Alpha" } });
+
+      // Clear button should appear
+      const clearButton = screen.getByLabelText("Clear search");
+      expect(clearButton).toBeDefined();
+
+      fireEvent.click(clearButton);
+      expect(searchInput).toHaveValue("");
+    });
+
+    it("filters by project path as well as name", () => {
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "Alpha", path: "/home/user/projects/frontend" }),
+            makeProject({ id: "proj_2", name: "Beta", path: "/home/user/projects/backend" }),
+          ]}
+          currentProject={makeProject({ id: "proj_1" })}
+          onSelect={noop}
+          onViewAll={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      const searchInput = screen.getByPlaceholderText("Search projects...");
+      fireEvent.change(searchInput, { target: { value: "backend" } });
+
+      // Beta project should be visible (matched by path)
+      expect(screen.getByText("Beta")).toBeDefined();
+      // Alpha should be filtered out
+      expect(screen.queryByText("Alpha")).toBeNull();
+    });
+
+    it("resets search query when dropdown is closed and reopened", () => {
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "Alpha" }),
+            makeProject({ id: "proj_2", name: "Beta" }),
+          ]}
+          currentProject={makeProject({ id: "proj_1" })}
+          onSelect={noop}
+          onViewAll={noop}
+        />
+      );
+
+      // Open, type something, close with escape
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      const searchInput = screen.getByPlaceholderText("Search projects...");
+      fireEvent.change(searchInput, { target: { value: "Alpha" } });
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      // Reopen — search should be cleared
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      const reopenedSearchInput = screen.getByPlaceholderText("Search projects...");
+      expect(reopenedSearchInput).toHaveValue("");
+    });
   });
 });
