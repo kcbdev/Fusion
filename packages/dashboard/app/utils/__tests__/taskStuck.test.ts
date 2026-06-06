@@ -59,6 +59,17 @@ describe("isTaskStuck", () => {
     expect(isTaskStuck(task, 600000)).toBe(false);
   });
 
+  // U14: intentional human-wait statuses are never stuck, even past the timeout.
+  it.each([
+    "awaiting-user-input",
+    "awaiting-approval",
+    "planning-awaiting-input",
+  ])("returns false for an intentional-wait status %s past the timeout", (status) => {
+    const stale = new Date(Date.now() - 600001).toISOString();
+    const task = createTask({ status: status as Task["status"], updatedAt: stale });
+    expect(isTaskStuck(task, 600000)).toBe(false);
+  });
+
   it("returns false for recent in-progress tasks within timeout", () => {
     const recent = new Date(Date.now() - 300000).toISOString(); // 5 minutes ago
     const task = createTask({ updatedAt: recent });

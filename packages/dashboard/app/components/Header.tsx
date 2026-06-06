@@ -5,7 +5,7 @@ import "./Header.css";
 // Header renders an inline ProjectSelector dropdown using project-selector-* classes.
 import "./ProjectSelector.css";
 import type { ProjectInfo } from "../api";
-import type { NodeConfig, ProjectStatus } from "@fusion/core";
+import type { NodeConfig, ProjectStatus, UiMode } from "@fusion/core";
 import { fetchScripts } from "../api";
 import { NodeStatusIndicator } from "./NodeStatusIndicator";
 import { NodeHealthDot } from "./NodeHealthDot";
@@ -13,6 +13,7 @@ import { PluginSlot } from "./PluginSlot";
 import { useViewportMode, type ViewportMode } from "../hooks/useViewportMode";
 import { getTrailingPath } from "../utils/pathDisplay";
 import type { TaskView } from "../hooks/useViewState";
+import { isAdvancedSurface } from "../ui-mode";
 import type { PluginDashboardViewEntry } from "../api";
 import { buildPluginTaskViewId, isPluginViewId } from "../plugins/pluginViewRegistry";
 import { getPluginNavIcon } from "./pluginNavIcon";
@@ -212,6 +213,8 @@ export interface HeaderProps {
   onToggleGlobalPause?: () => void;
   onToggleEnginePause?: () => void;
   view?: TaskView;
+  /** Simple/advanced UI mode (U11). Gated view buttons are hidden in simple mode. */
+  uiMode?: UiMode;
   onChangeView?: (view: TaskView) => void;
   /** Whether to show the skills tab in the view toggle */
   showSkillsTab?: boolean;
@@ -280,6 +283,7 @@ export function Header({
   onToggleGlobalPause,
   onToggleEnginePause,
   view = "board",
+  uiMode = "advanced",
   onChangeView,
   showSkillsTab,
   showAgentsTab,
@@ -1134,15 +1138,17 @@ export function Header({
                 <Bot size={16} />
               </button>
             )}
-            <button
-              className={`view-toggle-btn${view === "missions" ? " active" : ""}`}
-              onClick={() => onChangeView("missions")}
-              title={t("header.missionsView", "Missions view")}
-              aria-label={t("header.missionsView", "Missions view")}
-              aria-pressed={view === "missions"}
-            >
-              <Target size={16} />
-            </button>
+            {!(uiMode === "simple" && isAdvancedSurface("missions")) && (
+              <button
+                className={`view-toggle-btn${view === "missions" ? " active" : ""}`}
+                onClick={() => onChangeView("missions")}
+                title={t("header.missionsView", "Missions view")}
+                aria-label={t("header.missionsView", "Missions view")}
+                aria-pressed={view === "missions"}
+              >
+                <Target size={16} />
+              </button>
+            )}
             <button
               className={`view-toggle-btn${view === "chat" ? " active" : ""}`}
               onClick={() => onChangeView("chat")}
@@ -1184,6 +1190,17 @@ export function Header({
             </button>
             {pluginDashboardViews
               .filter((entry) => entry.view.placement === "primary")
+              .filter((entry) => {
+                if (uiMode !== "simple") return true;
+                // The dependency-graph "graph" view is the gated workflow graph
+                // editor surface; other plugin views consult their simpleMode
+                // declaration (undeclared → advanced-only).
+                if (entry.pluginId === "fusion-plugin-dependency-graph" && entry.view.viewId === "graph") {
+                  return false;
+                }
+                const pluginViewId = buildPluginTaskViewId(entry.pluginId, entry.view.viewId);
+                return !isAdvancedSurface(pluginViewId, entry.view.simpleMode);
+              })
               .sort((a, b) => (a.view.order ?? Number.MAX_SAFE_INTEGER) - (b.view.order ?? Number.MAX_SAFE_INTEGER))
               .map((entry) => {
                 const pluginTaskView = buildPluginTaskViewId(entry.pluginId, entry.view.viewId);
@@ -1377,6 +1394,14 @@ export function Header({
                     )}
                     {pluginDashboardViews
                       .filter((entry) => entry.view.placement !== "primary")
+                      .filter((entry) => {
+                        if (uiMode !== "simple") return true;
+                        if (entry.pluginId === "fusion-plugin-dependency-graph" && entry.view.viewId === "graph") {
+                          return false;
+                        }
+                        const pluginViewId = buildPluginTaskViewId(entry.pluginId, entry.view.viewId);
+                        return !isAdvancedSurface(pluginViewId, entry.view.simpleMode);
+                      })
                       .sort((a, b) => (a.view.order ?? Number.MAX_SAFE_INTEGER) - (b.view.order ?? Number.MAX_SAFE_INTEGER))
                       .map((entry) => {
                         const pluginTaskView = buildPluginTaskViewId(entry.pluginId, entry.view.viewId);
@@ -1593,8 +1618,9 @@ export function Header({
           </button>
         )}
 
-        {/* Workflows - desktop only (moved to overflow on mobile/tablet) */}
-        {!isCompact && onOpenWorkflowEditor && (
+        {/* Workflows - desktop only (moved to overflow on mobile/tablet).
+            Gated as the workflow graph editor surface in simple mode (U11). */}
+        {!isCompact && onOpenWorkflowEditor && !(uiMode === "simple" && isAdvancedSurface("graph")) && (
           <button
             className="btn-icon"
             onClick={onOpenWorkflowEditor}
@@ -1938,8 +1964,8 @@ export function Header({
                 <span>{t("header.viewUsage", "View Usage")}</span>
               </button>
             )}
-            {/* Workflows - in overflow on mobile */}
-            {onOpenWorkflowEditor && (
+            {/* Workflows - in overflow on mobile (gated in simple mode, U11) */}
+            {onOpenWorkflowEditor && !(uiMode === "simple" && isAdvancedSurface("graph")) && (
               <button
                 className="mobile-overflow-item"
                 onClick={() => handleOverflowAction(onOpenWorkflowEditor)}

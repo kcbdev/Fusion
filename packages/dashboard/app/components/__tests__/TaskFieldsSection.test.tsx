@@ -171,6 +171,32 @@ describe("TaskFieldsSection", () => {
     expect(body.textContent).toContain("stale");
   });
 
+  it("excludes engine-internal reserved (__-prefixed) keys from orphaned values", () => {
+    render(
+      <TaskFieldsSection
+        fieldDefs={[enumField]}
+        customFields={{ severity: "low", __lfgMode: true, legacyField: "stale" }}
+        onSave={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("task-fields-orphaned-toggle"));
+    const body = screen.getByTestId("task-fields-orphaned-body");
+    // Genuine orphan still shows; the reserved key is filtered out.
+    expect(body.textContent).toContain("legacyField");
+    expect(body.textContent).not.toContain("__lfgMode");
+  });
+
+  it("renders nothing when the only non-def key is reserved (__-prefixed)", () => {
+    const { container } = render(
+      <TaskFieldsSection
+        fieldDefs={[]}
+        customFields={{ __lfgMode: true }}
+        onSave={vi.fn()}
+      />,
+    );
+    expect(container.firstChild).toBeNull();
+  });
+
   it("serializes per-field saves so a stale response can't clobber a newer one (T2)", async () => {
     // Two overlapping chip clicks: the FIRST save resolves slowly, the second
     // quickly. With serialization the second onSave must not start until the

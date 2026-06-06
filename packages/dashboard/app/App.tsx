@@ -57,6 +57,9 @@ import i18n from "./i18n";
 import { ToastProvider, useToast } from "./hooks/useToast";
 import { ConfirmDialogProvider } from "./hooks/useConfirm";
 import { useTheme } from "./hooks/useTheme";
+import { useUiMode } from "./hooks/useUiMode";
+import { isAdvancedSurface } from "./ui-mode";
+import { GatedViewRedirectBanner } from "./components/GatedViewRedirectBanner";
 import { useModalManager, type DetailTaskOrigin, type DetailTaskTab } from "./hooks/useModalManager";
 import { useAppSettings } from "./hooks/useAppSettings";
 import { useDeepLink } from "./hooks/useDeepLink";
@@ -358,6 +361,13 @@ function AppInner() {
   
   // Theme management - required before useViewState
   const { themeMode, colorTheme, dashboardFontScalePct, setThemeMode, setColorTheme, setDashboardFontScalePct } = useTheme();
+
+  // Simple/advanced UI mode (U11). Gates advanced surfaces in navigation,
+  // deep-link routing, and settings; default is "simple".
+  const { uiMode, setUiMode, isHydrating: uiModeHydrating } = useUiMode();
+  // Names the gated view the user deep-linked to before being redirected to the
+  // board; drives the non-dismissible redirect banner. Cleared on switch.
+  const [gatedRedirectView, setGatedRedirectView] = useState<string | null>(null);
 
   // Background AI sessions - required before useModalManager
   const { sessions: bgSessions, generating: bgGenerating, needsInput: bgNeedsInput, planningSessions: bgPlanningSessions, dismissSession: bgDismiss } = useBackgroundSessions(currentProject?.id);
@@ -974,6 +984,47 @@ function AppInner() {
       handleChangeTaskView("board");
     }
   }, [taskView, settingsLoaded, skillsEnabled, insightsEnabled, handleChangeTaskView, agentsEnabled, memoryEnabled, devServerEnabled, researchEnabled, evalsEnabled, goalsEnabled, graphPluginTaskView]);
+
+  // Human-readable label for a gated view id, for the redirect banner.
+  const gatedViewLabel = useCallback((view: TaskView): string => {
+    if (isPluginViewId(view)) {
+      const match = pluginDashboardViews.find(
+        (entry) => `plugin:${entry.pluginId}:${entry.view.viewId}` === view,
+      );
+      if (match) return match.view.label;
+      return t("uiMode.pluginView", "Plugin view");
+    }
+    if (view === "missions") return t("header.missionsView", "Missions");
+    if (view === "graph") return t("uiMode.graphEditor", "Workflow graph editor");
+    return view;
+  }, [pluginDashboardViews, t]);
+
+  // Simple-mode gating (U11, R14/R15): deep-linking to an advanced-only view
+  // redirects to the board and raises the non-dismissible redirect banner.
+  // Routes/data stay live — this hides UI only. Plugin views consult their
+  // optional `simpleMode` declaration; undeclared plugin views are advanced-only.
+  useEffect(() => {
+    // Wait for the canonical uiMode to hydrate from backend settings before
+    // gating. Acting on the stale cached value (default "simple") would redirect
+    // a legitimate deep-link to an advanced view. Gating is UI-only (R15), so a
+    // brief render of the deep-linked view during hydration is acceptable.
+    if (uiModeHydrating) return;
+    if (uiMode !== "simple") {
+      setGatedRedirectView(null);
+      return;
+    }
+    const pluginSimpleMode = isPluginViewId(taskView)
+      ? pluginDashboardViews.find(
+          (entry) => `plugin:${entry.pluginId}:${entry.view.viewId}` === taskView,
+        )?.view.simpleMode
+      : undefined;
+    // The `graph` view id maps to the workflow graph editor plugin view.
+    const surfaceId = taskView;
+    if (isAdvancedSurface(surfaceId, pluginSimpleMode)) {
+      setGatedRedirectView(gatedViewLabel(taskView));
+      handleChangeTaskView("board");
+    }
+  }, [taskView, uiMode, uiModeHydrating, pluginDashboardViews, handleChangeTaskView, gatedViewLabel]);
 
   // Auto-close nodes overlay if feature flag is toggled off while overlay is open
   useEffect(() => {
@@ -1682,11 +1733,22 @@ function AppInner() {
     if (taskView === "board") {
       return (
         <PageErrorBoundary>
+          {uiMode === "simple" && gatedRedirectView ? (
+            <GatedViewRedirectBanner
+              viewLabel={gatedRedirectView}
+              onSwitchToAdvanced={() => {
+                setUiMode("advanced");
+                setGatedRedirectView(null);
+              }}
+            />
+          ) : null}
           {capacityRiskBannerEnabled && !capacityRiskDismissed ? (
             <CapacityRiskBanner signal={capacityRiskSignal} onDismiss={handleDismissCapacityRisk} />
           ) : null}
           <Board
             tasks={filteredBoardTasks}
+            uiMode={uiMode}
+            onSwitchToAdvancedMode={() => setUiMode("advanced")}
             projectId={currentProject?.id}
             maxConcurrent={maxConcurrent}
             onMoveTask={moveTask}
@@ -1817,6 +1879,7 @@ function AppInner() {
         onToggleGlobalPause={toggleGlobalPause}
         onToggleEnginePause={toggleEnginePause}
         view={taskView}
+        uiMode={uiMode}
         onChangeView={viewMode === "project" && currentProject ? handleTaskViewChange : undefined}
         showSkillsTab={skillsEnabled}
         showAgentsTab={agentsEnabled}
@@ -1993,6 +2056,7 @@ function AppInner() {
       )}
       <MobileNavBar
         view={taskView}
+        uiMode={uiMode}
         onChangeView={viewMode === "project" && currentProject ? handleTaskViewChange : () => {}}
         footerVisible={viewMode === "project" && !!currentProject}
         modalOpen={modalManager.anyModalOpen}
@@ -2076,10 +2140,11 @@ function AppInner() {
         }}
         taskOperations={{ moveTask, deleteTask, mergeTask, archiveTask, retryTask, resetTask, duplicateTask }}
         deepLink={{ handleDetailClose }}
-        settings={{ prAuthAvailable, themeMode, colorTheme, dashboardFontScalePct, setThemeMode, setColorTheme, setDashboardFontScalePct }}
+        settings={{ prAuthAvailable, uiMode, setUiMode, themeMode, colorTheme, dashboardFontScalePct, setThemeMode, setColorTheme, setDashboardFontScalePct }}
         onSettingsClose={handleSettingsClose}
         onReopenOnboarding={reopenOnboardingWithNav}
         onOpenApprovals={(_approvalId) => handleTaskViewChange("mailbox")}
+        companyModelEnabled={experimentalFeatures.companyModel === true}
       />
       <AuthTokenRecoveryDialog open={authTokenRecoveryOpen} />
             {shellApi && (

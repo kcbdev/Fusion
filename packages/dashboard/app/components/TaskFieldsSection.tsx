@@ -360,10 +360,14 @@ export function TaskFieldsSection({
 
   // Orphaned: stored keys with no matching definition (KTD-13). Card-placed
   // defs are excluded from the detail form, but their VALUES are not orphaned —
-  // only keys with no def at all qualify.
+  // only keys with no def at all qualify. Engine-internal reserved (`__`-prefixed)
+  // keys (e.g. __lfgMode) ride the same customFields column but are not user
+  // fields, so they must never surface in the orphaned-fields UI.
   const orphaned = useMemo(() => {
     const defIds = new Set(fieldDefs.map((f) => f.id));
-    return Object.entries(customFields ?? {}).filter(([id]) => !defIds.has(id));
+    return Object.entries(customFields ?? {}).filter(
+      ([id]) => !defIds.has(id) && !id.startsWith("__"),
+    );
   }, [fieldDefs, customFields]);
 
   // Byte-identical-to-today guard: nothing to render at all.

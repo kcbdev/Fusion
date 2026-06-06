@@ -2,7 +2,6 @@ import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { Board } from "../Board";
-import { COLUMNS } from "@fusion/core";
 
 import type { Task } from "@fusion/core";
 
@@ -17,12 +16,33 @@ vi.mock("../../hooks/useBatchBadgeFetch", () => ({
   })),
 }));
 
-const fetchBoardWorkflowsMock = vi.fn().mockResolvedValue({
-  flagEnabled: false,
-  defaultWorkflowId: "builtin:coding",
-  workflows: [],
-  taskWorkflowIds: {},
-});
+// Default board columns mirror the legacy builtin:coding pipeline so the
+// board-scoped board renders the same six columns today's UI showed.
+const DEFAULT_COLUMNS = [
+  { id: "triage", name: "Triage", flags: { intake: true } },
+  { id: "todo", name: "Todo", flags: { hold: true } },
+  { id: "in-progress", name: "In progress", flags: { countsTowardWip: true } },
+  { id: "in-review", name: "In review", flags: { mergeBlocker: true } },
+  { id: "done", name: "Done", flags: { complete: true } },
+  { id: "archived", name: "Archived", flags: { archived: true } },
+];
+
+const VISIBLE_COLUMNS = ["triage", "todo", "in-progress", "in-review", "done"];
+const ALL_COLUMNS = [...VISIBLE_COLUMNS, "archived"];
+
+function singleBoardPayload(taskIds: string[] = [], team: Record<string, { agentId: string; agentName: string }> = {}) {
+  return {
+    boards: [
+      { id: "board-default", name: "Default", description: "", requirePlanApproval: false, ordering: 0 },
+    ],
+    boardPayloads: {
+      "board-default": { columns: DEFAULT_COLUMNS, team, taskIds },
+    },
+    defaultBoardId: "board-default",
+  };
+}
+
+const fetchBoardWorkflowsMock = vi.fn().mockResolvedValue(singleBoardPayload());
 const promoteTaskMock = vi.fn().mockResolvedValue({});
 
 vi.mock("../../api", () => ({
@@ -31,10 +51,12 @@ vi.mock("../../api", () => ({
   ]),
   fetchBoardWorkflows: (...args: unknown[]) => fetchBoardWorkflowsMock(...args),
   promoteTask: (...args: unknown[]) => promoteTaskMock(...args),
+  // U13: the board-type availability probe (CE board type gated on plugin install).
+  getBoardTypes: vi.fn().mockResolvedValue({ types: [{ id: "standard" }] }),
 }));
 
 // Capture SSE event handlers registered via subscribeSse so tests can simulate
-// server-pushed `workflow:*` events without a real EventSource.
+// server-pushed events without a real EventSource.
 const sseHandlers: Record<string, (event?: unknown) => void> = {};
 const subscribeSseMock = vi.fn(
   (_url: string, opts: { events?: Record<string, (event?: unknown) => void> }) => {
@@ -50,47 +72,17 @@ vi.mock("../../sse-bus", () => ({
 
 const columnRenderCounts: Record<string, number> = {};
 
-// Mock child components so we only test Board's own rendering
+// Mock child Column so we only test Board's own rendering.
 vi.mock("../Column", () => ({
-  Column: React.memo(({ column, tasks, onToggleCollapse, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, isSearchActive, workflowStepNameLookup }: { column: string; tasks: Task[]; onToggleCollapse?: () => void; favoriteProviders?: string[]; favoriteModels?: string[]; onToggleFavorite?: (provider: string) => void; onToggleModelFavorite?: (modelId: string) => void; isSearchActive?: boolean; workflowStepNameLookup?: ReadonlyMap<string, string> }) => {
+  Column: React.memo(({ column, tasks, columnAgentName, onToggleCollapse, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, isSearchActive, workflowStepNameLookup }: { column: string; tasks: Task[]; columnAgentName?: string; onToggleCollapse?: () => void; favoriteProviders?: string[]; favoriteModels?: string[]; onToggleFavorite?: (provider: string) => void; onToggleModelFavorite?: (modelId: string) => void; isSearchActive?: boolean; workflowStepNameLookup?: ReadonlyMap<string, string> }) => {
     columnRenderCounts[column] = (columnRenderCounts[column] ?? 0) + 1;
     return (
-      <div data-testid={`column-${column}`} data-tasks={JSON.stringify(tasks)} data-favorite-providers={JSON.stringify(favoriteProviders ?? [])} data-favorite-models={JSON.stringify(favoriteModels ?? [])} data-has-toggle-favorite={onToggleFavorite ? "yes" : "no"} data-has-toggle-model-favorite={onToggleModelFavorite ? "yes" : "no"} data-is-search-active={isSearchActive ? "true" : "false"} data-workflow-lookup-size={String(workflowStepNameLookup?.size ?? 0)}>
+      <div data-testid={`column-${column}`} data-column-agent={columnAgentName ?? ""} data-tasks={JSON.stringify(tasks)} data-favorite-providers={JSON.stringify(favoriteProviders ?? [])} data-favorite-models={JSON.stringify(favoriteModels ?? [])} data-has-toggle-favorite={onToggleFavorite ? "yes" : "no"} data-has-toggle-model-favorite={onToggleModelFavorite ? "yes" : "no"} data-is-search-active={isSearchActive ? "true" : "false"} data-workflow-lookup-size={String(workflowStepNameLookup?.size ?? 0)}>
         {onToggleCollapse && <button onClick={onToggleCollapse}>toggle-{column}</button>}
       </div>
     );
   }),
 }));
-
-// Mock Lane so the multi-lane Board tests assert grouping/ordering without
-// pulling in the full Column tree.
-vi.mock("../Lane", () => ({
-  Lane: ({ workflow, tasks, collapsed }: { workflow: { id: string; name: string }; tasks: Task[]; collapsed: boolean }) => (
-    <section
-      data-testid={`lane-${workflow.id}`}
-      data-lane-name={workflow.name}
-      data-lane-count={String(tasks.length)}
-      data-lane-collapsed={collapsed ? "true" : "false"}
-      data-lane-task-ids={JSON.stringify(tasks.map((t) => t.id))}
-    />
-  ),
-}));
-
-const DEFAULT_WORKFLOW = {
-  id: "builtin:coding",
-  name: "Coding (built-in)",
-  columns: [
-    { id: "triage", name: "Triage", flags: { intake: true } },
-    { id: "todo", name: "Todo", flags: { hold: true } },
-    { id: "in-progress", name: "In progress", flags: { countsTowardWip: true } },
-    { id: "in-review", name: "In review", flags: { mergeBlocker: true } },
-    { id: "done", name: "Done", flags: { complete: true } },
-    { id: "archived", name: "Archived", flags: { archived: true } },
-  ],
-};
-
-const noop = () => {};
-const noopAsync = () => Promise.resolve({} as any);
 
 beforeEach(() => {
   fetchBatchMock.mockReset();
@@ -98,12 +90,7 @@ beforeEach(() => {
   subscribeSseMock.mockClear();
   for (const key of Object.keys(sseHandlers)) delete sseHandlers[key];
   fetchBoardWorkflowsMock.mockReset();
-  fetchBoardWorkflowsMock.mockResolvedValue({
-    flagEnabled: false,
-    defaultWorkflowId: "builtin:coding",
-    workflows: [],
-    taskWorkflowIds: {},
-  });
+  fetchBoardWorkflowsMock.mockResolvedValue(singleBoardPayload());
   try {
     window.localStorage.clear();
   } catch {
@@ -118,17 +105,14 @@ function createBoardProps(overrides = {}) {
   return {
     tasks: [],
     maxConcurrent: 2,
-    onMoveTask: noopAsync,
-    onOpenDetail: noop,
-    addToast: noop,
-    onQuickCreate: noopAsync,
-    onNewTask: noop,
+    onMoveTask: () => Promise.resolve({} as Task),
+    onOpenDetail: () => {},
+    addToast: () => {},
+    onQuickCreate: () => Promise.resolve({} as Task),
+    onNewTask: () => {},
     autoMerge: true,
-    onToggleAutoMerge: noop,
+    onToggleAutoMerge: () => {},
     globalPaused: false,
-    onUpdateTask: undefined,
-    onArchiveTask: undefined,
-    onUnarchiveTask: undefined,
     ...overrides,
   };
 }
@@ -137,892 +121,292 @@ function renderBoard(props = {}) {
   return render(<Board {...createBoardProps(props)} />);
 }
 
-describe("Board", () => {
-  it("renders a <main> element with class 'board'", () => {
-    renderBoard();
+/** Wait for the board-scoped payload to resolve and the board to render. */
+async function renderBoardAndSettle(props = {}) {
+  const result = renderBoard(props);
+  await waitFor(() => expect(screen.getByTestId("column-todo")).toBeDefined());
+  return result;
+}
+
+describe("Board (board-scoped, U10)", () => {
+  it("renders a <main> element with class 'board'", async () => {
+    await renderBoardAndSettle();
     const main = screen.getByRole("main");
     expect(main).toBeDefined();
     expect(main.className).toContain("board");
   });
 
-  it("renders with id='board' for scroll targeting", () => {
-    renderBoard();
+  it("renders with id='board' for scroll targeting", async () => {
+    await renderBoardAndSettle();
     const main = screen.getByRole("main");
     expect(main.id).toBe("board");
   });
 
-  it("FN-4380: does not eagerly fetch GitHub badge status on board mount", () => {
-    vi.useFakeTimers();
-    try {
-      const tasksWithBadges: Task[] = [
-        {
-          id: "FN-PR-1",
-          title: "Task with PR badge",
-          description: "Has prInfo",
-          column: "todo",
-          dependencies: [],
-          steps: [],
-          currentStep: 0,
-          log: [],
-          createdAt: "2024-01-01T00:00:00.000Z",
-          updatedAt: "2024-01-01T00:00:00.000Z",
-          prInfo: { number: 123, owner: "runfusion", repo: "fusion" } as Task["prInfo"],
-        },
-        {
-          id: "FN-ISSUE-1",
-          title: "Task with issue badge",
-          description: "Has issueInfo",
-          column: "todo",
-          dependencies: [],
-          steps: [],
-          currentStep: 0,
-          log: [],
-          createdAt: "2024-01-01T00:00:00.000Z",
-          updatedAt: "2024-01-01T00:00:00.000Z",
-          issueInfo: { number: 456, owner: "runfusion", repo: "fusion" } as Task["issueInfo"],
-        },
-      ];
+  it("FN-4380: does not eagerly fetch GitHub badge status on board mount", async () => {
+    const tasksWithBadges: Task[] = [
+      {
+        id: "FN-PR-1",
+        title: "Task with PR badge",
+        description: "Has prInfo",
+        column: "todo",
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        createdAt: "2024-01-01T00:00:00.000Z",
+        updatedAt: "2024-01-01T00:00:00.000Z",
+        prInfo: { number: 123, owner: "runfusion", repo: "fusion" } as Task["prInfo"],
+      },
+    ];
 
-      renderBoard({ tasks: tasksWithBadges });
-      vi.runAllTimers();
-      expect(fetchBatchMock).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
+    await renderBoardAndSettle({ tasks: tasksWithBadges });
+    expect(fetchBatchMock).not.toHaveBeenCalled();
   });
 
-  it("renders all 6 columns", () => {
-    renderBoard();
-    for (const col of COLUMNS) {
+  it("renders the active board's columns (no lane elements anywhere)", async () => {
+    await renderBoardAndSettle();
+    for (const col of ALL_COLUMNS) {
       expect(screen.getByTestId(`column-${col}`)).toBeDefined();
     }
+    // Zero lane elements: the lane concept is gone.
+    expect(screen.queryByTestId(/^lane-/)).toBeNull();
+    expect(document.querySelector(".lane")).toBeNull();
   });
 
-  it("falls back malformed task columns to triage instead of crashing", () => {
-    const malformedTask = {
-      id: "FN-404",
-      description: "Malformed",
-      column: "impossible-column",
-      dependencies: [],
-      steps: [],
-      currentStep: 0,
-      log: [],
-      createdAt: "2024-01-01T00:00:00.000Z",
-      updatedAt: "2024-01-01T00:00:00.000Z",
-    } as unknown as Task;
+  it("renders a board switcher above the board", async () => {
+    await renderBoardAndSettle();
+    expect(screen.getByTestId("board-switcher")).toBeDefined();
+    expect(screen.getByTestId("board-switcher-tab-board-default")).toBeDefined();
+  });
 
-    expect(() => renderBoard({ tasks: [malformedTask] })).not.toThrow();
+  it("renders the staffed agent name in the column header (team map)", async () => {
+    fetchBoardWorkflowsMock.mockResolvedValue(
+      singleBoardPayload([], { "in-progress": { agentId: "a1", agentName: "Ada" } }),
+    );
+    await renderBoardAndSettle();
+    await waitFor(() => {
+      expect(screen.getByTestId("column-in-progress").getAttribute("data-column-agent")).toBe("Ada");
+    });
+    expect(screen.getByTestId("column-todo").getAttribute("data-column-agent")).toBe("");
+  });
 
-    const triageTasks = JSON.parse(screen.getByTestId("column-triage").getAttribute("data-tasks") || "[]") as Task[];
-    expect(triageTasks).toHaveLength(1);
-    expect(triageTasks[0]?.id).toBe("FN-404");
+  it("homes tasks with no boardId to the default board", async () => {
+    const tasks: Task[] = [
+      mkTask({ id: "FN-1", column: "todo" }),
+      mkTask({ id: "FN-2", column: "in-progress" }),
+    ];
+    await renderBoardAndSettle({ tasks });
+    const todo = JSON.parse(screen.getByTestId("column-todo").getAttribute("data-tasks") || "[]") as Task[];
+    expect(todo.map((t) => t.id)).toEqual(["FN-1"]);
+    const ip = JSON.parse(screen.getByTestId("column-in-progress").getAttribute("data-tasks") || "[]") as Task[];
+    expect(ip.map((t) => t.id)).toEqual(["FN-2"]);
+  });
+
+  it("homes null-boardId tasks on the resolved board when defaultBoardId is null", async () => {
+    // Regression: with defaultBoardId null, a null-boardId (legacy) task used to
+    // resolve to homeBoardId=null and be excluded from every board silently.
+    fetchBoardWorkflowsMock.mockResolvedValue({
+      boards: [
+        { id: "board-default", name: "Default", description: "", requirePlanApproval: false, ordering: 0 },
+      ],
+      boardPayloads: {
+        "board-default": { columns: DEFAULT_COLUMNS, team: {}, taskIds: [] },
+      },
+      defaultBoardId: null,
+    });
+    const tasks: Task[] = [mkTask({ id: "FN-LEGACY", column: "todo" })];
+    await renderBoardAndSettle({ tasks });
+    const todo = JSON.parse(screen.getByTestId("column-todo").getAttribute("data-tasks") || "[]") as Task[];
+    expect(todo.map((t) => t.id)).toEqual(["FN-LEGACY"]);
+  });
+
+  it("buckets unknown-column tasks into the first column on a board without triage", async () => {
+    // CE-like board: no triage column. A task whose column id isn't recognized
+    // used to bucket to a hardcoded "triage" and vanish; it should now land in
+    // the board's intake/first column.
+    const CE_COLUMNS = [
+      { id: "backlog", name: "Backlog", flags: { intake: true } },
+      { id: "doing", name: "Doing", flags: { countsTowardWip: true } },
+      { id: "done", name: "Done", flags: { complete: true } },
+    ];
+    fetchBoardWorkflowsMock.mockResolvedValue({
+      boards: [
+        { id: "board-default", name: "CE", description: "", requirePlanApproval: false, ordering: 0 },
+      ],
+      boardPayloads: {
+        "board-default": { columns: CE_COLUMNS, team: {}, taskIds: [] },
+      },
+      defaultBoardId: "board-default",
+    });
+    const tasks: Task[] = [mkTask({ id: "FN-UNK", column: "weird-col" as Task["column"] })];
+    const result = renderBoard({ tasks });
+    await waitFor(() => expect(screen.getByTestId("column-backlog")).toBeDefined());
+    const backlog = JSON.parse(screen.getByTestId("column-backlog").getAttribute("data-tasks") || "[]") as Task[];
+    expect(backlog.map((t) => t.id)).toEqual(["FN-UNK"]);
+    result.unmount();
   });
 
   it("forwards board-level workflow name lookup to columns", async () => {
-    renderBoard();
-
+    await renderBoardAndSettle();
     await waitFor(() => {
-      for (const col of COLUMNS) {
-        const columnEl = screen.getByTestId(`column-${col}`);
-        expect(columnEl.getAttribute("data-workflow-lookup-size")).toBe("1");
+      for (const col of VISIBLE_COLUMNS) {
+        expect(screen.getByTestId(`column-${col}`).getAttribute("data-workflow-lookup-size")).toBe("1");
       }
     });
   });
 
-  it("renders all 6 columns as direct children of .board (CSS selector target)", () => {
-    renderBoard();
-    const board = screen.getByRole("main");
-    // The mock Column renders <div data-testid="column-{col}" />, which are direct children
-    const directChildren = Array.from(board.children);
-    expect(directChildren).toHaveLength(COLUMNS.length);
-    // Each direct child should be one of the column test-id elements
-    for (const col of COLUMNS) {
-      const colEl = screen.getByTestId(`column-${col}`);
-      expect(colEl.parentElement).toBe(board);
-    }
+  it("renders the board element as a <main> tag (semantic structure)", async () => {
+    await renderBoardAndSettle();
+    expect(screen.getByRole("main").tagName).toBe("MAIN");
   });
 
-  it("renders the board element as a <main> tag (semantic structure)", () => {
-    renderBoard();
-    const board = screen.getByRole("main");
-    expect(board.tagName).toBe("MAIN");
+  const mkTask = (overrides: Partial<Task> & { id: string }): Task => ({
+    title: overrides.id,
+    description: "d",
+    column: "todo",
+    dependencies: [],
+    steps: [],
+    currentStep: 0,
+    log: [],
+    createdAt: "2024-01-01T00:00:00.000Z",
+    updatedAt: "2024-01-01T00:00:00.000Z",
+    ...overrides,
   });
 
-  describe("search functionality", () => {
-    const createTask = (overrides: Partial<Task> & { id: string; description: string }): Task => ({
-      column: "todo",
-      dependencies: [],
-      steps: [],
-      currentStep: 0,
-      log: [],
-      createdAt: "2024-01-01T00:00:00.000Z",
-      updatedAt: "2024-01-01T00:00:00.000Z",
-      ...overrides,
-    });
-
-    it("renders server-filtered tasks by ID when search query is provided", () => {
-      const tasks: Task[] = [
-        createTask({ id: "FN-001", description: "First task", column: "todo" }),
-        createTask({ id: "FN-002", description: "Second task", column: "todo" }),
-        createTask({ id: "FN-003", description: "Third task", column: "in-progress" }),
-      ];
-
-      // Pre-filtered tasks - only FN-002 matches the search
-      const filteredTasks = [tasks[1]];
-
-      renderBoard({ tasks: filteredTasks, searchQuery: "FN-002" });
-
-      const todoColumn = screen.getByTestId("column-todo");
-      const todoTasks = JSON.parse(todoColumn.getAttribute("data-tasks") || "[]");
-      expect(todoTasks).toHaveLength(1);
-      expect(todoTasks[0].id).toBe("FN-002");
-
-      const inProgressColumn = screen.getByTestId("column-in-progress");
-      const inProgressTasks = JSON.parse(inProgressColumn.getAttribute("data-tasks") || "[]");
-      expect(inProgressTasks).toHaveLength(0);
-    });
-
-    it("renders server-filtered tasks by title when search query is provided", () => {
-      const tasks: Task[] = [
-        createTask({ id: "FN-001", title: "Fix login bug", description: "First task", column: "todo" }),
-        createTask({ id: "FN-002", title: "Add dashboard feature", description: "Second task", column: "todo" }),
-        createTask({ id: "FN-003", title: "Update documentation", description: "Third task", column: "todo" }),
-      ];
-
-      // Pre-filtered tasks - only dashboard matches
-      const filteredTasks = [tasks[1]];
-
-      renderBoard({ tasks: filteredTasks, searchQuery: "dashboard" });
-
-      const todoColumn = screen.getByTestId("column-todo");
-      const todoTasks = JSON.parse(todoColumn.getAttribute("data-tasks") || "[]");
-      expect(todoTasks).toHaveLength(1);
-      expect(todoTasks[0].id).toBe("FN-002");
-    });
-
-    it("renders server-filtered tasks by description when search query is provided", () => {
-      const tasks: Task[] = [
-        createTask({ id: "FN-001", description: "Implement user authentication", column: "todo" }),
-        createTask({ id: "FN-002", description: "Fix database connection issue", column: "todo" }),
-        createTask({ id: "FN-003", description: "Add caching layer", column: "todo" }),
-      ];
-
-      // Pre-filtered tasks - only database matches
-      const filteredTasks = [tasks[1]];
-
-      renderBoard({ tasks: filteredTasks, searchQuery: "database" });
-
-      const todoColumn = screen.getByTestId("column-todo");
-      const todoTasks = JSON.parse(todoColumn.getAttribute("data-tasks") || "[]");
-      expect(todoTasks).toHaveLength(1);
-      expect(todoTasks[0].id).toBe("FN-002");
-    });
-
-    it("search is case-insensitive (server handles this)", () => {
-      const tasks: Task[] = [
-        createTask({ id: "FN-001", title: "Fix Login Bug", description: "First task", column: "todo" }),
-        createTask({ id: "FN-002", title: "Add Dashboard Feature", description: "Second task", column: "todo" }),
-      ];
-
-      // Pre-filtered tasks - only FN-001 matches
-      const filteredTasks = [tasks[0]];
-
-      renderBoard({ tasks: filteredTasks, searchQuery: "login" });
-
-      const todoColumn = screen.getByTestId("column-todo");
-      const todoTasks = JSON.parse(todoColumn.getAttribute("data-tasks") || "[]");
-      expect(todoTasks).toHaveLength(1);
-      expect(todoTasks[0].id).toBe("FN-001");
-    });
-
-    it("search is case-insensitive for lowercase query matching uppercase content (server handles this)", () => {
-      const tasks: Task[] = [
-        createTask({ id: "FN-UPPER", title: "UPPERCASE TITLE", description: "DESC", column: "todo" }),
-      ];
-
-      // Pre-filtered tasks - FN-UPPER matches
-      const filteredTasks = [tasks[0]];
-
-      renderBoard({ tasks: filteredTasks, searchQuery: "upper" });
-
-      const todoColumn = screen.getByTestId("column-todo");
-      const todoTasks = JSON.parse(todoColumn.getAttribute("data-tasks") || "[]");
-      expect(todoTasks).toHaveLength(1);
-      expect(todoTasks[0].id).toBe("FN-UPPER");
-    });
-
-    it("shows all tasks when search query is empty", () => {
-      const tasks: Task[] = [
-        createTask({ id: "FN-001", description: "First task", column: "todo" }),
-        createTask({ id: "FN-002", description: "Second task", column: "todo" }),
-        createTask({ id: "FN-003", description: "Third task", column: "in-progress" }),
-      ];
-
-      renderBoard({ tasks, searchQuery: "" });
-
-      const todoColumn = screen.getByTestId("column-todo");
-      const todoTasks = JSON.parse(todoColumn.getAttribute("data-tasks") || "[]");
-      expect(todoTasks).toHaveLength(2);
-
-      const inProgressColumn = screen.getByTestId("column-in-progress");
-      const inProgressTasks = JSON.parse(inProgressColumn.getAttribute("data-tasks") || "[]");
-      expect(inProgressTasks).toHaveLength(1);
-    });
-
-    it("shows no tasks when search query matches nothing (server returns empty)", () => {
-      const tasks: Task[] = [
-        createTask({ id: "FN-001", description: "First task", column: "todo" }),
-        createTask({ id: "FN-002", description: "Second task", column: "todo" }),
-      ];
-
-      // Pre-filtered tasks - empty array because server found no matches
-      const filteredTasks: Task[] = [];
-
-      renderBoard({ tasks: filteredTasks, searchQuery: "nonexistent" });
-
-      const todoColumn = screen.getByTestId("column-todo");
-      const todoTasks = JSON.parse(todoColumn.getAttribute("data-tasks") || "[]");
-      expect(todoTasks).toHaveLength(0);
-    });
-
-    it("keeps unaffected columns stable when archived collapse toggles", () => {
-      const tasks: Task[] = [
-        createTask({ id: "FN-001", description: "Todo task", column: "todo" }),
-        createTask({ id: "FN-002", description: "Archived task", column: "archived" }),
-      ];
-
-      renderBoard({ tasks });
-
-      const initialTodoRenders = columnRenderCounts.todo;
-      const initialArchivedRenders = columnRenderCounts.archived;
-
-      fireEvent.click(screen.getByRole("button", { name: "toggle-archived" }));
-
-      expect(columnRenderCounts.archived).toBeGreaterThan(initialArchivedRenders);
-      expect(columnRenderCounts.todo).toBe(initialTodoRenders);
-    });
-
-    it("only re-renders the affected column when a task updates", () => {
-      const tasks: Task[] = [
-        createTask({ id: "FN-001", description: "Todo task", column: "todo", title: "Original" }),
-        createTask({ id: "FN-002", description: "Done task", column: "done", title: "Done" }),
-      ];
-
-      const { rerender } = renderBoard({ tasks });
-
-      const initialTodoRenders = columnRenderCounts.todo;
-      const initialDoneRenders = columnRenderCounts.done;
-
-      rerender(
-        <Board
-          {...createBoardProps({
-            tasks: [
-              { ...tasks[0], title: "Updated" },
-              tasks[1],
-            ],
-          })}
-        />,
-      );
-
-      const todoTasks = JSON.parse(screen.getByTestId("column-todo").getAttribute("data-tasks") || "[]");
-      expect(todoTasks[0].title).toBe("Updated");
-      expect(columnRenderCounts.todo).toBeGreaterThan(initialTodoRenders);
-      expect(columnRenderCounts.done).toBeGreaterThanOrEqual(initialDoneRenders);
-    });
-
-    describe("column default ordering priority semantics", () => {
-      it("orders done tasks by most recent completion regardless of priority", () => {
-        const tasks: Task[] = [
-          createTask({
-            id: "FN-003",
-            description: "Older urgent done task",
-            column: "done",
-            priority: "urgent",
-            columnMovedAt: "2024-01-01T09:00:00.000Z",
-          }),
-          createTask({
-            id: "FN-001",
-            description: "Newest low-priority done task",
-            column: "done",
-            priority: "low",
-            columnMovedAt: "2024-01-01T11:00:00.000Z",
-          }),
-          createTask({
-            id: "FN-002",
-            description: "Middle high-priority done task",
-            column: "done",
-            priority: "high",
-            columnMovedAt: "2024-01-01T10:00:00.000Z",
-          }),
-        ];
-
-        renderBoard({ tasks });
-
-        const doneTasks = JSON.parse(screen.getByTestId("column-done").getAttribute("data-tasks") || "[]") as Task[];
-        expect(doneTasks.map((t: Task) => t.id)).toEqual(["FN-001", "FN-002", "FN-003"]);
-      });
-
-      it("falls back to updatedAt and createdAt for legacy done tasks missing columnMovedAt", () => {
-        const tasks: Task[] = [
-          createTask({
-            id: "FN-010",
-            description: "Has updatedAt fallback",
-            column: "done",
-            updatedAt: "2024-01-01T10:30:00.000Z",
-          }),
-          createTask({
-            id: "FN-011",
-            description: "Has createdAt fallback",
-            column: "done",
-            createdAt: "2024-01-01T10:45:00.000Z",
-          }),
-          createTask({
-            id: "FN-012",
-            description: "Has real completion timestamp",
-            column: "done",
-            columnMovedAt: "2024-01-01T11:00:00.000Z",
-          }),
-        ];
-
-        const taskWithCreatedAtOnly = tasks[1];
-        delete taskWithCreatedAtOnly.columnMovedAt;
-        delete taskWithCreatedAtOnly.updatedAt;
-
-        renderBoard({ tasks });
-
-        const doneTasks = JSON.parse(screen.getByTestId("column-done").getAttribute("data-tasks") || "[]") as Task[];
-        expect(doneTasks.map((t: Task) => t.id)).toEqual(["FN-012", "FN-011", "FN-010"]);
-      });
-
-      it("orders todo by priority before age", () => {
-        const tasks: Task[] = [
-          createTask({
-            id: "FN-003",
-            description: "Low but oldest",
-            column: "todo",
-            priority: "low",
-            createdAt: "2024-01-01T08:00:00.000Z",
-          }),
-          createTask({
-            id: "FN-001",
-            description: "Urgent but newer",
-            column: "todo",
-            priority: "urgent",
-            createdAt: "2024-01-01T10:00:00.000Z",
-          }),
-          createTask({
-            id: "FN-004",
-            description: "Normal",
-            column: "todo",
-            priority: "normal",
-            createdAt: "2024-01-01T09:00:00.000Z",
-          }),
-          createTask({
-            id: "FN-002",
-            description: "High",
-            column: "todo",
-            priority: "high",
-            createdAt: "2024-01-01T07:00:00.000Z",
-          }),
-        ];
-
-        renderBoard({ tasks, searchQuery: "task" });
-
-        const todoTasks = JSON.parse(screen.getByTestId("column-todo").getAttribute("data-tasks") || "[]") as Task[];
-        expect(todoTasks).toHaveLength(4);
-        expect(todoTasks.map((t: Task) => t.id)).toEqual(["FN-001", "FN-002", "FN-004", "FN-003"]);
-      });
-
-      it("orders same-priority todo tasks by oldest createdAt first", () => {
-        const tasks: Task[] = [
-          createTask({ id: "FN-020", description: "Newest", column: "todo", priority: "high", createdAt: "2024-01-01T12:00:00.000Z" }),
-          createTask({ id: "FN-021", description: "Oldest", column: "todo", priority: "high", createdAt: "2024-01-01T09:00:00.000Z" }),
-          createTask({ id: "FN-022", description: "Middle", column: "todo", priority: "high", createdAt: "2024-01-01T10:00:00.000Z" }),
-        ];
-
-        renderBoard({ tasks });
-
-        const todoTasks = JSON.parse(screen.getByTestId("column-todo").getAttribute("data-tasks") || "[]") as Task[];
-        expect(todoTasks.map((t: Task) => t.id)).toEqual(["FN-021", "FN-022", "FN-020"]);
-      });
-
-      it("uses task ID as deterministic tie-breaker when todo createdAt matches", () => {
-        const tasks: Task[] = [
-          createTask({ id: "FN-050", description: "Fifty", column: "todo", priority: "normal", createdAt: "2024-01-01T10:00:00.000Z" }),
-          createTask({ id: "FN-010", description: "Ten", column: "todo", priority: "normal", createdAt: "2024-01-01T10:00:00.000Z" }),
-          createTask({ id: "FN-030", description: "Thirty", column: "todo", priority: "normal", createdAt: "2024-01-01T10:00:00.000Z" }),
-        ];
-
-        renderBoard({ tasks });
-
-        const todoTasks = JSON.parse(screen.getByTestId("column-todo").getAttribute("data-tasks") || "[]") as Task[];
-        expect(todoTasks.map((t: Task) => t.id)).toEqual(["FN-010", "FN-030", "FN-050"]);
-      });
-
-      it("keeps non-todo columns on priority then task ID ordering", () => {
-        const tasks: Task[] = [
-          createTask({ id: "FN-050", description: "Fifty", column: "in-progress", priority: "normal", createdAt: "2024-01-01T12:00:00.000Z" }),
-          createTask({ id: "FN-010", description: "Ten", column: "in-progress", priority: "normal", createdAt: "2024-01-01T09:00:00.000Z" }),
-          createTask({ id: "FN-030", description: "Thirty", column: "in-progress", priority: "normal", createdAt: "2024-01-01T10:00:00.000Z" }),
-        ];
-
-        renderBoard({ tasks });
-
-        const ipTasks = JSON.parse(screen.getByTestId("column-in-progress").getAttribute("data-tasks") || "[]") as Task[];
-        expect(ipTasks.map((t: Task) => t.id)).toEqual(["FN-010", "FN-030", "FN-050"]);
-      });
-
-      it("normalizes missing and invalid legacy priority values to normal", () => {
-        const noPriorityTask = createTask({ id: "FN-060", description: "No priority", column: "todo" });
-        delete noPriorityTask.priority;
-
-        const legacyPriorityTask = {
-          ...createTask({ id: "FN-059", description: "Legacy priority", column: "todo", priority: "normal" }),
-          priority: "critical" as unknown as Task["priority"],
-        };
-
-        const tasks: Task[] = [
-          noPriorityTask,
-          createTask({ id: "FN-061", description: "Explicit normal", column: "todo", priority: "normal" }),
-          legacyPriorityTask,
-          createTask({ id: "FN-062", description: "Urgent", column: "todo", priority: "urgent" }),
-        ];
-
-        renderBoard({ tasks });
-
-        const todoTasks = JSON.parse(screen.getByTestId("column-todo").getAttribute("data-tasks") || "[]") as Task[];
-        // FN-060 (missing), FN-059 (legacy invalid), and FN-061 (explicit normal) normalize to normal,
-        // so they sort by numeric ID ascending after urgent tasks.
-        expect(todoTasks.map((t: Task) => t.id)).toEqual(["FN-062", "FN-059", "FN-060", "FN-061"]);
-      });
-
-      it("uses localeCompare fallback for non-numeric task IDs", () => {
-        const tasks: Task[] = [
-          createTask({ id: "TASK-002", description: "Task two", column: "todo", priority: "normal" }),
-          createTask({ id: "TASK-001", description: "Task one", column: "todo", priority: "normal" }),
-        ];
-
-        renderBoard({ tasks });
-
-        const todoTasks = JSON.parse(screen.getByTestId("column-todo").getAttribute("data-tasks") || "[]") as Task[];
-        // Both have same priority, numeric parse fails (NaN), localeCompare fallback
-        expect(todoTasks.map((t: Task) => t.id)).toEqual(["TASK-001", "TASK-002"]);
-      });
-    });
-
-    describe("column default ordering merging pinning", () => {
-      it("pins merging tasks to top of in-review even when newer non-merging tasks exist", () => {
-        const tasks: Task[] = [
-          createTask({
-            id: "FN-010",
-            column: "in-review",
-            status: "merging",
-            columnMovedAt: "2024-01-01T10:00:00.000Z",
-          }),
-          createTask({
-            id: "FN-011",
-            column: "in-review",
-            status: "review-ready",
-            columnMovedAt: "2024-01-01T12:00:00.000Z",
-          }),
-        ];
-
-        renderBoard({ tasks });
-
-        const inReviewTasks = JSON.parse(screen.getByTestId("column-in-review").getAttribute("data-tasks") || "[]") as Task[];
-        expect(inReviewTasks.map((task) => task.id)).toEqual(["FN-010", "FN-011"]);
-      });
-
-      it("pins merging-pr tasks to top of in-review even when newer non-merging tasks exist", () => {
-        const tasks: Task[] = [
-          createTask({
-            id: "FN-020",
-            column: "in-review",
-            status: "merging-pr",
-            columnMovedAt: "2024-01-01T10:00:00.000Z",
-          }),
-          createTask({
-            id: "FN-021",
-            column: "in-review",
-            status: "review-ready",
-            columnMovedAt: "2024-01-01T13:00:00.000Z",
-          }),
-        ];
-
-        renderBoard({ tasks });
-
-        const inReviewTasks = JSON.parse(screen.getByTestId("column-in-review").getAttribute("data-tasks") || "[]") as Task[];
-        expect(inReviewTasks.map((task) => task.id)).toEqual(["FN-020", "FN-021"]);
-      });
-
-      it("pins merging-fix tasks to top of in-review even when newer non-merging tasks exist", () => {
-        const tasks: Task[] = [
-          createTask({
-            id: "FN-060",
-            column: "in-review",
-            status: "merging-fix",
-            columnMovedAt: "2024-01-01T10:00:00.000Z",
-          }),
-          createTask({
-            id: "FN-061",
-            column: "in-review",
-            status: "review-ready",
-            columnMovedAt: "2024-01-01T13:00:00.000Z",
-          }),
-        ];
-
-        renderBoard({ tasks });
-
-        const inReviewTasks = JSON.parse(screen.getByTestId("column-in-review").getAttribute("data-tasks") || "[]") as Task[];
-        expect(inReviewTasks.map((task) => task.id)).toEqual(["FN-060", "FN-061"]);
-      });
-
-      it("sorts multiple merging tasks by priority then task ID within the pinned group", () => {
-        const tasks: Task[] = [
-          createTask({
-            id: "FN-030",
-            column: "in-review",
-            status: "merging",
-            priority: "high",
-          }),
-          createTask({
-            id: "FN-031",
-            column: "in-review",
-            status: "merging-pr",
-            priority: "urgent",
-          }),
-          createTask({
-            id: "FN-032",
-            column: "in-review",
-            status: "review-ready",
-            priority: "urgent",
-          }),
-        ];
-
-        renderBoard({ tasks });
-
-        const inReviewTasks = JSON.parse(screen.getByTestId("column-in-review").getAttribute("data-tasks") || "[]") as Task[];
-        // Pinned group (merging): FN-031 urgent, FN-030 high — sorted by priority desc
-        // Non-pinned group: FN-032 urgent
-        expect(inReviewTasks.map((task) => task.id)).toEqual(["FN-031", "FN-030", "FN-032"]);
-      });
-
-      it("sorts non-in-review columns by priority then task ID regardless of status", () => {
-        const tasks: Task[] = [
-          createTask({
-            id: "FN-040",
-            column: "todo",
-            status: "merging",
-            priority: "high",
-          }),
-          createTask({
-            id: "FN-041",
-            column: "todo",
-            status: "ready",
-            priority: "urgent",
-          }),
-          createTask({
-            id: "FN-042",
-            column: "todo",
-            status: "ready",
-            priority: "high",
-          }),
-        ];
-
-        renderBoard({ tasks });
-
-        const todoTasks = JSON.parse(screen.getByTestId("column-todo").getAttribute("data-tasks") || "[]") as Task[];
-        // No merge-pinning outside in-review, so pure priority-then-ID sort
-        // FN-041 urgent, then FN-040 and FN-042 both high (sorted by ID asc)
-        expect(todoTasks.map((task) => task.id)).toEqual(["FN-041", "FN-040", "FN-042"]);
-      });
-
-      it("sorts tasks without status by priority then task ID in in-review", () => {
-        const statuslessTask = createTask({
-          id: "FN-050",
-          column: "in-review",
-          priority: "normal",
-        });
-        delete statuslessTask.status;
-
-        const tasks: Task[] = [
-          statuslessTask,
-          createTask({
-            id: "FN-051",
-            column: "in-review",
-            status: "review-ready",
-            priority: "urgent",
-          }),
-        ];
-
-        renderBoard({ tasks });
-
-        const inReviewTasks = JSON.parse(screen.getByTestId("column-in-review").getAttribute("data-tasks") || "[]") as Task[];
-        // Neither is merging, so sort by priority: FN-051 urgent > FN-050 normal
-        expect(inReviewTasks.map((task) => task.id)).toEqual(["FN-051", "FN-050"]);
-      });
-    });
-
-    it("renders server-filtered tasks matching across multiple fields simultaneously", () => {
-      const tasks: Task[] = [
-        createTask({ id: "SEARCH-123", title: "Searchable title", description: "Normal description", column: "todo" }),
-        createTask({ id: "FN-999", title: "Other task", description: "This has searchable content", column: "todo" }),
-        createTask({ id: "FN-888", title: "Unrelated", description: "No match here", column: "todo" }),
-      ];
-
-      // Pre-filtered tasks - only the two matching tasks
-      const filteredTasks = [tasks[0], tasks[1]];
-
-      renderBoard({ tasks: filteredTasks, searchQuery: "search" });
-
-      const todoColumn = screen.getByTestId("column-todo");
-      const todoTasks = JSON.parse(todoColumn.getAttribute("data-tasks") || "[]");
-
-      // Should have both matching tasks
-      expect(todoTasks).toHaveLength(2);
-      expect(todoTasks.map((t: Task) => t.id).sort()).toEqual(["FN-999", "SEARCH-123"]);
-    });
-
-    it("renders server-filtered branch-target results without additional client filtering", () => {
-      const branchFilteredTasks: Task[] = [
-        createTask({
-          id: "FN-3428",
-          description: "Task targeting release branch",
-          column: "todo",
-          branch: "feature/fn-3428",
-          baseBranch: "release/2026-05",
-        }),
-      ];
-
-      renderBoard({ tasks: branchFilteredTasks, searchQuery: "release/2026-05" });
-
-      const todoColumn = screen.getByTestId("column-todo");
-      const todoTasks = JSON.parse(todoColumn.getAttribute("data-tasks") || "[]") as Task[];
-      expect(todoTasks).toHaveLength(1);
-      expect(todoTasks[0]?.id).toBe("FN-3428");
-      expect(todoTasks[0]?.branch).toBe("feature/fn-3428");
-      expect(todoTasks[0]?.baseBranch).toBe("release/2026-05");
-    });
-
-    it("shows all tasks for whitespace-only search query (server treats as empty)", () => {
-      const tasks: Task[] = [
-        createTask({ id: "FN-001", description: "First task", column: "todo" }),
-      ];
-
-      renderBoard({ tasks, searchQuery: "  " });
-
-      const todoColumn = screen.getByTestId("column-todo");
-      const todoTasks = JSON.parse(todoColumn.getAttribute("data-tasks") || "[]");
-
-      // Whitespace-only query should be treated as empty, showing all tasks
-      expect(todoTasks).toHaveLength(1);
-    });
-
-    it("passes isSearchActive=true to columns when search query is non-empty", () => {
-      const tasks: Task[] = [
-        createTask({ id: "FN-001", description: "First task", column: "todo" }),
-      ];
-
-      renderBoard({ tasks, searchQuery: "first" });
-
-      for (const col of COLUMNS) {
-        const columnEl = screen.getByTestId(`column-${col}`);
-        expect(columnEl.getAttribute("data-is-search-active")).toBe("true");
-      }
-    });
-
-    it("passes isSearchActive=false to columns when search query is empty", () => {
-      renderBoard({ searchQuery: "" });
-
-      for (const col of COLUMNS) {
-        const columnEl = screen.getByTestId(`column-${col}`);
-        expect(columnEl.getAttribute("data-is-search-active")).toBe("false");
-      }
-    });
-
-    it("passes isSearchActive=false to columns when search query is whitespace-only", () => {
-      renderBoard({ searchQuery: "   " });
-
-      for (const col of COLUMNS) {
-        const columnEl = screen.getByTestId(`column-${col}`);
-        expect(columnEl.getAttribute("data-is-search-active")).toBe("false");
-      }
-    });
-  });
-
-  it("does not render a .board-project-context badge", () => {
-    renderBoard();
-    const badge = document.querySelector(".board-project-context");
-    expect(badge).toBeNull();
-  });
-
-  describe("favorite model prop forwarding (FN-770)", () => {
-    it("forwards favoriteProviders and favoriteModels to all columns", () => {
-      const favoriteProviders = ["anthropic"];
-      const favoriteModels = ["claude-sonnet-4-5"];
-      const onToggleFavorite = vi.fn();
-      const onToggleModelFavorite = vi.fn();
-
-      renderBoard({
-        favoriteProviders,
-        favoriteModels,
-        onToggleFavorite,
-        onToggleModelFavorite,
-      });
-
-      // Every column should receive the favorite props
-      for (const col of COLUMNS) {
-        const columnEl = screen.getByTestId(`column-${col}`);
-        expect(columnEl.getAttribute("data-favorite-providers")).toBe(JSON.stringify(favoriteProviders));
-        expect(columnEl.getAttribute("data-favorite-models")).toBe(JSON.stringify(favoriteModels));
-        expect(columnEl.getAttribute("data-has-toggle-favorite")).toBe("yes");
-        expect(columnEl.getAttribute("data-has-toggle-model-favorite")).toBe("yes");
-      }
-    });
-
-    it("passes empty arrays for favorites when not provided", () => {
-      renderBoard();
-
-      for (const col of COLUMNS) {
-        const columnEl = screen.getByTestId(`column-${col}`);
-        expect(columnEl.getAttribute("data-favorite-providers")).toBe("[]");
-        expect(columnEl.getAttribute("data-favorite-models")).toBe("[]");
-        expect(columnEl.getAttribute("data-has-toggle-favorite")).toBe("no");
-        expect(columnEl.getAttribute("data-has-toggle-model-favorite")).toBe("no");
-      }
-    });
-  });
-
-  describe("multi-lane board (U9, flag ON)", () => {
-    const mkTask = (overrides: Partial<Task> & { id: string }): Task => ({
-      title: overrides.id,
-      description: "d",
-      column: "todo",
-      dependencies: [],
-      steps: [],
-      currentStep: 0,
-      log: [],
-      createdAt: "2024-01-01T00:00:00.000Z",
-      updatedAt: "2024-01-01T00:00:00.000Z",
-      ...overrides,
-    });
-
-    const CUSTOM_WORKFLOW = {
-      id: "wf-custom",
-      name: "Custom Flow",
-      columns: [
-        { id: "intake", name: "Intake", flags: { intake: true } },
-        { id: "done", name: "Done", flags: { complete: true } },
-      ],
-    };
-
-    function enableFlag(taskWorkflowIds: Record<string, string>, workflows = [DEFAULT_WORKFLOW]) {
-      fetchBoardWorkflowsMock.mockResolvedValue({
-        flagEnabled: true,
-        defaultWorkflowId: "builtin:coding",
-        workflows,
-        taskWorkflowIds,
-      });
-    }
-
-    it("flag OFF renders the legacy single-lane board byte-identically", async () => {
-      // Default mock: flagEnabled false.
-      renderBoard({ tasks: [mkTask({ id: "FN-1" })] });
-      // Let the board-workflows fetch resolve (flagEnabled:false) so the async
-      // state settle is wrapped and the legacy board stays the rendered output.
-      await waitFor(() => expect(fetchBoardWorkflowsMock).toHaveBeenCalled());
-      const board = screen.getByRole("main");
-      expect(board.className).toBe("board");
-      // All 6 legacy columns present; no lanes.
-      for (const col of COLUMNS) {
-        expect(screen.getByTestId(`column-${col}`)).toBeDefined();
-      }
-      expect(screen.queryByTestId(/^lane-/)).toBeNull();
-    });
-
-    it("tasks with no selection render in the default lane (R16)", async () => {
-      enableFlag({ "FN-1": "builtin:coding", "FN-2": "builtin:coding" });
-      renderBoard({ tasks: [mkTask({ id: "FN-1" }), mkTask({ id: "FN-2", column: "in-progress" })] });
-      await waitFor(() => expect(screen.getByTestId("lane-builtin:coding")).toBeDefined());
-      const lane = screen.getByTestId("lane-builtin:coding");
-      expect(JSON.parse(lane.getAttribute("data-lane-task-ids") || "[]").sort()).toEqual(["FN-1", "FN-2"]);
-      expect(lane.getAttribute("data-lane-count")).toBe("2");
-    });
-
-    it("each card appears in exactly one lane over a mixed fixture", async () => {
-      enableFlag(
-        { "FN-1": "builtin:coding", "FN-2": "wf-custom", "FN-3": "wf-custom" },
-        [DEFAULT_WORKFLOW, CUSTOM_WORKFLOW],
-      );
-      renderBoard({
-        tasks: [
-          mkTask({ id: "FN-1" }),
-          mkTask({ id: "FN-2", column: "intake" }),
-          mkTask({ id: "FN-3", column: "intake" }),
+  describe("multi-board switcher (U10)", () => {
+    function twoBoardPayload() {
+      return {
+        boards: [
+          { id: "board-a", name: "Alpha", description: "", requirePlanApproval: false, ordering: 0 },
+          { id: "board-b", name: "Beta", description: "", requirePlanApproval: false, ordering: 1 },
         ],
+        boardPayloads: {
+          "board-a": { columns: DEFAULT_COLUMNS, team: {}, taskIds: ["FN-A"] },
+          "board-b": { columns: DEFAULT_COLUMNS, team: {}, taskIds: ["FN-B"] },
+        },
+        defaultBoardId: "board-a",
+      };
+    }
+
+    it("renders two boards via the switcher and shows the default board's tasks", async () => {
+      fetchBoardWorkflowsMock.mockResolvedValue(twoBoardPayload());
+      const tasks = [mkTask({ id: "FN-A", boardId: "board-a" }), mkTask({ id: "FN-B", boardId: "board-b" })];
+      await renderBoardAndSettle({ tasks });
+      expect(screen.getByTestId("board-switcher-tab-board-a")).toBeDefined();
+      expect(screen.getByTestId("board-switcher-tab-board-b")).toBeDefined();
+      // Default board (board-a) is active and shows only its task.
+      const todoA = JSON.parse(screen.getByTestId("column-todo").getAttribute("data-tasks") || "[]") as Task[];
+      expect(todoA.map((t) => t.id)).toEqual(["FN-A"]);
+    });
+
+    it("switches the rendered board on tab click and persists the selection", async () => {
+      fetchBoardWorkflowsMock.mockResolvedValue(twoBoardPayload());
+      const tasks = [mkTask({ id: "FN-A", boardId: "board-a" }), mkTask({ id: "FN-B", boardId: "board-b" })];
+      await renderBoardAndSettle({ tasks, projectId: "proj-1" });
+
+      fireEvent.click(screen.getByTestId("board-switcher-tab-board-b"));
+      await waitFor(() => {
+        const todoB = JSON.parse(screen.getByTestId("column-todo").getAttribute("data-tasks") || "[]") as Task[];
+        expect(todoB.map((t) => t.id)).toEqual(["FN-B"]);
       });
-      await waitFor(() => expect(screen.getByTestId("lane-wf-custom")).toBeDefined());
-      const defaultLaneIds = JSON.parse(screen.getByTestId("lane-builtin:coding").getAttribute("data-lane-task-ids") || "[]");
-      const customLaneIds = JSON.parse(screen.getByTestId("lane-wf-custom").getAttribute("data-lane-task-ids") || "[]");
-      const all = [...defaultLaneIds, ...customLaneIds].sort();
-      expect(all).toEqual(["FN-1", "FN-2", "FN-3"]);
-      // No id appears twice.
-      expect(new Set(all).size).toBe(all.length);
+      expect(window.localStorage.getItem("kb-dashboard-selected-board:proj-1")).toBe("board-b");
     });
 
-    it("hides zero-card lanes and puts the default lane first", async () => {
-      enableFlag(
-        { "FN-2": "wf-custom" },
-        [DEFAULT_WORKFLOW, CUSTOM_WORKFLOW],
-      );
-      // Only the custom workflow has a card; the default lane has none → hidden.
-      renderBoard({ tasks: [mkTask({ id: "FN-2", column: "intake" })] });
-      await waitFor(() => expect(screen.getByTestId("lane-wf-custom")).toBeDefined());
-      expect(screen.queryByTestId("lane-builtin:coding")).toBeNull();
+    it("restores the persisted board on load", async () => {
+      window.localStorage.setItem("kb-dashboard-selected-board:proj-1", "board-b");
+      fetchBoardWorkflowsMock.mockResolvedValue(twoBoardPayload());
+      const tasks = [mkTask({ id: "FN-A", boardId: "board-a" }), mkTask({ id: "FN-B", boardId: "board-b" })];
+      await renderBoardAndSettle({ tasks, projectId: "proj-1" });
+      await waitFor(() => {
+        const todo = JSON.parse(screen.getByTestId("column-todo").getAttribute("data-tasks") || "[]") as Task[];
+        expect(todo.map((t) => t.id)).toEqual(["FN-B"]);
+      });
+      expect(screen.getByTestId("board-switcher-tab-board-b").getAttribute("data-active")).toBe("true");
     });
 
-    it("orders the default lane first when both have cards", async () => {
-      enableFlag(
-        { "FN-1": "builtin:coding", "FN-2": "wf-custom" },
-        [CUSTOM_WORKFLOW, DEFAULT_WORKFLOW],
-      );
-      renderBoard({ tasks: [mkTask({ id: "FN-1" }), mkTask({ id: "FN-2", column: "intake" })] });
-      await waitFor(() => expect(screen.getByTestId("lane-builtin:coding")).toBeDefined());
-      const lanes = screen.getAllByTestId(/^lane-/);
-      expect(lanes[0].getAttribute("data-testid")).toBe("lane-builtin:coding");
-    });
-
-    it("excludes archived cards from lanes", async () => {
-      enableFlag({ "FN-1": "builtin:coding", "FN-9": "builtin:coding" });
-      renderBoard({ tasks: [mkTask({ id: "FN-1" }), mkTask({ id: "FN-9", column: "archived" })] });
-      await waitFor(() => expect(screen.getByTestId("lane-builtin:coding")).toBeDefined());
-      const ids = JSON.parse(screen.getByTestId("lane-builtin:coding").getAttribute("data-lane-task-ids") || "[]");
-      expect(ids).toEqual(["FN-1"]);
-    });
-
-    it("persists lane collapse state to localStorage", async () => {
-      window.localStorage.setItem("kb-dashboard-lane-collapsed", JSON.stringify(["builtin:coding"]));
-      enableFlag({ "FN-1": "builtin:coding" });
-      renderBoard({ tasks: [mkTask({ id: "FN-1" })] });
-      await waitFor(() => expect(screen.getByTestId("lane-builtin:coding")).toBeDefined());
-      expect(screen.getByTestId("lane-builtin:coding").getAttribute("data-lane-collapsed")).toBe("true");
+    it("falls back to defaultBoardId when the persisted board no longer exists", async () => {
+      window.localStorage.setItem("kb-dashboard-selected-board:proj-1", "board-gone");
+      fetchBoardWorkflowsMock.mockResolvedValue(twoBoardPayload());
+      await renderBoardAndSettle({ projectId: "proj-1" });
+      await waitFor(() => {
+        expect(screen.getByTestId("board-switcher-tab-board-a").getAttribute("data-active")).toBe("true");
+      });
     });
   });
 
-  describe("workflow:updated SSE invalidation (#1406)", () => {
-    it("re-fetches board-workflows when a workflow:updated SSE event arrives", async () => {
-      renderBoard({ projectId: "proj-1" });
-      // Initial mount fetch.
+  describe("SSE / fetch behavior", () => {
+    it("re-fetches the board-scoped payload on workflow:updated", async () => {
+      await renderBoardAndSettle({ projectId: "proj-1" });
       await waitFor(() => expect(fetchBoardWorkflowsMock).toHaveBeenCalledTimes(1));
-      // Board subscribed for workflow lifecycle events.
       expect(subscribeSseMock).toHaveBeenCalled();
       expect(typeof sseHandlers["workflow:updated"]).toBe("function");
-
-      // Simulate a server-pushed workflow:updated event → invalidate + re-fetch.
       await act(async () => {
         sseHandlers["workflow:updated"]?.();
       });
       await waitFor(() => expect(fetchBoardWorkflowsMock).toHaveBeenCalledTimes(2));
+    });
+
+    it("re-fetches the board-scoped payload on board:updated", async () => {
+      await renderBoardAndSettle({ projectId: "proj-1" });
+      await waitFor(() => expect(fetchBoardWorkflowsMock).toHaveBeenCalledTimes(1));
+      expect(typeof sseHandlers["board:updated"]).toBe("function");
+      await act(async () => {
+        sseHandlers["board:updated"]?.();
+      });
+      await waitFor(() => expect(fetchBoardWorkflowsMock).toHaveBeenCalledTimes(2));
+    });
+  });
+
+  describe("fetch failure", () => {
+    it("shows the switcher retry affordance when the boards fetch fails", async () => {
+      fetchBoardWorkflowsMock.mockRejectedValueOnce(new Error("offline"));
+      renderBoard({ projectId: "proj-1" });
+      await waitFor(() => expect(screen.getByTestId("board-switcher-failed")).toBeDefined());
+      // Retry succeeds → board renders.
+      fetchBoardWorkflowsMock.mockResolvedValueOnce(singleBoardPayload());
+      fireEvent.click(screen.getByTestId("board-switcher-retry"));
+      await waitFor(() => expect(screen.getByTestId("column-todo")).toBeDefined());
+    });
+  });
+
+  describe("search + sort plumbing", () => {
+    it("renders server-filtered tasks (search) on the active board", async () => {
+      const tasks: Task[] = [mkTask({ id: "FN-002", column: "todo" })];
+      await renderBoardAndSettle({ tasks, searchQuery: "FN-002" });
+      const todo = JSON.parse(screen.getByTestId("column-todo").getAttribute("data-tasks") || "[]") as Task[];
+      expect(todo.map((t) => t.id)).toEqual(["FN-002"]);
+      for (const col of VISIBLE_COLUMNS) {
+        expect(screen.getByTestId(`column-${col}`).getAttribute("data-is-search-active")).toBe("true");
+      }
+    });
+
+    it("orders todo by priority before age", async () => {
+      const tasks: Task[] = [
+        mkTask({ id: "FN-003", column: "todo", priority: "low", createdAt: "2024-01-01T08:00:00.000Z" }),
+        mkTask({ id: "FN-001", column: "todo", priority: "urgent", createdAt: "2024-01-01T10:00:00.000Z" }),
+        mkTask({ id: "FN-002", column: "todo", priority: "high", createdAt: "2024-01-01T07:00:00.000Z" }),
+      ];
+      await renderBoardAndSettle({ tasks });
+      const todo = JSON.parse(screen.getByTestId("column-todo").getAttribute("data-tasks") || "[]") as Task[];
+      expect(todo.map((t) => t.id)).toEqual(["FN-001", "FN-002", "FN-003"]);
+    });
+  });
+
+  describe("favorite model prop forwarding (FN-770)", () => {
+    it("forwards favoriteProviders and favoriteModels to all columns", async () => {
+      const favoriteProviders = ["anthropic"];
+      const favoriteModels = ["claude-sonnet-4-5"];
+      await renderBoardAndSettle({
+        favoriteProviders,
+        favoriteModels,
+        onToggleFavorite: vi.fn(),
+        onToggleModelFavorite: vi.fn(),
+      });
+      for (const col of VISIBLE_COLUMNS) {
+        const el = screen.getByTestId(`column-${col}`);
+        expect(el.getAttribute("data-favorite-providers")).toBe(JSON.stringify(favoriteProviders));
+        expect(el.getAttribute("data-has-toggle-favorite")).toBe("yes");
+      }
     });
   });
 });

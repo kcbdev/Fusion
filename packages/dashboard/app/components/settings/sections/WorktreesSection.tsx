@@ -40,6 +40,25 @@ export function WorktreesSection({
       {scopeBanner}
       <h4 className="settings-section-heading">Worktrees</h4>
       <div className="form-group">
+        <label htmlFor="worktreeIsolationEnabled" className="checkbox-label">
+          <input
+            id="worktreeIsolationEnabled"
+            type="checkbox"
+            checked={form.worktreeIsolationEnabled !== false}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, worktreeIsolationEnabled: e.target.checked } as SettingsFormState))
+            }
+          />
+          {t("uiMode.worktreeIsolationLabel", "Worktree isolation")}
+        </label>
+        <small>
+          {t(
+            "uiMode.worktreeIsolationDescription",
+            "Enabled by default. Each task runs in its own git worktree. This toggle is only available in advanced mode — simple mode always forces worktree isolation on.",
+          )}
+        </small>
+      </div>
+      <div className="form-group">
         <label htmlFor="maxWorktrees">Max Worktrees</label>
         <input
           id="maxWorktrees"

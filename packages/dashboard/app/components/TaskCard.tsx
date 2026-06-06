@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { memo, useCallback, useState, useRef, useEffect, useMemo, type ReactElement } from "react";
 import { Link, Clock, Layers, Pencil, ChevronDown, Folder, Target, Bot, Trash2, RotateCw, Zap, GitBranch, GitPullRequest } from "lucide-react";
-import type { Task, TaskDetail, Column, ColumnId, PrInfo, IssueInfo, TaskPriority, GithubIssueAction } from "@fusion/core";
+import type { Task, TaskDetail, Column, ColumnId, PrInfo, IssueInfo, TaskPriority, GithubIssueAction, UiMode } from "@fusion/core";
 import {
   DEFAULT_TASK_PRIORITY,
   HIGH_FANOUT_BLOCKER_TODO_THRESHOLD,
@@ -414,6 +414,14 @@ interface TaskCardProps {
    * Undefined when the task has no CLI session → no badge (card unchanged).
    */
   cliSessionState?: CliCardState;
+  /**
+   * Simple/advanced UI mode (U11, R23). In simple mode the card suppresses
+   * branch/worktree chrome (branch chips, PR/issue badges, the Create PR action)
+   * — branch/worktree detail stays available in the task detail view. The
+   * stuck / needs-attention indicators are NEVER suppressed: a blocked git state
+   * (merge conflict, push failure) must still surface on the card.
+   */
+  uiMode?: UiMode;
 }
 
 /** Minimal CLI session shape the card needs for its badges (U11). */
@@ -559,6 +567,7 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     previous.taskStuckTimeoutMs === next.taskStuckTimeoutMs &&
     previous.prAuthAvailable === next.prAuthAvailable &&
     previous.autoMergeEnabled === next.autoMergeEnabled &&
+    previous.uiMode === next.uiMode &&
     previous.cliSessionState?.agentState === next.cliSessionState?.agentState &&
     previous.cardFieldDefs === next.cardFieldDefs &&
     (previous.cardFieldDefs == null && next.cardFieldDefs == null
@@ -679,8 +688,12 @@ function TaskCardComponent({
   autoMergeEnabled = false,
   cardFieldDefs,
   cliSessionState,
+  uiMode = "advanced",
 }: TaskCardProps) {
   const { t } = useTranslation("app");
+  // R23: simple mode suppresses branch/worktree chrome on the card (NOT the
+  // stuck / needs-attention indicators — those must still surface a git block).
+  const suppressBranchChrome = uiMode === "simple";
   const columnLabel = useColumnLabel();
   const [dragging, setDragging] = useState(false);
   const [fileDragOver, setFileDragOver] = useState(false);
@@ -958,7 +971,10 @@ function TaskCardComponent({
   const stalePausedReviewCopy = task.stalePausedReview ? getStalePausedReviewCopy(task.stalePausedReview) : undefined;
   const hasTaskAgeStaleness = shouldShowTaskAgeStalenessBadge(task);
   const taskAgeStalenessCopy = getTaskAgeStalenessCopy(task.ageStaleness);
-  const isAwaitingApproval = task.column === "triage" && task.status === "awaiting-approval";
+  // Plan-approval hold (R20) parks in the Lead column: `triage` on legacy boards,
+  // `todo` on company-model boards. The "Awaiting Approval" badge fires for both.
+  const isAwaitingApproval =
+    (task.column === "triage" || task.column === "todo") && task.status === "awaiting-approval";
   const isAwaitingInput = task.status === "awaiting-user-input";
   const isArchived = task.column === "archived";
   const isAgentActive = !globalPaused && !queued && !isFailed && !isPaused && !isStuck && !isAwaitingApproval && !isAwaitingInput && (task.column === "in-progress" || ACTIVE_STATUSES.has(visualStatus as string));
@@ -1259,7 +1275,10 @@ function TaskCardComponent({
     && prAuthAvailable === true
     && !isPaused
     && !isFailed
-    && !queued;
+    && !queued
+    // R23: the Create PR action is branch chrome — hidden on the card in simple
+    // mode (still reachable from the task detail view).
+    && !suppressBranchChrome;
   const metaRowVisible =
     (task.dependencies?.length ?? 0) > 0
     || queued
@@ -1901,7 +1920,7 @@ function TaskCardComponent({
             {t("tasks.stalled", "Stalled")}
           </span>
         )}
-        {(livePrInfo || liveIssueInfo) && (
+        {(livePrInfo || liveIssueInfo) && !suppressBranchChrome && (
           <>
             {livePrInfo && (task.prInfos?.length ?? 0) >= 2 ? (
               <a className={`card-github-badge card-github-badge--${livePrInfo.status}`} title={t("tasks.prBadgeTitle", "PR #{{number}}: {{title}}", { number: livePrInfo.number, title: livePrInfo.title })} href={livePrInfo.url} target="_blank" rel="noopener noreferrer">
@@ -2087,7 +2106,7 @@ function TaskCardComponent({
           </div>
         );
       })()}
-      {hasBranchMetadata && (
+      {hasBranchMetadata && !suppressBranchChrome && (
         <div className="card-branch-row" aria-label={t("tasks.branchMetadata", "Branch metadata")}>
           {branchMetadata.branch && (
             <span className="card-branch-chip" title={branchMetadata.branch}>

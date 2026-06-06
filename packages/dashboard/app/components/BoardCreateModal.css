@@ -1,0 +1,122 @@
+/* BoardCreateModal (U12). Solid overlay, surface-tokened card. */
+
+.board-create-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--overlay-bg, rgba(0, 0, 0, 0.55));
+  padding: 16px;
+}
+
+.board-create-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(480px, 94vw);
+  max-height: 88vh;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: var(--shadow-lg, 0 12px 48px rgba(0, 0, 0, 0.35));
+  overflow: hidden;
+}
+
+.board-create-modal__header {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.board-create-modal__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.board-create-modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px;
+  overflow-y: auto;
+}
+
+.board-create-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.board-create-field__label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.board-create-field__input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface-muted, var(--surface));
+  color: var(--text);
+  resize: vertical;
+}
+.board-create-field__input:focus {
+  outline: none;
+  border-color: var(--accent, #4f8cff);
+}
+
+.board-create-types {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.board-create-type {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 8px);
+  cursor: pointer;
+  background: var(--surface-muted, var(--surface));
+}
+.board-create-type--selected {
+  border-color: var(--accent, #4f8cff);
+  background: rgba(79, 140, 255, 0.08);
+}
+.board-create-type__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.board-create-type__label {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+.board-create-type__desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.board-create-modal__error {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--danger, #e5484d);
+}
+
+.board-create-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--border);
+}

@@ -988,7 +988,10 @@ body {
   box-sizing: border-box;
   display: grid;
   flex: 1 1 auto;
-  grid-template-columns: repeat(6, minmax(300px, 1fr));
+  /* Board-scoped (U10): the column count is the active board's, not a fixed 6.
+   * Auto-flow by column keeps the same per-column min-width/elastic sizing. */
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(300px, 1fr);
   gap: var(--column-gap);
   height: 100%;
   min-height: 0;
@@ -1002,6 +1005,7 @@ body {
   scrollbar-width: thin;
 }
 
+/* Board-scoped empty state: a board whose workflow yielded no visible columns. */
 .board::-webkit-scrollbar {
   height: 6px;
 }
@@ -1083,6 +1087,7 @@ body {
   text-align: center;
 }
 
+/* Staffed-agent subtitle in a board column header (U10 team map). */
 @keyframes count-flash-bg {
   from {
     background: var(--color-success);

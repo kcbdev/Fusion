@@ -1,0 +1,96 @@
+/* AddCustomColumnModal (U12, R2/R3). */
+
+.add-column-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--overlay-bg, rgba(0, 0, 0, 0.55));
+  padding: 16px;
+}
+
+.add-column-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(460px, 94vw);
+  max-height: 88vh;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: var(--shadow-lg, 0 12px 48px rgba(0, 0, 0, 0.35));
+  overflow: hidden;
+}
+
+.add-column-modal__header {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.add-column-modal__title {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.add-column-modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px;
+  overflow-y: auto;
+}
+
+.add-column-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.add-column-field__label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.add-column-field__input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface-muted, var(--surface));
+  color: var(--text);
+}
+
+.add-column-placement,
+.add-column-agent {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+.add-column-radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.86rem;
+  color: var(--text);
+}
+
+.add-column-modal__error {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--danger, #e5484d);
+}
+
+.add-column-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--border);
+}

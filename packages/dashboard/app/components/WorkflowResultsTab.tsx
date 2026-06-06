@@ -6,8 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AgentLogEntry, WorkflowStep, WorkflowStepResult } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
-import { fetchWorkflowSteps, fetchTaskWorkflow, selectTaskWorkflow, submitTaskWorkflowInput, approveTaskWorkflowCli } from "../api";
-import { WorkflowSelector } from "./WorkflowSelector";
+import { fetchWorkflowSteps, submitTaskWorkflowInput, approveTaskWorkflowCli } from "../api";
 import { useAgentLogs } from "../hooks/useAgentLogs";
 import type { Components } from "react-markdown";
 import { linkifyFilePaths, linkifyReactChildren } from "../utils/filePathLinkify";
@@ -231,7 +230,6 @@ export function WorkflowResultsTab({
   onWorkflowStepsChange,
   taskStatus,
   taskPausedReason,
-  onWorkflowReconciled,
 }: WorkflowResultsTabProps) {
   const { t } = useTranslation("app");
   const [expandedOutputs, setExpandedOutputs] = useState<Record<string, boolean>>({});
@@ -242,7 +240,6 @@ export function WorkflowResultsTab({
   const [expandedViewStepId, setExpandedViewStepId] = useState<string | null>(null);
   const [allWorkflowSteps, setAllWorkflowSteps] = useState<WorkflowStep[]>([]);
   const [isEditing, setIsEditing] = useState(false);
-  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
   const [resumeError, setResumeError] = useState<string | null>(null);
 
   // Reset the paused-action UI whenever the blocked node/task changes, so a new
@@ -254,35 +251,6 @@ export function WorkflowResultsTab({
     setSubmitted(false);
     setResumeError(null);
   }, [taskId, taskStatus, taskPausedReason]);
-
-  // Load the task's current workflow selection (if any).
-  useEffect(() => {
-    let cancelled = false;
-    fetchTaskWorkflow(taskId, projectId)
-      .then((res) => {
-        if (!cancelled) setSelectedWorkflowId(res.workflowId);
-      })
-      .catch(() => {
-        /* selection is optional; ignore load failures */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [taskId, projectId]);
-
-  const handleWorkflowSelect = useCallback(
-    async (workflowId: string | null) => {
-      const res = await selectTaskWorkflow(taskId, workflowId, projectId);
-      setSelectedWorkflowId(res.workflowId);
-      onWorkflowStepsChange?.(res.enabledWorkflowSteps);
-      // U5 (R20): the switch re-homed the card to a new column — refresh the
-      // board now rather than waiting for the SSE catch-up.
-      if (res.reconciliation && !res.reconciliation.preserved) {
-        onWorkflowReconciled?.();
-      }
-    },
-    [taskId, projectId, onWorkflowStepsChange, onWorkflowReconciled],
-  );
 
   // Check if any result has pending status
   const hasPendingStep = results.some((r) => r.status === "pending");
@@ -801,16 +769,6 @@ export function WorkflowResultsTab({
               )}
             </div>
           )}
-        </div>
-      )}
-      {canEdit && onWorkflowStepsChange && (
-        <div className="workflow-selector-row">
-          <WorkflowSelector
-            value={selectedWorkflowId}
-            onChange={handleWorkflowSelect}
-            projectId={projectId}
-            label="Custom workflow"
-          />
         </div>
       )}
       {showConfiguredStepsState ? (

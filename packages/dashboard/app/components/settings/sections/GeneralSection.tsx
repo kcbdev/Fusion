@@ -11,8 +11,8 @@
  * JSX.
  */
 import type { ReactNode } from "react";
-import { ProjectDefaultWorkflowField } from "../../WorkflowSelector";
 import { TrackingRepoSelect, type TrackingRepoOption } from "../../TrackingRepoSelect";
+import { ConvertToSimpleSettings } from "../../ConvertToSimpleSettings";
 import type { ToastType } from "../../../hooks/useToast";
 import type { SectionBaseProps } from "./context";
 
@@ -31,10 +31,10 @@ export function GeneralSection({
   scopeBanner,
   form,
   setForm,
-  projectId,
-  addToast,
   prefixError,
   setPrefixError,
+  projectId,
+  addToast,
   projectTrackingRepoOptions,
   projectTrackingRepoLoading,
   projectTrackingRepoError,
@@ -62,10 +62,6 @@ export function GeneralSection({
         />
         {prefixError && <small className="field-error">{prefixError}</small>}
         {!prefixError && <small>Prefix for new task IDs (e.g. KB, PROJ)</small>}
-      </div>
-      <div className="form-group">
-        <ProjectDefaultWorkflowField projectId={projectId} addToast={addToast} />
-        <small>New tasks inherit this custom workflow's steps (overridable per task)</small>
       </div>
       <div className="form-group">
         <label htmlFor="ephemeralAgentsEnabled" className="checkbox-label">
@@ -319,6 +315,9 @@ export function GeneralSection({
           When enabled, Fusion checks open and closed issues in the target repo for likely duplicates (using File Scope paths and key symptoms) before creating a new tracking issue. Uncheck to always create a new issue.
         </small>
       </div>
+
+      {/* U12 (R17): convert a legacy/advanced board to simple mode on demand. */}
+      <ConvertToSimpleSettings projectId={projectId} addToast={addToast} />
     </>
   );
 }

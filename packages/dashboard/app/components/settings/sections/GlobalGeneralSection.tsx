@@ -8,7 +8,8 @@
  * resolution helper is imported directly from core.
  */
 import type { ReactNode } from "react";
-import { resolvePersistAgentThinkingLog } from "@fusion/core";
+import { useTranslation } from "react-i18next";
+import { resolvePersistAgentThinkingLog, type UiMode } from "@fusion/core";
 import { TrackingRepoSelect, type TrackingRepoOption } from "../../TrackingRepoSelect";
 import { CliBinaryPanel } from "../../CliBinaryPanel";
 import type { SectionBaseProps } from "./context";
@@ -18,6 +19,10 @@ export interface GlobalGeneralSectionProps extends SectionBaseProps {
   globalTrackingRepoOptions: TrackingRepoOption[];
   globalTrackingRepoLoading: boolean;
   globalTrackingRepoError: string | null;
+  /** Current simple/advanced UI mode (U11). */
+  uiMode?: UiMode;
+  /** Toggle handler for the simple/advanced UI mode. */
+  onUiModeChange?: (mode: UiMode) => void;
 }
 
 export function GlobalGeneralSection({
@@ -27,11 +32,31 @@ export function GlobalGeneralSection({
   globalTrackingRepoOptions,
   globalTrackingRepoLoading,
   globalTrackingRepoError,
+  uiMode = "advanced",
+  onUiModeChange,
 }: GlobalGeneralSectionProps) {
+  const { t } = useTranslation("app");
   return (
     <>
       {scopeBanner}
       <h4 className="settings-section-heading">General</h4>
+      <div className="form-group">
+        <label htmlFor="uiModeSelect">{t("uiMode.settingLabel", "Interface mode")}</label>
+        <select
+          id="uiModeSelect"
+          value={uiMode}
+          onChange={(e) => onUiModeChange?.(e.target.value as UiMode)}
+        >
+          <option value="simple">{t("uiMode.simple", "Simple")}</option>
+          <option value="advanced">{t("uiMode.advanced", "Advanced")}</option>
+        </select>
+        <small>
+          {t(
+            "uiMode.settingDescription",
+            "Simple mode hides advanced surfaces (missions, the workflow graph editor, per-task agent/model controls, and more) and forces worktree isolation on. Advanced mode shows everything.",
+          )}
+        </small>
+      </div>
       <div className="form-group">
         <label htmlFor="globalGithubTrackingDefaultRepo">Global default tracking repo</label>
         <TrackingRepoSelect

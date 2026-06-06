@@ -946,6 +946,32 @@
   opacity: 0.6;
 }
 
+/* Inline plan-feedback disclosure (replaces window.prompt; WebView-safe). */
+.plan-feedback-disclosure {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.plan-feedback-textarea {
+  width: 100%;
+  min-height: 72px;
+  padding: var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+  resize: vertical;
+}
+
+.plan-feedback-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
 .task-changes-state {
   display: flex;
   flex-direction: column;
@@ -1995,6 +2021,28 @@
 
 .detail-retries-warning {
   margin: var(--space-sm) 0 0;
+  color: var(--color-error);
+  font-size: 0.75rem;
+}
+
+/* Cross-board move control (U10, R13). */
+.detail-section--move-to-board {
+  display: flex;
+  flex-direction: column;
+}
+
+.detail-move-to-board {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.detail-move-to-board-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.detail-move-to-board-error {
   color: var(--color-error);
   font-size: 0.75rem;
 }

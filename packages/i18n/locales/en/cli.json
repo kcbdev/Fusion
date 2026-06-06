@@ -203,6 +203,7 @@
     "tabMain": "Main",
     "tabSettings": "Settings",
     "taskCardUntitled": "(untitled)",
+    "taskNeedsInput": "needs input",
     "taskDetailBack": "[Esc] back",
     "taskDetailLoading": "Loading task details…",
     "taskDetailLogsLive": "[live]",

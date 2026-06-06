@@ -162,10 +162,13 @@ beforeEach(() => {
 });
 
 describe("Board desktop column width CSS", () => {
-  it("keeps desktop board columns equal width via 6x minmax(300px, 1fr) grid", () => {
+  it("sizes board columns by auto-flow (U10: variable board column count) at minmax(300px, 1fr)", () => {
     const css = loadAllAppCss();
 
-    expectRuleToContain(css, ".board", "grid-template-columns: repeat(6, minmax(300px, 1fr));");
+    // Board-scoped (U10): the column count is the active board's, not a fixed 6,
+    // so the base .board uses auto-flow columns with the same elastic min-width.
+    expectRuleToContain(css, ".board", "grid-auto-flow: column;");
+    expectRuleToContain(css, ".board", "grid-auto-columns: minmax(300px, 1fr);");
   });
 
   it("constrains header content so actions cannot stretch column width", () => {

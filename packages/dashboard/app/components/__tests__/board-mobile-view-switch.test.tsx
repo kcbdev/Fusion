@@ -6,7 +6,26 @@ import { ListView } from "../ListView";
 import "../../styles.css";
 
 vi.mock("../../api", () => ({
-  fetchBoardWorkflows: vi.fn().mockResolvedValue({ flagEnabled: false, defaultWorkflowId: "", workflows: [], taskWorkflowIds: {} }),
+  getBoardTypes: vi.fn().mockResolvedValue({ types: [{ id: "standard" }] }),
+  fetchBoardWorkflows: vi.fn().mockResolvedValue({
+    boards: [{ id: "board-default", name: "Default", description: "", requirePlanApproval: false, ordering: 0 }],
+    boardPayloads: {
+      "board-default": {
+        columns: [
+          { id: "triage", name: "Triage", flags: { intake: true } },
+          { id: "todo", name: "To Do", flags: { hold: true } },
+          { id: "in-progress", name: "In Progress", flags: { countsTowardWip: true } },
+          { id: "in-review", name: "In Review", flags: { mergeBlocker: true } },
+          { id: "done", name: "Done", flags: { complete: true } },
+          { id: "archived", name: "Archived", flags: { archived: true } },
+        ],
+        team: {},
+        taskIds: [],
+      },
+    },
+    defaultBoardId: "board-default",
+  }),
+  promoteTask: vi.fn().mockResolvedValue({}),
   fetchWorkflowSteps: vi.fn().mockResolvedValue([]),
   fetchModels: vi.fn().mockResolvedValue({ models: [], favoriteProviders: [], favoriteModels: [] }),
   fetchSettings: vi.fn().mockResolvedValue({

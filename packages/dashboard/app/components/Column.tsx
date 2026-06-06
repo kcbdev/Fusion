@@ -2,7 +2,7 @@ import { memo, useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useFlashOnIncrease } from "../hooks/useFlashOnIncrease";
 import { useConfirm } from "../hooks/useConfirm";
-import type { Task, TaskDetail, Column as ColumnType, TaskCreateInput, GithubIssueAction } from "@fusion/core";
+import type { Task, TaskDetail, Column as ColumnType, TaskCreateInput, GithubIssueAction, UiMode, TraitFlags } from "@fusion/core";
 import { COLUMN_LABELS, COLUMN_DESCRIPTIONS, getErrorMessage } from "@fusion/core";
 import { TaskCard } from "./TaskCard";
 import { WorktreeGroup } from "./WorktreeGroup";
@@ -11,7 +11,7 @@ import { PluginSlot } from "./PluginSlot";
 import { groupByWorktree } from "../utils/worktreeGrouping";
 import type { ToastType } from "../hooks/useToast";
 import { ChevronDown, ChevronUp, Archive, MoreVertical } from "lucide-react";
-import type { ModelInfo, BoardWorkflowColumnFlags } from "../api";
+import type { ModelInfo } from "../api";
 import type { BlockerFanoutEntry } from "../hooks/useBlockerFanout";
 
 const PAGINATED_COLUMN_THRESHOLD = 100;
@@ -153,8 +153,11 @@ interface ColumnProps {
   workflowMode?: boolean;
   /** Display name for this column, from the workflow definition. */
   columnDisplayName?: string;
+  /** Name of the agent staffing this column (board team map, U10). Rendered as a
+   *  subtitle in the column header when present. */
+  columnAgentName?: string;
   /** Resolved trait flags for this column (workflow mode). */
-  columnFlags?: BoardWorkflowColumnFlags;
+  columnFlags?: TraitFlags;
   /** Manually promote a held card out of this hold column (workflow mode). */
   onPromote?: (taskId: string) => Promise<void>;
   /**
@@ -168,9 +171,12 @@ interface ColumnProps {
   canDropTask?: (taskId: string) => string | null;
   /** Read the id of the task currently being dragged (board-level ref). */
   getDraggingTaskId?: () => string | null;
+  /** Simple/advanced UI mode (U11). Threaded to task cards so they suppress
+   *  branch/worktree chrome in simple mode. */
+  uiMode?: UiMode;
 }
 
-function ColumnComponent({ column, tasks, projectId, maxConcurrent, onMoveTask, onPauseTask, onOpenDetail, onOpenGroupModal, addToast, onQuickCreate, onNewTask, autoMerge, onToggleAutoMerge, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, collapsed, onToggleCollapse, allTasks, availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, isSearchActive, taskStuckTimeoutMs, onOpenMission, lastFetchTimeMs, workflowStepNameLookup, taskCardFieldDefs, blockerFanoutMap, prAuthAvailable, workflowMode, columnDisplayName, columnFlags, onPromote, canDropTask, getDraggingTaskId }: ColumnProps) {
+function ColumnComponent({ column, tasks, projectId, maxConcurrent, onMoveTask, onPauseTask, onOpenDetail, onOpenGroupModal, addToast, onQuickCreate, onNewTask, autoMerge, onToggleAutoMerge, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, collapsed, onToggleCollapse, allTasks, availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, isSearchActive, taskStuckTimeoutMs, onOpenMission, lastFetchTimeMs, workflowStepNameLookup, taskCardFieldDefs, blockerFanoutMap, prAuthAvailable, workflowMode, columnDisplayName, columnAgentName, columnFlags, onPromote, canDropTask, getDraggingTaskId, uiMode = "advanced" }: ColumnProps) {
   const { t } = useTranslation("app");
   // Anchor the board.rejection.* catalog keys for the i18next extractor (it
   // scopes `t` to the useTranslation binding, so the shared translateRejection
@@ -534,6 +540,11 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, onMoveTask, 
       <div className="column-header">
         <div className={`column-dot dot-${column}`} />
         <h2>{workflowMode ? (columnDisplayName ?? COLUMN_LABELS[column] ?? column) : COLUMN_LABELS[column]}</h2>
+        {workflowMode && columnAgentName && (
+          <span className="column-agent" data-testid={`column-agent-${column}`} title={columnAgentName}>
+            {columnAgentName}
+          </span>
+        )}
         <span className={`column-count${countFlashing ? " count-flash" : ""}`}>{tasks.length}</span>
         {(workflowMode ? isReviewColumn : column === "in-review") && onToggleAutoMerge && (
           <label className="auto-merge-toggle" title={autoMerge ? t("column.autoMergeEnabled", "Auto-merge enabled") : t("column.autoMergeDisabled", "Auto-merge disabled")}>
@@ -712,6 +723,7 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, onMoveTask, 
                 <div key={task.id} className={isHoldColumn ? "column-hold-card" : undefined}>
                   <TaskCard
                     task={task}
+                    uiMode={uiMode}
                     projectId={projectId}
                     onOpenDetail={onOpenDetail}
                     onOpenGroupModal={onOpenGroupModal}

@@ -1,0 +1,109 @@
+/* Horizontal board switcher (U10). Sits above the board listing; boards are the
+ * universal task container in every mode. Tokens mirror .board/.column in
+ * app/styles.css so it inherits the same surface/border/radius language. */
+
+.board-switcher {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 8px var(--board-padding, 12px) 0;
+  box-sizing: border-box;
+}
+
+.board-switcher-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  /* Fade the right edge to hint at horizontal overflow when many boards. */
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  padding-bottom: 6px;
+}
+
+.board-switcher-tab {
+  flex: 0 0 auto;
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--surface-muted, var(--surface));
+  color: var(--text-muted);
+  border-radius: var(--radius-lg, 10px);
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.board-switcher-tab:hover {
+  color: var(--text);
+  border-color: var(--border-strong, var(--border));
+}
+
+.board-switcher-tab--active {
+  background: var(--accent, var(--primary, #2563eb));
+  border-color: var(--accent, var(--primary, #2563eb));
+  color: var(--accent-contrast, #fff);
+}
+
+.board-switcher-tab--skeleton {
+  width: 96px;
+  height: 31px;
+  background: linear-gradient(
+    90deg,
+    var(--surface-muted, var(--surface)) 0%,
+    var(--card) 50%,
+    var(--surface-muted, var(--surface)) 100%
+  );
+  background-size: 200% 100%;
+  animation: board-switcher-shimmer 1200ms ease-in-out infinite;
+  cursor: default;
+  pointer-events: none;
+}
+
+@keyframes board-switcher-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.board-switcher-failed-label,
+.board-switcher-empty-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.board-switcher-retry,
+.board-switcher-create {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+@media (max-width: 768px), (max-height: 480px) {
+  .board-switcher {
+    padding: 6px 8px 0;
+  }
+
+  .board-switcher-tab {
+    max-width: 18ch;
+    font-size: 0.8rem;
+  }
+}
+
+/* U12: persistent "+ create board" affordance at the end of the strip. */
+.board-switcher-tab--create {
+  font-weight: 700;
+  min-width: 32px;
+  text-align: center;
+  padding: 6px 10px;
+}

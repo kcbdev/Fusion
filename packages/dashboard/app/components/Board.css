@@ -1,0 +1,100 @@
+/* Degraded-board read-only banner (U11, AE7). Shown above the board when a
+   board's workflow violates the simple-mode linearity invariant. */
+.board-degraded-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  border-inline-start: var(--space-xs) solid var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+}
+
+.board-degraded-banner__content {
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.board-degraded-banner__action {
+  flex-shrink: 0;
+  border: 1px solid var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  color: var(--text);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-weight: 600;
+  transition: background var(--transition-fast);
+}
+
+.board-degraded-banner__action:hover {
+  background: color-mix(in srgb, var(--color-warning) 20%, transparent);
+}
+
+.board-degraded-banner__action:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+@media (max-width: 768px) {
+  .board-degraded-banner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .board-degraded-banner__action {
+    align-self: flex-end;
+  }
+}
+
+/* U12: board toolbar (switcher + Team button) and the team-panel host. */
+.board-toolbar {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.board-toolbar .board-switcher {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.board-team-button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 8px var(--board-padding, 12px) 0 0;
+  white-space: nowrap;
+}
+.board-team-panel-host {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 var(--board-padding, 12px) 8px;
+}
+
+/* Empty-board placeholder (Board.tsx). */
+.board-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* Column-agent badge (Column.tsx). Column has no own CSS file, so this lives
+   here alongside the board styles per the dashboard CSS-colocation guideline. */
+.column-agent {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  background: var(--surface-muted, var(--card));
+  padding: calc(var(--space-xs) / 2) var(--space-sm);
+  border-radius: var(--radius-xl);
+  max-width: 12ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

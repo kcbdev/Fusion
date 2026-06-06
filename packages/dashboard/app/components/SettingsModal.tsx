@@ -5,7 +5,8 @@ import {
   normalizeMergeIntegrationWorktreeMode,
   normalizeMergeAdvanceAutoSyncMode,
 } from "@fusion/core";
-import type { Settings, GlobalSettings, ThemeMode, ColorTheme, ModelPreset } from "@fusion/core";
+import type { Settings, GlobalSettings, ThemeMode, ColorTheme, ModelPreset, UiMode } from "@fusion/core";
+import { isAdvancedSurface } from "../ui-mode";
 import { fetchSettings, fetchSettingsByScope, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, cancelProviderLogin, saveApiKey, clearApiKey, fetchModels, testNotification, fetchBackups, createBackup, exportSettings, importSettings, fetchMemoryFile, fetchMemoryFiles, saveMemoryFile, compactMemory, fetchGlobalConcurrency, updateGlobalConcurrency, installQmd, testMemoryRetrieval, triggerMemoryDreams, fetchGitRemotes, fetchGitRemotesDetailed, fetchGitBranches, fetchProjects, fetchDashboardHealth, checkForUpdates, fetchRemoteSettings, fetchRemoteStatus, installCloudflared, fetchRemoteQr, fetchRemoteUrl, submitProviderManualCode } from "../api";
 import type { AuthProvider, ManualOAuthCodeInfo, ModelInfo, BackupListResponse, SettingsExportData, MemoryFileInfo, MemoryRetrievalTestResult, GitRemote, GitRemoteDetailed, ProjectInfo, RemoteStatus, UpdateCheckResponse, OAuthDeviceCodeInfo } from "../api";
 import { splitSettingsSave } from "./settings/save-split";
@@ -330,6 +331,10 @@ interface SettingsModalProps {
   projectId?: string;
   /** Optional section to show when the modal first opens. Defaults to the global General section. */
   initialSection?: SectionId;
+  /** Current simple/advanced UI mode (U11). Drives section gating and the mode toggle. */
+  uiMode?: UiMode;
+  /** Called when the UI mode toggle changes — write-through to global settings. */
+  onUiModeChange?: (mode: UiMode) => void;
   /** Current theme mode */
   themeMode?: ThemeMode;
   /** Current color theme */
@@ -586,6 +591,8 @@ export function SettingsModal({
   addToast,
   projectId,
   initialSection,
+  uiMode = "advanced",
+  onUiModeChange,
   themeMode = "dark",
   colorTheme = "default",
   onThemeModeChange,
@@ -723,6 +730,14 @@ export function SettingsModal({
 
     if (section.id === "scheduled-evals") {
       return evalsViewEnabled;
+    }
+
+    // U11: in simple mode, hide settings sections that expose advanced-only
+    // machinery (worktrees, agent permissions, node routing, experimental,
+    // prompts). Group headers are kept; empty groups are harmless. The mode
+    // toggle itself lives in Global General, visible in both modes.
+    if (!section.isGroupHeader && uiMode === "simple" && isAdvancedSurface(section.id)) {
+      return false;
     }
 
     return true;
@@ -2451,6 +2466,13 @@ export function SettingsModal({
             scopeBanner={renderScopeBanner()}
             form={form}
             setForm={setForm}
+            uiMode={uiMode}
+            onUiModeChange={(mode) => {
+              // Write-through immediately (drives App live) AND reflect in the
+              // form so Save persists it; mirrors the Appearance theme pattern.
+              setForm((f) => ({ ...f, uiMode: mode }));
+              onUiModeChange?.(mode);
+            }}
             globalTrackingRepoOptions={globalTrackingRepoOptions}
             globalTrackingRepoLoading={globalTrackingRepoLoading}
             globalTrackingRepoError={globalTrackingRepoError}

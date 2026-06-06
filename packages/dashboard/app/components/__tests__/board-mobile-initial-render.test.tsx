@@ -1,12 +1,31 @@
 import React from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, cleanup, act } from "@testing-library/react";
+import { render, cleanup, act, waitFor } from "@testing-library/react";
 import { Board } from "../Board";
 import { loadAllAppCss } from "../../test/cssFixture";
 
 vi.mock("../../api", () => ({
-  fetchBoardWorkflows: vi.fn().mockResolvedValue({ flagEnabled: false, defaultWorkflowId: "", workflows: [], taskWorkflowIds: {} }),
+  getBoardTypes: vi.fn().mockResolvedValue({ types: [{ id: "standard" }] }),
+  fetchBoardWorkflows: vi.fn().mockResolvedValue({
+    boards: [{ id: "board-default", name: "Default", description: "", requirePlanApproval: false, ordering: 0 }],
+    boardPayloads: {
+      "board-default": {
+        columns: [
+          { id: "triage", name: "Triage", flags: { intake: true } },
+          { id: "todo", name: "To Do", flags: { hold: true } },
+          { id: "in-progress", name: "In Progress", flags: { countsTowardWip: true } },
+          { id: "in-review", name: "In Review", flags: { mergeBlocker: true } },
+          { id: "done", name: "Done", flags: { complete: true } },
+          { id: "archived", name: "Archived", flags: { archived: true } },
+        ],
+        team: {},
+        taskIds: [],
+      },
+    },
+    defaultBoardId: "board-default",
+  }),
   fetchWorkflowSteps: vi.fn().mockResolvedValue([]),
+  promoteTask: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock("../../hooks/useBlockerFanout", () => ({
@@ -253,16 +272,25 @@ describe("Board mobile initial render stabilization (FN-4574)", () => {
     expect(mobileColumnRule).toContain("flex-shrink: 0");
   });
 
-  it("renders the board main element and all column children for empty and populated states", () => {
+  it("renders the board main element and all column children for empty and populated states", async () => {
     const viewportSpy = mockViewport(1280);
     const { rerender } = render(<Board {...boardProps} />);
 
-    let board = document.querySelector("main.board");
+    const board = document.querySelector("main.board");
     expect(board).not.toBeNull();
 
-    let columns = document.querySelectorAll("[data-testid^='column-']");
-    expect(columns).toHaveLength(6);
-    for (const column of columns) {
+    // Columns are board-scoped (U10): they render after the board-scoped payload
+    // resolves. Fake timers are active in this suite, so flush the mocked-fetch
+    // microtasks + pending timers under act rather than waitFor.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      vi.runOnlyPendingTimers();
+    });
+
+    // Six columns (triage…archived) come from the mocked board.
+    expect(document.querySelectorAll("[data-testid^='column-']")).toHaveLength(6);
+    for (const column of document.querySelectorAll("[data-testid^='column-']")) {
       expect(column).toHaveAttribute("data-task-count", "0");
     }
 
@@ -276,11 +304,9 @@ describe("Board mobile initial render stabilization (FN-4574)", () => {
       />,
     );
 
-    board = document.querySelector("main.board");
-    expect(board).not.toBeNull();
+    expect(document.querySelector("main.board")).not.toBeNull();
 
-    columns = document.querySelectorAll("[data-testid^='column-']");
-    expect(columns).toHaveLength(6);
+    expect(document.querySelectorAll("[data-testid^='column-']")).toHaveLength(6);
     expect(document.querySelector("[data-testid='column-triage']")).toHaveAttribute("data-task-count", "1");
     expect(document.querySelector("[data-testid='column-todo']")).toHaveAttribute("data-task-count", "1");
 

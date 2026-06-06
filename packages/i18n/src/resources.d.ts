@@ -1133,6 +1133,7 @@ export default interface Resources {
         "needsInput": "needs input"
       },
       "typeLabel": {
+        "cliAgent": "CLI Agent",
         "milestoneInterview": "Milestone Interview",
         "missionInterview": "Mission Interview",
         "planning": "Planning",
@@ -1155,6 +1156,15 @@ export default interface Resources {
       },
       "todo": "To Do",
       "triage": "Triage"
+    },
+    "boardSwitcher": {
+      "createBoard": "Create a board",
+      "emptyLabel": "No boards yet",
+      "label": "Boards",
+      "loadFailed": "Boards unavailable",
+      "loadFailedTooltip": "Couldn't load boards. Check your connection and try again.",
+      "noColumns": "This board has no columns to show.",
+      "retry": "Retry"
     },
     "branchGroup": {
       "abandonGroup": "Abandon group",
@@ -1345,6 +1355,27 @@ export default interface Resources {
       "stateMissing": "Not installed",
       "stateVersionMismatch": "Version mismatch",
       "succeededDuration": "Install succeeded in {{duration}}s"
+    },
+    "cliTerminal": {
+      "adapterSettings": "Adapter settings",
+      "advance": "Advance",
+      "advancePrompt": "This session looks idle — advance to review?",
+      "mobileInputPlaceholder": "Type to send to the session…",
+      "mobileKeyArrowDown": "Cursor down",
+      "mobileKeyArrowLeft": "Cursor left",
+      "mobileKeyArrowRight": "Cursor right",
+      "mobileKeyArrowUp": "Cursor up",
+      "mobileKeyCtrl": "Sticky Ctrl modifier",
+      "mobileKeyCtrlC": "Send Ctrl-C",
+      "mobileKeyEsc": "Send Escape",
+      "mobileKeyTab": "Send Tab",
+      "mobileSend": "Send",
+      "notYet": "Not yet",
+      "postureBaseline": "Baseline",
+      "postureResolved": "Resolved posture",
+      "readOnly": "Read-only",
+      "replayEnded": "Session ended",
+      "replayIdle": "Session idle"
     },
     "column": {
       "actionsAriaLabel": "{{columnLabel}} column actions",
@@ -2639,10 +2670,6 @@ export default interface Resources {
       "verificationCriteria": "Verification Criteria",
       "yes": "Yes"
     },
-    "lane": {
-      "collapse": "Collapse {{name}} lane",
-      "expand": "Expand {{name}} lane"
-    },
     "listView": {
       "apply": "Apply",
       "applying": "Applying...",
@@ -3420,6 +3447,15 @@ export default interface Resources {
         "configuration": "Model Configuration"
       },
       "useDefault": "Use default"
+    },
+    "moveToBoard": {
+      "failed": "Failed to move task to board",
+      "label": "Move to board…",
+      "placeholder": "Select a board…",
+      "warnCancel": "Cancel",
+      "warnConfirm": "Move and restart",
+      "warnMessage": "This task has work in progress. Moving it interrupts execution and restarts it in the target board's To Do. Its branch is kept on the task. Continue?",
+      "warnTitle": "Move task to another board?"
     },
     "nav": {
       "activityLog": "Activity Log",
@@ -4878,6 +4914,16 @@ export default interface Resources {
       "valueLabel": "Value"
     },
     "sessionBanner": {
+      "cli": {
+        "advance": "Advance",
+        "authFailed": "CLI authentication failed",
+        "cancelTask": "Cancel task",
+        "reauthenticate": "Re-authenticate",
+        "relaunch": "Relaunch fresh",
+        "resumeExhausted": "Couldn't resume the session",
+        "retry": "Retry",
+        "userExited": "Agent exited before completing"
+      },
       "dismissAll": "Dismiss all",
       "dismissItem": "Dismiss {{title}}",
       "failed": "Failed",
@@ -4893,7 +4939,10 @@ export default interface Resources {
       "headerErrorSingular_other": "",
       "regionLabel": "AI sessions needing input or failed",
       "resume": "Resume",
-      "retry": "Retry"
+      "retry": "Retry",
+      "typeLabel": {
+        "cliAgent": "CLI Agent"
+      }
     },
     "settings": {
       "actions": {
@@ -4947,6 +4996,34 @@ export default interface Resources {
         "backupCreated": "Backup created successfully",
         "backupNow": "Backup Now",
         "creating": "Creating…"
+      },
+      "cliAgents": {
+        "adapterLabel": "Adapter",
+        "approveFailed": "Failed to record autonomy approval",
+        "approvedNote": "Elevated autonomy is approved for this project.",
+        "autonomy": {
+          "default": "Default (request approvals)",
+          "elevated": "Elevated (bypass approvals)"
+        },
+        "autonomyHelp": "Elevated autonomy requires a per-project approval before the agent can launch.",
+        "autonomyLabel": "Autonomy mode",
+        "commandHelp": "Path or name of the binary to launch. A non-default value is treated as privileged and requires autonomy approval.",
+        "commandLabel": "Command override",
+        "description": "Per-adapter launch configuration for CLI coding agents driven in engine-owned terminals.",
+        "elevatedConfirmAction": "Approve elevated autonomy",
+        "elevatedConfirmBody": "Elevated autonomy lets this CLI agent bypass per-step approvals (e.g. --dangerously-skip-permissions). It can modify files and run commands without pausing. Approve only if you trust this adapter for this project.",
+        "elevatedConfirmTitle": "Approve elevated autonomy?",
+        "envHelp": "Comma-separated variable NAMES forwarded from the parent process. Service credentials (FUSION_*) are always excluded.",
+        "envLabel": "Environment variable additions",
+        "extraArgsHelp": "Appended after the adapter's computed arguments (space-separated). Bypass flags here are detected and gated.",
+        "extraArgsLabel": "Extra arguments",
+        "heading": "CLI Agents",
+        "saveFailed": "Failed to save CLI agent settings",
+        "tier": {
+          "generic": "generic",
+          "hybrid": "hybrid",
+          "native": "native"
+        }
       },
       "closeModal": "Close conflict modal",
       "conflictModalTitle": "Resolve Settings Conflicts",
@@ -5002,11 +5079,19 @@ export default interface Resources {
         "presetNameRequired": "Preset name is required",
         "savePreset": "Save preset"
       },
+      "movedStub": {
+        "modelLanes": "Per-phase model lanes (execution, planning, reviewer, their fallbacks, and the title summarizer) now live on the workflow.",
+        "openWorkflowSettings": "Open workflow settings",
+        "reviewVerification": "Review, verification auto-fix, and scope-enforcement settings now live on the workflow.",
+        "stepExecution": "Step execution settings (run steps in new sessions, max parallel steps) now live on the workflow.",
+        "summarizerModelInline": "The model used for summarization now lives on the workflow (title summarizer lane). Open workflow settings to choose it."
+      },
       "nav": {
         "aria": {
           "global": "Global setting",
           "project": "Project setting"
         },
+        "cliAgents": "CLI Agents",
         "tooltip": {
           "global": "Shared across all projects",
           "project": "Specific to this project"
@@ -6048,7 +6133,11 @@ export default interface Resources {
         "review": "Review",
         "routing": "Routing",
         "stats": "Stats",
+        "terminal": "Terminal",
         "workflow": "Workflow"
+      },
+      "terminal": {
+        "loading": "Loading terminal…"
       },
       "timedDuration": "Timed duration",
       "timestamps": {
@@ -6295,6 +6384,10 @@ export default interface Resources {
       "branchProgressTitle": "Parallel branches in progress",
       "cancelMove": "Cancel Move",
       "clearSelection": "Clear selection",
+      "cliNeedsAttention": "Needs attention",
+      "cliNeedsAttentionTitle": "The CLI agent needs your attention",
+      "cliWaitingOnInput": "Waiting on input",
+      "cliWaitingOnInputTitle": "The CLI agent is waiting for your input",
       "closeIssue": "Close Issue",
       "collapse": "Collapse",
       "createFailed": "Failed to create task",
@@ -6550,6 +6643,21 @@ export default interface Resources {
       "customOption": "Custom…",
       "loadingHint": "Loading detected GitHub remotes…"
     },
+    "uiMode": {
+      "advanced": "Advanced",
+      "degradedBoard": "This board uses an advanced workflow shape and is read-only in simple mode. Tasks keep running.",
+      "degradedReadOnly": "This board is read-only in simple mode.",
+      "gatedRedirect": "“{{view}}” is an advanced-mode feature. You’ve been returned to the board.",
+      "graphEditor": "Workflow graph editor",
+      "openInAdvancedEditor": "Open in advanced editor",
+      "pluginView": "Plugin view",
+      "settingDescription": "Simple mode hides advanced surfaces (missions, the workflow graph editor, per-task agent/model controls, and more) and forces worktree isolation on. Advanced mode shows everything.",
+      "settingLabel": "Interface mode",
+      "simple": "Simple",
+      "switchToAdvanced": "Switch to advanced mode",
+      "worktreeIsolationDescription": "Enabled by default. Each task runs in its own git worktree. This toggle is only available in advanced mode — simple mode always forces worktree isolation on.",
+      "worktreeIsolationLabel": "Worktree isolation"
+    },
     "updateBanner": {
       "dismissLabel": "Dismiss update notice",
       "learnMore": "Learn more",
@@ -6713,13 +6821,29 @@ export default interface Resources {
     },
     "workflowColumns": {
       "add": "Add column",
+      "agent": "Column agent",
+      "agentBadgeDefer": "Column agent (defer)",
+      "agentBadgeOverride": "Column agent (override)",
+      "agentFlagHint": "Enable both experimentalFeatures.workflowColumns and experimentalFeatures.workflowGraphExecutor to staff columns with agents",
+      "agentLabel": "Column agent",
+      "agentMode": "Agent mode",
+      "agentModeDefer": "Defer",
+      "agentModeDeferHint": "Column agent applies only when the work carries no agent/model settings of its own",
+      "agentModeOverride": "Override",
+      "agentModeOverrideHint": "Column agent supersedes node- and task-level agent/model settings",
+      "agentNone": "(none)",
+      "agentNotFound": "Agent not found — {{id}}",
+      "agentsLoadFailed": "Failed to load agents",
       "compositionBlocked": "Resolve trait conflicts on highlighted columns before saving",
+      "confirmPolicyEscalation": "Bind it anyway? The column agent will run with broader permissions than this project's default.",
       "empty": "No columns yet. Add a column to place nodes into board lanes.",
+      "escalationDeclined": "Save cancelled — column agent binding not confirmed",
       "moveDown": "Move column down",
       "moveUp": "Move column up",
       "nameLabel": "Column name",
       "newColumnName": "New column",
       "nodeUnplaced": "Not placed in a column",
+      "overriddenByColumnAgent": "Overridden by column agent {{name}} — this node's executor settings are superseded.",
       "readOnlyHint": "Built-in workflows are read-only — duplicate to edit",
       "remove": "Remove column",
       "title": "Columns",
@@ -6727,6 +6851,27 @@ export default interface Resources {
       "traitsLoadFailed": "Failed to load traits",
       "unplacedCount_one": "{{count}} nodes not placed in a column",
       "unplacedCount_other": "{{count}} nodes not placed in a column"
+    },
+    "workflowEditor": {
+      "cliAgent": {
+        "adapterLabel": "CLI adapter",
+        "adapterNote": "Drives a CLI coding agent in an engine-owned terminal for this step.",
+        "adapterPlaceholder": "— select adapter —",
+        "autonomyLabel": "Elevated autonomy (bypass approvals)",
+        "autonomyNote": "Elevated autonomy requires a per-project approval before the agent can launch. Until approved, launches with elevated posture fail.",
+        "executorOption": "CLI agent",
+        "notify": {
+          "banner": "In-app banner",
+          "bannerNotify": "Banner + push notification"
+        },
+        "notifyLabel": "Waiting-on-input notification",
+        "notifyNote": "How you are alerted when the agent pauses waiting for input on this step.",
+        "tier": {
+          "generic": "generic",
+          "hybrid": "hybrid",
+          "native": "native"
+        }
+      }
     },
     "workflowFields": {
       "add": "Add field",

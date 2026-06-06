@@ -88,6 +88,11 @@ import type {
   WorkflowSettingOption,
   WorkflowSettingRender,
   WorkflowSettingRejection,
+  BoardColumn,
+  BoardTeamMember,
+  BoardPayload,
+  BoardSummary,
+  BoardWorkflowsPayload,
 } from "@fusion/core";
 import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
 import type { GithubIssueAction, ScheduledTask, ScheduledTaskCreateInput, ScheduledTaskUpdateInput, AutomationRunResult, Routine, RoutineCreateInput, RoutineUpdateInput, RoutineExecutionResult } from "@fusion/core";
@@ -544,25 +549,6 @@ export function moveTask(
   });
 }
 
-/** Resolved trait flags for a board column (subset the client cares about). */
-export interface BoardWorkflowColumnFlags {
-  countsTowardWip?: boolean;
-  complete?: boolean;
-  archived?: boolean;
-  hiddenFromBoard?: boolean;
-  hold?: boolean;
-  intake?: boolean;
-  mergeBlocker?: boolean;
-  humanReview?: boolean;
-  [key: string]: boolean | undefined;
-}
-
-export interface BoardWorkflowColumn {
-  id: string;
-  name: string;
-  flags: BoardWorkflowColumnFlags;
-}
-
 // WorkflowFieldDefinition, WorkflowFieldType, WorkflowFieldOption, WorkflowFieldRender
 // are re-exported from @fusion/core above (KTD-13/14).
 export type { WorkflowFieldDefinition, WorkflowFieldType, WorkflowFieldOption, WorkflowFieldRender };
@@ -570,22 +556,6 @@ export type { WorkflowFieldDefinition, WorkflowFieldType, WorkflowFieldOption, W
 // Workflow-settings (U6/KTD-1) declaration types re-exported from @fusion/core so
 // the WorkflowSettingsPanel imports them from `../api` like the field types.
 export type { WorkflowSettingDefinition, WorkflowSettingType, WorkflowSettingOption, WorkflowSettingRender, WorkflowSettingRejection };
-
-export interface BoardWorkflowDefinition {
-  id: string;
-  name: string;
-  columns: BoardWorkflowColumn[];
-  /** Custom field definitions declared by this workflow (U13/KTD-14). Absent on
-   *  workflows with no fields, or from older servers. */
-  fields?: WorkflowFieldDefinition[];
-}
-
-export interface BoardWorkflowsPayload {
-  flagEnabled: boolean;
-  defaultWorkflowId: string;
-  workflows: BoardWorkflowDefinition[];
-  taskWorkflowIds: Record<string, string>;
-}
 
 /** A typed custom-field rejection surfaced by the PATCH endpoint (KTD-13). */
 export interface CustomFieldRejection {
@@ -612,15 +582,199 @@ export function updateTaskCustomFields(
   });
 }
 
-/** Fetch the multi-lane board metadata (U9). When the flag is OFF the server
- *  returns `{ flagEnabled: false }` and the board renders its legacy form. */
+/** Manually promote a held card out of its hold column (U9). */
+export function promoteTask(id: string, projectId?: string): Promise<Task> {
+  return api<Task>(withProjectId(`/tasks/${id}/promote`, projectId), { method: "POST" });
+}
+
+// ── U10: board-scoped board payload + cross-board move ───────────────────────
+//
+// Boards are the universal task container in every mode (the lane-shaped
+// payload is gone — `/tasks/board-workflows` serves this shape).
+
+// The board-scoped wire types (BoardColumn, BoardTeamMember, BoardPayload,
+// BoardSummary, BoardWorkflowsPayload) are single-sourced in @fusion/core
+// (board-wire-types.ts) and shared verbatim with the server route. They are
+// imported here (via the `@fusion/core` → types.ts vite alias) for local use and
+// re-exported so existing component imports from `../api` keep resolving.
+export type {
+  BoardColumn,
+  BoardTeamMember,
+  BoardPayload,
+  BoardSummary,
+  BoardWorkflowsPayload,
+};
+
+/** Fetch the board-scoped board metadata (U10). Unconditional — every mode
+ *  returns its boards (the lane concept is gone). Served by
+ *  `GET /tasks/board-workflows`. */
 export function fetchBoardWorkflows(projectId?: string): Promise<BoardWorkflowsPayload> {
   return api<BoardWorkflowsPayload>(withProjectId("/tasks/board-workflows", projectId));
 }
 
-/** Manually promote a held card out of its hold column (U9). */
-export function promoteTask(id: string, projectId?: string): Promise<Task> {
-  return api<Task>(withProjectId(`/tasks/${id}/promote`, projectId), { method: "POST" });
+/** Re-home a task onto a different board (U10, R13). The server aborts any active
+ *  session and moves the task to the target board's Todo as a system action. */
+export function moveTaskToBoard(id: string, boardId: string, projectId?: string): Promise<Task> {
+  return api<Task>(withProjectId(`/tasks/${id}/move-to-board`, projectId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ boardId }),
+  });
+}
+
+// ── U12: board management (create / seed-retry / convert-to-simple) ──────────
+
+/** Create a board (U12, R8). Reuses the U2 team seed so the board is born
+ *  staffed (flag-gated server-side). `boardType` selects from the server
+ *  board-type registry. */
+export function createBoard(
+  input: { name: string; description?: string; boardType?: string; lfgMode?: boolean },
+  projectId?: string,
+): Promise<{ board: BoardSummary; seeded: boolean }> {
+  return api<{ board: BoardSummary; seeded: boolean }>(withProjectId("/boards", projectId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+/** Delete a board, re-homing its tasks to the project default board first. The
+ *  server refuses to delete the default board while it implicitly homes
+ *  `boardId = null` tasks, and refuses when no other board exists to re-home onto
+ *  (both surface as a 400 carrying `{ reason }`). Emits a `board:deleted` SSE the
+ *  Board view consumes (it refetches and falls back to the default board). */
+export function deleteBoard(
+  boardId: string,
+  projectId?: string,
+): Promise<{ deletedBoardId: string; rehomedToBoardId: string | null; rehomedTaskIds: string[] }> {
+  return api(withProjectId(`/boards/${encodeURIComponent(boardId)}`, projectId), {
+    method: "DELETE",
+  });
+}
+
+/** Fetch the board types offered in the create-board picker (U13). Plugin-gated
+ *  types (Compound Engineering) appear only when their plugin is installed. */
+export function getBoardTypes(projectId?: string): Promise<{ types: { id: string }[] }> {
+  return api<{ types: { id: string }[] }>(withProjectId("/boards/types", projectId));
+}
+
+/** (Re)run the U2 team seed for one board (U12, R8). Powers the BoardTeamPanel
+ *  "seed failed → retry" CTA. Idempotent server-side. */
+export function retryBoardTeamSeed(
+  boardId: string,
+  projectId?: string,
+): Promise<{ board: BoardSummary; seeded: boolean; team: Record<string, string> }> {
+  return api(withProjectId(`/boards/${encodeURIComponent(boardId)}/seed-team`, projectId), {
+    method: "POST",
+  });
+}
+
+/** One source-column → company-template-column mapping in a convert-to-simple
+ *  preview (U12, R17). */
+export interface ConformColumnMapping {
+  fromColumnId: string;
+  fromColumnName: string;
+  toColumnId: string | null;
+  role?: "lead" | "executor" | "reviewer";
+  carried: boolean;
+}
+
+/** Preview the R17 conform mapping for a board before applying (U12). */
+export function previewBoardConvertToSimple(
+  boardId: string,
+  projectId?: string,
+): Promise<{ boardId: string; mappings: ConformColumnMapping[] }> {
+  return api(withProjectId(`/boards/${encodeURIComponent(boardId)}/convert-preview`, projectId));
+}
+
+/** Apply the R17 conform mapping: conform the board onto the company template
+ *  and re-seed the team (U12). */
+export function convertBoardToSimple(
+  boardId: string,
+  projectId?: string,
+): Promise<{ board: BoardSummary; seeded: boolean; mappings: ConformColumnMapping[] }> {
+  return api(withProjectId(`/boards/${encodeURIComponent(boardId)}/convert-to-simple`, projectId), {
+    method: "POST",
+  });
+}
+
+/** Add a custom column to a board (U12, R2/R3). Single flow: name + placement +
+ *  pick-or-create agent. The server is the placement/staffing authority — an
+ *  already-staffed agent (AE3) or a before-todo placement is rejected with a
+ *  structured 400 the caller surfaces inline. */
+export function addBoardColumn(
+  boardId: string,
+  input: {
+    name: string;
+    placement: "before-review" | "after-review";
+    agent?: { agentId: string } | { create: { name: string; soul?: string } };
+  },
+  projectId?: string,
+): Promise<{ boardId: string; columnId: string; workflowId: string; agentId: string | null }> {
+  return api(withProjectId(`/boards/${encodeURIComponent(boardId)}/columns`, projectId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+// ── U9/U12: per-task addressed agent messages ────────────────────────────────
+
+/** An addressed per-task agent message (U9). Steering-comment shaped. */
+export interface TaskAgentMessage {
+  id: string;
+  text: string;
+  author: string;
+  timestamp: string;
+  targetAgentId?: string;
+  deliveryState?: "pending" | "delivered" | "cancelled" | "discarded";
+  deliveredAt?: string;
+}
+
+/** List addressed agent messages on a task (U9/U12). */
+export function fetchTaskAgentMessages(
+  id: string,
+  opts?: { state?: "pending" | "delivered" | "cancelled" | "discarded"; agent?: string },
+  projectId?: string,
+): Promise<TaskAgentMessage[]> {
+  const search = new URLSearchParams();
+  if (opts?.state) search.set("state", opts.state);
+  if (opts?.agent) search.set("agent", opts.agent);
+  const qs = search.toString();
+  return api<TaskAgentMessage[]>(
+    withProjectId(`/tasks/${encodeURIComponent(id)}/agent-messages${qs ? `?${qs}` : ""}`, projectId),
+  );
+}
+
+/** Queue a message addressed to a specific agent within a task (U9/U12, R10).
+ *  Used for plan-approval "Send feedback" (addressed to the Lead) and per-task
+ *  agent steering. */
+export function sendTaskAgentMessage(
+  id: string,
+  targetAgentId: string,
+  text: string,
+  projectId?: string,
+): Promise<{ task: Task; messageId: string }> {
+  return api(withProjectId(`/tasks/${encodeURIComponent(id)}/agent-messages`, projectId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetAgentId, text }),
+  });
+}
+
+/** Cancel a still-pending addressed message (U9/U12). */
+export function cancelTaskAgentMessage(
+  id: string,
+  messageId: string,
+  projectId?: string,
+): Promise<Task> {
+  return api<Task>(
+    withProjectId(
+      `/tasks/${encodeURIComponent(id)}/agent-messages/${encodeURIComponent(messageId)}/cancel`,
+      projectId,
+    ),
+    { method: "POST" },
+  );
 }
 
 /**
@@ -5091,6 +5245,7 @@ export function createWorkflow(
 ): Promise<import("@fusion/core").WorkflowDefinition> {
   return api<import("@fusion/core").WorkflowDefinition>(withProjectId("/workflows", projectId), {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
 }
@@ -5103,6 +5258,7 @@ export function updateWorkflow(
 ): Promise<import("@fusion/core").WorkflowDefinition> {
   return api<import("@fusion/core").WorkflowDefinition>(withProjectId(`/workflows/${encodeURIComponent(id)}`, projectId), {
     method: "PATCH",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(updates),
   });
 }
@@ -5481,6 +5637,29 @@ export async function draftGoalDescription(title: string, projectId?: string): P
     body: JSON.stringify({ title }),
   });
   return response.description;
+}
+
+/** A project goal as returned by the /goals API (U12: the CEO's objectives). */
+export interface GoalRecord {
+  id: string;
+  title: string;
+  description?: string;
+  status: "active" | "archived";
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Create a project Goal (U12 onboarding step 2 — "What is the objective of your
+ *  company's CEO?"). Wires to the GoalStore via POST /goals. */
+export function createGoal(
+  input: { title: string; description?: string },
+  projectId?: string,
+): Promise<GoalRecord> {
+  return api<GoalRecord>(withProjectId("/goals", projectId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
 }
 
 export function startSubtaskBreakdown(description: string, projectId?: string): Promise<{ sessionId: string }> {

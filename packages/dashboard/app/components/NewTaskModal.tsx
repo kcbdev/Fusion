@@ -55,10 +55,6 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
   const [selectedPresetId, setSelectedPresetId] = useState<string>("");
   const [presetMode, setPresetMode] = useState<"default" | "preset" | "custom">("default");
   const [hasDirtyState, setHasDirtyState] = useState(false);
-  // U6/R3: tri-state workflow selection. `undefined` = inherit project default,
-  // `null` = explicit "No workflow", `string` = a specific workflow. Materialized
-  // atomically at create time via the `workflowId` create parameter.
-  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null | undefined>(undefined);
   const [reviewLevel, setReviewLevel] = useState<number | undefined>(undefined);
   const [autoMerge, setAutoMerge] = useState<boolean | undefined>(undefined);
   const [priority, setPriority] = useState<TaskPriority>(DEFAULT_TASK_PRIORITY);
@@ -147,7 +143,6 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       description.trim() !== "" ||
       dependencies.length > 0 ||
       pendingImages.length > 0 ||
-      selectedWorkflowId !== undefined ||
       executorModel !== "" ||
       validatorModel !== "" ||
       planningModel !== "" ||
@@ -163,7 +158,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       githubTrackingEnabled ||
       githubRepoOverrideTrimmed !== "";
     setHasDirtyState(isDirty);
-  }, [description, dependencies, pendingImages, selectedWorkflowId, executorModel, validatorModel, planningModel, thinkingLevel, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, branchMode, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed]);
+  }, [description, dependencies, pendingImages, executorModel, validatorModel, planningModel, thinkingLevel, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, branchMode, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed]);
 
   const handleClose = useCallback(async () => {
     if (hasDirtyState) {
@@ -186,7 +181,6 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
     setThinkingLevel("");
     setSelectedPresetId("");
     setPresetMode("default");
-    setSelectedWorkflowId(undefined);
     setSelectedAgentId(null);
     setShowAgentPicker(false);
     setReviewLevel(undefined);
@@ -223,11 +217,9 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
         description: trimmedDesc,
         column: "triage",
         dependencies: dependencies.length ? dependencies : undefined,
-        // U6/R3: forward the workflow selection only when the user changed it.
-        //  - undefined → omit (store inherits the project default, today's behavior)
-        //  - null      → explicit "No workflow" (store skips default materialization)
-        //  - string    → that workflow, materialized atomically at create time.
-        ...(selectedWorkflowId !== undefined ? { workflowId: selectedWorkflowId } : {}),
+        // U10: task creation targets a board (default = current board), not a
+        // workflow. The per-task workflow selection is gone, so no `workflowId`
+        // is forwarded; the store homes the task on the project's default board.
         ...(selectedAgentId ? { assignedAgentId: selectedAgentId } : {}),
         modelPresetId: presetMode === "preset" ? selectedPresetId || undefined : undefined,
         modelProvider: executorModel && executorSlashIdx !== -1 ? executorModel.slice(0, executorSlashIdx) : undefined,
@@ -256,9 +248,6 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
           : {}),
       };
 
-      // U6/R3: the workflow is now materialized atomically inside createTask via
-      // the `workflowId` parameter — no post-create selectTaskWorkflow call, so
-      // the executor can never observe the task with the wrong step set.
       const task = await onCreateTask(createInput);
 
       // Upload pending images as attachments
@@ -287,7 +276,6 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       setThinkingLevel("");
       setSelectedPresetId("");
       setPresetMode("default");
-      setSelectedWorkflowId(undefined);
       setSelectedAgentId(null);
       setShowAgentPicker(false);
       setReviewLevel(undefined);
@@ -305,7 +293,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
     } finally {
       setIsSubmitting(false);
     }
-  }, [description, dependencies, pendingImages, executorModel, validatorModel, planningModel, thinkingLevel, isSubmitting, githubRepoOverrideInvalid, hasInvalidBranchSelection, onCreateTask, addToast, onClose, projectId, presetMode, selectedPresetId, selectedWorkflowId, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, branchMode, isBranchNameRequired, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed, t]);
+  }, [description, dependencies, pendingImages, executorModel, validatorModel, planningModel, thinkingLevel, isSubmitting, githubRepoOverrideInvalid, hasInvalidBranchSelection, onCreateTask, addToast, onClose, projectId, presetMode, selectedPresetId, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, branchMode, isBranchNameRequired, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed, t]);
 
   // Handle keyboard shortcuts
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -447,9 +435,6 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
           )}
         </div>
       </div>
-      {/* U6/R3: the workflow picker now lives inside TaskForm (a whole-workflow
-          dropdown materialized atomically at create time), replacing the prior
-          standalone WorkflowSelector + post-create selectTaskWorkflow flow. */}
     </div>
   );
 
@@ -491,8 +476,6 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
             onPresetModeChange={setPresetMode}
             selectedPresetId={selectedPresetId}
             onSelectedPresetIdChange={setSelectedPresetId}
-            selectedWorkflowId={selectedWorkflowId}
-            onWorkflowIdChange={setSelectedWorkflowId}
             pendingImages={pendingImages}
             onImagesChange={setPendingImages}
             tasks={tasks}

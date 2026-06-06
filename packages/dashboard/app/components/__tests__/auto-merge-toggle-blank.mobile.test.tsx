@@ -6,8 +6,27 @@ import { PageErrorBoundary } from "../ErrorBoundary";
 import type { Task } from "@fusion/core";
 
 vi.mock("../../api", () => ({
-  fetchBoardWorkflows: vi.fn().mockResolvedValue({ flagEnabled: false, defaultWorkflowId: "", workflows: [], taskWorkflowIds: {} }),
+  fetchBoardWorkflows: vi.fn().mockResolvedValue({
+    boards: [{ id: "board-default", name: "Default", description: "", requirePlanApproval: false, ordering: 0 }],
+    boardPayloads: {
+      "board-default": {
+        columns: [
+          { id: "triage", name: "Triage", flags: { intake: true } },
+          { id: "todo", name: "To Do", flags: { hold: true } },
+          { id: "in-progress", name: "In Progress", flags: { countsTowardWip: true } },
+          { id: "in-review", name: "In Review", flags: { mergeBlocker: true } },
+          { id: "done", name: "Done", flags: { complete: true } },
+          { id: "archived", name: "Archived", flags: { archived: true } },
+        ],
+        team: {},
+        taskIds: [],
+      },
+    },
+    defaultBoardId: "board-default",
+  }),
+  promoteTask: vi.fn().mockResolvedValue({}),
   fetchWorkflowSteps: vi.fn().mockResolvedValue([]),
+  getBoardTypes: vi.fn().mockResolvedValue({ types: [{ id: "standard" }] }),
 }));
 
 vi.mock("../../hooks/useBlockerFanout", () => ({
@@ -176,6 +195,16 @@ function installAnimationFrame() {
   vi.stubGlobal("cancelAnimationFrame", vi.fn());
 }
 
+/** Flush the board-scoped payload fetch (U10) so columns render. Fake timers
+ *  are active, so we drain the mocked-fetch microtasks under act. */
+async function flushBoardLoad() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    vi.runOnlyPendingTimers();
+  });
+}
+
 function expectBoardVisible() {
   expect(document.querySelector("main.board")).not.toBeNull();
   expect(screen.getByText("In Review")).toBeInTheDocument();
@@ -193,7 +222,7 @@ describe("auto-merge toggle mobile blank regression", () => {
     vi.unstubAllGlobals();
   });
 
-  it("keeps the mobile board visible after an Android viewport resize triggered by toggling auto-merge", () => {
+  it("keeps the mobile board visible after an Android viewport resize triggered by toggling auto-merge", async () => {
     const viewportSpy = mockViewport(375);
     const visualViewport = createVisualViewport(1);
     Object.defineProperty(window, "visualViewport", {
@@ -203,6 +232,7 @@ describe("auto-merge toggle mobile blank regression", () => {
     installAnimationFrame();
 
     render(<BoardHarness tasks={[createTask("FN-5936", "in-review")]} />);
+    await flushBoardLoad();
 
     const board = document.querySelector("main.board") as HTMLElement;
     expect(screen.getByTestId("task-card-FN-5936")).toHaveTextContent("true");
@@ -235,7 +265,7 @@ describe("auto-merge toggle mobile blank regression", () => {
     viewportSpy.mockRestore();
   });
 
-  it("round-trips auto-merge on mobile Android with an empty in-review column without blanking", () => {
+  it("round-trips auto-merge on mobile Android with an empty in-review column without blanking", async () => {
     const viewportSpy = mockViewport(375);
     const visualViewport = createVisualViewport(1);
     Object.defineProperty(window, "visualViewport", {
@@ -245,6 +275,7 @@ describe("auto-merge toggle mobile blank regression", () => {
     installAnimationFrame();
 
     render(<BoardHarness tasks={[]} />);
+    await flushBoardLoad();
     const board = document.querySelector("main.board") as HTMLElement;
 
     act(() => {
@@ -277,7 +308,7 @@ describe("auto-merge toggle mobile blank regression", () => {
     viewportSpy.mockRestore();
   });
 
-  it("keeps populated task-card and worktree surfaces visible when auto-merge toggles on mobile", () => {
+  it("keeps populated task-card and worktree surfaces visible when auto-merge toggles on mobile", async () => {
     const viewportSpy = mockViewport(375);
     const visualViewport = createVisualViewport(1);
     Object.defineProperty(window, "visualViewport", {
@@ -294,23 +325,28 @@ describe("auto-merge toggle mobile blank regression", () => {
         ]}
       />,
     );
+    await flushBoardLoad();
 
     act(() => {
       vi.runOnlyPendingTimers();
     });
 
+    // Board-scoped (U10): the board is always in workflow mode, so the
+    // processing (countsTowardWip) column renders task cards directly rather
+    // than the legacy worktree-grouped view. Both surfaces still reflect the
+    // auto-merge toggle without blanking.
     expect(screen.getByTestId("task-card-FN-5936")).toHaveTextContent("true");
-    expect(screen.getByTestId("worktree-group-Unassigned")).toHaveTextContent("true");
+    expect(screen.getByTestId("task-card-FN-IP")).toHaveTextContent("true");
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Auto-merge" }));
 
     expect(screen.getByTestId("task-card-FN-5936")).toHaveTextContent("false");
-    expect(screen.getByTestId("worktree-group-Unassigned")).toHaveTextContent("false");
+    expect(screen.getByTestId("task-card-FN-IP")).toHaveTextContent("false");
     expectBoardVisible();
     viewportSpy.mockRestore();
   });
 
-  it("re-anchors on the mobile iOS pageshow path after toggling auto-merge", () => {
+  it("re-anchors on the mobile iOS pageshow path after toggling auto-merge", async () => {
     const viewportSpy = mockViewport(375);
     Object.defineProperty(window, "visualViewport", {
       configurable: true,
@@ -319,6 +355,7 @@ describe("auto-merge toggle mobile blank regression", () => {
     installAnimationFrame();
 
     render(<BoardHarness tasks={[createTask("FN-IOS", "in-review")]} />);
+    await flushBoardLoad();
     const board = document.querySelector("main.board") as HTMLElement;
 
     act(() => {
@@ -340,11 +377,12 @@ describe("auto-merge toggle mobile blank regression", () => {
     viewportSpy.mockRestore();
   });
 
-  it("keeps the board visible on tablet where the mobile stabilization effect is disabled", () => {
+  it("keeps the board visible on tablet where the mobile stabilization effect is disabled", async () => {
     const viewportSpy = mockViewport(900);
     installAnimationFrame();
 
     render(<BoardHarness tasks={[createTask("FN-TABLET", "in-review")]} />);
+    await flushBoardLoad();
 
     const toggle = screen.getByRole("checkbox", { name: "Auto-merge" });
     expect(toggle).toBeChecked();
@@ -357,11 +395,12 @@ describe("auto-merge toggle mobile blank regression", () => {
     viewportSpy.mockRestore();
   });
 
-  it("keeps the board visible on desktop after toggling auto-merge", () => {
+  it("keeps the board visible on desktop after toggling auto-merge", async () => {
     const viewportSpy = mockViewport(1280);
     installAnimationFrame();
 
     render(<BoardHarness tasks={[createTask("FN-DESKTOP", "in-review")]} />);
+    await flushBoardLoad();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Auto-merge" }));
 
@@ -380,6 +419,7 @@ describe("auto-merge toggle mobile blank regression", () => {
     installAnimationFrame();
 
     render(<RollbackBoardHarness tasks={[createTask("FN-ROLLBACK", "in-review")]} />);
+    await flushBoardLoad();
 
     const toggle = screen.getByRole("checkbox", { name: "Auto-merge" });
     expect(toggle).toBeChecked();
@@ -396,7 +436,7 @@ describe("auto-merge toggle mobile blank regression", () => {
     viewportSpy.mockRestore();
   });
 
-  it("shows a visible page error boundary fallback instead of a blank board when a board child throws", () => {
+  it("shows a visible page error boundary fallback instead of a blank board when a board child throws", async () => {
     const viewportSpy = mockViewport(375);
     const visualViewport = createVisualViewport(1);
     Object.defineProperty(window, "visualViewport", {
@@ -407,6 +447,7 @@ describe("auto-merge toggle mobile blank regression", () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     render(<BoardHarness tasks={[createTask("FN-ERROR", "in-review")]} />);
+    await flushBoardLoad();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Auto-merge" }));
 

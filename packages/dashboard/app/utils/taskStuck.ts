@@ -1,6 +1,22 @@
 import type { Task } from "@fusion/core";
 
-const NON_STUCK_STATUSES = new Set(["failed", "stuck-killed"]);
+/**
+ * Statuses that are NEVER stuck — even past the timeout. `failed`/`stuck-killed`
+ * are terminal. The `awaiting-*` family (U14, R21/R20) are INTENTIONAL human
+ * waits: a task parked on a structured question (`awaiting-user-input`), a
+ * plan-approval hold (`awaiting-approval`), or a planning-interview pause
+ * (`planning-awaiting-input`) is blocked on the human by design — surfacing it
+ * as "stuck" (and, server-side, auto-moving it) would treat a deliberate wait as
+ * a fault. The card surfaces these via their own awaiting-input/awaiting-approval
+ * badges instead.
+ */
+const NON_STUCK_STATUSES = new Set([
+  "failed",
+  "stuck-killed",
+  "awaiting-user-input",
+  "awaiting-approval",
+  "planning-awaiting-input",
+]);
 
 /**
  * Check if a task is stuck based on the project's stuck timeout setting.

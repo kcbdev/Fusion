@@ -1155,6 +1155,15 @@
     "todo": "To Do",
     "triage": "Triage"
   },
+  "boardSwitcher": {
+    "label": "Boards",
+    "loadFailed": "Boards unavailable",
+    "loadFailedTooltip": "Couldn't load boards. Check your connection and try again.",
+    "retry": "Retry",
+    "emptyLabel": "No boards yet",
+    "createBoard": "Create a board",
+    "noColumns": "This board has no columns to show."
+  },
   "branchGroup": {
     "abandonGroup": "Abandon group",
     "autoMergeEnabled": "Auto-merge enabled",
@@ -1344,6 +1353,27 @@
     "stateMissing": "Not installed",
     "stateVersionMismatch": "Version mismatch",
     "succeededDuration": "Install succeeded in {{duration}}s"
+  },
+  "cliTerminal": {
+    "replayIdle": "Session idle",
+    "replayEnded": "Session ended",
+    "readOnly": "Read-only",
+    "postureResolved": "Resolved posture",
+    "postureBaseline": "Baseline",
+    "adapterSettings": "Adapter settings",
+    "advancePrompt": "This session looks idle — advance to review?",
+    "advance": "Advance",
+    "notYet": "Not yet",
+    "mobileInputPlaceholder": "Type to send to the session…",
+    "mobileSend": "Send",
+    "mobileKeyEsc": "Send Escape",
+    "mobileKeyTab": "Send Tab",
+    "mobileKeyCtrlC": "Send Ctrl-C",
+    "mobileKeyCtrl": "Sticky Ctrl modifier",
+    "mobileKeyArrowUp": "Cursor up",
+    "mobileKeyArrowDown": "Cursor down",
+    "mobileKeyArrowLeft": "Cursor left",
+    "mobileKeyArrowRight": "Cursor right"
   },
   "column": {
     "actionsAriaLabel": "{{columnLabel}} column actions",
@@ -2638,10 +2668,6 @@
     "verificationCriteria": "Verification Criteria",
     "yes": "Yes"
   },
-  "lane": {
-    "collapse": "Collapse {{name}} lane",
-    "expand": "Expand {{name}} lane"
-  },
   "listView": {
     "apply": "Apply",
     "applying": "Applying...",
@@ -3344,6 +3370,20 @@
     "noChange": "No change",
     "selectPlaceholder": "Select a model…"
   },
+  "modelSelection": {
+    "choose": "Choose models for this task. If not selected, default models will be used.",
+    "custom": "Custom",
+    "executorModel": "Executor Model",
+    "executorPlaceholder": "Select executor model…",
+    "loading": "Loading models…",
+    "noModels": "No models available. Configure authentication in Settings to enable model selection.",
+    "preset": "Preset",
+    "reviewerModel": "Reviewer Model",
+    "reviewerPlaceholder": "Select reviewer model…",
+    "title": "Select Models",
+    "useDefault": "Use default",
+    "usingDefault": "Using default"
+  },
   "models": {
     "addProviderToFavoritesAriaLabel": "Add {{provider}} to favorites",
     "addToFavorites": "Add to favorites",
@@ -3406,19 +3446,14 @@
     },
     "useDefault": "Use default"
   },
-  "modelSelection": {
-    "choose": "Choose models for this task. If not selected, default models will be used.",
-    "custom": "Custom",
-    "executorModel": "Executor Model",
-    "executorPlaceholder": "Select executor model…",
-    "loading": "Loading models…",
-    "noModels": "No models available. Configure authentication in Settings to enable model selection.",
-    "preset": "Preset",
-    "reviewerModel": "Reviewer Model",
-    "reviewerPlaceholder": "Select reviewer model…",
-    "title": "Select Models",
-    "useDefault": "Use default",
-    "usingDefault": "Using default"
+  "moveToBoard": {
+    "label": "Move to board…",
+    "placeholder": "Select a board…",
+    "warnTitle": "Move task to another board?",
+    "warnMessage": "This task has work in progress. Moving it interrupts execution and restarts it in the target board's To Do. Its branch is kept on the task. Continue?",
+    "warnConfirm": "Move and restart",
+    "warnCancel": "Cancel",
+    "failed": "Failed to move task to board"
   },
   "nav": {
     "activityLog": "Activity Log",
@@ -3484,6 +3519,18 @@
     "taskCreated": "Created {{taskId}}",
     "title": "New Task",
     "unsavedChanges": "You have unsaved changes. Discard them?"
+  },
+  "nodeStatus": {
+    "local": "Local"
+  },
+  "nodeSync": {
+    "error": {
+      "authSyncFailed": "Auth sync failed",
+      "failedToFetchStatus": "Failed to fetch sync status",
+      "pullFailed": "Pull settings failed",
+      "pushFailed": "Push settings failed",
+      "someRequestsFailed": "Some sync status requests failed"
+    }
   },
   "nodes": {
     "actions": {
@@ -3751,18 +3798,6 @@
     },
     "viewLogsButton": "View Logs",
     "yes": "Yes"
-  },
-  "nodeStatus": {
-    "local": "Local"
-  },
-  "nodeSync": {
-    "error": {
-      "authSyncFailed": "Auth sync failed",
-      "failedToFetchStatus": "Failed to fetch sync status",
-      "pullFailed": "Pull settings failed",
-      "pushFailed": "Push settings failed",
-      "someRequestsFailed": "Some sync status requests failed"
-    }
   },
   "onboarding": {
     "authToken": "Auth token (optional)",
@@ -4230,6 +4265,16 @@
     "selectedCount_one": "{{count}} selected",
     "selectedCount_other": "{{count}} selected"
   },
+  "projectSelector": {
+    "allProjects": "All Projects",
+    "ariaLabel": "Select project",
+    "clearSearch": "Clear search",
+    "noResults": "No projects match your search",
+    "recent": "Recent",
+    "searchPlaceholder": "Search projects...",
+    "selectProject": "Select Project",
+    "viewAll": "View All Projects"
+  },
   "projects": {
     "actions": {
       "favoritesError": "Failed to update favorites",
@@ -4269,16 +4314,6 @@
     "sortStatusDesc": "Status (Active → Error)",
     "title": "Projects",
     "totalLabel": "Total"
-  },
-  "projectSelector": {
-    "allProjects": "All Projects",
-    "ariaLabel": "Select project",
-    "clearSearch": "Clear search",
-    "noResults": "No projects match your search",
-    "recent": "Recent",
-    "searchPlaceholder": "Search projects...",
-    "selectProject": "Select Project",
-    "viewAll": "View All Projects"
   },
   "providers": {
     "actions": {
@@ -5960,7 +5995,13 @@
       "rejected": "Plan rejected — {{id}} returned to Planning for replanning",
       "rejectMessage": "Reject this plan? The specification will be discarded and regenerated.",
       "rejectTitle": "Reject Plan",
-      "replanning": "Replanning {{id}}…"
+      "replanning": "Replanning {{id}}…",
+      "sendFeedbackBtn": "Send feedback",
+      "feedbackPrompt": "What should the Lead change about this plan?",
+      "feedbackPlaceholder": "What should the Lead change about this plan?",
+      "feedbackSendBtn": "Send",
+      "feedbackSending": "Sending...",
+      "feedbackSent": "Feedback sent to the Lead for revision."
     },
     "pr": {
       "awaitingChecks": "Awaiting PR checks",
@@ -6168,10 +6209,10 @@
     "yes": "Yes"
   },
   "taskFields": {
+    "unset": "—",
     "moreFields": "Additional fields",
     "orphaned": "Orphaned fields",
-    "saveFailed": "Failed to save field",
-    "unset": "—"
+    "saveFailed": "Failed to save field"
   },
   "taskForm": {
     "addDependencies": "Add dependencies",
@@ -6445,6 +6486,13 @@
     "nearDuplicateTitle": "Potential near-duplicate of {{id}}",
     "needsInput": "Needs input",
     "noAgentsAvailable": "No agents available",
+    "questionSessionClosed": "This question can no longer be answered — the session has moved on. The board has been refreshed.",
+    "questionSubmitFailed": "Failed to submit your answer. Please try again.",
+    "questionSteerLabel": "Add steering (optional — sent with your answer)",
+    "questionSteerPlaceholder": "e.g. focus on the mobile flow, skip auth for now…",
+    "questionSubmit": "Submit answer",
+    "questionSubmitting": "Sending…",
+    "typeAnswer": "Type your answer here…",
     "node": "Node",
     "noExistingTasks": "No existing tasks",
     "openRetryBreakdown": "Open retry breakdown",
@@ -6611,6 +6659,21 @@
     "learnMore": "Learn more",
     "message": "Update available: v{{latestVersion}} (current: v{{currentVersion}}). Run fn update for an installed CLI, or pull this source checkout.",
     "releaseNotes": "Release notes"
+  },
+  "uiMode": {
+    "settingLabel": "Interface mode",
+    "simple": "Simple",
+    "advanced": "Advanced",
+    "settingDescription": "Simple mode hides advanced surfaces (missions, the workflow graph editor, per-task agent/model controls, and more) and forces worktree isolation on. Advanced mode shows everything.",
+    "switchToAdvanced": "Switch to advanced mode",
+    "gatedRedirect": "“{{view}}” is an advanced-mode feature. You’ve been returned to the board.",
+    "graphEditor": "Workflow graph editor",
+    "pluginView": "Plugin view",
+    "degradedBoard": "This board uses an advanced workflow shape and is read-only in simple mode. Tasks keep running.",
+    "degradedReadOnly": "This board is read-only in simple mode.",
+    "openInAdvancedEditor": "Open in advanced editor",
+    "worktreeIsolationLabel": "Worktree isolation",
+    "worktreeIsolationDescription": "Enabled by default. Each task runs in its own git worktree. This toggle is only available in advanced mode — simple mode always forces worktree isolation on."
   },
   "usage": {
     "configureAuthHint": "Configure authentication in Settings to see usage data.",
@@ -6800,6 +6863,27 @@
     "unplacedCount_one": "{{count}} nodes not placed in a column",
     "unplacedCount_other": "{{count}} nodes not placed in a column"
   },
+  "workflowEditor": {
+    "cliAgent": {
+      "executorOption": "CLI agent",
+      "adapterLabel": "CLI adapter",
+      "adapterPlaceholder": "— select adapter —",
+      "adapterNote": "Drives a CLI coding agent in an engine-owned terminal for this step.",
+      "tier": {
+        "native": "native",
+        "hybrid": "hybrid",
+        "generic": "generic"
+      },
+      "autonomyLabel": "Elevated autonomy (bypass approvals)",
+      "autonomyNote": "Elevated autonomy requires a per-project approval before the agent can launch. Until approved, launches with elevated posture fail.",
+      "notifyLabel": "Waiting-on-input notification",
+      "notify": {
+        "banner": "In-app banner",
+        "bannerNotify": "Banner + push notification"
+      },
+      "notifyNote": "How you are alerted when the agent pauses waiting for input on this step."
+    }
+  },
   "workflowFields": {
     "add": "Add field",
     "addOption": "Add option",
@@ -6904,6 +6988,12 @@
     "templatesSection": "Templates",
     "trivialGraphHint": "This workflow only runs start → end. Add steps from the palette above to build it out."
   },
+  "workflowSelector": {
+    "switchActiveMessage": "This task has an active session. Switching workflows aborts it and re-homes the card into the new workflow's entry column. Continue?",
+    "switchActiveTitle": "Switch workflow?",
+    "switchCancel": "Cancel",
+    "switchConfirm": "Switch and abort"
+  },
   "workflows": {
     "aiEdit": "Design with AI",
     "aiFailed": "Failed to design workflow",
@@ -6962,12 +7052,6 @@
     "templateSectionBuiltin": "Built-in workflows",
     "templateSectionYours": "Your workflows"
   },
-  "workflowSelector": {
-    "switchActiveMessage": "This task has an active session. Switching workflows aborts it and re-homes the card into the new workflow's entry column. Continue?",
-    "switchActiveTitle": "Switch workflow?",
-    "switchCancel": "Cancel",
-    "switchConfirm": "Switch and abort"
-  },
   "workspace": {
     "projectRoot": "Project Root",
     "selectWorkspace": "Select workspace",
@@ -6984,52 +7068,127 @@
     "sha256": "SHA-256",
     "version": "Version"
   },
-  "taskFields": {
-    "unset": "—",
-    "moreFields": "Additional fields",
-    "orphaned": "Orphaned fields",
-    "saveFailed": "Failed to save field"
+  "boardTeam": {
+    "button": "Team",
+    "title": "Team",
+    "titleFor": "Team — {{board}}",
+    "roleLead": "Lead",
+    "roleExecutor": "Executor",
+    "roleReviewer": "Reviewer",
+    "roleCustom": "Custom",
+    "unstaffed": "Unstaffed",
+    "loadFailed": "Failed to load the team",
+    "empty": "No team members on this board yet.",
+    "seedFailedMessage": "This board's team isn't staffed yet ({{staffed}}/{{total}} roles). Retry to staff the Lead, Executor, and Reviewer.",
+    "seedRetry": "Staff the team",
+    "seeding": "Staffing…",
+    "seedSucceeded": "Team staffed.",
+    "seedSkipped": "Nothing to staff — the company model may be disabled for this project.",
+    "seedFailed": "Couldn't staff the team. Try again.",
+    "editInstructions": "Edit instructions",
+    "instructionsSaved": "Instructions saved.",
+    "instructionsSaveFailed": "Failed to save instructions",
+    "instructionsPlaceholder": "Add instructions for how this role executes its missions…",
+    "noInstructions": "No custom instructions.",
+    "customReplaceHint": "Custom column — replace its agent from the board's column settings.",
+    "addColumn": "Add a column"
   },
-  "workflowEditor": {
-    "cliAgent": {
-      "executorOption": "CLI agent",
-      "adapterLabel": "CLI adapter",
-      "adapterPlaceholder": "— select adapter —",
-      "adapterNote": "Drives a CLI coding agent in an engine-owned terminal for this step.",
-      "tier": {
-        "native": "native",
-        "hybrid": "hybrid",
-        "generic": "generic"
-      },
-      "autonomyLabel": "Elevated autonomy (bypass approvals)",
-      "autonomyNote": "Elevated autonomy requires a per-project approval before the agent can launch. Until approved, launches with elevated posture fail.",
-      "notifyLabel": "Waiting-on-input notification",
-      "notify": {
-        "banner": "In-app banner",
-        "bannerNotify": "Banner + push notification"
-      },
-      "notifyNote": "How you are alerted when the agent pauses waiting for input on this step."
-    }
+  "boardCreate": {
+    "title": "Create a department",
+    "nameLabel": "Name",
+    "namePlaceholder": "e.g. Backend, Docs, Marketing",
+    "nameRequired": "Board name is required.",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "What this department handles — the CEO uses this to route work.",
+    "typeLabel": "Board type",
+    "typeStandard": "Standard",
+    "typeStandardDesc": "Lead → Executor → Reviewer. The default department.",
+    "create": "Create board",
+    "creating": "Creating…",
+    "created": "Board created.",
+    "createdStaffed": "Board created and staffed.",
+    "failed": "Failed to create the board."
   },
-  "cliTerminal": {
-    "replayIdle": "Session idle",
-    "replayEnded": "Session ended",
-    "readOnly": "Read-only",
-    "postureResolved": "Resolved posture",
-    "postureBaseline": "Baseline",
-    "adapterSettings": "Adapter settings",
-    "advancePrompt": "This session looks idle — advance to review?",
-    "advance": "Advance",
-    "notYet": "Not yet",
-    "mobileInputPlaceholder": "Type to send to the session…",
-    "mobileSend": "Send",
-    "mobileKeyEsc": "Send Escape",
-    "mobileKeyTab": "Send Tab",
-    "mobileKeyCtrlC": "Send Ctrl-C",
-    "mobileKeyCtrl": "Sticky Ctrl modifier",
-    "mobileKeyArrowUp": "Cursor up",
-    "mobileKeyArrowDown": "Cursor down",
-    "mobileKeyArrowLeft": "Cursor left",
-    "mobileKeyArrowRight": "Cursor right"
+  "convertSimple": {
+    "title": "Convert to simple mode",
+    "titleFor": "Convert “{{board}}” to simple mode",
+    "settingsLabel": "Convert a board to simple mode",
+    "settingsHint": "Map a legacy or advanced board's columns onto the company template (Lead / Executor / Reviewer), carrying extra columns as custom columns and staffing the team.",
+    "intro": "Your columns map onto the company template. Extra columns are kept as custom columns, and the Lead/Executor/Reviewer team is staffed.",
+    "loading": "Previewing the mapping…",
+    "loadingBoards": "Loading boards…",
+    "noBoards": "No boards to convert.",
+    "previewFailed": "Couldn't preview the conversion.",
+    "carried": "Kept as a custom column",
+    "alreadySimple": "This board is already on the company template.",
+    "apply": "Convert",
+    "applying": "Converting…",
+    "applied": "Board converted to simple mode.",
+    "applyFailed": "Couldn't convert the board.",
+    "convertBtn": "Convert"
+  },
+  "addColumn": {
+    "title": "Add a column",
+    "nameLabel": "Column name",
+    "namePlaceholder": "e.g. Deploy, Publish, QA",
+    "nameRequired": "Column name is required.",
+    "placementLabel": "Placement",
+    "beforeReview": "Between In progress and In review",
+    "afterReview": "After In review (post-approval, e.g. Deploy)",
+    "agentLabel": "Agent",
+    "agentRequired": "Pick an agent or create a new one.",
+    "createAgent": "Create a new agent",
+    "newAgentPlaceholder": "New agent name",
+    "newAgentNameRequired": "Name the new agent.",
+    "pickAgent": "Pick an existing agent",
+    "selectAgent": "Select an agent…",
+    "add": "Add column",
+    "adding": "Adding…",
+    "added": "Column added.",
+    "failed": "Failed to add the column.",
+    "ae3": "That agent already staffs another column on this board. Pick a different agent or create a new one.",
+    "otherBoard": "That agent belongs to another board. Agents are board-scoped.",
+    "beforeTodo": "Columns can't be placed before Todo."
+  },
+  "companyOnboarding": {
+    "step1Title": "Found your company",
+    "step2Title": "Meet your CEO",
+    "step3Title": "Create your first department",
+    "step4Title": "Meet your employees",
+    "step5Title": "You're all set",
+    "progress": "Step {{step}} of 5",
+    "step1Lead": "Pick the working directory for your company and give it a name.",
+    "directory": "Working directory",
+    "pathPlaceholder": "/path/to/your/project",
+    "projectName": "Company name",
+    "namePlaceholder": "my-company",
+    "createCompany": "Create company",
+    "createProjectFailed": "Failed to create the project",
+    "step2Lead": "Your CEO routes every request to the right department. Give it a personality and define what your company is for.",
+    "ceoName": "CEO name",
+    "ceoNamePlaceholder": "CEO",
+    "ceoPersonality": "CEO personality & instructions",
+    "ceoPersonalityPlaceholder": "How should the CEO think about and route work?",
+    "goalPrompt": "What is the objective of your company's CEO?",
+    "goalTitlePlaceholder": "Ship a polished v1",
+    "goalDescPlaceholder": "Add detail about this objective (optional)",
+    "saveCeoFailed": "Failed to save the CEO and goals",
+    "step3Lead": "Create the first department of your company. The CEO uses its name and description to route work here.",
+    "boardName": "Department name",
+    "boardNamePlaceholder": "Engineering",
+    "boardDescription": "What does this department do?",
+    "boardDescPlaceholder": "Builds and ships the product.",
+    "createDepartment": "Create department",
+    "createBoardFailed": "Failed to create the board",
+    "step4Lead": "Here are your employees — give them a clear role in how they execute their missions.",
+    "teamLoading": "Staffing your team…",
+    "teamLoadFailed": "Failed to load the team",
+    "teamEmpty": "No employees staffed yet. You can add them later from the board's team panel.",
+    "employeeInstructionsPlaceholder": "How should this role execute its missions?",
+    "addEmployee": "Add another employee",
+    "saveTeamFailed": "Failed to save the team",
+    "step5Lead": "Your company is ready. Head to your board and send your first request to the CEO.",
+    "goToBoard": "Go to my board",
+    "skip": "Skip"
   }
 }

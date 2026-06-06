@@ -36,12 +36,16 @@ import { fetchScripts } from "../api";
 import type { PluginDashboardViewEntry } from "../api";
 import { useViewportMode } from "./Header";
 import type { TaskView } from "../hooks/useViewState";
+import type { UiMode } from "@fusion/core";
+import { isAdvancedSurface } from "../ui-mode";
 import { buildPluginTaskViewId, isPluginViewId } from "../plugins/pluginViewRegistry";
 import { getPluginNavIcon } from "./pluginNavIcon";
 
 export interface MobileNavBarProps {
   /** Current task view mode */
   view: TaskView;
+  /** Simple/advanced UI mode (U11). Gated nav tabs are hidden in simple mode. */
+  uiMode?: UiMode;
   /** Change task view handler */
   onChangeView: (view: TaskView) => void;
   /** Whether the ExecutorStatusBar footer is visible */
@@ -114,6 +118,7 @@ function formatCount(count: number): string {
 
 export function MobileNavBar({
   view,
+  uiMode = "advanced",
   onChangeView,
   footerVisible,
   modalOpen = false,
@@ -318,17 +323,19 @@ export function MobileNavBar({
           <span className="mobile-nav-tab-label">{t("nav.agents", "Agents")}</span>
         </button>
 
-        <button
-          type="button"
-          className={`mobile-nav-tab${view === "missions" ? " mobile-nav-tab--active" : ""}`}
-          data-testid="mobile-nav-tab-missions"
-          role="tab"
-          aria-selected={view === "missions"}
-          onClick={() => onChangeView("missions")}
-        >
-          <Target />
-          <span className="mobile-nav-tab-label">{t("nav.missions", "Missions")}</span>
-        </button>
+        {!(uiMode === "simple" && isAdvancedSurface("missions")) && (
+          <button
+            type="button"
+            className={`mobile-nav-tab${view === "missions" ? " mobile-nav-tab--active" : ""}`}
+            data-testid="mobile-nav-tab-missions"
+            role="tab"
+            aria-selected={view === "missions"}
+            onClick={() => onChangeView("missions")}
+          >
+            <Target />
+            <span className="mobile-nav-tab-label">{t("nav.missions", "Missions")}</span>
+          </button>
+        )}
 
         <button
           type="button"

@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Play, Flag, MessageSquare, Terminal, Shield, GitMerge, PauseCircle, Split, Merge, AlertTriangle, Repeat, ClipboardCheck, ListChecks, Code2, GitPullRequest } from "lucide-react";
+import { Play, Flag, MessageSquare, Terminal, Shield, GitMerge, PauseCircle, Split, Merge, AlertTriangle, Repeat, ClipboardCheck, ListChecks, Code2, GitPullRequest, MessageCircleReply, GitPullRequestArrow } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { nodeConfigSummary } from "./node-summary";
 import { useWorkflowEditorCatalogs } from "./WorkflowEditorCatalogContext";
@@ -63,8 +63,8 @@ const KIND_ICON: Record<WorkflowEditorNodeKind, typeof Play> = {
   "parse-steps": ListChecks,
   code: Code2,
   "pr-create": GitPullRequest,
-  "pr-respond": MessageSquare,
-  "pr-merge": GitMerge,
+  "pr-respond": MessageCircleReply,
+  "pr-merge": GitPullRequestArrow,
 };
 
 /** Shared error-state component (U10): one component renders both the

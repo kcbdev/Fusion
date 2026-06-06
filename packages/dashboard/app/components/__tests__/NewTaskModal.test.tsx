@@ -161,10 +161,11 @@ describe("NewTaskModal", () => {
       expect(toggle).toHaveAttribute("aria-expanded", "true");
       expect(moreOptions).not.toHaveAttribute("hidden");
     });
-    // Model Configuration, Attachments, and the Workflow picker are revealed
+    // Model Configuration and Attachments are revealed. The per-task Workflow
+    // picker is gone (U10: task creation targets a board, not a workflow).
     expect(screen.getByText(/Model Configuration/i)).toBeTruthy();
     expect(screen.getByText(/Attachments/i)).toBeTruthy();
-    expect(screen.getByText("Workflow")).toBeTruthy();
+    expect(screen.queryByTestId("task-workflow-select")).toBeNull();
   });
 
   it("shows dependencies and agent picker by default without expanding More options", () => {
@@ -590,34 +591,22 @@ describe("NewTaskModal", () => {
     });
   });
 
-  // Workflow step ordering tests (FN-836)
-  describe("workflow selection (U6/R3)", () => {
-    function mockWorkflows(defs: Array<{ id: string; name: string; kind?: "workflow" | "fragment" }>) {
-      return import("../../api").then(({ fetchWorkflows }) => {
-        vi.mocked(fetchWorkflows).mockResolvedValueOnce(
-          defs.map((d) => ({
-            id: d.id,
-            name: d.name,
-            description: "",
-            kind: d.kind ?? "workflow",
-            ir: { version: "v1", name: d.name, nodes: [], edges: [] },
-            layout: {},
-            createdAt: "",
-            updatedAt: "",
-          })) as any,
-        );
-      });
-    }
-
-    it("omits workflowId from the payload when the picker is untouched (inherit default)", async () => {
-      await mockWorkflows([{ id: "WF-1", name: "QA" }]);
-      const { props } = renderNewTaskModal();
-
+  // U10: task creation targets a board, not a workflow. The per-task workflow
+  // picker and any post-create selectTaskWorkflow flow are gone outright.
+  describe("workflow selection removed (U10)", () => {
+    it("does not render a per-task workflow picker", async () => {
+      renderNewTaskModal();
+      const toggle = screen.getByTestId("task-form-more-options-toggle");
+      fireEvent.click(toggle);
       await waitFor(() => {
-        expect(screen.getByTestId("task-workflow-select")).toBeTruthy();
+        expect(screen.getByTestId("task-form-more-options")).not.toHaveAttribute("hidden");
       });
+      expect(screen.queryByTestId("task-workflow-select")).toBeNull();
+    });
 
-      fireEvent.change(screen.getByRole("textbox"), { target: { value: "Inherit default" } });
+    it("never forwards a workflowId in the create payload", async () => {
+      const { props } = renderNewTaskModal();
+      fireEvent.change(screen.getByRole("textbox"), { target: { value: "No workflow selection" } });
       fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
 
       await waitFor(() => {
@@ -627,53 +616,8 @@ describe("NewTaskModal", () => {
       expect("workflowId" in payload).toBe(false);
     });
 
-    it("sends the chosen workflowId in the create payload", async () => {
-      await mockWorkflows([{ id: "WF-1", name: "QA" }]);
-      const { props } = renderNewTaskModal();
-
-      await waitFor(() => {
-        expect(screen.getByTestId("task-workflow-select")).toBeTruthy();
-      });
-
-      fireEvent.change(screen.getByTestId("task-workflow-select"), { target: { value: "WF-1" } });
-      fireEvent.change(screen.getByRole("textbox"), { target: { value: "Pick a workflow" } });
-      fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
-
-      await waitFor(() => {
-        expect(props.onCreateTask).toHaveBeenCalledWith(
-          expect.objectContaining({ workflowId: "WF-1" }),
-        );
-      });
-    });
-
-    it("sends workflowId: null when 'No workflow' is chosen", async () => {
-      await mockWorkflows([{ id: "WF-1", name: "QA" }]);
-      const { props } = renderNewTaskModal();
-
-      await waitFor(() => {
-        expect(screen.getByTestId("task-workflow-select")).toBeTruthy();
-      });
-
-      // Pick a workflow, then switch to "No workflow" to register an explicit null.
-      fireEvent.change(screen.getByTestId("task-workflow-select"), { target: { value: "WF-1" } });
-      fireEvent.change(screen.getByTestId("task-workflow-select"), { target: { value: "__none__" } });
-      fireEvent.change(screen.getByRole("textbox"), { target: { value: "No workflow task" } });
-      fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
-
-      await waitFor(() => {
-        expect(props.onCreateTask).toHaveBeenCalledWith(
-          expect.objectContaining({ workflowId: null }),
-        );
-      });
-    });
-
     it("does not render the legacy per-step checkbox UI", async () => {
-      await mockWorkflows([{ id: "WF-1", name: "QA" }]);
       renderNewTaskModal();
-
-      await waitFor(() => {
-        expect(screen.getByTestId("task-workflow-select")).toBeTruthy();
-      });
       expect(screen.queryByTestId("workflow-step-order")).toBeNull();
       expect(document.querySelector('[data-testid^="workflow-step-checkbox-"]')).toBeNull();
     });
@@ -1055,17 +999,15 @@ describe("NewTaskModal", () => {
   });
 
   describe("GitHub tracking", () => {
-    it("renders GitHub tracking after the Workflow picker in more options", async () => {
+    it("renders the GitHub tracking section in more options (U10: no workflow picker)", async () => {
       renderNewTaskModal();
 
       fireEvent.click(screen.getByTestId("task-form-more-options-toggle"));
 
-      const workflowLabel = await screen.findByText("Workflow");
-      const githubTrackingSection = screen.getByTestId("task-form-github-tracking");
-
-      expect(
-        workflowLabel.compareDocumentPosition(githubTrackingSection) & Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      const githubTrackingSection = await screen.findByTestId("task-form-github-tracking");
+      expect(githubTrackingSection).toBeInTheDocument();
+      // The per-task workflow picker is gone.
+      expect(screen.queryByTestId("task-workflow-select")).toBeNull();
     });
 
     it("seeds tracking toggle from project settings and submits githubTracking payload", async () => {

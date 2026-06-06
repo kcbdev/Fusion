@@ -20,9 +20,10 @@ import {
   resolveTaskExecutionModel,
   resolveTaskPlanningModel,
   resolveTaskValidatorModel,
+  resolveUiMode,
 } from "@fusion/core";
-import { uploadAttachment, deleteAttachment, updateTask, pauseTask, unpauseTask, fetchTaskDetail, fetchSettings, fetchGlobalSettings, requestSpecRevision, rebuildTaskSpec, approvePlan, rejectPlan, refineTask, fetchWorkflowResults, assignTask, fetchAgents, fetchAgent, recoverBranchBinding, refreshPrStatus, fetchBoardWorkflows, updateTaskCustomFields, api } from "../api";
-import type { RecoverBranchBindingOutcome, WorkflowFieldDefinition, CustomFieldRejection } from "../api";
+import { uploadAttachment, deleteAttachment, updateTask, pauseTask, unpauseTask, fetchTaskDetail, fetchSettings, fetchGlobalSettings, requestSpecRevision, rebuildTaskSpec, approvePlan, rejectPlan, refineTask, fetchWorkflowResults, assignTask, fetchAgents, fetchAgent, recoverBranchBinding, refreshPrStatus, fetchBoardWorkflows, updateTaskCustomFields, sendTaskAgentMessage, api } from "../api";
+import type { RecoverBranchBindingOutcome, WorkflowFieldDefinition, CustomFieldRejection, BoardSummary } from "../api";
 import { ApiRequestError } from "../api";
 import { TaskFieldsSection } from "./TaskFieldsSection";
 import type { ToastType } from "../hooks/useToast";
@@ -39,7 +40,9 @@ import { TaskChangesTab } from "./TaskChangesTab";
 import { TaskForm, type PendingImage } from "./TaskForm";
 import { useNodes } from "../hooks/useNodes";
 import { WorkflowResultsTab } from "./WorkflowResultsTab";
+import { TaskQuestionView, type TaskQuestionSubscribe } from "./TaskQuestionView";
 import { RoutingTab } from "./RoutingTab";
+import { MoveToBoardControl } from "./MoveToBoardControl";
 import { TaskDocumentsTab } from "./TaskDocumentsTab";
 import { TaskTokenStatsPanel } from "./TaskTokenStatsPanel";
 import { BranchGroupCard } from "./BranchGroupCard";
@@ -683,42 +686,71 @@ export function TaskDetailContent({
   // from the board-workflows payload; absent when the workflow declares none,
   // in which case the fields section renders nothing (today's UI byte-identical).
   // When `workflowFieldDefsProp` is provided by the caller (e.g. the Board
-  // already holds the payload) we skip the self-fetch entirely.
+  // already holds the payload) the field defs come from the prop rather than the
+  // payload — but the board-scoped payload is still fetched below to populate the
+  // boards index used by MoveToBoardControl (the fetch is not skipped).
   const [customFieldDefs, setCustomFieldDefs] = useState<WorkflowFieldDefinition[] | null>(
     workflowFieldDefsProp !== undefined ? (workflowFieldDefsProp ?? null) : null,
   );
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, unknown>>(task.customFields ?? {});
   const [customFieldError, setCustomFieldError] = useState<CustomFieldRejection | null>(null);
 
+  // Boards index for the cross-board move control (U10, R13). Fetched once per
+  // task/project alongside the field defs below — a single payload feeds both.
+  const [boardsIndex, setBoardsIndex] = useState<BoardSummary[]>([]);
+  const [defaultBoardId, setDefaultBoardId] = useState<string | null>(null);
+  // U12 (R20): the Lead agent staffing this task's board, so plan-approval
+  // "Send feedback" can address the Lead via the per-task agent-message channel.
+  const [leadAgentId, setLeadAgentId] = useState<string | null>(null);
+
   // Keep local field values in sync when the task prop changes (SSE refresh).
   useEffect(() => {
     setCustomFieldValues(task.customFields ?? {});
   }, [task.id, task.customFields]);
 
-  // Resolve this task's workflow field definitions once per task. Skipped when
-  // the caller supplies `workflowFieldDefs` directly (Board context). Best-effort:
-  // a failed fetch (or flag-OFF empty payload) leaves defs null → no section.
+  // Resolve the board-scoped payload once per task: it feeds the boards index
+  // (cross-board move control) and — unless the caller supplies
+  // `workflowFieldDefs` directly (Board context) — this task's field defs from
+  // its homing board's workflow. Best-effort: a failed fetch leaves the boards
+  // index empty (control hides) and defs null → no fields section.
   useEffect(() => {
     if (workflowFieldDefsProp !== undefined) {
-      // Prop-driven path: keep in sync if the prop changes (task switch etc.).
+      // Prop-driven defs path: keep in sync if the prop changes (task switch etc.).
       setCustomFieldDefs(workflowFieldDefsProp ?? null);
-      return;
     }
     let cancelled = false;
     void fetchBoardWorkflows(projectId)
       .then((payload) => {
         if (cancelled) return;
-        const workflowId = payload.taskWorkflowIds[task.id] ?? payload.defaultWorkflowId;
-        const workflow = payload.workflows.find((w) => w.id === workflowId);
-        setCustomFieldDefs(workflow?.fields ?? null);
+        setBoardsIndex(payload.boards);
+        setDefaultBoardId(payload.defaultBoardId);
+        // The task's field defs come from its homing board's workflow: the board
+        // whose taskIds carry it, else the default board (null-boardId homing).
+        const boardId =
+          payload.boards.find((b) => payload.boardPayloads[b.id]?.taskIds.includes(task.id))?.id ??
+          payload.defaultBoardId;
+        // Resolve the Lead for plan-approval feedback (R20): the agent staffing a
+        // column whose role marker is "lead" on this task's board.
+        const boardPayload = boardId ? payload.boardPayloads[boardId] : undefined;
+        const leadColumn = boardPayload?.columns.find((c) => c.role === "lead");
+        const lead = leadColumn ? boardPayload?.team[leadColumn.id] : undefined;
+        setLeadAgentId(lead?.agentId ?? null);
+        if (workflowFieldDefsProp !== undefined) return;
+        const fields = boardPayload?.fields;
+        setCustomFieldDefs(fields ?? null);
       })
       .catch(() => {
-        if (!cancelled) setCustomFieldDefs(null);
+        if (cancelled) return;
+        setBoardsIndex([]);
+        if (workflowFieldDefsProp === undefined) setCustomFieldDefs(null);
       });
     return () => {
       cancelled = true;
     };
-  }, [task.id, projectId, workflowFieldDefsProp]);
+    // `task.boardId` is included so a cross-board move refetches: the homing-board
+    // lookup (taskIds.includes) and the resolved Lead/field defs are stale until
+    // the new board's payload is pulled.
+  }, [task.id, task.boardId, projectId, workflowFieldDefsProp]);
 
   const handleSaveCustomFields = useCallback(
     async (patch: Record<string, unknown>) => {
@@ -742,6 +774,41 @@ export function TaskDetailContent({
     [task.id, projectId, onTaskUpdated, addToast, t],
   );
 
+  // U14: live updates for the structured Q&A panel. Refetch the task's pending
+  // question whenever the CE plugin pushes a session event (question arrival /
+  // settle) OR the task itself updates — so a question that arrives (or a session
+  // that completes/interrupts) while the detail is open updates without a refresh.
+  const taskQuestionSubscribe = useMemo<TaskQuestionSubscribe>(
+    () => (_taskId, onEvent) => {
+      const params = new URLSearchParams();
+      if (projectId) params.set("projectId", projectId);
+      const query = params.size > 0 ? `?${params.toString()}` : "";
+      return subscribeSse(`/api/events${query}`, {
+        events: {
+          "plugin:custom": (event: MessageEvent) => {
+            try {
+              const d = JSON.parse(event.data) as { pluginId?: string; event?: string };
+              if (d.pluginId === "fusion-plugin-compound-engineering" && typeof d.event === "string") {
+                onEvent();
+              }
+            } catch {
+              // ignore malformed payloads
+            }
+          },
+          "task:updated": (event: MessageEvent) => {
+            try {
+              const d = JSON.parse(event.data) as { id?: string };
+              if (d.id === task.id) onEvent();
+            } catch {
+              // ignore malformed payloads
+            }
+          },
+        },
+      });
+    },
+    [projectId, task.id],
+  );
+
   useEffect(() => {
     if (activeTab !== "logs" || logSubview !== "activity") {
       setHighlightStallCode(null);
@@ -759,6 +826,13 @@ export function TaskDetailContent({
   }, [activeTab, logSubview, highlightStallCode]);
   const [refineFeedback, setRefineFeedback] = useState("");
   const [isRefining, setIsRefining] = useState(false);
+
+  // Inline plan-feedback disclosure (R20): "Send feedback" toggles an inline
+  // textarea instead of window.prompt (blocked/disabled in embedded WebViews
+  // such as Electron, where prompt() silently returns null).
+  const [showPlanFeedback, setShowPlanFeedback] = useState(false);
+  const [planFeedback, setPlanFeedback] = useState("");
+  const [isSendingPlanFeedback, setIsSendingPlanFeedback] = useState(false);
 
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
@@ -888,6 +962,18 @@ export function TaskDetailContent({
   // Merged project settings for effective model resolution in Agent Log header
   const [settings, setSettings] = useState<Settings | undefined>(undefined);
   const [globalSettings, setGlobalSettings] = useState<GlobalSettings | null>(null);
+  // U11: per-task agent/model controls (Model tab) and the workflow graph editor
+  // (Workflow tab) are advanced-only and hidden in simple mode. Branch/worktree
+  // and PR detail stay visible — R23 suppresses card chrome, not the detail view.
+  const simpleMode = resolveUiMode(globalSettings ?? undefined) === "simple";
+
+  // Fall back to the Definition tab if a gated tab (Model/Workflow) is active
+  // when simple mode resolves (e.g. settings hydrate after open).
+  useEffect(() => {
+    if (simpleMode && (activeTab === "model" || activeTab === "workflow")) {
+      setActiveTab("definition");
+    }
+  }, [simpleMode, activeTab]);
 
   // Workflow results state
   const [workflowResults, setWorkflowResults] = useState<WorkflowStepResult[]>([]);
@@ -2063,6 +2149,45 @@ export function TaskDetailContent({
     }
   }, [task.id, requestClose, addToast, confirm]);
 
+  // U12 (R20): "Send feedback" toggles an inline disclosure (textarea + send)
+  // instead of approving. window.prompt is blocked/disabled in embedded WebViews
+  // (Electron) where it silently returns null, so the inline affordance is the
+  // only reliable path.
+  const handleTogglePlanFeedback = useCallback(() => {
+    setShowPlanFeedback((prev) => !prev);
+  }, []);
+
+  // Submit the inline plan feedback: routes the plan back to the Lead for
+  // revision via the per-task agent-message channel (U9, R10). Falls back to
+  // rejectPlan (respec) when the Lead can't be resolved (legacy/triage boards).
+  const handleSubmitPlanFeedback = useCallback(async () => {
+    const feedback = planFeedback.trim();
+    if (feedback.length === 0) return;
+    setIsSendingPlanFeedback(true);
+    try {
+      if (leadAgentId) {
+        await sendTaskAgentMessage(task.id, leadAgentId, feedback, projectId);
+        setPlanFeedback("");
+        setShowPlanFeedback(false);
+        addToast(
+          t("taskDetail.plan.feedbackSent", "Feedback sent to the Lead for revision."),
+          "success",
+        );
+      } else {
+        // No resolvable Lead (legacy triage board): fall back to the respec path.
+        await rejectPlan(task.id, projectId);
+        setPlanFeedback("");
+        setShowPlanFeedback(false);
+        addToast(t("taskDetail.plan.rejected", "Plan returned for revision."), "info");
+        requestClose();
+      }
+    } catch (err) {
+      addToast(getErrorMessage(err), "error");
+    } finally {
+      setIsSendingPlanFeedback(false);
+    }
+  }, [task.id, projectId, leadAgentId, planFeedback, addToast, t, requestClose]);
+
   const handleRespecify = useCallback(async () => {
     const shouldRebuild = await confirm({
       title: t("taskDetail.plan.rebuildTitle", "Rebuild Plan"),
@@ -2628,6 +2753,30 @@ export function TaskDetailContent({
           </div>
         </div>
         <div className={`detail-body${activeTab === "logs" && logSubview === "agent-log" && !isEditing ? " detail-body--agent-log" : ""}`}>
+          {/* U14: structured Q&A surface — when the task's column engine parked
+              awaiting human input, the question renders here for an inline answer.
+              Self-gating: renders nothing unless the server reports a pending
+              question (never for LFG/headless tasks). */}
+          {!isEditing && (
+            <div className="detail-section detail-section--question">
+              <TaskQuestionView
+                taskId={task.id}
+                subscribe={taskQuestionSubscribe}
+                onAnswered={() => {
+                  // Refetch the task detail so the cleared awaiting-input status
+                  // and any resulting column move reflect immediately.
+                  void fetchTaskDetail(task.id, projectId)
+                    .then((detail) => {
+                      setFullDetail(detail);
+                      onTaskUpdated?.(detail);
+                    })
+                    .catch(() => {
+                      /* best-effort refresh */
+                    });
+                }}
+              />
+            </div>
+          )}
           {isEditing ? (
             <div className="modal-edit-form">
               <TaskForm
@@ -2987,18 +3136,22 @@ export function TaskDetailContent({
             >
               {t("taskDetail.tabs.documents", "Documents")}
             </button>
-            <button
-              className={`detail-tab${activeTab === "model" ? " detail-tab-active" : ""}`}
-              onClick={() => setActiveTab("model")}
-            >
-              {t("taskDetail.tabs.model", "Model")}
-            </button>
-            <button
-              className={`detail-tab${activeTab === "workflow" ? " detail-tab-active" : ""}`}
-              onClick={() => setActiveTab("workflow")}
-            >
-              {t("taskDetail.tabs.workflow", "Workflow")}
-            </button>
+            {!simpleMode && (
+              <button
+                className={`detail-tab${activeTab === "model" ? " detail-tab-active" : ""}`}
+                onClick={() => setActiveTab("model")}
+              >
+                {t("taskDetail.tabs.model", "Model")}
+              </button>
+            )}
+            {!simpleMode && (
+              <button
+                className={`detail-tab${activeTab === "workflow" ? " detail-tab-active" : ""}`}
+                onClick={() => setActiveTab("workflow")}
+              >
+                {t("taskDetail.tabs.workflow", "Workflow")}
+              </button>
+            )}
             <button
               className={`detail-tab${activeTab === "stats" ? " detail-tab-active" : ""}`}
               onClick={() => setActiveTab("stats")}
@@ -3333,6 +3486,18 @@ export function TaskDetailContent({
             </div>
           ) : (
           <>
+          {/* Cross-board move (U10, R13): re-home this task onto another board.
+              The control hides itself when there is only one board. */}
+          <div className="detail-section detail-section--move-to-board">
+            <MoveToBoardControl
+              task={workingTask}
+              projectId={projectId}
+              boards={boardsIndex}
+              defaultBoardId={defaultBoardId}
+              addToast={addToast}
+              onMoved={onTaskUpdated}
+            />
+          </div>
           {/* Summary section - only for done tasks with summary */}
           {task.column === "done" && task.summary && (
             <div className="detail-section detail-summary">
@@ -4074,15 +4239,76 @@ export function TaskDetailContent({
             </>
           ) : (
             <>
-              {/* Approve/Reject Plan buttons for tasks awaiting approval — always visible */}
-              {task.column === "triage" && task.status === "awaiting-approval" && workingTask.prompt && (
+              {/* Approve / Send-feedback for tasks parked in the plan-approval
+                  hold (R20). The hold parks the task in the Lead column — `triage`
+                  on legacy boards, `todo` on company-model boards — with status
+                  awaiting-approval. Approve releases it forward; Send feedback
+                  routes the plan back to the Lead for revision (per-task agent
+                  message, U9). */}
+              {(task.column === "triage" || task.column === "todo") &&
+                task.status === "awaiting-approval" &&
+                workingTask.prompt && (
                 <>
-                  <button className="btn btn-primary btn-sm" onClick={handleApprovePlan}>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={handleApprovePlan}
+                    data-testid="plan-approve"
+                  >
                     {t("taskDetail.plan.approveBtn", "Approve Plan")}
+                  </button>
+                  <button
+                    className="btn btn-sm"
+                    onClick={handleTogglePlanFeedback}
+                    data-testid="plan-send-feedback"
+                    aria-expanded={showPlanFeedback}
+                    aria-controls="plan-feedback-disclosure"
+                  >
+                    {t("taskDetail.plan.sendFeedbackBtn", "Send feedback")}
                   </button>
                   <button className="btn btn-danger btn-sm" onClick={handleRejectPlan}>
                     {t("taskDetail.plan.rejectBtn", "Reject Plan")}
                   </button>
+                  {showPlanFeedback && (
+                    <div
+                      id="plan-feedback-disclosure"
+                      className="plan-feedback-disclosure"
+                      data-testid="plan-feedback-disclosure"
+                    >
+                      <textarea
+                        className="plan-feedback-textarea"
+                        value={planFeedback}
+                        onChange={(e) => setPlanFeedback(e.target.value)}
+                        placeholder={t(
+                          "taskDetail.plan.feedbackPlaceholder",
+                          "What should the Lead change about this plan?",
+                        )}
+                        rows={3}
+                        maxLength={2000}
+                        autoFocus
+                        data-testid="plan-feedback-textarea"
+                      />
+                      <div className="plan-feedback-actions">
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={handleSubmitPlanFeedback}
+                          disabled={!planFeedback.trim() || isSendingPlanFeedback}
+                          data-testid="plan-feedback-submit"
+                        >
+                          {isSendingPlanFeedback
+                            ? t("taskDetail.plan.feedbackSending", "Sending...")
+                            : t("taskDetail.plan.feedbackSendBtn", "Send")}
+                        </button>
+                        <button
+                          className="btn btn-sm"
+                          onClick={handleTogglePlanFeedback}
+                          disabled={isSendingPlanFeedback}
+                          data-testid="plan-feedback-cancel"
+                        >
+                          {t("common.cancel", "Cancel")}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
 

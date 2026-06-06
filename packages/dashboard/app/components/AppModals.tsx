@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, lazy, Suspense } from "react";
 import type { ProjectInfo } from "../api";
-import type { ColorTheme, Column, MergeResult, Task, TaskCreateInput, ThemeMode, GithubIssueAction } from "@fusion/core";
+import type { ColorTheme, Column, MergeResult, Task, TaskCreateInput, ThemeMode, GithubIssueAction, UiMode } from "@fusion/core";
 import type { UseProjectActionsResult } from "../hooks/useProjectActions";
 import type { ModalManager } from "../hooks/useModalManager";
 import type { UseTaskHandlersResult } from "../hooks/useTaskHandlers";
@@ -27,6 +27,7 @@ import { GroupTaskModal } from "./GroupTaskModal";
 import { useNavigationHistoryContext } from "../hooks/useNavigationHistory";
 
 const SetupWizardModal = lazy(() => import("./SetupWizardModal").then((m) => ({ default: m.SetupWizardModal })));
+const CompanyOnboardingModal = lazy(() => import("./CompanyOnboardingModal").then((m) => ({ default: m.CompanyOnboardingModal })));
 const SettingsModal = lazy(() => import("./SettingsModal").then((m) => ({ default: m.SettingsModal })));
 const WorkflowNodeEditor = lazy(() => import("./WorkflowNodeEditor").then((m) => ({ default: m.WorkflowNodeEditor })));
 
@@ -73,6 +74,8 @@ interface AppModalsProps {
   };
   settings: {
     prAuthAvailable: boolean;
+    uiMode: UiMode;
+    setUiMode: (mode: UiMode) => void;
     themeMode: ThemeMode;
     colorTheme: ColorTheme;
     dashboardFontScalePct: number;
@@ -86,6 +89,9 @@ interface AppModalsProps {
   onReopenOnboarding?: () => void;
   /** Optional callback to open mailbox approvals from Settings. */
   onOpenApprovals?: (approvalId?: string) => void;
+  /** When true (company-model flag ON), new-project creation runs the five-step
+   *  CompanyOnboardingModal instead of the SetupWizardModal (U12). */
+  companyModelEnabled?: boolean;
 }
 
 export function AppModals({
@@ -105,6 +111,7 @@ export function AppModals({
   onSettingsClose,
   onReopenOnboarding,
   onOpenApprovals,
+  companyModelEnabled,
 }: AppModalsProps) {
   const { pushNav } = useNavigationHistoryContext();
   const [firstCreatedTask, setFirstCreatedTask] = useState<Task | null>(null);
@@ -233,6 +240,8 @@ export function AppModals({
               addToast={addToast}
               initialSection={modalManager.settingsInitialSection}
               projectId={projectId}
+              uiMode={settings.uiMode}
+              onUiModeChange={settings.setUiMode}
               themeMode={settings.themeMode}
               colorTheme={settings.colorTheme}
               onThemeModeChange={settings.setThemeMode}
@@ -399,10 +408,19 @@ export function AppModals({
 
       {modalManager.setupWizardOpen && (
         <Suspense fallback={null}>
-          <SetupWizardModal
-            onProjectRegistered={projectActions.handleSetupComplete}
-            onClose={modalManager.closeSetupWizard}
-          />
+          {companyModelEnabled ? (
+            <CompanyOnboardingModal
+              onProjectRegistered={projectActions.handleSetupComplete}
+              onClose={modalManager.closeSetupWizard}
+              addToast={addToast}
+              existingProjects={projects.map((p) => ({ name: p.name, path: p.path }))}
+            />
+          ) : (
+            <SetupWizardModal
+              onProjectRegistered={projectActions.handleSetupComplete}
+              onClose={modalManager.closeSetupWizard}
+            />
+          )}
         </Suspense>
       )}
 

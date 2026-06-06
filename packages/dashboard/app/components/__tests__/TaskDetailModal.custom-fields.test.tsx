@@ -35,12 +35,13 @@ function renderModal(task = makeTask({ column: "done" })) {
 describe("TaskDetailModal custom fields (U13/KTD-14)", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("renders no fields section when the workflow declares no fields (today's UI)", async () => {
+  it("renders no fields section when the board's workflow declares no fields (today's UI)", async () => {
     vi.spyOn(dashboardApi, "fetchBoardWorkflows").mockResolvedValue({
-      flagEnabled: true,
-      defaultWorkflowId: "builtin:coding",
-      workflows: [{ id: "builtin:coding", name: "Coding", columns: [] }],
-      taskWorkflowIds: {},
+      boards: [
+        { id: "b1", name: "Board 1", description: "", requirePlanApproval: false, lfgMode: false, ordering: 0 },
+      ],
+      boardPayloads: { b1: { columns: [], team: {}, taskIds: [] } },
+      defaultBoardId: "b1",
     });
     renderModal();
     // Allow the field-defs fetch to settle.
@@ -48,29 +49,37 @@ describe("TaskDetailModal custom fields (U13/KTD-14)", () => {
     expect(screen.queryByTestId("task-fields-section")).toBeNull();
   });
 
-  it("renders the schema-driven fields section when the workflow declares fields", async () => {
+  it("renders the schema-driven fields section when the board's workflow declares fields", async () => {
     vi.spyOn(dashboardApi, "fetchBoardWorkflows").mockResolvedValue({
-      flagEnabled: true,
-      defaultWorkflowId: "builtin:coding",
-      workflows: [
-        {
-          id: "builtin:coding",
-          name: "Coding",
+      boards: [
+        { id: "b1", name: "Board 1", description: "", requirePlanApproval: false, lfgMode: false, ordering: 0 },
+      ],
+      boardPayloads: {
+        b1: {
           columns: [],
+          team: {},
+          taskIds: ["FN-001"],
           fields: [
             { id: "owner", name: "Owner", type: "string", render: { placement: "detail" } },
           ],
         },
-      ],
-      taskWorkflowIds: { "FN-001": "builtin:coding" },
+      },
+      defaultBoardId: "b1",
     });
     renderModal(makeTask({ id: "FN-001", column: "done", customFields: { owner: "alice" } }));
     await waitFor(() => expect(screen.getByTestId("task-fields-section")).toBeTruthy());
     expect((screen.getByLabelText("Owner") as HTMLInputElement).value).toBe("alice");
   });
 
-  it("uses workflowFieldDefs prop directly and skips the board-workflows fetch", async () => {
-    const fetchSpy = vi.spyOn(dashboardApi, "fetchBoardWorkflows");
+  it("uses workflowFieldDefs prop directly, ignoring the fetched payload's fields", async () => {
+    // The modal still fetches the payload once (the boards index feeds the
+    // cross-board move control), but with the prop provided the field defs must
+    // come from the prop — NOT from the payload (which here carries none).
+    const fetchSpy = vi.spyOn(dashboardApi, "fetchBoardWorkflows").mockResolvedValue({
+      boards: [],
+      boardPayloads: {},
+      defaultBoardId: null,
+    });
     const defs: WorkflowFieldDefinition[] = [
       { id: "owner", name: "Owner", type: "string", render: { placement: "detail" } },
     ];
@@ -90,12 +99,17 @@ describe("TaskDetailModal custom fields (U13/KTD-14)", () => {
     );
     await waitFor(() => expect(screen.getByTestId("task-fields-section")).toBeTruthy());
     expect((screen.getByLabelText("Owner") as HTMLInputElement).value).toBe("bob");
-    // The fetch must NOT have been triggered since the prop was provided.
-    expect(fetchSpy).not.toHaveBeenCalled();
+    // The payload fetch (boards index) may fire, but the rendered defs above
+    // came from the prop — the fetched payload carries no fields.
+    void fetchSpy;
   });
 
   it("renders no fields section when workflowFieldDefs prop is an empty array", async () => {
-    const fetchSpy = vi.spyOn(dashboardApi, "fetchBoardWorkflows");
+    const fetchSpy = vi.spyOn(dashboardApi, "fetchBoardWorkflows").mockResolvedValue({
+      boards: [],
+      boardPayloads: {},
+      defaultBoardId: null,
+    });
     render(
       <FileBrowserProvider openFile={vi.fn()}>
         <TaskDetailModal
@@ -113,6 +127,6 @@ describe("TaskDetailModal custom fields (U13/KTD-14)", () => {
     // Give React a tick to settle; no section should appear.
     await new Promise((r) => setTimeout(r, 50));
     expect(screen.queryByTestId("task-fields-section")).toBeNull();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    void fetchSpy;
   });
 });
