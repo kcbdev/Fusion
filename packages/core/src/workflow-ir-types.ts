@@ -45,6 +45,50 @@ export function resolveMaxReworkCycles(raw: unknown): number {
   return Math.max(1, Math.min(MAX_REWORK_CYCLES_CAP, Math.floor(n)));
 }
 
+/**
+ * Executor kinds selectable on a prompt/execute node's `config.executor` (CLI
+ * Agent Executor, U7). The engine reads `config.executor` as an open string; this
+ * union documents the recognized values and `WorkflowNodeExecutorConfig` the
+ * fields each one consumes. `config` itself stays an open `Record` so unknown
+ * keys remain forward-compatible.
+ *
+ * - `model`     (default): run the prompt on the configured/override model.
+ * - `agent`     : run as a named agent (adopt its model + persona).
+ * - `skill`     : invoke a named skill with the prompt as input.
+ * - `cli`       : run a named project script with the prompt via env.
+ * - `cli-agent` : drive a CLI coding agent (Claude Code / Codex / Droid / Pi /
+ *                 generic) in an engine-owned PTY for the execute step. Honors
+ *                 cancel/abort/re-entry semantics and positive-completion gating.
+ */
+export type WorkflowNodeExecutorKind = "model" | "agent" | "skill" | "cli" | "cli-agent";
+
+/**
+ * The cli-agent slice of a workflow node's `config`. These ride on the open
+ * `WorkflowIrNode.config` record (read at U7's executor seam); they are NOT a
+ * separate column. The resolved values are SNAPSHOTTED at session launch — a
+ * mid-run edit to the node config applies to the next run only.
+ */
+export interface WorkflowNodeExecutorConfig {
+  /** Selected executor kind for this node. */
+  executor?: WorkflowNodeExecutorKind;
+  /** cli-agent: adapter id to drive the session (resolved against the registry). */
+  cliAdapterId?: string;
+  /**
+   * cli-agent: autonomy posture (drives privileged flags + resume caps). Stored
+   * verbatim; structured but extensible (mirrors `CliAutonomyPosture`).
+   */
+  cliAutonomy?: {
+    autoApprove?: boolean;
+    maxResumeAttempts?: number;
+    [key: string]: unknown;
+  };
+  /**
+   * cli-agent: notification settings for waiting-on-input events on this node
+   * (origin R2/R11). Opaque to the engine seam; forwarded to the dispatch.
+   */
+  cliNotify?: Record<string, unknown>;
+}
+
 export interface WorkflowIrEdge {
   from: string;
   to: string;
@@ -54,8 +98,9 @@ export interface WorkflowIrEdge {
    *  by the foreach `maxReworkCycles`; U6 generalizes the same mechanism to the
    *  top-level walk so a PR review region (await-review → pr-respond → back to
    *  await-review) is a legal bounded cycle too. The bound on a top-level rework
-   *  edge is `maxReworkCycles` on this edge's `from` node config (the loop head),
-   *  defaulting to {@link DEFAULT_MAX_REWORK_CYCLES}. Either way, rework edges are
+   *  edge is `maxReworkCycles` on this edge's `to` node config (the loop-region
+   *  head, which must set `reworkRegion: true`), defaulting to
+   *  {@link DEFAULT_MAX_REWORK_CYCLES}. Either way, rework edges are
    *  exempt from "Cycle detected"; every other back-edge still throws. */
   kind?: "rework";
 }
@@ -121,6 +166,48 @@ export interface WorkflowFieldDefinition {
   render?: WorkflowFieldRender;
 }
 
+/** Workflow-settings (U1): the supported setting value types. A whitelist
+ *  mirroring the scalar/enum subset of `WorkflowFieldType` — settings carry
+ *  workflow-scoped policy (step timeouts, review gates, model lanes), so the
+ *  date/url field types do not apply. */
+export type WorkflowSettingType =
+  | "string"
+  | "text"
+  | "number"
+  | "boolean"
+  | "enum"
+  | "multi-enum";
+
+/** A single enum/multi-enum option for a workflow setting (mirrors
+ *  `WorkflowFieldOption`). */
+export interface WorkflowSettingOption {
+  value: string;
+  label: string;
+  color?: string;
+}
+
+/** Rendering instructions for a workflow setting (U1, KTD-1). Settings get their
+ *  OWN render-hint type: a widget only — NO `card`/`detail` placement, which is
+ *  task-card-specific. The widget whitelist mirrors the field render widgets. */
+export interface WorkflowSettingRender {
+  widget?: "select" | "radio" | "chips" | "input" | "textarea" | "toggle";
+}
+
+/** Workflow-settings (U1, R1, KTD-1): a workflow-declared typed setting. Clones
+ *  the shape of `WorkflowFieldDefinition` (one level up) — declarations describe
+ *  the schema; the per-`(workflowId, projectId)` value table (U2) carries data.
+ *  `default` is consumed by the engine's effective-settings resolver (U3), so it
+ *  is validated against its own type/options at parse time. */
+export interface WorkflowSettingDefinition {
+  id: string;
+  name: string;
+  type: WorkflowSettingType;
+  default?: unknown;
+  options?: WorkflowSettingOption[];
+  description?: string;
+  render?: WorkflowSettingRender;
+}
+
 /** A single trait configuration applied to a column. The `trait` is an opaque
  *  registry id (resolved by the trait registry shipped in U2); `config` carries
  *  trait-specific options validated by that trait's schema. */
@@ -129,11 +216,32 @@ export interface WorkflowIrColumnTrait {
   config?: Record<string, unknown>;
 }
 
+/** Per-column permanent-agent binding (column-agent plan KTD-1). A column may name
+ *  one agent from the registry plus a mode that decides precedence against
+ *  node-level / task-level agent and model settings:
+ *  - `defer`: the column agent applies only when the work carries no own settings
+ *    (no agent identity and no complete modelProvider+modelId pair — KTD-5).
+ *  - `override`: the column agent supersedes node/task settings wholesale.
+ *  This is execution identity (consumed by the executor's session-building paths),
+ *  not a board-transition trait — hence a first-class typed field, not a trait
+ *  config blob (KTD-1). Agent *existence* is not an IR concern (no agent store at
+ *  this layer); it is enforced at write time (route) and falls back at read time. */
+export interface WorkflowColumnAgent {
+  /** Registry agent id that staffs the column. Non-empty. */
+  agentId: string;
+  /** Precedence mode against node/task settings. */
+  mode: "defer" | "override";
+}
+
 /** A workflow-defined board column. */
 export interface WorkflowIrColumn {
   id: string;
   name: string;
   traits: WorkflowIrColumnTrait[];
+  /** Optional permanent-agent binding (column-agent plan KTD-1). Additive and
+   *  omitted entirely when unset — never serialized as `agent: null` — so legacy
+   *  and default workflows stay byte-identical (R9). */
+  agent?: WorkflowColumnAgent;
 }
 
 /** Release conditions for a `hold` node (KTD-2, R3). */
@@ -169,6 +277,9 @@ export interface WorkflowIrV2 {
   edges: WorkflowIrEdge[];
   artifacts?: WorkflowIrArtifact[];
   fields?: WorkflowFieldDefinition[];
+  /** Workflow-settings (U1, R1): typed setting declarations. Additive; absent on
+   *  legacy graphs. Values persist per-`(workflowId, projectId)` (U2), not here. */
+  settings?: WorkflowSettingDefinition[];
 }
 
 /** Either IR version. v1 graphs upgrade to v2 on parse (see parseWorkflowIr). */

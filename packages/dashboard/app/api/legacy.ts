@@ -83,6 +83,11 @@ import type {
   WorkflowFieldType,
   WorkflowFieldOption,
   WorkflowFieldRender,
+  WorkflowSettingDefinition,
+  WorkflowSettingType,
+  WorkflowSettingOption,
+  WorkflowSettingRender,
+  WorkflowSettingRejection,
 } from "@fusion/core";
 import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
 import type { GithubIssueAction, ScheduledTask, ScheduledTaskCreateInput, ScheduledTaskUpdateInput, AutomationRunResult, Routine, RoutineCreateInput, RoutineUpdateInput, RoutineExecutionResult } from "@fusion/core";
@@ -371,6 +376,7 @@ export async function createTask(
     dependencies,
     breakIntoSubtasks,
     enabledWorkflowSteps,
+    workflowId,
     assignedAgentId,
     modelPresetId,
     modelProvider,
@@ -407,6 +413,7 @@ export async function createTask(
       dependencies,
       breakIntoSubtasks,
       enabledWorkflowSteps,
+      workflowId,
       assignedAgentId,
       modelPresetId,
       modelProvider,
@@ -559,6 +566,10 @@ export interface BoardWorkflowColumn {
 // WorkflowFieldDefinition, WorkflowFieldType, WorkflowFieldOption, WorkflowFieldRender
 // are re-exported from @fusion/core above (KTD-13/14).
 export type { WorkflowFieldDefinition, WorkflowFieldType, WorkflowFieldOption, WorkflowFieldRender };
+
+// Workflow-settings (U6/KTD-1) declaration types re-exported from @fusion/core so
+// the WorkflowSettingsPanel imports them from `../api` like the field types.
+export type { WorkflowSettingDefinition, WorkflowSettingType, WorkflowSettingOption, WorkflowSettingRender, WorkflowSettingRejection };
 
 export interface BoardWorkflowDefinition {
   id: string;
@@ -5101,10 +5112,150 @@ export function deleteWorkflow(id: string, projectId?: string): Promise<void> {
   return api<void>(withProjectId(`/workflows/${encodeURIComponent(id)}`, projectId), { method: "DELETE" });
 }
 
+/** The per-`(workflowId, project)` setting-value payload returned by the
+ *  workflow setting-value endpoints (U6/R5): the raw `stored` map, the
+ *  `effective` map (stored ?? declaration default, drop-on-orphan), and the
+ *  `orphaned` stored entries that no longer validate against the declarations. */
+export interface WorkflowSettingValuesPayload {
+  stored: Record<string, unknown>;
+  effective: Record<string, unknown>;
+  orphaned: Array<{ id: string; value: unknown }>;
+}
+
+/** Read the setting VALUES (stored/effective/orphaned) for a workflow in the
+ *  current project context (U6). The project is bound server-side to the
+ *  scoped store. */
+export function fetchWorkflowSettingValues(
+  id: string,
+  projectId?: string,
+): Promise<WorkflowSettingValuesPayload> {
+  return api<WorkflowSettingValuesPayload>(
+    withProjectId(`/workflows/${encodeURIComponent(id)}/setting-values`, projectId),
+  );
+}
+
+/** Write setting VALUES for a workflow in the current project context (U6). The
+ *  `values` map is validated against the named workflow's declarations; a `null`
+ *  value deletes that key. A typed rejection surfaces as an ApiRequestError with
+ *  `status: 400` and `details.rejections: WorkflowSettingRejection[]`. */
+export function updateWorkflowSettingValues(
+  id: string,
+  values: Record<string, unknown>,
+  projectId?: string,
+): Promise<WorkflowSettingValuesPayload> {
+  return api<WorkflowSettingValuesPayload>(
+    withProjectId(`/workflows/${encodeURIComponent(id)}/setting-values`, projectId),
+    {
+      method: "PATCH",
+      body: JSON.stringify({ values }),
+    },
+  );
+}
+
 /** Preview the compiled steps for a workflow. Rejects (422) for non-linear graphs. */
 export function compileWorkflow(id: string, projectId?: string): Promise<{ steps: WorkflowStepInput[] }> {
   return api<{ steps: WorkflowStepInput[] }>(withProjectId(`/workflows/${encodeURIComponent(id)}/compile`, projectId), {
     method: "POST",
+  });
+}
+
+/** A workflow export envelope (U5/R9/KTD-5). `schemaVersion` is the SERVER's
+ *  schema version at export time — the import route version-gates against it
+ *  (the app build aliases @fusion/core to types-only, so the value can only come
+ *  from the server, never an app-side core import). */
+export interface WorkflowExportEnvelope {
+  fusionWorkflowExport: 1;
+  schemaVersion: number;
+  kind: import("@fusion/core").WorkflowDefinition["kind"];
+  name: string;
+  description: string;
+  ir: import("@fusion/core").WorkflowIr;
+  layout: import("@fusion/core").WorkflowDefinition["layout"];
+}
+
+/** Fetch a workflow's export envelope and trigger a browser download as
+ *  `<name>.workflow.json` (U5/R9). Built-ins are exportable too. Mirrors the
+ *  SettingsModal export pattern (Blob + createObjectURL + a.download). */
+export async function exportWorkflow(id: string, projectId?: string): Promise<WorkflowExportEnvelope> {
+  const envelope = await api<WorkflowExportEnvelope>(
+    withProjectId(`/workflows/${encodeURIComponent(id)}/export`, projectId),
+  );
+  const safeName = (envelope.name || "workflow").replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "workflow";
+  const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${safeName}.workflow.json`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  return envelope;
+}
+
+/** Result of POST /api/workflows/import (U5/R10). `strippedApprovalFlags` is set
+ *  when `cliSkipApproval`/`autoApprove` were removed from any node config at the
+ *  trust boundary; `warnings` lists non-blocking issues (e.g. unknown scriptName). */
+export interface ImportWorkflowResult {
+  workflow: import("@fusion/core").WorkflowDefinition;
+  strippedApprovalFlags: boolean;
+  warnings: string[];
+}
+
+/** Import a workflow export envelope (U5/R10). The server is the sole validator;
+ *  validation failures reject with an ApiError carrying the server message. */
+export function importWorkflow(
+  envelope: unknown,
+  projectId?: string,
+): Promise<ImportWorkflowResult> {
+  return api<ImportWorkflowResult>(withProjectId("/workflows/import", projectId), {
+    method: "POST",
+    body: JSON.stringify(envelope),
+  });
+}
+
+/** Result of the lazy legacy-step migration (U2/R5). `migrated` is the number of
+ *  newly converted user steps; `skipped` the count already migrated; when the
+ *  defaultOn subset was non-empty a combined "Migrated steps" workflow id is set. */
+export interface MigrateLegacyStepsResult {
+  migrated: number;
+  skipped: number;
+  combinedWorkflowId?: string;
+}
+
+/** Run the lazy, idempotent migration of legacy user-authored workflow steps into
+ *  fragments + a combined workflow (U2/R5). Safe to call repeatedly. */
+export function migrateLegacyWorkflowSteps(projectId?: string): Promise<MigrateLegacyStepsResult> {
+  return api<MigrateLegacyStepsResult>(withProjectId("/workflows/migrate-legacy-steps", projectId), {
+    method: "POST",
+  });
+}
+
+/** Result of POST /api/workflows/design (U10/R11). The server validates the
+ *  AI-produced IR (parseWorkflowIr), triages compilability (`interpreterOnly`),
+ *  and strips trust-escalating flags (`strippedApprovalFlags`). Persists nothing
+ *  — the client decides what to do with the returned graph. */
+export interface DesignWorkflowResult {
+  ir: import("@fusion/core").WorkflowIr;
+  layout: import("@fusion/core").WorkflowDefinition["layout"];
+  interpreterOnly: boolean;
+  strippedApprovalFlags: boolean;
+}
+
+/** Design a workflow from a natural-language prompt (U10/R11). When `workflowId`
+ *  is supplied the route reads that workflow's persisted IR server-side and folds
+ *  it into the prompt as the base graph (the client never posts IR). An optional
+ *  AbortSignal cancels the in-flight request. Validation failures reject with an
+ *  ApiError carrying the server message; 429 on rate limit. */
+export function designWorkflow(
+  input: { prompt: string; workflowId?: string },
+  projectId?: string,
+  signal?: AbortSignal,
+): Promise<DesignWorkflowResult> {
+  return api<DesignWorkflowResult>(withProjectId("/workflows/design", projectId), {
+    method: "POST",
+    body: JSON.stringify(input),
+    signal,
   });
 }
 
@@ -6226,6 +6377,7 @@ export interface SettingsImportResponse {
   success: boolean;
   globalCount: number;
   projectCount: number;
+  workflowSettingsCount: number;
   error?: string;
 }
 
@@ -8394,10 +8546,36 @@ export function reorderTodoItems(listId: string, itemIds: string[], projectId?: 
 
 // ── AI Sessions (Background Tasks) ─────────────────────────────────────────
 
+/**
+ * Needs-attention variants for a CLI agent session (CLI Agent Executor, U11).
+ * Each carries pinned banner copy + action verbs:
+ *  - userExited        → Advance / Retry / Cancel task
+ *  - authFailed        → Re-authenticate / Retry
+ *  - resume-exhausted  → Relaunch fresh / Cancel task
+ */
+export type CliNeedsAttentionVariant = "userExited" | "authFailed" | "resume-exhausted";
+
 export interface AiSessionSummary {
   id: string;
-  type: "planning" | "subtask" | "mission_interview" | "milestone_interview" | "slice_interview";
-  status: "draft" | "generating" | "awaiting_input" | "complete" | "error";
+  type:
+    | "planning"
+    | "subtask"
+    | "mission_interview"
+    | "milestone_interview"
+    | "slice_interview"
+    | "cli-agent";
+  status:
+    | "draft"
+    | "generating"
+    | "awaiting_input"
+    | "complete"
+    | "error"
+    | "waiting_on_input"
+    | "needs_attention";
+  /** For cli-agent sessions: which needs-attention variant (drives pinned copy/actions). */
+  cliVariant?: CliNeedsAttentionVariant;
+  /** Underlying CLI session id, for action wiring (confirm-advance / re-auth / etc.). */
+  cliSessionId?: string;
   title: string;
   /** Server-derived preview of the in-progress initialPlan; only set for draft planning sessions. */
   preview?: string;

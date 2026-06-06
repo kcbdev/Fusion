@@ -11,8 +11,8 @@ import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/p
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, relative, resolve } from "node:path";
-import type { AgentStore, AgentState, AgentCapability, AgentUpdateInput, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore } from "@fusion/core";
-import { listTraits, isBuiltinWorkflowId } from "@fusion/core";
+import type { AgentState, AgentCapability, AgentUpdateInput, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore, WorkflowSettingDefinition } from "@fusion/core";
+import { listTraits, isBuiltinWorkflowId, AgentStore, validateColumnAgentBindings, ColumnAgentBindingError, stripApprovalBypassFlags, WorkflowSettingRejectionError, resolveEffectiveSettingsById, resolveWorkflowIrById, findOrphanedSettingValues, BUILTIN_WORKFLOW_SETTINGS } from "@fusion/core";
 import { promoteHeldTask } from "./hold-release.js";
 import { DASHBOARD_USER_ID, canAgentTakeImplementationTaskForExplicitRouting, dailyMemoryPath, ensureOpenClawMemoryFiles, extractAgentProvisioningRequest, formatRoleMismatchReason, getMemoryBackendCapabilities, getProjectMemory, isEphemeralAgent, memoryLongTermPath, normalizeMessageParticipant, reconcileDeterministicDuplicate, resolveAgentProvisioningPolicy, resolveMemoryBackend, resolveResearchSettings, resolveTaskGithubTracking, resolveTitleSummarizerSettingsModel, runDeterministicDuplicateGuard, scheduleQmdProjectMemoryRefresh, searchProjectMemory, shouldSkipBackgroundQmdRefresh, summarizeTitle } from "@fusion/core";
 import { ResearchOrchestrator } from "./research-orchestrator.js";
@@ -102,6 +102,14 @@ export const workflowCreateParams = Type.Object({
       description: "Optional node layout map keyed by node id.",
     }),
   ),
+  confirm_policy_escalation: Type.Optional(
+    Type.Boolean({
+      description:
+        "Set true to confirm binding a column to an agent whose permission policy is broader " +
+        "(more privileged) than the project default. Required when such a binding is present; " +
+        "the create is otherwise rejected naming the offending column.",
+    }),
+  ),
 });
 
 export const workflowUpdateParams = Type.Object({
@@ -117,10 +125,42 @@ export const workflowUpdateParams = Type.Object({
         "Required to resolve an OccupiedColumns conflict; the target must exist in the new IR.",
     }),
   ),
+  confirm_policy_escalation: Type.Optional(
+    Type.Boolean({
+      description:
+        "Set true to confirm binding a column to an agent whose permission policy is broader " +
+        "(more privileged) than the project default. Required when such a binding is present; " +
+        "the update is otherwise rejected naming the offending column.",
+    }),
+  ),
 });
 
 export const workflowDeleteParams = Type.Object({
   workflow_id: Type.String({ description: "The workflow definition ID to delete (built-ins cannot be deleted)." }),
+});
+
+export const workflowSettingsParams = Type.Object({
+  action: Type.Union([Type.Literal("get"), Type.Literal("set")], {
+    description:
+      "`get` reads the stored setting VALUES plus the engine-effective values for the workflow; " +
+      "`set` writes values (requires `values`).",
+  }),
+  workflow_id: Type.String({
+    description:
+      "The workflow whose setting VALUES to read/write (e.g. 'WF-003', or a 'builtin:*' id). " +
+      "Values are scoped per (workflow, project). Built-in workflow VALUES are writable even though " +
+      "built-in DECLARATIONS are not (declarations are edited via the workflow IR's `settings`). " +
+      "Values are validated against THIS workflow's declared settings (use fn_workflow_get to inspect them).",
+  }),
+  values: Type.Optional(
+    Type.Record(Type.String(), Type.Unknown(), {
+      description:
+        "For action='set': a map of settingId → value to write. A `null` value DELETES the override " +
+        "(null-as-delete). Each value is validated against the named workflow's declaration; on ANY " +
+        "rejection (unknown-setting/type-mismatch/enum-violation/no-settings-defined) nothing is " +
+        "persisted and the typed rejection list is returned.",
+    }),
+  ),
 });
 
 export const traitListParams = Type.Object({});
@@ -1198,10 +1238,55 @@ export function createTaskPromoteTool(store: TaskStore, currentTaskId: string): 
 }
 
 /**
+ * Shared write-time column-agent gate for the `fn_workflow_*` tools (R11/R13).
+ * Runs the SAME `validateColumnAgentBindings` check the dashboard route runs, so
+ * an agent cannot persist a binding the UI would reject (existence +
+ * policy-escalation). Constructs a per-call AgentStore from the store's fusion
+ * dir (the connection is process-cached) and feeds it the project settings.
+ *
+ * A {@link ColumnAgentBindingError} propagates unchanged; each tool's catch
+ * surfaces its message (which names the column and, for an escalation, instructs
+ * passing `confirm_policy_escalation: true`).
+ */
+async function assertWorkflowColumnAgentBindings(
+  store: TaskStore,
+  ir: unknown,
+  confirmPolicyEscalation: boolean,
+): Promise<void> {
+  const columns = (ir as { columns?: unknown })?.columns;
+  if (!Array.isArray(columns) || !columns.some((c) => c?.agent?.agentId)) return;
+  const agentStore = new AgentStore({ rootDir: store.getFusionDir() });
+  await agentStore.init();
+  const settings = await store.getSettings();
+  await validateColumnAgentBindings({ ir, agentStore, settings, confirmPolicyEscalation });
+}
+
+/**
+ * Render a {@link ColumnAgentBindingError} as a structured tool error result.
+ * Re-phrases the escalation guidance with the tool's snake_case flag name
+ * (`confirm_policy_escalation`) rather than the route's camelCase variant.
+ */
+function columnAgentBindingErrorResult(err: ColumnAgentBindingError) {
+  const text =
+    err.reason === "policy-escalation"
+      ? `Column '${err.columnId}' binds agent '${err.agentId}' whose permission policy is broader than ` +
+        `the project default; pass confirm_policy_escalation: true to confirm.`
+      : err.message;
+  return {
+    content: [{ type: "text" as const, text: `ERROR: ${text}` }],
+    details: { columnId: err.columnId, agentId: err.agentId, reason: err.reason },
+    isError: true as const,
+  };
+}
+
+/**
  * Create a `fn_workflow_create` tool — a thin wrapper over the store's workflow
  * definition create. The IR is validated server-side; a malformed graph rejects.
  */
-export function createWorkflowCreateTool(store: TaskStore): ToolDefinition {
+export function createWorkflowCreateTool(
+  store: TaskStore,
+  opts?: WorkflowAuthoringToolOptions,
+): ToolDefinition {
   return {
     name: "fn_workflow_create",
     label: "Create Workflow",
@@ -1222,24 +1307,43 @@ export function createWorkflowCreateTool(store: TaskStore): ToolDefinition {
       "`code` node {source, timeoutMs?} runs sandboxed TypeScript returning {outcome?, contextPatch?, customFields?}. " +
       "Declare task documents via `artifacts: [{key, title?, producedBy?, role?}]` and custom task fields via " +
       "`fields: [{id, name, type, required?, default?, options?, render?}]` (types: string/text/number/boolean/" +
-      "enum/multi-enum/date/url; render.placement card|detail|detail-section, render.badge for card chips).",
+      "enum/multi-enum/date/url; render.placement card|detail|detail-section, render.badge for card chips).\n" +
+      "Declare typed workflow SETTINGS via `settings: [{id, name, type, default?, options?, description?, render?}]` " +
+      "(types: string/text/number/boolean/enum/multi-enum; settings have no card/detail placement — widget only). " +
+      "Settings carry workflow-scoped policy (step timeouts, review gates, model lanes); their per-project VALUES are " +
+      "read/written via fn_workflow_settings, not here.\n" +
+      "Bind a column to a permanent agent via `columns[].agent: { agentId, mode }`: `mode:'defer'` applies the " +
+      "column agent only when the work carries no own agent/model settings, while `mode:'override'` supersedes " +
+      "node/task settings wholesale. The bound agent must exist; if its permission policy is broader than the " +
+      "project default, pass `confirm_policy_escalation: true` to confirm (the create is otherwise rejected).",
     parameters: workflowCreateParams,
     execute: async (_id: string, params: Static<typeof workflowCreateParams>) => {
       try {
+        let approvalNote = "";
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let ir = params.ir as any;
+        if (opts?.stripApprovalFlags) {
+          const result = stripApprovalBypassFlags(ir);
+          ir = result.ir;
+          if (result.stripped) approvalNote = " (approval-bypass flags removed)";
+        }
+        await assertWorkflowColumnAgentBindings(store, ir, params.confirm_policy_escalation === true);
         const created = await store.createWorkflowDefinition({
           name: params.name,
           description: params.description,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ir: params.ir as any,
+          ir,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           layout: params.layout as any,
         });
         return {
-          content: [{ type: "text" as const, text: `Created workflow ${created.id} (${created.name}).` }],
+          content: [{ type: "text" as const, text: `Created workflow ${created.id} (${created.name}).${approvalNote}` }],
           details: { workflowId: created.id, name: created.name },
         };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
+        if (err instanceof ColumnAgentBindingError) {
+          return columnAgentBindingErrorResult(err);
+        }
         return {
           content: [{ type: "text" as const, text: `ERROR: Failed to create workflow: ${err?.message ?? err}` }],
           details: {},
@@ -1256,7 +1360,10 @@ export function createWorkflowCreateTool(store: TaskStore): ToolDefinition {
  * throws an OccupiedColumnsError; we surface it as a structured response carrying
  * the per-column occupant counts so the agent can retry with `rehome_to`.
  */
-export function createWorkflowUpdateTool(store: TaskStore): ToolDefinition {
+export function createWorkflowUpdateTool(
+  store: TaskStore,
+  opts?: WorkflowAuthoringToolOptions,
+): ToolDefinition {
   return {
     name: "fn_workflow_update",
     label: "Update Workflow",
@@ -1265,26 +1372,46 @@ export function createWorkflowUpdateTool(store: TaskStore): ToolDefinition {
       "If an IR change removes a column that still holds cards, the update is blocked and returns the " +
       "occupied columns — retry with rehome_to set to a column id that survives in the new IR. " +
       "The IR accepts the same step-inversion constructs as fn_workflow_create (foreach with mode/isolation/" +
-      "concurrency, step-execute, step-review, parse-steps, code nodes, rework edges, artifacts, fields). " +
-      "Editing `fields` orphans (never destroys) existing task values for removed/incompatible fields.",
+      "concurrency, step-execute, step-review, parse-steps, code nodes, rework edges, artifacts, fields, settings). " +
+      "Editing `fields` orphans (never destroys) existing task values for removed/incompatible fields. " +
+      "Editing `settings` declarations changes the schema; orphaned setting VALUES are dropped on resolution " +
+      "(the engine never sees a value that no longer validates). Built-in workflow declarations cannot be edited; " +
+      "their per-project VALUES are written via fn_workflow_settings.\n" +
+      "Bind a column to a permanent agent via `columns[].agent: { agentId, mode }`: `mode:'defer'` applies the " +
+      "column agent only when the work carries no own agent/model settings, while `mode:'override'` supersedes " +
+      "node/task settings wholesale. The bound agent must exist; if its permission policy is broader than the " +
+      "project default, pass `confirm_policy_escalation: true` to confirm (the update is otherwise rejected).",
     parameters: workflowUpdateParams,
     execute: async (_id: string, params: Static<typeof workflowUpdateParams>) => {
       try {
+        let approvalNote = "";
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let ir = params.ir as any;
+        if (ir !== undefined && ir !== null) {
+          if (opts?.stripApprovalFlags) {
+            const result = stripApprovalBypassFlags(ir);
+            ir = result.ir;
+            if (result.stripped) approvalNote = " (approval-bypass flags removed)";
+          }
+          await assertWorkflowColumnAgentBindings(store, ir, params.confirm_policy_escalation === true);
+        }
         const updated = await store.updateWorkflowDefinition(params.workflow_id, {
           name: params.name,
           description: params.description,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ir: params.ir as any,
+          ir,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           layout: params.layout as any,
           rehomeTo: params.rehome_to,
         });
         return {
-          content: [{ type: "text" as const, text: `Updated workflow ${updated.id} (${updated.name}).` }],
+          content: [{ type: "text" as const, text: `Updated workflow ${updated.id} (${updated.name}).${approvalNote}` }],
           details: { workflowId: updated.id, name: updated.name },
         };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
+        if (err instanceof ColumnAgentBindingError) {
+          return columnAgentBindingErrorResult(err);
+        }
         // Surface the typed OccupiedColumnsError as a structured, retryable result.
         if (err?.name === "OccupiedColumnsError") {
           const occupancies = err.occupancies ?? [];
@@ -1358,6 +1485,150 @@ export function createWorkflowDeleteTool(store: TaskStore): ToolDefinition {
 }
 
 /**
+ * Create a `fn_workflow_settings` tool — read/write the per-`(workflow, project)`
+ * setting VALUES that tune a workflow's policy (step timeouts, review gates, model
+ * lanes). This is the agent-native parity with the editor's workflow settings
+ * panel and mirrors the two-path contract from U2:
+ *
+ *  - DECLARATIONS (the typed schema) live in the workflow IR's `settings` array and
+ *    are authored via fn_workflow_create/update; built-in declarations are not
+ *    editable (the store's built-in guard rejects an IR edit).
+ *  - VALUES are written here against the NAMED workflow's declarations via
+ *    {@link store.updateWorkflowSettingValues}. Built-in workflow VALUES are
+ *    writable (per-project tuning of `builtin:coding`). An invalid value surfaces
+ *    the typed rejection list ({@link WorkflowSettingRejectionError}) and persists
+ *    nothing — the same contract HTTP/dashboard writers see.
+ *
+ * `action: "get"` returns both the raw `stored` values and the engine `effective`
+ * values (post drop-on-orphan), so an agent sees what it wrote and what the engine
+ * will actually consume.
+ */
+/**
+ * Resolve the setting DECLARATIONS for a workflow. Mirrors the store's private
+ * `resolveWorkflowSettingDeclarations` (and the dashboard route helper of the
+ * same shape): the resolved IR's `settings` when present, else the built-in
+ * catalog for built-in ids. Used to compute the `orphaned` value entries.
+ */
+async function resolveWorkflowSettingDeclarationsForTool(
+  store: TaskStore,
+  workflowId: string,
+): Promise<WorkflowSettingDefinition[] | undefined> {
+  const ir = await resolveWorkflowIrById(store, workflowId);
+  const declared = ir.version === "v2" ? ir.settings : undefined;
+  if (declared && declared.length > 0) return declared;
+  if (isBuiltinWorkflowId(workflowId)) return BUILTIN_WORKFLOW_SETTINGS;
+  return declared;
+}
+
+export function createWorkflowSettingsTool(store: TaskStore): ToolDefinition {
+  return {
+    name: "fn_workflow_settings",
+    label: "Workflow Settings",
+    description:
+      "Read or write a workflow's setting VALUES (the per-(workflow, project) policy knobs: step " +
+      "timeouts, review/approval gates, per-phase model lanes). action='get' returns both the raw " +
+      "`stored` values and the engine `effective` values (declaration defaults filled in, orphaned " +
+      "values dropped). action='set' writes `values` against the NAMED workflow's declared settings; " +
+      "a `null` value clears an override. Built-in workflow VALUES are writable, but built-in " +
+      "DECLARATIONS are not — declarations are authored in the workflow IR's `settings` array via " +
+      "fn_workflow_create/update. An invalid value returns the typed rejection list and persists nothing.",
+    parameters: workflowSettingsParams,
+    execute: async (_id: string, params: Static<typeof workflowSettingsParams>) => {
+      const workflowId = params.workflow_id?.trim();
+      if (!workflowId) {
+        return {
+          content: [{ type: "text" as const, text: "ERROR: workflow_id is required." }],
+          details: {},
+          isError: true,
+        };
+      }
+      let projectId: string;
+      try {
+        // Resolve the project key the same way the engine resolver does, so agent
+        // reads/writes share the store's single project scope.
+        projectId = store.getWorkflowSettingsProjectId();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } catch (err: any) {
+        return {
+          content: [{ type: "text" as const, text: `ERROR: Failed to resolve project: ${err?.message ?? err}` }],
+          details: {},
+          isError: true,
+        };
+      }
+
+      if (params.action === "get") {
+        try {
+          const stored = store.getWorkflowSettingValues(workflowId, projectId);
+          const effective = await resolveEffectiveSettingsById(store, workflowId, projectId);
+          const declarations = await resolveWorkflowSettingDeclarationsForTool(store, workflowId);
+          const orphaned = findOrphanedSettingValues(declarations, stored);
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({ workflowId, stored, effective, orphaned }, null, 2),
+            }],
+            details: { workflowId, stored, effective, orphaned },
+          };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } catch (err: any) {
+          return {
+            content: [{ type: "text" as const, text: `ERROR: Failed to read workflow settings: ${err?.message ?? err}` }],
+            details: {},
+            isError: true,
+          };
+        }
+      }
+
+      // action === "set"
+      const values = params.values;
+      if (!values || Object.keys(values).length === 0) {
+        return {
+          content: [{ type: "text" as const, text: "ERROR: action='set' requires a non-empty `values` map." }],
+          details: { error: "No values provided" },
+          isError: true,
+        };
+      }
+      try {
+        const next = await store.updateWorkflowSettingValues(workflowId, projectId, values);
+        const effective = await resolveEffectiveSettingsById(store, workflowId, projectId);
+        const declarations = await resolveWorkflowSettingDeclarationsForTool(store, workflowId);
+        const orphaned = findOrphanedSettingValues(declarations, next);
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Updated workflow settings for ${workflowId}: ${JSON.stringify(next)}`,
+          }],
+          details: { workflowId, stored: next, effective, orphaned },
+        };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } catch (err: any) {
+        // Surface the typed rejection list the same way other value writers do
+        // (mirrors the custom-field rejection contract) — flat, JSON-safe, with
+        // machine-stable codes the agent can branch on and retry.
+        if (err instanceof WorkflowSettingRejectionError || err?.name === "WorkflowSettingRejectionError") {
+          const rejections = err.rejections ?? [];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const summary = rejections.map((r: any) => `${r.settingId} (${r.code})`).join(", ");
+          return {
+            content: [{
+              type: "text" as const,
+              text: `ERROR: Rejected workflow setting value(s): ${summary}. Nothing was persisted.`,
+            }],
+            details: { workflowId, rejections },
+            isError: true,
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: `ERROR: Failed to write workflow settings: ${err?.message ?? err}` }],
+          details: {},
+          isError: true,
+        };
+      }
+    },
+  };
+}
+
+/**
  * Create a `fn_trait_list` tool that returns the trait catalog from
  * {@link listTraits} — the column-behavior building blocks (id, name, flags)
  * used when authoring workflow columns.
@@ -1398,6 +1669,45 @@ export function createTraitListTool(): ToolDefinition {
       }
     },
   };
+}
+
+/**
+ * Assemble the full workflow-authoring tool surface for a single store-scoped
+ * lane (chat / planning / executor): the six `fn_workflow_*` tools plus
+ * `fn_trait_list` (trait vocabulary needed to author/update workflow IR).
+ *
+ * Centralizing the list keeps the chat and planning lanes from drifting away
+ * from the executor's set as new workflow tools are added. `currentTaskId` is
+ * the default task for `fn_workflow_select`; lanes with no ambient task pass a
+ * placeholder (an agent can still target any task via the `task_id` param).
+ */
+/**
+ * Options for the workflow authoring tool set.
+ *
+ * `stripApprovalFlags` removes the `cliSkipApproval`/`autoApprove` approval-
+ * bypass flags from every node config (incl. nested foreach templates) before
+ * the create/update tools persist the IR. Chat and planning lanes are prompt-
+ * injectable, so they pass `true`; the executor lane (project-owner escape
+ * hatch) omits it so the dashboard editor can deliberately set those flags.
+ */
+export interface WorkflowAuthoringToolOptions {
+  stripApprovalFlags?: boolean;
+}
+
+export function createWorkflowAuthoringTools(
+  store: TaskStore,
+  currentTaskId: string,
+  opts?: WorkflowAuthoringToolOptions,
+): ToolDefinition[] {
+  return [
+    createWorkflowListTool(store),
+    createWorkflowGetTool(store),
+    createWorkflowSelectTool(store, currentTaskId),
+    createWorkflowCreateTool(store, opts),
+    createWorkflowUpdateTool(store, opts),
+    createWorkflowDeleteTool(store),
+    createTraitListTool(),
+  ];
 }
 
 export function createMemorySearchTool(rootDir: string, settings?: MemoryToolSettings, options?: MemoryToolOptions): ToolDefinition {

@@ -10,6 +10,8 @@ import type {
   WorkflowForeachConfig,
   WorkflowFieldDefinition,
   WorkflowFieldType,
+  WorkflowSettingDefinition,
+  WorkflowSettingType,
 } from "./workflow-ir-types.js";
 
 export class WorkflowIrError extends Error {
@@ -56,6 +58,27 @@ const FIELD_RENDER_PLACEMENTS: ReadonlySet<string> = new Set([
 ]);
 
 const FIELD_RENDER_WIDGETS: ReadonlySet<string> = new Set([
+  "select",
+  "radio",
+  "chips",
+  "input",
+  "textarea",
+  "toggle",
+]);
+
+/** Workflow-settings (U1) value-type whitelist (mirrors WORKFLOW_FIELD_TYPES). */
+export const WORKFLOW_SETTING_TYPES: ReadonlySet<WorkflowSettingType> = new Set([
+  "string",
+  "text",
+  "number",
+  "boolean",
+  "enum",
+  "multi-enum",
+]);
+
+/** Workflow-settings render-widget whitelist (mirrors FIELD_RENDER_WIDGETS;
+ *  no placement — settings have no card/detail placement). */
+export const SETTING_RENDER_WIDGETS: ReadonlySet<string> = new Set([
   "select",
   "radio",
   "chips",
@@ -271,7 +294,11 @@ function reachableFrom(
  *  - rework edges legal only when both endpoints are inside this template;
  *  - step-review verdict routing rules (KTD-4).
  */
-function validateForeach(node: WorkflowIrNode, topLevelNodeIds: Set<string>): void {
+function validateForeach(
+  node: WorkflowIrNode,
+  topLevelNodeIds: Set<string>,
+  columnIds: Set<string>,
+): void {
   const cfg = node.config as Partial<WorkflowForeachConfig> | undefined;
   if (!cfg || cfg.source !== "task-steps") {
     throw new WorkflowIrError(
@@ -341,11 +368,18 @@ function validateForeach(node: WorkflowIrNode, topLevelNodeIds: Set<string>): vo
     );
   }
 
-  // No nested foreach.
+  // No nested foreach. Also: a template node's declared `column` must resolve to a
+  // top-level column id (column-agent plan KTD-1) — otherwise a dangling reference
+  // is a silent no-binding no-op at runtime instead of a typed authoring error.
   for (const inner of templateNodes) {
     if (inner.kind === "foreach") {
       throw new WorkflowIrError(
         `foreach node '${node.id}' template may not contain a nested foreach ('${inner.id}')`,
+      );
+    }
+    if (inner.column !== undefined && !columnIds.has(inner.column)) {
+      throw new WorkflowIrError(
+        `Workflow node '${inner.id}' references undefined column '${inner.column}'`,
       );
     }
   }
@@ -726,6 +760,139 @@ function validateFields(fields: WorkflowFieldDefinition[] | undefined): void {
   }
 }
 
+/** Validate that a setting's `default` conforms to its own type/options (U1).
+ *  Unlike `validateFields`, settings validate defaults because the engine's
+ *  effective-settings resolver (U3) consumes the default directly — a malformed
+ *  default would feed garbage into execution. */
+function validateSettingDefault(setting: WorkflowSettingDefinition): void {
+  const value = setting.default;
+  if (value === undefined) return;
+  const id = setting.id;
+  switch (setting.type) {
+    case "string":
+    case "text":
+      if (typeof value !== "string") {
+        throw new WorkflowIrError(
+          `Workflow setting '${id}' default must be a string for type '${setting.type}'`,
+        );
+      }
+      break;
+    case "number":
+      if (typeof value !== "number" || !Number.isFinite(value)) {
+        throw new WorkflowIrError(
+          `Workflow setting '${id}' default must be a finite number`,
+        );
+      }
+      break;
+    case "boolean":
+      if (typeof value !== "boolean") {
+        throw new WorkflowIrError(`Workflow setting '${id}' default must be a boolean`);
+      }
+      break;
+    case "enum": {
+      const allowed = new Set((setting.options ?? []).map((o) => o.value));
+      if (typeof value !== "string" || !allowed.has(value)) {
+        throw new WorkflowIrError(
+          `Workflow setting '${id}' default '${String(value)}' is not one of its enum options`,
+        );
+      }
+      break;
+    }
+    case "multi-enum": {
+      const allowed = new Set((setting.options ?? []).map((o) => o.value));
+      if (!Array.isArray(value)) {
+        throw new WorkflowIrError(
+          `Workflow setting '${id}' default must be an array for type 'multi-enum'`,
+        );
+      }
+      for (const entry of value) {
+        if (typeof entry !== "string" || !allowed.has(entry)) {
+          throw new WorkflowIrError(
+            `Workflow setting '${id}' default '${String(entry)}' is not one of its enum options`,
+          );
+        }
+      }
+      break;
+    }
+  }
+}
+
+/** Validate `settings` declarations (U1, R1). Mirrors `validateFields`: non-empty
+ *  unique ids, type whitelist, options iff enum-kind, unique option values, render
+ *  widget whitelist — plus default validation (settings need it; see
+ *  `validateSettingDefault`). */
+function validateSettings(settings: WorkflowSettingDefinition[] | undefined): void {
+  if (settings === undefined) return;
+  if (!Array.isArray(settings)) {
+    throw new WorkflowIrError("Workflow IR settings must be an array");
+  }
+  const seen = new Set<string>();
+  for (const setting of settings) {
+    if (!setting || typeof setting.id !== "string" || setting.id === "") {
+      throw new WorkflowIrError("Workflow setting must have a non-empty id");
+    }
+    if (seen.has(setting.id)) {
+      throw new WorkflowIrError(`Workflow IR has duplicate setting id '${setting.id}'`);
+    }
+    seen.add(setting.id);
+    if (typeof setting.name !== "string" || setting.name === "") {
+      throw new WorkflowIrError(
+        `Workflow setting '${setting.id}' must have a non-empty name`,
+      );
+    }
+    if (!WORKFLOW_SETTING_TYPES.has(setting.type)) {
+      throw new WorkflowIrError(
+        `Workflow setting '${setting.id}' has unknown type '${String(setting.type)}'`,
+      );
+    }
+    const isEnum = setting.type === "enum" || setting.type === "multi-enum";
+    if (isEnum) {
+      if (!Array.isArray(setting.options) || setting.options.length === 0) {
+        throw new WorkflowIrError(
+          `Workflow setting '${setting.id}' of type '${setting.type}' must declare non-empty options`,
+        );
+      }
+      const optSeen = new Set<string>();
+      for (const opt of setting.options) {
+        if (!opt || typeof opt.value !== "string" || opt.value === "") {
+          throw new WorkflowIrError(
+            `Workflow setting '${setting.id}' option must have a non-empty value`,
+          );
+        }
+        if (typeof opt.label !== "string" || opt.label === "") {
+          throw new WorkflowIrError(
+            `Workflow setting '${setting.id}' option '${opt.value}' must have a non-empty label`,
+          );
+        }
+        if (optSeen.has(opt.value)) {
+          throw new WorkflowIrError(
+            `Workflow setting '${setting.id}' has duplicate option value '${opt.value}'`,
+          );
+        }
+        optSeen.add(opt.value);
+      }
+    } else if (setting.options !== undefined) {
+      throw new WorkflowIrError(
+        `Workflow setting '${setting.id}' of type '${setting.type}' must not declare options`,
+      );
+    }
+    if (setting.description !== undefined && typeof setting.description !== "string") {
+      throw new WorkflowIrError(
+        `Workflow setting '${setting.id}' description must be a string`,
+      );
+    }
+    if (setting.render !== undefined) {
+      const r = setting.render;
+      if (r.widget !== undefined && !SETTING_RENDER_WIDGETS.has(r.widget)) {
+        throw new WorkflowIrError(
+          `Workflow setting '${setting.id}' render.widget '${String(r.widget)}' is not allowed`,
+        );
+      }
+    }
+    validateSettingDefault(setting);
+  }
+}
+
 function validateColumns(ir: WorkflowIrV2): void {
   if (!Array.isArray(ir.columns)) {
     throw new WorkflowIrError("Workflow IR v2 columns must be an array");
@@ -742,6 +909,29 @@ function validateColumns(ir: WorkflowIrV2): void {
     if (!Array.isArray(column.traits)) {
       throw new WorkflowIrError(`Workflow IR column '${column.id}' traits must be an array`);
     }
+    validateColumnAgent(column);
+  }
+}
+
+/** Validate a column's optional permanent-agent binding (column-agent plan KTD-1).
+ *  Mirrors the `validateFields` early-return shape: absent → no-op; present →
+ *  `agentId` must be a non-empty string and `mode` exactly `defer`/`override`.
+ *  Agent existence is NOT checked here (no agent store at the IR layer). */
+function validateColumnAgent(column: WorkflowIrColumn): void {
+  const agent = column.agent;
+  if (agent === undefined) return;
+  if (!agent || typeof agent !== "object") {
+    throw new WorkflowIrError(`Workflow IR column '${column.id}' agent must be an object`);
+  }
+  if (typeof agent.agentId !== "string" || agent.agentId === "") {
+    throw new WorkflowIrError(
+      `Workflow IR column '${column.id}' agent must have a non-empty agentId`,
+    );
+  }
+  if (agent.mode !== "defer" && agent.mode !== "override") {
+    throw new WorkflowIrError(
+      `Workflow IR column '${column.id}' agent mode must be 'defer' or 'override' (got '${String(agent.mode)}')`,
+    );
   }
 }
 
@@ -775,12 +965,13 @@ function validateV2(ir: WorkflowIrV2): void {
   const topLevelIds = new Set(ir.nodes.map((n) => n.id));
   validateStepExecutePlacement(ir.nodes);
   for (const node of ir.nodes) {
-    if (node.kind === "foreach") validateForeach(node, topLevelIds);
+    if (node.kind === "foreach") validateForeach(node, topLevelIds, columnIds);
   }
   validateStepReviewRouting(ir.nodes, outgoing, nodesById, false);
   validateParseStepsNodes(ir);
   validateCodeNodes(ir.nodes);
   validateFields(ir.fields);
+  validateSettings(ir.settings);
 
   // Rework edges are legal only intra-template; any rework edge at the top level
   // is rejected (template rework edges are validated inside validateForeach and
@@ -869,8 +1060,13 @@ export function downgradeIrToV1IfPure(ir: WorkflowIr): WorkflowIr {
     if (!V1_NODE_KINDS.has(node.kind)) return ir;
   }
 
-  // Step-inversion declarations (artifacts/fields) are v2-only features.
-  if ((ir.artifacts && ir.artifacts.length > 0) || (ir.fields && ir.fields.length > 0)) {
+  // Step-inversion declarations (artifacts/fields) and workflow settings (U1)
+  // are v2-only features.
+  if (
+    (ir.artifacts && ir.artifacts.length > 0) ||
+    (ir.fields && ir.fields.length > 0) ||
+    (ir.settings && ir.settings.length > 0)
+  ) {
     return ir;
   }
 
@@ -884,6 +1080,9 @@ export function downgradeIrToV1IfPure(ir: WorkflowIr): WorkflowIr {
     if (col.id !== expectedId || col.name !== expectedId || col.traits.length !== 0) {
       return ir;
     }
+    // A permanent-agent binding is a v2-only feature (column-agent plan, R9): a
+    // graph that staffs a column can never round-trip through a pre-v2 binary.
+    if (col.agent !== undefined) return ir;
   }
 
   // Every node must sit in its default seam-derived column. A node placed
@@ -905,4 +1104,43 @@ export function downgradeIrToV1IfPure(ir: WorkflowIr): WorkflowIr {
 
 export function serializeWorkflowIr(ir: WorkflowIr): string {
   return JSON.stringify(ir, null, 2);
+}
+
+/**
+ * Strip the trust-escalating `cliSkipApproval`/`autoApprove` flags from every
+ * node config in an IR, recursing into foreach `config.template.nodes` at any
+ * nesting depth (foreach-in-foreach). Mutates the passed IR in place and returns
+ * it alongside a `stripped` flag indicating whether anything was removed.
+ *
+ * These flags bypass the CLI first-run approval gate (see executor.ts). They are
+ * legitimate only for workflows authored through the trusted dashboard editor /
+ * executor lane; on prompt-injectable surfaces (chat/planning authoring tools,
+ * import, AI design) they must be removed at the write boundary.
+ */
+export function stripApprovalBypassFlags(ir: WorkflowIr): { ir: WorkflowIr; stripped: boolean } {
+  const nodes = (ir as { nodes?: WorkflowIrNode[] }).nodes;
+  if (!Array.isArray(nodes)) return { ir, stripped: false };
+  let stripped = false;
+  const stripNode = (node: WorkflowIrNode): void => {
+    // Untrusted input may contain non-object entries (null, strings, numbers)
+    // in `nodes` / `template.nodes`; skip them rather than dereferencing.
+    if (!node || typeof node !== "object") return;
+    const cfg = node.config as Record<string, unknown> | undefined;
+    if (cfg && typeof cfg === "object") {
+      if ("cliSkipApproval" in cfg) {
+        delete cfg.cliSkipApproval;
+        stripped = true;
+      }
+      if ("autoApprove" in cfg) {
+        delete cfg.autoApprove;
+        stripped = true;
+      }
+      const template = (cfg as { template?: { nodes?: unknown } }).template;
+      if (template && Array.isArray(template.nodes)) {
+        for (const inner of template.nodes as WorkflowIrNode[]) stripNode(inner);
+      }
+    }
+  };
+  for (const node of nodes) stripNode(node);
+  return { ir, stripped };
 }

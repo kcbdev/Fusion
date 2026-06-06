@@ -149,7 +149,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 109;
+const SCHEMA_VERSION = 113;
 
 export { SCHEMA_VERSION };
 
@@ -385,6 +385,10 @@ CREATE TABLE IF NOT EXISTS workflow_steps (
   defaultOn INTEGER DEFAULT 0,
   modelProvider TEXT,
   modelId TEXT,
+  -- (workflow-editor-consolidation U1/U2) when this step has been migrated into a
+  -- fragment WorkflowDefinition, the fragment's id is stamped here so re-runs of
+  -- the lazy migration skip already-migrated rows (marker idempotency).
+  migrated_fragment_id TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL
 );
@@ -398,6 +402,11 @@ CREATE TABLE IF NOT EXISTS workflows (
   description TEXT NOT NULL DEFAULT '',
   ir TEXT NOT NULL,
   layout TEXT NOT NULL DEFAULT '{}',
+  -- (workflow-editor-consolidation U1, KTD-1) discriminates reusable single-node
+  -- "fragment" templates from full "workflow" definitions. Fragments never appear
+  -- in task workflow pickers, default-workflow selection, or compile/selection
+  -- paths. Legacy rows default to 'workflow'.
+  kind TEXT NOT NULL DEFAULT 'workflow',
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL
 );
@@ -615,6 +624,17 @@ CREATE TABLE IF NOT EXISTS workflow_run_step_instances (
   PRIMARY KEY (taskId, runId, foreachNodeId, stepIndex)
 );
 CREATE INDEX IF NOT EXISTS idx_workflow_run_step_instances_task_run ON workflow_run_step_instances(taskId, runId);
+
+-- Workflow setting values per (workflowId, projectId). JSON values map; validated
+-- against the named workflow's declared settings by the store write authority.
+CREATE TABLE IF NOT EXISTS workflow_settings (
+  workflowId TEXT NOT NULL,
+  projectId TEXT NOT NULL,
+  "values" TEXT DEFAULT '{}',
+  updatedAt TEXT NOT NULL,
+  PRIMARY KEY (workflowId, projectId)
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_settings_project ON workflow_settings(projectId);
 
 -- Task documents (key-value store per task with revision tracking)
 CREATE TABLE IF NOT EXISTS task_documents (
@@ -1283,6 +1303,23 @@ export const MIGRATION_ONLY_TABLE_SCHEMAS: Record<string, Record<string, string>
     updatedAt: "TEXT NOT NULL",
     cliSessionFile: "TEXT",
     inFlightGeneration: "TEXT",
+    cliExecutorAdapterId: "TEXT",
+  },
+  cli_sessions: {
+    id: "TEXT PRIMARY KEY",
+    taskId: "TEXT",
+    chatSessionId: "TEXT",
+    purpose: "TEXT NOT NULL",
+    projectId: "TEXT NOT NULL",
+    adapterId: "TEXT NOT NULL",
+    agentState: "TEXT NOT NULL DEFAULT 'starting'",
+    terminationReason: "TEXT",
+    nativeSessionId: "TEXT",
+    resumeAttempts: "INTEGER NOT NULL DEFAULT 0",
+    autonomyPosture: "TEXT",
+    worktreePath: "TEXT",
+    createdAt: "TEXT NOT NULL",
+    updatedAt: "TEXT NOT NULL",
   },
   chat_messages: {
     id: "TEXT PRIMARY KEY",
@@ -4346,7 +4383,81 @@ export class Database {
       });
     }
 
-    // Migration 109: Unified PR entity (PR-lifecycle-as-workflow-nodes, U1).
+    // Migration 109: Workflow editor consolidation. Adds workflows.kind
+    // (fragment vs workflow discriminator; existing rows default 'workflow')
+    // and workflow_steps.migrated_fragment_id (idempotent lazy step migration).
+    // Additive-only, idempotent (addColumnIfMissing guards); no backfill.
+    if (version < 109) {
+      this.applyMigration(109, () => {
+        this.addColumnIfMissing("workflows", "kind", "TEXT NOT NULL DEFAULT 'workflow'");
+        this.addColumnIfMissing("workflow_steps", "migrated_fragment_id", "TEXT");
+      });
+    }
+
+    // Migration 110: Durable CLI agent session records (CLI Agent Executor U1).
+    // cli_sessions — one row per long-lived CLI agent session. agentState ∈
+    // starting|ready|busy|waitingOnInput|done|dead|needsAttention; terminationReason
+    // ∈ completed|userExited|killed|crashed|authFailed|engineDeath; purpose ∈
+    // execute|planning|validator|ce|chat. Additive-only, idempotent.
+    if (version < 110) {
+      this.applyMigration(110, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS cli_sessions (
+            id TEXT PRIMARY KEY,
+            taskId TEXT,
+            chatSessionId TEXT,
+            purpose TEXT NOT NULL,
+            projectId TEXT NOT NULL,
+            adapterId TEXT NOT NULL,
+            agentState TEXT NOT NULL DEFAULT 'starting',
+            terminationReason TEXT,
+            nativeSessionId TEXT,
+            resumeAttempts INTEGER NOT NULL DEFAULT 0,
+            autonomyPosture TEXT,
+            worktreePath TEXT,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_cli_sessions_taskId ON cli_sessions(taskId);
+          CREATE INDEX IF NOT EXISTS idx_cli_sessions_chatSessionId ON cli_sessions(chatSessionId);
+          CREATE INDEX IF NOT EXISTS idx_cli_sessions_project_state ON cli_sessions(projectId, agentState);
+        `);
+      });
+    }
+
+    // Migration 111: per-chat-session cli-agent adapter selection (U12).
+    if (version < 111) {
+      this.applyMigration(111, () => {
+        if (this.hasTable("chat_sessions")) {
+          this.addColumnIfMissing("chat_sessions", "cliExecutorAdapterId", "TEXT");
+        }
+      });
+    }
+
+    // Migration 112: Workflow setting values (workflow-settings U2, KTD-2).
+    // Adds workflow_settings — one row per (workflowId, projectId) carrying a JSON
+    // map of setting values declared by the workflow's IR. Values are validated by
+    // the store write authority against the named workflow's declarations; built-in
+    // workflow ids are accepted for value writes even though their declarations are
+    // non-editable. Additive-only, idempotent (table-exists guard); no backfill.
+    // (Authored as 109 on the feature branch; renumbered as mainline migrations
+    // land first — currently 112.)
+    if (version < 112) {
+      this.applyMigration(112, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS workflow_settings (
+            workflowId TEXT NOT NULL,
+            projectId TEXT NOT NULL,
+            "values" TEXT DEFAULT '{}',
+            updatedAt TEXT NOT NULL,
+            PRIMARY KEY (workflowId, projectId)
+          );
+          CREATE INDEX IF NOT EXISTS idx_workflow_settings_project ON workflow_settings(projectId);
+        `);
+      });
+    }
+
+    // Migration 113: Unified PR entity (PR-lifecycle-as-workflow-nodes, U1).
     // Adds pull_requests + pull_request_thread_state and copies legacy
     // branch_groups PR fields into entities flagged unverified (R19) — that
     // legacy state may be fiction (prState:"open" was once written without a
@@ -4357,14 +4468,18 @@ export class Database {
     // re-runs the entire body at next boot. Every statement below is therefore
     // re-runnable — IF NOT EXISTS DDL and INSERT OR IGNORE keyed on the same
     // columns as the partial unique indexes.
-    if (version < 109) {
-      this.applyMigration(109, () => {
+    // (Authored as 109 on the feature branch; renumbered to 113 behind main's
+    // workflows.kind(109)/cli_sessions(110)/adapter(111)/workflow_settings(112).)
+    if (version < 113) {
+      this.applyMigration(113, () => {
         this.ensurePullRequestsSchemaCompatibility();
         const now = Date.now();
         // Copy legacy branch-group PRs (only groups that claim an open/merged PR)
         // into entities. INSERT OR IGNORE makes the copy idempotent across a
-        // re-run after a partial migration: rows that already landed collide on
-        // the open-source / open-branch / number indexes and are skipped.
+        // re-run after a partial migration: the deterministic PRIMARY KEY
+        // ('pr-bg-' || bg.id) collides for any row that already landed and is
+        // skipped (terminal-state rows are excluded from the open-* partial
+        // indexes, so the PK — not those indexes — is the re-run guard).
         this.db
           .prepare(
             `INSERT OR IGNORE INTO pull_requests
@@ -4404,7 +4519,7 @@ export class Database {
    * Idempotent schema reconciliation for the PR-entity tables. ensureSchema-
    * Compatibility adds missing *columns* but never indexes, so the partial
    * unique indexes must be (re)created here as well as in SCHEMA_SQL and the
-   * v109 migration block — a fresh-from-SCHEMA_SQL DB and a migrated DB must
+   * v113 migration block — a fresh-from-SCHEMA_SQL DB and a migrated DB must
    * converge on identical constraints. Mirrors ensureEvalTaskResultsSchema-
    * Compatibility.
    */
@@ -4528,7 +4643,8 @@ export class Database {
    */
   private addColumnIfMissing(table: string, column: string, definition: string): void {
     if (!this.hasColumn(table, column)) {
-      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+      // Quote the column identifier so reserved words (e.g. `values`) are legal.
+      this.db.exec(`ALTER TABLE ${table} ADD COLUMN "${column}" ${definition}`);
     }
   }
 
@@ -4546,7 +4662,8 @@ export class Database {
       return;
     }
 
-    this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    // Quote the column identifier so reserved words (e.g. `values`) are legal.
+    this.db.exec(`ALTER TABLE ${table} ADD COLUMN "${column}" ${definition}`);
     columns.add(column);
     if (cache) {
       cache.set(table, columns);

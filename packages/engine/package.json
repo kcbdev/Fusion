@@ -31,6 +31,7 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --silent=passed-only --reporter=dot --project=engine-default --project=engine-reliability",
+    "test:core": "vitest run --silent=passed-only --reporter=dot --project=engine-core",
     "test:slow": "vitest run --silent=passed-only --reporter=dot --project=engine-slow",
     "test:all": "vitest run --silent=passed-only --reporter=dot",
     "test:executor": "vitest run src/__tests__/executor-*.test.ts",
@@ -43,6 +44,7 @@
     "@earendil-works/pi-coding-agent": "^0.78.0",
     "cron-parser": "^5.5.0",
     "esbuild": "^0.25.12",
+    "node-pty": "npm:@homebridge/node-pty-prebuilt-multiarch@^0.13.1",
     "proper-lockfile": "^4.1.2",
     "typebox": "^1.0.0"
   },

@@ -10,8 +10,20 @@ One of Fusion's user-facing frontends — the browser dashboard and the terminal
 ### Global Settings
 User-level settings persisted server-side that apply across all Surfaces and all projects, as opposed to per-project settings. Values are validated at the write boundary — an invalid value is dropped rather than persisted — so every reader can trust what it loads.
 
+### Workflow Setting
+A typed setting declared by a workflow in its IR (id, type, default, options), mirroring the custom-task-field shape. Declarations describe the schema; *values* persist per workflow + project through a single validating store authority, so built-in workflows can carry values without their IR being editable. The engine consumes **effective settings** — stored value falling back to declaration default, with values that no longer validate against the current declaration dropped (never fed to execution).
+
+### Effective Settings
+The per-task, flat `Partial<Settings>`-shaped value map the engine reads at executor entry, composed from the task's resolved workflow: for each declared Workflow Setting, the stored `(workflowId, projectId)` value falls back to the declaration default, with stored values that no longer validate against the current declaration dropped. Resolution never throws — a missing or corrupt workflow degrades to the built-in coding declarations — so every read site receives a usable value. Because built-in declaration defaults are byte-equal to the legacy project-settings defaults, an untuned project resolves to identical behavior across the settings hard-move.
+
+### Moved Settings Keys
+The tombstone allowlist (`MOVED_SETTINGS_KEYS`) of the step-execution, review/approval, and per-phase model-lane keys that the one-time hard-move migration relocated from project/global settings into Workflow Settings. It is the single record of the old names and shields every surface that can encounter a legacy payload — cross-node sync diffs, v1 settings imports, and stale writers — from resurrecting a moved key. A consistency test enforces that a key lives in exactly one regime (project settings *or* the tombstone list, never both).
+
 ### Three-Tier Setting
 The named persistence pattern for a user preference on the dashboard: a device-local cache for instant reads, a write-through to Global Settings so other Surfaces see it, and a hydrate-on-mount from the server when no local value exists. A local or in-flight user choice always wins over server hydration, and changes propagate to other open tabs.
+
+### Translation Placeholder
+An empty-string value for a catalog key in a non-English locale, marking "not yet translated." Placeholders are intentionally backfilled when keys are added; at runtime they are treated as missing (never rendered), falling back through the locale chain to English. A non-empty value — even an English one left in a non-en catalog — is rendered as-is.
 
 ### Supported Locale
 A language tag in the closed set Fusion ships translations for. Any external tag (browser, environment, flag) is normalized into this set or rejected — never passed through raw. Chinese tags route by script and region so Traditional-script users are never silently served Simplified, and the two Chinese variants never collapse into a generic base tag.
@@ -147,6 +159,10 @@ A plugin that ships inside the Fusion distribution itself rather than being inst
 *Avoid:* built-in plugin (as a distinct concept; the Settings label uses "Built-in" for the same thing)
 
 A Bundled Plugin must be registered in several independently maintained surfaces — the Settings catalog, the dashboard server's bundled-id fallback set, the CLI's startup auto-install list, and the build step that stages a loadable copy into the distribution. The surfaces do not cross-check each other: a plugin registered in some but not all appears installable yet fails to install or load, so adding one means mirroring an existing bundled plugin across every surface.
+
+### Plugin Entry
+The single loadable file persisted as a plugin's path and dynamically imported by the loader. The contract is strict: a package directory is never a valid entry (ESM cannot import directories), so every install surface must resolve a concrete file before persisting, preferring the shipped bundle, then a prebuilt output, then raw workspace source. Legacy registrations that stored a directory are healed in place — re-pointed at a resolved entry — the next time the plugin is enabled or auto-installed.
+
 ## Workflow columns & traits
 
 *Behind the `experimentalFeatures.workflowColumns` flag. With the flag off, the legacy fixed pipeline (the closed column enum + `VALID_TRANSITIONS`) is authoritative and unchanged.*
@@ -156,6 +172,14 @@ A first-class, workflow-defined unit of task state: an id, a display name, and a
 
 ### Trait
 Composable column configuration: declarative flags (e.g. `complete`, `archived`, `countsTowardWip`) plus optional lifecycle hooks (`guard`, `gate`, `onEnter`, `onExit`, `releaseCondition`). Built-in and plugin-contributed traits register through one registry. Sync `guard` hooks and the `complete`/`archived` flags are built-in-only; plugin traits get async hook points only. A column's effective flags are the merged flags of its traits; conflicting compositions are rejected at save (server-side and in the editor).
+
+### Column agent
+A permanent agent binding on a workflow-defined column — a registry agent plus a mode — staffing all session-running work attributable to that column (custom nodes, the execute seam's coding session, per-step sessions; foreach template nodes inherit the enclosing foreach's column unless they declare their own). `defer` makes the column agent the default, applying only when the work carries no own agent identity and no complete model pair; `override` supersedes node- and task-level agent/model settings wholesale.
+
+Requires both the workflow-columns and graph-executor flags; with either off, bindings are inert at execution time. A missing or deleted agent degrades to normal resolution without aborting a live session. Binding an agent whose permission policy is broader than the project default requires explicit confirmation at save time on every write surface.
+
+### Effective agent (execution principal)
+The agent identity that actually runs a piece of work after column-agent precedence resolves — and the principal every identity-keyed subsystem must consult: permission gating, heartbeat serialization in both directions, resume re-dispatch, and mid-flight change detection. It may differ from the task's assigned agent under an override binding, and one task may have multiple effective agents across concurrent branch sessions.
 
 ### Lane
 A horizontal row on the multi-lane board, one per workflow in use by visible cards. Each lane renders its own workflow's columns. Tasks with no workflow selection appear in the Default workflow's lane; every card appears in exactly one lane. Zero-card lanes are hidden; lanes are collapsible with persisted state.
@@ -177,13 +201,46 @@ A persisted crash-safe marker (`tasks.transitionPending`) written in the same tr
 *Behind the `experimentalFeatures.workflowGraphExecutor` flag (orthogonal to `workflowColumns`). With the flag off, and for the Default workflow always, step policy is the legacy engine-owned path (PROMPT.md parsing, in-session review verdicts, RETHINK reset) — unchanged.*
 
 ### Step instance
-One runtime expansion of a `foreach` template subgraph, bound to a single planned step (`Task.steps[i]`). Identity is deterministic — `<foreachNodeId>#<stepIndex>:<templateNodeId>` — so resume reconstructs the full instance set from the pinned step count without persisting the expansion itself. Each instance carries its own run-state (current node, rework count, baseline/checkpoint, and in worktree mode its branch and integration status) in `workflow_run_step_instances` (schema v108). The step count is pinned at expansion; a later disagreement with the live step list is a `pin-mismatch` failure, never a silent re-expansion. An instance's lifecycle writes flow through `store.updateStep` so `Task.steps[]` stays the physical projection sink for every existing consumer.
+One runtime expansion of a `foreach` template subgraph, bound to a single planned step (`Task.steps[i]`). Identity is deterministic — `<foreachNodeId>#<stepIndex>:<templateNodeId>` — so resume reconstructs the full instance set from the pinned step count without persisting the expansion itself. Each instance carries its own run-state (current node, rework count, baseline/checkpoint, and in worktree mode its branch and integration status) in its own persisted run-state table. The step count is pinned at expansion; a later disagreement with the live step list is a `pin-mismatch` failure, never a silent re-expansion. An instance's lifecycle writes flow through `store.updateStep` so `Task.steps[]` stays the physical projection sink for every existing consumer.
 
 ### parse-steps
 A workflow graph node that reads a declared Artifact and runs a registry parser to write the canonical step list (`Task.steps[]`) — the only graph-side writer of steps. Built-in parsers are `step-headings` (the `### Step N:` convention, extracted byte-identically from the legacy regex, including the `(depends: N,M)` annotation) and `json-steps`; plugins contribute parsers under `plugin:<pluginId>:<parserId>`. Parsing failures fail closed to a routable `outcome:parse-error` rather than crashing. A parse-steps node must dominate (precede on all paths) any `foreach(source:"task-steps")`, and running one after a foreach has already expanded trips pin protection (an audited failure) so re-plan loops cannot desynchronize an expanded region.
 
 ### Custom task field
 A workflow-declared, typed task field (`string | text | number | boolean | enum | multi-enum | date | url`, with enum options and render hints) whose values live in `tasks.customFields`, keyed by field id. The task model is thereby recast as core fields (title, description) + standard metadata + these workflow-defined fields. Writes pass through a single store authority (`updateTaskCustomFields`) that validates each value against the resolving workflow's schema and returns typed rejections (offending `fieldId` + `code`); agents write them via `fn_task_update`'s `custom_fields` patch. Editing a workflow's fields or switching a task's workflow orphans (never destroys) values for removed or type-incompatible ids — orphans are retained and surfaced under a detail disclosure, excluded from cards. Same id means the same field within a project; there is no cross-workflow shared field namespace.
+
+## Persistence & migrations
+
+### Schema-Version Sweep
+The named process performed atomically with any bump of the core schema-version counter: a repo-wide hunt for hard-coded assertions of the old version number, updated in the same commit as the bump. The sweep's scope is every workspace that can embed the core database — packages *and* plugins — because any package instantiating the core store observes the current version; scoping the hunt to one workspace silently strands assertions in the others. Downstream consumers should prefer asserting against the exported version constant instead of a literal, which removes them from the sweep entirely.
+## CLI executor
+
+### CLI Executor
+The executor type `cli-agent`: a Fusion agent session (task execute step, planning, validator, CE plugin session, or chat) driven by an interactive CLI coding agent running in a Fusion-owned PTY. Distinct from the pre-existing non-interactive `cli` executor kind (the named-script/raw-command runner). Selected on the workflow node for task surfaces (per-task override) and per session for chat/CE. The board lifecycle is unchanged — the terminal is the execution surface, not a separate workflow.
+*Avoid:* `cli` as the executor identifier — that name is taken by the script-runner kind.
+
+### CLI Adapter
+The per-CLI integration that launches and understands one CLI agent. Native-telemetry adapters (Claude Code, Codex, Droid, Pi) tap the CLI's own hooks/session logs for precise agent state, structured transcript, and native session identity; the generic adapter runs any CLI command with heuristic idle detection and a raw-terminal-only view. Adapters carry their own launch configuration (command, args, permission mode) with shipped defaults.
+
+### CLI Session
+A server-owned PTY bound to a task or chat entity. It survives client disconnects, supports concurrent attach from any surface, and carries an agent state (starting, ready, busy, waiting-on-input, done, dead). Its CLI-native session ID is persisted so a dead PTY or engine restart resumes via the CLI's own resume mechanism — needs-attention is the fallback when resume fails, never the first response.
+
+### Waiting-on-input
+The CLI Session state where the agent is blocked on the human (permission prompt, clarifying question), as distinct from idle-because-done. Entering it fires the notification configured on the workflow node; the task neither advances nor fails while in it.
+## Testing
+
+### Merge Gate
+The minimal set of merge-blocking PR checks: lint, typecheck, build, a Boot Smoke, and a small curated engine test suite. The gate is the only test signal that can block a PR; all other tests run non-blocking after merge.
+
+Gate membership is an explicit allow-list, never a glob: a test earns its slot with evidence of value and never graduates in by default. A flake inside the gate is *evicted* — its allow-list entry is removed — which deliberately requires no green run from the flaky test itself, so the gate can always be repaired while red.
+
+### Boot Smoke
+The gate's "app starts and serves" proof: the CLI answers its help command and a real server boots on a throwaway port, answers its health endpoint, and shuts down cleanly on signal. A pass requires both that the shutdown signal was actually delivered and that the exit was clean — a crash after serving is a failed boot path, not a pass.
+
+### Deletion Ratchet
+The standing policy for flaky tests: a test observed failing without a corresponding real bug is quarantined on sight — a dated ledger entry plus exclusion from all runs, not retried, not patched — then deleted 2 weeks later unless rescued with evidence it catches real regressions plus a root-cause fix. Appeasement (widened timeouts, added retries, loosened assertions) is prohibited, for agents especially.
+
+A second quarantine in the same subsystem is a product-race smell: the flake may be a real bug, so the product code gets a look before the deletion clock runs out. Gate flakes exit by Merge Gate eviction rather than quarantine, unless they should also leave the non-blocking tier.
 
 ## Flagged ambiguities
 

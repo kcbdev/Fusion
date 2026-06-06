@@ -86,6 +86,8 @@ describe("workflow routes (U4)", () => {
   const put = (path: string, body: unknown) =>
     request(app, "PUT", path, JSON.stringify(body), { "content-type": "application/json" });
   const get = (path: string) => request(app, "GET", path);
+  const patch = (path: string, body: unknown) =>
+    request(app, "PATCH", path, JSON.stringify(body), { "content-type": "application/json" });
 
   it("POST /workflows creates with valid IR and rejects malformed IR", async () => {
     const ok = await post("/api/workflows", { name: "QA", ir: linearIr() });
@@ -444,5 +446,351 @@ describe("workflow routes (U4)", () => {
       expect(recon?.toColumn).toBe("intake");
       expect((await store.getTask(t.id)).column).toBe("intake");
     });
+  });
+
+  // ── Workflow setting VALUES (U6, R5) ───────────────────────────────────────
+  describe("setting-values routes (U6)", () => {
+    // A v2 IR declaring one of each value-relevant type.
+    function settingsIr(name: string): WorkflowIr {
+      return {
+        version: "v2",
+        name,
+        columns: [],
+        nodes: [
+          { id: "start", kind: "start" },
+          { id: "end", kind: "end" },
+        ],
+        edges: [{ from: "start", to: "end", condition: "success" }],
+        settings: [
+          { id: "timeout-ms", name: "Timeout", type: "number", default: 1000 },
+          { id: "new-sessions", name: "New sessions", type: "boolean", default: false },
+          {
+            id: "review-policy",
+            name: "Review policy",
+            type: "enum",
+            default: "strict",
+            options: [
+              { value: "strict", label: "Strict" },
+              { value: "lenient", label: "Lenient" },
+            ],
+          },
+          { id: "label", name: "Label", type: "string" },
+        ],
+      } as WorkflowIr;
+    }
+
+    async function createSettingsWorkflow(): Promise<string> {
+      const wf = await post("/api/workflows", { name: "sw-settings", ir: settingsIr("sw-settings") });
+      expect(wf.status).toBe(201);
+      return (wf.body as { id: string }).id;
+    }
+
+    it("GET returns stored/effective/orphaned (defaults until a value is stored)", async () => {
+      const id = await createSettingsWorkflow();
+      const res = await get(`/api/workflows/${encodeURIComponent(id)}/setting-values`);
+      expect(res.status).toBe(200);
+      const body = res.body as {
+        stored: Record<string, unknown>;
+        effective: Record<string, unknown>;
+        orphaned: Array<{ id: string }>;
+      };
+      expect(body.stored).toEqual({});
+      // Declaration defaults fill the effective map (drop-on-orphan, KTD-6).
+      expect(body.effective["timeout-ms"]).toBe(1000);
+      expect(body.effective["new-sessions"]).toBe(false);
+      expect(body.effective["review-policy"]).toBe("strict");
+      expect(body.orphaned).toEqual([]);
+    });
+
+    it("PATCH writes a valid batch (one request, multiple keys) and reflects it", async () => {
+      const id = await createSettingsWorkflow();
+      const res = await patch(`/api/workflows/${encodeURIComponent(id)}/setting-values`, {
+        values: { "timeout-ms": 5000, "new-sessions": true, "review-policy": "lenient" },
+      });
+      expect(res.status).toBe(200);
+      const body = res.body as { stored: Record<string, unknown>; effective: Record<string, unknown> };
+      expect(body.stored).toEqual({ "timeout-ms": 5000, "new-sessions": true, "review-policy": "lenient" });
+      expect(body.effective["timeout-ms"]).toBe(5000);
+      expect(body.effective["label"]).toBeUndefined(); // no default, no stored
+    });
+
+    it("PATCH null deletes a key (clear-to-default)", async () => {
+      const id = await createSettingsWorkflow();
+      await patch(`/api/workflows/${encodeURIComponent(id)}/setting-values`, { values: { "timeout-ms": 5000 } });
+      const res = await patch(`/api/workflows/${encodeURIComponent(id)}/setting-values`, {
+        values: { "timeout-ms": null },
+      });
+      expect(res.status).toBe(200);
+      const body = res.body as { stored: Record<string, unknown>; effective: Record<string, unknown> };
+      expect(body.stored["timeout-ms"]).toBeUndefined();
+      expect(body.effective["timeout-ms"]).toBe(1000); // back to declaration default
+    });
+
+    it("PATCH rejects an invalid value with 400 + typed rejections; nothing persisted", async () => {
+      const id = await createSettingsWorkflow();
+      const res = await patch(`/api/workflows/${encodeURIComponent(id)}/setting-values`, {
+        values: { "timeout-ms": "not-a-number", "review-policy": "bogus" },
+      });
+      expect(res.status).toBe(400);
+      const details = (res.body as { details?: { rejections?: Array<{ settingId: string; code: string }> } }).details;
+      const rejections = details?.rejections ?? [];
+      const byId = Object.fromEntries(rejections.map((r) => [r.settingId, r.code]));
+      expect(byId["timeout-ms"]).toBe("type-mismatch");
+      expect(byId["review-policy"]).toBe("enum-violation");
+      // Write-boundary contract: nothing persisted.
+      const after = await get(`/api/workflows/${encodeURIComponent(id)}/setting-values`);
+      expect((after.body as { stored: Record<string, unknown> }).stored).toEqual({});
+    });
+
+    it("PATCH accepts a value write for a built-in workflow (R4)", async () => {
+      const res = await patch("/api/workflows/builtin:coding/setting-values", {
+        values: { workflowStepTimeoutMs: 123_456 },
+      });
+      // Built-in coding declares the moved-key catalog; a valid numeric write
+      // succeeds even though built-in DECLARATIONS are not editable.
+      expect(res.status).toBe(200);
+      const body = res.body as { stored: Record<string, unknown> };
+      expect(body.stored["workflowStepTimeoutMs"]).toBe(123_456);
+    });
+
+    it("GET surfaces orphaned stored values after a declaration retype", async () => {
+      const id = await createSettingsWorkflow();
+      // Store a valid number for timeout-ms.
+      await patch(`/api/workflows/${encodeURIComponent(id)}/setting-values`, { values: { "timeout-ms": 5000 } });
+      // Retype timeout-ms to a string via an IR save → the stored number orphans.
+      const retyped = settingsIr("sw-settings");
+      (retyped as { settings?: Array<{ id: string; type: string; default?: unknown }> }).settings![0] = {
+        id: "timeout-ms",
+        name: "Timeout",
+        type: "string",
+      } as never;
+      await patch(`/api/workflows/${encodeURIComponent(id)}`, { ir: retyped });
+      const res = await get(`/api/workflows/${encodeURIComponent(id)}/setting-values`);
+      expect(res.status).toBe(200);
+      const body = res.body as { effective: Record<string, unknown>; orphaned: Array<{ id: string; value: unknown }> };
+      expect(body.orphaned.some((o) => o.id === "timeout-ms" && o.value === 5000)).toBe(true);
+      // Effective drops the orphan (no string default declared) → undefined.
+      expect(body.effective["timeout-ms"]).toBeUndefined();
+    });
+
+    it("PATCH 400 when values is missing/not an object", async () => {
+      const id = await createSettingsWorkflow();
+      const res = await patch(`/api/workflows/${encodeURIComponent(id)}/setting-values`, { values: [1, 2, 3] });
+      expect(res.status).toBe(400);
+    });
+
+    it("GET returns 404 for an unknown workflow id (neither built-in nor custom)", async () => {
+      const res = await get("/api/workflows/WF-404/setting-values");
+      expect(res.status).toBe(404);
+    });
+
+    it("PATCH returns 404 for an unknown workflow id (neither built-in nor custom)", async () => {
+      const res = await patch("/api/workflows/WF-404/setting-values", {
+        values: { "timeout-ms": 5000 },
+      });
+      expect(res.status).toBe(404);
+    });
+  });
+});
+
+// ── U6: write-time column-agent validation (existence + policy escalation) ────
+
+describe("workflow routes — column agents (U6)", () => {
+  let store: TaskStore;
+  let rootDir: string;
+  let globalDir: string;
+  let app: express.Express;
+
+  /** A v2 workflow whose `triage` column optionally binds an agent. */
+  function boundIr(agent?: { agentId: string; mode: "defer" | "override" }): WorkflowIr {
+    return {
+      version: "v2",
+      name: "bound",
+      columns: [
+        { id: "triage", name: "Triage", traits: [{ trait: "intake" }], ...(agent ? { agent } : {}) },
+        { id: "done", name: "Done", traits: [{ trait: "complete" }] },
+      ],
+      nodes: [
+        { id: "start", kind: "start", column: "triage" },
+        { id: "work", kind: "prompt", column: "triage", config: { prompt: "do" } },
+        { id: "end", kind: "end", column: "done" },
+      ],
+      edges: [
+        { from: "start", to: "work", condition: "success" },
+        { from: "work", to: "end", condition: "success" },
+      ],
+    } as WorkflowIr;
+  }
+
+  async function makeAgent(input: { permissionPolicy?: { presetId: "unrestricted" | "approval-required" | "locked-down" | "custom"; rules?: Record<string, string> } }): Promise<string> {
+    const { AgentStore } = await import("@fusion/core");
+    const agentStore = new AgentStore({ rootDir: store.getFusionDir() });
+    await agentStore.init();
+    const agent = await agentStore.createAgent({
+      name: `Agent ${Math.random().toString(36).slice(2, 8)}`,
+      role: "executor",
+      permissionPolicy: input.permissionPolicy as never,
+    });
+    return agent.id;
+  }
+
+  beforeEach(async () => {
+    rootDir = mkdtempSync(join(tmpdir(), "wf-ca-root-"));
+    globalDir = mkdtempSync(join(tmpdir(), "wf-ca-global-"));
+    store = new TaskStore(rootDir, globalDir, { inMemoryDb: true });
+    await store.init();
+
+    app = express();
+    app.use(express.json());
+    const router = express.Router();
+    registerWorkflowRoutes({
+      router,
+      getProjectContext: async () => ({ store, engine: undefined, projectId: undefined }),
+      rethrowAsApiError: (err: unknown) => {
+        throw err instanceof ApiError ? err : new ApiError(500, err instanceof Error ? err.message : String(err));
+      },
+    } as unknown as Parameters<typeof registerWorkflowRoutes>[0]);
+    app.use("/api", router);
+    app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+      if (err instanceof ApiError) sendErrorResponse(res, err.statusCode, err.message, { details: err.details });
+      else sendErrorResponse(res, 500, err instanceof Error ? err.message : String(err));
+    });
+  });
+
+  afterEach(() => {
+    store.close();
+    rmSync(rootDir, { recursive: true, force: true });
+    rmSync(globalDir, { recursive: true, force: true });
+  });
+
+  const post = (path: string, body: unknown) =>
+    request(app, "POST", path, JSON.stringify(body), { "content-type": "application/json" });
+  const patch = (path: string, body: unknown) =>
+    request(app, "PATCH", path, JSON.stringify(body), { "content-type": "application/json" });
+  const get = (path: string) => request(app, "GET", path);
+
+  it("persists a valid agent binding and round-trips it through GET", async () => {
+    const agentId = await makeAgent({});
+    const res = await post("/api/workflows", { name: "Bound", ir: boundIr({ agentId, mode: "defer" }) });
+    expect(res.status).toBe(201);
+    const id = (res.body as { id: string }).id;
+
+    const fetched = await get(`/api/workflows/${id}`);
+    expect(fetched.status).toBe(200);
+    const ir = (fetched.body as { ir: { columns: Array<{ id: string; agent?: { agentId: string; mode: string } }> } }).ir;
+    const triage = ir.columns.find((c) => c.id === "triage");
+    expect(triage?.agent).toEqual({ agentId, mode: "defer" });
+  });
+
+  it("rejects an unknown agentId with a 400 naming the column; definition is unchanged", async () => {
+    const res = await post("/api/workflows", { name: "Ghost", ir: boundIr({ agentId: "agent-ghost", mode: "defer" }) });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/triage/);
+    expect(res.body.error).toMatch(/agent-ghost/);
+    // Nothing persisted (no custom "Ghost" workflow created; built-ins remain).
+    const list = await get("/api/workflows");
+    expect((list.body as Array<{ name: string }>).some((w) => w.name === "Ghost")).toBe(false);
+  });
+
+  it("rejects a more-privileged agent without confirmPolicyEscalation, then persists with the flag", async () => {
+    // Project default is restrictive; the bound agent is unrestricted (broader).
+    await store.updateSettings({ defaultAgentPermissionPolicy: { rules: { file_write_delete: "block" } } as never });
+    const agentId = await makeAgent({ permissionPolicy: { presetId: "unrestricted" } });
+
+    const denied = await post("/api/workflows", { name: "Esc", ir: boundIr({ agentId, mode: "override" }) });
+    expect(denied.status).toBe(400);
+    expect(denied.body.error).toMatch(/broader/i);
+    expect((denied.body as { details?: { policyEscalation?: boolean } }).details?.policyEscalation).toBe(true);
+
+    const ok = await post("/api/workflows", {
+      name: "Esc2",
+      ir: boundIr({ agentId, mode: "override" }),
+      confirmPolicyEscalation: true,
+    });
+    expect(ok.status).toBe(201);
+  });
+
+  it("saves without the flag when the agent policy equals the project default (no escalation)", async () => {
+    // Project default and the bound agent are both fully restrictive (locked-down):
+    // equal policies are NOT broader, so no confirmation is required.
+    await store.updateSettings({
+      defaultAgentPermissionPolicy: { rules: { file_write_delete: "block", command_execution: "block" } } as never,
+    });
+    const agentId = await makeAgent({
+      permissionPolicy: { presetId: "custom", rules: { file_write_delete: "block", command_execution: "block" } },
+    });
+    const res = await post("/api/workflows", { name: "Equal", ir: boundIr({ agentId, mode: "override" }) });
+    expect(res.status).toBe(201);
+  });
+
+  it("saves without the flag when the project default is unset (unrestricted) and the agent is unrestricted", async () => {
+    // No project default configured → effective default is `unrestricted` (allow-all).
+    // An unrestricted agent is equal, not broader, so no escalation.
+    const agentId = await makeAgent({ permissionPolicy: { presetId: "unrestricted" } });
+    const res = await post("/api/workflows", { name: "Unrestricted", ir: boundIr({ agentId, mode: "override" }) });
+    expect(res.status).toBe(201);
+  });
+
+  it("still detects escalation when the agent's custom rules map omits a category the default blocks", async () => {
+    // Default blocks two categories. The agent's custom rules map names only ONE
+    // of them (the other is absent → resolves to the unrestricted `allow` seed),
+    // so the agent is genuinely broader on the omitted category. A missing key
+    // must NOT silently suppress this escalation.
+    await store.updateSettings({
+      defaultAgentPermissionPolicy: { rules: { file_write_delete: "block", command_execution: "block" } } as never,
+    });
+    const agentId = await makeAgent({
+      // Only file_write_delete declared; command_execution omitted → allow (broader).
+      permissionPolicy: { presetId: "custom", rules: { file_write_delete: "block" } },
+    });
+    const denied = await post("/api/workflows", { name: "PartialEsc", ir: boundIr({ agentId, mode: "override" }) });
+    expect(denied.status).toBe(400);
+    expect(denied.body.error).toMatch(/broader/i);
+    expect((denied.body as { details?: { policyEscalation?: boolean } }).details?.policyEscalation).toBe(true);
+
+    const ok = await post("/api/workflows", {
+      name: "PartialEsc2",
+      ir: boundIr({ agentId, mode: "override" }),
+      confirmPolicyEscalation: true,
+    });
+    expect(ok.status).toBe(201);
+  });
+
+  it("stores no agent key when the binding is absent (omission, R9)", async () => {
+    const res = await post("/api/workflows", { name: "Plain", ir: boundIr() });
+    expect(res.status).toBe(201);
+    const id = (res.body as { id: string }).id;
+    const fetched = await get(`/api/workflows/${id}`);
+    const ir = (fetched.body as { ir: { columns: Array<{ id: string; agent?: unknown }> } }).ir;
+    const triage = ir.columns.find((c) => c.id === "triage")!;
+    expect("agent" in triage).toBe(false);
+  });
+
+  it("PATCH validates an unknown agentId the same way as POST", async () => {
+    const created = await post("/api/workflows", { name: "Editable", ir: boundIr() });
+    const id = (created.body as { id: string }).id;
+    const res = await patch(`/api/workflows/${id}`, { ir: boundIr({ agentId: "agent-ghost", mode: "override" }) });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/triage/);
+  });
+
+  it("PATCH enforces the policy-escalation gate the same way as POST (FN-5893)", async () => {
+    await store.updateSettings({ defaultAgentPermissionPolicy: { rules: { file_write_delete: "block" } } as never });
+    const agentId = await makeAgent({ permissionPolicy: { presetId: "unrestricted" } });
+
+    const created = await post("/api/workflows", { name: "EditableEsc", ir: boundIr() });
+    expect(created.status).toBe(201);
+    const id = (created.body as { id: string }).id;
+
+    const denied = await patch(`/api/workflows/${id}`, { ir: boundIr({ agentId, mode: "override" }) });
+    expect(denied.status).toBe(400);
+    expect(denied.body.error).toMatch(/broader/i);
+    expect((denied.body as { details?: { policyEscalation?: boolean } }).details?.policyEscalation).toBe(true);
+
+    const ok = await patch(`/api/workflows/${id}`, {
+      ir: boundIr({ agentId, mode: "override" }),
+      confirmPolicyEscalation: true,
+    });
+    expect(ok.status).toBe(200);
   });
 });

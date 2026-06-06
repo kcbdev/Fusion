@@ -541,6 +541,11 @@ export interface WorkflowStep {
    *  Must be set together with `modelProvider`. When both model fields are undefined,
    *  the executor uses global settings defaults. Only used when mode is "prompt". */
   modelId?: string;
+  /** (workflow-editor-consolidation U1/U2, KTD-1/KTD-3) when this legacy step has
+   *  been migrated into a fragment WorkflowDefinition, the fragment's id is stamped
+   *  here so the lazy step migration is idempotent (already-stamped rows are
+   *  skipped). Stored in the `migrated_fragment_id` column. */
+  migratedFragmentId?: string;
   /** ISO-8601 timestamp of creation */
   createdAt: string;
   /** ISO-8601 timestamp of last update */
@@ -651,6 +656,9 @@ export interface WorkflowStepInput {
   modelProvider?: string;
   /** AI model ID override. Must be set together with modelProvider. Only used when mode is "prompt". */
   modelId?: string;
+  /** (workflow-editor-consolidation U2, KTD-3) fragment id stamped when this step
+   *  was migrated into a fragment WorkflowDefinition. Set by the migration only. */
+  migratedFragmentId?: string;
 }
 
 /** Result of a workflow step execution on a task. */
@@ -2393,6 +2401,23 @@ export interface TaskCreateInput {
   noCommitsExpected?: boolean;
   /** IDs of workflow steps to enable for this task */
   enabledWorkflowSteps?: string[];
+  /**
+   * Workflow selection applied atomically at task creation (U6/R3/KTD-4).
+   *
+   * Semantics:
+   *  - `undefined` → inherit the project default workflow (today's behavior:
+   *    `materializeDefaultWorkflowSteps` runs, falling back to default-on steps).
+   *  - `null` → explicitly NO workflow: skip default materialization entirely;
+   *    the task is created with no custom workflow steps.
+   *  - `string` → that workflow's compiled steps are materialized and selected
+   *    inside the creation flow, overriding any project default. Fragment IDs
+   *    and unknown IDs are rejected with a clear error BEFORE the task row is
+   *    created.
+   *
+   * Mutually exclusive with `enabledWorkflowSteps`: when `enabledWorkflowSteps`
+   * is provided, it takes precedence and `workflowId` materialization is skipped.
+   */
+  workflowId?: string | null;
   /** Model preset selected during task creation. Presets resolve to concrete model overrides at creation time. */
   modelPresetId?: string;
   /** AI model provider override for the executor agent (e.g., "anthropic").
@@ -3052,6 +3077,39 @@ export interface GlobalSettings {
    *
    *  Default: {} (empty object — no experimental features enabled). */
   experimentalFeatures?: Record<string, boolean>;
+  /** Per-adapter CLI-agent launch configuration (CLI Agent Executor, U15).
+   *  Keyed by adapter id (e.g. `"claude-code"`, `"codex"`, `"generic"`). Each
+   *  entry carries operator overrides layered over the adapter's shipped
+   *  defaults: a command override, extra args, an autonomy mode, and env
+   *  allowlist additions. Validated + sanitized at the write boundary
+   *  (`sanitizeCliAgentsSettings`); invalid entries/fields are dropped.
+   *
+   *  Note: elevation expressed through ANY of these channels (autonomy mode,
+   *  extra args, env additions, a non-default command override) is gated by a
+   *  stored per-project approval at launch — see `@fusion/engine`'s
+   *  `resolveEffectivePosture`. These settings only describe *intent*; the
+   *  engine resolves and enforces posture. Default: {} (no overrides). */
+  cliAgents?: Record<string, CliAgentSettings>;
+}
+
+/** Operator launch config for one CLI-agent adapter (U15). Values are layered
+ *  over the adapter's shipped defaults at launch. All fields optional; an empty
+ *  object means "use shipped defaults". */
+export interface CliAgentSettings {
+  /** Override for the binary path/name to invoke. A non-default value is treated
+   *  as privileged (routes through the autonomy approval gate). */
+  commandOverride?: string;
+  /** Extra args appended after the adapter's computed base args. Free-form; the
+   *  engine's elevation detector scans these for bypass markers. */
+  extraArgs?: string[];
+  /** Autonomy mode above the adapter baseline. `"default"` is the baseline (no
+   *  elevation); `"elevated"` requests bypass-permissions-style autonomy and is
+   *  gated. Kept as a string enum so adapters can map it to their own flags. */
+  autonomyMode?: "default" | "elevated";
+  /** Additional env var KEYS to forward from the parent process to the child.
+   *  Names only (never values); the engine copies these from `process.env`.
+   *  Service credentials (`FUSION_*`) are always excluded regardless. */
+  envAdditions?: string[];
 }
 
 export type RemoteAccessProvider = "tailscale" | "cloudflare";
@@ -3141,6 +3199,12 @@ export interface ProjectSettings {
    *  (trust-on-first-use). A node's command must appear here before it runs;
    *  named scripts (settings.scripts) never require approval. */
   approvedWorkflowCliCommands?: string[];
+  /** CLI-agent adapter ids the project owner has approved for ELEVATED autonomy
+   *  (CLI Agent Executor, U15). An adapter must appear here before a launch whose
+   *  resolved posture is elevated (bypass-permissions-style) is permitted; an
+   *  unapproved elevation fails the launch with a typed error. Approving
+   *  principal in v1: the daemon-token holder (the single workspace owner). */
+  approvedCliAutonomyAdapters?: string[];
   /** Engine pause (soft pause): when true, the scheduler and triage
    *  processor stop dispatching **new** work (scheduling, triage
    *  specification, and auto-merge), but currently running agent sessions
@@ -4001,6 +4065,10 @@ export {
   isProjectSettingsKey,
   isMergeRequestContractShadowEnabled,
   resolvePersistAgentThinkingLog,
+  sanitizeCliAgentSettings,
+  sanitizeCliAgentsSettings,
+  CLI_AGENT_ADAPTER_IDS,
+  CLI_AGENT_AUTONOMY_MODES,
 } from "./settings-schema.js";
 
 export interface BoardConfig {

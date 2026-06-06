@@ -1,5 +1,5 @@
-export { COLUMNS, DEFAULT_COLUMN, isColumn, normalizeColumn, COLUMN_LABELS, COLUMN_DESCRIPTIONS, VALID_TRANSITIONS, DEFAULT_SETTINGS, DEFAULT_GLOBAL_SETTINGS, DEFAULT_PROJECT_SETTINGS, GLOBAL_SETTINGS_KEYS, PROJECT_SETTINGS_KEYS, isGlobalSettingsKey, isProjectSettingsKey, isMergeRequestContractShadowEnabled, resolvePersistAgentThinkingLog, THINKING_LEVELS, THEME_MODES, COLOR_THEMES, SUPPORTED_LOCALES, DEFAULT_LOCALE, isLocale, WORKFLOW_STEP_TEMPLATES, AGENT_PERMISSIONS, PERMANENT_AGENT_ACTION_CATEGORIES, AGENT_PERMISSION_POLICY_ACTION_CATEGORIES, AGENT_PROVISIONING_APPROVAL_MODES, SANDBOX_PROVISIONING_APPROVAL_MODES, AGENT_PERMISSION_POLICY_PRESET_IDS, LEGACY_AGENT_PERMISSION_POLICY_ACTION_CATEGORY_ALIASES, APPROVAL_REQUEST_STATUSES, APPROVAL_REQUEST_AUDIT_EVENT_TYPES, normalizeApprovalRequestActionCategory, isValidApprovalRequestTransition, agentToConfigSnapshot, diffConfigSnapshots, isEphemeralAgent, hasAgentIdentity, CheckoutConflictError, DEFAULT_HEARTBEAT_PROCEDURE_PATH, getDefaultHeartbeatProcedurePath, EXECUTION_MODES, DEFAULT_EXECUTION_MODE, TASK_PRIORITIES, DEFAULT_TASK_PRIORITY, HIGH_FANOUT_BLOCKER_TODO_THRESHOLD, STALE_HIGH_FANOUT_BLOCKER_AGE_THRESHOLD_MS, DASHBOARD_USER_ID, normalizeMessageParticipant, validateMessageMetadata, validateDockerNodeConfig, sanitizeDockerNodeConfigForResponse, normalizeMergeIntegrationWorktreeMode, normalizeMergeAdvanceAutoSyncMode, MERGE_ADVANCE_AUTO_SYNC_MODES, normalizeMergeConflictStrategy, normalizeMergeStrategyOverlapBehavior, normalizePostMergeAuditMode, POST_MERGE_AUDIT_MODES, normalizeMergeAuditAutoRecovery, MERGE_AUDIT_AUTO_RECOVERY_MODES, normalizeMergerMode, MERGER_MODES, normalizeAutoRecovery, AUTO_RECOVERY_MODES, buildResearchDocumentKey, REPO_OVERRIDE_RE, SHARED_STATE_SNAPSHOT_VERSION } from "./types.js";
-export type { Column, ColumnId, IssueInfo, IssueState, TaskSourceIssue, PrInfo, PrConflictState, PrConflictDiagnostics, PrCheckState, PrCheckStatus, PrStatus, BranchGroup, BranchGroupCreateInput, BranchGroupUpdate, BranchGroupPrState, Task, TaskTokenUsage, TaskAttachment, TaskComment, TaskCommentInput, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, TaskCreateInput, MeshReplicatedTaskCreatePayload, MeshReplicatedTaskApplyResult, TaskSource, SourceType, TaskDetail, RetrySummary, InboxTask, TodoList, TodoItem, TodoListCreateInput, TodoListUpdateInput, TodoItemCreateInput, TodoItemUpdateInput, TodoListWithItems, AgentLogEntry, AgentLogType, AgentRole, BoardConfig, DistributedTaskIdReserveInput, DistributedTaskIdReserveResult, DistributedTaskIdCommitInput, DistributedTaskIdCommitResult, DistributedTaskIdAbortInput, DistributedTaskIdAbortResult, DistributedTaskIdStateInput, DistributedTaskIdStateResult, AutostashOrphanRecord, AutostashOutcome, MergeDetails, MergeResult, MergeIntegrationWorktreeMode, MergeAdvanceAutoSyncMode, MergeConflictStrategy, CanonicalMergeConflictStrategy, MergeStrategyOverlapBehavior, PostMergeAuditMode, MergeAuditAutoRecoveryMode, MergerMode, MergerSettings, AutoRecoveryMode, AutoRecoveryFailureClass, AutoRecoverySettings, DirectMergeCommitStrategy, Settings, GlobalSettings, ProjectSettings, SecretsEnvConfig, WebSearchBackend, ResearchEnabledSources, ResearchGlobalDefaults, ResearchProjectLimits, ResearchProjectSettings, SandboxBackendName, SandboxFailureMode, SandboxPolicy, SandboxProjectSettings, EvalFollowUpPolicy, EvalProjectSettings, ResolvedEvalSettings, SettingsScope, DaemonTokenSettings, TaskStep, StepStatus, TaskLogEntry, RunMutationContext, ActivityLogEntry, ActivityEventType, ThinkingLevel, ThemeMode, ColorTheme, Locale, ExecutionMode, TaskPriority, MergeQueueEntry, MergeQueueEnqueueOptions, MergeQueueAcquireOptions, MergeQueueReleaseOutcome, MergeRequestState, MergeRequestRecord, CompletionHandoffMarker, HandoffEvidence, HandoffToReviewOptions, UnavailableNodePolicy, OwningNodeHandoffPolicy, PlanningQuestion, PlanningSummary, PlanningResponse, PlanningQuestionType, ArchivedTaskEntry, BatchStatusRequest, BatchStatusResponse, BatchStatusEntry, BatchStatusResult, GithubIssueAction, ModelPreset, WorkflowStep, WorkflowStepMode, WorkflowStepGateMode, WorkflowStepPhase, WorkflowStepInput, WorkflowStepResult, WorkflowStepTemplate, Agent, OrgTreeNode, AgentState, AgentDetail, AgentCreateInput, AgentUpdateInput, AgentApiKey, AgentApiKeyCreateResult, AgentCapability, AgentPromptTemplate, AgentPromptsConfig, AgentPermission, PermanentAgentActionCategory, PermanentAgentSensitiveActionCategory, PermanentAgentGatingContext, AgentPermissionPolicy, AgentPermissionPolicyRules, AgentPermissionPolicyActionCategory, AgentProvisioningApprovalMode, SandboxProvisioningApprovalMode, LegacyAgentPermissionPolicyActionCategory, ApprovalRequestActionCategoryInput, ApprovalRequestActionCategory, AgentPermissionPolicyDisposition, AgentPermissionPolicyPresetId, ApprovalRequestStatus, ApprovalRequestAuditEventType, ApprovalRequestActorSnapshot, ApprovalRequestTargetAction, ApprovalRequestAuditEvent, ApprovalRequest, ApprovalRequestCreateInput, ApprovalRequestDecisionInput, ApprovalRequestCompletionInput, ApprovalRequestListInput, TaskAssignSource, AgentAccessState, AgentHeartbeatConfig, AgentBudgetConfig, AgentBudgetStatus, InstructionsBundleConfig, MessageResponseMode, AgentHeartbeatEvent, AgentHeartbeatRun, BlockedStateSnapshot, HeartbeatInvocationSource, AgentTaskSession, AgentRating, AgentRatingSummary, AgentRatingInput, AgentConfigSnapshot, RevisionFieldDiff, AgentConfigRevision, AgentStats, ReflectionTrigger, ReflectionMetrics, AgentReflection, AgentPerformanceSummary, NtfyNotificationEvent, NotificationEvent, NotificationPayload, NotificationProviderConfig, CustomProvider, SteeringComment, ParticipantType, MessageType, Message, MessageCreateInput, MessageFilter, MessageMetadata, MessageReplyReference, Mailbox, CheckoutLease, CheckoutClaimPrecondition, TaskClaimRow, CentralClaimStore, RunAuditDomain, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, AgentMemoryInclusionMode, HeartbeatPromptTemplate, HeartbeatScopeDisciplineMode, WorktrunkSettings, WorktrunkOnFailure, TaskBranchContext } from "./types.js";
+export { COLUMNS, DEFAULT_COLUMN, isColumn, normalizeColumn, COLUMN_LABELS, COLUMN_DESCRIPTIONS, VALID_TRANSITIONS, DEFAULT_SETTINGS, DEFAULT_GLOBAL_SETTINGS, DEFAULT_PROJECT_SETTINGS, GLOBAL_SETTINGS_KEYS, PROJECT_SETTINGS_KEYS, isGlobalSettingsKey, isProjectSettingsKey, isMergeRequestContractShadowEnabled, resolvePersistAgentThinkingLog, THINKING_LEVELS, THEME_MODES, COLOR_THEMES, SUPPORTED_LOCALES, DEFAULT_LOCALE, isLocale, WORKFLOW_STEP_TEMPLATES, AGENT_PERMISSIONS, PERMANENT_AGENT_ACTION_CATEGORIES, AGENT_PERMISSION_POLICY_ACTION_CATEGORIES, AGENT_PROVISIONING_APPROVAL_MODES, SANDBOX_PROVISIONING_APPROVAL_MODES, AGENT_PERMISSION_POLICY_PRESET_IDS, LEGACY_AGENT_PERMISSION_POLICY_ACTION_CATEGORY_ALIASES, APPROVAL_REQUEST_STATUSES, APPROVAL_REQUEST_AUDIT_EVENT_TYPES, normalizeApprovalRequestActionCategory, isValidApprovalRequestTransition, agentToConfigSnapshot, diffConfigSnapshots, isEphemeralAgent, hasAgentIdentity, CheckoutConflictError, DEFAULT_HEARTBEAT_PROCEDURE_PATH, getDefaultHeartbeatProcedurePath, EXECUTION_MODES, DEFAULT_EXECUTION_MODE, TASK_PRIORITIES, DEFAULT_TASK_PRIORITY, HIGH_FANOUT_BLOCKER_TODO_THRESHOLD, STALE_HIGH_FANOUT_BLOCKER_AGE_THRESHOLD_MS, DASHBOARD_USER_ID, normalizeMessageParticipant, validateMessageMetadata, validateDockerNodeConfig, sanitizeDockerNodeConfigForResponse, normalizeMergeIntegrationWorktreeMode, normalizeMergeAdvanceAutoSyncMode, MERGE_ADVANCE_AUTO_SYNC_MODES, normalizeMergeConflictStrategy, normalizeMergeStrategyOverlapBehavior, normalizePostMergeAuditMode, POST_MERGE_AUDIT_MODES, normalizeMergeAuditAutoRecovery, MERGE_AUDIT_AUTO_RECOVERY_MODES, normalizeMergerMode, MERGER_MODES, normalizeAutoRecovery, AUTO_RECOVERY_MODES, buildResearchDocumentKey, REPO_OVERRIDE_RE, SHARED_STATE_SNAPSHOT_VERSION, sanitizeCliAgentSettings, sanitizeCliAgentsSettings, CLI_AGENT_ADAPTER_IDS, CLI_AGENT_AUTONOMY_MODES } from "./types.js";
+export type { Column, ColumnId, IssueInfo, IssueState, TaskSourceIssue, PrInfo, PrConflictState, PrConflictDiagnostics, PrCheckState, PrCheckStatus, PrStatus, BranchGroup, BranchGroupCreateInput, BranchGroupUpdate, BranchGroupPrState, Task, TaskTokenUsage, TaskAttachment, TaskComment, TaskCommentInput, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, TaskCreateInput, MeshReplicatedTaskCreatePayload, MeshReplicatedTaskApplyResult, TaskSource, SourceType, TaskDetail, RetrySummary, InboxTask, TodoList, TodoItem, TodoListCreateInput, TodoListUpdateInput, TodoItemCreateInput, TodoItemUpdateInput, TodoListWithItems, AgentLogEntry, AgentLogType, AgentRole, BoardConfig, DistributedTaskIdReserveInput, DistributedTaskIdReserveResult, DistributedTaskIdCommitInput, DistributedTaskIdCommitResult, DistributedTaskIdAbortInput, DistributedTaskIdAbortResult, DistributedTaskIdStateInput, DistributedTaskIdStateResult, AutostashOrphanRecord, AutostashOutcome, MergeDetails, MergeResult, MergeIntegrationWorktreeMode, MergeAdvanceAutoSyncMode, MergeConflictStrategy, CanonicalMergeConflictStrategy, MergeStrategyOverlapBehavior, PostMergeAuditMode, MergeAuditAutoRecoveryMode, MergerMode, MergerSettings, AutoRecoveryMode, AutoRecoveryFailureClass, AutoRecoverySettings, DirectMergeCommitStrategy, Settings, GlobalSettings, ProjectSettings, SecretsEnvConfig, WebSearchBackend, ResearchEnabledSources, ResearchGlobalDefaults, ResearchProjectLimits, ResearchProjectSettings, SandboxBackendName, SandboxFailureMode, SandboxPolicy, SandboxProjectSettings, EvalFollowUpPolicy, EvalProjectSettings, ResolvedEvalSettings, SettingsScope, DaemonTokenSettings, TaskStep, StepStatus, TaskLogEntry, RunMutationContext, ActivityLogEntry, ActivityEventType, ThinkingLevel, ThemeMode, ColorTheme, Locale, ExecutionMode, TaskPriority, MergeQueueEntry, MergeQueueEnqueueOptions, MergeQueueAcquireOptions, MergeQueueReleaseOutcome, MergeRequestState, MergeRequestRecord, CompletionHandoffMarker, HandoffEvidence, HandoffToReviewOptions, UnavailableNodePolicy, OwningNodeHandoffPolicy, PlanningQuestion, PlanningSummary, PlanningResponse, PlanningQuestionType, ArchivedTaskEntry, BatchStatusRequest, BatchStatusResponse, BatchStatusEntry, BatchStatusResult, GithubIssueAction, ModelPreset, WorkflowStep, WorkflowStepMode, WorkflowStepGateMode, WorkflowStepPhase, WorkflowStepInput, WorkflowStepResult, WorkflowStepTemplate, Agent, OrgTreeNode, AgentState, AgentDetail, AgentCreateInput, AgentUpdateInput, AgentApiKey, AgentApiKeyCreateResult, AgentCapability, AgentPromptTemplate, AgentPromptsConfig, AgentPermission, PermanentAgentActionCategory, PermanentAgentSensitiveActionCategory, PermanentAgentGatingContext, AgentPermissionPolicy, AgentPermissionPolicyRules, AgentPermissionPolicyActionCategory, AgentProvisioningApprovalMode, SandboxProvisioningApprovalMode, LegacyAgentPermissionPolicyActionCategory, ApprovalRequestActionCategoryInput, ApprovalRequestActionCategory, AgentPermissionPolicyDisposition, AgentPermissionPolicyPresetId, ApprovalRequestStatus, ApprovalRequestAuditEventType, ApprovalRequestActorSnapshot, ApprovalRequestTargetAction, ApprovalRequestAuditEvent, ApprovalRequest, ApprovalRequestCreateInput, ApprovalRequestDecisionInput, ApprovalRequestCompletionInput, ApprovalRequestListInput, TaskAssignSource, AgentAccessState, AgentHeartbeatConfig, AgentBudgetConfig, AgentBudgetStatus, InstructionsBundleConfig, MessageResponseMode, AgentHeartbeatEvent, AgentHeartbeatRun, BlockedStateSnapshot, HeartbeatInvocationSource, AgentTaskSession, AgentRating, AgentRatingSummary, AgentRatingInput, AgentConfigSnapshot, RevisionFieldDiff, AgentConfigRevision, AgentStats, ReflectionTrigger, ReflectionMetrics, AgentReflection, AgentPerformanceSummary, NtfyNotificationEvent, NotificationEvent, NotificationPayload, NotificationProviderConfig, CustomProvider, SteeringComment, ParticipantType, MessageType, Message, MessageCreateInput, MessageFilter, MessageMetadata, MessageReplyReference, Mailbox, CheckoutLease, CheckoutClaimPrecondition, TaskClaimRow, CentralClaimStore, RunAuditDomain, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, AgentMemoryInclusionMode, HeartbeatPromptTemplate, HeartbeatScopeDisciplineMode, WorktrunkSettings, WorktrunkOnFailure, TaskBranchContext, CliAgentSettings } from "./types.js";
 export { AGENT_VALID_TRANSITIONS, DUPLICATE_OF_METADATA_KEY } from "./types.js";
 export {
   resolveEntryPointBranchAssignment,
@@ -16,6 +16,7 @@ export type {
   EntryPointBranchAssignment,
 } from "./branch-assignment.js";
 export { customProviderRegistryKey } from "./custom-provider-key.js";
+export { redactSecrets } from "./redact-secrets.js";
 export { MOCK_PROVIDER_ID } from "./mock-provider-constants.js";
 export type { MockProviderId, MockSessionPurpose } from "./mock-provider-constants.js";
 export {
@@ -48,8 +49,11 @@ export {
 export {
   parseWorkflowIr,
   serializeWorkflowIr,
+  stripApprovalBypassFlags,
   WorkflowIrError,
   DEFAULT_WORKFLOW_COLUMN_IDS,
+  WORKFLOW_SETTING_TYPES,
+  SETTING_RENDER_WIDGETS,
 } from "./workflow-ir.js";
 export type {
   WorkflowIr,
@@ -60,6 +64,7 @@ export type {
   WorkflowIrNodeKind,
   WorkflowIrColumn,
   WorkflowIrColumnTrait,
+  WorkflowColumnAgent,
   WorkflowHoldRelease,
   WorkflowJoinMode,
   WorkflowJoinBranchFailure,
@@ -70,14 +75,43 @@ export type {
   WorkflowFieldType,
   WorkflowFieldOption,
   WorkflowFieldRender,
+  // Workflow-settings (U1): typed setting declaration IR types.
+  WorkflowSettingDefinition,
+  WorkflowSettingType,
+  WorkflowSettingOption,
+  WorkflowSettingRender,
+  // CLI Agent Executor (U7): node-config executor typing.
+  WorkflowNodeExecutorKind,
+  WorkflowNodeExecutorConfig,
 } from "./workflow-ir-types.js";
 export {
   DEFAULT_MAX_REWORK_CYCLES,
   MAX_REWORK_CYCLES_CAP,
   resolveMaxReworkCycles,
 } from "./workflow-ir-types.js";
+export {
+  instanceNodeId,
+  parseInstanceNodeId,
+  resolveColumnAgentBinding,
+  resolveEffectiveAgent,
+} from "./column-agent-resolver.js";
+export type {
+  ParsedInstanceNodeId,
+  EffectiveAgentInput,
+  EffectiveAgentResult,
+} from "./column-agent-resolver.js";
 export { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
 export { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "./builtin-stepwise-coding-workflow-ir.js";
+export { BUILTIN_PR_WORKFLOW_IR } from "./builtin-pr-workflow-ir.js";
+export { BUILTIN_WORKFLOW_SETTINGS } from "./builtin-workflow-settings.js";
+export {
+  MOVED_SETTINGS_KEYS,
+  SETTINGS_MIGRATION_VERSION,
+  SETTINGS_MIGRATION_MARKER_KEY,
+  isMovedSettingsKey,
+  stripMovedSettingsKeys,
+  patchContainsMovedKey,
+} from "./moved-settings.js";
 
 // ── Trait model (U2) ─────────────────────────────────────────────────
 export type {
@@ -216,6 +250,20 @@ export type {
   FieldReconciliation,
 } from "./task-fields.js";
 export {
+  validateSettingValuePatch,
+  resolveEffectiveSettingValues,
+  findOrphanedSettingValues,
+  makeWorkflowSettingRejection,
+  WorkflowSettingRejectionError,
+  WORKFLOW_SETTING_REJECTION_CODES,
+} from "./workflow-settings.js";
+export type {
+  WorkflowSettingRejection,
+  WorkflowSettingRejectionCode,
+  SettingValuePatchResult,
+  OrphanedSettingValue,
+} from "./workflow-settings.js";
+export {
   readTransitionPending,
   writeTransitionPending,
   clearTransitionPending,
@@ -225,6 +273,7 @@ export type {
   WorkflowDefinition,
   WorkflowDefinitionInput,
   WorkflowDefinitionUpdate,
+  WorkflowDefinitionKind,
   WorkflowNodeLayout,
 } from "./workflow-definition-types.js";
 export {
@@ -232,6 +281,11 @@ export {
   validateLinearity,
   WorkflowCompileError,
 } from "./workflow-compiler.js";
+export {
+  stepsToWorkflowIr,
+  stepToFragmentIr,
+  layoutForIr,
+} from "./workflow-steps-to-ir.js";
 export {
   BUILTIN_WORKFLOWS,
   BUILTIN_WORKFLOW_ID_PREFIX,
@@ -243,6 +297,14 @@ export {
   resolveWorkflowIrById,
   type WorkflowIrResolverStore,
 } from "./workflow-ir-resolver.js";
+export {
+  resolveEffectiveSettings,
+  resolveEffectiveSettingsDetailed,
+  resolveEffectiveSettingsById,
+  type WorkflowSettingsResolverStore,
+  type EffectiveSettingsResult,
+  type EffectiveSettingsTaskRef,
+} from "./workflow-settings-resolver.js";
 
 // ── Engine wiring (set by @fusion/engine at module load) ────────────
 export {
@@ -297,8 +359,13 @@ export {
   normalizeAgentPermissionPolicy,
   resolveEffectiveAgentPermissionPolicy,
   isAgentPermissionPolicyPresetId,
+  isPolicyBroaderThanDefault,
 } from "./agent-permission-policy.js";
 export type { BuiltInAgentPermissionPolicyPreset } from "./agent-permission-policy.js";
+export {
+  validateColumnAgentBindings,
+  ColumnAgentBindingError,
+} from "./column-agent-binding-validation.js";
 export { AgentStore, DEFAULT_AGENT_HEARTBEAT_INTERVAL_MS } from "./agent-store.js";
 export type { AgentStoreEvents } from "./agent-store.js";
 export {
@@ -452,6 +519,7 @@ export {
   toJson,
   toJsonNullable,
   fromJson,
+  SCHEMA_VERSION,
 } from "./db.js";
 export {
   ProjectIdentityConflictError,
@@ -785,7 +853,7 @@ export {
 } from "./plugin-types.js";
 export { PluginStore } from "./plugin-store.js";
 export type { PluginStoreEvents, PluginRegistrationInput, PluginUpdateInput } from "./plugin-store.js";
-export { PluginLoader } from "./plugin-loader.js";
+export { PluginLoader, resolvePluginEntryPath } from "./plugin-loader.js";
 export { scanPluginSecurity } from "./plugin-security-scan.js";
 export type { PluginSecurityScanResult, PluginSecurityFinding } from "./plugin-security-scan.js";
 export type {
@@ -827,12 +895,14 @@ export {
   generateExportFilename,
   readExportFile,
   writeExportFile,
+  SETTINGS_EXPORT_VERSION,
 } from "./settings-export.js";
 export type {
   SettingsExportData,
   ExportSettingsOptions,
   ImportSettingsOptions,
   ImportResult,
+  WorkflowSettingsExportSection,
 } from "./settings-export.js";
 
 // ── AI Summarization ─────────────────────────────────────────────────────
@@ -1549,6 +1619,25 @@ export type {
 } from "./chat-types.js";
 export { ChatStore } from "./chat-store.js";
 export type { ChatStoreEvents } from "./chat-store.js";
+export {
+  CLI_AGENT_STATES,
+  CLI_TERMINATION_REASONS,
+  CLI_SESSION_PURPOSES,
+  isCliAgentState,
+  isCliTerminationReason,
+  isCliSessionPurpose,
+} from "./cli-session-types.js";
+export type {
+  CliAgentState,
+  CliTerminationReason,
+  CliSessionPurpose,
+  CliAutonomyPosture,
+  CliSession,
+  CliSessionCreateInput,
+  CliSessionUpdateInput,
+} from "./cli-session-types.js";
+export { CliSessionStore } from "./cli-session-store.js";
+export type { CliSessionStoreEvents } from "./cli-session-store.js";
 export {
   choosePreferredStoredCredential,
   extractClaudeCliStoredCredential,

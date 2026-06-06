@@ -53,8 +53,9 @@ export interface ModalManager {
   fileBrowserInitialFile: string | null;
   activityLogOpen: boolean;
   gitManagerOpen: boolean;
-  workflowStepsOpen: boolean;
   workflowEditorOpen: boolean;
+  /** When the workflow editor opens, which internal panel to pre-select (U9 redirect stubs). */
+  workflowEditorInitialPanel?: "settings";
   agentsOpen: boolean;
   scriptsOpen: boolean;
   setupWizardOpen: boolean;
@@ -117,9 +118,7 @@ export interface ModalManager {
   openGitManager: () => void;
   closeGitManager: () => void;
 
-  openWorkflowSteps: () => void;
-  closeWorkflowSteps: () => void;
-  openWorkflowEditor: () => void;
+  openWorkflowEditor: (initialPanel?: "settings") => void;
   closeWorkflowEditor: () => void;
 
   openAgents: () => void;
@@ -177,8 +176,8 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const [fileBrowserInitialFile, setFileBrowserInitialFile] = useState<string | null>(null);
   const [activityLogOpen, setActivityLogOpen] = useState(false);
   const [gitManagerOpen, setGitManagerOpen] = useState(false);
-  const [workflowStepsOpen, setWorkflowStepsOpen] = useState(false);
   const [workflowEditorOpen, setWorkflowEditorOpen] = useState(false);
+  const [workflowEditorInitialPanel, setWorkflowEditorInitialPanel] = useState<"settings" | undefined>(undefined);
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [scriptsOpen, setScriptsOpen] = useState(false);
   const [setupWizardOpen, setSetupWizardOpen] = useState(false);
@@ -196,7 +195,6 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
       todosOpen ||
       activityLogOpen ||
       gitManagerOpen ||
-      workflowStepsOpen ||
       workflowEditorOpen ||
       scriptsOpen ||
       agentsOpen ||
@@ -345,10 +343,14 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const openGitManager = useCallback(() => setGitManagerOpen(true), []);
   const closeGitManager = useCallback(() => setGitManagerOpen(false), []);
 
-  const openWorkflowSteps = useCallback(() => setWorkflowStepsOpen(true), []);
-  const closeWorkflowSteps = useCallback(() => setWorkflowStepsOpen(false), []);
-  const openWorkflowEditor = useCallback(() => setWorkflowEditorOpen(true), []);
-  const closeWorkflowEditor = useCallback(() => setWorkflowEditorOpen(false), []);
+  const openWorkflowEditor = useCallback((initialPanel?: "settings") => {
+    setWorkflowEditorInitialPanel(initialPanel);
+    setWorkflowEditorOpen(true);
+  }, []);
+  const closeWorkflowEditor = useCallback(() => {
+    setWorkflowEditorOpen(false);
+    setWorkflowEditorInitialPanel(undefined);
+  }, []);
 
   const openAgents = useCallback(() => setAgentsOpen(true), []);
   const closeAgents = useCallback(() => setAgentsOpen(false), []);
@@ -414,8 +416,8 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     fileBrowserInitialFile,
     activityLogOpen,
     gitManagerOpen,
-    workflowStepsOpen,
     workflowEditorOpen,
+    workflowEditorInitialPanel,
     agentsOpen,
     scriptsOpen,
     setupWizardOpen,
@@ -458,8 +460,6 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     closeActivityLog,
     openGitManager,
     closeGitManager,
-    openWorkflowSteps,
-    closeWorkflowSteps,
     openWorkflowEditor,
     closeWorkflowEditor,
     openAgents,

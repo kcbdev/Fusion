@@ -24,6 +24,7 @@ import type {
   ChatSessionCreateInput,
   MessageStore,
   Settings,
+  TaskStore,
 } from "@fusion/core";
 import { summarizeTitle } from "@fusion/core";
 import { EventEmitter } from "node:events";
@@ -40,6 +41,7 @@ import {
   extractRuntimeModel,
   createSendMessageTool,
   createReadMessagesTool,
+  createWorkflowAuthoringTools,
 } from "@fusion/engine";
 import * as engineModule from "@fusion/engine";
 
@@ -733,7 +735,34 @@ export class ChatManager {
       | "chatRoomSummaryMaxChars"
     > | undefined,
     private messageStore?: MessageStore,
+    // Scoped task store for the chat's project — enables workflow-authoring
+    // tools (fn_workflow_*). Optional so existing test/construction sites that
+    // don't author workflows keep working.
+    private taskStore?: TaskStore,
   ) {}
+
+  /**
+   * Runner for CLI-agent-backed chat sessions (CLI Agent Executor). When a chat
+   * session selects a cli-agent executor (`cliExecutorAdapterId`), composer sends
+   * are brokered to the live PTY through this runner instead of the model agent
+   * loop. Injected post-construction (the runtime is built per-project at boot,
+   * after the ChatManager) so the positional ctor stays stable.
+   */
+  private cliChatRunner?: {
+    ensureSession(chatSessionId: string, opts: { projectId: string; worktreePath?: string | null }): Promise<string>;
+    send(chatSessionId: string, text: string): Promise<"sent" | "queued">;
+  };
+  /** Project id used when the runner spawns a CLI session for a chat. */
+  private cliChatProjectId?: string;
+
+  /** Wire (or clear) the CLI-agent chat runner and its owning project id. */
+  setCliChatRunner(
+    runner: ChatManager["cliChatRunner"] | undefined,
+    projectId?: string,
+  ): void {
+    this.cliChatRunner = runner;
+    this.cliChatProjectId = projectId;
+  }
 
   private queueInFlightGenerationPersist(sessionId: string, snapshot: ChatInFlightGenerationState | null): void {
     const existingTimer = this.inFlightPersistTimers.get(sessionId);
@@ -1392,6 +1421,26 @@ export class ChatManager {
     const broadcastOptions = { generationId };
 
     const session = this.chatStore.getSession(sessionId);
+
+    // CLI-agent-backed chat: a session that selected a cli-agent executor brokers
+    // its composer sends to the live PTY (via the runner) rather than running the
+    // model agent loop. The runner persists the user message + the transcript.
+    if (session?.cliExecutorAdapterId && this.cliChatRunner) {
+      const runner = this.cliChatRunner;
+      try {
+        await runner.ensureSession(sessionId, {
+          projectId: this.cliChatProjectId ?? session.projectId ?? "",
+        });
+        await runner.send(sessionId, content);
+      } finally {
+        const current = this.activeGenerations.get(sessionId);
+        if (current?.generationId === generationId) {
+          this.activeGenerations.delete(sessionId);
+        }
+      }
+      return;
+    }
+
     let agentResult: AgentResult | undefined;
     let accumulatedThinking = "";
     let accumulatedText = "";
@@ -1604,13 +1653,22 @@ export class ChatManager {
             createSendMessageTool(this.messageStore, agent.id),
             createReadMessagesTool(this.messageStore, agent.id),
           ]
-        : undefined;
+        : [];
+
+      // Expose workflow-authoring tools (fn_workflow_*) when a scoped task store
+      // is available. The chat lane has no ambient task, so fn_workflow_select
+      // has no default target — an agent must pass an explicit task_id.
+      const workflowTools = this.taskStore
+        ? createWorkflowAuthoringTools(this.taskStore, "", { stripApprovalFlags: true })
+        : [];
+
+      const customTools = [...messagingTools, ...workflowTools];
 
       const sessionOptions = {
         cwd: this.rootDir,
         systemPrompt,
         tools: "coding" as const,
-        ...(messagingTools ? { customTools: messagingTools } : {}),
+        ...(customTools.length > 0 ? { customTools } : {}),
         sessionManager,
         ...(effectiveModelProvider && effectiveModelId
           ? {

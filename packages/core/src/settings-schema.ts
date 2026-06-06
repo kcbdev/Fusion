@@ -1,10 +1,60 @@
-import type { GlobalSettings, ProjectSettings, Settings } from "./types.js";
+import type { CliAgentSettings, GlobalSettings, ProjectSettings, Settings } from "./types.js";
 
 export interface MergeRequestContractShadowSettingsSource {
   mergeRequestContractShadowEnabled?: boolean;
 }
 
 type CompleteSettings<T> = { [K in keyof Required<T>]: Required<T>[K] | undefined };
+
+/**
+ * The settings keys hard-MOVED to workflow settings in U4 (see
+ * `moved-settings.ts`). They are REMOVED from `DEFAULT_PROJECT_SETTINGS` (so they
+ * leave `PROJECT_SETTINGS_KEYS` / the save-split), but their FIELDS are retained
+ * on the `ProjectSettings` type for the engine's flat `settings.<key>` reads and
+ * the U3 effective-settings merge. `DEFAULT_PROJECT_SETTINGS` is therefore
+ * type-checked against `ProjectSettings` MINUS these keys — the type-vs-schema
+ * split documented in `moved-settings.ts`.
+ *
+ * This union is NOT compile-time-enforced against `MOVED_SETTINGS_KEYS`.
+ * Enforcement lives in `src/__tests__/settings-consistency.test.ts` (every key
+ * must belong to exactly one regime). A STALE entry here only loosens the `Omit`
+ * type — at worst it lets `DEFAULT_PROJECT_SETTINGS` drop a key it should keep;
+ * it can never re-add a key to the schema object. A MISSING entry surfaces as a
+ * type error on `DEFAULT_PROJECT_SETTINGS` if that key still has a default.
+ */
+type MovedProjectSettingsKey =
+  | "workflowStepTimeoutMs"
+  | "workflowStepScopeEnforcement"
+  | "planOnlyScopeLeakEnforcement"
+  | "workflowRevisionForkOnScopeMismatch"
+  | "strictScopeEnforcement"
+  | "runStepsInNewSessions"
+  | "maxParallelSteps"
+  | "buildRetryCount"
+  | "verificationFixRetries"
+  | "maxPostReviewFixes"
+  | "requirePrApproval"
+  | "requirePlanApproval"
+  | "reviewHandoffPolicy"
+  | "maxReviewerContextRetries"
+  | "maxReviewerFallbackRetries"
+  | "reflectionEnabled"
+  | "executionProvider"
+  | "executionModelId"
+  | "planningProvider"
+  | "planningModelId"
+  | "planningFallbackProvider"
+  | "planningFallbackModelId"
+  | "validatorProvider"
+  | "validatorModelId"
+  | "validatorFallbackProvider"
+  | "validatorFallbackModelId"
+  | "titleSummarizerProvider"
+  | "titleSummarizerModelId"
+  | "titleSummarizerFallbackProvider"
+  | "titleSummarizerFallbackModelId";
+
+type ProjectSettingsSchema = Omit<ProjectSettings, MovedProjectSettingsKey>;
 
 /**
  * Settings schema source of truth.
@@ -180,6 +230,7 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   },
   owningNodeHandoffPolicy: "reassign-to-local",
   experimentalFeatures: {},
+  cliAgents: {},
 } satisfies CompleteSettings<GlobalSettings>;
 
 /** Default values for project-level settings. */
@@ -188,6 +239,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   globalPauseReason: undefined,
   defaultWorkflowId: undefined,
   approvedWorkflowCliCommands: undefined,
+  approvedCliAutonomyAdapters: undefined,
   enginePaused: false,
   maxConcurrent: 2,
   maxTriageConcurrent: 2,
@@ -209,7 +261,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   mergeIntegrationWorktree: "reuse-task-worktree",
   mergeAdvanceAutoSync: "stash-and-ff",
   integrationBranch: undefined,
-  requirePrApproval: false,
+  // `requirePrApproval` MOVED to workflow settings (U4) — see MOVED_SETTINGS_KEYS.
   pushAfterMerge: false,
   pushRemote: "origin",
   unavailableNodePolicy: "block",
@@ -236,19 +288,12 @@ export const DEFAULT_PROJECT_SETTINGS = {
   commitAuthorEnabled: true,
   commitAuthorName: "Fusion",
   commitAuthorEmail: "noreply@runfusion.ai",
-  planningProvider: undefined,
-  planningModelId: undefined,
-  planningFallbackProvider: undefined,
-  planningFallbackModelId: undefined,
-  // Project-level default override and execution lane
+  // Per-phase model lanes (planning/execution/validator) MOVED to workflow
+  // settings (U4) — see MOVED_SETTINGS_KEYS. The GLOBAL baseline lanes
+  // (executionGlobalProvider etc.) stay global; project default overrides stay.
+  // Project-level default override (NOT moved — stays project-scoped)
   defaultProviderOverride: undefined,
   defaultModelIdOverride: undefined,
-  executionProvider: undefined,
-  executionModelId: undefined,
-  validatorProvider: undefined,
-  validatorModelId: undefined,
-  validatorFallbackProvider: undefined,
-  validatorFallbackModelId: undefined,
   modelPresets: [],
   autoSelectModelPreset: false,
   completionDocumentationMode: "off",
@@ -283,15 +328,13 @@ export const DEFAULT_PROJECT_SETTINGS = {
     maxRetries: 3,
   },
   reliabilityStatsResetAt: undefined,
-  workflowStepTimeoutMs: 360_000,
-  workflowStepScopeEnforcement: "block",
-  planOnlyScopeLeakEnforcement: "warn",
-  workflowRevisionForkOnScopeMismatch: true,
-  strictScopeEnforcement: false,
-  buildRetryCount: 0,
-  verificationFixRetries: 3,
+  // Step-execution knobs (workflowStepTimeoutMs, workflowStepScopeEnforcement,
+  // planOnlyScopeLeakEnforcement, workflowRevisionForkOnScopeMismatch,
+  // strictScopeEnforcement, buildRetryCount, verificationFixRetries,
+  // requirePlanApproval) MOVED to workflow settings (U4) — see
+  // MOVED_SETTINGS_KEYS. `buildTimeoutMs` is NOT moved (no engine reader) and
+  // stays a plain project setting:
   buildTimeoutMs: 300_000,
-  requirePlanApproval: false,
   ephemeralAgentsEnabled: true,
   agentProvisioning: {},
   sandboxProvisioning: {},
@@ -335,11 +378,11 @@ export const DEFAULT_PROJECT_SETTINGS = {
   autoUnpauseMaxDelayMs: 3_600_000,
   maxStuckKills: 6,
   maxBranchConflictRecoveries: 5,
-  maxReviewerContextRetries: 2,
-  maxReviewerFallbackRetries: 2,
+  // maxReviewerContextRetries / maxReviewerFallbackRetries MOVED to workflow
+  // settings (U4) — see MOVED_SETTINGS_KEYS.
   maxTotalRetriesBeforeFail: 25,
   preserveProgressOnStuckRequeue: true,
-  maxPostReviewFixes: 1,
+  // maxPostReviewFixes MOVED to workflow settings (U4).
   maxSpawnedAgentsPerParent: 5,
   maxSpawnedAgentsGlobal: 20,
   // Run maintenance (including WAL checkpointing) every 5 minutes by default.
@@ -368,10 +411,8 @@ export const DEFAULT_PROJECT_SETTINGS = {
   memoryBackupScope: "all" as const,
   autoSummarizeTitles: false,
   useAiMergeCommitSummary: true,
-  titleSummarizerProvider: undefined,
-  titleSummarizerModelId: undefined,
-  titleSummarizerFallbackProvider: undefined,
-  titleSummarizerFallbackModelId: undefined,
+  // Title-summarizer model lanes MOVED to workflow settings (U4) —
+  // see MOVED_SETTINGS_KEYS.
   scripts: undefined,
   setupScript: undefined,
   insightExtractionEnabled: false,
@@ -392,17 +433,19 @@ export const DEFAULT_PROJECT_SETTINGS = {
   memoryDreamsSchedule: "0 4 * * *",
   tokenCap: undefined,
   taskTokenBudget: undefined,
-  runStepsInNewSessions: false,
-  maxParallelSteps: 2,
+  // runStepsInNewSessions / maxParallelSteps MOVED to workflow settings (U4) —
+  // see MOVED_SETTINGS_KEYS.
   missionStaleThresholdMs: 600_000,
   missionMaxTaskRetries: 3,
   missionHealthCheckIntervalMs: 300_000,
   agentPrompts: undefined,
   promptOverrides: undefined,
-  reflectionEnabled: false,
+  // reflectionEnabled MOVED to workflow settings (U4). reflectionIntervalMs /
+  // reflectionAfterTask have no engine reader, so they STAY plain project
+  // settings (catalog-shrink rule) and are NOT in MOVED_SETTINGS_KEYS.
   reflectionIntervalMs: 3_600_000,
   reflectionAfterTask: true,
-  reviewHandoffPolicy: "disabled",
+  // reviewHandoffPolicy MOVED to workflow settings (U4) — see MOVED_SETTINGS_KEYS.
   showQuickChatFAB: false,
   chatAutoCleanupDays: 0,
   mailAutoCleanupDays: 0,
@@ -451,7 +494,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   researchDefaultTimeout: 300000,
   researchMaxSourcesPerRun: 20,
   researchMaxSynthesisRounds: 2,
-} satisfies CompleteSettings<ProjectSettings>;
+} satisfies CompleteSettings<ProjectSettingsSchema>;
 
 /**
  * Merged default settings (backward compatible).
@@ -520,4 +563,82 @@ export function resolvePersistAgentThinkingLog(
   if (typeof granular === "boolean") return granular;
   if (typeof settings?.persistAgentThinkingLog === "boolean") return settings.persistAgentThinkingLog;
   return false;
+}
+
+// ── CLI-agent settings sanitization (U15) ───────────────────────────────────
+
+/** Adapter ids accepted in `cliAgents`. Unknown ids are dropped at the write
+ *  boundary so a settings file cannot carry config for non-existent adapters. */
+export const CLI_AGENT_ADAPTER_IDS = Object.freeze([
+  "claude-code",
+  "codex",
+  "droid",
+  "pi",
+  "generic",
+] as const);
+
+/** Autonomy modes accepted in a `CliAgentSettings` entry. */
+export const CLI_AGENT_AUTONOMY_MODES = Object.freeze(["default", "elevated"] as const);
+
+function sanitizeStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const cleaned = value
+    .filter((v): v is string => typeof v === "string")
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0);
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+/**
+ * Sanitize a single adapter's launch settings (U15). Drops unknown fields and
+ * invalid values; returns `undefined` when nothing survives (so the caller can
+ * omit an empty entry). Pure — no I/O.
+ *
+ * Validation rules:
+ * - `commandOverride`: non-empty trimmed string, else dropped.
+ * - `extraArgs` / `envAdditions`: arrays of non-empty trimmed strings, else dropped.
+ * - `autonomyMode`: one of CLI_AGENT_AUTONOMY_MODES, else dropped (falls back to
+ *   the adapter baseline at resolution time).
+ */
+export function sanitizeCliAgentSettings(value: unknown): CliAgentSettings | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  const out: CliAgentSettings = {};
+
+  if (typeof input.commandOverride === "string") {
+    const trimmed = input.commandOverride.trim();
+    if (trimmed.length > 0) out.commandOverride = trimmed;
+  }
+
+  const extraArgs = sanitizeStringArray(input.extraArgs);
+  if (extraArgs) out.extraArgs = extraArgs;
+
+  const envAdditions = sanitizeStringArray(input.envAdditions);
+  if (envAdditions) out.envAdditions = envAdditions;
+
+  if (
+    typeof input.autonomyMode === "string" &&
+    (CLI_AGENT_AUTONOMY_MODES as readonly string[]).includes(input.autonomyMode)
+  ) {
+    out.autonomyMode = input.autonomyMode as CliAgentSettings["autonomyMode"];
+  }
+
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Sanitize the whole `cliAgents` map at the write boundary (U15). Drops unknown
+ * adapter ids and any entry that sanitizes to nothing. Returns a fresh object;
+ * always returns an object (possibly empty) so the field round-trips cleanly.
+ */
+export function sanitizeCliAgentsSettings(value: unknown): Record<string, CliAgentSettings> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const input = value as Record<string, unknown>;
+  const out: Record<string, CliAgentSettings> = {};
+  for (const adapterId of CLI_AGENT_ADAPTER_IDS) {
+    if (!(adapterId in input)) continue;
+    const entry = sanitizeCliAgentSettings(input[adapterId]);
+    if (entry) out[adapterId] = entry;
+  }
+  return out;
 }

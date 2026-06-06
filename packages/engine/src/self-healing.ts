@@ -31,6 +31,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, allowsAutoMergeProcessing, countRecentIdenticalStallEntries, detectDependencyCycle, detectSelfDefeatingDependency, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getStalePausedTodoSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, isMergeRequestContractShadowEnabled, isWorkflowColumnsEnabled, isSharedBranchGroupMemberIntegration, parseExplicitDuplicateMarker, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult } from "@fusion/core";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { createLogger, schedulerLog } from "./logger.js";
+import { mergeEffectiveSettings } from "./effective-settings.js";
 import { RemovalReason, classifyTaskWorktree, getRegisteredWorktreeBranchMap, getRegisteredWorktreePaths, isUsableTaskWorktree, removeWorktree, resolveWorktreeBackend, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
 import {
   classifyMissingWorktreeSessionStartFailure,
@@ -293,6 +294,16 @@ export interface SelfHealingOptions {
   recoverActiveMissionValidations?: () => Promise<{ recoveredCount: number }>;
   /** Optional callback to reap stale mission validator runs during startup and maintenance. */
   reapStaleMissionValidatorRuns?: () => Promise<{ reapedCount: number }>;
+  /**
+   * U8 (CLI Agent Executor): returns true when a worktree path backs a
+   * resume-eligible `cli_sessions` record. Idle-worktree sweeps
+   * (`enforceWorktreeCap`, `cleanupOrphans`, `reapUnregisteredOrphans`) MUST
+   * treat such a worktree as in-use, so a reaped-but-resumable session cannot
+   * have its worktree reclaimed out from under it before the resume coordinator
+   * relaunches the CLI. Narrow seam: a single predicate; absence (undefined)
+   * preserves the prior behavior. The path passed is the absolute worktree dir.
+   */
+  isWorktreeResumeReserved?: (worktreePath: string) => boolean;
 }
 
 const APPROVED_TRIAGE_RECOVERY_GRACE_MS = 60_000;
@@ -1548,6 +1559,27 @@ export class SelfHealingManager {
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       log.warn(`Failed to record shared-group self-heal landing audit for ${task.id}: ${errorMessage}`);
+    }
+  }
+
+  /**
+   * U8 seam: whether a worktree path backs a resume-eligible CLI agent session
+   * and must therefore be treated as in-use by idle sweeps. Defensive: a throw
+   * in the injected predicate is treated as "reserved" (conservative — never
+   * reclaim a worktree we can't prove is free).
+   */
+  private isWorktreeResumeReserved(worktreePath: string): boolean {
+    const predicate = this.options.isWorktreeResumeReserved;
+    if (!predicate) return false;
+    try {
+      return predicate(resolve(worktreePath));
+    } catch (err: unknown) {
+      log.warn(
+        `[self-healing] resume-reserved check threw for ${worktreePath}: ${
+          err instanceof Error ? err.message : String(err)
+        } — treating as reserved (conservative)`,
+      );
+      return true;
     }
   }
 
@@ -5008,11 +5040,19 @@ export class SelfHealingManager {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
-      const maxFixes = settings.maxPostReviewFixes ?? 1;
-      if (!Number.isFinite(maxFixes) || maxFixes <= 0) return 0;
 
       const tasks = await this.store.listTasks({ column: "in-review", slim: true });
       const executingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
+
+      // Resolve the per-task effective `maxPostReviewFixes` (U3, KTD-3) — this is a
+      // cross-task recovery sweep, so the budget is resolved per task rather than
+      // from a single global read. Behavior-inert when nothing is customized.
+      const maxFixesByTask = new Map<string, number>();
+      for (const task of tasks) {
+        const eff = await mergeEffectiveSettings(this.store, task, settings);
+        maxFixesByTask.set(task.id, eff.maxPostReviewFixes ?? 1);
+      }
+      const maxFixesFor = (taskId: string): number => maxFixesByTask.get(taskId) ?? 1;
 
       const candidates = tasks.filter((task) => {
         if (task.column !== "in-review") return false;
@@ -5022,6 +5062,8 @@ export class SelfHealingManager {
         // merging, etc.). Only revive tasks that are otherwise idle.
         if (task.status) return false;
         if (executingIds.has(task.id)) return false;
+        const maxFixes = maxFixesFor(task.id);
+        if (!Number.isFinite(maxFixes) || maxFixes <= 0) return false;
         if ((task.postReviewFixCount ?? 0) >= maxFixes) return false;
 
         // Must have at least one failed pre-merge workflow step result.
@@ -5051,6 +5093,7 @@ export class SelfHealingManager {
       let recovered = 0;
       for (const task of candidates) {
         const nextCount = (task.postReviewFixCount ?? 0) + 1;
+        const maxFixes = maxFixesFor(task.id);
         try {
           // Increment the counter BEFORE delegating so that even if the
           // executor path crashes or races, the budget is still consumed and
@@ -8434,6 +8477,11 @@ export class SelfHealingManager {
 
       let cleaned = 0;
       for (const worktreePath of orphaned) {
+        // U8: never reclaim a worktree backing a resume-eligible CLI session.
+        if (this.isWorktreeResumeReserved(worktreePath)) {
+          log.log(`[self-healing] deferring idle-sweep for ${worktreePath}: resume-eligible CLI session present`);
+          continue;
+        }
         try {
           await removeWorktree({
             rootDir: this.options.rootDir,
@@ -8504,6 +8552,11 @@ export class SelfHealingManager {
       // admin file while the owning process is still running.
       if (activeSessionRegistry.isPathActive(path)) {
         log.log(`[self-healing] deferring unregistered-orphan reap for ${path}: active session present`);
+        continue;
+      }
+      // U8: never reclaim a worktree backing a resume-eligible CLI session.
+      if (this.isWorktreeResumeReserved(path)) {
+        log.log(`[self-healing] deferring unregistered-orphan reap for ${path}: resume-eligible CLI session present`);
         continue;
       }
       try {
@@ -8639,6 +8692,11 @@ export class SelfHealingManager {
 
       for (const { path: worktreePath } of withMtime) {
         if (removed >= excess) break;
+        // U8: never reclaim a worktree backing a resume-eligible CLI session.
+        if (this.isWorktreeResumeReserved(worktreePath)) {
+          log.log(`[self-healing] cap-enforcement skipping ${worktreePath}: resume-eligible CLI session present`);
+          continue;
+        }
         try {
           await removeWorktree({
             rootDir: this.options.rootDir,

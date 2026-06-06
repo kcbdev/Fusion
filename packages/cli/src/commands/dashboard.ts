@@ -25,6 +25,9 @@ import {
 } from "@fusion/core";
 import {
   createServer,
+  AttachTicketStore,
+  CliInputAttributionLog,
+  CliConfirmAdvanceRegistry,
   GitHubClient,
   createSkillsAdapter,
   getCliPackageVersion,
@@ -86,7 +89,7 @@ import { getCachedUpdateStatus, isUpdateCheckEnabled } from "../update-cache.js"
 import { resolveSelfExtension } from "./self-extension.js";
 import { ensureBundledDependencyGraphPluginInstalled, ensureBundledPluginInstalled, isBundledPluginId } from "../plugins/bundled-plugin-install.js";
 import { registerCustomProviders, reregisterCustomProviders } from "./custom-provider-registry.js";
-import { refreshOpencodeGoModels, syncStartupModels } from "./startup-model-sync.js";
+import { handleOpencodeGoApiKeySaved, syncStartupModels } from "./startup-model-sync.js";
 import { DashboardTUI, DashboardLogSink, isTTYAvailable, type SystemInfo, type GitStatus, type GitCommit, type GitCommitDetail, type GitBranch, type GitWorktree, type FileEntry, type FileReadResult, type TaskStep as TUITaskStep, type TaskLogEntry as TUITaskLogEntry, type TaskDetailData, type TaskEvent } from "./dashboard-tui/index.js";
 import { DASHBOARD_STARTUP_STATUS, runTuiStartupPrelude } from "./dashboard-startup-chain.js";
 
@@ -1745,9 +1748,33 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     // to createServer — routes derived from getPluginRoutes() rely on it.
     await phaseTime("pluginLoadingPromise (await)", () => pluginLoadingPromise);
 
+    // ── CLI Agent Executor: hub resolver + session transport ─────────────
+    //
+    // The hook route validates a per-session token against the project's live
+    // TelemetryHub; resolve it from that project's engine. The cli-sessions
+    // transport (REST + WS attach) is supplied from the cwd project's runtime
+    // (the canonical single-project surface) when the experimental flag is on.
+    //
+    const cliAgentHubResolver = (projectId: string | undefined, _sessionId: string) => {
+      const engine = projectId ? engineManager.getEngine(projectId) : cwdEngine;
+      return engine?.getCliAgentRuntime()?.bundle.hub;
+    };
+    const cwdCliAgentRuntime = cwdEngine?.getCliAgentRuntime();
+    const cliSessionTransport = cwdCliAgentRuntime
+      ? {
+          manager: cwdCliAgentRuntime.bundle.manager,
+          store: cwdCliAgentRuntime.bundle.store,
+          ticketStore: new AttachTicketStore(),
+          attributionLog: new CliInputAttributionLog(),
+          confirmAdvance: new CliConfirmAdvanceRegistry(),
+        }
+      : undefined;
+
     app = createServer(store, {
       engine: cwdEngine,
       engineManager,
+      cliAgentHubResolver,
+      cliSessionTransport,
       hybridExecutor,
       centralCore: centralCoreForEngine,
       authStorage: dashboardAuthStorage,
@@ -1765,14 +1792,12 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
         if (providerId !== "opencode" && providerId !== "opencode-go") {
           return undefined;
         }
-        const settings = await store.getSettings();
-        if (settings.opencodeGoModelSync === false) {
-          return { registeredCount: 0, reason: "disabled-by-settings" };
-        }
-        return await refreshOpencodeGoModels({
+        return await handleOpencodeGoApiKeySaved(
+          dashboardAuthStorage,
+          store,
           modelRegistry,
-          log: (scope, message) => logSink.log(message, scope),
-        });
+          (scope, message) => logSink.log(message, scope),
+        );
       },
       getClaudeCliExtensionStatus: () => {
         const r = getCachedClaudeCliResolution();
@@ -1978,6 +2003,11 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
           });
         },
         store,
+        // Dev-mode scheduler: no TaskExecutor runs here (engine not started), so
+        // neither `isTaskExecuting` nor the U5 reverse-direction
+        // `isAgentEffectivelyExecuting` guard has a source — both stay unwired (the
+        // guards simply never fire), matching the prior `isTaskExecuting` omission.
+        // The real wiring is the InProcessRuntime construction site.
       );
       triggerScheduler.start();
 
@@ -2086,14 +2116,12 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
         if (providerId !== "opencode" && providerId !== "opencode-go") {
           return undefined;
         }
-        const settings = await store.getSettings();
-        if (settings.opencodeGoModelSync === false) {
-          return { registeredCount: 0, reason: "disabled-by-settings" };
-        }
-        return await refreshOpencodeGoModels({
+        return await handleOpencodeGoApiKeySaved(
+          dashboardAuthStorage,
+          store,
           modelRegistry,
-          log: (scope, message) => logSink.log(message, scope),
-        });
+          (scope, message) => logSink.log(message, scope),
+        );
       },
       getClaudeCliExtensionStatus: () => {
         const r = getCachedClaudeCliResolution();
