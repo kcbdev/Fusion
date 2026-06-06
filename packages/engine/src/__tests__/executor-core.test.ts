@@ -734,6 +734,77 @@ describe("TaskExecutor messaging tools", () => {
       expect(toolNames).toContain("fn_review_step");
     });
 
+    // issue #4 item 7: fn_task_update forwards per-task model overrides to
+    // store.updateTask (absent = preserve, null = clear), mirroring PATCH /tasks/:id.
+    it("fn_task_update forwards model overrides to store.updateTask", async () => {
+      const store = createMockStore();
+      store.getTask.mockImplementation(async (id: string) => ({
+        id,
+        title: "Test",
+        description: "Test task",
+        column: "in-progress",
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }));
+      let captured: any[] = [];
+      mockedCreateFnAgent.mockImplementation(async (opts: any) => {
+        captured = opts.customTools || [];
+        return {
+          session: {
+            prompt: vi.fn().mockResolvedValue(undefined),
+            dispose: vi.fn(),
+            sessionManager: {
+              getLeafId: vi.fn().mockReturnValue("leaf-id"),
+              branchWithSummary: vi.fn(),
+              navigateTree: vi.fn().mockResolvedValue({ cancelled: false }),
+            },
+            navigateTree: vi.fn().mockResolvedValue({ cancelled: false }),
+          },
+        } as any;
+      });
+      const taskExecutor = new TaskExecutor(store, "/tmp/test", {});
+      await taskExecutor.execute({
+        id: "FN-MODEL",
+        title: "Test",
+        description: "Test task",
+        column: "in-progress",
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } as any);
+
+      const updateTool = captured.find((t: any) => t.name === "fn_task_update");
+      expect(updateTool).toBeTruthy();
+
+      store.updateTask.mockClear();
+      const res = await updateTool.execute("c", {
+        model_provider: "anthropic",
+        model_id: "claude-x",
+        validator_model_provider: null,
+      });
+      expect((res as any).isError).toBeFalsy();
+      expect(store.updateTask).toHaveBeenCalledTimes(1);
+      const [, patch] = store.updateTask.mock.calls[0];
+      expect(patch).toEqual({
+        modelProvider: "anthropic",
+        modelId: "claude-x",
+        validatorModelProvider: null,
+      });
+
+      // Bare call (no fields at all) is still rejected.
+      store.updateTask.mockClear();
+      const bare = await updateTool.execute("c", {});
+      expect((bare as any).isError).toBe(true);
+      expect(store.updateTask).not.toHaveBeenCalled();
+    });
+
     it("logs executor model usage when execution starts", async () => {
       const store = createMockStore();
       store.getTask.mockResolvedValue({

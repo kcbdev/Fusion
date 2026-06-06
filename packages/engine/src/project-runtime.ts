@@ -56,6 +56,14 @@ export interface ProjectRuntimeConfig {
    */
   externalTaskStore?: TaskStore;
   /**
+   * Absolute URL of the dashboard's CLI-agent hook ingestion endpoint that
+   * generated hook scripts POST to (e.g. `http://127.0.0.1:4040/api/cli-agent/hooks`).
+   * Threaded from the dashboard boot once the listening port is known. When
+   * absent, the runtime derives a localhost URL from `FUSION_DASHBOARD_PORT`
+   * (falling back to 4040).
+   */
+  cliAgentHookEndpointUrl?: string;
+  /**
    * PR-entity node GitHub ops (U3): the injected `createPr`/`mergePr`/`respond`
    * callbacks (+ source resolver + audit) for the `pr-create`/`pr-respond`/
    * `pr-merge` workflow nodes. Threaded from the CLI layer; the runtime binds the
@@ -64,13 +72,21 @@ export interface ProjectRuntimeConfig {
    */
   prNodeGithubOps?: import("./pr-nodes.js").PrNodeGithubOps;
   /**
-   * Absolute URL of the dashboard's CLI-agent hook ingestion endpoint that
-   * generated hook scripts POST to (e.g. `http://127.0.0.1:4040/api/cli-agent/hooks`).
-   * Threaded from the dashboard boot once the listening port is known. When
-   * absent, the runtime derives a localhost URL from `FUSION_DASHBOARD_PORT`
-   * (falling back to 4040).
+   * Compound-Engineering session launcher factory (U13). The engine must not
+   * import the CE plugin (layering), so the dashboard composition supplies this
+   * factory — it constructs the plugin-orchestrator-backed `CeSessionLauncher`
+   * from the runtime's live pieces (taskStore + pluginStore + pluginRunner +
+   * project root). The runtime calls it once the plugin system is up and threads
+   * the result into the executor's `ceDispatch` seam. Absent → CE columns run the
+   * standard engine (kill-switch parity). Returning `undefined` (e.g. the CE
+   * plugin is not installed) also disables CE dispatch for the project.
    */
-  cliAgentHookEndpointUrl?: string;
+  ceSessionLauncherFactory?: (deps: {
+    taskStore: TaskStore;
+    pluginStore: import("@fusion/core").PluginStore;
+    pluginRunner: import("./plugin-runner.js").PluginRunner;
+    projectRoot: string;
+  }) => import("./ce-dispatch.js").CeSessionLauncher | undefined;
 }
 
 /**

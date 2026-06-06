@@ -9,7 +9,7 @@ import { delimiter, isAbsolute, join, relative, resolve as resolvePath } from "n
 import { existsSync, realpathSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode } from "@fusion/core";
-import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, isWorkflowColumnsEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId } from "@fusion/core";
+import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, isWorkflowColumnsEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, isCompanyBoardIr } from "@fusion/core";
 import { mergeEffectiveSettings } from "./effective-settings.js";
 import type { TaskStep, WorkflowIr, WorkflowFieldDefinition, WorkflowColumnAgent, EffectiveAgentInput } from "@fusion/core";
 import {
@@ -140,8 +140,10 @@ import {
 } from "./agent-instructions.js";
 import { buildPromptLayers, collapsePromptLayers } from "./prompt-layers.js";
 import { resolveAndEmitGoalContext } from "./goal-injection-diagnostics.js";
+import { buildBoardContextSection } from "./goal-context-injector.js";
 import type { AgentReflectionService } from "./agent-reflection.js";
 import { createRunAuditor, generateSyntheticRunId, type EngineRunContext, type RunAuditor } from "./run-audit.js";
+import { dispatchCeColumn, resolveCeParkedReleasePosture, type CeDispatchDeps } from "./ce-dispatch.js";
 import { AutoRecoveryDispatcher } from "./auto-recovery.js";
 import {
   classifyMissingWorktreeSessionStartFailure,
@@ -749,6 +751,28 @@ const taskUpdateParams = Type.Object({
       "pass null for a field to clear it. Rejected writes return the offending field id and reason. " +
       "Only fields declared by the task's workflow may be written.",
   })),
+  // Per-task model overrides — agent-native parity with PATCH /tasks/:id. Each
+  // is forwarded verbatim to store.updateTask (which clears the override on null
+  // and leaves it untouched when the key is absent). Provider/id are independent
+  // fields here, mirroring the route; the store arbitrates pairing.
+  model_provider: Type.Optional(Type.Union([Type.String(), Type.Null()], {
+    description: "Executor model provider override (e.g. 'anthropic'). Pass null to clear.",
+  })),
+  model_id: Type.Optional(Type.Union([Type.String(), Type.Null()], {
+    description: "Executor model id override. Pass null to clear.",
+  })),
+  validator_model_provider: Type.Optional(Type.Union([Type.String(), Type.Null()], {
+    description: "Validator model provider override. Pass null to clear.",
+  })),
+  validator_model_id: Type.Optional(Type.Union([Type.String(), Type.Null()], {
+    description: "Validator model id override. Pass null to clear.",
+  })),
+  planning_model_provider: Type.Optional(Type.Union([Type.String(), Type.Null()], {
+    description: "Planning model provider override. Pass null to clear.",
+  })),
+  planning_model_id: Type.Optional(Type.Union([Type.String(), Type.Null()], {
+    description: "Planning model id override. Pass null to clear.",
+  })),
 });
 
 // taskLogParams and taskCreateParams are imported from agent-tools.ts
@@ -1145,6 +1169,20 @@ export interface TaskExecutorOptions {
    * PTY manager + telemetry hub + adapter registry + hook endpoint together.
    */
   cliAgentRuntime?: CliAgentRuntime;
+  /**
+   * Compound-Engineering column-engine dispatch deps (U13). When present (and the
+   * task is on a CE board column whose IR carries a `ce-stage` engine binding),
+   * `execute()` dispatches the bound CE stage as a CE Session through the injected
+   * `launcher` INSTEAD of running the standard executor engine for that column.
+   * The engine never imports the CE plugin — the launcher is the DI seam wired by
+   * the runtime composition (dashboard bootstrap). Absent → every column runs the
+   * standard engine (kill-switch parity); a degrade/not-CE/park outcome also runs
+   * (or skips) the standard engine per `dispatchCeColumn`'s contract.
+   */
+  ceDispatch?: Pick<
+    CeDispatchDeps,
+    "launcher" | "getBoardLfgMode" | "resolveColumnAgentId" | "installPrePushGuard"
+  >;
 }
 
 /** Bundled CLI Agent Executor runtime dependencies (U7). */
@@ -1836,6 +1874,14 @@ export class TaskExecutor {
     // runner's own finally blocks also clear these; double-delete is harmless.
     this.graphCompletionInterceptors.delete(taskId);
     TaskExecutor.processWideGraphRouting.delete(taskId);
+    // FIX 7: these per-run graph maps are otherwise cleared only in
+    // maybeExecuteWorkflowGraph's finally — a pause/abort/delete mid-graph would
+    // leak them. FIX 3: the CE-dispatch guard is retired on delete/dispose so a
+    // re-created task id cannot inherit a stale claim.
+    this.graphColumnAgentResolver.delete(taskId);
+    this.graphCompanyBoard.delete(taskId);
+    this.graphSeamGoverningNodeId.delete(taskId);
+    this.ceDispatchedTasks.delete(taskId);
 
     // FN-5256: claim each surface synchronously BEFORE awaiting any async
     // abort. Without this, two concurrent disposal calls for the same task
@@ -2022,6 +2068,9 @@ export class TaskExecutor {
 
     store.on("task:moved", ({ task, from, to, source }) => {
       executorLog.log(`[event:task:moved] ${task.id}: ${from} → ${to}`);
+      // A column change retires any prior CE-dispatch claim: the session was
+      // scoped to the OLD column, so the NEW column may legitimately re-dispatch.
+      this.ceDispatchedTasks.delete(task.id);
       if (to === "in-progress") {
         this.userCanceledTaskIds.delete(task.id);
         if (this.recoveringCompleted.has(task.id)) {
@@ -2181,7 +2230,11 @@ export class TaskExecutor {
           const resolveBinding = this.graphColumnAgentResolver.get(task.id)!;
           const binding = resolveBinding(governingNodeId);
           const effective = binding
-            ? resolveEffectiveAgent({ binding, ...this.extractOwnSettings(task) })
+            ? resolveEffectiveAgent({
+                binding,
+                ...this.extractOwnSettings(task),
+                modelPairSuppressesDefer: this.graphCompanyBoard.get(task.id) ? false : undefined,
+              })
             : undefined;
           if (!effective || effective.source !== "column-agent") {
             // Binding RELEASED (PR #1432 review): a workflow edit removed the
@@ -2363,10 +2416,29 @@ export class TaskExecutor {
           const activeSession = this.activeSessions.get(task.id)!;
           const { session, seenSteeringIds } = activeSession;
 
-          // Find new steering comments that haven't been seen yet
-          const newComments = task.steeringComments.filter(c => !seenSteeringIds.has(c.id));
+          // U9: the agent identity governing this running session. Addressed
+          // messages (steering comments carrying targetAgentId) are injected
+          // ONLY into their target agent's session — never another agent's.
+          // The effective principal is the column agent when one governs, else
+          // the task's own assignedAgentId (mirrors resolveEffectivePrincipalId).
+          const sessionAgentId = activeSession.lastEffectiveColumnAgentId
+            ?? activeSession.lastAssignedAgentId
+            ?? task.assignedAgentId
+            ?? null;
+
+          // Find new steering comments that haven't been seen yet, then drop
+          // addressed messages that are not pending-for-this-agent: a message
+          // for a different agent, or one already cancelled/delivered/discarded,
+          // must not be injected here. Untargeted steering keeps legacy behavior.
+          const newComments = task.steeringComments.filter((c) => {
+            if (seenSteeringIds.has(c.id)) return false;
+            if (!c.targetAgentId) return true; // legacy broadcast steering
+            if (c.targetAgentId !== sessionAgentId) return false;
+            return (c.deliveryState ?? "pending") === "pending";
+          });
 
           if (newComments.length > 0) {
+            const deliveredAddressedIds: string[] = [];
             for (const comment of newComments) {
               const summary = comment.text.length > 80
                 ? comment.text.slice(0, 80) + "..."
@@ -2382,6 +2454,8 @@ export class TaskExecutor {
                 await session.steer(commentMessage);
                 executorLog.log(`Successfully injected comment into ${task.id}`);
 
+                if (comment.targetAgentId) deliveredAddressedIds.push(comment.id);
+
                 // Log to the task that comment was received
                 await this.store.logEntry(
                   task.id,
@@ -2393,6 +2467,14 @@ export class TaskExecutor {
                 // Comment is already marked as seen - we won't retry to avoid spamming
                 // the agent with failed injections. The error is logged for debugging.
               }
+            }
+
+            // U9: mark the addressed messages we injected as delivered so the UI
+            // reflects delivery and they are not re-queued on the next dispatch.
+            if (deliveredAddressedIds.length > 0 && sessionAgentId) {
+              await this.store
+                .markAgentMessagesDelivered(task.id, sessionAgentId, deliveredAddressedIds)
+                .catch((err) => executorLog.error(`Failed to mark delivered for ${task.id}:`, err));
             }
 
             // After injecting comments, check for review handoff intent
@@ -3378,7 +3460,7 @@ export class TaskExecutor {
     const ir = await resolveWorkflowIrForTask(this.store, task.id);
     if (!ir || ir.version !== "v2") return false;
 
-    const ownSettings = this.extractOwnSettings(task);
+    const ownSettings = this.extractOwnSettings(task, ir);
     const matchesNodeId = (nodeId: string): boolean => {
       const binding = resolveColumnAgentBinding(ir, nodeId);
       if (!binding) return false;
@@ -3565,6 +3647,15 @@ export class TaskExecutor {
    *  Doubles as the re-entrancy guard for graph routing. */
   private graphCompletionInterceptors = new Map<string, (info: { modifiedFiles: string[] }) => void>();
 
+  /** CE double-dispatch guard: task ids for which a (detached) CE column session
+   *  has been launched and is presumed still running. The CE session outlives the
+   *  `dispatchCeColumn` call, so nothing else claims the executingTaskLock for it;
+   *  without this set a second execute() pass for the same in-column task would
+   *  launch a duplicate CE session. Cleared when the task changes column
+   *  (task:moved), on task delete/dispose cleanup, NOT on degrade/park outcomes
+   *  (those did not start a session). */
+  private ceDispatchedTasks = new Set<string>();
+
   /** Step-inversion (KTD-2/KTD-8, U6/U8): tasks whose graph-owned step-execute
    *  driver has pinned step-session physics for the run. Forces the step-session
    *  path in execute() regardless of the `runStepsInNewSessions` setting, so the
@@ -3600,6 +3691,9 @@ export class TaskExecutor {
    *  resolved IR. The execute / step-execute seams consume it to decide whether the
    *  coding/step session runs as a column agent. Cleared in the run's finally. */
   private graphColumnAgentResolver = new Map<string, (nodeId: string) => WorkflowColumnAgent | undefined>();
+  /** Per-run flag: the task's resolved IR is a company board (R7 — a per-task
+   *  model pair keeps the column agent; only an agent identity suppresses). */
+  private graphCompanyBoard = new Map<string, boolean>();
 
   /** Column-agent seam wiring (column-agent plan U4). The governing graph node id
    *  for the implementation pass currently in flight for a task — the execute-seam
@@ -3699,6 +3793,7 @@ export class TaskExecutor {
       // the SAME binding lookup the custom-node seam uses (KTD-2 single resolver).
       if (columnAgentsEnabled) {
         this.graphColumnAgentResolver.set(task.id, resolveBindingForNode);
+        this.graphCompanyBoard.set(task.id, columnAgentIr ? isCompanyBoardIr(columnAgentIr) : false);
       }
 
       const runner = new WorkflowGraphTaskRunner({
@@ -3731,6 +3826,14 @@ export class TaskExecutor {
         // PR-entity nodes (U3): pr-create/pr-respond/pr-merge handler deps —
         // engine-owned store + CLI-injected GitHub callbacks. Absent → fail closed.
         prNodes: this.options.prNodes,
+        // CE PR respond-loop binding (U13): a CE board's pr-respond node launches
+        // the CE resolve-pr-feedback stage (posture-aware) instead of the standard
+        // review-response run, with the same degrade+audit fallback. Built from the
+        // injected CE dispatch deps (launcher + board LFG resolver). Absent → the
+        // standard pr-respond runs.
+        ...(this.options.ceDispatch
+          ? { ceRespond: { store: this.store, ...this.options.ceDispatch } }
+          : {}),
         // Step-inversion (KTD-11, U10): worktree isolation + ordered integration +
         // parallel scheduling. Per-instance worktrees branched off the task's main
         // branch tip; integration rebases each branch in step order; the projection
@@ -3773,6 +3876,7 @@ export class TaskExecutor {
       // Clear per-run column-agent seam wiring (U4): the resolver and any dangling
       // governing-node-id are scoped to this run only.
       this.graphColumnAgentResolver.delete(task.id);
+      this.graphCompanyBoard.delete(task.id);
       this.graphSeamGoverningNodeId.delete(task.id);
       // Per-instance keys: clear every instance slot owned by this task.
       const ctxPrefix = `${task.id}:`;
@@ -3854,6 +3958,35 @@ export class TaskExecutor {
       const ir = await resolveWorkflowIrForTask(this.store, taskId);
       const fields = ir.version === "v2" ? ir.fields : undefined;
       return fields && fields.length > 0 ? fields : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Resolve the board-context (issue #4 item 8) for a task's execution prompt:
+   * the board's display name + its ordered column names. Returns undefined when
+   * the task has no board (silent skip) or resolution fails — board context is
+   * purely additive and never blocks dispatch.
+   */
+  private async resolveBoardContextForTask(
+    task: TaskDetail,
+  ): Promise<{ boardName?: string | null; columnNames?: string[] } | undefined> {
+    const boardId = task.boardId;
+    if (!boardId) return undefined;
+    try {
+      const board = this.store.getBoardStore().getBoard(boardId);
+      if (!board) return undefined;
+      let columnNames: string[] = [];
+      try {
+        const ir = await resolveWorkflowIrForTask(this.store, task.id);
+        if (ir.version === "v2" && Array.isArray(ir.columns)) {
+          columnNames = ir.columns.map((c) => c.name ?? c.id);
+        }
+      } catch {
+        columnNames = [];
+      }
+      return { boardName: board.name, columnNames };
     } catch {
       return undefined;
     }
@@ -4833,7 +4966,10 @@ export class TaskExecutor {
       : "This workflow is waiting for your input.";
     const marker = `workflow-input:${node.id}`;
 
-    const steering = Array.isArray(live.steeringComments) ? live.steeringComments : [];
+    // U9: addressed agent messages (targetAgentId set) are a distinct channel
+    // and must never be consumed as the answer to a workflow-input pause.
+    const steering = (Array.isArray(live.steeringComments) ? live.steeringComments : [])
+      .filter((c) => !c.targetAgentId);
     // Resume only when THIS node previously paused the task (its marker is on
     // pausedReason). A pre-existing steering comment (e.g. one added at task
     // creation) must never short-circuit the pause on the node's first run —
@@ -4950,7 +5086,11 @@ export class TaskExecutor {
    *  resolveEffectivePrincipalId) share one normalized idiom. */
   private extractOwnSettings(
     task: Pick<Task, "assignedAgentId" | "modelProvider" | "modelId">,
-  ): Pick<EffectiveAgentInput, "ownAgentId" | "ownModelProvider" | "ownModelId"> {
+    ir?: WorkflowIr,
+  ): Pick<
+    EffectiveAgentInput,
+    "ownAgentId" | "ownModelProvider" | "ownModelId" | "modelPairSuppressesDefer"
+  > {
     const ownAgentId = typeof task.assignedAgentId === "string" && task.assignedAgentId.trim()
       ? task.assignedAgentId.trim()
       : undefined;
@@ -4959,6 +5099,9 @@ export class TaskExecutor {
       ownAgentId,
       ownModelProvider: ownModelComplete ? task.modelProvider : undefined,
       ownModelId: ownModelComplete ? task.modelId : undefined,
+      // Company-model boards (R7): a per-task custom model keeps the column
+      // agent — only an explicit agent identity suppresses a defer binding.
+      modelPairSuppressesDefer: ir && isCompanyBoardIr(ir) ? false : undefined,
     };
   }
 
@@ -5056,6 +5199,7 @@ export class TaskExecutor {
     const effective = resolveEffectiveAgent({
       binding,
       ...this.extractOwnSettings(detail),
+      modelPairSuppressesDefer: this.graphCompanyBoard.get(task.id) ? false : undefined,
     });
     if (effective.source !== "column-agent") return undefined;
 
@@ -5111,7 +5255,10 @@ export class TaskExecutor {
     task: Task,
     detail: Task,
   ): string | undefined {
-    const ownSettings = this.extractOwnSettings(detail);
+    const ownSettings = {
+      ...this.extractOwnSettings(detail),
+      modelPairSuppressesDefer: this.graphCompanyBoard.get(task.id) ? false : undefined,
+    };
     const assignedAgentId = ownSettings.ownAgentId;
 
     const governingNodeId = this.graphSeamGoverningNodeId.get(task.id);
@@ -5557,6 +5704,75 @@ export class TaskExecutor {
   }
 
   async execute(task: Task): Promise<void> {
+    // Compound-Engineering column-engine dispatch (U13). Runs BEFORE workflow-graph
+    // routing so a CE-board column (whose IR is a graph workflow) is dispatched as a
+    // CE Session INSTEAD of being handed to the standard graph interpreter / engine.
+    // Skipped for the inner re-entry (a completion interceptor is registered), so a
+    // CE session that itself re-enters execute() is not re-dispatched.
+    //
+    // - `dispatched`            → the CE session drives the column; return (standard engine skipped).
+    // - `parked-lfg-no-safe-default` → the task is parked for human input; return.
+    // - `park-plugin-missing` (parked release) → park (no degrade); return.
+    // - `degraded-to-standard` / `not-ce-column` → fall through to the standard path.
+    // Inert (no-op) when `ceDispatch` is unwired or the task is not on a CE column.
+    if (this.options.ceDispatch && !this.graphCompletionInterceptors.has(task.id)) {
+      // Double-dispatch guard: a detached CE session launched on a prior pass
+      // outlives the dispatch call (nothing claims the executingTaskLock for it),
+      // so a second execute() pass for the same in-column task would otherwise
+      // launch a duplicate session. Skip dispatch entirely while one is in flight;
+      // the guard is cleared on column change / task delete.
+      if (this.ceDispatchedTasks.has(task.id)) {
+        executorLog.log(`${task.id}: CE session already dispatched for this column — skipping duplicate dispatch`);
+        return;
+      }
+      try {
+        const parkedStatuses = new Set(["awaiting-approval", "planning-awaiting-input"]);
+        if (parkedStatuses.has(task.status ?? "")) {
+          // Parked-state release: a task RELEASING from a plan-approval hold /
+          // awaiting-input whose CE engine is GONE must PARK with a plugin-missing
+          // diagnostic — NOT degrade into the standard engine (it cannot consume the
+          // in-flight CE artifact). A fresh column entry degrades normally below.
+          const parked = await resolveCeParkedReleasePosture(
+            { store: this.store, launcher: this.options.ceDispatch.launcher },
+            task.id,
+          );
+          if (parked.kind === "park-plugin-missing") {
+            executorLog.log(
+              `${task.id}: parked CE task released but CE engine gone (stage "${parked.stageId}") — parking (no degrade)`,
+            );
+            return;
+          }
+        }
+        const result = await dispatchCeColumn(
+          { store: this.store, ...this.options.ceDispatch },
+          task.id,
+        );
+        if (result.kind === "dispatched") {
+          // Claim the guard: the detached session now owns this column. Cleared on
+          // column change / task delete (NOT in a finally — the session outlives us).
+          this.ceDispatchedTasks.add(task.id);
+          executorLog.log(
+            `${task.id}: CE column engine dispatched stage "${result.stageId}" ` +
+              `(posture=${result.posture}) — standard engine skipped`,
+          );
+          return;
+        }
+        if (result.kind === "parked-lfg-no-safe-default") {
+          executorLog.log(
+            `${task.id}: CE LFG stage "${result.stageId}" parked (no safe headless default) — standard engine skipped`,
+          );
+          return;
+        }
+        // "degraded-to-standard" / "not-ce-column" → fall through to the standard path.
+      } catch (ceErr) {
+        // Never let a dispatch fault strand the task: fall through to the standard
+        // path (degrade-to-standard parity).
+        executorLog.warn(
+          `${task.id}: CE column dispatch failed (running standard engine): ${ceErr instanceof Error ? ceErr.message : String(ceErr)}`,
+        );
+      }
+    }
+
     // Workflow graph interpreter routing (cutover M-C): graph-selected tasks
     // are orchestrated by the interpreter. The execute seam re-enters this
     // method with a completion interceptor registered (which claims the task
@@ -6898,6 +7114,12 @@ export class TaskExecutor {
             ].join("\n"));
           } else {
             const customFieldDefs = await this.resolveTaskCustomFieldDefs(task.id);
+            // U9: the agent identity this dispatch resolves to — column agent
+            // when one governs (company-model boards), else the task's own
+            // assignedAgentId. Pending addressed messages for THIS agent are
+            // folded into the steering section and then marked delivered.
+            const dispatchAgentId = columnAgentSeam?.agent.id ?? detail.assignedAgentId ?? undefined;
+            const boardContext = await this.resolveBoardContextForTask(detail);
             const agentPrompt = buildExecutionPrompt(
               detail,
               this.rootDir,
@@ -6905,8 +7127,19 @@ export class TaskExecutor {
               worktreePath,
               this.options.pluginRunner,
               customFieldDefs,
+              dispatchAgentId,
+              boardContext,
             );
             await promptWithFallback(session, agentPrompt);
+
+            // U9: mark pending addressed messages for this agent delivered now
+            // that they have been injected into the dispatch context. seenSteeringIds
+            // already covers them so the live listener won't re-inject.
+            if (dispatchAgentId) {
+              await this.store
+                .markAgentMessagesDelivered(task.id, dispatchAgentId)
+                .catch((err) => executorLog.error(`Failed to mark dispatch-delivered for ${task.id}:`, err));
+            }
           }
 
           // Re-raise errors that pi-coding-agent swallowed after exhausting retries.
@@ -8236,23 +8469,68 @@ export class TaskExecutor {
         "The board updates in real-time.",
       parameters: taskUpdateParams,
       execute: async (_id: string, params: Static<typeof taskUpdateParams>) => {
-        const { step, status, dependencies, custom_fields } = params;
+        const {
+          step, status, dependencies, custom_fields,
+          model_provider, model_id,
+          validator_model_provider, validator_model_id,
+          planning_model_provider, planning_model_id,
+        } = params;
+
+        // Collect the per-task model overrides into a single updateTask patch,
+        // only including keys the caller actually supplied (absent = preserve,
+        // null = clear — matching PATCH /tasks/:id semantics). The store
+        // arbitrates provider/id pairing.
+        const modelUpdates: {
+          modelProvider?: string | null; modelId?: string | null;
+          validatorModelProvider?: string | null; validatorModelId?: string | null;
+          planningModelProvider?: string | null; planningModelId?: string | null;
+        } = {};
+        if (model_provider !== undefined) modelUpdates.modelProvider = model_provider;
+        if (model_id !== undefined) modelUpdates.modelId = model_id;
+        if (validator_model_provider !== undefined) modelUpdates.validatorModelProvider = validator_model_provider;
+        if (validator_model_id !== undefined) modelUpdates.validatorModelId = validator_model_id;
+        if (planning_model_provider !== undefined) modelUpdates.planningModelProvider = planning_model_provider;
+        if (planning_model_id !== undefined) modelUpdates.planningModelId = planning_model_id;
+        const hasModelUpdate = Object.keys(modelUpdates).length > 0;
 
         // Bare-call guard (P1 api-contract): a call with none of
-        // step/status/dependencies/custom_fields silently no-op'd, which the
-        // agent cannot observe. Reject it up front so the failure is visible and
-        // self-describing. The legacy no-op text is preserved as the detail.
-        if (step === undefined && status === undefined && dependencies === undefined && custom_fields === undefined) {
+        // step/status/dependencies/custom_fields/model-overrides silently
+        // no-op'd, which the agent cannot observe. Reject it up front so the
+        // failure is visible and self-describing.
+        if (
+          step === undefined && status === undefined && dependencies === undefined
+          && custom_fields === undefined && !hasModelUpdate
+        ) {
           return {
             content: [{
               type: "text" as const,
               text: "ERROR: fn_task_update requires at least one of: step+status (report step progress), " +
-                "dependencies (array of task ids), or custom_fields (workflow-defined field patch). " +
-                "No-op: provide a step+status, dependencies, or custom_fields to update.",
+                "dependencies (array of task ids), custom_fields (workflow-defined field patch), or a model " +
+                "override (model_provider/model_id, validator_model_*, planning_model_*). " +
+                "No-op: provide a step+status, dependencies, custom_fields, or model override to update.",
             }],
             details: {},
             isError: true,
           };
+        }
+
+        // Apply per-task model overrides via the store's single write authority.
+        // Applied before the step/deps handling so a model-only call returns here.
+        if (hasModelUpdate) {
+          await store.updateTask(taskId, modelUpdates);
+          if (
+            step === undefined && status === undefined && dependencies === undefined
+            && custom_fields === undefined
+          ) {
+            const updatedKeys = Object.keys(modelUpdates);
+            return {
+              content: [{
+                type: "text" as const,
+                text: `Updated model override(s): ${updatedKeys.join(", ")}.`,
+              }],
+              details: { updatedModelFields: updatedKeys },
+            };
+          }
         }
 
         // Custom-field patch (KTD-13): routed through the store's single write
@@ -13605,6 +13883,25 @@ export function buildExecutionPrompt(
   worktreePath?: string,
   pluginRunner?: PluginRunner,
   customFieldDefs?: WorkflowFieldDefinition[],
+  /**
+   * U9: the agent identity this dispatch resolves to. When set, addressed
+   * messages (steering comments with a targetAgentId) are included in the
+   * steering section ONLY when they target this agent AND are still pending —
+   * messages for other agents, or already delivered/cancelled/discarded, are
+   * excluded. When undefined (legacy / no effective agent), addressed messages
+   * are NOT injected at all (they remain queued); untargeted steering is always
+   * included regardless. The caller is responsible for marking the included
+   * addressed messages delivered (see markAgentMessagesDelivered).
+   */
+  effectiveAgentId?: string,
+  /**
+   * Board context (issue #4 item 8): the task's board name + ordered column
+   * names, resolved by the caller from the board's workflow IR. Rendered as a
+   * compact "## Board" section so the executing agent knows which board/pipeline
+   * it operates within. Silently skipped when the task has no board (omit, or
+   * pass an entry with no boardName).
+   */
+  boardContext?: { boardName?: string | null; columnNames?: string[] },
 ): string {
   const prompt = scopePromptToWorktree(task.prompt, rootDir, worktreePath);
   const reviewLevel = parseReviewLevelFromPrompt(prompt);
@@ -13684,9 +13981,17 @@ git log --oneline
   }
 
   // Build steering comments section (last 10 comments only to avoid context bloat)
+  // U9: untargeted steering is always injected (legacy). Addressed messages are
+  // injected only when they target THIS dispatch's agent and are still pending;
+  // messages for other agents / non-pending ones are filtered out (stay queued).
   let steeringSection = "";
-  if (task.steeringComments && task.steeringComments.length > 0) {
-    const recentComments = [...task.steeringComments].slice(-10);
+  const injectableSteering = (task.steeringComments ?? []).filter((c) => {
+    if (!c.targetAgentId) return true;
+    if (!effectiveAgentId || c.targetAgentId !== effectiveAgentId) return false;
+    return (c.deliveryState ?? "pending") === "pending";
+  });
+  if (injectableSteering.length > 0) {
+    const recentComments = injectableSteering.slice(-10);
     const lines = [
       "",
       "## Steering Comments",
@@ -13732,6 +14037,11 @@ git log --oneline
     customFieldsSection = lines.join("\n") + "\n";
   }
 
+  // Board context (issue #4 item 8): silent skip when the task has no board.
+  const boardSection = boardContext?.boardName
+    ? `\n${buildBoardContextSection(boardContext)}\n`
+    : "";
+
   const taskPromptContributions = pluginRunner?.getPromptContributionsForSurface("executor-task") ?? [];
   if (taskPromptContributions.length > 0) {
     executorLog.log(`${task.id}: applied ${taskPromptContributions.length} plugin prompt contributions for executor-task surface`);
@@ -13743,7 +14053,7 @@ git log --oneline
 ## Task: ${task.id}
 ${task.title ? `**${task.title}**` : ""}
 ${task.dependencies.length > 0 ? `Dependencies: ${task.dependencies.join(", ")}` : ""}
-
+${boardSection}
 ## PROMPT.md
 
 ${prompt}

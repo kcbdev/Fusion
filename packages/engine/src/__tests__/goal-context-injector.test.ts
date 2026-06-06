@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Goal } from "@fusion/core";
 import {
   buildGoalContextSection,
+  buildBoardContextSection,
   DEFAULT_GOAL_INJECTION_CHAR_BUDGET,
 } from "../goal-context-injector.js";
 
@@ -184,5 +185,37 @@ describe("buildGoalContextSection", () => {
     });
 
     expect(onTruncated).not.toHaveBeenCalled();
+  });
+});
+
+describe("buildBoardContextSection (issue #4 item 8)", () => {
+  it("renders the board name and ordered columns", () => {
+    const text = buildBoardContextSection({
+      boardName: "Engineering",
+      columnNames: ["Todo", "In Progress", "Done"],
+    });
+    expect(text).toContain("## Board");
+    expect(text).toContain("**Engineering**");
+    expect(text).toContain("Todo → In Progress → Done");
+  });
+
+  it("renders the board name with no columns line when columns are absent", () => {
+    const text = buildBoardContextSection({ boardName: "Content" });
+    expect(text).toContain("**Content**");
+    expect(text).not.toContain("Columns:");
+  });
+
+  it("silently skips (empty string) when there is no board", () => {
+    expect(buildBoardContextSection({ boardName: null })).toBe("");
+    expect(buildBoardContextSection({ boardName: "   " })).toBe("");
+    expect(buildBoardContextSection({})).toBe("");
+  });
+
+  it("drops blank column names", () => {
+    const text = buildBoardContextSection({
+      boardName: "B",
+      columnNames: ["Todo", "  ", "Done"],
+    });
+    expect(text).toContain("Todo → Done");
   });
 });

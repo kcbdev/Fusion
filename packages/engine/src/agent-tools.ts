@@ -11,9 +11,17 @@ import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/p
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, relative, resolve } from "node:path";
-import type { AgentState, AgentCapability, AgentUpdateInput, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore, WorkflowSettingDefinition } from "@fusion/core";
-import { listTraits, isBuiltinWorkflowId, AgentStore, validateColumnAgentBindings, ColumnAgentBindingError, stripApprovalBypassFlags, WorkflowSettingRejectionError, resolveEffectiveSettingsById, resolveWorkflowIrById, findOrphanedSettingValues, BUILTIN_WORKFLOW_SETTINGS } from "@fusion/core";
+import type { AgentState, AgentCapability, AgentUpdateInput, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore, WorkflowSettingDefinition, WorkflowIr } from "@fusion/core";
+import { listTraits, isBuiltinWorkflowId, AgentStore, validateColumnAgentBindings, ColumnAgentBindingError, stripApprovalBypassFlags, WorkflowSettingRejectionError, resolveEffectiveSettingsById, resolveWorkflowIrById, findOrphanedSettingValues, BUILTIN_WORKFLOW_SETTINGS, resolveCompanyRoleColumnId } from "@fusion/core";
 import { promoteHeldTask } from "./hold-release.js";
+import {
+  convertBoardToSimple,
+  createBoardWithTeam,
+  moveTaskToBoard,
+  previewBoardConvertToSimple,
+  rejectPlanForTask,
+  type ExecutionAgentBindingReleaser,
+} from "./board-actions.js";
 import { DASHBOARD_USER_ID, canAgentTakeImplementationTaskForExplicitRouting, dailyMemoryPath, ensureOpenClawMemoryFiles, extractAgentProvisioningRequest, formatRoleMismatchReason, getMemoryBackendCapabilities, getProjectMemory, isEphemeralAgent, memoryLongTermPath, normalizeMessageParticipant, reconcileDeterministicDuplicate, resolveAgentProvisioningPolicy, resolveMemoryBackend, resolveResearchSettings, resolveTaskGithubTracking, resolveTitleSummarizerSettingsModel, runDeterministicDuplicateGuard, scheduleQmdProjectMemoryRefresh, searchProjectMemory, shouldSkipBackgroundQmdRefresh, summarizeTitle } from "@fusion/core";
 import { ResearchOrchestrator } from "./research-orchestrator.js";
 import { ResearchProviderRegistry } from "./research/provider-registry.js";
@@ -40,6 +48,69 @@ export const taskCreateParams = Type.Object({
   priority: Type.Optional(
     Type.Union(TASK_CREATE_PRIORITY_VALUES.map((priority) => Type.Literal(priority)), {
       description: "Task priority (low, normal, high, urgent)",
+    }),
+  ),
+  board_id: Type.Optional(
+    Type.String({
+      description:
+        "Target board id to home the task on (company-model routing). When set, the task is " +
+        "created in that board's Todo column with the board id stamped. CEO-only: any other " +
+        "agent supplying board_id is rejected. Omit for the default triage intake path.",
+    }),
+  ),
+});
+
+export const boardListParams = Type.Object({});
+
+export const boardCreateParams = Type.Object({
+  name: Type.String({ description: "Board name (required, non-empty)." }),
+  description: Type.Optional(Type.String({ description: "Optional human-readable board description." })),
+  board_type: Type.Optional(
+    Type.String({
+      description:
+        "Board type id (default 'standard'). Plugin-gated types are accepted only when their " +
+        "plugin is installed. Unknown types are rejected naming the available ids.",
+    }),
+  ),
+  lfg_mode: Type.Optional(
+    Type.Boolean({ description: "Override the board type's default LFG (autonomous) posture (R22)." }),
+  ),
+});
+
+export const taskMoveBoardParams = Type.Object({
+  task_id: Type.String({ description: "The task to re-home (e.g. \"FN-001\")." }),
+  board_id: Type.String({ description: "Target board id. Use fn_board_list to discover board ids." }),
+});
+
+export const planApproveParams = Type.Object({
+  task_id: Type.String({ description: "The task whose plan to approve (must be status 'awaiting-approval')." }),
+});
+
+export const planRejectParams = Type.Object({
+  task_id: Type.String({ description: "The task whose plan to reject (must be status 'awaiting-approval')." }),
+  feedback: Type.Optional(
+    Type.String({ description: "Optional feedback recorded in the task log explaining the rejection." }),
+  ),
+});
+
+export const taskAnswerInputParams = Type.Object({
+  task_id: Type.String({ description: "The task paused awaiting input." }),
+  text: Type.String({ description: "The answer text to record and resume the task with (1-2000 chars)." }),
+});
+
+export const taskSendMessageParams = Type.Object({
+  task_id: Type.String({ description: "The task the message is scoped to." }),
+  target_agent_id: Type.String({ description: "The agent the message is addressed to." }),
+  text: Type.String({ description: "Message body (1-2000 characters)." }),
+});
+
+export const boardConvertSimpleParams = Type.Object({
+  board_id: Type.String({ description: "The board to preview/convert. Use fn_board_list to discover board ids." }),
+  apply: Type.Optional(
+    Type.Boolean({
+      description:
+        "When omitted/false, returns the conform mapping PREVIEW (read-only). When true, applies " +
+        "the conversion: points the board at the conformed company workflow and re-seeds the team.",
     }),
   ),
 });
@@ -785,6 +856,42 @@ export async function createAgentTask(
 }
 
 /**
+ * CEO board-routing context for `fn_task_create` (company-model U8). When the
+ * tool is constructed for the global-chat CEO principal, `isCeo` is true and the
+ * `board_id` parameter is honored (the task lands on the named board's Todo
+ * column with the stored board id stamped). For every other caller `isCeo` is
+ * false (or this option is omitted) and supplying `board_id` is a typed error —
+ * preventing lateral task injection across boards.
+ *
+ * `onRoutingFailure` is invoked (best-effort) when a board-routing attempt fails
+ * (authorization rejection, unknown board id, store rejection) so the caller can
+ * persist an audit event — never stdout-only (per the run-audit pattern).
+ */
+export interface CeoTaskRoutingOptions {
+  isCeo: boolean;
+  onRoutingFailure?: (info: {
+    code: "not-ceo" | "unknown-board" | "store-rejected";
+    boardId?: string;
+    message: string;
+  }) => void | Promise<void>;
+}
+
+/**
+ * Resolve a board's Todo (Lead) column id from its workflow IR. Company boards
+ * carry the `lead` role on their working entry column (the template's `todo`);
+ * resolving via the role marker (not a hard-coded literal) keeps a future
+ * template rename from silently breaking routing. Degrades to `"todo"`.
+ */
+async function resolveBoardTodoColumnId(store: TaskStore, workflowId: string): Promise<string> {
+  try {
+    const ir = await resolveWorkflowIrById(store, workflowId);
+    return resolveCompanyRoleColumnId(ir, "lead") ?? "todo";
+  } catch {
+    return "todo";
+  }
+}
+
+/**
  * Create a `fn_task_create` tool that creates a new task in triage.
  *
  * @param store - TaskStore for task persistence
@@ -794,6 +901,7 @@ export function createTaskCreateTool(
   store: TaskStore,
   provenance?: { sourceType: SourceType; sourceAgentId?: string; sourceRunId?: string; sourceParentTaskId?: string },
   options?: AgentTaskCreationOptions,
+  ceoRouting?: CeoTaskRoutingOptions,
 ): ToolDefinition {
   return {
     name: "fn_task_create",
@@ -804,14 +912,62 @@ export function createTaskCreateTool(
       "Before creating, scan existing open tasks for similar work — if an open task " +
       "already covers this, do not create a duplicate. " +
       "Optionally set dependencies (e.g., the new task depends on the current one, " +
-      "or the current task should wait for the new one).",
+      "or the current task should wait for the new one)." +
+      (ceoRouting?.isCeo
+        ? " As CEO you may pass board_id to home the task directly on a board's Todo column " +
+          "(use fn_board_list to discover board ids)."
+        : ""),
     parameters: taskCreateParams,
     execute: async (_id: string, params: Static<typeof taskCreateParams>) => {
+      const requestedBoardId = params.board_id?.trim();
+
+      // ── Board-routing authorization + resolution (company-model U8) ──────
+      let column = "triage";
+      let stampedBoardId: string | undefined;
+      if (requestedBoardId) {
+        if (!ceoRouting?.isCeo) {
+          const message =
+            "board_id may only be supplied by the project CEO routing the request to a board.";
+          await ceoRouting?.onRoutingFailure?.({ code: "not-ceo", boardId: requestedBoardId, message });
+          return {
+            content: [{ type: "text" as const, text: `ERROR: ${message}` }],
+            details: { code: "not-ceo", boardId: requestedBoardId },
+            isError: true as const,
+          };
+        }
+        let board;
+        try {
+          board = store.getBoardStore().getBoard(requestedBoardId);
+        } catch (lookupErr) {
+          const message = `Failed to resolve board '${requestedBoardId}': ${lookupErr instanceof Error ? lookupErr.message : String(lookupErr)}`;
+          await ceoRouting.onRoutingFailure?.({ code: "store-rejected", boardId: requestedBoardId, message });
+          return {
+            content: [{ type: "text" as const, text: `ERROR: ${message}` }],
+            details: { code: "store-rejected", boardId: requestedBoardId },
+            isError: true as const,
+          };
+        }
+        if (!board) {
+          const message = `Unknown board id '${requestedBoardId}'. Use fn_board_list to discover valid board ids.`;
+          await ceoRouting.onRoutingFailure?.({ code: "unknown-board", boardId: requestedBoardId, message });
+          return {
+            content: [{ type: "text" as const, text: `ERROR: ${message}` }],
+            details: { code: "unknown-board", boardId: requestedBoardId },
+            isError: true as const,
+          };
+        }
+        // Stamp the STORED board id returned by the store, never a derived
+        // string (per the synthetic-id learning).
+        stampedBoardId = board.id;
+        column = await resolveBoardTodoColumnId(store, board.workflowId);
+      }
+
       try {
         const { task, wasDuplicate } = await createAgentTask(store, {
           description: params.description,
           dependencies: params.dependencies,
-          column: "triage",
+          column,
+          ...(stampedBoardId ? { boardId: stampedBoardId } : {}),
           priority: params.priority,
           source: provenance ? {
             sourceType: provenance.sourceType,
@@ -821,12 +977,13 @@ export function createTaskCreateTool(
           } : undefined,
         }, options);
         const deps = task.dependencies.length ? ` (depends on: ${task.dependencies.join(", ")})` : "";
+        const where = stampedBoardId ? ` on board ${stampedBoardId} (${column})` : "";
         return {
           content: [{
             type: "text" as const,
-            text: `${wasDuplicate ? "Linked existing" : "Created"} ${task.id}: ${params.description}${deps}`,
+            text: `${wasDuplicate ? "Linked existing" : "Created"} ${task.id}: ${params.description}${deps}${where}`,
           }],
-          details: { taskId: task.id },
+          details: { taskId: task.id, ...(stampedBoardId ? { boardId: stampedBoardId, column } : {}) },
         };
       } catch (err) {
         if (err instanceof Error && err.message.startsWith("Task ID already exists:")) {
@@ -843,7 +1000,540 @@ export function createTaskCreateTool(
             isError: true,
           };
         }
+        if (stampedBoardId) {
+          // A board-routed create that fell through to the store is a routing
+          // failure — surface it and persist the audit event.
+          const message = err instanceof Error ? err.message : String(err);
+          await ceoRouting?.onRoutingFailure?.({ code: "store-rejected", boardId: stampedBoardId, message });
+          return {
+            content: [{ type: "text" as const, text: `ERROR: Failed to create task on board ${stampedBoardId}: ${message}` }],
+            details: { code: "store-rejected", boardId: stampedBoardId },
+            isError: true as const,
+          };
+        }
         throw err;
+      }
+    },
+  };
+}
+
+/**
+ * Create a `fn_board_list` tool that lists the project's boards for CEO routing
+ * (company-model U8): each board's id, name, description, and a short column
+ * summary so the CEO can pick the right target. Read-only.
+ */
+export function createBoardListTool(store: TaskStore): ToolDefinition {
+  return {
+    name: "fn_board_list",
+    label: "List Boards",
+    description:
+      "List the project's boards — id, name, description, and a column summary — so you can " +
+      "route a request to the right board's Todo queue via fn_task_create(board_id). " +
+      "Exactly one board → route directly; ambiguous or no clear match → ask a clarifying question.",
+    parameters: boardListParams,
+    execute: async () => {
+      try {
+        const boards = store.getBoardStore().listBoards();
+        if (boards.length === 0) {
+          return {
+            content: [{ type: "text" as const, text: "No boards are defined for this project." }],
+            details: { boards: [] },
+          };
+        }
+        const irCache = new Map<string, WorkflowIr>();
+        const lines: string[] = [];
+        const detailBoards: Array<{ id: string; name: string; description: string; columns: string[] }> = [];
+        for (const board of boards) {
+          let columns: string[] = [];
+          try {
+            const ir = await resolveWorkflowIrById(store, board.workflowId, irCache);
+            if (ir.version === "v2" && Array.isArray(ir.columns)) {
+              columns = ir.columns.map((c) => c.name ?? c.id);
+            }
+          } catch {
+            columns = [];
+          }
+          const desc = board.description?.trim() ? ` — ${board.description.trim()}` : "";
+          const colSummary = columns.length ? ` [columns: ${columns.join(" → ")}]` : "";
+          lines.push(`- ${board.id}: ${board.name}${desc}${colSummary}`);
+          detailBoards.push({ id: board.id, name: board.name, description: board.description ?? "", columns });
+        }
+        return {
+          content: [{ type: "text" as const, text: `Boards:\n${lines.join("\n")}` }],
+          details: { boards: detailBoards },
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: `ERROR: Failed to list boards: ${err instanceof Error ? err.message : String(err)}` }],
+          details: {},
+          isError: true as const,
+        };
+      }
+    },
+  };
+}
+
+/**
+ * CEO-only gating for the company-model board/plan management tools (issue #4).
+ * Mirrors the `board_id` gating on {@link createTaskCreateTool}: the chat layer
+ * hands the CEO an `isCeo: true` toolset, but the authorization lives in each
+ * tool so a non-CEO caller is rejected even if the tool leaks. `onDenied` is a
+ * best-effort audit hook (never stdout-only, per the run-audit pattern).
+ */
+export interface CeoToolGate {
+  isCeo: boolean;
+  onDenied?: (info: { tool: string; message: string }) => void | Promise<void>;
+}
+
+/** The built-in workflow a freshly-created standard board points at. The team
+ *  seed re-points it at a board-owned company workflow when the company-model
+ *  flag is on. Mirrors STANDARD_BOARD_WORKFLOW_ID in register-boards-routes.ts. */
+const FN_STANDARD_BOARD_WORKFLOW_ID = "builtin:coding";
+
+async function denyNonCeo(
+  gate: CeoToolGate | undefined,
+  tool: string,
+): Promise<{ content: [{ type: "text"; text: string }]; details: { code: "not-ceo" }; isError: true } | null> {
+  if (gate?.isCeo) return null;
+  const message = `${tool} may only be invoked by the project CEO.`;
+  await gate?.onDenied?.({ tool, message });
+  return {
+    content: [{ type: "text" as const, text: `ERROR: ${message}` }],
+    details: { code: "not-ceo" as const },
+    isError: true as const,
+  };
+}
+
+/**
+ * Create a `fn_board_create` tool — CEO-only (same gating posture as the
+ * `board_id` route on fn_task_create). Creates a standard board and seeds its
+ * team via the shared {@link createBoardWithTeam} helper (the same logic POST
+ * /boards runs). The board-type registry's plugin-gated types (CE) live in the
+ * dashboard route; this tool covers the standard type plus a passthrough
+ * `board_type` that is rejected when it is not 'standard'.
+ */
+export function createBoardCreateTool(
+  store: TaskStore,
+  gate: CeoToolGate,
+  options?: { agentStore?: AgentStore },
+): ToolDefinition {
+  return {
+    name: "fn_board_create",
+    label: "Create Board",
+    description:
+      "Create a new board (CEO-only) and seed its team so it is born staffed. " +
+      "Defaults to the 'standard' board type. Returns the created board id.",
+    parameters: boardCreateParams,
+    execute: async (_id: string, params: Static<typeof boardCreateParams>) => {
+      const denied = await denyNonCeo(gate, "fn_board_create");
+      if (denied) return denied;
+
+      const name = params.name?.trim();
+      if (!name) {
+        return {
+          content: [{ type: "text" as const, text: "ERROR: name is required." }],
+          details: {},
+          isError: true as const,
+        };
+      }
+      const boardType = params.board_type?.trim() || "standard";
+      if (boardType !== "standard") {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `ERROR: board_type '${boardType}' is not supported by this tool. ` +
+              "Only 'standard' boards can be created agent-side; plugin-gated types are dashboard-only.",
+          }],
+          details: { code: "unsupported-board-type", boardType },
+          isError: true as const,
+        };
+      }
+      try {
+        const { board, seeded } = await createBoardWithTeam(
+          store,
+          {
+            name,
+            description: params.description?.trim(),
+            workflowId: FN_STANDARD_BOARD_WORKFLOW_ID,
+            requirePlanApproval: false,
+            lfgMode: typeof params.lfg_mode === "boolean" ? params.lfg_mode : false,
+          },
+          {
+            agentStore: options?.agentStore,
+            onSeedError: (err) => {
+              log.warn(`fn_board_create: board team seed failed for ${board?.id ?? name}: ${err instanceof Error ? err.message : String(err)}`);
+            },
+          },
+        );
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Created board ${board.id}: ${board.name}${seeded ? " (team seeded)" : ""}.`,
+          }],
+          details: { boardId: board.id, seeded },
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: `ERROR: Failed to create board: ${err instanceof Error ? err.message : String(err)}` }],
+          details: {},
+          isError: true as const,
+        };
+      }
+    },
+  };
+}
+
+/**
+ * Create a `fn_task_move_board` tool — CEO-only. Mirrors the move-to-board route
+ * exactly (release execution-agent bindings, setTaskBoard, system move to the
+ * target board's Todo, log) via the shared {@link moveTaskToBoard} helper.
+ */
+export function createTaskMoveBoardTool(
+  store: TaskStore,
+  gate: CeoToolGate,
+  options?: { agentStore?: ExecutionAgentBindingReleaser },
+): ToolDefinition {
+  return {
+    name: "fn_task_move_board",
+    label: "Move Task to Board",
+    description:
+      "Re-home a task onto a different board (CEO-only) and move it to that board's Todo as a " +
+      "system action — any active session is aborted; the task restarts under the target board's " +
+      "Lead. Use fn_board_list to discover board ids.",
+    parameters: taskMoveBoardParams,
+    execute: async (_id: string, params: Static<typeof taskMoveBoardParams>) => {
+      const denied = await denyNonCeo(gate, "fn_task_move_board");
+      if (denied) return denied;
+
+      const taskId = params.task_id?.trim();
+      const boardId = params.board_id?.trim();
+      if (!taskId || !boardId) {
+        return {
+          content: [{ type: "text" as const, text: "ERROR: task_id and board_id are required." }],
+          details: {},
+          isError: true as const,
+        };
+      }
+      try {
+        const result = await moveTaskToBoard(store, options?.agentStore, taskId, boardId);
+        if (!result.ok) {
+          return {
+            content: [{ type: "text" as const, text: `ERROR: ${result.message}` }],
+            details: { code: result.code },
+            isError: true as const,
+          };
+        }
+        const text = result.noop
+          ? `Task ${taskId} is already homed on board ${boardId}; no change.`
+          : `Moved ${taskId} to board "${result.board.name}" (${boardId}) — re-homed to its Todo.`;
+        return {
+          content: [{ type: "text" as const, text }],
+          details: { taskId, boardId, noop: result.noop },
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: `ERROR: Failed to move task: ${err instanceof Error ? err.message : String(err)}` }],
+          details: {},
+          isError: true as const,
+        };
+      }
+    },
+  };
+}
+
+/**
+ * Create a `fn_plan_approve` tool — CEO-only (closest manager precedent; the
+ * approve/reject actions are management decisions and the board tools they
+ * accompany are CEO-only, so CEO-only is the conservative gate). Mirrors the
+ * approve-plan route: requires status 'awaiting-approval', then releases via
+ * `store.approvePlanForTask`.
+ */
+export function createPlanApproveTool(store: TaskStore, gate: CeoToolGate): ToolDefinition {
+  return {
+    name: "fn_plan_approve",
+    label: "Approve Plan",
+    description:
+      "Approve the plan for a task awaiting approval (CEO-only) — releases it forward out of the " +
+      "plan-approval hold (to Todo from triage, or in-progress from a company Lead column).",
+    parameters: planApproveParams,
+    execute: async (_id: string, params: Static<typeof planApproveParams>) => {
+      const denied = await denyNonCeo(gate, "fn_plan_approve");
+      if (denied) return denied;
+
+      const taskId = params.task_id?.trim();
+      if (!taskId) {
+        return {
+          content: [{ type: "text" as const, text: "ERROR: task_id is required." }],
+          details: {},
+          isError: true as const,
+        };
+      }
+      try {
+        const task = await store.getTask(taskId);
+        if (task.status !== "awaiting-approval") {
+          return {
+            content: [{ type: "text" as const, text: "ERROR: Task must have status 'awaiting-approval' to approve plan." }],
+            details: { code: "not-awaiting-approval", status: task.status ?? null },
+            isError: true as const,
+          };
+        }
+        const updated = await store.approvePlanForTask(taskId);
+        return {
+          content: [{ type: "text" as const, text: `Approved plan for ${taskId}; released to '${updated.column}'.` }],
+          details: { taskId, column: updated.column },
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: `ERROR: Failed to approve plan: ${err instanceof Error ? err.message : String(err)}` }],
+          details: {},
+          isError: true as const,
+        };
+      }
+    },
+  };
+}
+
+/**
+ * Create a `fn_plan_reject` tool — CEO-only (see {@link createPlanApproveTool}).
+ * Mirrors the reject-plan route via the shared {@link rejectPlanForTask} helper:
+ * requires status 'awaiting-approval', logs the rejection (with optional
+ * feedback), clears status, removes PROMPT.md to force regeneration.
+ */
+export function createPlanRejectTool(store: TaskStore, gate: CeoToolGate): ToolDefinition {
+  return {
+    name: "fn_plan_reject",
+    label: "Reject Plan",
+    description:
+      "Reject the plan for a task awaiting approval (CEO-only) — the specification is regenerated " +
+      "and the task returns to its Lead/triage re-spec scan. Optionally include feedback.",
+    parameters: planRejectParams,
+    execute: async (_id: string, params: Static<typeof planRejectParams>) => {
+      const denied = await denyNonCeo(gate, "fn_plan_reject");
+      if (denied) return denied;
+
+      const taskId = params.task_id?.trim();
+      if (!taskId) {
+        return {
+          content: [{ type: "text" as const, text: "ERROR: task_id is required." }],
+          details: {},
+          isError: true as const,
+        };
+      }
+      try {
+        const task = await store.getTask(taskId);
+        if (task.status !== "awaiting-approval") {
+          return {
+            content: [{ type: "text" as const, text: "ERROR: Task must have status 'awaiting-approval' to reject plan." }],
+            details: { code: "not-awaiting-approval", status: task.status ?? null },
+            isError: true as const,
+          };
+        }
+        // Optional feedback is recorded as a task log entry alongside the
+        // route-identical rejection logging inside rejectPlanForTask.
+        const feedback = params.feedback?.trim();
+        if (feedback) {
+          await store.logEntry(taskId, `Plan rejection feedback: ${feedback}`);
+        }
+        await rejectPlanForTask(store, taskId);
+        return {
+          content: [{ type: "text" as const, text: `Rejected plan for ${taskId}; specification will be regenerated.` }],
+          details: { taskId },
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: `ERROR: Failed to reject plan: ${err instanceof Error ? err.message : String(err)}` }],
+          details: {},
+          isError: true as const,
+        };
+      }
+    },
+  };
+}
+
+/**
+ * Create a `fn_task_answer_input` tool. Mirrors POST /tasks/:taskId/workflow/input:
+ * records the answer as a steering comment and resumes the task (clears status +
+ * unpauses). Not CEO-gated — answering an await-input prompt is the operator/agent
+ * response any reachable principal may give, matching the unauthenticated route.
+ */
+export function createTaskAnswerInputTool(store: TaskStore): ToolDefinition {
+  return {
+    name: "fn_task_answer_input",
+    label: "Answer Task Input",
+    description:
+      "Answer a task paused awaiting input — records the answer as a steering comment and resumes " +
+      "the task (clears its paused state). The await-input node consumes the answer on resume.",
+    parameters: taskAnswerInputParams,
+    execute: async (_id: string, params: Static<typeof taskAnswerInputParams>) => {
+      const taskId = params.task_id?.trim();
+      const text = params.text?.trim();
+      if (!taskId) {
+        return {
+          content: [{ type: "text" as const, text: "ERROR: task_id is required." }],
+          details: {},
+          isError: true as const,
+        };
+      }
+      if (!text) {
+        return {
+          content: [{ type: "text" as const, text: "ERROR: Input text is required." }],
+          details: {},
+          isError: true as const,
+        };
+      }
+      try {
+        await store.addSteeringComment(taskId, text);
+        // Do NOT clear pausedReason here (mirrors the route): the await-input
+        // node checks the marker to confirm it paused the task, and clears it
+        // itself once it consumes the answer.
+        await store.updateTask(taskId, { status: null, paused: false });
+        return {
+          content: [{ type: "text" as const, text: `Recorded answer for ${taskId} and resumed the task.` }],
+          details: { taskId },
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: `ERROR: Failed to record answer: ${err instanceof Error ? err.message : String(err)}` }],
+          details: {},
+          isError: true as const,
+        };
+      }
+    },
+  };
+}
+
+/**
+ * Create a `fn_task_send_message` tool. Mirrors POST /tasks/:id/agent-messages:
+ * queues an addressed steering message for a target agent. The comment-wake that
+ * an actively-running target agent picks up is a DASHBOARD-side concern
+ * (triggerCommentWakeForAssignedAgent lives in the route layer and is not
+ * reachable from the engine tool); the message is queued/delivered on the target
+ * agent's next reasoning cycle exactly like a pending addressed message — see the
+ * honest gap noted in the tool description.
+ */
+export function createTaskSendMessageTool(
+  store: TaskStore,
+  author: "user" | "agent" = "agent",
+): ToolDefinition {
+  return {
+    name: "fn_task_send_message",
+    label: "Send Task Message",
+    description:
+      "Queue an addressed message to an agent, scoped to a task. The target agent receives it on " +
+      "its next reasoning cycle (or when the task next activates in its column).",
+    parameters: taskSendMessageParams,
+    execute: async (_id: string, params: Static<typeof taskSendMessageParams>) => {
+      const taskId = params.task_id?.trim();
+      const targetAgentId = params.target_agent_id?.trim();
+      const text = params.text;
+      if (!taskId || !targetAgentId) {
+        return {
+          content: [{ type: "text" as const, text: "ERROR: task_id and target_agent_id are required." }],
+          details: {},
+          isError: true as const,
+        };
+      }
+      if (!text || text.length === 0 || text.length > 2000) {
+        return {
+          content: [{ type: "text" as const, text: "ERROR: text is required and must be between 1 and 2000 characters." }],
+          details: {},
+          isError: true as const,
+        };
+      }
+      try {
+        const { messageId } = await store.queueAgentMessage(taskId, targetAgentId, text, author);
+        return {
+          content: [{ type: "text" as const, text: `Queued message ${messageId} to ${targetAgentId} on ${taskId}.` }],
+          details: { taskId, targetAgentId, messageId },
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: `ERROR: Failed to queue message: ${err instanceof Error ? err.message : String(err)}` }],
+          details: {},
+          isError: true as const,
+        };
+      }
+    },
+  };
+}
+
+/**
+ * Create a `fn_board_convert_simple` tool — CEO-only. Previews (default) or
+ * applies the R17 conform mapping via the shared {@link previewBoardConvertToSimple}
+ * / {@link convertBoardToSimple} helpers (the same logic the convert-preview /
+ * convert-to-simple routes run).
+ */
+export function createBoardConvertSimpleTool(
+  store: TaskStore,
+  gate: CeoToolGate,
+  options?: { agentStore?: AgentStore },
+): ToolDefinition {
+  return {
+    name: "fn_board_convert_simple",
+    label: "Convert Board to Simple",
+    description:
+      "Preview (default) or apply (apply=true) converting a board to the simple company template " +
+      "(CEO-only). Preview returns the column conform mapping; apply re-points the board at the " +
+      "conformed workflow and re-seeds the team.",
+    parameters: boardConvertSimpleParams,
+    execute: async (_id: string, params: Static<typeof boardConvertSimpleParams>) => {
+      const denied = await denyNonCeo(gate, "fn_board_convert_simple");
+      if (denied) return denied;
+
+      const boardId = params.board_id?.trim();
+      if (!boardId) {
+        return {
+          content: [{ type: "text" as const, text: "ERROR: board_id is required." }],
+          details: {},
+          isError: true as const,
+        };
+      }
+      try {
+        if (params.apply === true) {
+          const result = await convertBoardToSimple(store, boardId, {
+            agentStore: options?.agentStore,
+            onSeedError: (err) => {
+              log.warn(`fn_board_convert_simple: board team seed failed during convert for ${boardId}: ${err instanceof Error ? err.message : String(err)}`);
+            },
+          });
+          if (!result) {
+            return {
+              content: [{ type: "text" as const, text: `ERROR: Board '${boardId}' not found.` }],
+              details: { code: "board-not-found" },
+              isError: true as const,
+            };
+          }
+          const lines = result.mappings.map((m) => `- ${m.fromColumnId} → ${m.toColumnId}`);
+          return {
+            content: [{
+              type: "text" as const,
+              text: `Converted board ${boardId} to simple${result.seeded ? " (team re-seeded)" : ""}.\nMapping:\n${lines.join("\n")}`,
+            }],
+            details: { boardId, seeded: result.seeded, mappings: result.mappings },
+          };
+        }
+        const preview = await previewBoardConvertToSimple(store, boardId);
+        if (!preview) {
+          return {
+            content: [{ type: "text" as const, text: `ERROR: Board '${boardId}' not found.` }],
+            details: { code: "board-not-found" },
+            isError: true as const,
+          };
+        }
+        const lines = preview.mappings.map((m) => `- ${m.fromColumnId} → ${m.toColumnId}`);
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Convert-to-simple PREVIEW for board ${boardId} (no changes applied). Pass apply=true to apply.\nMapping:\n${lines.join("\n")}`,
+          }],
+          details: { boardId, preview: true, mappings: preview.mappings },
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: `ERROR: Failed to convert board: ${err instanceof Error ? err.message : String(err)}` }],
+          details: {},
+          isError: true as const,
+        };
       }
     },
   };

@@ -84,6 +84,14 @@ describe("Ntfy notifier helpers", () => {
     expect(isNtfyEventEnabled(["failed"], "planning-awaiting-input")).toBe(false);
   });
 
+  it("U14: awaiting-user-input is a default event and respects the user's enabled set", () => {
+    expect(DEFAULT_NTFY_EVENTS).toContain("awaiting-user-input");
+    expect(resolveNtfyEvents(undefined)).toContain("awaiting-user-input");
+    expect(isNtfyEventEnabled(["awaiting-user-input"], "awaiting-user-input")).toBe(true);
+    // Disabled when the user excludes it from their enabled set.
+    expect(isNtfyEventEnabled(["failed"], "awaiting-user-input")).toBe(false);
+  });
+
   it("supports task-created enablement while keeping it default-off", () => {
     expect(isNtfyEventEnabled(["task-created"], "task-created")).toBe(true);
     expect(DEFAULT_NTFY_EVENTS).not.toContain("task-created");

@@ -1107,6 +1107,22 @@ export class PluginRunner {
    * @param pluginId - The plugin ID to create context for
    * @returns The plugin context, or null if the plugin is not loaded
    */
+  /**
+   * Build a full plugin ROUTE context for `pluginId` — including the
+   * `createInteractiveAiSession` / `createAiSession` factories (unlike
+   * {@link createRuntimeContext}, which omits them). Used by the U13 CE session
+   * launcher to construct the plugin's `CeOrchestrator` outside a request handler
+   * (the column-engine dispatch seam runs in the executor, not an HTTP route).
+   * Returns null when the plugin is not loaded.
+   */
+  async createPluginRouteContext(pluginId: string): Promise<PluginContext | null> {
+    const plugin = this.options.pluginLoader.getPlugin(pluginId);
+    if (!plugin) return null;
+    return this.options.pluginLoader.createRouteContext(pluginId, {
+      taskStore: this.options.taskStore,
+    });
+  }
+
   async createRuntimeContext(pluginId: string): Promise<PluginContext | null> {
     const plugin = this.options.pluginLoader.getPlugin(pluginId);
     if (!plugin) {

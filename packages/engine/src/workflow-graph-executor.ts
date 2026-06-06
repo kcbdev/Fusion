@@ -12,6 +12,7 @@ import {
   type WorkflowLegacySeams,
 } from "./workflow-node-handlers.js";
 import type { PrNodeDeps } from "./pr-nodes.js";
+import type { CeDispatchDeps } from "./ce-dispatch.js";
 import {
   runSplitJoin,
   type BranchEnvironment,
@@ -60,6 +61,10 @@ export interface WorkflowGraphExecutorDeps {
   /** PR-entity nodes (U3): deps for `pr-create`/`pr-respond`/`pr-merge` (injected
    *  GitHub callbacks + store accessor). Absent → the pr-* kinds fail cleanly. */
   prNodes?: PrNodeDeps;
+  /** CE PR respond-loop binding (U13). When present, the `pr-respond` node on a CE
+   *  board launches the CE resolve-pr-feedback stage; degrades to the standard
+   *  respond otherwise. */
+  ceRespond?: CeDispatchDeps;
   maxRetriesPerNode?: number;
   /** Per-branch run-state persistence (U13). Optional — fully in-memory without it. */
   branchPersistence?: WorkflowBranchPersistence;
@@ -150,6 +155,7 @@ export class WorkflowGraphExecutor {
         parseSteps: deps.parseStepsDeps,
         runCode: deps.runCode,
         prNodes: deps.prNodes,
+        ceRespond: deps.ceRespond,
       }),
       ...(deps.handlers ?? {}),
     };

@@ -753,6 +753,52 @@ describe("Scheduler", () => {
       expect(store.on).toHaveBeenCalledWith("task:moved", expect.any(Function));
     });
 
+    it("reviewer-gate trigger resolves a CUSTOM reviewer column id from the board IR (not hardcoded 'in-review')", async () => {
+      // A company board whose reviewer column has a custom id ("qa-review"). The
+      // trigger must fire driveReviewForTask on ENTRY to that column, not the
+      // hardcoded "in-review". Minimal v2 IR — isCompanyBoardIr only needs a column
+      // carrying a role, and resolveCompanyRoleColumnId returns the reviewer id.
+      const customIr = {
+        version: "v2",
+        columns: [
+          { id: "todo", role: "lead" },
+          { id: "in-progress", role: "executor" },
+          { id: "qa-review", role: "reviewer" },
+          { id: "done" },
+        ],
+        nodes: [],
+        edges: [],
+      } as unknown as import("@fusion/core").WorkflowIr;
+
+      const store = createMockStore({
+        getSettings: vi.fn().mockResolvedValue({
+          experimentalFeatures: { workflowColumns: true, companyModel: true },
+        }),
+        getTaskBoardId: vi.fn().mockReturnValue(undefined),
+        getTaskWorkflowSelection: vi.fn().mockReturnValue({ workflowId: "wf" }),
+        getWorkflowDefinition: vi.fn().mockResolvedValue({ ir: customIr }),
+      });
+
+      const driveReviewForTask = vi.fn().mockResolvedValue({ outcome: "passed" });
+      new Scheduler(store, { reviewerGate: { driveReviewForTask } as never });
+      const movedHandler = (store.on as any).mock.calls.find(
+        (call: any) => call[0] === "task:moved",
+      )?.[1];
+      expect(movedHandler).toBeTypeOf("function");
+
+      // Entry into the custom reviewer column triggers the gate drive.
+      await movedHandler({ task: createMockTask({ id: "FN-R" }), from: "in-progress", to: "qa-review" });
+      await flushAsyncWork();
+      expect(driveReviewForTask).toHaveBeenCalledWith("FN-R");
+
+      // Entry into the legacy hardcoded "in-review" (NOT the reviewer column here)
+      // must NOT trigger — proving the id is resolved, not hardcoded.
+      driveReviewForTask.mockClear();
+      await movedHandler({ task: createMockTask({ id: "FN-R2" }), from: "in-progress", to: "in-review" });
+      await flushAsyncWork();
+      expect(driveReviewForTask).not.toHaveBeenCalled();
+    });
+
     it("FN-5496: task:deleted immediately unblocks dependents in same tick", async () => {
       const deleted = createMockTask({ id: "FN-DEL", column: "todo" });
       const dependent = createMockTask({ id: "FN-DEP", column: "todo", blockedBy: "FN-DEL", dependencies: ["FN-DEL"] });

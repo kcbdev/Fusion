@@ -174,7 +174,13 @@ export interface SecretFinding {
   excerpt: string;
 }
 
-const SECRET_PATTERNS: Array<{ kind: string; re: RegExp }> = [
+/**
+ * The credential patterns the pre-push secret scan enforces. Exported as the
+ * SINGLE SOURCE OF TRUTH so the CE pre-push git hook ({@link
+ * ./ce-prepush-guard.ts}) serializes the identical set into a worktree-installed
+ * hook — the standard path and the CE-session path scan for the same secrets.
+ */
+export const SECRET_PATTERNS: Array<{ kind: string; re: RegExp }> = [
   // AWS access key id.
   { kind: "aws-access-key-id", re: /\bAKIA[0-9A-Z]{16}\b/ },
   // PEM / OpenSSH private-key headers.

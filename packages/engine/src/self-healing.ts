@@ -28,7 +28,7 @@ import { promisify } from "node:util";
 import { setImmediate as setImmediateCb } from "node:timers";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, allowsAutoMergeProcessing, countRecentIdenticalStallEntries, detectDependencyCycle, detectSelfDefeatingDependency, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getStalePausedTodoSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, isMergeRequestContractShadowEnabled, isWorkflowColumnsEnabled, isSharedBranchGroupMemberIntegration, parseExplicitDuplicateMarker, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult } from "@fusion/core";
+import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, allowsAutoMergeProcessing, countRecentIdenticalStallEntries, detectDependencyCycle, detectSelfDefeatingDependency, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getStalePausedTodoSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, isMergeRequestContractShadowEnabled, isWorkflowColumnsEnabled, isSharedBranchGroupMemberIntegration, parseExplicitDuplicateMarker, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult, type ShouldAutoMergeResult } from "@fusion/core";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { createLogger, schedulerLog } from "./logger.js";
 import { mergeEffectiveSettings } from "./effective-settings.js";
@@ -294,6 +294,25 @@ export interface SelfHealingOptions {
   recoverActiveMissionValidations?: () => Promise<{ recoveredCount: number }>;
   /** Optional callback to reap stale mission validator runs during startup and maintenance. */
   reapStaleMissionValidatorRuns?: () => Promise<{ reapedCount: number }>;
+  /**
+   * Company-model U6: optional callback to reap orphaned task-keyed Reviewer runs
+   * and re-drive verdict-pending in-review tasks during startup and maintenance.
+   * Mirrors {@link reapStaleMissionValidatorRuns} but for the Reviewer-gate runs.
+   * Absent (undefined) → inert, preserving prior behavior (flag-off / mission-only
+   * deployments). The mission validator sweep is independent and untouched.
+   */
+  recoverOrphanedReviewerRuns?: () => Promise<{ reapedCount: number; reDrivenCount: number }>;
+  /**
+   * Company-model U7: the one auto-merge chokepoint, bound to this project's
+   * stores (`resolveAutoMergeRoute`). When present, the mergeable-in-review
+   * recovery sweep consults it before re-enqueuing a task so it never enqueues a
+   * verdict-pending company task (route `blocked`) or a PR-mode task (route
+   * `pr-subgraph`) into the legacy merge queue — mirroring
+   * `ProjectEngine.enqueueEligibleInReviewTasks`. Absent (undefined) → the sweep
+   * degrades EXACTLY to the prior `allowsAutoMergeProcessing` behavior (flag-off /
+   * non-company / legacy boards return `auto-enqueue`, so nothing changes).
+   */
+  autoMergeGate?: (taskId: string, taskHint?: Task) => Promise<ShouldAutoMergeResult>;
   /**
    * U8 (CLI Agent Executor): returns true when a worktree path backs a
    * resume-eligible `cli_sessions` record. Idle-worktree sweeps
@@ -884,6 +903,19 @@ export class SelfHealingManager {
             return undefined;
           }
           await this.options.reapStaleMissionValidatorRuns();
+          return undefined;
+        },
+      },
+      {
+        // Company-model U6: reap orphaned task-keyed Reviewer runs and re-drive
+        // verdict-pending in-review tasks. Independent of the mission validator
+        // sweep above; inert when the callback is absent.
+        name: "recover-orphaned-reviewer-runs",
+        fn: async () => {
+          if (!this.options.recoverOrphanedReviewerRuns) {
+            return undefined;
+          }
+          await this.options.recoverOrphanedReviewerRuns();
           return undefined;
         },
       },
@@ -1755,6 +1787,16 @@ export class SelfHealingManager {
                 return;
               }
               await this.options.reapStaleMissionValidatorRuns();
+            },
+          },
+          {
+            // Company-model U6: startup recovery for orphaned Reviewer runs.
+            name: "recover-orphaned-reviewer-runs",
+            fn: async () => {
+              if (!this.options.recoverOrphanedReviewerRuns) {
+                return;
+              }
+              await this.options.recoverOrphanedReviewerRuns();
             },
           },
           {
@@ -4948,24 +4990,48 @@ export class SelfHealingManager {
         getTaskMergeBlocker(t) === undefined,
       );
 
+      // Company-model U7 chokepoint: the legacy `allowsAutoMergeProcessing` filter
+      // above is verdict-UNAWARE, so on a flag-on company board it would re-enqueue
+      // a verdict-pending in-review task (route `blocked`) or a PR-mode task (route
+      // `pr-subgraph`) — both forbidden (the enqueue is verdict-driven; PR-mode
+      // boards never touch the legacy queue). When the gate is wired, drop those
+      // two NEW exclusions before enqueue. `manual-required` still flows through
+      // (the merger parks it). The gate re-reads full task state (verdict from the
+      // reviewer store + full log) so the slim list projection's stripped `log`
+      // does not mask a manual-approval marker. Absent gate (legacy/test) → no-op:
+      // every task passes, byte-identical to pre-U7. A gate throw fails OPEN to the
+      // legacy decision (recovery must not be wedged by a transient gate error).
+      let gated = mergeable;
+      if (this.options.autoMergeGate && mergeable.length > 0) {
+        const routes = await Promise.all(
+          mergeable.map((t) =>
+            this.options.autoMergeGate!(t.id).catch(() => undefined),
+          ),
+        );
+        gated = mergeable.filter((_t, i) => {
+          const route = routes[i]?.route;
+          return route !== "blocked" && route !== "pr-subgraph";
+        });
+      }
+
       const inReviewIds = new Set(tasks.map((task) => task.id));
-      const mergeableIds = new Set(mergeable.map((task) => task.id));
+      const mergeableIds = new Set(gated.map((task) => task.id));
       for (const taskId of [...this.mergeStarvationDrops.keys()]) {
         if (!inReviewIds.has(taskId) || !mergeableIds.has(taskId)) {
           this.mergeStarvationDrops.delete(taskId);
         }
       }
 
-      if (mergeable.length === 0) return 0;
+      if (gated.length === 0) return 0;
 
-      log.warn(`Found ${mergeable.length} mergeable review task(s) stuck in in-review`);
+      log.warn(`Found ${gated.length} mergeable review task(s) stuck in in-review`);
 
       // Prefer the engine's merge queue so `mergeStrategy` (direct vs.
       // pull-request) is honored. Fall back to a direct store merge only
       // when no enqueue callback is wired (standalone/tests).
       const enqueueMerge = this.options.enqueueMerge;
       let recovered = 0;
-      for (const task of mergeable) {
+      for (const task of gated) {
         try {
           if (enqueueMerge) {
             const queued = enqueueMerge(task.id);

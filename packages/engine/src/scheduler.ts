@@ -13,6 +13,7 @@ import {
   type PrInfo,
   type AgentStore,
   type Settings,
+  type Column,
 } from "@fusion/core";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -32,7 +33,14 @@ import type { AutoClaimSnapshotManager } from "./auto-claim-snapshot.js";
 import { StaleTaskReporter } from "./stale-task-reporter.js";
 import { BacklogPressureReporter } from "./backlog-pressure-reporter.js";
 import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
-import { isWorkflowColumnsEnabled, DEFAULT_WORKFLOW_POOL_ID } from "@fusion/core";
+import {
+  isWorkflowColumnsEnabled,
+  DEFAULT_WORKFLOW_POOL_ID,
+  isCompanyModelEnabled,
+  isCompanyBoardIr,
+  resolveCompanyRoleColumnId,
+  resolveWorkflowIrForTask,
+} from "@fusion/core";
 import { runHoldReleaseSweep, type SlotReservation } from "./hold-release.js";
 
 /**
@@ -410,6 +418,15 @@ export interface SchedulerOptions {
   prMonitor?: PrMonitor;
   /** Optional MissionStore for slice activation and auto-advance */
   missionStore?: MissionStore;
+  /**
+   * Company-model U6: optional Reviewer gate. When wired, a task entering the
+   * in-review column on a company-model board triggers a task-keyed Reviewer run.
+   * The call is idempotent (no-op if a run is in flight / verdict exists) and
+   * inert on non-company boards and when the flag is off, so this seam is safe to
+   * always fire. The self-healing recovery sweep re-drives any missed entry, so
+   * exactly-once is not load-bearing here. Absent → no Reviewer runs on entry.
+   */
+  reviewerGate?: { driveReviewForTask: (taskId: string) => Promise<unknown> };
   /** Optional lease manager used to recover stale checkout leases before scheduling. */
   leaseManager?: MeshLeaseManager;
   /** Optional MissionAutopilot for autonomous mission progression */
@@ -582,6 +599,36 @@ export class Scheduler {
 
           // Task moved out of in-review, stop monitoring
           this.options.prMonitor.stopMonitoring(task.id);
+        }
+      }
+
+      // Company-model U6: entering the REVIEWER column on a company-model board
+      // triggers a task-keyed Reviewer run. Fire-and-forget + idempotent: the
+      // gate re-validates the board/column/flag and no-ops otherwise, and the
+      // self-healing sweep re-drives any missed entry.
+      //
+      // The reviewer column id is resolved from the task's board IR rather than
+      // hardcoded to "in-review", so a company board with a custom-id reviewer
+      // column still triggers on entry. Kept cheap: the IR resolve only runs when
+      // the reviewer gate is wired AND the company flag is on; "in-review" is the
+      // fallback when the IR can't be resolved (matches the legacy behavior).
+      if (this.options.reviewerGate) {
+        const settings = await this.store.getSettings();
+        if (isCompanyModelEnabled(settings)) {
+          let reviewerColumnId = "in-review";
+          try {
+            const ir = await resolveWorkflowIrForTask(this.store, task.id);
+            if (ir && isCompanyBoardIr(ir)) {
+              reviewerColumnId = resolveCompanyRoleColumnId(ir, "reviewer") ?? "in-review";
+            }
+          } catch {
+            /* IR unresolvable — fall back to the default "in-review" id */
+          }
+          if (to === reviewerColumnId) {
+            void Promise.resolve(this.options.reviewerGate.driveReviewForTask(task.id)).catch((err) => {
+              schedulerLog.error(`Reviewer gate drive failed for ${task.id}:`, err);
+            });
+          }
         }
       }
 
@@ -798,9 +845,33 @@ export class Scheduler {
   }
 
   /**
+   * Company-model U5: the column a recovery/staleness path should re-target a
+   * dispatch-blocked task to when its spec is missing/stale. On a company-model
+   * board the `triage` column does not exist — the Lead re-structures the task on
+   * its own column (`todo`), where the TriageProcessor's company scan re-specifies
+   * it. Returns the board's Lead column id for company boards, else `"triage"`
+   * (legacy flag-off behavior, byte-identical). Best-effort: any resolution
+   * failure / flag-off falls back to `"triage"` (kill-switch parity).
+   */
+  private async resolveTriageRecoveryColumn(
+    taskId: string,
+    settings: Settings,
+  ): Promise<Column> {
+    if (!isCompanyModelEnabled(settings)) return "triage";
+    try {
+      const ir = await resolveWorkflowIrForTask(this.store, taskId);
+      if (!ir || !isCompanyBoardIr(ir)) return "triage";
+      const leadColumnId = resolveCompanyRoleColumnId(ir, "lead");
+      return (leadColumnId ?? "triage") as Column;
+    } catch {
+      return "triage";
+    }
+  }
+
+  /**
    * Validate that a task's filesystem state is intact.
    * Checks that the task directory exists and PROMPT.md is present and non-empty.
-   * 
+   *
    * @param id - The task ID to validate
    * @returns Object with `valid: true` if checks pass, or `valid: false` with a `reason` string if they fail
    */
@@ -1275,6 +1346,17 @@ export class Scheduler {
         if (t.column !== "todo" || t.paused) return false;
         // Skip tasks with a recovery backoff that hasn't elapsed yet
         if (t.nextRecoveryAt && new Date(t.nextRecoveryAt).getTime() > now) return false;
+        // Company-model U5: a todo task in a Lead-owned lifecycle state is NOT
+        // dispatch-ready — it is being specified by the Lead (`planning`), parked
+        // in the R20 plan-approval hold (`awaiting-approval`), or queued for
+        // re-spec (`needs-replan`). The TriageProcessor's company scan owns these;
+        // dispatching them would fail filesystem validation every poll and (for an
+        // approval-parked task) is exactly the intentional wait we must not break.
+        // Legacy flag-off todo tasks never carry these statuses (finalize clears
+        // status to null before moving to todo), so this is byte-identical off.
+        if (t.status === "planning" || t.status === "awaiting-approval" || t.status === "needs-replan") {
+          return false;
+        }
         return true;
       });
 
@@ -1491,8 +1573,16 @@ export class Scheduler {
         const validation = await this.validateTaskFilesystem(task.id);
         if (!validation.valid) {
           schedulerLog.warn(`Task ${task.id} filesystem validation failed: ${validation.reason}`);
-          await this.store.moveTask(task.id, "triage");
-          await this.store.logEntry(task.id, "Task moved to triage — filesystem validation failed", validation.reason);
+          // Company-model U5: re-target to the board's Lead column (its `todo`)
+          // instead of a non-existent `triage` column. When the task is ALREADY in
+          // that column (the common company case — a Lead task without a spec yet),
+          // skip the no-op move and just log; the TriageProcessor's company scan
+          // re-specifies it in place.
+          const recoveryColumn = await this.resolveTriageRecoveryColumn(task.id, settings);
+          if (task.column !== recoveryColumn) {
+            await this.store.moveTask(task.id, recoveryColumn);
+          }
+          await this.store.logEntry(task.id, `Task moved to ${recoveryColumn} — filesystem validation failed`, validation.reason);
           continue;
         }
 
@@ -1504,7 +1594,12 @@ export class Scheduler {
         const staleness = await evaluateSpecStaleness({ settings, promptPath, task });
         if (staleness.isStale) {
           schedulerLog.warn(`Task ${task.id} specification is stale — ${staleness.reason}`);
-          await this.store.moveTask(task.id, "triage");
+          // Company-model U5: re-target staleness re-spec to the Lead column (`todo`),
+          // not a non-existent `triage` column. Skip the no-op move when already there.
+          const recoveryColumn = await this.resolveTriageRecoveryColumn(task.id, settings);
+          if (task.column !== recoveryColumn) {
+            await this.store.moveTask(task.id, recoveryColumn);
+          }
           await this.store.updateTask(task.id, { status: "needs-replan" });
           await this.store.logEntry(task.id, staleness.reason);
           continue;
@@ -1841,7 +1936,25 @@ export class Scheduler {
           }
         }
 
-        if (latestSettings.ephemeralAgentsEnabled === false && !freshTask.assignedAgentId) {
+        // Company-model boards (U4, R7): the column's bound agent is the
+        // persistent execution owner, resolved at dispatch by
+        // EphemeralWorkerManager.onTaskStart. The generic permanent-agent auto-pick
+        // below would stamp an ARBITRARY pool executor onto `assignedAgentId`, which
+        // would then win (as own settings) over the column agent — defeating the
+        // role binding. Skip it for company-model tasks so the column agent governs.
+        // Best-effort + flag-gated: any failure or flag-off falls through to the
+        // legacy auto-assign (kill-switch parity).
+        let isCompanyModelTask = false;
+        if (isCompanyModelEnabled(latestSettings)) {
+          try {
+            const ir = await resolveWorkflowIrForTask(this.store, freshTask.id);
+            isCompanyModelTask = isCompanyBoardIr(ir);
+          } catch {
+            isCompanyModelTask = false;
+          }
+        }
+
+        if (latestSettings.ephemeralAgentsEnabled === false && !freshTask.assignedAgentId && !isCompanyModelTask) {
           if (!this.options.agentStore) {
             if (!loggedMissingAgentStoreThisPass) {
               loggedMissingAgentStoreThisPass = true;

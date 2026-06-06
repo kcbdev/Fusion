@@ -17,9 +17,16 @@ import { Scheduler } from "../scheduler.js";
 import type { PrMonitor, PrComment } from "../pr-monitor.js";
 import type { PrInfo } from "@fusion/core";
 import { TaskExecutor, type TaskExecutorOptions } from "../executor.js";
-import { buildPrNodeDeps } from "../pr-nodes.js";
-import { isExperimentalFeatureEnabled } from "@fusion/core";
+import {
+  isExperimentalFeatureEnabled,
+  isCompanyModelEnabled,
+  isCompanyBoardIr,
+  resolveWorkflowIrForTask,
+  resolveCompanyExecutionAgentId,
+  resolveCompanyRoleColumnId,
+} from "@fusion/core";
 import { createCliAgentRuntime, type BootstrappedCliAgentRuntime } from "../cli-agent/runtime.js";
+import { buildPrNodeDeps } from "../pr-nodes.js";
 import { WorktreePool, isGitRepository, type PoolInvariantViolation } from "../worktree-pool.js";
 import { AgentSemaphore } from "../concurrency.js";
 import { HeartbeatMonitor, HeartbeatTriggerScheduler, type WakeContext } from "../agent-heartbeat.js";
@@ -36,6 +43,7 @@ import type {
 } from "../project-runtime.js";
 import { runtimeLog } from "../logger.js";
 import { StuckTaskDetector } from "../stuck-task-detector.js";
+import { getActiveNotificationService } from "../notifier.js";
 import type { UsageLimitPauser } from "../usage-limit-detector.js";
 import { SelfHealingManager, VALIDATOR_RUN_STALE_MAX_AGE_MS } from "../self-healing.js";
 import { RestartRecoveryCoordinator } from "../restart-recovery-coordinator.js";
@@ -43,6 +51,10 @@ import { MeshLeaseManager } from "../mesh-lease-manager.js";
 import { PluginRunner } from "../plugin-runner.js";
 import { MissionAutopilot } from "../mission-autopilot.js";
 import { MissionExecutionLoop } from "../mission-execution-loop.js";
+import { ReviewerGate } from "../reviewer-gate.js";
+import { createReviewerEvaluator } from "../reviewer-evaluator.js";
+import { createCeAwareReviewerEvaluator } from "../ce-dispatch.js";
+import { resolveAutoMergeRoute } from "../auto-merge-gate-engine.js";
 import { TriageProcessor } from "../triage.js";
 import { EphemeralWorkerManager } from "../ephemeral-worker-manager.js";
 import { validateProjectNodeMapping } from "../node-dispatch-validation.js";
@@ -130,6 +142,11 @@ export class InProcessRuntime
   private routineScheduler?: RoutineScheduler;
   private missionExecutionLoop?: MissionExecutionLoop;
   private missionAutopilot?: MissionAutopilot;
+  /** Company-model U6: drives the task-keyed Reviewer verdict run on in-review
+   *  entry and re-drives orphans via the self-healing sweep. Constructed
+   *  unconditionally; inert (every drive no-ops) when the flag is off or the
+   *  board is not a company-model board. */
+  private reviewerGate?: ReviewerGate;
   private triageProcessor?: TriageProcessor;
   private messageStore?: MessageStore;
   private chatStore?: ChatStore;
@@ -299,6 +316,30 @@ export class InProcessRuntime
         agentStoreForReflection = new AgentStoreClass({ rootDir: this.taskStore.getFusionDir(), taskStore: this.taskStore });
         await agentStoreForReflection.init();
         runtimeLog.log("AgentStore initialized for reflection service");
+
+        // Company-model U2 backfill: with the flag on, ensure the project has its
+        // CEO + per-board Lead/Executor/Reviewer team. Idempotent and flag-gated —
+        // a no-op when the flag is off or the team already exists. Covers projects
+        // created while the flag was off and then flipped on (seed on next start).
+        try {
+          const { seedBoardTeam } = await import("@fusion/core");
+          const result = await seedBoardTeam({
+            taskStore: this.taskStore,
+            agentStore: agentStoreForReflection,
+            settings,
+          });
+          if (!result.skipped) {
+            runtimeLog.log(
+              `Company-model team seeded/backfilled (boards: ${Object.keys(result.boards).length})`,
+            );
+          }
+        } catch (seedErr) {
+          // Non-fatal — a missed seed is recoverable on the next start.
+          runtimeLog.warn(
+            `Board-team seed failed (continuing):`,
+            seedErr instanceof Error ? seedErr.message : seedErr,
+          );
+        }
       } catch (agentErr) {
         runtimeLog.warn(`AgentStore initialization failed (reflection service will be unavailable):`, agentErr instanceof Error ? agentErr.message : agentErr);
       }
@@ -366,6 +407,77 @@ export class InProcessRuntime
 
       const autoClaimSnapshotManager = new AutoClaimSnapshotManager({ taskStore: this.taskStore });
 
+      // Compound-Engineering session launcher (U13). Built once from the runtime's
+      // live pieces via the dashboard-supplied factory (the engine never imports
+      // the plugin). Reused below for BOTH the Reviewer gate's CE-aware evaluator
+      // (a CE in-review column derives its verdict from ce-code-review) AND the
+      // executor's CE column dispatch + PR respond-loop binding. Undefined when the
+      // factory is unset or the CE plugin is not installed → CE specializations are
+      // inert (standard engine / standard evaluator), kill-switch parity.
+      let ceLauncher: import("../ce-dispatch.js").CeSessionLauncher | undefined;
+      if (this.config.ceSessionLauncherFactory && this.pluginStore && this.pluginRunner) {
+        try {
+          ceLauncher = this.config.ceSessionLauncherFactory({
+            taskStore: this.taskStore,
+            pluginStore: this.pluginStore,
+            pluginRunner: this.pluginRunner,
+            projectRoot: this.config.workingDirectory,
+          });
+          if (ceLauncher) runtimeLog.log("CE session launcher wired");
+        } catch (ceErr) {
+          runtimeLog.warn(
+            `CE session launcher factory failed (CE specializations inert): ${ceErr instanceof Error ? ceErr.message : String(ceErr)}`,
+          );
+        }
+      }
+
+      // Company-model U6 (R11/R16): the Reviewer absorbs the Validator. The gate
+      // drives a task-keyed Reviewer verdict run when a task enters in-review on a
+      // company-model board, gating its exit. Constructed unconditionally — the
+      // gate self-validates the flag + board on every drive and no-ops otherwise
+      // (kill-switch parity), so it is safe to always wire into the Scheduler entry
+      // hook and the self-healing recovery sweep below. The production evaluator is
+      // a readonly AI-judge session mirroring the mission validator.
+      //
+      // U13: when a CE session launcher is wired AND exposes a `runReviewSession`
+      // seam, a task on a CE board's in-review column derives its verdict from the
+      // ce-code-review stage completion (createCeAwareReviewerEvaluator) instead of
+      // the generic judge; every other column uses the standard evaluator.
+      const standardReviewerEvaluator = createReviewerEvaluator({
+        taskStore: this.taskStore,
+        rootDir: this.config.workingDirectory,
+        pluginRunner: this.pluginRunner,
+        agentStore: this.agentStore,
+      });
+      const reviewerEvaluator =
+        ceLauncher?.runReviewSession
+          ? createCeAwareReviewerEvaluator({
+              store: this.taskStore,
+              standard: standardReviewerEvaluator,
+              runReviewSession: ceLauncher.runReviewSession.bind(ceLauncher),
+            })
+          : standardReviewerEvaluator;
+      this.reviewerGate = new ReviewerGate({
+        store: this.taskStore,
+        evaluate: reviewerEvaluator,
+        // U7 ("Auto-merge enqueue is verdict-driven, not entry-driven"): a passing
+        // Reviewer verdict on a company board is the enqueue trigger (deferred from
+        // in-review entry). Consult the auto-merge chokepoint and route: auto-enqueue
+        // → the legacy merge queue (via the ProjectEngine-supplied mergeEnqueuer);
+        // pr-subgraph → the unified PR sub-graph drives completion (the graph walk
+        // picks up pr-create; no legacy enqueue); manual-required/blocked → no
+        // enqueue. Best-effort: the verdict is already persisted, and the merger's
+        // periodic enqueue + self-healing re-evaluate a missed handoff.
+        onVerdictPass: async (taskId) => {
+          const store = this.taskStore;
+          if (!store) return;
+          const routing = await resolveAutoMergeRoute({ store }, taskId).catch(() => undefined);
+          if (routing?.route === "auto-enqueue") {
+            this.mergeEnqueuer?.(taskId);
+          }
+        },
+      });
+
       this.scheduler = new Scheduler(this.taskStore, {
         maxConcurrent: this.config.maxConcurrent,
         maxWorktrees: this.config.maxWorktrees,
@@ -374,6 +486,9 @@ export class InProcessRuntime
         missionStore,
         missionAutopilot,
         missionExecutionLoop,
+        // Company-model U6: fire the Reviewer gate on in-review entry (idempotent,
+        // inert off-flag / non-company board).
+        reviewerGate: this.reviewerGate,
         leaseManager: this.leaseManager,
         onTaskFailed: (taskId) => {
           if (missionAutopilot) {
@@ -428,6 +543,13 @@ export class InProcessRuntime
             `${event.shouldRequeue ? "will retry" : "budget exhausted"}`,
           );
         },
+        // Issue #6 (b): re-surface tasks parked awaiting-user-input past the
+        // configured reminder threshold. Resolves the active notification service
+        // lazily — it is constructed later in project-engine startup, after this
+        // runtime builds the detector.
+        onAwaitingInputReminder: async (task, parkedHours) => {
+          await getActiveNotificationService()?.notifyAwaitingInputReminder(task, parkedHours);
+        },
       });
 
       // 5b. Initialize ReflectionStore for agent reflections
@@ -474,12 +596,54 @@ export class InProcessRuntime
       }
 
       const prNodeGithubOps = this.config.prNodeGithubOps;
+
+      // Compound-Engineering column-engine dispatch seam (U13). Reuses the
+      // `ceLauncher` built above (one launcher per runtime, shared by the reviewer
+      // gate + the executor). Undefined launcher → CE columns run the standard
+      // engine (kill-switch parity).
+      const ceDispatch: TaskExecutorOptions["ceDispatch"] = ceLauncher
+        ? {
+            launcher: ceLauncher,
+            getBoardLfgMode: (taskId) => {
+              try {
+                const boardId = this.taskStore.getTaskBoardId(taskId);
+                if (!boardId) return false;
+                return this.taskStore.getBoardStore().getBoard(boardId)?.lfgMode ?? false;
+              } catch {
+                return false;
+              }
+            },
+            // Security (issue #3): install the code-enforced pre-push secret guard
+            // into the task's worktree before the CE resolve-pr-feedback session can
+            // run. The untrusted session can `git push` itself, so the scan must be a
+            // git-enforced pre-push hook in the worktree (interactive AND headless).
+            installPrePushGuard: async (taskId) => {
+              try {
+                const task = await this.taskStore.getTask(taskId);
+                const worktreePath = task.worktree;
+                if (!worktreePath) {
+                  return { installed: false, skippedReason: "task has no worktree path" };
+                }
+                const { installCePrePushSecretGuard } = await import("../ce-prepush-guard.js");
+                const res = await installCePrePushSecretGuard({ worktreePath });
+                return { installed: res.installed, skippedReason: res.skippedReason };
+              } catch (err) {
+                return {
+                  installed: false,
+                  skippedReason: `guard install error: ${err instanceof Error ? err.message : String(err)}`,
+                };
+              }
+            },
+          }
+        : undefined;
+
       const executorOptions: TaskExecutorOptions = {
         semaphore: this.globalSemaphore,
         pool: this.worktreePool,
         usageLimitPauser: this.usageLimitPauser,
         stuckTaskDetector: this.stuckTaskDetector,
         cliAgentRuntime: this.cliAgentRuntime?.bundle,
+        ...(ceDispatch ? { ceDispatch } : {}),
         pluginRunner: this.pluginRunner,
         messageStore: this.messageStore,
         missionStore,
@@ -663,6 +827,32 @@ export class InProcessRuntime
               const settings = await this.taskStore.getSettings();
               return { ephemeralAgentsEnabled: settings.ephemeralAgentsEnabled };
             },
+            // Company-model persistent-agent bypass (U4, R7). Flag-gated: returns
+            // null unless `companyModel` is on AND the task is on a company-model
+            // board (IR carries role markers — `isCompanyBoardIr`, U3). Resolves the
+            // effective column agent for the task's CURRENT column through the shared
+            // core resolver (defer/override precedence: an explicit advanced per-task
+            // `assignedAgentId`/model wins). Best-effort: any resolution failure
+            // yields null so the legacy ephemeral path runs (kill-switch parity).
+            resolveCompanyExecutionOwner: async (task) => {
+              try {
+                const settings = await this.taskStore.getSettings();
+                // Kill-switch parity: every entry point reads the flag. Flag off →
+                // null → ephemeral path byte-identical to today.
+                if (!isCompanyModelEnabled(settings)) return null;
+                const ir = await resolveWorkflowIrForTask(this.taskStore, task.id);
+                if (!ir || !isCompanyBoardIr(ir)) return null;
+                const hasOwnModelPair = Boolean(task.modelProvider && task.modelId);
+                const agentId = resolveCompanyExecutionAgentId(ir, task.column, {
+                  ownAgentId: task.assignedAgentId ?? undefined,
+                  ownModelProvider: hasOwnModelPair ? task.modelProvider ?? undefined : undefined,
+                  ownModelId: hasOwnModelPair ? task.modelId ?? undefined : undefined,
+                });
+                return agentId ? { agentId } : null;
+              } catch {
+                return null;
+              }
+            },
           });
         }
         if (this.workerManager) {
@@ -720,6 +910,48 @@ export class InProcessRuntime
           },
           onSpecifyError: (t, e) => {
             runtimeLog.error(`Triage failed for ${t.id}: ${e.message}`);
+          },
+          // Company-model U5 (R1, R20): the Lead absorbs triage. Resolves the
+          // Lead-triage context for a task — non-null ONLY when `companyModel` is
+          // on AND the task is on a company-model board (IR carries role markers)
+          // AND the task currently sits in the board's Lead column (its `todo`).
+          // Supplies the Lead's effective agent id (the column agent, via the
+          // shared core resolver) and the board's R20 plan-approval flag. Returns
+          // null for flag-off / legacy boards / non-Lead columns so the legacy
+          // `triage`-column flow runs byte-identically (kill-switch parity).
+          resolveLeadTriageContext: async (task) => {
+            try {
+              const settings = await this.taskStore.getSettings();
+              if (!isCompanyModelEnabled(settings)) return null;
+              const ir = await resolveWorkflowIrForTask(this.taskStore, task.id);
+              if (!ir || !isCompanyBoardIr(ir)) return null;
+              const leadColumnId = resolveCompanyRoleColumnId(ir, "lead");
+              if (!leadColumnId || task.column !== leadColumnId) return null;
+              const hasOwnModelPair = Boolean(task.modelProvider && task.modelId);
+              const leadAgentId = resolveCompanyExecutionAgentId(ir, leadColumnId, {
+                ownAgentId: task.assignedAgentId ?? undefined,
+                ownModelProvider: hasOwnModelPair ? task.modelProvider ?? undefined : undefined,
+                ownModelId: hasOwnModelPair ? task.modelId ?? undefined : undefined,
+              });
+              const requirePlanApproval = this.taskStore.getTaskBoardRequiresPlanApproval(task.id);
+              // Company-model U13 (R22): resolve the task's effective LFG posture so
+              // the plan-approval hold is skipped for a headless task. Best-effort:
+              // any failure leaves it false (the hold applies).
+              let lfgHeadless = false;
+              try {
+                const boardId = this.taskStore.getTaskBoardId(task.id);
+                const boardLfg = boardId
+                  ? this.taskStore.getBoardStore().getBoard(boardId)?.lfgMode ?? false
+                  : false;
+                const { resolveEffectiveLfgMode } = await import("@fusion/core");
+                lfgHeadless = resolveEffectiveLfgMode(task, boardLfg);
+              } catch {
+                lfgHeadless = false;
+              }
+              return { leadColumnId, leadAgentId, requirePlanApproval, lfgHeadless };
+            } catch {
+              return null;
+            }
           },
         },
       );
@@ -795,6 +1027,22 @@ export class InProcessRuntime
           }
           return this.missionExecutionLoop.reapStaleValidatorRuns(VALIDATOR_RUN_STALE_MAX_AGE_MS);
         },
+        // Company-model U6: reap orphaned task-keyed Reviewer runs and re-drive
+        // verdict-pending in-review tasks so a crash mid-review never strands a
+        // task. Reuses the mission validator stale threshold. Inert off-flag.
+        recoverOrphanedReviewerRuns: async () => {
+          if (!this.reviewerGate) {
+            return { reapedCount: 0, reDrivenCount: 0 };
+          }
+          return this.reviewerGate.recoverOrphanedReviewerRuns(VALIDATOR_RUN_STALE_MAX_AGE_MS);
+        },
+        // Company-model U7: the one auto-merge chokepoint bound to this project's
+        // stores, so the mergeable-in-review recovery sweep never re-enqueues a
+        // verdict-pending company task (route `blocked`) or a PR-mode task (route
+        // `pr-subgraph`) into the legacy merge queue (mirrors
+        // ProjectEngine.enqueueEligibleInReviewTasks). Re-fetches full task state
+        // (no slim hint) so the verdict + manual-approval marker resolve correctly.
+        autoMergeGate: (taskId: string) => resolveAutoMergeRoute({ store: this.taskStore }, taskId),
         reconcileAllMissionFeatures: async () => this.scheduler.reconcileAllMissionFeatures(),
         chatStore: this.chatStore,
         messageStore: this.messageStore,

@@ -68,6 +68,9 @@ export interface NotificationChatStore {
 export class NotificationService {
   private readonly dispatcher = new NotificationDispatcher();
   private readonly notifiedEvents = new Set<string>();
+  /** Tasks already sent a one-shot stale awaiting-input reminder (Issue #6 b).
+   *  Cleared when the task leaves awaiting-user-input via clearAwaitingInputDedup. */
+  private readonly awaitingInputReminded = new Set<string>();
   private started = false;
   private chatStore: NotificationChatStore | undefined;
   private notificationsEnabled = false;
@@ -259,7 +262,38 @@ export class NotificationService {
         this.createTaskPayload(task, "awaiting-user-review"),
       );
     }
+
+    // U14 (R21): a column engine (e.g. the Lead's ce-plan stage) parked on a
+    // structured question fires through the same notification channels, respecting
+    // the user's enabled-events setting — the task is blocked on the human.
+    if (task.status === "awaiting-user-input") {
+      this.maybeNotify(
+        task.id,
+        "awaiting-user-input",
+        this.createTaskPayload(task, "awaiting-user-input"),
+      );
+    } else {
+      // Issue #6 (a): the dispatch point only sees the Task, not the CE
+      // session's questionId, so the dedup key cannot encode question identity.
+      // Instead, clear the awaiting-input dedup entry the moment the task LEAVES
+      // awaiting-user-input. A SECOND question (the session parks again, flipping
+      // the task status back) then re-fires a fresh notification instead of being
+      // silently swallowed as a duplicate. Also clears the once-per-park reminder
+      // guard so a re-parked task is eligible for a fresh stale-input reminder.
+      this.clearAwaitingInputDedup(task.id);
+    }
   };
+
+  /**
+   * Issue #6 (a): drop the awaiting-input dedup + reminder bookkeeping for a task
+   * so the NEXT time it parks awaiting-user-input (a new question) the
+   * notification fires again. Called when the task leaves awaiting-user-input and
+   * by the stale-input reminder path when it re-keys for a one-shot reminder.
+   */
+  private clearAwaitingInputDedup(taskId: string): void {
+    this.notifiedEvents.delete(`${taskId}:awaiting-user-input`);
+    this.awaitingInputReminded.delete(taskId);
+  }
 
   private handleTaskMerged = (result: MergeResult): void => {
     void this.handleTaskMergedAsync(result);
@@ -534,6 +568,42 @@ export class NotificationService {
 
     const dedupTaskId = payload.taskId ?? "global";
     this.maybeNotify(dedupTaskId, eventType, payload);
+  }
+
+  /**
+   * Issue #6 (b): re-send the awaiting-user-input notification ONCE for a task
+   * that has been parked awaiting human input past the configured reminder
+   * threshold, with a "still waiting" flavor (`metadata.reminder: true`,
+   * `metadata.parkedHours`). The stuck-task detector's periodic loop drives this
+   * (it already scans awaiting-input statuses for stuck suppression). Idempotent
+   * per park: a task gets at most one reminder until it leaves awaiting-user-input
+   * (tracked in `awaitingInputReminded`, cleared by `clearAwaitingInputDedup`).
+   * Returns true if a reminder was actually dispatched.
+   */
+  async notifyAwaitingInputReminder(task: Task, parkedHours: number): Promise<boolean> {
+    if (this.awaitingInputReminded.has(task.id)) {
+      return false;
+    }
+
+    if (!this.notificationsEnabled) {
+      await this.refreshNotificationState("awaiting-input-reminder");
+      if (!this.notificationsEnabled) {
+        return false;
+      }
+    }
+
+    // Mark BEFORE dispatch so a re-entrant tick can't double-fire while the
+    // best-effort dispatch is still in flight.
+    this.awaitingInputReminded.add(task.id);
+    // Re-key the dedup so the reminder is not swallowed as a duplicate of the
+    // original awaiting-user-input notification.
+    this.notifiedEvents.delete(`${task.id}:awaiting-user-input`);
+    this.maybeNotify(task.id, "awaiting-user-input", {
+      ...this.createTaskPayload(task, "awaiting-user-input"),
+      metadata: { reminder: true, parkedHours },
+    });
+    schedulerLog.log(`[notify] ${task.id} stale awaiting-input reminder dispatched (parked ~${parkedHours}h)`);
+    return true;
   }
 
   private async refreshNotificationState(reason: string): Promise<void> {

@@ -73,6 +73,9 @@ export interface WorkflowGraphTaskRunnerDeps {
   /** PR-entity nodes (U3): deps for `pr-create`/`pr-respond`/`pr-merge`. Additive;
    *  a workflow with no pr-* node never invokes them; absent → they fail closed. */
   prNodes?: PrNodeDeps;
+  /** CE PR respond-loop binding (U13). Threaded to the graph executor so a CE
+   *  board's pr-respond node launches the CE resolve-pr-feedback stage. */
+  ceRespond?: import("./ce-dispatch.js").CeDispatchDeps;
   /** Step-inversion (KTD-11, U10): worktree-isolation + parallel-scheduling deps.
    *  Additive; a shared-isolation foreach never invokes them. */
   allocateInstanceWorktree?: ForeachEnvironment["allocateInstanceWorktree"];
@@ -197,6 +200,7 @@ export class WorkflowGraphTaskRunner {
         parseStepsDeps: this.deps.parseStepsDeps,
         runCode: this.deps.runCode,
         prNodes: this.deps.prNodes,
+        ceRespond: this.deps.ceRespond,
         // Step-inversion (KTD-11, U10): worktree isolation + parallel scheduling.
         allocateInstanceWorktree: this.deps.allocateInstanceWorktree,
         resolveIntegrationBase: this.deps.resolveIntegrationBase,

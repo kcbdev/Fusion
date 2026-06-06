@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import type { RunMutationContext, Settings, Task, TaskStore, SecretsStore } from "@fusion/core";
+import { resolveWorktreeEnabled, isWorktreeForcedOnBySimpleMode } from "@fusion/core";
 import { generateWorktreeName, resolveTaskWorkingBranch, slugify } from "./worktree-names.js";
 import { resolveTaskWorktreePathForBackend } from "./worktree-paths.js";
 import { hydrateWorktreeDb } from "./worktree-db-hydrate.js";
@@ -32,6 +33,7 @@ import {
   type WorktrunkOpName,
 } from "./worktrunk-failure-handler.js";
 import type { RunAuditor } from "./run-audit.js";
+import { generateSyntheticRunId } from "./run-audit.js";
 import { writeSecretsEnvFile } from "./secrets-env-writer.js";
 import { removeDesktopBuildArtifacts } from "./worktree-desktop-artifacts.js";
 
@@ -77,7 +79,9 @@ export interface AcquireTaskWorktreeOptions {
 export interface AcquireTaskWorktreeResult {
   worktreePath: string;
   branch: string;
-  source: "existing" | "pool" | "fresh";
+  /** "disabled" → worktree isolation is off (advanced mode opt-out); the task
+   *  runs in the project root rather than an isolated per-task worktree. */
+  source: "existing" | "pool" | "fresh" | "disabled";
   hydrated: boolean;
   isResume: boolean;
   reclaimed?: {
@@ -155,8 +159,75 @@ async function maybeWarnForeignTaskStartPoint(
   }
 }
 
+/**
+ * Surface the one-time "simple mode forces worktree isolation on" notice
+ * (company-model plan U11, R23). The force-on is never silent: the first time
+ * the override takes effect for a project whose stored setting disables
+ * worktrees, record a `worktree:simple-mode-forced` audit event (and a task-log
+ * line) naming advanced mode as the opt-out. The audit row itself is the
+ * per-project one-time guard — each project has its own store/DB, so a prior
+ * row means the notice already fired. Best-effort: any read/record failure is
+ * swallowed so worktree acquisition is never blocked by the notice.
+ */
+async function maybeNoticeSimpleModeForcedWorktree(input: {
+  task: Task;
+  store: TaskStore;
+  runContext?: RunMutationContext;
+}): Promise<void> {
+  const { task, store, runContext } = input;
+  if (typeof store.getRunAuditEvents !== "function" || typeof store.recordRunAuditEvent !== "function") {
+    return;
+  }
+  try {
+    // The persisted audit row is the per-project one-time guard (each project
+    // has its own store/DB). Record it directly rather than through the
+    // context-gated RunAuditor so the row — and thus the guard — always lands.
+    const prior = store.getRunAuditEvents({ domain: "git", mutationType: "worktree:simple-mode-forced", limit: 1 });
+    if (prior.length > 0) return;
+
+    await store.logEntry(
+      task.id,
+      "Simple mode forces worktree isolation on (the stored setting has it disabled). "
+        + "Switch to advanced mode to opt out and honor the disable toggle.",
+      undefined,
+      runContext,
+    );
+    store.recordRunAuditEvent({
+      taskId: task.id,
+      agentId: runContext?.agentId ?? "system",
+      runId: generateSyntheticRunId("worktree-policy", task.id),
+      domain: "git",
+      mutationType: "worktree:simple-mode-forced",
+      target: task.id,
+      metadata: { storedWorktreeIsolationEnabled: false, advancedModeOptOut: true },
+    });
+  } catch {
+    // best-effort observability only — never block worktree acquisition
+  }
+}
+
 export async function acquireTaskWorktree(opts: AcquireTaskWorktreeOptions): Promise<AcquireTaskWorktreeResult> {
   const { task, rootDir, store, settings, pool, logger, audit, runContext, createWorktree, runConfiguredCommand, runInitCommand, taskEnv, secretsStore } = opts;
+
+  // Central worktree-isolation gate (company-model plan U11, R23). The single
+  // `resolveWorktreeEnabled` resolver is the only place worktree enablement is
+  // decided — every engine site (executor, merger, heartbeat) funnels through
+  // here. Simple mode forces isolation on regardless of any stored disable; the
+  // resolver returns false only in advanced mode with an explicit opt-out.
+  const settingsSource = { globalSettings: settings };
+  if (isWorktreeForcedOnBySimpleMode(settingsSource)) {
+    await maybeNoticeSimpleModeForcedWorktree({ task, store, runContext });
+  }
+  if (!resolveWorktreeEnabled(settingsSource)) {
+    // Worktree isolation is the explicit advanced-mode opt-out: run the task in
+    // the project root instead of an isolated per-task worktree. The branch is
+    // still derived so downstream branch handling has a stable name.
+    const disabledBranch = resolveTaskWorkingBranch(task);
+    logger?.log(`${task.id}: worktree isolation disabled (advanced mode opt-out) — executing in project root ${rootDir}`);
+    await store.logEntry(task.id, "Worktree isolation disabled (advanced mode) — executing in project root without an isolated worktree", undefined, runContext);
+    return { worktreePath: rootDir, branch: disabledBranch, source: "disabled", hydrated: false, isResume: false };
+  }
+
   const notifyFallback = async (op: WorktrunkOpName, stderr?: string) => {
     await store.logEntry(task.id, `Worktrunk ${op} failed; continuing with native worktree backend (${stderr ?? "no stderr"})`, undefined, runContext);
   };

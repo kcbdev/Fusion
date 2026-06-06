@@ -304,3 +304,103 @@ describe("NotificationService deferred failure notifications", () => {
     expect(sendNotification).not.toHaveBeenCalled();
   });
 });
+
+// U14 (R21): a column engine parked on a structured question fires the
+// `awaiting-user-input` notification through the same channels.
+describe("NotificationService awaiting-user-input (U14)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  async function setup(settings: Partial<Settings> = {}) {
+    const store = createStore(settings);
+    const sendNotification = vi.fn(async () => ({ success: true, providerId: "mock" }));
+    const provider: NotificationProvider = {
+      getProviderId: () => "mock",
+      isEventSupported: () => true,
+      sendNotification,
+    };
+    const service = new NotificationService(store as any, { failedNotificationGraceMs: 100 });
+    service.registerProvider(provider);
+    await service.start();
+    return { store, service, sendNotification };
+  }
+
+  it("dispatches an awaiting-user-input notification when a task parks on a question", async () => {
+    const { store, service, sendNotification } = await setup();
+    store.setTask(task({ id: "FN-Q", status: "awaiting-user-input", column: "todo" }));
+    store.emit("task:updated", task({ id: "FN-Q", status: "awaiting-user-input", column: "todo" }));
+
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(sendNotification).toHaveBeenCalledWith(
+      "awaiting-user-input",
+      expect.objectContaining({ taskId: "FN-Q" }),
+    );
+    await service.stop();
+  });
+
+  it("re-notifies a SECOND question after the task left awaiting-user-input (Issue #6 a)", async () => {
+    const { store, service, sendNotification } = await setup();
+    // First question parks the task.
+    store.setTask(task({ id: "FN-Q", status: "awaiting-user-input" }));
+    store.emit("task:updated", task({ id: "FN-Q", status: "awaiting-user-input" }));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sendNotification).toHaveBeenCalledTimes(1);
+
+    // A duplicate awaiting-user-input update (same park) is still de-duped.
+    store.emit("task:updated", task({ id: "FN-Q", status: "awaiting-user-input" }));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sendNotification).toHaveBeenCalledTimes(1);
+
+    // The session answers → task leaves awaiting-user-input. This clears the dedup.
+    store.emit("task:updated", task({ id: "FN-Q", status: "in-progress" }));
+    await vi.advanceTimersByTimeAsync(1);
+
+    // A SECOND question parks the task again → fires a fresh notification.
+    store.emit("task:updated", task({ id: "FN-Q", status: "awaiting-user-input" }));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sendNotification).toHaveBeenCalledTimes(2);
+    expect(sendNotification).toHaveBeenLastCalledWith(
+      "awaiting-user-input",
+      expect.objectContaining({ taskId: "FN-Q" }),
+    );
+    await service.stop();
+  });
+
+  it("notifyAwaitingInputReminder fires once per park with a reminder flavor (Issue #6 b)", async () => {
+    const { store, service, sendNotification } = await setup();
+    const parked = task({ id: "FN-R", status: "awaiting-user-input" });
+    store.setTask(parked);
+    store.emit("task:updated", parked);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sendNotification).toHaveBeenCalledTimes(1);
+
+    // First reminder dispatches with metadata.reminder.
+    const first = await service.notifyAwaitingInputReminder(parked, 4.2);
+    expect(first).toBe(true);
+    expect(sendNotification).toHaveBeenCalledTimes(2);
+    expect(sendNotification).toHaveBeenLastCalledWith(
+      "awaiting-user-input",
+      expect.objectContaining({
+        taskId: "FN-R",
+        metadata: expect.objectContaining({ reminder: true, parkedHours: 4.2 }),
+      }),
+    );
+
+    // Second reminder for the same park is suppressed (once-per-park).
+    const second = await service.notifyAwaitingInputReminder(parked, 5);
+    expect(second).toBe(false);
+    expect(sendNotification).toHaveBeenCalledTimes(2);
+
+    // Task leaves awaiting-input then re-parks → eligible for a fresh reminder.
+    store.emit("task:updated", task({ id: "FN-R", status: "in-progress" }));
+    await vi.advanceTimersByTimeAsync(1);
+    const third = await service.notifyAwaitingInputReminder(parked, 4.5);
+    expect(third).toBe(true);
+    expect(sendNotification).toHaveBeenCalledTimes(3);
+    await service.stop();
+  });
+});

@@ -36,6 +36,7 @@ type SupportedNtfyEvent =
   | "failed"
   | "awaiting-approval"
   | "awaiting-user-review"
+  | "awaiting-user-input"
   | "planning-awaiting-input"
   | "fallback-used"
   | "task-created"
@@ -50,6 +51,7 @@ const SUPPORTED_EVENTS = new Set<SupportedNtfyEvent>([
   "failed",
   "awaiting-approval",
   "awaiting-user-review",
+  "awaiting-user-input",
   "planning-awaiting-input",
   "fallback-used",
   "task-created",
@@ -218,6 +220,11 @@ export class NtfyNotificationProvider implements NotificationProvider {
       "awaiting-user-review": {
         title: `User review needed for ${taskId}`,
         message: `Task "${identifier}" needs human review before it can proceed`,
+        priority: "high",
+      },
+      "awaiting-user-input": {
+        title: `Input needed for ${taskId}`,
+        message: `Task "${identifier}" is asking a question and needs your answer to continue`,
         priority: "high",
       },
       "planning-awaiting-input": {

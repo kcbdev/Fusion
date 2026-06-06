@@ -3,6 +3,7 @@ import type { TaskDetail, TaskStep, WorkflowIrNode } from "@fusion/core";
 
 import type { WorkflowNodeHandler, WorkflowNodeResult } from "./workflow-graph-executor.js";
 import { createPrNodeHandlers, createAutoMergeGateHandler, type PrNodeDeps } from "./pr-nodes.js";
+import { dispatchCePrRespond, type CeDispatchDeps } from "./ce-dispatch.js";
 
 export type WorkflowSeamName = "planning" | "execute" | "review" | "merge" | "schedule" | "step-execute";
 
@@ -548,6 +549,13 @@ export interface DefaultNodeHandlerDeps {
   runCode?: CodeNodeRunner;
   /** PR node deps (U3). When absent, the three pr-* kinds fail cleanly. */
   prNodes?: PrNodeDeps;
+  /**
+   * Compound-Engineering dispatch deps (U13). When present, the `pr-respond` node
+   * on a CE board binds to the CE resolve-pr-feedback stage (posture-aware) instead
+   * of the standard review-response run, with the same degrade+audit fallback.
+   * Absent → the standard pr-respond runs (kill-switch parity).
+   */
+  ceRespond?: CeDispatchDeps;
 }
 
 export function createDefaultNodeHandlers(
@@ -582,6 +590,29 @@ export function createDefaultNodeHandlers(
         "pr-respond": async () => ({ outcome: "failure", value: "pr-nodes-unwired" }),
         "pr-merge": async () => ({ outcome: "failure", value: "pr-nodes-unwired" }),
       };
+  // CE PR respond-loop binding (U13). On a CE board, the respond step launches the
+  // CE resolve-pr-feedback stage instead of the standard review-response run, with
+  // the same degrade+audit fallback. Wrap only when both PR deps and CE deps are
+  // present; a non-CE board / unavailable CE engine degrades to the wrapped
+  // standard handler.
+  if (deps?.ceRespond && deps.prNodes) {
+    const ceRespond = deps.ceRespond;
+    const standardRespond = prNodes["pr-respond"];
+    prNodes["pr-respond"] = async (node, ctx) => {
+      try {
+        const result = await dispatchCePrRespond(ceRespond, ctx.task.id);
+        if (result.kind === "dispatched") {
+          // The CE session now drives the resolution; route forward like a normal
+          // respond settle (the same routing the standard respond emits).
+          return { outcome: "success", value: "ce-respond-dispatched" };
+        }
+        // "not-ce" / "degraded-to-standard" → run the standard respond.
+      } catch {
+        // Any dispatch fault → standard respond (degrade parity).
+      }
+      return standardRespond(node, ctx);
+    };
+  }
   // Auto-merge gate (U6): a `gate` node carrying `config.gate === "auto-merge"`
   // routes on live PR-entity state (outcome:auto-on/auto-off) instead of the
   // generic context/executable gate. Wired only when PR deps are present; absent

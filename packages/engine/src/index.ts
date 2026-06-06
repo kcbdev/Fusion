@@ -2,6 +2,16 @@ export { AgentLogger, type AgentLoggerOptions, summarizeToolArgs } from "./agent
 export { reloadExemptTools, addToExemptTools, getExemptToolNames } from "./agent-action-gate.js";
 export {
   createTaskCreateTool,
+  createBoardListTool,
+  createBoardCreateTool,
+  createTaskMoveBoardTool,
+  createPlanApproveTool,
+  createPlanRejectTool,
+  createTaskAnswerInputTool,
+  createTaskSendMessageTool,
+  createBoardConvertSimpleTool,
+  type CeoTaskRoutingOptions,
+  type CeoToolGate,
   createTaskDocumentReadTool,
   createTaskDocumentWriteTool,
   createTaskLogTool,
@@ -23,6 +33,22 @@ export {
   workflowSelectParams,
   executeApprovedAgentProvisioning,
 } from "./agent-tools.js";
+export {
+  moveTaskToBoard,
+  deleteBoardAndRehome,
+  rejectPlanForTask,
+  createBoardWithTeam,
+  previewBoardConvertToSimple,
+  convertBoardToSimple,
+  releaseExecutionAgentBindings as releaseExecutionAgentBindingsShared,
+  type ExecutionAgentBindingReleaser,
+  type MoveTaskToBoardResult,
+  type DeleteBoardResult,
+  type CreateBoardWithTeamInput,
+  type CreateBoardWithTeamResult,
+  type ConvertBoardPreviewResult,
+  type ConvertBoardApplyResult,
+} from "./board-actions.js";
 export { AgentSemaphore, PRIORITY_MERGE, PRIORITY_EXECUTE, PRIORITY_SPECIFY } from "./concurrency.js";
 export { TriageProcessor, type TriageProcessorOptions } from "./triage.js";
 export { TaskExecutor, type TaskExecutorOptions } from "./executor.js";
@@ -112,6 +138,55 @@ export { Scheduler, type SchedulerOptions } from "./scheduler.js";
 export { MeshLeaseManager, type MeshLeaseManagerOptions, type LeaseRecoveryContext } from "./mesh-lease-manager.js";
 export { MissionAutopilot, type MissionAutopilotOptions } from "./mission-autopilot.js";
 export { MissionExecutionLoop, type MissionExecutionLoopOptions, type ValidationResult, loopLog } from "./mission-execution-loop.js";
+export {
+  ReviewerGate,
+  type ReviewerGateOptions,
+  type ReviewerEvaluator,
+  type ReviewerEvaluation,
+  type DriveResult,
+  formatFailureFeedback,
+  REVIEWER_NEEDS_ATTENTION_LOG_PREFIX,
+  REVIEWER_FAIL_FEEDBACK_LOG_PREFIX,
+} from "./reviewer-gate.js";
+export { createReviewerEvaluator, type ReviewerEvaluatorDeps } from "./reviewer-evaluator.js";
+// ── U13 sub-part B: CE column-engine dispatch, verdict adapter, LFG, fallbacks ──
+export {
+  dispatchCeColumn,
+  dispatchCePrRespond,
+  resolveCeParkedReleasePosture,
+  adaptCeReviewOutcome,
+  createCeReviewerEvaluator,
+  createCeAwareReviewerEvaluator,
+  CE_PLUGIN_MISSING_PARK_LOG_PREFIX,
+  CE_LFG_NO_SAFE_DEFAULT_PARK_LOG_PREFIX,
+  CE_FALLBACK_DEGRADE_LOG_PREFIX,
+  CE_PREPUSH_GUARD_MISSING_LOG_PREFIX,
+  type CePrePushGuardInstall,
+  type CeSessionPosture,
+  type CeSessionLauncher,
+  type CeSessionLaunchRequest,
+  type CeSessionLaunchOutcome,
+  type CeDispatchDeps,
+  type CeDispatchResult,
+  type CeParkedReleaseDecision,
+  type CeReviewCompletion,
+  type CePrRespondResult,
+} from "./ce-dispatch.js";
+// Security (issue #3): code-enforced pre-push secret guard for CE PR-respond sessions.
+export {
+  installCePrePushSecretGuard,
+  buildPrePushHookScript,
+  resolveWorktreeHooksDir,
+  readCePrePushBlockMarker,
+  CE_PREPUSH_BLOCK_MARKER,
+  CE_PREPUSH_BLOCKED_LOG_PREFIX,
+  type InstallCePrePushGuardResult,
+} from "./ce-prepush-guard.js";
+export {
+  resolveAutoMergeRoute,
+  irIsPrMode,
+  type AutoMergeGateEngineDeps,
+} from "./auto-merge-gate-engine.js";
 export {
   aiMergeTask,
   listAutostashOrphans,
@@ -367,6 +442,8 @@ export { fetchWebContent, assertSafeUrl, WebFetchError, type WebFetchOptions, ty
 export { classifyTaskError, type ErrorClass, type TaskErrorClassification } from "./error-classifier.js";
 export {
   buildGoalContextSection,
+  buildBoardContextSection,
+  type BoardContextInput,
   DEFAULT_GOAL_INJECTION_CHAR_BUDGET,
   MAX_INJECTED_GOALS,
   type GoalInjectionInput,
@@ -519,7 +596,7 @@ export type { NtfyProviderConfig, NotificationServiceOptions, WebhookProviderCon
 export { CronRunner, type CronRunnerOptions, type AiPromptExecutor, createAiPromptExecutor } from "./cron-runner.js";
 export { RoutineRunner, type RoutineRunnerOptions } from "./routine-runner.js";
 export { RoutineScheduler, type RoutineSchedulerOptions } from "./routine-scheduler.js";
-export { StuckTaskDetector, type StuckTaskDetectorOptions, type DisposableSession } from "./stuck-task-detector.js";
+export { StuckTaskDetector, AWAITING_INPUT_NON_STUCK_STATUSES, type StuckTaskDetectorOptions, type DisposableSession } from "./stuck-task-detector.js";
 export { HeartbeatMonitor, HeartbeatTriggerScheduler, type WakeContext } from "./agent-heartbeat.js";
 export { TokenCapDetector, type TokenCapCheckResult } from "./token-cap-detector.js";
 export { SelfHealingManager, type SelfHealingOptions, type RebindResult } from "./self-healing.js";

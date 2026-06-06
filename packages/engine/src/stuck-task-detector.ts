@@ -20,6 +20,22 @@ import { createLogger } from "./logger.js";
 
 const stuckLog = createLogger("stuck-detector");
 
+/**
+ * Task statuses that are INTENTIONAL human waits and must never be flagged stuck
+ * or auto-moved (U14, R21/R20). A task parked on a structured CE question
+ * (`awaiting-user-input`), a plan-approval hold (`awaiting-approval`), or a
+ * planning-interview pause (`planning-awaiting-input`) is blocked on the human by
+ * design — past the stuck threshold it is still a deliberate wait, not a fault.
+ * The board surfaces these via their own awaiting-* badges. Coordinates with the
+ * dashboard-side `NON_STUCK_STATUSES` in `app/utils/taskStuck.ts` (which keeps
+ * the badge from rendering) and U5's stuck-detection re-keying.
+ */
+export const AWAITING_INPUT_NON_STUCK_STATUSES: ReadonlySet<string> = new Set([
+  "awaiting-user-input",
+  "awaiting-approval",
+  "planning-awaiting-input",
+]);
+
 /** Minimal session interface — matches what TaskExecutor stores. */
 export interface DisposableSession {
   dispose: () => void;
@@ -119,6 +135,17 @@ export interface StuckTaskDetectorOptions {
    * (undefined) preserves the prior behavior. Errors are treated as "not
    * waiting" (fail toward the normal stuck path, never silently suppress). */
   isCliSessionWaitingOnInput?: (taskId: string) => boolean;
+  /**
+   * Issue #6 (b): stale awaiting-input escalation. Invoked once per task that has
+   * been parked in `awaiting-user-input` past `awaitingInputReminderHours` so the
+   * engine can re-send the notification with a "still waiting" flavor. A task on a
+   * structured CE question is deliberately never flagged stuck, so without this
+   * hook a parked question can sit unanswered forever with no follow-up. The
+   * detector piggybacks its existing periodic loop (it already reads task statuses
+   * for stuck suppression); the callback owns one-shot dedup so the detector can
+   * call it every tick a task remains past threshold. Best-effort: a throw is
+   * logged and swallowed so it never disrupts stuck detection. */
+  onAwaitingInputReminder?: (task: import("@fusion/core").Task, parkedHours: number) => Promise<void> | void;
 }
 
 export class StuckTaskDetector {
@@ -129,6 +156,7 @@ export class StuckTaskDetector {
   private beforeRequeue?: (taskId: string, reason: "inactivity" | "loop" | "no-progress-churn", event: StuckTaskEvent) => Promise<boolean>;
   private onLoopDetected?: (event: StuckTaskEvent) => Promise<boolean>;
   private isCliSessionWaitingOnInput?: (taskId: string) => boolean;
+  private onAwaitingInputReminder?: (task: import("@fusion/core").Task, parkedHours: number) => Promise<void> | void;
   private paused = false;
   private exhaustedTasks = new Set<string>();
 
@@ -141,6 +169,7 @@ export class StuckTaskDetector {
     this.beforeRequeue = options.beforeRequeue;
     this.onLoopDetected = options.onLoopDetected;
     this.isCliSessionWaitingOnInput = options.isCliSessionWaitingOnInput;
+    this.onAwaitingInputReminder = options.onAwaitingInputReminder;
   }
 
   /**
@@ -617,7 +646,12 @@ export class StuckTaskDetector {
    *   (agent is actively doing things but not advancing steps)
    */
   private async checkStuckTasks(): Promise<void> {
-    if (this.tracked.size === 0) return;
+    // Issue #6 (b): the stale awaiting-input reminder sweep must run even when no
+    // agent sessions are tracked — a parked awaiting-user-input task is detached
+    // (no live session in `this.tracked`). So the empty-tracked short-circuit is
+    // gated on the reminder also being disabled.
+    const reminderEnabled = Boolean(this.onAwaitingInputReminder);
+    if (this.tracked.size === 0 && !reminderEnabled) return;
 
     // Fast pause gate: if lifecycle hooks paused the detector, skip the cycle
     // without reading settings (avoids noisy settings-read errors while paused).
@@ -633,6 +667,27 @@ export class StuckTaskDetector {
 
     // Defensive fallback for pause windows where lifecycle hooks haven't run yet.
     if (settings.globalPause || settings.enginePaused) return;
+
+    // Batch the per-cycle status reads. Both the awaiting-input reminder sweep
+    // and the per-tracked-task human-wait suppression need current task statuses;
+    // rather than one `getTask` per tracked task past threshold PLUS a separate
+    // `listTasks` for the reminder sweep, fetch the slim task list ONCE and serve
+    // both checks from a single status map (id → status). Built lazily — only
+    // when the reminder sweep is enabled or there are tracked tasks to suppress —
+    // and best-effort: a list failure leaves the map empty so each consumer falls
+    // back to its own defensive read path.
+    const snapshot = await this.loadTaskStatusSnapshot();
+    const statusByTaskId = snapshot.statusById;
+
+    // Issue #6 (b): re-surface tasks parked in awaiting-user-input past the
+    // reminder threshold. Independent of the stuck-timeout path (a parked CE
+    // question is intentionally never "stuck"); cheap because it only acts on
+    // tasks already past threshold and the notifier owns one-shot dedup.
+    if (reminderEnabled) {
+      await this.checkAwaitingInputReminders(settings, snapshot.tasks);
+    }
+
+    if (this.tracked.size === 0) return;
 
     const timeoutMs = settings.taskStuckTimeoutMs;
     if (!timeoutMs || timeoutMs <= 0) return; // Disabled when task stuck timeout is explicitly unset/disabled
@@ -652,12 +707,112 @@ export class StuckTaskDetector {
           stuckLog.log(`Suppressing stuck flag for ${taskId} (canonical=${entry.canonicalTaskId}) — CLI session waitingOnInput`);
           continue;
         }
+        // U14: intentional human-wait statuses (awaiting structured input, the
+        // plan-approval hold, a planning-interview pause) are NEVER stuck and are
+        // never auto-moved — surfacing a deliberate wait as a fault would kill a
+        // parked CE session out from under the human answering its question.
+        if (await this.isAwaitingHumanInput(entry.canonicalTaskId, statusByTaskId)) {
+          stuckLog.log(`Suppressing stuck flag for ${taskId} (canonical=${entry.canonicalTaskId}) — task awaiting human input/approval`);
+          continue;
+        }
         stuckTasks.push(taskId);
       }
     }
 
     for (const taskId of stuckTasks) {
       await this.killAndRetry(taskId, timeoutMs);
+    }
+  }
+
+  /**
+   * Fetch a single slim task snapshot for the cycle and project it to an
+   * id → status map. One query feeds both the awaiting-input reminder sweep and
+   * the per-tracked-task human-wait suppression, replacing the prior fan-out of
+   * one `getTask` per stuck candidate plus a separate `listTasks`. Best-effort:
+   * on failure the map is empty and each consumer falls back to its own read
+   * (the per-task suppression to `getTask`, the reminder sweep to skipping).
+   */
+  private async loadTaskStatusSnapshot(): Promise<{
+    tasks: import("@fusion/core").Task[];
+    statusById: Map<string, string | undefined>;
+  }> {
+    const statusById = new Map<string, string | undefined>();
+    let tasks: import("@fusion/core").Task[] = [];
+    try {
+      tasks = await this.store.listTasks({ slim: true });
+      for (const task of tasks) statusById.set(task.id, task.status);
+    } catch (err) {
+      stuckLog.error("Failed to list tasks for stuck/awaiting-input snapshot — using empty snapshot:", err);
+    }
+    return { tasks, statusById };
+  }
+
+  /**
+   * Issue #6 (b): scan for tasks parked in `awaiting-user-input` longer than the
+   * configured `awaitingInputReminderHours` and fire a one-shot "still waiting"
+   * reminder via {@link onAwaitingInputReminder}. Uses the task's `updatedAt` as
+   * the "parked since" proxy: the only writes that touch an awaiting-input task
+   * are the status flip into awaiting-user-input itself and the idempotent
+   * reconcile read (which no-ops while the status is unchanged), so `updatedAt`
+   * stays stable while parked. The notifier de-dupes per park, so calling it
+   * every tick past threshold is harmless. Best-effort throughout — a read or
+   * callback throw is logged and swallowed so it never disrupts stuck detection.
+   */
+  private async checkAwaitingInputReminders(
+    settings: Settings,
+    tasks: import("@fusion/core").Task[],
+  ): Promise<void> {
+    const hours = settings.awaitingInputReminderHours;
+    if (typeof hours !== "number" || hours <= 0) return; // disabled
+    const thresholdMs = hours * 60 * 60 * 1000;
+    const now = Date.now();
+
+    for (const task of tasks) {
+      if (task.status !== "awaiting-user-input") continue;
+      const parkedSince = Date.parse(task.updatedAt);
+      if (Number.isNaN(parkedSince)) continue;
+      const parkedMs = now - parkedSince;
+      if (parkedMs < thresholdMs) continue;
+      const parkedHours = Math.round((parkedMs / (60 * 60 * 1000)) * 10) / 10;
+      try {
+        await this.onAwaitingInputReminder?.(task, parkedHours);
+      } catch (err) {
+        stuckLog.error(`Awaiting-input reminder callback threw for ${task.id}:`, err);
+      }
+    }
+  }
+
+  /**
+   * U14: whether stuck flagging/auto-move should be suppressed because the task
+   * is parked in an intentional human-wait status
+   * ({@link AWAITING_INPUT_NON_STUCK_STATUSES}). Defensive: a read failure is
+   * treated as "not awaiting" (fail toward the normal stuck path) so a transient
+   * store error never silently disables stuck detection.
+   *
+   * Reads from the per-cycle status snapshot when the task is present (the batched
+   * common path — no per-task query); only when the task is absent from the
+   * snapshot (e.g. the snapshot read failed, or a detached task not in the slim
+   * listing) does it fall back to a single `getTask`.
+   */
+  private async isAwaitingHumanInput(
+    canonicalTaskId: string,
+    statusByTaskId?: Map<string, string | undefined>,
+  ): Promise<boolean> {
+    const snapshotStatus = statusByTaskId?.get(canonicalTaskId);
+    if (snapshotStatus !== undefined) {
+      return AWAITING_INPUT_NON_STUCK_STATUSES.has(snapshotStatus);
+    }
+    if (statusByTaskId?.has(canonicalTaskId)) {
+      // Present in the snapshot but with a nullish status — definitively not an
+      // awaiting-input wait; no need to re-read.
+      return false;
+    }
+    try {
+      const task = await this.store.getTask(canonicalTaskId);
+      return Boolean(task.status && AWAITING_INPUT_NON_STUCK_STATUSES.has(task.status));
+    } catch (err) {
+      stuckLog.error(`awaiting-input status lookup threw for ${canonicalTaskId}; treating as not awaiting:`, err);
+      return false;
     }
   }
 

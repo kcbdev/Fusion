@@ -95,6 +95,12 @@ export type GitMutationType =
   | "worktree:incomplete-detected"
   | "worktree:reanchored"
   | "worktree:auto-recovered"
+  /** Simple mode (company-model plan U11, R23) forced worktree isolation on for a
+   *  project whose stored setting disables it. Recorded once per project (guarded
+   *  by a prior-event lookup) the first time the override takes effect, so the
+   *  force-on is never silent. metadata: { storedWorktreeIsolationEnabled: false,
+   *  advancedModeOptOut: true }. */
+  | "worktree:simple-mode-forced"
   /**
    * worktrunk run-audit metadata shape:
    *

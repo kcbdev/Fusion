@@ -26,6 +26,7 @@ export const DEFAULT_NTFY_EVENTS: readonly NtfyNotificationEvent[] = [
   "failed",
   "awaiting-approval",
   "awaiting-user-review",
+  "awaiting-user-input",
   "planning-awaiting-input",
   "gridlock",
   "board-stall-unrecovered",
@@ -67,7 +68,7 @@ interface NtfyConfig {
 }
 
 /** Event types for task notification deduplication */
-type TaskNotificationEvent = "in-review" | "merged" | "failed" | "awaiting-approval" | "awaiting-user-review";
+type TaskNotificationEvent = "in-review" | "merged" | "failed" | "awaiting-approval" | "awaiting-user-review" | "awaiting-user-input";
 type AnyNotificationEvent = TaskNotificationEvent | "gridlock" | "board-stall-unrecovered" | "fallback-used";
 
 /**

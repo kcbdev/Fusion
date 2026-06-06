@@ -134,6 +134,45 @@ describe("buildExecutionPrompt", () => {
     expect(result).not.toContain("## Attachments");
   });
 
+  // issue #4 item 8: board context injection.
+  it("injects board name + ordered columns when boardContext is provided", () => {
+    const task = createMockTaskDetail();
+    const result = buildExecutionPrompt(
+      task,
+      "/home/user/project",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { boardName: "Engineering", columnNames: ["Todo", "In Progress", "Done"] },
+    );
+    expect(result).toContain("## Board");
+    expect(result).toContain("**Engineering**");
+    expect(result).toContain("Todo → In Progress → Done");
+  });
+
+  it("silently skips the board section when boardContext is absent", () => {
+    const task = createMockTaskDetail();
+    const result = buildExecutionPrompt(task, "/home/user/project");
+    expect(result).not.toContain("## Board");
+  });
+
+  it("silently skips the board section when boardContext has no boardName", () => {
+    const task = createMockTaskDetail();
+    const result = buildExecutionPrompt(
+      task,
+      "/home/user/project",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { boardName: null, columnNames: [] },
+    );
+    expect(result).not.toContain("## Board");
+  });
+
   it("omits attachment section when rootDir is not provided", () => {
     const task = createMockTaskDetail({
       attachments: [
@@ -2559,7 +2598,7 @@ describe("fn_task_update bare-call guard (P1 api-contract)", () => {
     const text = result.content[0]?.type === "text" ? result.content[0].text : "";
     expect(text).toContain("fn_task_update requires at least one of");
     // The legacy no-op text is preserved as the detail.
-    expect(text).toContain("No-op: provide a step+status, dependencies, or custom_fields to update.");
+    expect(text).toContain("No-op: provide a step+status, dependencies, custom_fields, or model override to update.");
   });
 
   it("does not trigger the guard when a dependencies-only patch is supplied", async () => {

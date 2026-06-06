@@ -140,3 +140,35 @@ export function buildGoalContextSection(input: GoalInjectionInput): GoalInjectio
     truncated,
   };
 }
+
+/**
+ * Pure input for the board-context seam (issue #4 item 8).
+ *
+ * When a task is homed on a board, callers resolve the board's name and its
+ * ordered column names (from the board's workflow IR) and pass them in. This
+ * helper renders a compact, deterministic "Board" prompt section so the executing
+ * agent knows which board/pipeline it is operating within. Silent skip when the
+ * task has no board (empty `name` / no columns).
+ */
+export interface BoardContextInput {
+  /** The board's display name, or null/undefined when the task has no board. */
+  boardName?: string | null;
+  /** Ordered column names (Todo → … → Done). Empty when unavailable. */
+  columnNames?: string[];
+}
+
+/**
+ * Build a deterministic Board prompt section. Returns "" (silent skip) when the
+ * task has no board name — board context is purely additive and never errors.
+ */
+export function buildBoardContextSection(input: BoardContextInput): string {
+  const name = input.boardName?.trim();
+  if (!name) {
+    return "";
+  }
+  const columns = (input.columnNames ?? [])
+    .map((column) => column.trim())
+    .filter((column) => column.length > 0);
+  const columnsLine = columns.length > 0 ? `\n\nColumns: ${columns.join(" → ")}` : "";
+  return `## Board\n\nThis task is homed on the **${name}** board.${columnsLine}`;
+}

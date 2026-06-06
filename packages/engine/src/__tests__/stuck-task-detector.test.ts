@@ -830,6 +830,60 @@ describe("StuckTaskDetector", () => {
       vi.useRealTimers();
     });
 
+    // U14: tasks parked in an intentional human-wait status are NEVER flagged
+    // stuck and never auto-moved, even past the threshold.
+    it.each([
+      "awaiting-user-input",
+      "awaiting-approval",
+      "planning-awaiting-input",
+    ])("suppresses stuck flagging for a task parked in %s past the threshold", async (status) => {
+      const onStuck = vi.fn();
+      store = createMockStore({
+        getSettings: vi.fn().mockResolvedValue({ taskStuckTimeoutMs: 600_000 }),
+        getTask: vi.fn().mockResolvedValue({ id: "FN-001", status }),
+      });
+      const customDetector = new StuckTaskDetector(store, { onStuck });
+      const session = createMockSession();
+
+      customDetector.trackTask("FN-001", session);
+
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      vi.advanceTimersByTime(601_000);
+
+      await customDetector.checkNow();
+
+      // Deliberate wait — not stuck, not killed, not moved.
+      expect(onStuck).not.toHaveBeenCalled();
+      expect(session.dispose).not.toHaveBeenCalled();
+      expect(store.moveTask).not.toHaveBeenCalled();
+
+      vi.useRealTimers();
+    });
+
+    it("still kills a genuinely stuck task whose status is a normal running state", async () => {
+      const onStuck = vi.fn();
+      store = createMockStore({
+        getSettings: vi.fn().mockResolvedValue({ taskStuckTimeoutMs: 600_000 }),
+        getTask: vi.fn().mockResolvedValue({ id: "FN-001", status: "in-progress" }),
+      });
+      const customDetector = new StuckTaskDetector(store, { onStuck });
+      const session = createMockSession();
+
+      customDetector.trackTask("FN-001", session);
+
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      vi.advanceTimersByTime(601_000);
+
+      await customDetector.checkNow();
+
+      expect(onStuck).toHaveBeenCalledWith(
+        expect.objectContaining({ taskId: "FN-001", reason: "inactivity" }),
+      );
+      expect(session.dispose).toHaveBeenCalled();
+
+      vi.useRealTimers();
+    });
+
     it("does nothing when timeout is zero or negative", async () => {
       store = createMockStore({
         getSettings: vi.fn().mockResolvedValue({ taskStuckTimeoutMs: 0 }),
@@ -1426,5 +1480,103 @@ describe("StuckTaskDetector heartbeat tracking (FN-978)", () => {
     expect((exhaustedStore.getTask as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith("FN-001");
     expect(customDetector.trackedCount).toBe(0);
     vi.useRealTimers();
+  });
+});
+
+describe("StuckTaskDetector awaiting-input reminder escalation (Issue #6 b)", () => {
+  function parkedTask(id: string, parkedMsAgo: number) {
+    return {
+      id,
+      status: "awaiting-user-input",
+      updatedAt: new Date(Date.now() - parkedMsAgo).toISOString(),
+    };
+  }
+
+  it("invokes the reminder callback for a task parked past the threshold", async () => {
+    const onAwaitingInputReminder = vi.fn().mockResolvedValue(undefined);
+    const fiveHoursMs = 5 * 60 * 60 * 1000;
+    const store = createMockStore({
+      getSettings: vi.fn().mockResolvedValue({ taskStuckTimeoutMs: 60000, awaitingInputReminderHours: 4 }),
+      listTasks: vi.fn().mockResolvedValue([parkedTask("FN-OLD", fiveHoursMs)]),
+    } as unknown as Partial<TaskStore>);
+    const detector = new StuckTaskDetector(store, { onAwaitingInputReminder });
+
+    await detector.checkNow();
+
+    expect(onAwaitingInputReminder).toHaveBeenCalledTimes(1);
+    const [task, parkedHours] = onAwaitingInputReminder.mock.calls[0];
+    expect(task.id).toBe("FN-OLD");
+    expect(parkedHours).toBeCloseTo(5, 1);
+  });
+
+  it("does NOT invoke the reminder for a task parked under the threshold", async () => {
+    const onAwaitingInputReminder = vi.fn().mockResolvedValue(undefined);
+    const oneHourMs = 1 * 60 * 60 * 1000;
+    const store = createMockStore({
+      getSettings: vi.fn().mockResolvedValue({ taskStuckTimeoutMs: 60000, awaitingInputReminderHours: 4 }),
+      listTasks: vi.fn().mockResolvedValue([parkedTask("FN-FRESH", oneHourMs)]),
+    } as unknown as Partial<TaskStore>);
+    const detector = new StuckTaskDetector(store, { onAwaitingInputReminder });
+
+    await detector.checkNow();
+
+    expect(onAwaitingInputReminder).not.toHaveBeenCalled();
+  });
+
+  it("is disabled when awaitingInputReminderHours is 0", async () => {
+    const onAwaitingInputReminder = vi.fn().mockResolvedValue(undefined);
+    const listTasks = vi.fn().mockResolvedValue([parkedTask("FN-OLD", 100 * 60 * 60 * 1000)]);
+    const store = createMockStore({
+      getSettings: vi.fn().mockResolvedValue({ taskStuckTimeoutMs: 60000, awaitingInputReminderHours: 0 }),
+      listTasks,
+    } as unknown as Partial<TaskStore>);
+    const detector = new StuckTaskDetector(store, { onAwaitingInputReminder });
+
+    await detector.checkNow();
+
+    expect(onAwaitingInputReminder).not.toHaveBeenCalled();
+  });
+
+  it("runs the sweep even when no agent sessions are tracked (parked tasks are detached)", async () => {
+    const onAwaitingInputReminder = vi.fn().mockResolvedValue(undefined);
+    const listTasks = vi.fn().mockResolvedValue([parkedTask("FN-OLD", 6 * 60 * 60 * 1000)]);
+    const store = createMockStore({
+      getSettings: vi.fn().mockResolvedValue({ taskStuckTimeoutMs: 60000, awaitingInputReminderHours: 4 }),
+      listTasks,
+    } as unknown as Partial<TaskStore>);
+    const detector = new StuckTaskDetector(store, { onAwaitingInputReminder });
+
+    expect(detector.trackedCount).toBe(0);
+    await detector.checkNow();
+
+    expect(listTasks).toHaveBeenCalled();
+    expect(onAwaitingInputReminder).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores tasks not in awaiting-user-input", async () => {
+    const onAwaitingInputReminder = vi.fn().mockResolvedValue(undefined);
+    const store = createMockStore({
+      getSettings: vi.fn().mockResolvedValue({ taskStuckTimeoutMs: 60000, awaitingInputReminderHours: 4 }),
+      listTasks: vi.fn().mockResolvedValue([
+        { id: "FN-RUN", status: "in-progress", updatedAt: new Date(Date.now() - 10 * 60 * 60 * 1000).toISOString() },
+      ]),
+    } as unknown as Partial<TaskStore>);
+    const detector = new StuckTaskDetector(store, { onAwaitingInputReminder });
+
+    await detector.checkNow();
+
+    expect(onAwaitingInputReminder).not.toHaveBeenCalled();
+  });
+
+  it("swallows a throwing reminder callback without disrupting detection", async () => {
+    const onAwaitingInputReminder = vi.fn().mockRejectedValue(new Error("boom"));
+    const store = createMockStore({
+      getSettings: vi.fn().mockResolvedValue({ taskStuckTimeoutMs: 60000, awaitingInputReminderHours: 4 }),
+      listTasks: vi.fn().mockResolvedValue([parkedTask("FN-OLD", 6 * 60 * 60 * 1000)]),
+    } as unknown as Partial<TaskStore>);
+    const detector = new StuckTaskDetector(store, { onAwaitingInputReminder });
+
+    await expect(detector.checkNow()).resolves.toBeUndefined();
+    expect(onAwaitingInputReminder).toHaveBeenCalledTimes(1);
   });
 });
