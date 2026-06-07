@@ -1695,37 +1695,42 @@ describe("TaskExecutor worktree recovery", () => {
   it("removes existing directory that is not a registered worktree", async () => {
     const store = createMockStore();
     const fs = await import("node:fs/promises");
-    const tempRoot = await fs.mkdtemp("/tmp/executor-worktree-");
-    const staleWorktreePath = `${tempRoot}/.worktrees/swift-falcon`;
+    const { tmpdir } = await import("node:os");
+    const rootDir = await fs.mkdtemp(`${tmpdir()}/executor-worktree-`);
+    const staleWorktreePath = `${rootDir}/.worktrees/swift-falcon`;
 
-    // Directory exists but is not registered
-    mockedExistsSync.mockReturnValue(true);
+    try {
+      // Directory exists but is not registered
+      mockedExistsSync.mockImplementation((path) => String(path) === staleWorktreePath);
 
-    await fs.mkdir(staleWorktreePath, { recursive: true });
-    await fs.writeFile(`${staleWorktreePath}/marker.txt`, "stale");
+      await fs.mkdir(staleWorktreePath, { recursive: true });
+      await fs.writeFile(`${staleWorktreePath}/marker.txt`, "stale");
 
-    // Mock git worktree list to not include our path
-    mockedExecSync.mockImplementation((cmd: string | string[]) => {
-      const command = typeof cmd === "string" ? cmd : cmd[0];
-      if (command.includes("git worktree list")) {
-        return Buffer.from("/other/path/.git/worktrees/other\n");
-      }
-      return Buffer.from("");
-    });
+      // Mock git worktree list to not include our path
+      mockedExecSync.mockImplementation((cmd: string | string[]) => {
+        const command = typeof cmd === "string" ? cmd : cmd[0];
+        if (command.includes("git worktree list")) {
+          return Buffer.from("/other/path/.git/worktrees/other\n");
+        }
+        return Buffer.from("");
+      });
 
-    const executor = new TaskExecutor(store, tempRoot);
-    await executor.execute(makeTask());
+      const executor = new TaskExecutor(store, rootDir);
+      await executor.execute(makeTask());
 
-    expect(
-      mockedExecSync.mock.calls.some((call) =>
-        typeof call[0] === "string" && call[0].includes("rm -rf"),
-      ),
-    ).toBe(false);
-    await expect(fs.access(staleWorktreePath)).rejects.toThrow();
-    expect(store.logEntry).toHaveBeenCalledWith(
-      "FN-050",
-      expect.stringContaining("Removing existing directory (not a registered worktree)"),
-    );
+      expect(
+        mockedExecSync.mock.calls.some((call) =>
+          typeof call[0] === "string" && call[0].includes("rm -rf"),
+        ),
+      ).toBe(false);
+      await expect(fs.access(staleWorktreePath)).rejects.toThrow();
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-050",
+        expect.stringContaining("Removing existing directory (not a registered worktree)"),
+      );
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
   });
 
   it("handles locked worktree by unlocking before removal", async () => {
