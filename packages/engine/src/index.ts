@@ -202,6 +202,12 @@ export {
   type WorkflowParityObserverShadowRunResult,
 } from "./workflow-parity-observer.js";
 export {
+  WorkflowAuthoritativeDriver,
+  type WorkflowAuthoritativeDriverDeps,
+  type WorkflowAuthoritativeDriverResult,
+  type WorkflowAuthoritativeDriverStore,
+} from "./workflow-authoritative-driver.js";
+export {
   auditSquashMerge,
   formatSquashAuditReport,
   type SquashAuditFindings,

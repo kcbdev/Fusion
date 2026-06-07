@@ -1129,6 +1129,10 @@ export interface TaskExecutorOptions {
   onStart?: (task: Task, worktreePath: string) => void;
   onComplete?: (task: Task) => void;
   onError?: (task: Task, error: Error) => void;
+  /** Optional runtime-owned dispatch seam that lets a flag-gated workflow
+   * interpreter own the authoritative lifecycle for default coding tasks.
+   * Return true when the task was fully handled and legacy execute() should stop. */
+  workflowAuthoritativeDispatch?: (task: Task) => Promise<boolean>;
   onAgentText?: (taskId: string, delta: string) => void;
   onAgentTool?: (taskId: string, toolName: string) => void;
   autoRecoveryDispatcher?: AutoRecoveryDispatcher;
@@ -3704,7 +3708,7 @@ export class TaskExecutor {
       const runner = new WorkflowGraphTaskRunner({
         store: this.store,
         runId: resolvedRunId,
-        seams: this.createGraphSeams(settings),
+        seams: this.createAuthoritativeWorkflowSeams(settings),
         runCustomNode: (node, nodeTask) =>
           this.runGraphCustomNode(node, nodeTask, settings, resolveBindingForNode(node.id)),
         onEvent: (event) => executorLog.log(`[workflow-graph] ${event.type} ${event.taskId}: ${event.detail}`),
@@ -4543,8 +4547,9 @@ export class TaskExecutor {
     return only;
   }
 
-  /** Seam implementations delegating to the legacy engine (KTD-1: delegate, never reimplement). */
-  private createGraphSeams(_settings: Settings): WorkflowLegacySeams {
+  /** Public authoritative-driver seam factory: exposes the same real lifecycle
+   * seams the internal graph runner uses, without changing legacy behavior. */
+  public createAuthoritativeWorkflowSeams(_settings: Settings): WorkflowLegacySeams {
     return {
       // Built-in triage/spec generation runs upstream of the interpreter today,
       // so planning is a no-op for already-specified tasks. Custom planning
@@ -5568,6 +5573,8 @@ export class TaskExecutor {
         executorLog.log(`execute() called for ${task.id} while graph routing is active — skipping duplicate`);
         return;
       }
+      const authoritativeOwned = await this.options.workflowAuthoritativeDispatch?.(task);
+      if (authoritativeOwned) return;
       const graphOwned = await this.maybeExecuteWorkflowGraph(task);
       if (graphOwned) return;
     }

@@ -1216,7 +1216,7 @@ The Experimental Features section in Settings shows:
 - Global scope indicator (features are shared across projects)
 - Description explaining the purpose of experimental features
 
-Common built-in dashboard flags include:
+Common built-in dashboard/runtime flags include:
 - `insights`
 - `roadmap`
 - `memoryView`
@@ -1226,6 +1226,9 @@ Common built-in dashboard flags include:
 - `todoView` (enables dashboard Todo View; see [Todo View](./todo-view.md))
 - `researchView`
 - `evalsView` (gates Evals dashboard view, Settings → Scheduled Evals section, and scheduled-eval cron execution)
+- `workflowGraphExecutor` (enables the workflow-IR interpreter path)
+- `workflowInterpreterDualObserve` (observe-only parity instrumentation for interpreter rollout)
+- `workflowInterpreterAuthoritative` (readiness-gated authoritative interpreter lifecycle cutover; legacy remains default/fallback when OFF)
 - `remoteAccess`
 - `agentOnboarding` (enables the **AI Interview** option inside the New Agent dialog)
 

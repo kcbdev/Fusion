@@ -410,7 +410,7 @@ Run-audit events emitted in `database` domain:
 
 The parity contract is exported from `@fusion/core` (`compareWorkflowRunObservations`, `compareWorkflowRunAudits`) and produces deterministic drift reports shaped as `{ agree, diffs[] }`, where each diff includes field name, legacy/interpreter values, category, and severity.
 
-This is a dual-observe stage only; interpreter-authoritative cutover is deferred to a later phase.
+Dual-observe remains the rollout evidence path for the later authoritative cutover: the interpreter may only become authoritative when the separate `experimentalFeatures.workflowInterpreterAuthoritative` flag is ON **and** the cutover-readiness guard reports zero unresolved parity drift.
 
 #### Self-healing recovery for parked review tasks
 
@@ -479,6 +479,26 @@ Traversal semantics:
 - per-node retries are bounded and deterministic
 
 Parity coverage includes flag-OFF no-op behavior, lifecycle ordering parity vs legacy seams, merge/file-scope-like failure routing, and downstream halt behavior for hard-cancel/self-healing style failures.
+
+### Interpreter-authoritative cutover
+
+A second default-OFF flag, `experimentalFeatures.workflowInterpreterAuthoritative`, promotes the interpreter from shadow/selected-workflow sequencing to the **authoritative** lifecycle driver for default coding tasks.
+
+The cutover stays opt-in, guarded, and reversible:
+- **Default OFF:** legacy executor/reviewer/merger/scheduler flow remains authoritative.
+- **Guarded ON:** the engine only routes through the authoritative driver when `evaluateInterpreterCutoverReadiness(...)` reports ready. The guard consumes explicit rollout evidence (cutover flag enabled, dual-observe enabled, non-empty parity observations, zero unresolved drift).
+- **Rollback:** turning `workflowInterpreterAuthoritative` back OFF immediately restores the legacy path; no migration or cleanup step is required.
+
+When the guard passes, the runtime binds real DI seams from `TaskExecutor` into the built-in coding IR and drives `BUILTIN_CODING_WORKFLOW_IR` through `WorkflowGraphExecutor`. The interpreter does **not** reimplement lifecycle behavior: it delegates execute/review/merge to the same legacy seams already used by the imperative path.
+
+Reliability invariants preserved under authoritative mode:
+- file-scope enforcement including `FileScopeViolationError`
+- squash/file-scope overlap enforcement via `assertSquashOverlapsFileScope`
+- `autoMerge: false` terminal-until-merged behavior in `in-review`
+- `moveTask(in-progress → todo)` hard-cancel semantics without stray `userPaused` rebounds
+- existing self-healing routing and fail-soft fallback behavior
+
+The interaction backstop lives in `packages/engine/src/__tests__/reliability-interactions/workflow-interpreter-cutover.test.ts`.
 
 ## Workflow Step APIs
 

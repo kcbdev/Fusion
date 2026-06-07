@@ -6,7 +6,7 @@ const { execMock, existsSyncMock } = vi.hoisted(() => ({
   execMock: vi.fn(),
   existsSyncMock: vi.fn(() => false),
 }));
-vi.mock("node:child_process", () => ({ exec: execMock, execSync: vi.fn() }));
+vi.mock("node:child_process", () => ({ exec: execMock, execSync: vi.fn(), execFile: vi.fn() }));
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();

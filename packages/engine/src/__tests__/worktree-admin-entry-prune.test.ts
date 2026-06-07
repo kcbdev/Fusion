@@ -21,7 +21,7 @@ describe("worktree prune wiring", () => {
 
     execMock.mockRejectedValueOnce(new Error("create failed")).mockResolvedValueOnce({ stdout: "", stderr: "" });
 
-    vi.doMock("node:child_process", () => ({ exec: execMock }));
+    vi.doMock("node:child_process", () => ({ exec: execMock, execFile: vi.fn() }));
     vi.doMock("../worktree-prune.js", async (importOriginal) => {
       const actual = await importOriginal<typeof import("../worktree-prune.js")>();
       return { ...actual, pruneWorktreeAdminEntries: pruneSpy };
@@ -61,7 +61,7 @@ describe("worktree prune wiring", () => {
     (execMock as any)[Symbol.for("nodejs.util.promisify.custom")] = execMock;
     execMock.mockRejectedValueOnce(new Error("create failed")).mockResolvedValueOnce({ stdout: "", stderr: "" });
 
-    vi.doMock("node:child_process", () => ({ exec: execMock }));
+    vi.doMock("node:child_process", () => ({ exec: execMock, execFile: vi.fn() }));
     vi.doMock("../worktree-prune.js", async (importOriginal) => {
       const actual = await importOriginal<typeof import("../worktree-prune.js")>();
       return { ...actual, pruneWorktreeAdminEntries: pruneSpy };
@@ -91,7 +91,7 @@ describe("worktree prune wiring", () => {
     (execMock as any)[Symbol.for("nodejs.util.promisify.custom")] = execMock;
     execMock.mockResolvedValueOnce({ stdout: "", stderr: "" }).mockResolvedValueOnce({ stdout: "", stderr: "" });
 
-    vi.doMock("node:child_process", () => ({ exec: execMock }));
+    vi.doMock("node:child_process", () => ({ exec: execMock, execFile: vi.fn() }));
     vi.doMock("../worktree-prune.js", async (importOriginal) => {
       const actual = await importOriginal<typeof import("../worktree-prune.js")>();
       return { ...actual, pruneWorktreeAdminEntries: pruneSpy };
@@ -122,7 +122,7 @@ describe("pruneWorktreeAdminEntries helper", () => {
     execMock.mockRejectedValue(new Error("boom"));
     vi.doMock("node:child_process", async () => {
       const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
-      return { ...actual, exec: execMock };
+      return { ...actual, exec: execMock, execFile: vi.fn() };
     });
 
     vi.unmock("../worktree-prune.js");

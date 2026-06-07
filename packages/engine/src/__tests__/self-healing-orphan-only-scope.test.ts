@@ -28,7 +28,7 @@ vi.mock("node:child_process", async () => {
       }
     });
   });
-  return { execSync: execSyncFn, exec: execFn };
+  return { execSync: execSyncFn, exec: execFn, execFile: vi.fn() };
 });
 
 import { EventEmitter } from "node:events";

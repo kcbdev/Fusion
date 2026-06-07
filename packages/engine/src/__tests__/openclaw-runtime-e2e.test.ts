@@ -42,6 +42,7 @@ vi.mock("../pi.js", () => ({
 }));
 
 vi.mock("node:child_process", () => ({
+  execFile: vi.fn(),
   spawn: (...args: unknown[]) => mockSpawn(...args),
 }));
 

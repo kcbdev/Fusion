@@ -64,7 +64,7 @@ vi.mock("node:child_process", () => {
         }
       });
     });
-  return { execSync: execSyncFn, exec: execFn };
+  return { execSync: execSyncFn, exec: execFn, execFile: vi.fn() };
 });
 
 vi.mock("node:fs", async () => {

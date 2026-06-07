@@ -12,7 +12,7 @@ vi.mock("node:child_process", async () => {
       .catch((err: Error) => callback?.(err, "", err.message));
   };
   execFn[promisify.custom] = (cmd: string, opts?: any) => execMock(cmd, opts).then((stdout: string) => ({ stdout, stderr: "" }));
-  return { exec: execFn, execSync: vi.fn() };
+  return { exec: execFn, execSync: vi.fn(), execFile: vi.fn() };
 });
 
 import { SelfHealingManager } from "../../self-healing.js";

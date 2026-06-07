@@ -5,7 +5,7 @@ import type { Settings, Task, TaskStore } from "@fusion/core";
 const { execMock } = vi.hoisted(() => ({
   execMock: vi.fn(),
 }));
-vi.mock("node:child_process", () => ({ exec: execMock, execSync: vi.fn() }));
+vi.mock("node:child_process", () => ({ exec: execMock, execSync: vi.fn(), execFile: vi.fn() }));
 
 const { logger } = vi.hoisted(() => ({
   logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() },
