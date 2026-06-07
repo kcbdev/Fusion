@@ -640,7 +640,6 @@
         "packages/engine/src/__tests__/reliability-interactions/completion-handoff-limbo.test.ts": 100,
         "packages/engine/src/__tests__/reliability-interactions/concurrent-execute-race.test.ts": 200,
         "packages/engine/src/__tests__/reliability-interactions/cross-node-assignment-wake.test.ts": 200,
-        "packages/engine/src/__tests__/reliability-interactions/cwd-integration-fallback-removed.test.ts": 0,
         "packages/engine/src/__tests__/reliability-interactions/dashboard-diff-boundary.test.ts": 100,
         "packages/engine/src/__tests__/reliability-interactions/dependency-cycle-reconcile.test.ts": 1100,
         "packages/engine/src/__tests__/reliability-interactions/dirty-integration-worktree.real-git.test.ts": 1100,
