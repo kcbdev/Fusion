@@ -107,4 +107,14 @@ describe("default workflow columns validate cleanly", () => {
     expect(flags.abortOnExit).toBe(true);
     expect(flags.timing).toBe(true);
   });
+
+  it("the default workflow's in-review column resolves review and merge flags", () => {
+    const r = freshRegistry();
+    const ir = BUILTIN_CODING_WORKFLOW_IR as WorkflowIrV2;
+    const inReview = ir.columns.find((c) => c.id === "in-review")!;
+    const flags = r.resolveColumnFlags(inReview);
+    expect(flags.mergeBlocker).toBe(true);
+    expect(flags.humanReview).toBe(true);
+    expect(flags.mergeOrchestration).toBe(true);
+  });
 });

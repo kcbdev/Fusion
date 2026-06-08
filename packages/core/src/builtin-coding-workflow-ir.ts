@@ -13,7 +13,7 @@ import { BUILTIN_WORKFLOW_SETTINGS } from "./builtin-workflow-settings.js";
  *   triage      = intake
  *   todo        = hold(capacity) + reset-on-entry
  *   in-progress = wip + abort-on-exit + timing
- *   in-review   = merge-blocker + stall-detection + merge
+ *   in-review   = merge-blocker + human-review + stall-detection + merge
  *   done        = complete
  *   archived    = archived
  *
@@ -39,7 +39,7 @@ const RAW_BUILTIN_CODING_WORKFLOW_IR: WorkflowIr = {
     {
       id: "in-review",
       name: "In review",
-      traits: [{ trait: "merge-blocker" }, { trait: "stall-detection" }, { trait: "merge" }],
+      traits: [{ trait: "merge-blocker" }, { trait: "human-review" }, { trait: "stall-detection" }, { trait: "merge" }],
     },
     { id: "done", name: "Done", traits: [{ trait: "complete" }] },
     { id: "archived", name: "Archived", traits: [{ trait: "archived" }] },
