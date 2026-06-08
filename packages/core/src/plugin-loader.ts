@@ -40,6 +40,7 @@ import type {
   PluginSetupHooks,
   PluginSetupCheckResult,
 } from "./plugin-types.js";
+import type { WorkflowExtensionContribution } from "./workflow-extension-types.js";
 import { normalizePluginUiContributionDefinition, validatePluginManifest } from "./plugin-types.js";
 import { createLogger } from "./logger.js";
 import { getCreateAiSessionFactory, getCreateInteractiveAiSessionFactory } from "./ai-engine-loader.js";
@@ -1065,6 +1066,21 @@ export class PluginLoader extends EventEmitter<{
       }
     }
     return steps;
+  }
+
+  /**
+   * Get all workflow extension contributions from loaded plugins.
+   */
+  getPluginWorkflowExtensions(): Array<{ pluginId: string; extension: WorkflowExtensionContribution }> {
+    const extensions: Array<{ pluginId: string; extension: WorkflowExtensionContribution }> = [];
+    for (const [pluginId, plugin] of this.plugins) {
+      if (plugin.workflowExtensions) {
+        for (const extension of plugin.workflowExtensions) {
+          extensions.push({ pluginId, extension });
+        }
+      }
+    }
+    return extensions;
   }
 
   /**

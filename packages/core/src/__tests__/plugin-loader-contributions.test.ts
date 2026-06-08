@@ -28,6 +28,7 @@ async function writePluginModule(dir: string, filename: string, plugin: FusionPl
 const hasContributionApis =
   "getPluginSkills" in PluginLoader.prototype &&
   "getPluginWorkflowSteps" in PluginLoader.prototype &&
+  "getPluginWorkflowExtensions" in PluginLoader.prototype &&
   "getPluginPromptContributions" in PluginLoader.prototype &&
   "getPluginSetupInfo" in PluginLoader.prototype;
 
@@ -52,15 +53,23 @@ describe.skipIf(!hasContributionApis)("PluginLoader contribution loading", () =>
     const pluginDir = join(rootDir, "plugins");
 
     const alpha = makePlugin(
-      makeManifest({ id: "plugin-alpha", skills: [{ skillId: "alpha", name: "Alpha" }], workflowSteps: [{ stepId: "wf-alpha", name: "WF Alpha", mode: "prompt" }], promptSurfaces: ["triage"] }),
+      makeManifest({
+        id: "plugin-alpha",
+        skills: [{ skillId: "alpha", name: "Alpha" }],
+        workflowSteps: [{ stepId: "wf-alpha", name: "WF Alpha", mode: "prompt" }],
+        workflowExtensions: [{ extensionId: "move-policy", name: "Move Policy", kind: "move-policy" }],
+        promptSurfaces: ["triage"],
+      }),
     );
     alpha.skills = [{ skillId: "alpha", name: "Alpha", description: "alpha", enabled: false } as any];
     alpha.workflowSteps = [{ stepId: "wf-alpha", name: "WF Alpha", description: "wf", mode: "prompt", prompt: "Run", enabled: false } as any];
+    alpha.workflowExtensions = [{ extensionId: "move-policy", name: "Move Policy", kind: "move-policy", schemaVersion: 1, fallback: "degradeToDefault" } as any];
     alpha.promptContributions = { enabledByDefault: false, contributions: [{ surface: "triage", content: "Alpha triage" }] };
 
     const beta = makePlugin(makeManifest({ id: "plugin-beta" }));
     beta.skills = [{ skillId: "beta", name: "Beta", description: "beta", enabled: true } as any];
     beta.workflowSteps = [{ stepId: "wf-beta", name: "WF Beta", description: "wf", mode: "script", scriptName: "test" } as any];
+    beta.workflowExtensions = [{ extensionId: "work-engine", name: "Work Engine", kind: "work-engine", schemaVersion: 1, fallback: "parkNeedsAttention" } as any];
     beta.promptContributions = { enabledByDefault: true, contributions: [{ surface: "reviewer", content: "Beta reviewer" }] };
 
     const alphaPath = await writePluginModule(pluginDir, "alpha.mjs", alpha);
@@ -72,10 +81,12 @@ describe.skipIf(!hasContributionApis)("PluginLoader contribution loading", () =>
 
     const skills = loader.getPluginSkills();
     const steps = loader.getPluginWorkflowSteps();
+    const extensions = loader.getPluginWorkflowExtensions();
     const prompts = loader.getPluginPromptContributions();
 
     expect(skills.map((s) => s.pluginId).sort()).toEqual(["plugin-alpha", "plugin-beta"]);
     expect(steps.map((s) => s.pluginId).sort()).toEqual(["plugin-alpha", "plugin-beta"]);
+    expect(extensions.map((e) => e.pluginId).sort()).toEqual(["plugin-alpha", "plugin-beta"]);
     expect(prompts.map((p) => p.pluginId).sort()).toEqual(["plugin-alpha", "plugin-beta"]);
     expect(skills.some((s) => s.skill.enabled === false)).toBe(true);
     expect(steps.some((s) => s.step.enabled === false)).toBe(true);

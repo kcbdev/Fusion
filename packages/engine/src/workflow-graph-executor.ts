@@ -1,5 +1,5 @@
-import type { Settings, TaskDetail, TaskStep, WorkflowIr, WorkflowIrEdge, WorkflowIrNode } from "@fusion/core";
-import { BUILTIN_CODING_WORKFLOW_IR, WorkflowIrError, isExperimentalFeatureEnabled, resolveMaxReworkCycles } from "@fusion/core";
+import type { Settings, TaskDetail, TaskStep, WorkflowIr, WorkflowIrEdge, WorkflowIrNode, WorkflowNodeExtensionResult } from "@fusion/core";
+import { BUILTIN_CODING_WORKFLOW_IR, WorkflowIrError, getWorkflowExtensionRegistry, isExperimentalFeatureEnabled, resolveMaxReworkCycles } from "@fusion/core";
 
 import {
   createDefaultNodeHandlers,
@@ -249,7 +249,7 @@ export class WorkflowGraphExecutor {
       runId,
       nodeMap,
       outgoingMap,
-      runBranchNode: (node, signal) => this.executeNodeWithRetries(node, task, settings, context, signal),
+      runBranchNode: (node, signal) => this.executeNodeWithRetries(node, task, settings, context, ir, signal),
       shouldTraverseEdge: (edge, source) => this.shouldTraverseEdge(edge, source),
       persistence: this.deps.branchPersistence,
       semaphore: this.deps.branchSemaphore,
@@ -314,7 +314,7 @@ export class WorkflowGraphExecutor {
             steps,
             context,
             runTemplateNode: (tNode, sig, contextOverride) =>
-              this.executeNodeWithRetries(tNode, task, settings, contextOverride ?? context, sig),
+              this.executeNodeWithRetries(tNode, task, settings, contextOverride ?? context, ir, sig),
             shouldTraverseEdge: (edge, src) => this.shouldTraverseEdge(edge, src),
             persistence: this.deps.stepInstancePersistence,
             onReworkReset: this.deps.onReworkReset,
@@ -338,7 +338,7 @@ export class WorkflowGraphExecutor {
           return await traverseChildren(node, result);
         }
 
-        const result = await this.executeNodeWithRetries(node, task, settings, context);
+        const result = await this.executeNodeWithRetries(node, task, settings, context, ir);
         if (result.contextPatch) Object.assign(context, result.contextPatch);
         context[`node:${node.id}:outcome`] = result.outcome;
         if (result.value !== undefined) context[`node:${node.id}:value`] = result.value;
@@ -488,17 +488,67 @@ export class WorkflowGraphExecutor {
     throw new WorkflowIrError(`Unsupported edge condition: ${edge.condition}`);
   }
 
+  private normalizePluginNodeResult(result: WorkflowNodeExtensionResult): WorkflowNodeResult {
+    if (result.outcome === "success" || result.outcome === "failure") {
+      return result;
+    }
+    return {
+      outcome: "success",
+      value: result.outcome.slice("outcome:".length),
+      contextPatch: result.contextPatch,
+    };
+  }
+
+  private async executePluginNodeHandler(
+    node: WorkflowIrNode,
+    task: TaskDetail,
+    workflow: WorkflowIr,
+    context: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<WorkflowNodeResult | undefined> {
+    const extensionIds = Object.keys(node.extensions ?? {});
+    if (extensionIds.length === 0) return undefined;
+
+    const registry = getWorkflowExtensionRegistry();
+    for (const extensionId of extensionIds) {
+      const definition = registry.get(extensionId);
+      const extension = definition?.extension;
+      if (!definition || definition.degraded || extension?.kind !== "node-handler" || !extension.handle) continue;
+      if (extension.nodeKind && extension.nodeKind !== node.kind) continue;
+      try {
+        const result = await extension.handle({
+          task,
+          workflow,
+          node,
+          context,
+          signal,
+        });
+        return this.normalizePluginNodeResult(result);
+      } catch (error) {
+        if (extension.fallback === "degradeToDefault") continue;
+        return {
+          outcome: "failure",
+          value: "plugin-node-handler-error",
+          contextPatch: {
+            [`node:${node.id}:error`]: error instanceof Error ? error.message : String(error),
+            [`node:${node.id}:extensionId`]: extensionId,
+          },
+        };
+      }
+    }
+
+    return undefined;
+  }
+
   private async executeNodeWithRetries(
     node: WorkflowIrNode,
     task: TaskDetail,
     settings: Pick<Settings, "experimentalFeatures"> | undefined,
     context: Record<string, unknown>,
+    workflow: WorkflowIr,
     signal?: AbortSignal,
   ): Promise<WorkflowNodeResult> {
     const handler = this.handlers[node.kind];
-    if (!handler) {
-      throw new WorkflowIrError(`No handler registered for node kind: ${node.kind}`);
-    }
 
     // Per-node override: config.maxRetries beats the executor-wide default.
     const configured = Number(node.config?.maxRetries);
@@ -511,6 +561,11 @@ export class WorkflowGraphExecutor {
       // Fail-fast cancellation: a branch aborted mid-retry stops re-trying.
       if (signal?.aborted) return { outcome: "failure", value: "aborted" };
       try {
+        const pluginResult = await this.executePluginNodeHandler(node, task, workflow, context, signal);
+        if (pluginResult) return pluginResult;
+        if (!handler) {
+          throw new WorkflowIrError(`No handler registered for node kind: ${node.kind}`);
+        }
         return await handler(node, { task, settings, context, signal });
       } catch (error) {
         lastError = error;

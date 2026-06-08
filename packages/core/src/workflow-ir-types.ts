@@ -28,6 +28,8 @@ export interface WorkflowIrNode {
   kind: WorkflowIrNodeKind;
   /** v2: the column this node is placed in. Must reference a defined column id. */
   column?: string;
+  /** Plugin-namespaced extension metadata keyed as `plugin:<pluginId>:<extensionId>`. */
+  extensions?: Record<string, Record<string, unknown>>;
   config?: Record<string, unknown>;
 }
 
@@ -238,6 +240,8 @@ export interface WorkflowIrColumn {
   id: string;
   name: string;
   traits: WorkflowIrColumnTrait[];
+  /** Plugin-namespaced extension metadata keyed as `plugin:<pluginId>:<extensionId>`. */
+  extensions?: Record<string, Record<string, unknown>>;
   /** Optional permanent-agent binding (column-agent plan KTD-1). Additive and
    *  omitted entirely when unset — never serialized as `agent: null` — so legacy
    *  and default workflows stay byte-identical (R9). */

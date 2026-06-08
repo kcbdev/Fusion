@@ -89,10 +89,12 @@ import {
   type PostMergeAuditMode,
   type TaskSourceIssue,
   type Task,
+  type TaskDetail,
   type AutostashOrphanRecord,
   normalizeMergeAdvanceAutoSyncMode,
   isMergeRequestContractShadowEnabled,
 } from "@fusion/core";
+import { evaluateAutoMergeFactProviders } from "./auto-merge-fact-providers.js";
 import { resolveMergePolicy, type MergeFileScopeMode } from "./merge-trait.js";
 import { describeModel, promptWithFallback } from "./pi.js";
 import { accumulateSessionTokenUsage } from "./session-token-usage.js";
@@ -8149,7 +8151,15 @@ export async function aiMergeTask(
   }
 
   if (isMergeRequestContractShadowEnabled(settings)) {
-    const initialState = task.autoMerge === false ? "manual-required" : "queued";
+    const autoMergeFacts = await evaluateAutoMergeFactProviders(store, task as TaskDetail).catch((error) => ({
+      route: "blocked" as const,
+      facts: {},
+      reasons: [`auto-merge fact provider evaluation failed: ${error instanceof Error ? error.message : String(error)}`],
+    }));
+    const providerManualRoute =
+      autoMergeFacts.route === "manual-required" ||
+      autoMergeFacts.route === "blocked";
+    const initialState = task.autoMerge === false || providerManualRoute ? "manual-required" : "queued";
     const existingRecord = store.getMergeRequestRecord(task.id);
     const currentState = existingRecord?.state ?? initialState;
     if (!existingRecord) {
@@ -8171,6 +8181,9 @@ export async function aiMergeTask(
       metadata: {
         taskId: task.id,
         state: initialState,
+        autoMergeProviderRoute: autoMergeFacts.route ?? null,
+        autoMergeProviderReasons: autoMergeFacts.reasons,
+        autoMergeProviderFacts: autoMergeFacts.facts,
         integrationMode: integrationRoot.mode === "reuse-task-worktree" ? "reuse-task-worktree" : "cwd-integration",
       },
     });

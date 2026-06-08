@@ -14,6 +14,15 @@
 import type { Database } from "./db.js";
 import type { TaskStore } from "./store.js";
 import type { PlanningQuestion, Task, WorkflowStepMode, WorkflowStepToolMode } from "./types.js";
+import type {
+  WorkflowExtensionContribution,
+  WorkflowExtensionFallback,
+  WorkflowExtensionKind,
+  WorkflowExtensionMetadata,
+} from "./workflow-extension-types.js";
+import {
+  WORKFLOW_EXTENSION_SCHEMA_VERSION,
+} from "./workflow-extension-types.js";
 
 const SLUG_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 const PROMPT_CONTRIBUTION_SURFACES = ["executor-system", "executor-task", "triage", "reviewer", "heartbeat"] as const;
@@ -51,6 +60,8 @@ export interface PluginManifest {
   workflowSteps?: Array<{ stepId: string; name: string }>;
   /** Optional trait metadata used for discovery UIs (U8). */
   traits?: Array<{ traitId: string; name: string }>;
+  /** Optional workflow extension metadata used for discovery UIs. */
+  workflowExtensions?: WorkflowExtensionMetadata[];
   /** Prompt surfaces this plugin contributes to. */
   promptSurfaces?: PluginPromptSurface[];
   /** Setup metadata for plugin-managed binaries/runtimes. */
@@ -900,6 +911,83 @@ export function validatePluginTraitContribution(
   return errors;
 }
 
+const WORKFLOW_EXTENSION_KINDS: ReadonlySet<WorkflowExtensionKind> = new Set([
+  "column-metadata",
+  "move-policy",
+  "work-engine",
+  "node-handler",
+  "verdict-provider",
+  "merge-fact-provider",
+]);
+
+const WORKFLOW_EXTENSION_FALLBACKS: ReadonlySet<WorkflowExtensionFallback> = new Set([
+  "degradeToDefault",
+  "parkNeedsAttention",
+  "failClosed",
+]);
+
+/**
+ * Validate one full plugin workflow extension contribution. Discovery metadata
+ * (`{ extensionId, name, kind }`) is validated in validatePluginManifest; runtime
+ * contribution objects use this stricter check.
+ */
+export function validateWorkflowExtensionContribution(
+  extension: unknown,
+  index = 0,
+): string[] {
+  const errors: string[] = [];
+  const prefix = `workflowExtensions[${index}]`;
+  if (!extension || typeof extension !== "object" || Array.isArray(extension)) {
+    return [`${prefix} must be an object`];
+  }
+  const e = extension as Record<string, unknown>;
+
+  if (!e.extensionId || typeof e.extensionId !== "string" || e.extensionId.trim() === "") {
+    errors.push(`${prefix}.extensionId is required and must be a non-empty string`);
+  } else if (!SLUG_PATTERN.test(e.extensionId)) {
+    errors.push(
+      `${prefix}.extensionId must be a valid slug (lowercase, alphanumeric, hyphens only, cannot start or end with hyphen)`,
+    );
+  }
+
+  if (!e.name || typeof e.name !== "string" || e.name.trim() === "") {
+    errors.push(`${prefix}.name is required and must be a non-empty string`);
+  }
+
+  if (typeof e.kind !== "string" || !WORKFLOW_EXTENSION_KINDS.has(e.kind as WorkflowExtensionKind)) {
+    errors.push(
+      `${prefix}.kind must be one of: ${[...WORKFLOW_EXTENSION_KINDS].join(", ")}`,
+    );
+  }
+
+  if (e.schemaVersion === undefined) {
+    errors.push(`${prefix}.schemaVersion is required`);
+  } else if (e.schemaVersion !== WORKFLOW_EXTENSION_SCHEMA_VERSION) {
+    errors.push(
+      `${prefix}.schemaVersion must be ${WORKFLOW_EXTENSION_SCHEMA_VERSION}; got ${String(e.schemaVersion)}`,
+    );
+  }
+
+  if (typeof e.fallback !== "string" || !WORKFLOW_EXTENSION_FALLBACKS.has(e.fallback as WorkflowExtensionFallback)) {
+    errors.push(
+      `${prefix}.fallback must be one of: ${[...WORKFLOW_EXTENSION_FALLBACKS].join(", ")}`,
+    );
+  }
+
+  if (e.configSchema !== undefined) {
+    if (typeof e.configSchema !== "object" || e.configSchema === null || Array.isArray(e.configSchema)) {
+      errors.push(`${prefix}.configSchema must be an object`);
+    } else {
+      const fields = (e.configSchema as { fields?: unknown }).fields;
+      if (!Array.isArray(fields)) {
+        errors.push(`${prefix}.configSchema.fields must be an array`);
+      }
+    }
+  }
+
+  return errors;
+}
+
 /**
  * Prompt injection surfaces for plugin-contributed instructions.
  * - executor-system: Appended to executor agent system prompt
@@ -1039,6 +1127,8 @@ export interface FusionPlugin {
   workflowSteps?: PluginWorkflowStepContribution[];
   /** Plugin-contributed column traits (U8). */
   traits?: PluginTraitContribution[];
+  /** Plugin-contributed workflow extension points. */
+  workflowExtensions?: WorkflowExtensionContribution[];
   /** Plugin-contributed prompt injections. */
   promptContributions?: PluginPromptContributions;
   /** Plugin-managed setup metadata and lifecycle hooks. */
@@ -1266,6 +1356,42 @@ export function validatePluginManifest(manifest: unknown): { valid: boolean; err
     }
   }
 
+  // Optional: workflow extension contributions. Full contribution shapes validate
+  // through validateWorkflowExtensionContribution; discovery metadata uses the
+  // lighter {extensionId, name, kind} form.
+  if (m.workflowExtensions !== undefined) {
+    if (!Array.isArray(m.workflowExtensions)) {
+      errors.push("workflowExtensions must be an array");
+    } else {
+      for (const [index, extension] of m.workflowExtensions.entries()) {
+        if (!extension || typeof extension !== "object") {
+          errors.push(`workflowExtensions[${index}] must be an object`);
+          continue;
+        }
+        const extensionMeta = extension as Record<string, unknown>;
+        if (
+          extensionMeta.schemaVersion !== undefined ||
+          extensionMeta.fallback !== undefined ||
+          extensionMeta.configSchema !== undefined
+        ) {
+          errors.push(...validateWorkflowExtensionContribution(extensionMeta, index));
+          continue;
+        }
+        if (!extensionMeta.extensionId || typeof extensionMeta.extensionId !== "string" || extensionMeta.extensionId.trim() === "") {
+          errors.push(`workflowExtensions[${index}].extensionId is required and must be a non-empty string`);
+        } else if (!SLUG_PATTERN.test(extensionMeta.extensionId)) {
+          errors.push(`workflowExtensions[${index}].extensionId must be a valid slug (lowercase, alphanumeric, hyphens only, cannot start or end with hyphen)`);
+        }
+        if (!extensionMeta.name || typeof extensionMeta.name !== "string" || extensionMeta.name.trim() === "") {
+          errors.push(`workflowExtensions[${index}].name is required and must be a non-empty string`);
+        }
+        if (typeof extensionMeta.kind !== "string" || !WORKFLOW_EXTENSION_KINDS.has(extensionMeta.kind as WorkflowExtensionKind)) {
+          errors.push(`workflowExtensions[${index}].kind must be one of: ${[...WORKFLOW_EXTENSION_KINDS].join(", ")}`);
+        }
+      }
+    }
+  }
+
   // Optional: prompt surface metadata
   if (m.promptSurfaces !== undefined) {
     if (!Array.isArray(m.promptSurfaces)) {
@@ -1346,4 +1472,3 @@ export function validatePluginManifest(manifest: unknown): { valid: boolean; err
     errors,
   };
 }
-

@@ -11,7 +11,15 @@ import type {
   PluginSkillContribution,
   PluginWorkflowStepContribution,
 } from "../plugin-types.js";
-import { validatePluginManifest } from "../plugin-types.js";
+import type {
+  WorkflowExtensionContribution,
+  WorkflowExtensionFallback,
+  WorkflowExtensionKind,
+} from "../workflow-extension-types.js";
+import {
+  validatePluginManifest,
+  validateWorkflowExtensionContribution,
+} from "../plugin-types.js";
 
 describe("plugin contribution type constraints", () => {
   it("accepts setup check result status variants", () => {
@@ -153,6 +161,47 @@ describe("plugin contribution type constraints", () => {
     expectTypeOf(plugin.executorRuntimeEnv).toBeFunction();
   });
 
+  it("accepts workflow extension contribution shapes", () => {
+    const kinds: WorkflowExtensionKind[] = [
+      "column-metadata",
+      "move-policy",
+      "work-engine",
+      "node-handler",
+      "verdict-provider",
+      "merge-fact-provider",
+    ];
+    const fallback: WorkflowExtensionFallback = "degradeToDefault";
+    const extensions: WorkflowExtensionContribution[] = kinds.map((kind) => ({
+      extensionId: `${kind}-demo`,
+      name: `${kind} demo`,
+      kind,
+      schemaVersion: 1,
+      fallback,
+    } as WorkflowExtensionContribution));
+
+    const plugin: FusionPlugin = {
+      manifest: { id: "plugin-workflow-extensions", name: "Workflow Extensions", version: "1.0.0" },
+      state: "installed",
+      hooks: {},
+      workflowExtensions: extensions,
+    };
+
+    expect(plugin.workflowExtensions).toHaveLength(6);
+    expect(validateWorkflowExtensionContribution(extensions[0])).toEqual([]);
+    expect(
+      validateWorkflowExtensionContribution({
+        extensionId: "bad",
+        name: "Bad",
+        kind: "move-policy",
+        schemaVersion: 99,
+        fallback: "guess" as WorkflowExtensionFallback,
+      }),
+    ).toEqual([
+      "workflowExtensions[0].schemaVersion must be 1; got 99",
+      "workflowExtensions[0].fallback must be one of: degradeToDefault, parkNeedsAttention, failClosed",
+    ]);
+  });
+
   it("compile-time rejects invalid prompt surfaces", () => {
     const validSurface: PluginPromptSurface = "triage";
     expect(validSurface).toBe("triage");
@@ -173,6 +222,7 @@ describe("validatePluginManifest contribution metadata scope", () => {
       version: "1.0.0",
       skills: [{ skillId: "browser-reader", name: "Browser Reader" }],
       workflowSteps: [{ stepId: "browser-check", name: "Browser Check", mode: "prompt" }],
+      workflowExtensions: [{ extensionId: "move-policy", name: "Move Policy", kind: "move-policy" }],
       promptSurfaces: ["executor-system", "heartbeat"],
       setup: { binaryName: "agent-browser", description: "Browser runtime", channel: "stable" },
     });
@@ -187,6 +237,7 @@ describe("validatePluginManifest contribution metadata scope", () => {
       version: "1.0.0",
       skills: [{ skillId: "Bad Skill", name: "Bad" }],
       workflowSteps: [{ stepId: "bad-step", name: "Bad Step", mode: "oops" as "prompt" }],
+      workflowExtensions: [{ extensionId: "Bad Extension", name: "Bad", kind: "not-real" as WorkflowExtensionKind }],
       promptSurfaces: ["not-a-surface" as PluginPromptSurface],
       setup: { binaryName: "", description: "" },
     });

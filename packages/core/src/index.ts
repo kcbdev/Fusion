@@ -856,12 +856,68 @@ export type {
 export {
   validatePluginManifest,
   validatePluginTraitContribution,
+  validateWorkflowExtensionContribution,
   PLUGIN_TRAIT_RESTRICTED_FLAGS,
   PLUGIN_TRAIT_ALLOWED_HOOK_POINTS,
   PLUGIN_TRAIT_SCHEMA_VERSION,
   normalizePluginUiContributionSurface,
   normalizePluginUiContributionDefinition,
 } from "./plugin-types.js";
+export type {
+  WorkflowExtensionContribution,
+  WorkflowExtensionMetadata,
+  WorkflowExtensionBaseContribution,
+  WorkflowColumnMetadataExtensionContribution,
+  WorkflowMovePolicyExtensionContribution,
+  WorkflowWorkEngineExtensionContribution,
+  WorkflowNodeHandlerExtensionContribution,
+  TaskVerdictProviderExtensionContribution,
+  AutoMergeFactProviderExtensionContribution,
+  WorkflowExtensionConfigField,
+  WorkflowExtensionConfigSchema,
+  WorkflowExtensionFallback,
+  WorkflowExtensionKind,
+  WorkflowMovePolicyDecision,
+  WorkflowMovePolicyInput,
+  WorkflowMovePolicyHandler,
+  WorkflowWorkEngineDispatchResult,
+  WorkflowWorkEngineInput,
+  WorkflowWorkEngineHandler,
+  WorkflowNodeExtensionResult,
+  WorkflowNodeHandlerInput,
+  WorkflowNodeExtensionHandler,
+  TaskVerdictStatus,
+  TaskVerdictProviderInput,
+  TaskVerdictProviderResult,
+  TaskVerdictProviderHandler,
+  AutoMergeRoute,
+  AutoMergeFactProviderInput,
+  AutoMergeFactProviderResult,
+  AutoMergeFactProviderHandler,
+} from "./workflow-extension-types.js";
+export {
+  WORKFLOW_EXTENSION_SCHEMA_VERSION,
+  workflowExtensionRegistryId,
+} from "./workflow-extension-types.js";
+export {
+  WorkflowExtensionRegistry,
+  WorkflowExtensionRegistrationError,
+  getWorkflowExtensionRegistry,
+  __resetWorkflowExtensionRegistryForTests,
+} from "./workflow-extension-registry.js";
+export type {
+  WorkflowExtensionDefinition,
+  WorkflowExtensionRegistrationReason,
+} from "./workflow-extension-registry.js";
+export {
+  createBoardActionServices,
+} from "./board-action-services.js";
+export type {
+  BoardActionServices,
+  BoardActionTaskStore,
+  MoveBoardTaskInput,
+  UpdateBoardTaskInput,
+} from "./board-action-services.js";
 export { PluginStore } from "./plugin-store.js";
 export type { PluginStoreEvents, PluginRegistrationInput, PluginUpdateInput } from "./plugin-store.js";
 export { PluginLoader, resolvePluginEntryPath } from "./plugin-loader.js";

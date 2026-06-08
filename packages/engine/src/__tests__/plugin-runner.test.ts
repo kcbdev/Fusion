@@ -39,6 +39,7 @@ describe("PluginRunner", () => {
     getCliProviderContributions: ReturnType<typeof vi.fn>;
     getPluginSkills: ReturnType<typeof vi.fn>;
     getPluginWorkflowSteps: ReturnType<typeof vi.fn>;
+    getPluginWorkflowExtensions: ReturnType<typeof vi.fn>;
     getPluginWorkflowStepTemplates: ReturnType<typeof vi.fn>;
     getPluginPromptContributions: ReturnType<typeof vi.fn>;
     getPluginSetupInfo: ReturnType<typeof vi.fn>;
@@ -63,6 +64,7 @@ describe("PluginRunner", () => {
     off: ReturnType<typeof vi.fn>;
     getTask: ReturnType<typeof vi.fn>;
     getDatabase: ReturnType<typeof vi.fn>;
+    recordRunAuditEvent: ReturnType<typeof vi.fn>;
   };
   let pluginRunner: PluginRunner;
 
@@ -104,6 +106,7 @@ describe("PluginRunner", () => {
       getCliProviderContributions: vi.fn().mockReturnValue([]),
       getPluginSkills: vi.fn().mockReturnValue([]),
       getPluginWorkflowSteps: vi.fn().mockReturnValue([]),
+      getPluginWorkflowExtensions: vi.fn().mockReturnValue([]),
       getPluginWorkflowStepTemplates: vi.fn().mockReturnValue([]),
       getPluginPromptContributions: vi.fn().mockReturnValue([]),
       getPluginSetupInfo: vi.fn().mockReturnValue([]),
@@ -127,6 +130,7 @@ describe("PluginRunner", () => {
       off: mockOff,
       getTask: vi.fn(),
       getDatabase: vi.fn().mockReturnValue({ runPluginSchemaInits: mockRunPluginSchemaInits }),
+      recordRunAuditEvent: vi.fn(),
     };
 
     mockPluginStore = {
@@ -878,17 +882,20 @@ describe("PluginRunner", () => {
       expect(second).toBe(first);
     });
 
-    it("returns workflow steps, workflow step templates, prompt contributions, and setup info", async () => {
+    it("returns workflow steps, workflow extensions, workflow step templates, prompt contributions, and setup info", async () => {
       const steps = [{ pluginId: "test-plugin", step: { stepId: "ws1", name: "Step", description: "d", mode: "prompt", prompt: "Run checks" } }];
+      const extensions = [{ pluginId: "test-plugin", extension: { extensionId: "move-policy", name: "Move Policy", kind: "move-policy", schemaVersion: 1, fallback: "degradeToDefault" } }];
       const templates = [{ pluginId: "test-plugin", template: { id: "plugin:test-plugin:ws1", name: "Step", description: "d", prompt: "Run checks", category: "Plugin", icon: "puzzle" } }];
       const prompts = [{ pluginId: "test-plugin", contribution: { surface: "executor-system", content: "extra" }, config: { enabledByDefault: true, contributions: [] } }];
       const setups = [{ pluginId: "test-plugin", manifest: { binaryName: "agent-browser", description: "Do it" }, hooks: { checkSetup: vi.fn().mockResolvedValue({ status: "installed" }) } }];
       mockPluginLoader.getPluginWorkflowSteps.mockReturnValue(steps);
+      mockPluginLoader.getPluginWorkflowExtensions.mockReturnValue(extensions);
       mockPluginLoader.getPluginWorkflowStepTemplates.mockReturnValue(templates);
       mockPluginLoader.getPluginPromptContributions.mockReturnValue(prompts);
       mockPluginLoader.getPluginSetupInfo.mockReturnValue(setups);
       await pluginRunner.init();
       expect(pluginRunner.getPluginWorkflowSteps()).toEqual(steps);
+      expect(pluginRunner.getPluginWorkflowExtensions()).toEqual(extensions);
       expect(pluginRunner.getPluginWorkflowStepTemplates()).toEqual(templates);
       expect(pluginRunner.getPluginPromptContributions()).toEqual(prompts);
       expect(pluginRunner.getPluginSetupInfo()).toEqual(setups);
@@ -921,6 +928,7 @@ describe("PluginRunner", () => {
       pluginRunner.getCliProviderContributions();
       pluginRunner.getPluginSkills();
       pluginRunner.getPluginWorkflowSteps();
+      pluginRunner.getPluginWorkflowExtensions();
       pluginRunner.getPluginWorkflowStepTemplates();
       pluginRunner.getPluginPromptContributions();
       pluginRunner.getPluginSetupInfo();
@@ -930,6 +938,7 @@ describe("PluginRunner", () => {
       pluginRunner.getCliProviderContributions();
       pluginRunner.getPluginSkills();
       pluginRunner.getPluginWorkflowSteps();
+      pluginRunner.getPluginWorkflowExtensions();
       pluginRunner.getPluginWorkflowStepTemplates();
       pluginRunner.getPluginPromptContributions();
       pluginRunner.getPluginSetupInfo();
@@ -939,6 +948,7 @@ describe("PluginRunner", () => {
       pluginRunner.getCliProviderContributions();
       pluginRunner.getPluginSkills();
       pluginRunner.getPluginWorkflowSteps();
+      pluginRunner.getPluginWorkflowExtensions();
       pluginRunner.getPluginWorkflowStepTemplates();
       pluginRunner.getPluginPromptContributions();
       pluginRunner.getPluginSetupInfo();
@@ -946,6 +956,7 @@ describe("PluginRunner", () => {
       expect(mockPluginLoader.getCliProviderContributions).toHaveBeenCalledTimes(3);
       expect(mockPluginLoader.getPluginSkills).toHaveBeenCalledTimes(3);
       expect(mockPluginLoader.getPluginWorkflowSteps).toHaveBeenCalledTimes(3);
+      expect(mockPluginLoader.getPluginWorkflowExtensions).toHaveBeenCalledTimes(3);
       expect(mockPluginLoader.getPluginWorkflowStepTemplates).toHaveBeenCalledTimes(3);
       expect(mockPluginLoader.getPluginPromptContributions).toHaveBeenCalledTimes(3);
       expect(mockPluginLoader.getPluginSetupInfo).toHaveBeenCalledTimes(3);

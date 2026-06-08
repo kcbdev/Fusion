@@ -9,9 +9,9 @@ import { delimiter, isAbsolute, join, relative, resolve as resolvePath } from "n
 import { existsSync, realpathSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode } from "@fusion/core";
-import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, isWorkflowColumnsEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId } from "@fusion/core";
+import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, isWorkflowColumnsEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry } from "@fusion/core";
 import { mergeEffectiveSettings } from "./effective-settings.js";
-import type { TaskStep, WorkflowIr, WorkflowFieldDefinition, WorkflowColumnAgent, EffectiveAgentInput } from "@fusion/core";
+import type { TaskStep, WorkflowIr, WorkflowFieldDefinition, WorkflowColumnAgent, EffectiveAgentInput, WorkflowWorkEngineDispatchResult } from "@fusion/core";
 import {
   buildWorkflowObservationFromTask,
   buildWorkflowObservation,
@@ -5556,6 +5556,129 @@ export class TaskExecutor {
     }
   }
 
+  private async maybeDispatchWorkflowWorkEngine(task: Task): Promise<boolean> {
+    let detail: TaskDetail;
+    let workflow: WorkflowIr;
+    try {
+      detail = await this.store.getTask(task.id);
+      workflow = await resolveWorkflowIrForTask(this.store, task.id);
+    } catch (error) {
+      executorLog.warn(`${task.id}: failed to resolve workflow work-engine bindings: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
+    if (workflow.version !== "v2") return false;
+
+    const column = workflow.columns.find((candidate) => candidate.id === detail.column);
+    const extensionEntries = Object.entries(column?.extensions ?? {});
+    if (extensionEntries.length === 0) return false;
+
+    const registry = getWorkflowExtensionRegistry();
+    for (const [extensionId, metadata] of extensionEntries) {
+      const definition = registry.get(extensionId);
+      const extension = definition?.extension;
+      if (!definition || definition.degraded || extension?.kind !== "work-engine" || !extension.dispatch) continue;
+
+      let result: WorkflowWorkEngineDispatchResult;
+      try {
+        result = await extension.dispatch({
+          task: detail,
+          workflow,
+          columnId: detail.column,
+          metadata,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        executorLog.warn(`${task.id}: workflow work-engine ${extensionId} failed: ${message}`);
+        if (extension.fallback === "degradeToDefault") continue;
+        await this.store.logEntry(task.id, `Workflow work engine ${extensionId} failed`, message);
+        await this.store.updateTask(task.id, {
+          status: extension.fallback === "parkNeedsAttention" ? "queued" : "failed",
+          error: message,
+        });
+        return true;
+      }
+
+      if (result.kind === "not-claimed") continue;
+      if (result.kind === "degraded-to-default") {
+        executorLog.warn(`${task.id}: workflow work-engine ${extensionId} degraded to default: ${result.reason}`);
+        await this.store.logEntry(task.id, `Workflow work engine ${extensionId} degraded to default`, result.reason);
+        continue;
+      }
+      if (result.kind === "parked") {
+        await this.store.logEntry(task.id, result.message, result.reason);
+        await this.store.updateTask(task.id, { status: "queued", error: result.reason });
+        return true;
+      }
+
+      await this.store.logEntry(
+        task.id,
+        result.message ?? `Workflow work engine ${extensionId} claimed execution`,
+      );
+      try {
+        await this.store.recordRunAuditEvent?.({
+          taskId: task.id,
+          agentId: "workflow-work-engine",
+          runId: result.runId ?? generateSyntheticRunId("workflow-work-engine", task.id),
+          domain: "database",
+          mutationType: "workflow:work-engine:claimed",
+          target: task.id,
+          metadata: {
+            extensionId,
+            columnId: detail.column,
+            pluginId: definition.pluginId,
+          },
+        });
+      } catch (error) {
+        executorLog.warn(`${task.id}: failed to record workflow work-engine claim audit: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  private async evaluateTaskVerdictProviders(
+    task: TaskDetail,
+    context: Record<string, unknown> = {},
+  ): Promise<{ ok: true } | { ok: false; message: string }> {
+    let workflow: WorkflowIr;
+    try {
+      workflow = await resolveWorkflowIrForTask(this.store, task.id);
+    } catch (error) {
+      executorLog.warn(`${task.id}: failed to resolve workflow for verdict providers: ${error instanceof Error ? error.message : String(error)}`);
+      return { ok: true };
+    }
+
+    const providers = getWorkflowExtensionRegistry().list("verdict-provider");
+    for (const definition of providers) {
+      const extension = definition.extension;
+      if (definition.degraded || extension.kind !== "verdict-provider" || !extension.evaluate) continue;
+      try {
+        const verdict = await extension.evaluate({
+          task,
+          workflow,
+          reworkRound: 0,
+          metadata: context,
+        });
+        if (verdict.status === "pass") continue;
+        const reasons = verdict.failureReasons?.map((reason) => reason.message).filter(Boolean).join("; ");
+        return {
+          ok: false,
+          message: `fn_task_done refused (verdict-provider): ${verdict.summary}${reasons ? ` — ${reasons}` : ""}`,
+        };
+      } catch (error) {
+        if (extension.fallback === "degradeToDefault") continue;
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          ok: false,
+          message: `fn_task_done refused (verdict-provider): provider '${definition.id}' failed — ${message}`,
+        };
+      }
+    }
+
+    return { ok: true };
+  }
+
   async execute(task: Task): Promise<void> {
     // Workflow graph interpreter routing (cutover M-C): graph-selected tasks
     // are orchestrated by the interpreter. The execute seam re-enters this
@@ -5594,6 +5717,13 @@ export class TaskExecutor {
 
     if (task.deletedAt) {
       executorLog.warn(`${task.id}: refusing execute — task is soft-deleted`);
+      this.executing.delete(task.id);
+      executingTaskLock.release(task.id);
+      return;
+    }
+
+    if (await this.maybeDispatchWorkflowWorkEngine(task)) {
+      executorLog.log(`${task.id}: workflow work engine claimed execution`);
       this.executing.delete(task.id);
       executingTaskLock.release(task.id);
       return;
@@ -9014,6 +9144,21 @@ export class TaskExecutor {
               text: `Cannot mark task done yet — ${completionBlocker}. Resolve the blocker before calling fn_task_done().`,
             }],
             details: {},
+          };
+        }
+
+        const providerVerdict = await this.evaluateTaskVerdictProviders(task, {
+          summary: params.summary,
+          source: "fn_task_done",
+        });
+        if (!providerVerdict.ok) {
+          await store.logEntry(taskId, providerVerdict.message, undefined, this.getRunContextFor(task.id));
+          executorLog.error(`${taskId}: ${providerVerdict.message}`);
+          return {
+            content: [{ type: "text" as const, text: providerVerdict.message }],
+            details: {
+              error: providerVerdict.message,
+            },
           };
         }
 

@@ -21,6 +21,7 @@ import type {
   PluginContext,
   PluginSkillContribution,
   PluginWorkflowStepContribution,
+  WorkflowExtensionContribution,
   PluginTraitContribution,
   WorkflowIr,
   PluginPromptContribution,
@@ -36,6 +37,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { isAbsolute } from "node:path";
 import {
   getTraitRegistry,
+  getWorkflowExtensionRegistry,
   resolveWorkflowIrForTask,
 } from "@fusion/core";
 import { createLogger, executorLog } from "./logger.js";
@@ -54,6 +56,11 @@ import {
   unregisterPluginStepParsers,
   type PluginStepParserContribution,
 } from "./plugin-parser-adapter.js";
+import {
+  degradePluginWorkflowExtensions,
+  registerPluginWorkflowExtensions,
+  unregisterPluginWorkflowExtensions,
+} from "./plugin-workflow-extension-adapter.js";
 
 // Type for the task store's event data
 interface TaskMovedEvent {
@@ -122,6 +129,11 @@ interface CachedWorkflowSteps {
   version: number;
 }
 
+interface CachedWorkflowExtensions {
+  extensions: Array<{ pluginId: string; extension: WorkflowExtensionContribution }>;
+  version: number;
+}
+
 interface CachedWorkflowStepTemplates {
   templates: Array<{ pluginId: string; template: WorkflowStepTemplate }>;
   version: number;
@@ -158,6 +170,7 @@ export class PluginRunner {
   private cachedCliProviderContributions: CachedCliProviderContributions | null = null;
   private cachedSkills: CachedSkills | null = null;
   private cachedWorkflowSteps: CachedWorkflowSteps | null = null;
+  private cachedWorkflowExtensions: CachedWorkflowExtensions | null = null;
   private cachedWorkflowStepTemplates: CachedWorkflowStepTemplates | null = null;
   private cachedTraits: CachedTraits | null = null;
   private cachedPromptContributions: CachedPromptContributions | null = null;
@@ -170,11 +183,14 @@ export class PluginRunner {
   private cliProviderContributionsCacheVersion = 0;
   private skillsCacheVersion = 0;
   private workflowStepsCacheVersion = 0;
+  private workflowExtensionsCacheVersion = 0;
   private workflowStepTemplatesCacheVersion = 0;
   private traitsCacheVersion = 0;
   private promptContributionsCacheVersion = 0;
   /** Map of pluginId → the registry trait ids it currently has registered. */
   private registeredPluginTraitIds = new Map<string, string[]>();
+  /** Map of pluginId → the workflow extension ids it currently has registered. */
+  private registeredPluginWorkflowExtensionIds = new Map<string, string[]>();
   /** Map of pluginId → the step-parser registry ids it currently has registered
    *  (U12, KTD-12; mirrors registeredPluginTraitIds). */
   private registeredPluginParserIds = new Map<string, string[]>();
@@ -256,6 +272,7 @@ export class PluginRunner {
     this.invalidateCliProviderContributionsCache();
     this.invalidateSkillsCache();
     this.invalidateWorkflowStepsCache();
+    this.invalidateWorkflowExtensionsCache();
     this.invalidateWorkflowStepTemplatesCache();
     this.invalidateTraitsCache();
     this.invalidatePromptContributionsCache();
@@ -396,6 +413,21 @@ export class PluginRunner {
     return this.cachedWorkflowSteps.steps;
   }
 
+  getPluginWorkflowExtensions(): Array<{ pluginId: string; extension: WorkflowExtensionContribution }> {
+    if (!this.cachedWorkflowExtensions || this.cachedWorkflowExtensions.version !== this.workflowExtensionsCacheVersion) {
+      const loader = this.options.pluginLoader as unknown as {
+        getPluginWorkflowExtensions?: () => Array<{ pluginId: string; extension: WorkflowExtensionContribution }>;
+      };
+      this.cachedWorkflowExtensions = {
+        extensions: typeof loader.getPluginWorkflowExtensions === "function"
+          ? loader.getPluginWorkflowExtensions()
+          : [],
+        version: this.workflowExtensionsCacheVersion,
+      };
+    }
+    return this.cachedWorkflowExtensions.extensions;
+  }
+
   /**
    * Get all plugin trait contributions with their plugin ids (U8). Aggregated /
    * cached / invalidated exactly like workflow steps.
@@ -477,6 +509,78 @@ export class PluginRunner {
         this.log.warn(`Failed to register traits for plugin '${pluginId}': ${msg}`);
       }
     }
+  }
+
+  syncPluginWorkflowExtensions(): void {
+    const registry = getWorkflowExtensionRegistry();
+    const current = this.getPluginWorkflowExtensions();
+
+    const byPlugin = new Map<string, WorkflowExtensionContribution[]>();
+    for (const { pluginId, extension } of current) {
+      const list = byPlugin.get(pluginId) ?? [];
+      list.push(extension);
+      byPlugin.set(pluginId, list);
+    }
+
+    for (const [pluginId, ids] of [...this.registeredPluginWorkflowExtensionIds.entries()]) {
+      if (!byPlugin.has(pluginId)) {
+        unregisterPluginWorkflowExtensions(registry, ids);
+        this.registeredPluginWorkflowExtensionIds.delete(pluginId);
+      }
+    }
+
+    for (const [pluginId, contributions] of byPlugin) {
+      try {
+        const previous = this.registeredPluginWorkflowExtensionIds.get(pluginId);
+        if (previous) unregisterPluginWorkflowExtensions(registry, previous);
+        const ids = registerPluginWorkflowExtensions({ registry, pluginId, contributions });
+        this.registeredPluginWorkflowExtensionIds.set(pluginId, ids);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.log.warn(`Failed to register workflow extensions for plugin '${pluginId}': ${msg}`);
+      }
+    }
+  }
+
+  disablePluginWorkflowExtensions(pluginId: string, opts?: { force?: boolean }): {
+    degraded: string[];
+    dependents: [];
+  } {
+    const registry = getWorkflowExtensionRegistry();
+    const ids = this.collectPluginWorkflowExtensionIds(pluginId);
+    if (!opts?.force) {
+      unregisterPluginWorkflowExtensions(registry, ids);
+      this.registeredPluginWorkflowExtensionIds.delete(pluginId);
+      return { degraded: [], dependents: [] };
+    }
+    const degraded = degradePluginWorkflowExtensions(registry, ids);
+    if (degraded.length > 0) {
+      try {
+        this.options.taskStore.recordRunAuditEvent({
+          agentId: "system",
+          runId: `plugin-workflow-extension-degrade-${pluginId}-${Date.now()}`,
+          domain: "database",
+          mutationType: "plugin:workflow-extension-degraded",
+          target: pluginId,
+          metadata: {
+            pluginId,
+            degradedExtensionIds: degraded,
+            note: "workflow extension handlers are degraded by fallback policy",
+          },
+        });
+      } catch {
+        // Audit is best-effort; degradation already applied.
+      }
+    }
+    return { degraded, dependents: [] };
+  }
+
+  private collectPluginWorkflowExtensionIds(pluginId: string): string[] {
+    const tracked = this.registeredPluginWorkflowExtensionIds.get(pluginId);
+    if (tracked && tracked.length > 0) return tracked;
+    return this.getPluginWorkflowExtensions()
+      .filter((entry) => entry.pluginId === pluginId)
+      .map((entry) => `plugin:${pluginId}:${entry.extension.extensionId}`);
   }
 
   /**
@@ -807,6 +911,7 @@ export class PluginRunner {
     this.invalidateCliProviderContributionsCache();
     this.invalidateSkillsCache();
     this.invalidateWorkflowStepsCache();
+    this.invalidateWorkflowExtensionsCache();
     this.invalidateWorkflowStepTemplatesCache();
     this.invalidateTraitsCache();
     this.invalidatePromptContributionsCache();
@@ -829,6 +934,7 @@ export class PluginRunner {
     this.invalidateCliProviderContributionsCache();
     this.invalidateSkillsCache();
     this.invalidateWorkflowStepsCache();
+    this.invalidateWorkflowExtensionsCache();
     this.invalidateWorkflowStepTemplatesCache();
     this.invalidateTraitsCache();
     this.invalidatePromptContributionsCache();
@@ -856,6 +962,7 @@ export class PluginRunner {
     this.invalidateCliProviderContributionsCache();
     this.invalidateSkillsCache();
     this.invalidateWorkflowStepsCache();
+    this.invalidateWorkflowExtensionsCache();
     this.invalidateWorkflowStepTemplatesCache();
     this.invalidateTraitsCache();
     this.invalidatePromptContributionsCache();
@@ -883,6 +990,7 @@ export class PluginRunner {
     this.invalidateCliProviderContributionsCache();
     this.invalidateSkillsCache();
     this.invalidateWorkflowStepsCache();
+    this.invalidateWorkflowExtensionsCache();
     this.invalidateWorkflowStepTemplatesCache();
     this.invalidateTraitsCache();
     this.invalidatePromptContributionsCache();
@@ -909,6 +1017,7 @@ export class PluginRunner {
     this.invalidateCliProviderContributionsCache();
     this.invalidateSkillsCache();
     this.invalidateWorkflowStepsCache();
+    this.invalidateWorkflowExtensionsCache();
     this.invalidateWorkflowStepTemplatesCache();
     this.invalidateTraitsCache();
     this.invalidatePromptContributionsCache();
@@ -927,6 +1036,7 @@ export class PluginRunner {
     this.invalidateCliProviderContributionsCache();
     this.invalidateSkillsCache();
     this.invalidateWorkflowStepsCache();
+    this.invalidateWorkflowExtensionsCache();
     this.invalidateWorkflowStepTemplatesCache();
     this.invalidateTraitsCache();
     this.invalidatePromptContributionsCache();
@@ -945,6 +1055,7 @@ export class PluginRunner {
     this.invalidateCliProviderContributionsCache();
     this.invalidateSkillsCache();
     this.invalidateWorkflowStepsCache();
+    this.invalidateWorkflowExtensionsCache();
     this.invalidateWorkflowStepTemplatesCache();
     this.invalidateTraitsCache();
     this.invalidatePromptContributionsCache();
@@ -963,6 +1074,7 @@ export class PluginRunner {
     this.invalidateCliProviderContributionsCache();
     this.invalidateSkillsCache();
     this.invalidateWorkflowStepsCache();
+    this.invalidateWorkflowExtensionsCache();
     this.invalidateWorkflowStepTemplatesCache();
     this.invalidateTraitsCache();
     this.invalidatePromptContributionsCache();
@@ -981,6 +1093,7 @@ export class PluginRunner {
     this.invalidateCliProviderContributionsCache();
     this.invalidateSkillsCache();
     this.invalidateWorkflowStepsCache();
+    this.invalidateWorkflowExtensionsCache();
     this.invalidateWorkflowStepTemplatesCache();
     this.invalidateTraitsCache();
     this.invalidatePromptContributionsCache();
@@ -1208,6 +1321,12 @@ export class PluginRunner {
   private invalidateWorkflowStepsCache(): void {
     this.workflowStepsCacheVersion++;
     this.log.log(`Workflow steps cache invalidated (version: ${this.workflowStepsCacheVersion})`);
+  }
+
+  private invalidateWorkflowExtensionsCache(): void {
+    this.workflowExtensionsCacheVersion++;
+    this.log.log(`Workflow extensions cache invalidated (version: ${this.workflowExtensionsCacheVersion})`);
+    this.syncPluginWorkflowExtensions();
   }
 
   private invalidateWorkflowStepTemplatesCache(): void {

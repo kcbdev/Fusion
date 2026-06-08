@@ -21,6 +21,7 @@ A comprehensive guide to creating Fusion plugins that extend the task board with
 15. [Registering Skills](#15-registering-skills)
 16. [Registering Workflow Steps](#16-registering-workflow-steps)
 16.5. [Contributing Column Traits](#165-contributing-column-traits)
+16.6. [Contributing Workflow Extensions](#166-contributing-workflow-extensions)
 17. [Contributing Prompt Modifications](#17-contributing-prompt-modifications)
 18. [Plugin Binary Setup Hooks](#18-plugin-binary-setup-hooks)
 
@@ -1604,6 +1605,70 @@ A **force** path degrades the affected columns to **passive**: the trait's hooks
 become no-ops (the registry resolves them to a no-op plus an audit warning), a
 single audit event is emitted, and the cards remain fully movable. A degraded
 gate column never blocks a card.
+
+## 16.6. Contributing Workflow Extensions
+
+Workflow extensions let plugins participate in engine and workflow decisions
+without replacing the base engine. Each extension is registered under
+`plugin:<pluginId>:<extensionId>` and may be referenced from workflow IR
+`extensions` metadata on columns or nodes.
+
+Use `WORKFLOW_EXTENSION_SCHEMA_VERSION` from `@fusion/plugin-sdk` and declare
+extensions on the plugin object:
+
+```typescript
+import {
+  WORKFLOW_EXTENSION_SCHEMA_VERSION,
+  type WorkflowExtensionContribution,
+} from "@fusion/plugin-sdk";
+
+const workflowExtensions: WorkflowExtensionContribution[] = [
+  {
+    extensionId: "security-move-policy",
+    name: "Security Move Policy",
+    kind: "move-policy",
+    schemaVersion: WORKFLOW_EXTENSION_SCHEMA_VERSION,
+    fallback: "failClosed",
+    evaluate: async ({ task, fromColumn, toColumn, actor }) => {
+      if (toColumn === "done" && actor?.kind !== "human") {
+        return {
+          allowed: false,
+          reason: "human approval required",
+          message: `Cannot move ${task.id} to done without human approval`,
+        };
+      }
+      return { allowed: true };
+    },
+  },
+];
+
+export default definePlugin({
+  manifest: { id: "my-plugin", name: "My Plugin", version: "1.0.0" },
+  workflowExtensions,
+});
+```
+
+Supported kinds:
+
+| Kind | Purpose | Binding |
+|---|---|---|
+| `column-metadata` | Typed metadata schema for workflow columns | Column `extensions` metadata |
+| `move-policy` | Async pre-move policy that can allow or reject a valid transition | Global evaluator |
+| `work-engine` | Claims execution for a column before the built-in executor starts | Column `extensions` metadata |
+| `node-handler` | Handles an extension-marked workflow node before the built-in handler | Node `extensions` metadata |
+| `verdict-provider` | Adds async task-completion verdicts before `fn_task_done` can finish | Global evaluator |
+| `merge-fact-provider` | Adds route/fact inputs to auto-merge request initialization | Global evaluator |
+
+Fallback behavior controls what happens when an extension handler fails:
+
+- `degradeToDefault` — continue through the built-in behavior.
+- `parkNeedsAttention` — block or park the action with a retryable/manual signal.
+- `failClosed` — block the action with a fail-closed diagnostic.
+
+Workflow IR extension metadata is preserved only on v2 workflows. Keys must use
+the `plugin:<pluginId>:<extensionId>` form, and values must be JSON objects. If
+the extension is registered and declares a `configSchema`, the engine validates
+the metadata fields during IR validation.
 
 ## 17. Contributing Prompt Modifications
 

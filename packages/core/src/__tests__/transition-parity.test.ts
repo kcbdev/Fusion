@@ -21,6 +21,8 @@ import { TransitionRejectionError } from "../store.js";
 import { resolveAllowedColumns, workflowHasColumn } from "../workflow-transitions.js";
 import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
 import { readTransitionPending } from "../transition-pending.js";
+import { WORKFLOW_EXTENSION_SCHEMA_VERSION } from "../workflow-extension-types.js";
+import { __resetWorkflowExtensionRegistryForTests, getWorkflowExtensionRegistry } from "../workflow-extension-registry.js";
 import { createTaskStoreTestHarness } from "./store-test-helpers.js";
 
 const ALL_COLUMNS: Column[] = ["triage", "todo", "in-progress", "in-review", "done", "archived"];
@@ -58,6 +60,7 @@ describe("transition-parity — store flag-ON scenarios", () => {
     await store.updateGlobalSettings({ experimentalFeatures: { workflowColumns: true } });
   });
   afterEach(async () => {
+    __resetWorkflowExtensionRegistryForTests();
     await harness.afterEach();
   });
 
@@ -133,6 +136,53 @@ describe("transition-parity — store flag-ON scenarios", () => {
     }
     expect(caught).toBeInstanceOf(TransitionRejectionError);
     expect((caught as TransitionRejectionError).rejection.code).toBe("guard-rejected");
+  });
+
+  it("move-policy extensions can veto structurally valid workflow moves", async () => {
+    getWorkflowExtensionRegistry().register("policy-plugin", {
+      extensionId: "review-lock",
+      name: "Review lock",
+      kind: "move-policy",
+      schemaVersion: WORKFLOW_EXTENSION_SCHEMA_VERSION,
+      fallback: "failClosed",
+      evaluate: ({ toColumn }) => {
+        if (toColumn === "in-review") {
+          return { allowed: false, reason: "review lane locked", message: "Review lane is locked" };
+        }
+        return { allowed: true };
+      },
+    });
+
+    const task = await seedInColumn("in-progress");
+    let caught: unknown;
+    try {
+      await store.moveTask(task.id, "in-review", { moveSource: "user", allowDirectInReviewMove: true });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(TransitionRejectionError);
+    expect((caught as TransitionRejectionError).rejection.messageKey).toBe("transition.rejected.workflowMovePolicy");
+    expect((await store.getTask(task.id))?.column).toBe("in-progress");
+  });
+
+  it("move-policy extensions receive actor and source context when allowing moves", async () => {
+    const seen: Array<{ actorKind?: string; source?: string }> = [];
+    getWorkflowExtensionRegistry().register("policy-plugin", {
+      extensionId: "context-capture",
+      name: "Context capture",
+      kind: "move-policy",
+      schemaVersion: WORKFLOW_EXTENSION_SCHEMA_VERSION,
+      fallback: "failClosed",
+      evaluate: ({ actor, source }) => {
+        seen.push({ actorKind: actor?.kind, source });
+        return { allowed: true };
+      },
+    });
+
+    const task = await seedInColumn("triage");
+    const moved = await store.moveTask(task.id, "todo", { moveSource: "user", workflowMoveSource: "board-drag" });
+    expect(moved.column).toBe("todo");
+    expect(seen).toEqual([{ actorKind: "human", source: "board-drag" }]);
   });
 
   it("handoffToReview maps skipMergeBlocker onto bypassGuards and enqueues exactly once", async () => {

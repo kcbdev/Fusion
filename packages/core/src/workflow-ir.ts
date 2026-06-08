@@ -13,6 +13,8 @@ import type {
   WorkflowSettingDefinition,
   WorkflowSettingType,
 } from "./workflow-ir-types.js";
+import { getWorkflowExtensionRegistry } from "./workflow-extension-registry.js";
+import type { WorkflowExtensionConfigField } from "./workflow-extension-types.js";
 
 export class WorkflowIrError extends Error {
   constructor(message: string) {
@@ -93,6 +95,7 @@ const MAX_REWORK_CYCLES_CAP = 10;
 
 /** Parallel concurrency bounds (KTD-3): range 1..8. */
 const MAX_FOREACH_CONCURRENCY = 8;
+const WORKFLOW_EXTENSION_KEY_PATTERN = /^plugin:[a-z0-9]([a-z0-9-]*[a-z0-9])?:[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 /** The implicit step-source artifact allowed when no artifacts are declared. */
 const IMPLICIT_DEFAULT_ARTIFACT = "PROMPT.md";
@@ -909,8 +912,82 @@ function validateColumns(ir: WorkflowIrV2): void {
     if (!Array.isArray(column.traits)) {
       throw new WorkflowIrError(`Workflow IR column '${column.id}' traits must be an array`);
     }
+    validateExtensionMetadata(`Workflow IR column '${column.id}'`, column.extensions);
     validateColumnAgent(column);
   }
+}
+
+function validateExtensionMetadata(owner: string, extensions: unknown): void {
+  if (extensions === undefined) return;
+  if (!extensions || typeof extensions !== "object" || Array.isArray(extensions)) {
+    throw new WorkflowIrError(`${owner} extensions must be an object`);
+  }
+  for (const [key, value] of Object.entries(extensions as Record<string, unknown>)) {
+    if (!WORKFLOW_EXTENSION_KEY_PATTERN.test(key)) {
+      throw new WorkflowIrError(
+        `${owner} extension key '${key}' must be plugin-namespaced as plugin:<pluginId>:<extensionId>`,
+      );
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new WorkflowIrError(`${owner} extension '${key}' metadata must be an object`);
+    }
+    validateRegisteredExtensionMetadata(owner, key, value as Record<string, unknown>);
+  }
+}
+
+function validateRegisteredExtensionMetadata(
+  owner: string,
+  key: string,
+  value: Record<string, unknown>,
+): void {
+  const definition = getWorkflowExtensionRegistry().get(key);
+  const fields = definition?.extension.configSchema?.fields;
+  if (!fields || fields.length === 0) return;
+  for (const field of fields) {
+    if (field.required && !(field.key in value)) {
+      throw new WorkflowIrError(`${owner} extension '${key}' missing required field '${field.key}'`);
+    }
+    if (field.key in value) {
+      validateExtensionFieldValue(owner, key, field, value[field.key]);
+    }
+  }
+}
+
+function validateExtensionFieldValue(
+  owner: string,
+  key: string,
+  field: WorkflowExtensionConfigField,
+  value: unknown,
+): void {
+  if (value === undefined) return;
+  const fail = (): never => {
+    throw new WorkflowIrError(
+      `${owner} extension '${key}' field '${field.key}' must be ${field.type}`,
+    );
+  };
+  if (field.type === "array") {
+    if (!Array.isArray(value)) fail();
+    return;
+  }
+  if (field.type === "object") {
+    if (!value || typeof value !== "object" || Array.isArray(value)) fail();
+    return;
+  }
+  if (field.type === "enum") {
+    if (typeof value !== "string") {
+      throw new WorkflowIrError(
+        `${owner} extension '${key}' field '${field.key}' must be ${field.type}`,
+      );
+    }
+    const enumValue: string = value;
+    if (field.enumValues && !field.enumValues.includes(enumValue)) {
+      throw new WorkflowIrError(
+        `${owner} extension '${key}' field '${field.key}' must be one of: ${field.enumValues.join(", ")}`,
+      );
+    }
+    return;
+  }
+  if (typeof value !== field.type) fail();
 }
 
 /** Validate a column's optional permanent-agent binding (column-agent plan KTD-1).
@@ -942,6 +1019,7 @@ function validateV2(ir: WorkflowIrV2): void {
   const nodesById = new Map(ir.nodes.map((n) => [n.id, n]));
 
   for (const node of ir.nodes) {
+    validateExtensionMetadata(`Workflow node '${node.id}'`, node.extensions);
     if (node.column !== undefined && !columnIds.has(node.column)) {
       throw new WorkflowIrError(
         `Workflow node '${node.id}' references undefined column '${node.column}'`,
@@ -1091,12 +1169,14 @@ export function downgradeIrToV1IfPure(ir: WorkflowIr): WorkflowIr {
     // A permanent-agent binding is a v2-only feature (column-agent plan, R9): a
     // graph that staffs a column can never round-trip through a pre-v2 binary.
     if (col.agent !== undefined) return ir;
+    if (col.extensions !== undefined && Object.keys(col.extensions).length > 0) return ir;
   }
 
   // Every node must sit in its default seam-derived column. A node placed
   // elsewhere is a v2 feature (custom placement) and must stay v2.
   for (const node of ir.nodes) {
     if (node.column !== defaultColumnForNode(node)) return ir;
+    if (node.extensions !== undefined && Object.keys(node.extensions).length > 0) return ir;
   }
 
   // Pure v1: emit the v1 shape, dropping the synthesized `column` fields so the

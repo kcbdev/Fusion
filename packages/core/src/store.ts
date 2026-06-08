@@ -54,6 +54,8 @@ import {
 } from "./transition-pending.js";
 import { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
 import type { WorkflowIr, WorkflowIrColumn, WorkflowFieldDefinition, WorkflowSettingDefinition } from "./workflow-ir-types.js";
+import { getWorkflowExtensionRegistry } from "./workflow-extension-registry.js";
+import type { WorkflowMovePolicyInput } from "./workflow-extension-types.js";
 import {
   validateCustomFieldPatch,
   applyFieldDefaults,
@@ -1182,6 +1184,9 @@ interface MoveTaskOptions {
   preserveStatus?: boolean;
   allocateWorktree?: (reservedNames: Set<string>) => string | null;
   moveSource?: "user" | "engine" | "scheduler";
+  workflowMoveActor?: WorkflowMovePolicyInput["actor"];
+  workflowMoveSource?: string;
+  workflowMoveMetadata?: Record<string, unknown>;
   skipMergeBlocker?: boolean;
   allowDirectInReviewMove?: boolean;
   /**
@@ -6327,6 +6332,64 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     });
   }
 
+  private resolveWorkflowMoveActor(
+    moveSource: NonNullable<MoveTaskOptions["moveSource"]>,
+    internal: MoveTaskInternalOptions,
+    options?: MoveTaskOptions,
+  ): WorkflowMovePolicyInput["actor"] {
+    if (options?.workflowMoveActor) return options.workflowMoveActor;
+    if (moveSource === "user") return { kind: "human" };
+    if (moveSource === "scheduler") return { kind: "system" };
+    if (internal.runContext?.agentId) {
+      return { kind: "agent", id: internal.runContext.agentId };
+    }
+    return { kind: "engine" };
+  }
+
+  private async evaluateWorkflowMovePolicies(input: WorkflowMovePolicyInput): Promise<void> {
+    const policies = getWorkflowExtensionRegistry().list("move-policy");
+    for (const definition of policies) {
+      const extension = definition.extension;
+      if (definition.degraded || extension.kind !== "move-policy" || !extension.evaluate) continue;
+
+      let decision: Awaited<ReturnType<NonNullable<typeof extension.evaluate>>>;
+      try {
+        decision = await extension.evaluate(input);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        storeLog.warn("Workflow move-policy extension faulted", {
+          phase: "moveTaskInternal:move-policy",
+          taskId: input.task.id,
+          extensionId: definition.id,
+          fallback: extension.fallback,
+          error: message,
+        });
+        if (extension.fallback === "degradeToDefault") continue;
+        throw new TransitionRejectionError(
+          makeTransitionRejection(
+            "guard-rejected",
+            "transition.rejected.workflowMovePolicy",
+            extension.fallback === "parkNeedsAttention",
+            `Move policy '${definition.id}' failed: ${message}`,
+          ),
+          `Cannot move ${input.task.id} to '${input.toColumn}': move policy '${definition.id}' failed`,
+        );
+      }
+
+      if (!decision.allowed) {
+        throw new TransitionRejectionError(
+          makeTransitionRejection(
+            "guard-rejected",
+            "transition.rejected.workflowMovePolicy",
+            true,
+            decision.reason,
+          ),
+          decision.message,
+        );
+      }
+    }
+  }
+
   private async moveTaskInternal(
     id: string,
     toColumn: ColumnId,
@@ -6463,6 +6526,15 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
             `Valid targets: ${allowed.join(", ") || "none"}`,
         );
       }
+      await this.evaluateWorkflowMovePolicies({
+        task,
+        workflow: workflowIr,
+        fromColumn,
+        toColumn,
+        actor: this.resolveWorkflowMoveActor(moveSource, internal, options),
+        source: options?.workflowMoveSource ?? moveSource,
+        metadata: options?.workflowMoveMetadata,
+      });
       // 3. Sync trait guards (in-lock). Skipped entirely when bypassGuards
       //    (engine/recovery moves, KTD-9). The default workflow's merge-blocker
       //    trait reads the same getTaskMergeBlocker.
