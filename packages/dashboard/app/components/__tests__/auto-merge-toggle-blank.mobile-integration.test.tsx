@@ -5,9 +5,11 @@ import type { Settings, Task } from "@fusion/core";
 import { Board } from "../Board";
 import { PageErrorBoundary } from "../ErrorBoundary";
 import { TaskReviewTab } from "../TaskReviewTab";
+import { MobileNavBar } from "../MobileNavBar";
 import { RetryWarningProvider } from "../../context/RetryWarningContext";
 import { useAppSettings } from "../../hooks/useAppSettings";
-import { MOBILE_MEDIA_QUERY } from "../../hooks/useViewportMode";
+import { useMobileKeyboard, _resetInitialViewportHeight } from "../../hooks/useMobileKeyboard";
+import { MOBILE_MEDIA_QUERY, useViewportMode } from "../../hooks/useViewportMode";
 import { fetchConfig, fetchSettings, fetchTaskReview, updateSettings } from "../../api";
 
 const defaultSettings: Settings = {
@@ -160,7 +162,23 @@ function createTask(id: string, column: Task["column"], overrides: Partial<Task>
   } as Task;
 }
 
-function SettingsBoardHarness({ tasks, openTaskOnMountId }: { tasks: Task[]; openTaskOnMountId?: string }) {
+function ThrowOnAutoMergeOff({ autoMerge }: { autoMerge: boolean }) {
+  if (autoMerge === false) {
+    throw new Error("Auto-merge render failed");
+  }
+
+  return null;
+}
+
+function SettingsBoardHarness({
+  tasks,
+  openTaskOnMountId,
+  includeThrowProbe = false,
+}: {
+  tasks: Task[];
+  openTaskOnMountId?: string;
+  includeThrowProbe?: boolean;
+}) {
   const { autoMerge, toggleAutoMerge, maxConcurrent } = useAppSettings("proj_123");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const handleOpenDetail = (task: Task) => setSelectedTask(task);
@@ -197,7 +215,69 @@ function SettingsBoardHarness({ tasks, openTaskOnMountId }: { tasks: Task[]; ope
             <TaskReviewTab task={selectedTask} addToast={vi.fn()} autoMergeEnabled={autoMerge} prAuthAvailable />
           </div>
         ) : null}
+        {includeThrowProbe ? <ThrowOnAutoMergeOff autoMerge={autoMerge} /> : null}
       </PageErrorBoundary>
+    </RetryWarningProvider>
+  );
+}
+
+function AppShellMobileHarness({ tasks }: { tasks: Task[] }) {
+  const viewportMode = useViewportMode();
+  const isMobile = viewportMode === "mobile";
+  const { keyboardOpen } = useMobileKeyboard({ enabled: isMobile });
+  const { autoMerge, toggleAutoMerge, maxConcurrent } = useAppSettings("proj_123");
+
+  return (
+    <RetryWarningProvider value={undefined}>
+      <div className={`project-content${isMobile && !keyboardOpen ? " project-content--with-mobile-nav" : ""}`}>
+        <PageErrorBoundary>
+          <Board
+            tasks={tasks}
+            projectId="proj_123"
+            maxConcurrent={maxConcurrent}
+            onMoveTask={vi.fn(async () => ({} as Task))}
+            onOpenDetail={vi.fn()}
+            addToast={vi.fn()}
+            onQuickCreate={vi.fn(async () => undefined)}
+            onNewTask={vi.fn()}
+            autoMerge={autoMerge}
+            onToggleAutoMerge={toggleAutoMerge}
+            globalPaused={false}
+            prAuthAvailable={true}
+          />
+        </PageErrorBoundary>
+      </div>
+      {isMobile && !keyboardOpen ? (
+        <MobileNavBar
+          view="board"
+          onChangeView={vi.fn()}
+          footerVisible={true}
+          modalOpen={false}
+          keyboardOpen={keyboardOpen}
+          onOpenSettings={vi.fn()}
+          onOpenActivityLog={vi.fn()}
+          onOpenSystemStats={vi.fn()}
+          onOpenMailbox={vi.fn()}
+          onOpenGitManager={vi.fn()}
+          onOpenWorkflowEditor={vi.fn()}
+          onOpenSchedules={vi.fn()}
+          onOpenScripts={vi.fn()}
+          onToggleTerminal={vi.fn()}
+          onOpenFiles={vi.fn()}
+          onOpenTodos={vi.fn()}
+          onOpenGitHubImport={vi.fn()}
+          onOpenPlanning={vi.fn()}
+          onResumePlanning={vi.fn()}
+          onOpenUsage={vi.fn()}
+          onRunScript={vi.fn()}
+          onViewAllProjects={vi.fn()}
+          onOpenNodes={vi.fn()}
+          projectId="proj_123"
+          activePlanningSessionCount={0}
+          experimentalFeatures={{}}
+          pluginDashboardViews={[]}
+        />
+      ) : null}
     </RetryWarningProvider>
   );
 }
@@ -222,18 +302,53 @@ function createInReviewAndWorktreeTasks() {
   ];
 }
 
+function installMobileDeviceEnvironment() {
+  Object.defineProperty(window.navigator, "maxTouchPoints", {
+    configurable: true,
+    value: 5,
+  });
+}
+
+function renderAppShellHarness({
+  width,
+  height = 812,
+  tasks,
+  autoMerge = false,
+}: {
+  width: number;
+  height?: number;
+  tasks: Task[];
+  autoMerge?: Settings["autoMerge"];
+}) {
+  const viewportSpy = mockViewport(width, height);
+  const visualViewport = createVisualViewport();
+  Object.defineProperty(window, "visualViewport", {
+    configurable: true,
+    value: visualViewport,
+  });
+  installMobileDeviceEnvironment();
+  installAnimationFrame();
+  mockSettings = { ...defaultSettings, autoMerge };
+
+  render(<AppShellMobileHarness tasks={tasks} />);
+
+  return { viewportSpy, visualViewport };
+}
+
 function renderBoardHarness({
   width,
   height = 812,
   tasks,
   autoMerge = false,
   openTaskOnMountId,
+  includeThrowProbe = false,
 }: {
   width: number;
   height?: number;
   tasks: Task[];
   autoMerge?: Settings["autoMerge"];
   openTaskOnMountId?: string;
+  includeThrowProbe?: boolean;
 }) {
   const viewportSpy = mockViewport(width, height);
   const visualViewport = createVisualViewport();
@@ -244,7 +359,13 @@ function renderBoardHarness({
   installAnimationFrame();
   mockSettings = { ...defaultSettings, autoMerge };
 
-  render(<SettingsBoardHarness tasks={tasks} openTaskOnMountId={openTaskOnMountId} />);
+  render(
+    <SettingsBoardHarness
+      tasks={tasks}
+      openTaskOnMountId={openTaskOnMountId}
+      includeThrowProbe={includeThrowProbe}
+    />,
+  );
 
   return { viewportSpy, visualViewport };
 }
@@ -253,10 +374,12 @@ describe("auto-merge toggle mobile integration regression", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    _resetInitialViewportHeight();
     mockSettings = { ...defaultSettings };
   });
 
   afterEach(() => {
+    _resetInitialViewportHeight();
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
@@ -361,6 +484,97 @@ describe("auto-merge toggle mobile integration regression", () => {
 
     expect(toggle).toBeChecked();
     expectBoardVisible();
+
+    viewportSpy.mockRestore();
+  });
+
+  it("shows the page error boundary fallback instead of a blank page when a sibling render throws after auto-merge toggles off", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { viewportSpy, visualViewport } = renderBoardHarness({
+      width: 375,
+      tasks: createInReviewAndWorktreeTasks(),
+      autoMerge: true,
+      includeThrowProbe: true,
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+
+    const toggle = screen.getByRole("checkbox", { name: "Auto-merge" });
+    expect(toggle).toBeChecked();
+    expectBoardVisible(["FN-5972", "Worktree child task"]);
+
+    await act(async () => {
+      fireEvent.click(toggle);
+      await Promise.resolve();
+    });
+    act(() => {
+      visualViewport.dispatchResize();
+      vi.advanceTimersByTime(1);
+    });
+
+    expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(document.querySelector("main.board")).toBeNull();
+
+    consoleErrorSpy.mockRestore();
+    viewportSpy.mockRestore();
+  });
+
+  it("keeps the App-level mobile shell visible while round-tripping auto-merge", async () => {
+    const { viewportSpy, visualViewport } = renderAppShellHarness({
+      width: 375,
+      tasks: createInReviewAndWorktreeTasks(),
+      autoMerge: false,
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+
+    const toggle = screen.getByRole("checkbox", { name: "Auto-merge" });
+    expect(toggle).not.toBeChecked();
+    expectBoardVisible(["FN-5972", "Worktree child task"]);
+    expect(document.querySelector(".project-content.project-content--with-mobile-nav")).not.toBeNull();
+    expect(screen.getByTestId("mobile-nav-tab-tasks")).toBeInTheDocument();
+    expect(screen.queryByText("Something went wrong")).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(toggle);
+      await Promise.resolve();
+    });
+    act(() => {
+      visualViewport.dispatchResize();
+      vi.advanceTimersByTime(1);
+    });
+
+    expect(toggle).toBeChecked();
+    expectBoardVisible(["FN-5972", "Worktree child task"]);
+    expect(document.querySelector(".project-content.project-content--with-mobile-nav")).not.toBeNull();
+    expect(screen.getByTestId("mobile-nav-tab-tasks")).toBeInTheDocument();
+    expect(screen.queryByText("Something went wrong")).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(toggle);
+      await Promise.resolve();
+    });
+    act(() => {
+      visualViewport.dispatchResize();
+      vi.advanceTimersByTime(1);
+    });
+
+    expect(toggle).not.toBeChecked();
+    expectBoardVisible(["FN-5972", "Worktree child task"]);
+    expect(document.querySelector(".project-content.project-content--with-mobile-nav")).not.toBeNull();
+    expect(screen.getByTestId("mobile-nav-tab-tasks")).toBeInTheDocument();
+    expect(screen.queryByText("Something went wrong")).toBeNull();
 
     viewportSpy.mockRestore();
   });
