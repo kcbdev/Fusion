@@ -118,7 +118,6 @@ describe("resolveWorkflowIrById", () => {
     expect(ir).toBe(BUILTIN_CODING_WORKFLOW_IR);
     expect(store.getWorkflowDefinition).not.toHaveBeenCalled();
   });
-
   it("parses a raw-string IR from the definition", async () => {
     const raw = JSON.stringify(CUSTOM_IR);
     const store = makeStore({ defs: { "wf-raw": { ir: raw } } });

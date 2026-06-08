@@ -176,10 +176,10 @@ Important execution nuance:
 - Why defer now:
   - FN-5943 already landed the lower-risk fix for the observed incident: fewer rewrites, bounded merge/optimize maintenance, and threshold-triggered rebuild.
   - FN-6008 rechecked the post-FN-5943 operational evidence against the live project DB and the defer condition still holds:
-    - recent `runAuditEvents` telemetry for `target: "tasks_fts"` shows the live index staying bounded in the **tens of KB**, not MB-scale bloat;
-    - the sampled 30-event maintenance window showed **0 rebuild events** (`23` merge, `7` optimize), with `merge`/`optimize` repeatedly keeping the index small (latest samples include `44076 → 43296` bytes and `53261 → 40449` bytes);
-    - a direct `tasks_fts_data` size check during the review was only **47884 bytes** for the current project DB;
-    - reviewed logs contained one general `database disk image is malformed` crash in an older merge-agent log, but no recurring post-FN-5943 live `tasks_fts` corruption pattern and no repeated FTS rebuild failures.
+    - recent `runAuditEvents` telemetry for `target: "tasks_fts"` shows the live index staying bounded in the **tens to low hundreds of KB**, not MB-scale bloat;
+    - sampled maintenance windows showed **0 rebuild events**, with `merge`/`optimize` repeatedly pulling the index back down (for example `141186 → 43990` bytes, `96571 → 40693` bytes, `44076 → 43296` bytes, and `53261 → 40449` bytes);
+    - direct `tasks_fts_data` size checks during review were only about **48–50 KB** for the current project DB (including **47884 bytes** in one sample and about **50 KB** for **36** live tasks in another);
+    - reviewed logs showed no concrete recurring post-FN-5943 live `tasks_fts` corruption pattern or repeated FTS rebuild failures, though one older merge-agent log did contain a general `database disk image is malformed` crash.
   - The attached-file idea still improves corruption isolation, but it would trade away the current same-file trigger-maintained index for a manual two-file sync architecture with weaker crash atomicity under WAL.
 - Revisit only if post-FN-5943 production evidence shows recurring `fusion.db`-coupled FTS corruption or materially persistent live-index bloat significant enough to justify a contentless/manual-sync redesign. Until then, keep the single-file external-content design and existing maintenance path.
 

@@ -151,7 +151,6 @@ describe("built-in workflows", () => {
       "builtin:stepwise-coding",
     ]);
   });
-
   it("builtin:coding exposes execute retries after registry lookup and parse round-trip", () => {
     const coding = getBuiltinWorkflow("builtin:coding");
     expect(coding).toBeDefined();

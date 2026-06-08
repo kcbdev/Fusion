@@ -196,19 +196,34 @@ export class NotificationService {
   private async handleTaskMovedAsync(data: { task: Task; from: Column; to: Column }): Promise<void> {
     await this.maybeSuppressTransientFailedNotification(data.task, `moved to ${data.to}`);
 
-    if (data.to !== "in-review") {
+    if (data.to === "in-review") {
+      if (!this.notificationsEnabled) {
+        await this.refreshNotificationState("task:moved");
+        if (!this.notificationsEnabled) {
+          return;
+        }
+      }
+
+      const payload = this.createTaskPayload(data.task, "in-review");
+      this.maybeNotify(data.task.id, "in-review", payload);
       return;
     }
 
-    if (!this.notificationsEnabled) {
-      await this.refreshNotificationState("task:moved");
+    if (data.to === "done" && this.isMergeBackedTerminalTask(data.task)) {
+      // `task:merged` remains the canonical terminal merge event. This fallback
+      // preserves notification parity for PR/webhook/recovery paths that reach
+      // done through moveTask before (or without) a matching task:merged emit;
+      // maybeNotify uses the same `merged` key so a later task:merged event is
+      // suppressed instead of producing a duplicate alarm.
       if (!this.notificationsEnabled) {
-        return;
+        await this.refreshNotificationState("task:moved:done");
+        if (!this.notificationsEnabled) {
+          return;
+        }
       }
-    }
 
-    const payload = this.createTaskPayload(data.task, "in-review");
-    this.maybeNotify(data.task.id, "in-review", payload);
+      this.maybeNotify(data.task.id, "merged", this.createTaskPayload(data.task, "merged"));
+    }
   };
 
   private handleTaskUpdated = (task: Task): void => {
@@ -673,6 +688,13 @@ export class NotificationService {
 
   getPendingFailureCount(): number {
     return this.pendingFailureNotifications.size;
+  }
+
+  private isMergeBackedTerminalTask(task: Task): boolean {
+    return task.prInfo?.status === "merged" ||
+      task.mergeDetails?.mergeConfirmed === true ||
+      task.mergeDetails?.noOpMerge === true ||
+      typeof task.mergeDetails?.mergedAt === "string";
   }
 
   private createTaskPayload(task: Task, event: NotificationEvent): NotificationPayload {

@@ -11809,12 +11809,24 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       return { moved: false, skipped: "wrong-column" };
     }
 
-    await this.moveTask(taskId, "done", {
+    const movedTask = await this.moveTask(taskId, "done", {
       moveSource: "engine",
       preserveProgress: true,
       preserveWorktree: true,
       skipMergeBlocker: true,
     });
+
+    this.emit("task:merged", {
+      task: movedTask,
+      branch: movedTask.branch ?? movedTask.prInfo?.headBranch ?? freshTask.branch ?? freshTask.prInfo?.headBranch ?? "",
+      merged: true,
+      worktreeRemoved: false,
+      branchDeleted: false,
+      mergeConfirmed: movedTask.mergeDetails?.mergeConfirmed ?? freshTask.mergeDetails?.mergeConfirmed,
+      mergedAt: movedTask.mergeDetails?.mergedAt ?? freshTask.mergeDetails?.mergedAt,
+      mergeTargetBranch: movedTask.mergeDetails?.mergeTargetBranch ?? freshTask.mergeDetails?.mergeTargetBranch,
+      mergeTargetSource: movedTask.mergeDetails?.mergeTargetSource ?? freshTask.mergeDetails?.mergeTargetSource,
+    } satisfies MergeResult);
 
     if (ctx?.agentId && ctx?.runId) {
       this.recordRunAuditEvent({

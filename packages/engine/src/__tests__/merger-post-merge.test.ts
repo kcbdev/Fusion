@@ -330,8 +330,15 @@ describe("aiMergeTask — post-merge workflow steps", () => {
     expect(postMergeAgentCall?.[0]?.cwd).toMatch(/\.worktrees\/post-merge-FN-050-[a-z0-9]+/);
     expect(postMergeAgentCall?.[0]?.cwd).not.toBe("/tmp/root");
 
-    // Task should still move to done even though post-merge step ran
+    // Task should still move to done and emit the canonical terminal event after post-merge steps run.
     expect(store.moveTask).toHaveBeenCalledWith("FN-050", "done");
+    expect(store.emit).toHaveBeenCalledWith(
+      "task:merged",
+      expect.objectContaining({ merged: true, task: expect.objectContaining({ id: "FN-050" }) }),
+    );
+    expect((store as any).getWorkflowStep.mock.invocationCallOrder[0]).toBeLessThan(
+      (store.emit as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0],
+    );
   });
 
   it("uses assigned agent runtime model for post-merge prompt step when workflow step has no override", async () => {

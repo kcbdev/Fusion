@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TaskStore } from "../store.js";
 import { createTaskStoreTestHarness } from "./store-test-helpers.js";
@@ -16,7 +16,7 @@ describe("TaskStore.applyPrMergedTransition", () => {
     await harness.afterEach();
   });
 
-  it("moves in-review merged tasks to done once", async () => {
+  it("moves in-review merged tasks to done once and emits task:merged", async () => {
     const task = await store.createTask({ description: "merged task" });
     await store.moveTask(task.id, "todo");
     await store.moveTask(task.id, "in-progress");
@@ -30,9 +30,19 @@ describe("TaskStore.applyPrMergedTransition", () => {
       baseBranch: "main",
       commentCount: 0,
     });
+    const mergedListener = vi.fn();
+    store.on("task:merged", mergedListener);
 
     await expect(store.applyPrMergedTransition(task.id)).resolves.toEqual({ moved: true });
+    expect(mergedListener).toHaveBeenCalledTimes(1);
+    expect(mergedListener).toHaveBeenCalledWith(expect.objectContaining({
+      branch: "fusion/fn-1",
+      merged: true,
+      task: expect.objectContaining({ id: task.id, column: "done" }),
+    }));
+
     await expect(store.applyPrMergedTransition(task.id)).resolves.toEqual({ moved: false, skipped: "already-done" });
+    expect(mergedListener).toHaveBeenCalledTimes(1);
   });
 
   it("skips when pr status is not merged", async () => {

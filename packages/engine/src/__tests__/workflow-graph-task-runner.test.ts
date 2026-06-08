@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import { EventEmitter } from "node:events";
 import type { Settings, TaskDetail, WorkflowDefinition, WorkflowIr } from "@fusion/core";
 
+import { NotificationService } from "../notification/notification-service.js";
 import { WorkflowGraphTaskRunner, type WorkflowGraphRunnerStore } from "../workflow-graph-task-runner.js";
 import type { WorkflowNodeResult } from "../workflow-graph-executor.js";
 
@@ -90,6 +92,61 @@ describe("WorkflowGraphTaskRunner (CU-U2)", () => {
     expect(result.disposition).toBe("completed");
     expect(calls).toEqual(["custom:lint", "execute", "review", "merge", "custom:notify"]);
     expect(result.visitedNodeIds).toEqual(["start", "lint", "execute", "review", "merge", "notify"]);
+  });
+
+  it("selected workflows reaching the merge seam produce the canonical merged notification once", async () => {
+    const emitter = new EventEmitter();
+    const graphTask = {
+      ...task,
+      title: "Workflow merge",
+      description: "Graph path",
+      column: "done",
+      mergeDetails: { mergeConfirmed: true },
+    } as TaskDetail;
+    const store = Object.assign(emitter, {
+      getSettings: vi.fn(async () => ({ ntfyEnabled: true, ntfyTopic: "topic" }) as Settings),
+      getTask: vi.fn(async (_id: string) => graphTask),
+      getTaskWorkflowSelection: () => ({ workflowId: "WF-001", stepIds: [] }),
+      getWorkflowDefinition: async () => definition(fullLifecycleIr()),
+    }) as unknown as EventEmitter & WorkflowGraphRunnerStore & {
+      getSettings: () => Promise<Settings>;
+      getTask: (id: string) => Promise<TaskDetail>;
+    };
+    const sendNotification = vi.fn(async () => ({ success: true, providerId: "mock" }));
+    const service = new NotificationService(store as any);
+    service.registerProvider({ getProviderId: () => "mock", isEventSupported: () => true, sendNotification });
+    await service.start();
+
+    const runner = new WorkflowGraphTaskRunner({
+      store,
+      seams: {
+        ...recordingSeams([]),
+        merge: async () => {
+          store.emit("task:moved", { task: graphTask, from: "in-review", to: "done" });
+          store.emit("task:merged", {
+            task: graphTask,
+            branch: "fusion/fn-9001",
+            merged: true,
+            worktreeRemoved: false,
+            branchDeleted: false,
+          });
+          return { outcome: "success", value: "merged" };
+        },
+      },
+      runCustomNode: async () => ({ outcome: "success" }),
+    });
+
+    const result = await runner.run(graphTask, flagOn);
+
+    expect(result.disposition).toBe("completed");
+    await vi.waitFor(() => {
+      expect(sendNotification).toHaveBeenCalledTimes(1);
+    });
+    expect(sendNotification).toHaveBeenCalledWith(
+      "merged",
+      expect.objectContaining({ taskId: "FN-9001", taskTitle: "Workflow merge", event: "merged" }),
+    );
+    await service.stop();
   });
 
   it("a failing seam terminates the run as failed without running later nodes", async () => {

@@ -667,6 +667,107 @@ describe("NotificationService", () => {
     await second.stop();
   });
 
+  describe("terminal merged notifications", () => {
+    it("dispatches task:moved to done for PR-merged tasks to ntfy and webhook providers", async () => {
+      const store = createStore({ ntfyEnabled: true, ntfyTopic: "topic" });
+      const ntfySend = vi.fn(async () => ({ success: true, providerId: "mock-ntfy" }));
+      const webhookSend = vi.fn(async () => ({ success: true, providerId: "mock-webhook" }));
+      const service = new NotificationService(store as any);
+      service.registerProvider({ getProviderId: () => "mock-ntfy", isEventSupported: (event) => event === "merged", sendNotification: ntfySend });
+      service.registerProvider({ getProviderId: () => "mock-webhook", isEventSupported: (event) => event === "merged", sendNotification: webhookSend });
+      await service.start();
+
+      store.emit("task:moved", {
+        task: task({ id: "FN-301", column: "done", prInfo: { status: "merged", number: 12 } as any }),
+        from: "in-review",
+        to: "done",
+      });
+
+      await vi.waitFor(() => {
+        expect(ntfySend).toHaveBeenCalledWith("merged", expect.objectContaining({ taskId: "FN-301", event: "merged" }));
+        expect(webhookSend).toHaveBeenCalledWith("merged", expect.objectContaining({ taskId: "FN-301", event: "merged" }));
+      });
+    });
+
+    it.each([
+      ["mergeConfirmed", { mergeConfirmed: true }],
+      ["noOpMerge", { noOpMerge: true }],
+      ["mergedAt", { mergedAt: "2026-06-08T00:00:00.000Z" }],
+    ])("dispatches task:moved to done for merge-backed tasks with %s metadata", async (_name, mergeDetails) => {
+      const store = createStore({ ntfyEnabled: true, ntfyTopic: "topic" });
+      const sendNotification = vi.fn(async () => ({ success: true, providerId: "mock" }));
+      const service = new NotificationService(store as any);
+      service.registerProvider({ getProviderId: () => "mock", isEventSupported: () => true, sendNotification });
+      await service.start();
+
+      store.emit("task:moved", {
+        task: task({ id: `FN-${Object.keys(mergeDetails).join("")}`, column: "done", mergeDetails: mergeDetails as any }),
+        from: "in-review",
+        to: "done",
+      });
+
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledWith(
+          "merged",
+          expect.objectContaining({ event: "merged" }),
+        );
+      });
+    });
+
+    it("does not dispatch task:moved to done for non-merge-backed tasks", async () => {
+      const store = createStore({ ntfyEnabled: true, ntfyTopic: "topic" });
+      const sendNotification = vi.fn(async () => ({ success: true, providerId: "mock" }));
+      const service = new NotificationService(store as any);
+      service.registerProvider({ getProviderId: () => "mock", isEventSupported: () => true, sendNotification });
+      await service.start();
+
+      store.emit("task:moved", { task: task({ id: "FN-302", column: "done" }), from: "in-review", to: "done" });
+      await Promise.resolve();
+
+      expect(sendNotification).not.toHaveBeenCalledWith("merged", expect.anything());
+    });
+
+    it("deduplicates task:moved to done plus task:merged for the same merge-backed task", async () => {
+      const store = createStore({ ntfyEnabled: true, ntfyTopic: "topic" });
+      const sendNotification = vi.fn(async () => ({ success: true, providerId: "mock" }));
+      const service = new NotificationService(store as any);
+      service.registerProvider({ getProviderId: () => "mock", isEventSupported: () => true, sendNotification });
+      await service.start();
+
+      const mergedTask = task({ id: "FN-303", column: "done", mergeDetails: { mergeConfirmed: true } as any });
+      store.emit("task:moved", { task: mergedTask, from: "in-review", to: "done" });
+      store.emit("task:merged", {
+        task: mergedTask,
+        branch: "fusion/fn-303",
+        merged: true,
+        worktreeRemoved: false,
+        branchDeleted: false,
+      });
+
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledTimes(1);
+      });
+      expect(sendNotification).toHaveBeenCalledWith("merged", expect.objectContaining({ taskId: "FN-303", event: "merged" }));
+    });
+
+    it("honors provider event filtering for task:moved to done terminal notifications", async () => {
+      const store = createStore({ ntfyEnabled: true, ntfyTopic: "topic" });
+      const sendNotification = vi.fn(async () => ({ success: true, providerId: "mock" }));
+      const service = new NotificationService(store as any);
+      service.registerProvider({ getProviderId: () => "mock", isEventSupported: (event) => event !== "merged", sendNotification });
+      await service.start();
+
+      store.emit("task:moved", {
+        task: task({ id: "FN-304", column: "done", mergeDetails: { mergeConfirmed: true } as any }),
+        from: "in-review",
+        to: "done",
+      });
+      await Promise.resolve();
+
+      expect(sendNotification).not.toHaveBeenCalled();
+    });
+  });
+
   describe("stale-settings refresh for task lifecycle", () => {
     function createStaleLifecycleStore() {
       const listeners = new Map<string, Set<Listener>>();
@@ -752,14 +853,38 @@ describe("NotificationService", () => {
       expect(sendNotification).not.toHaveBeenCalled();
     });
 
-    it("does not notify for non-in-review moves even after stale-settings refresh", async () => {
+    it("refreshes stale disabled settings before merge-backed done move notifications", async () => {
       const store = createStaleLifecycleStore();
       const sendNotification = vi.fn(async () => ({ success: true, providerId: "mock" }));
       const service = new NotificationService(store as any);
       service.registerProvider({ getProviderId: () => "mock", isEventSupported: () => true, sendNotification });
       await service.start();
 
-      store.emit("task:moved", { task: task({ id: "FN-104" }), from: "todo", to: "in-progress" });
+      store.emit("task:moved", {
+        task: task({ id: "FN-104", column: "done", prInfo: { status: "merged", number: 104 } as any }),
+        from: "in-review",
+        to: "done",
+      });
+
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledWith(
+          "merged",
+          expect.objectContaining({ taskId: "FN-104", event: "merged" }),
+        );
+      });
+      expect(schedulerLog.log).toHaveBeenCalledWith(
+        expect.stringContaining("NotificationService refreshed notification state reason=task:moved:done enabled=true"),
+      );
+    });
+
+    it("does not notify for non-in-review/non-terminal moves even after stale-settings refresh", async () => {
+      const store = createStaleLifecycleStore();
+      const sendNotification = vi.fn(async () => ({ success: true, providerId: "mock" }));
+      const service = new NotificationService(store as any);
+      service.registerProvider({ getProviderId: () => "mock", isEventSupported: () => true, sendNotification });
+      await service.start();
+
+      store.emit("task:moved", { task: task({ id: "FN-106" }), from: "todo", to: "in-progress" });
       await Promise.resolve();
 
       expect(sendNotification).not.toHaveBeenCalled();
