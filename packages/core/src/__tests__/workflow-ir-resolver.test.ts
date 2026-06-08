@@ -89,6 +89,20 @@ describe("resolveWorkflowIrForTask", () => {
 });
 
 describe("resolveWorkflowIrById", () => {
+  it("resolves builtin:coding to the authored v2 IR with review column traits", async () => {
+    const store = makeStore({});
+    const ir = await resolveWorkflowIrById(store, "builtin:coding");
+
+    expect(ir.version).toBe("v2");
+    if (ir.version !== "v2") throw new Error("expected v2");
+    const inReview = ir.columns.find((column) => column.id === "in-review");
+    expect(inReview).toBeDefined();
+    expect(inReview!.traits.length).toBeGreaterThan(0);
+    expect(inReview!.traits).toEqual(
+      expect.arrayContaining([{ trait: "merge-blocker" }, { trait: "human-review" }]),
+    );
+  });
+
   it("parses a raw-string IR from the definition", async () => {
     const raw = JSON.stringify(CUSTOM_IR);
     const store = makeStore({ defs: { "wf-raw": { ir: raw } } });

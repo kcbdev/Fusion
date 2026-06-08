@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 import { BUILTIN_WORKFLOWS, getBuiltinWorkflow, isBuiltinWorkflowId } from "../builtin-workflows.js";
 import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
+import { resolveColumnFlags } from "../trait-registry.js";
 import { compileWorkflowToSteps } from "../workflow-compiler.js";
 import { DEFAULT_WORKFLOW_COLUMN_IDS, parseWorkflowIr, serializeWorkflowIr } from "../workflow-ir.js";
 import { createTaskStoreTestHarness } from "./store-test-helpers.js";
@@ -84,6 +85,24 @@ describe("built-in workflows", () => {
     expect(BUILTIN_CODING_WORKFLOW_IR.columns.map((c) => c.id)).toEqual([
       ...DEFAULT_WORKFLOW_COLUMN_IDS,
     ]);
+  });
+
+  it("builtin:coding exposes merge-blocker and human-review traits on in-review", () => {
+    const coding = getBuiltinWorkflow("builtin:coding");
+    expect(coding).toBeDefined();
+    const ir = parseWorkflowIr(coding!.ir);
+    expect(ir.version).toBe("v2");
+    if (ir.version !== "v2") throw new Error("expected v2");
+
+    const inReview = ir.columns.find((column) => column.id === "in-review");
+    expect(inReview).toBeDefined();
+    expect(inReview!.traits.length).toBeGreaterThan(0);
+    expect(inReview!.traits.map((trait) => trait.trait)).toContain("merge-blocker");
+    expect(inReview!.traits.map((trait) => trait.trait)).toContain("human-review");
+
+    const flags = resolveColumnFlags(inReview!);
+    expect(flags.mergeBlocker).toBe(true);
+    expect(flags.humanReview).toBe(true);
   });
 
   it("includes a coding and a compound-engineering workflow", () => {

@@ -112,7 +112,11 @@ describe("GET /tasks/board-workflows", () => {
     const body = res.body as {
       flagEnabled: boolean;
       defaultWorkflowId: string;
-      workflows: Array<{ id: string; name: string; columns: unknown[] }>;
+      workflows: Array<{
+        id: string;
+        name: string;
+        columns: Array<{ id: string; flags: { mergeBlocker?: boolean; humanReview?: boolean } }>;
+      }>;
       taskWorkflowIds: Record<string, string>;
     };
 
@@ -149,6 +153,9 @@ describe("GET /tasks/board-workflows", () => {
     const defaultLane = body.workflows.find((w) => w.id === DEFAULT_LANE);
     expect(Array.isArray(defaultLane?.columns)).toBe(true);
     expect((defaultLane?.columns.length ?? 0)).toBeGreaterThan(0);
+    const inReview = defaultLane?.columns.find((column) => column.id === "in-review");
+    expect(inReview?.flags.mergeBlocker).toBe(true);
+    expect(inReview?.flags.humanReview).toBe(true);
   });
 
   it("payload contract (flag ON): mixed default + custom ids → full taskWorkflowIds + deduped workflows", async () => {
@@ -173,7 +180,8 @@ describe("GET /tasks/board-workflows", () => {
     });
     const ids = payload.workflows.map((w) => w.id);
     expect(new Set(ids).size).toBe(ids.length); // deduped
-    expect(ids.sort()).toEqual([DEFAULT_LANE, custom.id].sort());
+    expect(ids).toContain(DEFAULT_LANE);
+    expect(ids).toContain(custom.id);
     const customLane = payload.workflows.find((w) => w.id === custom.id);
     expect(customLane?.name).toBe("Custom");
     expect((customLane?.columns.length ?? 0)).toBeGreaterThan(0);

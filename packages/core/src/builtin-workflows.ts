@@ -1,3 +1,4 @@
+import { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
 import { BUILTIN_PR_WORKFLOW_IR } from "./builtin-pr-workflow-ir.js";
 import { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "./builtin-stepwise-coding-workflow-ir.js";
 import { BUILTIN_WORKFLOW_SETTINGS } from "./builtin-workflow-settings.js";
@@ -84,16 +85,22 @@ function linear(spec: BuiltinSpec): WorkflowDefinition {
  * seams are honored only by the graph interpreter (flag on).
  */
 export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
-  linear({
+  {
     id: "builtin:coding",
     name: "Coding (built-in)",
     description: "The standard coding pipeline: implement, review, then merge. Equivalent to the default behavior.",
-    nodes: [
-      { id: "execute", kind: "prompt", config: builtinPromptConfig("execute", "Execute") },
-      { id: "review", kind: "prompt", config: builtinPromptConfig("review", "Review") },
-      { id: "merge", kind: "prompt", config: builtinPromptConfig("merge", "Merge boundary") },
-    ],
-  }),
+    kind: "workflow",
+    ir: BUILTIN_CODING_WORKFLOW_IR,
+    layout: {
+      start: { x: 60, y: 160 },
+      execute: { x: 230, y: 160 },
+      review: { x: 400, y: 160 },
+      merge: { x: 570, y: 160 },
+      end: { x: 740, y: 160 },
+    },
+    createdAt: BUILTIN_TS,
+    updatedAt: BUILTIN_TS,
+  },
   linear({
     id: "builtin:quick-fix",
     name: "Quick fix (built-in)",

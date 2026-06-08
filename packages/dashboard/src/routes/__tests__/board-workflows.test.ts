@@ -82,6 +82,10 @@ describe("buildBoardWorkflowsPayload", () => {
       "Done",
       "Archived",
     ]);
+    const inReview = defaultWf!.columns.find((c) => c.id === "in-review");
+    expect(inReview).toBeDefined();
+    expect(inReview!.flags.mergeBlocker).toBe(true);
+    expect(inReview!.flags.humanReview).toBe(true);
   });
 
   it("includes user-defined workflows even when no visible task references them", async () => {
