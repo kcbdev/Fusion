@@ -98,6 +98,19 @@ Behavior:
 - Nodes support manual drag repositioning with a 4px movement threshold to separate click from drag, using pointer capture and zoom-aware delta scaling for reliable tracking
 - Custom node positions persist per project in browser localStorage (`kb:${projectId}:fusion-plugin-dependency-graph:positions`) across refresh/project switches, and **Fit to graph** clears saved positions and restores auto-layout
 
+## Workflow Editor
+
+The workflow editor opens as a full-screen modal editor for authoring custom workflows from the board's workflow selector.
+
+Navigation:
+- Open a task or board surface that shows the workflow selector, then choose **Manage…**
+
+Behavior:
+- Opens a workflow node editor with a workflow list/sidebar, canvas, inspector, and settings/authoring panels
+- On desktop, the editor uses a multi-panel layout for editing the graph and adjacent workflow metadata
+- On viewports `<=768px`, the editor switches to a full-screen mobile sheet and stacks the sidebar, canvas, inspector, and settings/authoring panels vertically so each section remains scrollable and usable on phones
+- The create-workflow dialog and workflow AI authoring popover follow the same mobile full-screen/sheet pattern so they are not clipped by the editor canvas on narrow screens
+
 ## Planning Mode
 
 Planning Mode now includes branch controls on the summary screen before you create a task.

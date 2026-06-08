@@ -46,3 +46,19 @@
 .workflow-selector-manage:hover {
   background: var(--bg-tertiary);
 }
+
+@media (max-width: 768px) {
+  .workflow-selector {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .workflow-selector select,
+  .workflow-selector-manage {
+    width: 100%;
+  }
+
+  .workflow-selector-manage {
+    text-align: center;
+  }
+}

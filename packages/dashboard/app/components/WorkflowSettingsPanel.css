@@ -339,3 +339,23 @@
   cursor: pointer;
   padding: 0;
 }
+
+@media (max-width: 768px) {
+  .wf-settings-panel-wrap {
+    flex-direction: column;
+  }
+
+  .wf-settings-panel {
+    width: 100%;
+    min-width: 0;
+    padding: var(--space-sm);
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+
+  .wf-setting-row,
+  .wf-setting-option-row,
+  .wf-settings-orphaned-row {
+    flex-wrap: wrap;
+  }
+}

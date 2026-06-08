@@ -193,3 +193,18 @@
 .wf-field-preview {
   padding-top: var(--space-xs);
 }
+
+@media (max-width: 768px) {
+  .wf-fields-panel {
+    width: 100%;
+    min-width: 0;
+    padding: var(--space-sm);
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+
+  .wf-field-row,
+  .wf-field-option-row {
+    flex-wrap: wrap;
+  }
+}
