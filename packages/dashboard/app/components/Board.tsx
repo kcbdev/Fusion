@@ -11,6 +11,7 @@ import { useBlockerFanout } from "../hooks/useBlockerFanout";
 import { MOBILE_MEDIA_QUERY } from "../hooks/useViewportMode";
 import { recordResumeEvent } from "../utils/resumeInstrumentation";
 import { subscribeSse } from "../sse-bus";
+import { getBoardCanDropTaskRejection } from "./boardCanDropTask";
 
 interface BoardProps {
   tasks: Task[];
@@ -418,32 +419,16 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
   // Drag pre-check (R17): adjacency + capacity from the lane's column metadata.
   // Cross-lane drag → workflow-mismatch. Deterministic rejections return a
   // messageKey (no-move); null = allowed.
-  const canDropTask = useCallback((taskId: string, targetColumnId: string, laneWorkflowId: string): string | null => {
-    if (!boardWorkflows) return null;
-    const sourceTask = tasks.find((t) => t.id === taskId);
-    if (!sourceTask) return null;
-    const sourceWorkflowId = boardWorkflows.taskWorkflowIds[taskId] ?? boardWorkflows.defaultWorkflowId;
-    // Cross-lane drag never switches workflows (R17).
-    if (sourceWorkflowId !== laneWorkflowId) {
-      return "board.rejection.workflowMismatch";
-    }
-    const workflow = boardWorkflows.workflows.find((w) => w.id === laneWorkflowId);
-    if (!workflow) return null;
-    const targetCol = workflow.columns.find((c) => c.id === targetColumnId);
-    if (!targetCol) return "board.rejection.unknownColumn";
-    // Capacity pre-check: a wip-flagged column that is already full rejects.
-    if (targetCol.flags.countsTowardWip) {
-      const occupants = tasks.filter(
-        (t) => t.column === targetColumnId && (boardWorkflows.taskWorkflowIds[t.id] ?? boardWorkflows.defaultWorkflowId) === laneWorkflowId,
-      ).length;
-      // The default workflow's in-progress limit is maxConcurrent; custom limits
-      // are enforced authoritatively server-side (the 409 fallback still snaps back).
-      if (Number.isFinite(maxConcurrent) && maxConcurrent > 0 && sourceTask.column !== targetColumnId && occupants >= maxConcurrent) {
-        return "board.rejection.capacityExhausted";
-      }
-    }
-    return null;
-  }, [boardWorkflows, tasks, maxConcurrent]);
+  const canDropTask = useCallback((taskId: string, targetColumnId: string, laneWorkflowId: string): string | null => (
+    getBoardCanDropTaskRejection({
+      boardWorkflows,
+      tasks,
+      maxConcurrent,
+      taskId,
+      targetColumnId,
+      laneWorkflowId,
+    })
+  ), [boardWorkflows, tasks, maxConcurrent]);
 
   // FN-4380: GitHub badge state comes from persisted task fields (`task.prInfo`,
   // `task.issueInfo`, `task.githubTracking.issue`) and live WebSocket `badge:updated`
