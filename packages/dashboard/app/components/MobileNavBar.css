@@ -53,15 +53,16 @@
     bottom: 0;
   }
 
-  /* Content padding: mobile nav only (no footer). Bar is flush at bottom (no safe-area pad). */
+  /* Content padding: mobile nav only (no footer). Mirrors the visible fixed stack,
+     including ICB compensation when fixed bars are pulled into the visual viewport. */
   .project-content--with-mobile-nav:not(.project-content--with-footer) {
-    padding-bottom: calc(var(--mobile-nav-height) + max(env(safe-area-inset-bottom, 0px), 12px) + var(--standalone-bottom-gap));
+    padding-bottom: calc(var(--mobile-nav-height) + max(env(safe-area-inset-bottom, 0px), 12px) + var(--standalone-bottom-gap) + var(--icb-bottom-offset, 0px));
   }
 
   /* Content padding: both mobile nav AND footer */
   .project-content--with-footer.project-content--with-mobile-nav {
     padding-bottom: calc(
-      var(--executor-footer-height) + var(--mobile-nav-height) + max(env(safe-area-inset-bottom, 0px), 12px) + var(--standalone-bottom-gap)
+      var(--executor-footer-height) + var(--mobile-nav-height) + max(env(safe-area-inset-bottom, 0px), 12px) + var(--standalone-bottom-gap) + var(--icb-bottom-offset, 0px)
     );
   }
 }

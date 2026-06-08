@@ -39,6 +39,27 @@ import type { TaskView } from "../hooks/useViewState";
 import { buildPluginTaskViewId, isPluginViewId } from "../plugins/pluginViewRegistry";
 import { getPluginNavIcon } from "./pluginNavIcon";
 
+export interface PublishedMobileNavHeightInput {
+  navOffsetHeight: number;
+  paddingBottom: number;
+  tabHeights: number[];
+}
+
+export function computePublishedMobileNavHeight({
+  navOffsetHeight,
+  paddingBottom,
+  tabHeights,
+}: PublishedMobileNavHeightInput): number {
+  const measuredTabHeight = Math.max(0, ...tabHeights.filter((height) => Number.isFinite(height)));
+  if (measuredTabHeight > 0) {
+    return Math.max(44, Math.ceil(measuredTabHeight));
+  }
+
+  const resolvedPaddingBottom = Number.isFinite(paddingBottom) ? paddingBottom : 0;
+  const contentHeight = navOffsetHeight - resolvedPaddingBottom;
+  return Math.max(44, Math.ceil(contentHeight));
+}
+
 export interface MobileNavBarProps {
   /** Current task view mode */
   view: TaskView;
@@ -215,9 +236,13 @@ export function MobileNavBar({
 
     const publishMeasuredHeight = () => {
       const computed = window.getComputedStyle(navEl);
-      const paddingBottom = Number.parseFloat(computed.paddingBottom) || 0;
-      const contentHeight = navEl.offsetHeight - paddingBottom;
-      const publishedHeight = Math.max(44, Math.ceil(contentHeight));
+      const paddingBottom = Number.parseFloat(computed.paddingBottom);
+      const tabHeights = Array.from(navEl.querySelectorAll<HTMLElement>(".mobile-nav-tab"), (tab) => tab.getBoundingClientRect().height);
+      const publishedHeight = computePublishedMobileNavHeight({
+        navOffsetHeight: navEl.offsetHeight,
+        paddingBottom,
+        tabHeights,
+      });
       document.documentElement.style.setProperty("--mobile-nav-height", `${publishedHeight}px`);
     };
 

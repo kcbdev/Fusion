@@ -57,6 +57,7 @@ const qualityAppFoundationUiTests = [
   "app/__tests__/lazy-loaded-views-docs.test.ts",
   "app/__tests__/mission-planning-modals-mobile.test.ts",
   "app/__tests__/mobile-bottom-bars-keyboard-layout.test.ts",
+  "app/__tests__/mobile-bottom-space-layout.test.ts",
   "app/__tests__/mobile-feature-access-regression.test.tsx",
   "app/__tests__/mobile-header-controls.test.ts",
   "app/__tests__/mobile-input-font-size.test.ts",
