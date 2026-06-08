@@ -107,6 +107,35 @@ describe("electron-builder desktop config", () => {
     expect(linuxArchByTarget.get("tar.gz")).toEqual(["arm64", "x64"]);
   });
 
+  it("packages @fusion/core runtime dependencies used during desktop startup", async () => {
+    const builderConfig = await readDesktopFile("electron-builder.yml");
+    const requiredRuntimeDependencyGlobs = [
+      "node_modules/debug/**/*",
+      "node_modules/ms/**/*",
+      "node_modules/extract-zip/**/*",
+      "node_modules/get-stream/**/*",
+      "node_modules/pump/**/*",
+      "node_modules/end-of-stream/**/*",
+      "node_modules/once/**/*",
+      "node_modules/wrappy/**/*",
+      "node_modules/yauzl/**/*",
+      "node_modules/fd-slicer/**/*",
+      "node_modules/pend/**/*",
+      "node_modules/buffer-crc32/**/*",
+      "node_modules/tar/**/*",
+      "node_modules/@isaacs/fs-minipass/**/*",
+      "node_modules/chownr/**/*",
+      "node_modules/minipass/**/*",
+      "node_modules/minizlib/**/*",
+      "node_modules/yallist/**/*",
+      "node_modules/yaml/**/*",
+    ];
+
+    for (const dependencyGlob of requiredRuntimeDependencyGlobs) {
+      expect(builderConfig).toContain(`- ${dependencyGlob}`);
+    }
+  });
+
   it("locks mac signing and notarization configuration", async () => {
     const builderConfig = await readDesktopFile("electron-builder.yml");
 
