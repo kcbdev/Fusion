@@ -247,11 +247,11 @@ describe("task creation hook", () => {
       summarizeTitleMock.mockResolvedValue("Auto Generated Title");
       setTaskCreatedHook(hook);
 
-      // autoSummarizeTitles stays a project setting; the summarizer model lanes
-      // MOVED to workflow settings (U4/KTD-7), so write them to the project's
-      // default workflow (builtin:coding) value store.
-      await store.updateSettings({ autoSummarizeTitles: true });
-      await store.updateWorkflowSettingValues("builtin:coding", store.getWorkflowSettingsProjectId(), {
+      // autoSummarizeTitles and the summarizer model lane are both project
+      // settings, so the store should auto-attach summarization from project
+      // settings alone when explicit options are omitted.
+      await store.updateSettings({
+        autoSummarizeTitles: true,
         titleSummarizerProvider: "openai",
         titleSummarizerModelId: "gpt-5-mini",
       });

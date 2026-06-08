@@ -93,13 +93,24 @@ describe("generatePrMetadata", () => {
     vi.clearAllMocks();
   });
 
-  it("returns generated body without template", async () => {
+  it("uses the summarizer model lane for PR generation", async () => {
     const result = await generatePrMetadata({
       task: createTask(),
       repoRoot,
-      settings: {} as never,
+      settings: {
+        titleSummarizerProvider: "anthropic",
+        titleSummarizerModelId: "claude-haiku",
+        planningProvider: "openai",
+        planningModelId: "gpt-4o",
+      } as never,
     });
 
+    expect(vi.mocked(createFnAgent)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultProvider: "anthropic",
+        defaultModelId: "claude-haiku",
+      }),
+    );
     expect(result.title).toBe("feat: add routes");
     expect(result.body).toContain("## Summary");
     expect(result.body).toContain("## Changes");
@@ -119,7 +130,10 @@ describe("generatePrMetadata", () => {
     const result = await generatePrMetadata({
       task: createTask(),
       repoRoot,
-      settings: {} as never,
+      settings: {
+        titleSummarizerProvider: "anthropic",
+        titleSummarizerModelId: "claude-haiku",
+      } as never,
     });
 
     expect(result.templateUsed).toBe(true);
@@ -142,7 +156,10 @@ describe("generatePrMetadata", () => {
     const result = await generatePrMetadata({
       task: createTask(),
       repoRoot,
-      settings: {} as never,
+      settings: {
+        titleSummarizerProvider: "anthropic",
+        titleSummarizerModelId: "claude-haiku",
+      } as never,
     });
 
     expect(result).toEqual({

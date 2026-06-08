@@ -228,7 +228,7 @@ These groups moved out of project settings and into workflow settings (built-in
 |---|---|
 | **Step execution** | `workflowStepTimeoutMs`, `runStepsInNewSessions`, `maxParallelSteps`, `workflowStepScopeEnforcement`, `strictScopeEnforcement`, `verificationFixRetries`, `maxPostReviewFixes`, `buildRetryCount` |
 | **Review / approval** | `requirePrApproval`, `requirePlanApproval`, `reviewHandoffPolicy`, `maxReviewerContextRetries`, `maxReviewerFallbackRetries` |
-| **Per-phase model lanes** | `executionProvider`/`executionModelId`, `planningProvider`/`planningModelId` (+ fallbacks), `validatorProvider`/`validatorModelId` (+ fallbacks), `titleSummarizerProvider`/`titleSummarizerModelId` (+ fallback) |
+| **Per-phase model lanes** | `executionProvider`/`executionModelId`, `planningProvider`/`planningModelId` (+ fallbacks), `validatorProvider`/`validatorModelId` (+ fallbacks) |
 
 In the dashboard Settings modal, Project Models now exposes Plan/Triage, Executor,
 and Reviewer controls for the default workflow. Former locations for advanced
@@ -822,7 +822,7 @@ For post-merge prompt workflow steps, explicit step-level `modelProvider` + `mod
 
 ### Title summarization model
 
-Used for task title auto-summarization, GitHub tracking issue title summarization when tasks are untitled, and (when enabled) AI merge commit summaries.
+Project-scoped model lane used for task title auto-summarization, GitHub tracking issue title summarization when tasks are untitled, PR title/body generation, and (when enabled) AI merge commit summaries.
 
 1. Project `titleSummarizerProvider` + `titleSummarizerModelId`
 2. Global `titleSummarizerGlobalProvider` + `titleSummarizerGlobalModelId`

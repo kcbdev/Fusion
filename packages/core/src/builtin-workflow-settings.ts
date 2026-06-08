@@ -229,28 +229,4 @@ export const BUILTIN_WORKFLOW_SETTINGS: WorkflowSettingDefinition[] = [
     type: "string",
     description: "Fallback model id for the validation phase.",
   },
-  {
-    id: "titleSummarizerProvider",
-    name: "Title summarizer provider",
-    type: "string",
-    description: "Provider for summarizing task titles.",
-  },
-  {
-    id: "titleSummarizerModelId",
-    name: "Title summarizer model",
-    type: "string",
-    description: "Model id for summarizing task titles.",
-  },
-  {
-    id: "titleSummarizerFallbackProvider",
-    name: "Title summarizer fallback provider",
-    type: "string",
-    description: "Fallback provider for summarizing task titles.",
-  },
-  {
-    id: "titleSummarizerFallbackModelId",
-    name: "Title summarizer fallback model",
-    type: "string",
-    description: "Fallback model id for summarizing task titles.",
-  },
 ];

@@ -169,8 +169,9 @@ describe("TaskStore", () => {
   // ── Dual-Scope Lane Model Settings (FN-1710) ─────────────────────
 
   describe("dual-scope lane model settings", () => {
-    // U4 hard-move: the per-phase PROJECT lanes are dropped by updateSettings.
-    it("moved project lanes are dropped, not round-tripped through project config", async () => {
+    // U4 hard-move drops execution/planning/validator project lanes, while the
+    // title-summarizer lane stays project-scoped and round-trips normally.
+    it("only execution/planning/validator project lanes are dropped from project config", async () => {
       await harness.store().updateSettings({
         planningProvider: "anthropic",
         planningModelId: "claude-sonnet-4-5",
@@ -183,12 +184,14 @@ describe("TaskStore", () => {
       const settings = await harness.store().getSettings();
       expect(settings.planningProvider).toBeUndefined();
       expect(settings.validatorProvider).toBeUndefined();
-      expect(settings.titleSummarizerProvider).toBeUndefined();
+      expect(settings.titleSummarizerProvider).toBe("google");
+      expect(settings.titleSummarizerModelId).toBe("gemini-2.5-pro");
 
       const config = JSON.parse(await readFile(join(harness.rootDir(), ".fusion", "config.json"), "utf-8"));
       expect((config.settings as any).planningProvider).toBeUndefined();
       expect((config.settings as any).validatorProvider).toBeUndefined();
-      expect((config.settings as any).titleSummarizerProvider).toBeUndefined();
+      expect((config.settings as any).titleSummarizerProvider).toBe("google");
+      expect((config.settings as any).titleSummarizerModelId).toBe("gemini-2.5-pro");
     });
 
     // New default override fields
@@ -360,8 +363,8 @@ describe("TaskStore", () => {
       const settings = await harness.store().getSettings();
       expect(settings.titleSummarizerGlobalProvider).toBe("openai");
       expect(settings.titleSummarizerGlobalModelId).toBe("gpt-4o-mini");
-      expect(settings.titleSummarizerProvider).toBeUndefined();
-      expect(settings.titleSummarizerModelId).toBeUndefined();
+      expect(settings.titleSummarizerProvider).toBe("anthropic");
+      expect(settings.titleSummarizerModelId).toBe("claude-haiku");
     });
 
     // Global-only key filtering tests
@@ -418,24 +421,27 @@ describe("TaskStore", () => {
     // Table-driven test matrix: verifies all model lane fields persist correctly
     // Fields are split by their correct scope (global or project)
     // U4 hard-move: the per-PHASE project lanes (execution/planning/validator/
-    // titleSummarizer + fallbacks) MOVED to workflow settings and no longer
-    // persist through `updateSettings` (the stale-writer guard drops them). They
-    // are covered by the workflow-settings store + settings-migration suites.
-    // Only `defaultProviderOverride`/`defaultModelIdOverride` remain project-scoped.
+    // Execution/planning/validator project lanes MOVED to workflow settings and
+    // no longer persist through `updateSettings` (the stale-writer guard drops
+    // them). The title-summarizer lane was restored to project settings, so it
+    // is covered below alongside the default override pair.
     const projectModelLanePairs = [
       // Default override (project-level override of global defaults) — NOT moved.
       { provider: "defaultProviderOverride", modelId: "defaultModelIdOverride" },
+      { provider: "titleSummarizerProvider", modelId: "titleSummarizerModelId" },
+      {
+        provider: "titleSummarizerFallbackProvider",
+        modelId: "titleSummarizerFallbackModelId",
+      },
     ] as const;
 
-    // The moved lanes, asserted to be DROPPED from project settings (R8).
+    // The moved lanes, asserted to be DROPPED from project settings (U4 hard-move).
     const movedProjectModelLanePairs = [
       { provider: "executionProvider", modelId: "executionModelId" },
       { provider: "planningProvider", modelId: "planningModelId" },
       { provider: "planningFallbackProvider", modelId: "planningFallbackModelId" },
       { provider: "validatorProvider", modelId: "validatorModelId" },
       { provider: "validatorFallbackProvider", modelId: "validatorFallbackModelId" },
-      { provider: "titleSummarizerProvider", modelId: "titleSummarizerModelId" },
-      { provider: "titleSummarizerFallbackProvider", modelId: "titleSummarizerFallbackModelId" },
     ] as const;
 
     it.each(movedProjectModelLanePairs)(
@@ -835,7 +841,8 @@ describe("TaskStore", () => {
       expect(settings.executionGlobalModelId).toBe("claude-opus-4");
       expect(settings.titleSummarizerGlobalProvider).toBe("anthropic");
       expect(settings.titleSummarizerGlobalModelId).toBe("claude-haiku");
-      // U4 hard-move: the per-phase PROJECT lanes are dropped by updateSettings.
+      // U4 hard-move drops execution/planning/validator project lanes, but the
+      // title-summarizer lane remains project-scoped.
       expect(settings.planningProvider).toBeUndefined();
       expect(settings.planningModelId).toBeUndefined();
       expect(settings.planningFallbackProvider).toBeUndefined();
@@ -846,10 +853,10 @@ describe("TaskStore", () => {
       expect(settings.validatorModelId).toBeUndefined();
       expect(settings.validatorFallbackProvider).toBeUndefined();
       expect(settings.validatorFallbackModelId).toBeUndefined();
-      expect(settings.titleSummarizerProvider).toBeUndefined();
-      expect(settings.titleSummarizerModelId).toBeUndefined();
-      expect(settings.titleSummarizerFallbackProvider).toBeUndefined();
-      expect(settings.titleSummarizerFallbackModelId).toBeUndefined();
+      expect(settings.titleSummarizerProvider).toBe("google");
+      expect(settings.titleSummarizerModelId).toBe("gemini-2.5-pro");
+      expect(settings.titleSummarizerFallbackProvider).toBe("anthropic");
+      expect(settings.titleSummarizerFallbackModelId).toBe("claude-haiku");
     });
   });
 
@@ -991,7 +998,8 @@ describe("TaskStore", () => {
       expect(settings.fallbackProvider).toBe("openai");
       expect(settings.fallbackModelId).toBe("gpt-4o");
 
-      // Global lanes stay; U4 hard-move drops every per-phase PROJECT lane.
+      // Global lanes stay; execution/planning/validator project lanes are still
+      // dropped, but the title-summarizer lane remains project-scoped.
       expect(settings.executionGlobalProvider).toBe("google");
       expect(settings.executionGlobalModelId).toBe("gemini-2.5-pro");
       expect(settings.planningGlobalProvider).toBe("anthropic");
@@ -1006,8 +1014,8 @@ describe("TaskStore", () => {
       expect(settings.planningFallbackProvider).toBeUndefined();
       expect(settings.validatorProvider).toBeUndefined();
       expect(settings.validatorFallbackProvider).toBeUndefined();
-      expect(settings.titleSummarizerProvider).toBeUndefined();
-      expect(settings.titleSummarizerFallbackProvider).toBeUndefined();
+      expect(settings.titleSummarizerProvider).toBe("openai");
+      expect(settings.titleSummarizerFallbackProvider).toBe("google");
     });
   });
 
@@ -1068,7 +1076,7 @@ describe("TaskStore", () => {
       // U4 hard-move: all per-phase PROJECT lanes are dropped from project settings.
       expect(settings.planningProvider).toBeUndefined();
       expect(settings.validatorProvider).toBeUndefined();
-      expect(settings.titleSummarizerProvider).toBeUndefined();
+      expect(settings.titleSummarizerProvider).toBe("google");
       expect(settings.executionProvider).toBeUndefined();
       expect(settings.executionModelId).toBeUndefined();
 
@@ -1176,7 +1184,7 @@ describe("TaskStore", () => {
       expect(settings.executionModelId).toBeUndefined();
     });
 
-    it("clears titleSummarizerProvider/titleSummarizerModelId with null", async () => {
+    it("clears project-scoped titleSummarizerProvider/titleSummarizerModelId with null", async () => {
       await harness.store().updateSettings({
         titleSummarizerProvider: "anthropic",
         titleSummarizerModelId: "claude-haiku",

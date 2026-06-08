@@ -3,7 +3,7 @@ import { exec as execCb } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { GlobalSettings, ProjectSettings, Settings, Task } from "@fusion/core";
-import { resolveTaskPlanningModel } from "@fusion/core";
+import { resolveTitleSummarizerSettingsModel } from "@fusion/core";
 import { createFnAgent } from "@fusion/engine";
 
 const execAsync = promisify(execCb);
@@ -238,7 +238,7 @@ export async function generatePrMetadata(input: {
     const templateExists = await access(templatePath).then(() => true).catch(() => false);
     const template = templateExists ? await readFile(templatePath, "utf8") : "";
 
-    const model = resolveTaskPlanningModel(task, settings as Partial<Settings>);
+    const model = resolveTitleSummarizerSettingsModel(settings as Partial<Settings>);
     let aiText = "";
     const { session } = await createFnAgent({
       cwd: repoRoot,

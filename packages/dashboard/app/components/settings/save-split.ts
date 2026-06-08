@@ -29,14 +29,15 @@ import type { GlobalSettings, Settings } from "@fusion/core";
  * Project-scoped model-override keys whose overrides track inheritance
  * explicitly (changed-only writes with null-as-delete in the project branch).
  *
- * The per-phase model lanes (planning/validator/execution/titleSummarizer
- * providers, models, and fallbacks) MOVED to workflow settings (U4) and are no
- * longer project keys, so `isProjectSettingsKey` filters them out before the
- * project branch is reached — listing them here would be dead. Only the two
- * project-level default overrides remain.
+ * The title-summarizer lane was restored to project settings in FN-5994, so it
+ * needs the same changed-only/null-as-delete handling as the project default
+ * lane overrides. Execution/planning/validator lanes still live on workflow
+ * settings and are filtered out before the project branch is reached.
  */
 export const MODEL_LANE_KEYS = [
   "defaultProviderOverride", "defaultModelIdOverride",
+  "titleSummarizerProvider", "titleSummarizerModelId",
+  "titleSummarizerFallbackProvider", "titleSummarizerFallbackModelId",
 ] as const;
 
 const MODEL_LANE_KEY_SET = new Set<string>(MODEL_LANE_KEYS);

@@ -48,11 +48,7 @@ type MovedProjectSettingsKey =
   | "validatorProvider"
   | "validatorModelId"
   | "validatorFallbackProvider"
-  | "validatorFallbackModelId"
-  | "titleSummarizerProvider"
-  | "titleSummarizerModelId"
-  | "titleSummarizerFallbackProvider"
-  | "titleSummarizerFallbackModelId";
+  | "validatorFallbackModelId";
 
 type ProjectSettingsSchema = Omit<ProjectSettings, MovedProjectSettingsKey>;
 
@@ -418,8 +414,11 @@ export const DEFAULT_PROJECT_SETTINGS = {
   memoryBackupScope: "all" as const,
   autoSummarizeTitles: false,
   useAiMergeCommitSummary: true,
-  // Title-summarizer model lanes MOVED to workflow settings (U4) —
-  // see MOVED_SETTINGS_KEYS.
+  // Title-summarizer model lanes stay project-scoped (not moved in U4).
+  titleSummarizerProvider: undefined,
+  titleSummarizerModelId: undefined,
+  titleSummarizerFallbackProvider: undefined,
+  titleSummarizerFallbackModelId: undefined,
   scripts: undefined,
   setupScript: undefined,
   insightExtractionEnabled: false,

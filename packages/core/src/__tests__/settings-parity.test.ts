@@ -221,10 +221,6 @@ describe("settings key parity", () => {
       "validatorModelId",
       "validatorFallbackProvider",
       "validatorFallbackModelId",
-      "titleSummarizerProvider",
-      "titleSummarizerModelId",
-      "titleSummarizerFallbackProvider",
-      "titleSummarizerFallbackModelId",
     ];
     for (const key of movedKeys) {
       expect(isProjectSettingsKey(key)).toBe(false);
@@ -424,11 +420,10 @@ describe("eval settings parity regression (FN-3393)", () => {
 describe("model lane key parity regression (FN-1729)", () => {
   // All model lane provider/modelId pairs that should exist.
   //
-  // U4 hard-move: the per-PHASE project lanes (execution/planning/validator/
-  // titleSummarizer provider+model, plus their fallbacks) MOVED to workflow
-  // settings and are no longer in either scope key list ("workflow" scope). The
-  // GLOBAL baseline lanes (`*GlobalProvider`) and the default/fallback baseline
-  // stay global.
+  // U4 hard-move moved the execution/planning/validator project lanes (plus
+  // their fallbacks) to workflow settings. The title-summarizer lane was later
+  // restored to project settings, while GLOBAL baseline lanes (`*GlobalProvider`)
+  // and the default/fallback baseline remain global.
   const allModelLanePairs = [
     // Default baseline (global only)
     { provider: "defaultProvider", modelId: "defaultModelId", expectedScope: "global" },
@@ -446,9 +441,9 @@ describe("model lane key parity regression (FN-1729)", () => {
     { provider: "validatorGlobalProvider", modelId: "validatorGlobalModelId", expectedScope: "global" },
     { provider: "validatorFallbackProvider", modelId: "validatorFallbackModelId", expectedScope: "workflow" },
     // Summarizer lane
-    { provider: "titleSummarizerProvider", modelId: "titleSummarizerModelId", expectedScope: "workflow" },
+    { provider: "titleSummarizerProvider", modelId: "titleSummarizerModelId", expectedScope: "project" },
     { provider: "titleSummarizerGlobalProvider", modelId: "titleSummarizerGlobalModelId", expectedScope: "global" },
-    { provider: "titleSummarizerFallbackProvider", modelId: "titleSummarizerFallbackModelId", expectedScope: "workflow" },
+    { provider: "titleSummarizerFallbackProvider", modelId: "titleSummarizerFallbackModelId", expectedScope: "project" },
   ] as const;
 
   it.each(allModelLanePairs)(

@@ -23,7 +23,7 @@ import {
   SETTINGS_MIGRATION_MARKER_KEY,
 } from "../moved-settings.js";
 import { resolveEffectiveSettingsById, type WorkflowSettingsResolverStore } from "../workflow-settings-resolver.js";
-import { PROJECT_SETTINGS_KEYS } from "../settings-schema.js";
+import { DEFAULT_PROJECT_SETTINGS, PROJECT_SETTINGS_KEYS } from "../settings-schema.js";
 
 // ── Test harness ────────────────────────────────────────────────────────────
 
@@ -143,8 +143,20 @@ describe("settings hard-move migration (U4)", () => {
     expect(MOVED_SETTINGS_KEYS).toContain("workflowStepTimeoutMs");
     expect(MOVED_SETTINGS_KEYS).toContain("requirePrApproval");
     expect(MOVED_SETTINGS_KEYS).toContain("executionProvider");
-    // 30 keys after removing buildTimeoutMs from the catalog.
-    expect(MOVED_SETTINGS_KEYS.length).toBe(30);
+    expect(MOVED_SETTINGS_KEYS).not.toContain("titleSummarizerProvider");
+    expect(MOVED_SETTINGS_KEYS).not.toContain("titleSummarizerModelId");
+    expect(MOVED_SETTINGS_KEYS).not.toContain("titleSummarizerFallbackProvider");
+    expect(MOVED_SETTINGS_KEYS).not.toContain("titleSummarizerFallbackModelId");
+    expect(PROJECT_SETTINGS_KEYS).toContain("titleSummarizerProvider");
+    expect(PROJECT_SETTINGS_KEYS).toContain("titleSummarizerModelId");
+    expect(PROJECT_SETTINGS_KEYS).toContain("titleSummarizerFallbackProvider");
+    expect(PROJECT_SETTINGS_KEYS).toContain("titleSummarizerFallbackModelId");
+    expect(DEFAULT_PROJECT_SETTINGS).toHaveProperty("titleSummarizerProvider", undefined);
+    expect(DEFAULT_PROJECT_SETTINGS).toHaveProperty("titleSummarizerModelId", undefined);
+    expect(DEFAULT_PROJECT_SETTINGS).toHaveProperty("titleSummarizerFallbackProvider", undefined);
+    expect(DEFAULT_PROJECT_SETTINGS).toHaveProperty("titleSummarizerFallbackModelId", undefined);
+    // 26 keys after removing buildTimeoutMs plus the summarizer lane from the catalog.
+    expect(MOVED_SETTINGS_KEYS.length).toBe(26);
   });
 
   it("fresh project post-init: marker set, effective values equal declaration defaults, no moved key in PROJECT_SETTINGS_KEYS", async () => {

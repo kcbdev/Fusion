@@ -1281,10 +1281,7 @@ describe("SettingsModal", () => {
       expect(screen.queryByText("Title, commit message, and GitHub tracking issue summarization model")).not.toBeInTheDocument();
     });
 
-    it("shows a moved-to-workflow note for the summarizer model when GitHub tracking defaults are on", async () => {
-      // The title-summarizer model lane was hard-moved (U4) onto workflow
-      // settings; the Project Models section now surfaces a moved-to-workflow
-      // note instead of an inline picker.
+    it("does not show a moved-to-workflow note for the summarizer model when GitHub tracking defaults are on", async () => {
       mockFetchSettings.mockResolvedValueOnce({
         ...defaultSettings,
         githubTrackingEnabledByDefault: true,
@@ -1295,10 +1292,8 @@ describe("SettingsModal", () => {
 
       await userEvent.click(screen.getByRole("button", { name: "Project Models" }));
 
-      expect(
-        screen.queryByText("Title, commit message, and GitHub tracking issue summarization model"),
-      ).not.toBeInTheDocument();
-      expect(screen.getByText(/model used for summarization now lives on the workflow/i)).toBeInTheDocument();
+      expect(screen.queryByText(/model used for summarization now lives on the workflow/i)).not.toBeInTheDocument();
+      expect(screen.getByText(/per-phase model lanes \(execution, planning, reviewer, and their fallbacks\) now live on the workflow/i)).toBeInTheDocument();
     });
 
     it("picks a project repo suggestion and preserves label association", async () => {
