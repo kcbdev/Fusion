@@ -679,6 +679,78 @@ describe("Scheduler", () => {
       expect(schedulerLog.log).toHaveBeenCalledWith(expect.stringContaining("no reservable slot"));
     });
 
+    it("holds workflow-column releases when file scopes overlap active work", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
+
+      const tasks = new Map<string, Task>([
+        ["FN-001", createMockTask({ id: "FN-001", column: "in-progress", dependencies: [] })],
+        ["FN-002", createMockTask({ id: "FN-002", column: "todo", dependencies: [] })],
+        ["FN-003", createMockTask({ id: "FN-003", column: "todo", dependencies: [] })],
+      ]);
+      const scopes = new Map<string, string[]>([
+        ["FN-001", ["packages/engine/src/scheduler.ts"]],
+        ["FN-002", ["packages/engine/src/scheduler.ts"]],
+        ["FN-003", ["packages/core/src/store.ts"]],
+      ]);
+      const movedListeners = new Set<(data: { task: object; to: string }) => void>();
+      const moveTask = vi.fn(async (taskId: string, column: Task["column"]) => {
+        const current = tasks.get(taskId);
+        if (!current) throw new Error(`missing task ${taskId}`);
+        const updated = { ...current, column } as Task;
+        tasks.set(taskId, updated);
+        for (const listener of movedListeners) {
+          listener({ task: updated, to: column });
+        }
+        return updated;
+      });
+      const updateTask = vi.fn(async (taskId: string, updates: Partial<Task>) => {
+        const current = tasks.get(taskId);
+        if (!current) throw new Error(`missing task ${taskId}`);
+        const updated = { ...current, ...updates } as Task;
+        if (updates.blockedBy === null) updated.blockedBy = undefined;
+        if (updates.overlapBlockedBy === null) updated.overlapBlockedBy = undefined;
+        tasks.set(taskId, updated);
+        return updated;
+      });
+      const store = createMockStore({
+        listTasks: vi.fn(async () => [...tasks.values()]),
+        getTask: vi.fn(async (taskId: string) => tasks.get(taskId) ?? null),
+        getSettings: vi.fn().mockResolvedValue({
+          maxConcurrent: 15,
+          maxWorktrees: 10,
+          groupOverlappingFiles: true,
+          experimentalFeatures: { workflowColumns: true },
+        }),
+        parseFileScopeFromPrompt: vi.fn(async (taskId: string) => scopes.get(taskId) ?? []),
+        updateTask,
+        moveTask,
+        on: vi.fn((event: string, listener: (data: { task: object; to: string }) => void) => {
+          if (event === "task:moved") movedListeners.add(listener);
+        }),
+        off: vi.fn((event: string, listener: (data: { task: object; to: string }) => void) => {
+          if (event === "task:moved") movedListeners.delete(listener);
+        }),
+      });
+
+      const scheduler = new Scheduler(store);
+      (scheduler as unknown as { running: boolean }).running = true;
+      await scheduler.schedule();
+
+      expect(tasks.get("FN-002")).toMatchObject({
+        column: "todo",
+        status: "queued",
+        blockedBy: undefined,
+        overlapBlockedBy: "FN-001",
+      });
+      expect(tasks.get("FN-003")?.column).toBe("in-progress");
+      expect(moveTask.mock.calls.filter((call) => call[1] === "in-progress").map((call) => call[0])).toEqual(["FN-003"]);
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-002",
+        expect.stringContaining("queued — blocked by active file-scope lease FN-001"),
+      );
+    });
+
     it("flag-OFF: todo dispatch is tagged as scheduler-sourced for redispatch guards", async () => {
       const off = setupTodoStore(false);
       await off.scheduler.schedule();

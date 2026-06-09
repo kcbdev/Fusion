@@ -76,7 +76,7 @@ export interface HoldReleaseDeps {
    * default-workflow legacy parity path where the scheduler dispatch loop owns
    * worktree allocation via `allocateWorktree`.
    */
-  reserveSlot?: (task: Task, targetColumn: string) => SlotReservation | null;
+  reserveSlot?: (task: Task, targetColumn: string) => SlotReservation | null | Promise<SlotReservation | null>;
   /** Allocate a worktree path for a release into a processing column (passed
    *  through to `moveTask`'s `allocateWorktree`). */
   allocateWorktree?: (task: Task, reservedNames: Set<string>) => string | null;
@@ -411,7 +411,7 @@ async function issueRelease(
 
   let reservation: SlotReservation | null = null;
   if (targetIsProcessing && deps.reserveSlot) {
-    reservation = deps.reserveSlot(task, target);
+    reservation = await deps.reserveSlot(task, target);
     if (!reservation) {
       // Semaphore/worktree exhausted — reservation-first means no move at all.
       schedulerLog.log(`Hold release for ${task.id} deferred — no reservable slot for ${target}`);

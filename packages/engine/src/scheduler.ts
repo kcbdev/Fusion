@@ -2126,15 +2126,92 @@ export class Scheduler {
     try {
       const maxWorktrees = settings.maxWorktrees ?? this.options.maxWorktrees ?? 4;
       let reservedWorktreeSlots = tasks.filter((task) => task.column === "in-progress").length;
+      const activeScopes = new Map<string, string[]>();
+      const activeScopeColumns = new Map<string, Task["column"]>();
+      const overlapIgnorePaths = settings.overlapIgnorePaths ?? [];
+      const filteredScopeByTaskId = new Map<string, string[]>();
+      const getFilteredFileScope = async (taskId: string): Promise<string[]> => {
+        const cached = filteredScopeByTaskId.get(taskId);
+        if (cached) return cached;
+        const scope = await this.store.parseFileScopeFromPrompt(taskId);
+        const filteredScope = filterPathsByIgnoreList(scope, overlapIgnorePaths);
+        filteredScopeByTaskId.set(taskId, filteredScope);
+        return filteredScope;
+      };
+
+      if (settings.groupOverlappingFiles) {
+        for (const task of tasks) {
+          if (task.column !== "in-progress") continue;
+          const filteredScope = await getFilteredFileScope(task.id);
+          if (isCoordinationOnlyTask(task, filteredScope)) continue;
+          if (filteredScope.length > 0) {
+            activeScopes.set(task.id, filteredScope);
+            activeScopeColumns.set(task.id, task.column);
+          }
+        }
+
+        const inReviewWithWorktree = tasks.filter(
+          (task) => task.column === "in-review" && Boolean(task.worktree) && !task.paused && task.status !== "failed",
+        );
+        for (const task of inReviewWithWorktree) {
+          const filteredScope = await getFilteredFileScope(task.id);
+          if (isCoordinationOnlyTask(task, filteredScope)) continue;
+          if (filteredScope.length > 0) {
+            activeScopes.set(task.id, filteredScope);
+            activeScopeColumns.set(task.id, task.column);
+          }
+        }
+      }
+
       await runHoldReleaseSweep(this.store, {
         now: () => Date.now(),
-        reserveSlot: (): SlotReservation | null => {
+        reserveSlot: async (task): Promise<SlotReservation | null> => {
+          let reservedScope = false;
+          if (settings.groupOverlappingFiles) {
+            const taskScope = await getFilteredFileScope(task.id);
+            if (taskScope.length > 0 && !isCoordinationOnlyTask(task, taskScope)) {
+              const overlappingTaskId = Array.from(activeScopes.entries())
+                .sort(([aId], [bId]) => aId.localeCompare(bId))
+                .find(([, activeScope]) => this.pathsOverlap(taskScope, activeScope))?.[0] ?? null;
+
+              if (overlappingTaskId) {
+                const activeLeaseColumn = activeScopeColumns.get(overlappingTaskId) ?? "in-progress";
+                await this.store.updateTask(task.id, {
+                  status: "queued",
+                  blockedBy: null,
+                  overlapBlockedBy: overlappingTaskId,
+                });
+                await this.logDispatchQueuedReason(
+                  task.id,
+                  `queued — blocked by active file-scope lease ${overlappingTaskId} (column=${activeLeaseColumn})`,
+                );
+                return null;
+              }
+
+              activeScopes.set(task.id, taskScope);
+              activeScopeColumns.set(task.id, "in-progress");
+              reservedScope = true;
+            } else if (task.overlapBlockedBy) {
+              await this.store.updateTask(task.id, { overlapBlockedBy: null });
+            }
+          }
+
           if (Number.isFinite(maxWorktrees) && reservedWorktreeSlots >= maxWorktrees) {
+            if (reservedScope) {
+              activeScopes.delete(task.id);
+              activeScopeColumns.delete(task.id);
+            }
             return null;
           }
 
           const sem = this.options.semaphore;
-          if (sem && !sem.tryAcquire()) return null;
+          if (sem && !sem.tryAcquire()) {
+            if (reservedScope) {
+              activeScopes.delete(task.id);
+              activeScopeColumns.delete(task.id);
+            }
+            return null;
+          }
 
           reservedWorktreeSlots += 1;
           let released = false;
@@ -2142,6 +2219,10 @@ export class Scheduler {
             release: () => {
               if (released) return;
               released = true;
+              if (reservedScope) {
+                activeScopes.delete(task.id);
+                activeScopeColumns.delete(task.id);
+              }
               reservedWorktreeSlots = Math.max(0, reservedWorktreeSlots - 1);
               sem?.release();
             },
