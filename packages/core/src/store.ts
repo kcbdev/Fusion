@@ -9075,12 +9075,19 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
 
   listDueWorkflowWorkItems(filter: WorkflowWorkItemDueFilter = {}): WorkflowWorkItem[] {
     const now = filter.now ?? new Date().toISOString();
+    const includeExpiredRunning = !filter.states || filter.states.includes("running");
     const states = filter.states?.length ? filter.states : ["runnable", "retrying"];
+    const stateConditions = [`(state IN (${states.map(() => "?").join(", ")}) AND (leaseExpiresAt IS NULL OR leaseExpiresAt <= ?))`];
+    const params: unknown[] = [...states, now];
+    if (includeExpiredRunning) {
+      stateConditions.push("(state = 'running' AND leaseExpiresAt IS NOT NULL AND leaseExpiresAt <= ?)");
+      params.push(now);
+    }
     const conditions = [
-      `((state IN (${states.map(() => "?").join(", ")}) AND (leaseExpiresAt IS NULL OR leaseExpiresAt <= ?)) OR (state = 'running' AND leaseExpiresAt IS NOT NULL AND leaseExpiresAt <= ?))`,
+      `(${stateConditions.join(" OR ")})`,
       "(retryAfter IS NULL OR retryAfter <= ?)",
     ];
-    const params: unknown[] = [...states, now, now, now];
+    params.push(now);
     if (filter.kinds?.length) {
       conditions.push(`kind IN (${filter.kinds.map(() => "?").join(", ")})`);
       params.push(...filter.kinds);
@@ -9104,6 +9111,10 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     leaseOwner: string,
     opts: { leaseDurationMs: number; now?: string },
   ): WorkflowWorkItem | null {
+    if (opts.leaseDurationMs <= 0) {
+      throw new Error(`workflow work item leaseDurationMs must be > 0 (received ${opts.leaseDurationMs})`);
+    }
+
     return this.db.transactionImmediate(() => {
       const now = opts.now ?? new Date().toISOString();
       const leaseExpiresAt = new Date(new Date(now).getTime() + opts.leaseDurationMs).toISOString();

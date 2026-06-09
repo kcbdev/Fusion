@@ -173,6 +173,33 @@ describe("TaskStore workflow work items", () => {
     });
   });
 
+  it("honors due-list state filters and validates lease duration", async () => {
+    const taskId = await createTaskId();
+    const item = store.upsertWorkflowWorkItem({
+      runId: "run-filter",
+      taskId,
+      nodeId: "merge.node",
+      kind: "merge",
+      state: "runnable",
+      now: "2026-06-09T00:00:00.000Z",
+    });
+    store.acquireWorkflowWorkItemLease(item.id, "worker-a", {
+      now: "2026-06-09T00:00:00.000Z",
+      leaseDurationMs: 60_000,
+    });
+
+    expect(store.listDueWorkflowWorkItems({ now: "2026-06-09T00:01:00.000Z", states: ["runnable"] })).toEqual([]);
+    expect(store.listDueWorkflowWorkItems({ now: "2026-06-09T00:01:00.000Z", states: ["running"] }).map((due) => due.id)).toEqual([
+      item.id,
+    ]);
+    expect(() =>
+      store.acquireWorkflowWorkItemLease(item.id, "worker-b", {
+        now: "2026-06-09T00:01:00.000Z",
+        leaseDurationMs: 0,
+      }),
+    ).toThrow("workflow work item leaseDurationMs must be > 0 (received 0)");
+  });
+
   it("preserves lease and retry metadata on idempotent duplicate upserts", async () => {
     const taskId = await createTaskId();
     const item = store.upsertWorkflowWorkItem({
