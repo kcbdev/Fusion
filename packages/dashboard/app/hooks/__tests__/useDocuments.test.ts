@@ -228,10 +228,10 @@ describe("useDocuments", () => {
     const abortMock = vi.fn();
     const originalAbortController = globalThis.AbortController;
 
-    globalThis.AbortController = vi.fn().mockImplementation(() => ({
-      signal: {},
-      abort: abortMock,
-    })) as unknown as typeof AbortController;
+    globalThis.AbortController = class {
+      signal = {};
+      abort = abortMock;
+    } as unknown as typeof AbortController;
 
     globalThis.fetch = vi.fn().mockReturnValue(
       new Promise(() => {
