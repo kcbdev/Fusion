@@ -72,8 +72,6 @@ vi.mock("../Lane", () => ({
   ),
 }));
 
-const BOARD_WORKFLOW_COLLAPSED_KEY = "kb-dashboard-board-workflow-collapsed";
-
 const DEFAULT_WORKFLOW = {
   id: "builtin:coding",
   name: "Coding (built-in)",
@@ -1064,66 +1062,16 @@ describe("Board", () => {
         return { onCreateWorkflow, onOpenWorkflowEditor };
       }
 
-      it("defaults to expanded (not collapsed)", async () => {
+      it("has no collapse affordance in the workflow toolbar", async () => {
         renderWorkflowToolbarBoard();
 
-        expect(await screen.findByLabelText("Select workflow")).toBeDefined();
+        // The toolbar renders but has no collapse toggle button and no collapsed-label span.
+        await waitFor(() => expect(screen.getByLabelText("Select workflow")).toBeDefined());
+        expect(screen.queryByTestId("board-workflow-collapse-toggle")).toBeNull();
+        expect(screen.queryByText("Workflow")).toBeNull(); // no collapsed-label "Workflow" text
+        // Workflow selector and action buttons are always visible (not behind a collapse toggle).
         expect(screen.getByRole("button", { name: "New workflow" })).toBeDefined();
         expect(screen.getByRole("button", { name: "Edit workflows" })).toBeDefined();
-        expect(screen.getByTestId("board-workflow-collapse-toggle").getAttribute("aria-expanded")).toBe("true");
-      });
-
-      it("clicking the toggle collapses the toolbar", async () => {
-        renderWorkflowToolbarBoard();
-        await screen.findByLabelText("Select workflow");
-
-        fireEvent.click(screen.getByTestId("board-workflow-collapse-toggle"));
-
-        expect(screen.queryByLabelText("Select workflow")).toBeNull();
-        expect(screen.queryByRole("button", { name: "New workflow" })).toBeNull();
-        expect(screen.queryByRole("button", { name: "Edit workflows" })).toBeNull();
-        expect(screen.getByTestId("board-workflow-collapse-toggle").getAttribute("aria-expanded")).toBe("false");
-        expect(screen.getByText("Workflow")).toBeDefined();
-      });
-
-      it("clicking the toggle again expands the toolbar", async () => {
-        renderWorkflowToolbarBoard();
-        await screen.findByLabelText("Select workflow");
-        const toggle = screen.getByTestId("board-workflow-collapse-toggle");
-
-        fireEvent.click(toggle);
-        expect(screen.queryByLabelText("Select workflow")).toBeNull();
-        fireEvent.click(toggle);
-
-        expect(screen.getByLabelText("Select workflow")).toBeDefined();
-        expect(screen.getByRole("button", { name: "New workflow" })).toBeDefined();
-        expect(screen.getByRole("button", { name: "Edit workflows" })).toBeDefined();
-        expect(toggle.getAttribute("aria-expanded")).toBe("true");
-      });
-
-      it("persists collapsed state to localStorage", async () => {
-        renderWorkflowToolbarBoard();
-        await screen.findByLabelText("Select workflow");
-        const toggle = screen.getByTestId("board-workflow-collapse-toggle");
-
-        fireEvent.click(toggle);
-        expect(window.localStorage.getItem(BOARD_WORKFLOW_COLLAPSED_KEY)).toBe("1");
-
-        fireEvent.click(toggle);
-        expect(window.localStorage.getItem(BOARD_WORKFLOW_COLLAPSED_KEY)).toBe("0");
-      });
-
-      it("reads collapsed state from localStorage on mount", async () => {
-        window.localStorage.setItem(BOARD_WORKFLOW_COLLAPSED_KEY, "1");
-
-        renderWorkflowToolbarBoard();
-        await waitFor(() => expect(screen.getByTestId("board-workflow-collapse-toggle")).toBeDefined());
-
-        expect(screen.queryByLabelText("Select workflow")).toBeNull();
-        expect(screen.queryByRole("button", { name: "New workflow" })).toBeNull();
-        expect(screen.queryByRole("button", { name: "Edit workflows" })).toBeNull();
-        expect(screen.getByTestId("board-workflow-collapse-toggle").getAttribute("aria-expanded")).toBe("false");
-        expect(screen.getByText("Workflow")).toBeDefined();
       });
     });
 
