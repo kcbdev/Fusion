@@ -7445,6 +7445,23 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     return this.withTaskLock(id, () => this.updateTaskUnlocked(id, updates, runContext));
   }
 
+  async updateTaskAtomic(
+    id: string,
+    updater: (
+      current: Task,
+    ) => Parameters<TaskStore["updateTask"]>[1] | null | undefined | Promise<Parameters<TaskStore["updateTask"]>[1] | null | undefined>,
+    runContext?: RunMutationContext,
+  ): Promise<Task> {
+    return this.withTaskLock(id, async () => {
+      const current = await this.readTaskJson(this.taskDir(id));
+      const updates = await updater(current);
+      if (!updates || Object.values(updates).every((value) => value === undefined)) {
+        return current;
+      }
+      return this.updateTaskUnlocked(id, updates, runContext);
+    });
+  }
+
   /**
    * Merge a validated/normalized custom-field patch into the existing values.
    * `null` in the patch deletes that field's value (the delete sentinel from

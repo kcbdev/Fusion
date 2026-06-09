@@ -1198,5 +1198,43 @@ Task with acceptance criteria
     });
   });
 
+  describe("updateTaskAtomic", () => {
+    it("serializes read-merge-write patches against the freshest task snapshot", async () => {
+      const task = await store.createTask({ description: "atomic task projection" });
+      let releaseFirst: () => void = () => {};
+      const firstCanFinish = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      let markFirstRead: () => void = () => {};
+      const firstRead = new Promise<void>((resolve) => {
+        markFirstRead = resolve;
+      });
+
+      const first = store.updateTaskAtomic(task.id, async (current) => {
+        markFirstRead();
+        expect(current.modifiedFiles).toBeUndefined();
+        await firstCanFinish;
+        return {
+          modifiedFiles: [...new Set([...(current.modifiedFiles ?? []), "src/a.ts"])].sort(),
+          mergeDetails: { ...(current.mergeDetails ?? {}), filesChanged: 1 },
+        };
+      });
+
+      await firstRead;
+
+      const second = store.updateTaskAtomic(task.id, (current) => ({
+        modifiedFiles: [...new Set([...(current.modifiedFiles ?? []), "src/b.ts"])].sort(),
+        mergeDetails: { ...(current.mergeDetails ?? {}), insertions: 2 },
+      }));
+
+      releaseFirst();
+      await Promise.all([first, second]);
+
+      const updated = await store.getTask(task.id);
+      expect(updated.modifiedFiles).toEqual(["src/a.ts", "src/b.ts"]);
+      expect(updated.mergeDetails).toEqual({ filesChanged: 1, insertions: 2 });
+    });
+  });
+
 
 });

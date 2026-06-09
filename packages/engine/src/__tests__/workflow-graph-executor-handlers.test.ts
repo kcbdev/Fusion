@@ -117,6 +117,223 @@ describe("WorkflowGraphExecutor traversal", () => {
     expect(result.visitedNodeIds).not.toContain("right");
   });
 
+  it("publishes workflow node task projections for dispatcher and UI", async () => {
+    const ir: WorkflowIr = {
+      version: "v1",
+      name: "projection",
+      nodes: [
+        { id: "start", kind: "start" },
+        { id: "a", kind: "prompt" },
+        { id: "end", kind: "end" },
+      ],
+      edges: [
+        { from: "start", to: "a" },
+        { from: "a", to: "end", condition: "success" },
+      ],
+    };
+    const publishTaskProjection = vi.fn();
+    const executor = new WorkflowGraphExecutor({
+      handlers: {
+        prompt: async () => ({
+          outcome: "success",
+          contextPatch: {
+            touchedFiles: ["./packages/engine/src/workflow-graph-executor.ts", "packages\\core\\src\\store.ts"],
+            filesChanged: 2,
+            summary: "workflow published task metadata",
+          },
+        }),
+      },
+      publishTaskProjection,
+    });
+
+    await executor.run(task, settingsOn(), ir);
+
+    expect(publishTaskProjection).toHaveBeenCalledWith(
+      task.id,
+      {
+        modifiedFiles: ["packages/core/src/store.ts", "packages/engine/src/workflow-graph-executor.ts"],
+        mergeDetails: { filesChanged: 2 },
+        summary: "workflow published task metadata",
+      },
+      { nodeId: "a", nodeKind: "prompt" },
+    );
+  });
+
+  it("keeps projection writes to safe task metadata fields", async () => {
+    const ir: WorkflowIr = {
+      version: "v1",
+      name: "safe-projection",
+      nodes: [
+        { id: "start", kind: "start" },
+        { id: "a", kind: "prompt" },
+        { id: "end", kind: "end" },
+      ],
+      edges: [
+        { from: "start", to: "a" },
+        { from: "a", to: "end", condition: "success" },
+      ],
+    };
+    const publishTaskProjection = vi.fn();
+    const executor = new WorkflowGraphExecutor({
+      handlers: {
+        prompt: async () => ({
+          outcome: "success",
+          contextPatch: {
+            modifiedFiles: ["src/index.ts"],
+            mergeDetails: {
+              commitSha: "engine-owned",
+              mergeConfirmed: true,
+              filesChanged: 3,
+              insertions: 12.8,
+              deletions: 1,
+            },
+            status: "done",
+            error: "bypass",
+            review: {},
+            reviewState: {},
+            workflowStepResults: [{}],
+            tokenUsage: {},
+          },
+        }),
+      },
+      publishTaskProjection,
+    });
+
+    await executor.run(task, settingsOn(), ir);
+
+    expect(publishTaskProjection).toHaveBeenCalledWith(
+      task.id,
+      {
+        modifiedFiles: ["src/index.ts"],
+        mergeDetails: { filesChanged: 3, insertions: 12, deletions: 1 },
+      },
+      { nodeId: "a", nodeKind: "prompt" },
+    );
+  });
+
+  it("publishes projections from loop template nodes", async () => {
+    const ir: WorkflowIr = {
+      version: "v2",
+      name: "loop-projection",
+      columns: [
+        { id: "todo", name: "Todo", traits: [] },
+        { id: "done", name: "Done", traits: [{ trait: "complete" }] },
+      ],
+      nodes: [
+        { id: "start", kind: "start", column: "todo" },
+        {
+          id: "loop",
+          kind: "loop",
+          column: "todo",
+          config: {
+            maxIterations: 1,
+            exitWhen: { type: "output-contains", value: "done" },
+            template: {
+              nodes: [{ id: "inner", kind: "prompt" }],
+              edges: [],
+            },
+          },
+        },
+        { id: "end", kind: "end", column: "done" },
+      ],
+      edges: [
+        { from: "start", to: "loop" },
+        { from: "loop", to: "end", condition: "success" },
+      ],
+    };
+    const publishTaskProjection = vi.fn();
+    const executor = new WorkflowGraphExecutor({
+      handlers: {
+        prompt: async () => ({
+          outcome: "success",
+          value: "done",
+          contextPatch: { modifiedFiles: ["src/from-loop.ts"] },
+        }),
+      },
+      publishTaskProjection,
+    });
+
+    await executor.run(task, settingsOn(), ir);
+
+    expect(publishTaskProjection).toHaveBeenCalledWith(
+      task.id,
+      { modifiedFiles: ["src/from-loop.ts"] },
+      { nodeId: "inner", nodeKind: "prompt" },
+    );
+  });
+
+  it("does not retry an already-executed node when projection publishing fails", async () => {
+    const ir: WorkflowIr = {
+      version: "v1",
+      name: "projection-failure",
+      nodes: [
+        { id: "start", kind: "start" },
+        { id: "a", kind: "prompt" },
+        { id: "end", kind: "end" },
+      ],
+      edges: [
+        { from: "start", to: "a" },
+        { from: "a", to: "end", condition: "failure" },
+      ],
+    };
+    const handler = vi.fn(async () => ({
+      outcome: "success" as const,
+      contextPatch: { modifiedFiles: ["src/once.ts"] },
+    }));
+    const publishTaskProjection = vi.fn(async () => {
+      throw new Error("store unavailable");
+    });
+    const executor = new WorkflowGraphExecutor({
+      handlers: { prompt: handler },
+      maxRetriesPerNode: 3,
+      publishTaskProjection,
+    });
+
+    const result = await executor.run(task, settingsOn(), ir);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(publishTaskProjection).toHaveBeenCalledTimes(1);
+    expect(result.outcome).toBe("failure");
+    expect(result.context["node:a:projectionError"]).toBe("store unavailable");
+  });
+
+  it("does not fail the node when the deprecated touched-files hook fails", async () => {
+    const ir: WorkflowIr = {
+      version: "v1",
+      name: "legacy-touched-files-failure",
+      nodes: [
+        { id: "start", kind: "start" },
+        { id: "a", kind: "prompt" },
+        { id: "end", kind: "end" },
+      ],
+      edges: [
+        { from: "start", to: "a" },
+        { from: "a", to: "end", condition: "success" },
+      ],
+    };
+    const publishTaskProjection = vi.fn();
+    const publishTouchedFiles = vi.fn(async () => {
+      throw new Error("legacy sink unavailable");
+    });
+    const executor = new WorkflowGraphExecutor({
+      handlers: {
+        prompt: async () => ({
+          outcome: "success",
+          contextPatch: { modifiedFiles: ["src/projected.ts"] },
+        }),
+      },
+      publishTaskProjection,
+      publishTouchedFiles,
+    });
+
+    const result = await executor.run(task, settingsOn(), ir);
+
+    expect(publishTaskProjection).toHaveBeenCalledTimes(1);
+    expect(publishTouchedFiles).toHaveBeenCalledTimes(1);
+    expect(result.outcome).toBe("success");
+    expect(result.context["node:a:projectionError"]).toBeUndefined();
+  });
+
   it("caps retries and converts exceptions to failure", async () => {
     const ir: WorkflowIr = {
       version: "v1",
