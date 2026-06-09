@@ -40,14 +40,12 @@ export interface WorkflowNodeResult {
 
 export interface WorkflowTaskProjection {
   modifiedFiles?: string[];
-  mergeDetails?: Record<string, unknown>;
+  mergeDetails?: {
+    filesChanged?: number;
+    insertions?: number;
+    deletions?: number;
+  };
   summary?: string;
-  review?: Record<string, unknown>;
-  reviewState?: Record<string, unknown>;
-  workflowStepResults?: unknown[];
-  tokenUsage?: Record<string, unknown>;
-  error?: string | null;
-  status?: string | null;
 }
 
 export interface WorkflowNodeExecutionContext {
@@ -187,6 +185,12 @@ function objectRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+function finiteCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : undefined;
+}
+
 function extractTaskProjection(contextPatch: Record<string, unknown> | undefined): WorkflowTaskProjection {
   if (!contextPatch) return {};
   const patch: WorkflowTaskProjection = {};
@@ -194,21 +198,22 @@ function extractTaskProjection(contextPatch: Record<string, unknown> | undefined
   if (files.length > 0) patch.modifiedFiles = files;
 
   const mergeDetails = objectRecord(contextPatch.mergeDetails);
-  if (mergeDetails) patch.mergeDetails = mergeDetails;
-  if (typeof contextPatch.filesChanged === "number" && Number.isFinite(contextPatch.filesChanged)) {
-    patch.mergeDetails = { ...(patch.mergeDetails ?? {}), filesChanged: contextPatch.filesChanged };
+  const safeMergeDetails = {
+    filesChanged: finiteCount(contextPatch.filesChanged ?? mergeDetails?.filesChanged),
+    insertions: finiteCount(mergeDetails?.insertions),
+    deletions: finiteCount(mergeDetails?.deletions),
+  };
+  if (
+    safeMergeDetails.filesChanged !== undefined
+    || safeMergeDetails.insertions !== undefined
+    || safeMergeDetails.deletions !== undefined
+  ) {
+    patch.mergeDetails = Object.fromEntries(
+      Object.entries(safeMergeDetails).filter(([, value]) => value !== undefined),
+    ) as NonNullable<WorkflowTaskProjection["mergeDetails"]>;
   }
 
   if (typeof contextPatch.summary === "string") patch.summary = contextPatch.summary;
-  const review = objectRecord(contextPatch.review);
-  if (review) patch.review = review;
-  const reviewState = objectRecord(contextPatch.reviewState);
-  if (reviewState) patch.reviewState = reviewState;
-  if (Array.isArray(contextPatch.workflowStepResults)) patch.workflowStepResults = contextPatch.workflowStepResults;
-  const tokenUsage = objectRecord(contextPatch.tokenUsage);
-  if (tokenUsage) patch.tokenUsage = tokenUsage;
-  if (typeof contextPatch.error === "string" || contextPatch.error === null) patch.error = contextPatch.error;
-  if (typeof contextPatch.status === "string" || contextPatch.status === null) patch.status = contextPatch.status;
   return patch;
 }
 
@@ -681,15 +686,13 @@ export class WorkflowGraphExecutor {
       try {
         const pluginResult = await this.executePluginNodeHandler(node, task, workflow, context, signal);
         if (pluginResult) {
-          await this.publishTaskProjectionFromResult(task.id, node, pluginResult);
-          return pluginResult;
+          return await this.publishTaskProjectionFromResult(task.id, node, pluginResult);
         }
         if (!handler) {
           throw new WorkflowIrError(`No handler registered for node kind: ${node.kind}`);
         }
         const result = await handler(node, { task, settings, context, signal });
-        await this.publishTaskProjectionFromResult(task.id, node, result);
-        return result;
+        return await this.publishTaskProjectionFromResult(task.id, node, result);
       } catch (error) {
         lastError = error;
       }
@@ -708,13 +711,25 @@ export class WorkflowGraphExecutor {
     taskId: string,
     node: WorkflowIrNode,
     result: WorkflowNodeResult,
-  ): Promise<void> {
+  ): Promise<WorkflowNodeResult> {
     const patch = extractTaskProjection(result.contextPatch);
-    if (!hasTaskProjection(patch)) return;
+    if (!hasTaskProjection(patch)) return result;
     const source = { nodeId: node.id, nodeKind: node.kind };
-    await this.deps.publishTaskProjection?.(taskId, patch, source);
-    if (patch.modifiedFiles && patch.modifiedFiles.length > 0) {
-      await this.deps.publishTouchedFiles?.(taskId, patch.modifiedFiles, source);
+    try {
+      await this.deps.publishTaskProjection?.(taskId, patch, source);
+      if (patch.modifiedFiles && patch.modifiedFiles.length > 0) {
+        await this.deps.publishTouchedFiles?.(taskId, patch.modifiedFiles, source);
+      }
+    } catch (error) {
+      return {
+        outcome: "failure",
+        value: "projection-error",
+        contextPatch: {
+          ...(result.contextPatch ?? {}),
+          [`node:${node.id}:projectionError`]: error instanceof Error ? error.message : String(error),
+        },
+      };
     }
+    return result;
   }
 }

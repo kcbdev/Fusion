@@ -3759,15 +3759,9 @@ export class TaskExecutor {
             if (merged.length > 0) update.modifiedFiles = merged;
           }
           if (patch.mergeDetails) {
-            update.mergeDetails = { ...(liveTask?.mergeDetails ?? {}), ...patch.mergeDetails } as Task["mergeDetails"];
+            update.mergeDetails = { ...(liveTask?.mergeDetails ?? {}), ...patch.mergeDetails };
           }
           if (patch.summary !== undefined) update.summary = patch.summary;
-          if (patch.review !== undefined) update.review = patch.review as unknown as Task["review"];
-          if (patch.reviewState !== undefined) update.reviewState = patch.reviewState as unknown as Task["reviewState"];
-          if (patch.workflowStepResults !== undefined) update.workflowStepResults = patch.workflowStepResults as Task["workflowStepResults"];
-          if (patch.tokenUsage !== undefined) update.tokenUsage = patch.tokenUsage as unknown as Task["tokenUsage"];
-          if (patch.error !== undefined) update.error = patch.error;
-          if (patch.status !== undefined) update.status = patch.status;
           if (Object.keys(update).length > 0) {
             await this.store.updateTask(taskId, update);
           }
