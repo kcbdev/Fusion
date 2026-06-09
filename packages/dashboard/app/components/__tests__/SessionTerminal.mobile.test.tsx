@@ -44,7 +44,7 @@ class FakeWS {
     this.readyState = 3;
   }
 }
-(globalThis as unknown as { WebSocket: typeof FakeWS }).WebSocket = FakeWS;
+let originalWebSocket: typeof WebSocket | undefined;
 (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
   observe() {}
   disconnect() {}
@@ -89,6 +89,8 @@ async function renderMobile(props: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   FakeWS.instances = [];
+  originalWebSocket = (globalThis as typeof globalThis & { WebSocket?: typeof WebSocket }).WebSocket;
+  (globalThis as unknown as { WebSocket: typeof FakeWS }).WebSocket = FakeWS;
   mockTerm.onData.mockReset();
   mockTerm.write.mockClear();
   apiMock.mockReset();
@@ -98,6 +100,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  (globalThis as typeof globalThis & { WebSocket?: typeof WebSocket }).WebSocket = originalWebSocket;
   vi.clearAllMocks();
 });
 
