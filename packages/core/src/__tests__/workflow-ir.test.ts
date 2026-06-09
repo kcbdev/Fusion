@@ -232,6 +232,65 @@ describe("downgradeIrToV1IfPure — rollback compat (#1405)", () => {
   });
 });
 
+describe("parseWorkflowIr — notify nodes", () => {
+  const cols = [{ id: "c", name: "C", traits: [] }];
+
+  function notifyIr(config: Record<string, unknown> | undefined): WorkflowIrV2 {
+    return v2(
+      cols,
+      [
+        { id: "start", kind: "start", column: "c" },
+        { id: "notify", kind: "notify", column: "c", config },
+        { id: "end", kind: "end", column: "c" },
+      ],
+      [
+        { from: "start", to: "notify" },
+        { from: "notify", to: "end" },
+      ],
+    );
+  }
+
+  it("accepts a notify node with an event and optional templates", () => {
+    expect(() =>
+      parseWorkflowIr(
+        notifyIr({
+          event: "workflow-notify",
+          title: "{{taskTitle}}",
+          message: "Task {{taskId}} reached {{workflowName}}",
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it("accepts omitted message and title", () => {
+    expect(() => parseWorkflowIr(notifyIr({ event: "custom-event" }))).not.toThrow();
+  });
+
+  it("rejects a notify node missing its event", () => {
+    expect(() => parseWorkflowIr(notifyIr(undefined))).toThrow(
+      /notify node 'notify' must declare a non-empty event/,
+    );
+  });
+
+  it("rejects an empty notify event", () => {
+    expect(() => parseWorkflowIr(notifyIr({ event: "   " }))).toThrow(/non-empty event/);
+  });
+
+  it("rejects non-string optional templates", () => {
+    expect(() => parseWorkflowIr(notifyIr({ event: "workflow-notify", message: 42 }))).toThrow(
+      /message must be a string/,
+    );
+    expect(() => parseWorkflowIr(notifyIr({ event: "workflow-notify", title: false }))).toThrow(
+      /title must be a string/,
+    );
+  });
+
+  it("keeps v2 when a notify node is present", () => {
+    const parsed = parseWorkflowIr(notifyIr({ event: "workflow-notify" }));
+    expect(downgradeIrToV1IfPure(parsed).version).toBe("v2");
+  });
+});
+
 describe("parseWorkflowIr — hold release kinds", () => {
   const holdCols = [{ id: "c", name: "C", traits: [] }];
   function holdIr(release: unknown): WorkflowIrV2 {

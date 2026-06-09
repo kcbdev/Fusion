@@ -20,6 +20,7 @@ import {
 } from "@fusion/core";
 import { WorkflowGraphTaskRunner, type WorkflowGraphTaskRunResult } from "./workflow-graph-task-runner.js";
 import { createCodeNodeRunner } from "./code-node-runner.js";
+import { getActiveNotificationService } from "./notifier.js";
 import type { ParseStepsHandlerDeps, CodeNodeRunner } from "./workflow-node-handlers.js";
 import type { WorkflowBranchPersistence, WorkflowBranchRunState } from "./workflow-graph-branches.js";
 import type {
@@ -3786,6 +3787,7 @@ export class TaskExecutor {
         // Step-inversion (KTD-15, U14): code node runner — esbuild compile +
         // child-process execution with the harness contract.
         runCode: this.buildCodeNodeRunner(),
+        notifyDispatch: (event, payload) => getActiveNotificationService()?.dispatch(event, payload),
         // PR-entity nodes (U3): pr-create/pr-respond/pr-merge handler deps —
         // engine-owned store + CLI-injected GitHub callbacks. Absent → fail closed.
         prNodes: this.options.prNodes,

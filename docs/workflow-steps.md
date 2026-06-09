@@ -91,7 +91,7 @@ A v2 column can optionally name a **permanent agent** from the agent registry, s
 
 **Write-time validation.** Saving a workflow validates agent references: an unknown `agentId` is rejected with a typed 4xx naming the column. Binding an agent whose permission policy is broader than the project default requires an explicit policy-escalation confirmation (`confirmPolicyEscalation`) at save time, so override cannot silently re-key action gates to a more-privileged agent.
 
-### Workflow IR v2 — step inversion (foreach, loop, step-review, parse-steps, code)
+### Workflow IR v2 — step inversion (foreach, loop, step-review, parse-steps, code, notify)
 
 The **step-inversion** track makes task *steps* themselves workflow-modelable. Today the engine owns step policy end-to-end (PROMPT.md parsing, per-step review verdicts, RETHINK/REVISE control flow, merge blocking). Step inversion extracts exactly one new substrate capability — *run one step inside a task's session, and reset one step to its baseline* — and exposes everything else as authored graph structure. It is additive to IR v2 and gated by `experimentalFeatures.workflowGraphExecutor`. The default coding workflow is untouched and byte-identical (it keeps its monolithic `execute` seam and is the parity oracle); inversion is opt-in via custom workflows and a new built-in **stepwise coding workflow**.
 
@@ -154,6 +154,12 @@ Parallelism is opt-in *per step by the planner*, not asserted by the workflow au
 #### `code` node — sandboxed TypeScript
 
 `code` (`{ source, timeoutMs? }`, default 30s, cap 300s) runs inline TypeScript (compiled with esbuild, executed in a timeout-bounded child process with cwd = the task worktree) for logic no built-in node covers. The script default-exports `async (ctx) => result` where `ctx = { task, steps, customFields, context, artifacts: { read(key) }, instance? }` (`instance` present inside a foreach template). The returned `{ outcome?, value?, contextPatch?, customFields? }` routes `outcome:<value>` edges, merges `contextPatch` into walk context, and writes `customFields` through the validated field authority. It gets **no store handle**, cannot write the step list, and a throw/timeout/non-zero exit becomes an audited `failure`. Source compile errors are rejected at save time (a dashboard 400 listing the failing node ids). It runs at the same trust tier as existing project-local script steps.
+
+#### `notify` node — workflow-authored notifications
+
+`notify` (`{ event, title?, message? }`) dispatches a notification through Fusion's active notification service and then always continues on the normal success path. `event` may be one of the standard notification events (for example `in-review`, `merged`, or `failed`), the built-in workflow-authored event `workflow-notify`, or a provider-specific custom event string. `title` and `message` are optional templates; the engine interpolates `{{taskTitle}}`, `{{taskId}}`, `{{workflowName}}`, and `{{context:key}}` from the workflow walk context.
+
+Notification delivery is intentionally best-effort: a missing/unconfigured notification service, an empty `event`, or a provider delivery failure is logged/audited but does not fail the workflow node. Providers receive the rendered title/message in notification metadata so ntfy and webhook notifications can show workflow-specific copy. `workflow-notify` is **not** part of the default ntfy event allowlist; add it to `ntfyEvents` or the provider `events` filter when you want workflow-authored notifications delivered.
 
 #### Workflow-defined custom task fields
 
@@ -489,7 +495,7 @@ Workflow graph execution is the task lifecycle runtime. `TaskExecutor` pins `wor
 
 Default node dispatch:
 - `prompt` / `script` nodes with `config.seam` dispatch through workflow runtime primitives (`planning`, `execute`, `workflow-step`, `review`, `merge`, `schedule`, `step-execute`)
-- `step-review`, `parse-steps`, `code`, and PR nodes use their dedicated primitive/dependency adapters
+- `step-review`, `parse-steps`, `code`, `notify`, and PR nodes use their dedicated primitive/dependency adapters
 - `gate` nodes evaluate context-key expectations or run configured executable checks
 
 Traversal semantics:

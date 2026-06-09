@@ -15,7 +15,7 @@ import {
   type Edge as FlowEdge,
 } from "@xyflow/react";
 import { useTranslation } from "react-i18next";
-import { X, Plus, Trash2, Save, MessageSquare, Terminal, Shield, GitMerge, Loader2, HelpCircle, PauseCircle, Split, Merge, Repeat, ClipboardCheck, ListChecks, Code2, LayoutGrid, Workflow, Download, Upload, ChevronDown, ChevronRight, ChevronLeft, Library, Sparkles } from "lucide-react";
+import { X, Plus, Trash2, Save, MessageSquare, Terminal, Shield, GitMerge, Loader2, HelpCircle, PauseCircle, Split, Merge, Repeat, ClipboardCheck, ListChecks, Code2, Bell, LayoutGrid, Workflow, Download, Upload, ChevronDown, ChevronRight, ChevronLeft, Library, Sparkles } from "lucide-react";
 import type { WorkflowDefinition, WorkflowIrColumn, TraitViolation, WorkflowStepTemplate } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
 import {
@@ -189,6 +189,15 @@ const BUILTIN_STEP_PARSERS = ["step-headings", "json-steps"] as const;
 /** Step-review verdict outcomes (KTD-4), authored as `outcome:<verdict>` edge
  *  conditions and displayed as short labels. */
 const STEP_REVIEW_VERDICTS = ["approve", "revise", "rethink", "unavailable"] as const;
+const NOTIFY_EVENT_OPTIONS = [
+  "in-review",
+  "merged",
+  "failed",
+  "awaiting-approval",
+  "task-created",
+  "workflow-notify",
+] as const;
+const NOTIFY_CUSTOM_EVENT_VALUE = "__custom";
 
 const PALETTE: Array<{ kind: WorkflowEditorNodeKind; label: string; icon: typeof MessageSquare; presetConfig?: Record<string, unknown> }> = [
   { kind: "prompt", label: "Prompt", icon: MessageSquare },
@@ -205,6 +214,7 @@ const PALETTE: Array<{ kind: WorkflowEditorNodeKind; label: string; icon: typeof
   { kind: "step-review", label: "Step review", icon: ClipboardCheck, presetConfig: { type: "code" } },
   { kind: "parse-steps", label: "Parse steps", icon: ListChecks, presetConfig: { artifact: "PROMPT.md", parser: "step-headings" } },
   { kind: "code", label: "Code", icon: Code2, presetConfig: { source: "" } },
+  { kind: "notify", label: "Notify", icon: Bell, presetConfig: { event: "in-review", title: "{{taskTitle}}", message: "" } },
 ];
 
 /** Map a step template to a single pre-configured editor node (kind + config),
@@ -254,6 +264,7 @@ const USER_NODE_KINDS: ReadonlySet<WorkflowEditorNodeKind> = new Set<WorkflowEdi
   "loop",
   "step-review",
   "parse-steps",
+  "notify",
   "merge",
 ]);
 
@@ -3599,6 +3610,69 @@ function InnerEditor({
                     )}
                   </p>
                 </>
+              ) : null}
+
+              {selectedNode.data.kind === "notify" ? (
+                (() => {
+                  const eventValue = String(selectedNode.data.config?.event ?? "workflow-notify");
+                  const isCustom = !NOTIFY_EVENT_OPTIONS.includes(eventValue as typeof NOTIFY_EVENT_OPTIONS[number]);
+                  return (
+                    <>
+                      <label className="wf-field">
+                        <span>{t("workflowNodes.notifyEvent", "Event type")}</span>
+                        <select
+                          value={isCustom ? NOTIFY_CUSTOM_EVENT_VALUE : eventValue}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            updateSelectedData({
+                              config: {
+                                event: value === NOTIFY_CUSTOM_EVENT_VALUE ? "custom-event" : value,
+                              },
+                            });
+                          }}
+                        >
+                          {NOTIFY_EVENT_OPTIONS.map((event) => (
+                            <option key={event} value={event}>{event}</option>
+                          ))}
+                          <option value={NOTIFY_CUSTOM_EVENT_VALUE}>{t("workflowNodes.notifyCustom", "Custom")}</option>
+                        </select>
+                      </label>
+                      {isCustom ? (
+                        <label className="wf-field">
+                          <span>{t("workflowNodes.notifyCustomEvent", "Custom event")}</span>
+                          <input
+                            value={eventValue}
+                            placeholder="custom-event"
+                            onChange={(e) => updateSelectedData({ config: { event: e.target.value } })}
+                          />
+                        </label>
+                      ) : null}
+                      <label className="wf-field">
+                        <span>{t("workflowNodes.notifyTitle", "Title (optional)")}</span>
+                        <input
+                          value={String(selectedNode.data.config?.title ?? "{{taskTitle}}")}
+                          placeholder="{{taskTitle}}"
+                          onChange={(e) => updateSelectedData({ config: { title: e.target.value } })}
+                        />
+                      </label>
+                      <label className="wf-field">
+                        <span>{t("workflowNodes.notifyMessage", "Message (optional)")}</span>
+                        <textarea
+                          rows={4}
+                          value={String(selectedNode.data.config?.message ?? "")}
+                          placeholder="Task {{taskId}} reached {{workflowName}}"
+                          onChange={(e) => updateSelectedData({ config: { message: e.target.value } })}
+                        />
+                      </label>
+                      <p className="wf-inspector-note wf-inspector-note--info">
+                        {t(
+                          "workflowNodes.notifyNote",
+                          "Templates may use {{taskTitle}}, {{taskId}}, {{workflowName}}, and {{context:key}}.",
+                        )}
+                      </p>
+                    </>
+                  );
+                })()
               ) : null}
 
               {selectedNode.data.kind === "prompt" ||

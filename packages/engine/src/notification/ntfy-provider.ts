@@ -39,6 +39,7 @@ type SupportedNtfyEvent =
   | "planning-awaiting-input"
   | "fallback-used"
   | "task-created"
+  | "workflow-notify"
   | "message:agent-to-user"
   | "message:agent-to-agent"
   | "message:room"
@@ -53,6 +54,7 @@ const SUPPORTED_EVENTS = new Set<SupportedNtfyEvent>([
   "planning-awaiting-input",
   "fallback-used",
   "task-created",
+  "workflow-notify",
   "message:agent-to-user",
   "message:agent-to-agent",
   "message:room",
@@ -233,6 +235,15 @@ export class NtfyNotificationProvider implements NotificationProvider {
       "task-created": {
         title: `New task ${taskId} created by agent`,
         message: `${typeof payload.metadata?.agentName === "string" && payload.metadata.agentName.trim().length > 0 ? payload.metadata.agentName.trim() : "An agent"} created "${identifier}"`,
+        priority: "default",
+      },
+      "workflow-notify": {
+        title: typeof payload.metadata?.title === "string" && payload.metadata.title.trim().length > 0
+          ? payload.metadata.title.trim()
+          : `Workflow notification for ${taskId}`,
+        message: typeof payload.metadata?.message === "string" && payload.metadata.message.trim().length > 0
+          ? payload.metadata.message.trim()
+          : `Workflow notification for task "${identifier}"`,
         priority: "default",
       },
       "message:agent-to-user": {

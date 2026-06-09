@@ -752,6 +752,7 @@ describe("WorkflowNodeEditor — U8 step-inversion authoring", () => {
     expect(screen.getByText("Step review")).toBeInTheDocument();
     expect(screen.getByText("Parse steps")).toBeInTheDocument();
     expect(screen.getByText("Code")).toBeInTheDocument();
+    expect(screen.getByText("Notify")).toBeInTheDocument();
   });
 
   it("auto-populates a step-execute child when a foreach is added from the palette", async () => {
@@ -934,6 +935,64 @@ describe("WorkflowNodeEditor — U8 step-inversion authoring", () => {
     const timeout = screen.getByText("Timeout (ms)").parentElement!.querySelector("input")! as HTMLInputElement;
     fireEvent.change(timeout, { target: { value: "12000" } });
     expect(timeout.value).toBe("12000");
+  });
+
+  it("edits notify event, title, and message fields", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
+    vi.mocked(updateWorkflow).mockImplementation(async (_id, updates) => ({ ...v2Def(), ...(updates as object) }));
+    vi.mocked(compileWorkflow).mockResolvedValue({ steps: [] });
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    await screen.findByText("Save");
+    expect(await screen.findByTestId("wf-column-panel")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Notify").closest("button")!);
+    await waitFor(() => expect(screen.getByTestId("wf-node-notify")).toBeInTheDocument());
+
+    const eventSelect = (await screen.findByText("Event type")).parentElement!.querySelector("select")! as HTMLSelectElement;
+    expect(eventSelect.value).toBe("in-review");
+    fireEvent.change(eventSelect, { target: { value: "workflow-notify" } });
+    expect(eventSelect.value).toBe("workflow-notify");
+
+    const title = screen.getByText("Title (optional)").parentElement!.querySelector("input")! as HTMLInputElement;
+    fireEvent.change(title, { target: { value: "{{taskTitle}} done" } });
+    expect(title.value).toBe("{{taskTitle}} done");
+
+    const message = screen.getByText("Message (optional)").parentElement!.querySelector("textarea")! as HTMLTextAreaElement;
+    fireEvent.change(message, { target: { value: "Task {{taskId}} reached {{workflowName}}" } });
+    expect(message.value).toContain("{{workflowName}}");
+
+    fireEvent.click(screen.getByText("Save").closest("button")!);
+    await waitFor(() => expect(updateWorkflow).toHaveBeenCalled());
+    const [, updates] = vi.mocked(updateWorkflow).mock.calls[0];
+    const ir = (updates as { ir: { nodes: { kind: string; config?: Record<string, unknown> }[] } }).ir;
+    const notify = ir.nodes.find((n) => n.kind === "notify");
+    expect(notify?.config).toMatchObject({
+      event: "workflow-notify",
+      title: "{{taskTitle}} done",
+      message: "Task {{taskId}} reached {{workflowName}}",
+    });
+  });
+
+  it("toggles notify custom event input and preserves it across reselect", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    await screen.findByText("Save");
+    expect(await screen.findByTestId("wf-column-panel")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Notify").closest("button")!);
+    await waitFor(() => expect(screen.getByTestId("wf-node-notify")).toBeInTheDocument());
+
+    const eventSelect = (await screen.findByText("Event type")).parentElement!.querySelector("select")! as HTMLSelectElement;
+    fireEvent.change(eventSelect, { target: { value: "__custom" } });
+    const custom = (await screen.findByText("Custom event")).parentElement!.querySelector("input")! as HTMLInputElement;
+    expect(custom.value).toBe("custom-event");
+    fireEvent.change(custom, { target: { value: "deploy-finished" } });
+    expect(custom.value).toBe("deploy-finished");
+
+    fireEvent.click(screen.getByTestId("wf-node-start"));
+    await waitFor(() => expect(screen.queryByText("Custom event")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("wf-node-notify"));
+    const preserved = (await screen.findByText("Custom event")).parentElement!.querySelector("input")! as HTMLInputElement;
+    expect(preserved.value).toBe("deploy-finished");
   });
 });
 
@@ -1371,6 +1430,8 @@ describe("WorkflowNodeEditor — U4 create dialog / delete / inline rename / dir
   it("renames the workflow inline: click → input prefilled → Enter commits", async () => {
     vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
     render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    await screen.findByText("Save");
+    await waitFor(() => expect(screen.getAllByLabelText(/Column name/i).length).toBeGreaterThan(0));
     const nameBtn = await screen.findByTestId("wf-workflow-name");
     expect(nameBtn).toHaveTextContent("Custom");
     fireEvent.click(nameBtn);

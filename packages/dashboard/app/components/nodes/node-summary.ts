@@ -197,6 +197,11 @@ export function nodeConfigSummary(
       const source = firstLine(str(config.source));
       return source ? truncate(source, COMMAND_TRUNCATE) : t("workflowNodes.summaryCodeDefault", "TypeScript");
     }
+    case "notify": {
+      const event = str(config.event) || "workflow-notify";
+      const message = truncate(firstLine(str(config.message)), COMMAND_TRUNCATE);
+      return message ? `${event} · ${message}` : event;
+    }
     // No meaningful summary: structural/control nodes.
     case "start":
     case "end":

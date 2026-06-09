@@ -849,6 +849,24 @@ function validateCodeNodes(nodes: WorkflowIrNode[]): void {
   }
 }
 
+/** Validate workflow-authored notification node config. */
+function validateNotifyNodes(nodes: WorkflowIrNode[]): void {
+  for (const node of nodes) {
+    if (node.kind !== "notify") continue;
+    const cfg = node.config as { event?: unknown; message?: unknown; title?: unknown } | undefined;
+    const event = cfg?.event;
+    if (typeof event !== "string" || event.trim() === "") {
+      throw new WorkflowIrError(`notify node '${node.id}' must declare a non-empty event`);
+    }
+    if (cfg?.message !== undefined && typeof cfg.message !== "string") {
+      throw new WorkflowIrError(`notify node '${node.id}' message must be a string`);
+    }
+    if (cfg?.title !== undefined && typeof cfg.title !== "string") {
+      throw new WorkflowIrError(`notify node '${node.id}' title must be a string`);
+    }
+  }
+}
+
 /** Validate `fields` declarations (KTD-13). */
 function validateFields(fields: WorkflowFieldDefinition[] | undefined): void {
   if (fields === undefined) return;
@@ -1210,6 +1228,7 @@ function validateV2(ir: WorkflowIrV2): void {
   validateStepReviewRouting(ir.nodes, outgoing, nodesById, false);
   validateParseStepsNodes(ir);
   validateCodeNodes(ir.nodes);
+  validateNotifyNodes(ir.nodes);
   validateFields(ir.fields);
   validateSettings(ir.settings);
 

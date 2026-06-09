@@ -571,7 +571,8 @@ export type NtfyNotificationEvent =
   | "message:agent-to-agent"
   | "message:room"
   | "oauth-token-expired"
-  | "task-created";
+  | "task-created"
+  | "workflow-notify";
 
 /** Known notification event types. Providers may support additional custom events. */
 export const NOTIFICATION_EVENTS = [
@@ -592,6 +593,7 @@ export const NOTIFICATION_EVENTS = [
   "message:room",
   "oauth-token-expired",
   "task-created",
+  "workflow-notify",
 ] as const;
 
 /** Notification event type. Known events plus provider-specific custom events. */

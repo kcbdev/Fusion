@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Play, Flag, MessageSquare, Terminal, Shield, GitMerge, PauseCircle, Split, Merge, AlertTriangle, Repeat, ClipboardCheck, ListChecks, Code2 } from "lucide-react";
+import { Play, Flag, MessageSquare, Terminal, Shield, GitMerge, PauseCircle, Split, Merge, AlertTriangle, Repeat, ClipboardCheck, ListChecks, Code2, Bell } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { nodeConfigSummary } from "./node-summary";
 import { useWorkflowEditorCatalogs } from "./WorkflowEditorCatalogContext";
@@ -25,7 +25,8 @@ export type WorkflowEditorNodeKind =
   | "loop"
   | "step-review"
   | "parse-steps"
-  | "code";
+  | "code"
+  | "notify";
 
 export interface WorkflowFlowNodeData {
   kind: WorkflowEditorNodeKind;
@@ -62,6 +63,7 @@ const KIND_ICON: Record<WorkflowEditorNodeKind, typeof Play> = {
   "step-review": ClipboardCheck,
   "parse-steps": ListChecks,
   code: Code2,
+  notify: Bell,
 };
 
 /** Shared error-state component (U10): one component renders both the
@@ -205,4 +207,5 @@ export const workflowNodeTypes = {
   "step-review": ({ data }: NodeProps) => <NodeShell data={data as WorkflowFlowNodeData} kind="step-review" />,
   "parse-steps": ({ data }: NodeProps) => <NodeShell data={data as WorkflowFlowNodeData} kind="parse-steps" />,
   code: ({ data }: NodeProps) => <NodeShell data={data as WorkflowFlowNodeData} kind="code" />,
+  notify: ({ data }: NodeProps) => <NodeShell data={data as WorkflowFlowNodeData} kind="notify" />,
 };

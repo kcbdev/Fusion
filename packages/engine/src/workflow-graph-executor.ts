@@ -10,6 +10,7 @@ import {
   type CodeNodeRunner,
   type ForeachActiveContext,
   type ParseStepsHandlerDeps,
+  type WorkflowNotifyDispatch,
   type WorkflowCustomNodeRunner,
   type WorkflowLegacySeams,
 } from "./workflow-node-handlers.js";
@@ -74,6 +75,8 @@ export interface WorkflowGraphExecutorDeps {
   /** Step-inversion (U14, KTD-15): runner for the `code` node (esbuild compile +
    *  child-process execution). Absent → a code node fails cleanly. */
   runCode?: CodeNodeRunner;
+  /** notify node dispatch callback. Absent → notify nodes succeed with notify-skipped. */
+  notifyDispatch?: WorkflowNotifyDispatch;
   /** PR-entity nodes (U3): deps for `pr-create`/`pr-respond`/`pr-merge` (injected
    *  GitHub callbacks + store accessor). Absent → the pr-* kinds fail cleanly. */
   prNodes?: PrNodeDeps;
@@ -233,6 +236,7 @@ export class WorkflowGraphExecutor {
         primitives: deps.primitives,
         parseSteps: deps.parseStepsDeps,
         runCode: deps.runCode,
+        notifyDispatch: deps.notifyDispatch,
         prNodes: deps.prNodes,
       }),
       ...(deps.handlers ?? {}),

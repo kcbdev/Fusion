@@ -3,7 +3,8 @@
  *  step-inversion additions (FN step-inversion, KTD-3/4/12/15): `foreach`
  *  (runtime-expanding per-step template region), `step-review` (per-step review
  *  verdicts as outcome edges), `parse-steps` (graph-native step-list parsing),
- *  `code` (sandboxed TypeScript), and `loop` (bounded repeat-until region);
+ *  `code` (sandboxed TypeScript), `notify` (workflow-authored notifications),
+ *  and `loop` (bounded repeat-until region);
  *  and the unified PR-entity additions (U3):
  *  `pr-create` (open/reuse the PR + write the entity), `pr-respond` (the
  *  review-response run), and `pr-merge` (tool-side merge with expectedHeadOid). */
@@ -21,6 +22,7 @@ export type WorkflowIrNodeKind =
   | "step-review"
   | "parse-steps"
   | "code"
+  | "notify"
   | "pr-create"
   | "pr-respond"
   | "pr-merge";

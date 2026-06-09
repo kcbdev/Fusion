@@ -6,6 +6,7 @@ import type {
   CodeNodeRunner,
   ForeachActiveContext,
   ParseStepsHandlerDeps,
+  WorkflowNotifyDispatch,
   WorkflowCustomNodeRunner,
   WorkflowLegacySeams,
 } from "./workflow-node-handlers.js";
@@ -72,6 +73,8 @@ export interface WorkflowGraphTaskRunnerDeps {
   /** Step-inversion (U14, KTD-15): `code` node runner. Additive; a workflow with
    *  no code node never invokes it. */
   runCode?: CodeNodeRunner;
+  /** notify node dispatch callback. Additive; absent → notify nodes are skipped. */
+  notifyDispatch?: WorkflowNotifyDispatch;
   /** PR-entity nodes (U3): deps for `pr-create`/`pr-respond`/`pr-merge`. Additive;
    *  a workflow with no pr-* node never invokes them; absent → they fail closed. */
   prNodes?: PrNodeDeps;
@@ -224,6 +227,7 @@ export class WorkflowGraphTaskRunner {
         onReworkReset: this.deps.onReworkReset,
         parseStepsDeps: this.deps.parseStepsDeps,
         runCode: this.deps.runCode,
+        notifyDispatch: this.deps.notifyDispatch,
         prNodes: this.deps.prNodes,
         // Step-inversion (KTD-11, U10): worktree isolation + parallel scheduling.
         allocateInstanceWorktree: this.deps.allocateInstanceWorktree,

@@ -243,6 +243,43 @@ describe("workflow-flow-mapping v2 round-trip", () => {
     const { ir: out } = flowToIr("wf", nodes, edges, columnsOf(def));
     expect(out.version).toBe("v1");
   });
+
+  it("round-trips notify nodes as first-class editor nodes", () => {
+    const notifyIr: WorkflowDefinition["ir"] = {
+      version: "v2",
+      name: "notify-wf",
+      columns: [{ id: "todo", name: "Todo", traits: [] }],
+      nodes: [
+        { id: "start", kind: "start", column: "todo" },
+        {
+          id: "notify",
+          kind: "notify",
+          column: "todo",
+          config: { event: "workflow-notify", title: "{{taskTitle}}", message: "Task {{taskId}}" },
+        },
+        { id: "end", kind: "end", column: "todo" },
+      ],
+      edges: [
+        { from: "start", to: "notify", condition: "success" },
+        { from: "notify", to: "end", condition: "success" },
+      ],
+    };
+
+    const { nodes, edges } = irToFlow(v2Def(notifyIr));
+    const notifyNode = nodes.find((node) => node.id === "notify");
+    expect(notifyNode?.type).toBe("notify");
+    expect(notifyNode?.data.kind).toBe("notify");
+
+    const { ir: out } = flowToIr("notify-wf", nodes, edges, columnsOf(v2Def(notifyIr)));
+    expect(out.version).toBe("v2");
+    if (out.version !== "v2") return;
+    const roundTripped = out.nodes.find((node) => node.id === "notify");
+    expect(roundTripped).toMatchObject({
+      kind: "notify",
+      column: "todo",
+      config: { event: "workflow-notify", title: "{{taskTitle}}", message: "Task {{taskId}}" },
+    });
+  });
 });
 
 describe("workflow-flow-mapping validation helpers", () => {

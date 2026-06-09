@@ -1,8 +1,9 @@
 import { WorkflowIrError, getStepParser, instanceNodeId } from "@fusion/core";
-import type { TaskDetail, TaskStep, WorkflowIrNode } from "@fusion/core";
+import type { NotificationEvent, NotificationPayload, TaskDetail, TaskStep, WorkflowIrNode } from "@fusion/core";
 
 import type { WorkflowNodeHandler, WorkflowNodeResult } from "./workflow-graph-executor.js";
 import { createPrNodeHandlers, createAutoMergeGateHandler, type PrNodeDeps } from "./pr-nodes.js";
+import { schedulerLog } from "./logger.js";
 import {
   primitiveNodeContext,
   type WorkflowPrimitiveContext,
@@ -763,6 +764,92 @@ export function createCodeNodeHandler(runCode?: CodeNodeRunner): WorkflowNodeHan
   };
 }
 
+export type WorkflowNotifyDispatch = (
+  event: NotificationEvent,
+  payload: NotificationPayload,
+) => Promise<void> | void;
+
+function stringifyTemplateValue(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function interpolateNotifyTemplate(
+  template: string,
+  vars: {
+    taskId: string;
+    taskTitle: string;
+    workflowName: string;
+    context: Record<string, unknown>;
+  },
+): string {
+  return template.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_match, rawName: string) => {
+    const name = rawName.trim();
+    if (name === "taskId") return vars.taskId;
+    if (name === "taskTitle") return vars.taskTitle;
+    if (name === "workflowName") return vars.workflowName;
+    if (name.startsWith("context:")) {
+      return stringifyTemplateValue(vars.context[name.slice("context:".length)]);
+    }
+    return `{{${rawName}}}`;
+  });
+}
+
+export function createNotifyHandler(notifyDispatch?: WorkflowNotifyDispatch): WorkflowNodeHandler {
+  return async (node, ctx) => {
+    const cfg = (node.config ?? {}) as { event?: unknown; message?: unknown; title?: unknown };
+    const event = typeof cfg.event === "string" ? cfg.event.trim() : "";
+    if (!event) {
+      schedulerLog.log(`Workflow notify node '${node.id}' skipped because it has no event`);
+      return { outcome: "success", value: "notify-skipped" };
+    }
+    if (!notifyDispatch) {
+      schedulerLog.log(`Workflow notify node '${node.id}' skipped because notification dispatch is unwired`);
+      return { outcome: "success", value: "notify-skipped" };
+    }
+
+    const taskTitle = typeof ctx.task.title === "string" && ctx.task.title.trim() !== ""
+      ? ctx.task.title
+      : ctx.task.id;
+    const workflowName = typeof ctx.context[WORKFLOW_ID_CONTEXT_KEY] === "string"
+      ? ctx.context[WORKFLOW_ID_CONTEXT_KEY]
+      : "unknown";
+    const vars = { taskId: ctx.task.id, taskTitle, workflowName, context: ctx.context };
+    const title = typeof cfg.title === "string" ? interpolateNotifyTemplate(cfg.title, vars) : taskTitle;
+    const message = typeof cfg.message === "string" ? interpolateNotifyTemplate(cfg.message, vars) : "";
+    const payload: NotificationPayload = {
+      taskId: ctx.task.id,
+      taskTitle,
+      taskDescription: ctx.task.description,
+      event,
+      timestamp: new Date().toISOString(),
+      metadata: {
+        nodeId: node.id,
+        workflowName,
+        title,
+        message,
+      },
+    };
+
+    try {
+      await notifyDispatch(event, payload);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      schedulerLog.log(`Workflow notify node '${node.id}' dispatch failed for event=${event}: ${detail}`);
+    }
+
+    return { outcome: "success" };
+  };
+}
+
 export interface DefaultNodeHandlerDeps {
   /** Workflow-native runtime primitives. When present they replace legacy seams. */
   primitives?: WorkflowRuntimePrimitives;
@@ -770,6 +857,8 @@ export interface DefaultNodeHandlerDeps {
   parseSteps?: ParseStepsHandlerDeps;
   /** code node runner (U14). When absent, a code node fails cleanly. */
   runCode?: CodeNodeRunner;
+  /** notify node dispatch callback. When absent, notify nodes succeed with notify-skipped. */
+  notifyDispatch?: WorkflowNotifyDispatch;
   /** PR node deps (U3). When absent, the three pr-* kinds fail cleanly. */
   prNodes?: PrNodeDeps;
 }
@@ -785,6 +874,7 @@ export function createDefaultNodeHandlers(
   | "step-review"
   | "parse-steps"
   | "code"
+  | "notify"
   | "pr-create"
   | "pr-respond"
   | "pr-merge",
@@ -827,6 +917,7 @@ export function createDefaultNodeHandlers(
       : createStepReviewHandler(seams),
     "parse-steps": parseSteps,
     code: createCodeNodeHandler(deps?.runCode),
+    notify: createNotifyHandler(deps?.notifyDispatch),
     ...prNodes,
   };
 }
