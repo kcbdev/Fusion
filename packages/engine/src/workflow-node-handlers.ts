@@ -319,7 +319,7 @@ export function createPrimitivePromptLikeHandler(
         const prepared = await primitives.prepareWorktree(primitiveCtx, context.task);
         if (prepared.outcome !== "success" || !prepared.data) {
           return {
-            outcome: prepared.outcome,
+            outcome: prepared.outcome === "success" ? "failure" : prepared.outcome,
             value: prepared.value ?? "prepare-worktree-failed",
             contextPatch: prepared.contextPatch,
           };

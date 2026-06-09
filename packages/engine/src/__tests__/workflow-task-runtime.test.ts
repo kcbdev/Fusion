@@ -29,7 +29,9 @@ function selectedIr(): WorkflowIr {
 
 function recordingPrimitives(
   calls: string[],
-  overrides: Partial<Record<"prepare" | "execute" | "workflowStep", WorkflowNodeResult>> = {},
+  overrides: Partial<Record<"prepare" | "execute" | "workflowStep", WorkflowNodeResult>> & {
+    prepareData?: PreparedWorktree | null;
+  } = {},
   observed: { prepared?: PreparedWorktree } = {},
 ): WorkflowRuntimePrimitives {
   const prepared: PreparedWorktree = { worktreePath: "/tmp/fusion-worktree" };
@@ -40,7 +42,11 @@ function recordingPrimitives(
         outcome: overrides.prepare?.outcome ?? "success",
         value: overrides.prepare?.value,
         contextPatch: overrides.prepare?.contextPatch,
-        data: overrides.prepare?.outcome === "failure" ? undefined : prepared,
+        data: overrides.prepare?.outcome === "failure"
+          ? undefined
+          : overrides.prepareData === null
+            ? undefined
+            : overrides.prepareData ?? prepared,
       };
     },
     readArtifact: async () => undefined,
@@ -143,6 +149,30 @@ describe("WorkflowTaskRuntime", () => {
     expect(result.context.preparedKey).toBe("from-prepare");
     expect(result.context.executeKey).toBe("from-execute");
     expect(workflowSelectionReads).toBe(1);
+  });
+
+  it("fails execute instead of skipping coding when prepare succeeds without worktree data", async () => {
+    const calls: string[] = [];
+    const runtime = new WorkflowTaskRuntime({
+      store: {
+        getTaskWorkflowSelection: () => ({ workflowId: "WF-001", stepIds: [] }),
+        getWorkflowDefinition: async () => ({ ir: selectedIr() }),
+      },
+      primitives: recordingPrimitives(calls, {
+        prepare: { outcome: "success", value: "prepared-without-data" },
+        prepareData: null,
+      }),
+      runCustomNode: async (node) => {
+        calls.push(`custom:${node.id}`);
+        return { outcome: "success" };
+      },
+    });
+
+    const result = await runtime.run(task, flagOff);
+
+    expect(result.disposition).toBe("failed");
+    expect(calls).toEqual(["custom:prepare", "prepare-worktree"]);
+    expect(result.visitedNodeIds).toEqual(["start", "prepare", "execute"]);
   });
 
   it("resolves an unselected task to the built-in coding workflow instead of falling back", async () => {
