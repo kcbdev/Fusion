@@ -103,6 +103,72 @@ describe("WorkflowNodeEditor mobile CSS contract", () => {
     expect(collapsedToggleRule).toMatch(/bottom\s*:\s*var\(--space-sm\)\s*;/);
   });
 
+  it("FN-6034 keeps the desktop graph canvas shrinkable without removing the modal minimum", () => {
+    const baseCss = loadAllAppCssBaseOnly();
+
+    const desktopModalRule = findRule([baseCss], /\.wf-editor-modal\s*\{[^}]*\}/);
+    expect(desktopModalRule).toMatch(/min-width\s*:\s*640px\s*;/);
+
+    const bodyRule = findRule([baseCss], /\.wf-editor-body\s*\{[^}]*\}/);
+    expect(bodyRule).toMatch(/min-width\s*:\s*0\s*;/);
+
+    const canvasWrapRule = findRule([baseCss], /\.wf-editor-canvas-wrap\s*\{[^}]*\}/);
+    expect(canvasWrapRule).toMatch(/min-width\s*:\s*0\s*;/);
+
+    const canvasRule = findRule([baseCss], /\.wf-editor-canvas\s*\{[^}]*\}/);
+    expect(canvasRule).toMatch(/min-width\s*:\s*0\s*;/);
+    expect(canvasRule).toMatch(/width\s*:\s*100%\s*;/);
+    expect(canvasRule).toMatch(/overflow\s*:\s*hidden\s*;/);
+  });
+
+  it("FN-6034 makes the mobile React Flow surface fill the editor stage without horizontal overflow", () => {
+    const editorCss = readComponentCss("WorkflowNodeEditor.css");
+    const mobileBlocks = extractMediaBlocks(editorCss, "(max-width: 768px)");
+
+    const editorBodyRule = findRule(mobileBlocks, /\.wf-editor-body\s*\{[^}]*\}/);
+    expect(editorBodyRule).toMatch(/width\s*:\s*100%\s*;/);
+    expect(editorBodyRule).toMatch(/min-width\s*:\s*0\s*;/);
+    expect(editorBodyRule).toMatch(/overflow-x\s*:\s*hidden\s*;/);
+
+    const editorStageWrapRule = findRule(mobileBlocks, /\.wf-editor-body--editor-stage \.wf-editor-canvas-wrap\s*\{[^}]*\}/);
+    expect(editorStageWrapRule).toMatch(/width\s*:\s*100%\s*;/);
+    expect(editorStageWrapRule).toMatch(/min-width\s*:\s*0\s*;/);
+    expect(editorStageWrapRule).toMatch(/overflow\s*:\s*hidden\s*;/);
+
+    const canvasRule = findRule(mobileBlocks, /\.wf-editor-canvas\s*\{[^}]*\}/);
+    expect(canvasRule).toMatch(/width\s*:\s*100%\s*;/);
+    expect(canvasRule).toMatch(/min-width\s*:\s*0\s*;/);
+    expect(canvasRule).toMatch(/max-width\s*:\s*100%\s*;/);
+    expect(canvasRule).toMatch(/overflow\s*:\s*hidden\s*;/);
+
+    const reactFlowSurfaceRule = findRule(
+      mobileBlocks,
+      /\.wf-editor-canvas \.react-flow,\s*\.wf-editor-canvas \.react-flow__renderer,\s*\.wf-editor-canvas \.react-flow__pane,\s*\.wf-editor-canvas \.react-flow__viewport\s*\{[^}]*\}/,
+    );
+    expect(reactFlowSurfaceRule).toMatch(/width\s*:\s*100%\s*;/);
+    expect(reactFlowSurfaceRule).toMatch(/min-width\s*:\s*0\s*;/);
+    expect(reactFlowSurfaceRule).toMatch(/max-width\s*:\s*100%\s*;/);
+  });
+
+  it("FN-6034 preserves mobile staged editor visibility and inspector stacking", () => {
+    const editorCss = readComponentCss("WorkflowNodeEditor.css");
+    const mobileBlocks = extractMediaBlocks(editorCss, "(max-width: 768px)");
+
+    const listStageHiddenRule = findRule(
+      mobileBlocks,
+      /\.wf-editor-body--list-stage \.wf-editor-canvas-wrap,\s*\.wf-editor-body--list-stage \.wf-editor-inspector\s*\{[^}]*\}/,
+    );
+    expect(listStageHiddenRule).toMatch(/display\s*:\s*none\s*;/);
+
+    const editorStageSidebarRule = findRule(mobileBlocks, /\.wf-editor-body--editor-stage \.wf-editor-sidebar\s*\{[^}]*\}/);
+    expect(editorStageSidebarRule).toMatch(/display\s*:\s*none\s*;/);
+
+    const inspectorRule = findRule(mobileBlocks, /\.wf-editor-body--editor-stage \.wf-editor-inspector\s*\{[^}]*\}/);
+    expect(inspectorRule).toMatch(/width\s*:\s*100%\s*;/);
+    expect(inspectorRule).toMatch(/min-width\s*:\s*0\s*;/);
+    expect(inspectorRule).toMatch(/border-top\s*:\s*1px solid var\(--border\)\s*;/);
+  });
+
   it("FN-6033 keeps workflow editor touch target increases mobile-scoped", () => {
     const baseCss = loadAllAppCssBaseOnly();
     const editorCss = readComponentCss("WorkflowNodeEditor.css");

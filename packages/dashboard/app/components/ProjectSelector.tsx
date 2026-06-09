@@ -23,6 +23,8 @@ export interface ProjectSelectorProps {
   onSelect?: (project: ProjectInfo) => void;
   onViewAll: () => void;
   recentProjectIds?: string[];
+  allowSingleProject?: boolean;
+  viewAllLabel?: string;
 }
 
 /**
@@ -77,6 +79,8 @@ export function ProjectSelector({
   onSelect,
   onViewAll,
   recentProjectIds = [],
+  allowSingleProject = false,
+  viewAllLabel,
 }: ProjectSelectorProps) {
   const { t } = useTranslation("app");
   const [isOpen, setIsOpen] = useState(false);
@@ -369,8 +373,9 @@ export function ProjectSelector({
     );
   };
 
-  // Don't render if only one project (single-project mode)
-  if (projects.length <= 1) {
+  // Standalone project switching stays hidden in single/no-project contexts unless
+  // a host uses the trigger as an explicit Manage Projects affordance.
+  if (!allowSingleProject && projects.length <= 1) {
     return null;
   }
 
@@ -384,11 +389,12 @@ export function ProjectSelector({
         aria-expanded={isOpen}
         aria-haspopup="listbox"
         aria-label={t("projectSelector.ariaLabel", "Select project")}
+        title={currentProject?.name ? t("projectSelector.switchProjectTitle", "Switch project (current: {{name}})", { name: currentProject.name }) : t("projectSelector.projectsTitle", "Projects")}
         data-testid="project-selector-trigger"
       >
         <Folder size={16} className="project-selector__trigger-icon" />
         <span className="project-selector__trigger-text">
-          {currentProject?.name || t("projectSelector.selectProject", "Select Project")}
+          {currentProject?.name || t("projectSelector.projects", "Projects")}
         </span>
         <ChevronDown
           size={14}
@@ -583,9 +589,10 @@ export function ProjectSelector({
                 highlightedIndex === totalItems - 1 ? "highlighted" : ""
               }`}
               onClick={handleViewAll}
+              data-testid="manage-projects-action"
             >
               <Grid3X3 size={14} />
-              <span>{t("projectSelector.viewAll", "View All Projects")}</span>
+              <span>{viewAllLabel ?? t("projectSelector.viewAll", "View All Projects")}</span>
             </button>
           </div>
         </div>
