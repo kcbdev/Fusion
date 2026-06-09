@@ -422,12 +422,12 @@ Tasks are not parked in `in-review` for this remediable path unless additional t
 
 ## Workflow Interpreter Dual-Observe (parity instrumentation)
 
-Fusion now includes a **default-OFF** experimental parity seam for the workflow interpreter rollout.
+Fusion now enables the workflow interpreter parity seam by default as part of the workflow rollout.
 
-- **Flag:** `experimentalFeatures.workflowInterpreterDualObserve`
-- **Mode:** observe-only shadow run; legacy executor/reviewer/merger/scheduler path remains authoritative
-- **Behavior when OFF (default):** strict no-op (no shadow run, no parity audit records)
-- **Behavior when ON:** compare legacy and interpreter observations plus comparable run-audit slices
+- **Flag:** `experimentalFeatures.workflowInterpreterDualObserve` (default ON)
+- **Mode:** observe-only shadow run; legacy executor/reviewer/merger/scheduler path remains authoritative unless the authoritative cutover guard passes
+- **Behavior when OFF:** strict no-op (no shadow run, no parity audit records)
+- **Behavior when ON (default):** compare legacy and interpreter observations plus comparable run-audit slices
 
 Run-audit events emitted in `database` domain:
 

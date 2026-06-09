@@ -39,9 +39,7 @@ for (const flag of flagStates) {
     beforeEach(async () => {
       await harness.beforeEach();
       store = harness.store();
-      if (flag.workflowColumns) {
-        await store.updateGlobalSettings({ experimentalFeatures: { workflowColumns: true } });
-      }
+      await store.updateGlobalSettings({ experimentalFeatures: { workflowColumns: flag.workflowColumns } });
     });
 
     afterEach(async () => {

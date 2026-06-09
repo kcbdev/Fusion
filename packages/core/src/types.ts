@@ -3077,7 +3077,9 @@ export interface GlobalSettings {
    *    "another-experiment": false
    *  }
    *
-   *  Default: {} (empty object — no experimental features enabled). */
+   *  Default: workflow columns, graph executor, dual-observe, and authoritative
+   *  interpreter flags enabled; operators may explicitly set individual flags
+   *  false while rollout controls remain available. */
   experimentalFeatures?: Record<string, boolean>;
   /** Per-adapter CLI-agent launch configuration (CLI Agent Executor, U15).
    *  Keyed by adapter id (e.g. `"claude-code"`, `"codex"`, `"generic"`). Each
