@@ -262,6 +262,10 @@ function mockMobileViewport() {
 }
 
 const QUICK_ENTRY_ACTION_BUTTONS = [
+  ["Save", "quick-entry-save"],
+  ["Fast", "quick-entry-fast-toggle"],
+  ["GitHub", "quick-entry-github-toggle"],
+  ["Priority", "quick-entry-priority-button"],
   ["Plan", "plan-button"],
   ["Subtask", "subtask-button"],
   ["Refine", "refine-button"],
@@ -270,10 +274,6 @@ const QUICK_ENTRY_ACTION_BUTTONS = [
   ["Models", "quick-entry-models"],
   ["Node", "quick-entry-node-button"],
   ["Agent", "quick-entry-agent-button"],
-  ["Priority", "quick-entry-priority-button"],
-  ["Fast", "quick-entry-fast-toggle"],
-  ["GitHub", "quick-entry-github-toggle"],
-  ["Save", "quick-entry-save"],
 ] as const;
 
 describe("QuickEntryBox", () => {
@@ -366,15 +366,14 @@ describe("QuickEntryBox", () => {
       ["Priority", "quick-entry-priority-button"],
     ] as const;
 
-    const allActionButtons = [
-      ["Plan", "plan-button"],
-      ["Subtask", "subtask-button"],
-      ["Refine", "refine-button"],
-      ...newlyCoveredActionButtons,
-      ["Fast", "quick-entry-fast-toggle"],
-      ["GitHub", "quick-entry-github-toggle"],
-      ["Save", "quick-entry-save"],
-    ] as const;
+    const allActionButtons = QUICK_ENTRY_ACTION_BUTTONS;
+    const actionButtonsWithSaveLast = [...allActionButtons.slice(1), allActionButtons[0]];
+
+    function getActionButtonTestIdsInDomOrder() {
+      const actionsContainer = screen.getByTestId("quick-entry-actions");
+      return Array.from(actionsContainer.querySelectorAll<HTMLButtonElement>("button[data-testid]"))
+        .map((button) => button.dataset.testid);
+    }
 
     function focusTextareaWithValue(value: string) {
       const textarea = screen.getByTestId("quick-entry-input") as HTMLTextAreaElement;
@@ -414,6 +413,20 @@ describe("QuickEntryBox", () => {
       });
     });
 
+    it("Save button is the first action button in DOM order", () => {
+      renderQuickEntryBox({});
+      expandQuickEntry();
+
+      expect(getActionButtonTestIdsInDomOrder()[0]).toBe("quick-entry-save");
+    });
+
+    it("action buttons appear in correct DOM order after reorder", () => {
+      renderQuickEntryBox({});
+      expandQuickEntry();
+
+      expect(getActionButtonTestIdsInDomOrder()).toEqual(allActionButtons.map(([_label, testId]) => testId));
+    });
+
     it("keeps textarea focused for every quick-entry action button", async () => {
       mockDesktopViewport();
       vi.mocked(fetchSettings).mockResolvedValueOnce({
@@ -427,7 +440,7 @@ describe("QuickEntryBox", () => {
       });
 
       const actionsContainer = screen.getByTestId("quick-entry-actions");
-      for (const [_label, testId] of allActionButtons) {
+      for (const [_label, testId] of actionButtonsWithSaveLast) {
         const textarea = focusTextareaWithValue(`Focus preserved for ${testId}`);
         const button = screen.getByTestId(testId);
         expect(actionsContainer.contains(button)).toBe(true);
@@ -524,8 +537,12 @@ describe("QuickEntryBox", () => {
       const actionsContainer = screen.getByTestId("quick-entry-actions");
       const buttons = Array.from(actionsContainer.querySelectorAll("button"));
       expect(buttons).toHaveLength(QUICK_ENTRY_ACTION_BUTTONS.length);
+      const buttonsWithSaveLast = [
+        ...buttons.filter((button) => button.dataset.testid !== "quick-entry-save"),
+        ...buttons.filter((button) => button.dataset.testid === "quick-entry-save"),
+      ];
 
-      for (const button of buttons) {
+      for (const button of buttonsWithSaveLast) {
         const textarea = focusTextareaWithValue(`Full mobile surface focus for ${button.dataset.testid ?? button.textContent}`);
         await touchActionButton(button);
         expect(document.activeElement).toBe(textarea);

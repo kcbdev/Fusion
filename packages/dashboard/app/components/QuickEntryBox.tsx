@@ -1509,6 +1509,119 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
           >
             <button
               type="button"
+              className="btn btn-task-create btn-sm"
+              onClick={handleSaveClick}
+              onMouseDown={(e) => e.preventDefault()}
+              disabled={!description.trim() || isSubmitting}
+              data-testid="quick-entry-save"
+              title={t("tasks.createTaskTitle", "Create task")}
+            >
+              <Save size={12} style={{ verticalAlign: "middle", marginRight: 4 }} />
+              {t("tasks.save", "Save")}
+            </button>
+
+            <button
+              type="button"
+              className={`btn btn-sm ${isFastMode ? "btn-primary" : ""}`}
+              onClick={() => setIsFastMode((prev) => !prev)}
+              onMouseDown={(e) => e.preventDefault()}
+              aria-pressed={isFastMode}
+              data-testid="quick-entry-fast-toggle"
+              title={t("tasks.toggleFastMode", "Toggle fast execution mode")}
+            >
+              {t("tasks.fast", "Fast")}
+            </button>
+
+            <button
+              type="button"
+              className={`btn btn-sm ${githubTrackingProjectEnabled && effectiveGithubTracking ? "btn-primary" : ""}`}
+              onClick={() => {
+                if (!githubTrackingProjectEnabled) {
+                  return;
+                }
+                setGithubTrackingOverride((prev) => (prev ?? true) ? false : true);
+              }}
+              onMouseDown={(e) => e.preventDefault()}
+              disabled={!githubTrackingProjectEnabled}
+              aria-pressed={effectiveGithubTracking}
+              aria-disabled={!githubTrackingProjectEnabled || undefined}
+              data-testid="quick-entry-github-toggle"
+              title={githubToggleLabel}
+              aria-label={githubToggleLabel}
+            >
+              <ProviderIcon provider="github" size="sm" />
+            </button>
+
+            <div className="priority-trigger-wrap" ref={priorityPickerRef}>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                className="btn btn-sm dep-trigger"
+                data-testid="quick-entry-priority-button"
+                onClick={() => {
+                  setShowDeps(false);
+                  setShowAgentPicker(false);
+                  setAgentPickerPosition(null);
+                  setShowNodePicker(false);
+                  setNodePickerPosition(null);
+                  setIsModelMenuOpen(false);
+                  setModelMenuPosition(null);
+                  setActiveModelSubmenu(null);
+                  setShowPriorityPicker((prev) => {
+                    const next = !prev;
+                    if (next) {
+                      updatePriorityPickerPosition();
+                    } else {
+                      setPriorityPickerPosition(null);
+                    }
+                    return next;
+                  });
+                }}
+              >
+                <Flag size={12} style={{ verticalAlign: "middle" }} />
+                {` ${priority[0].toUpperCase()}${priority.slice(1)}`}
+              </button>
+            </div>
+
+            {showPriorityPicker && portalRoot && priorityPickerPosition && createPortal(
+              <div
+                ref={priorityPickerPortalRef}
+                className="dep-dropdown priority-picker-dropdown priority-picker-dropdown--portal"
+                onMouseDown={(e) => e.preventDefault()}
+                style={{
+                  position: "fixed",
+                  top: `${priorityPickerPosition.top}px`,
+                  left: `${priorityPickerPosition.left}px`,
+                  width: `${priorityPickerPosition.width}px`,
+                  maxHeight: priorityPickerPosition.maxHeight ? `${priorityPickerPosition.maxHeight}px` : undefined,
+                  overflowY: priorityPickerPosition.maxHeight ? "auto" : undefined,
+                }}
+              >
+                <div className="dep-dropdown-search-header">{t("tasks.selectPriority", "Select priority")}</div>
+                {TASK_PRIORITIES.map((taskPriority) => {
+                  const label = `${taskPriority[0].toUpperCase()}${taskPriority.slice(1)}`;
+                  return (
+                    <div
+                      key={taskPriority}
+                      className={`dep-dropdown-item${priority === taskPriority ? " selected" : ""}`}
+                      data-testid={`quick-entry-priority-option-${taskPriority}`}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setPriority(taskPriority);
+                        setShowPriorityPicker(false);
+                        setPriorityPickerPosition(null);
+                      }}
+                    >
+                      <span className="dep-dropdown-title">{label}</span>
+                    </div>
+                  );
+                })}
+              </div>,
+              portalRoot,
+            )}
+
+            <button
+              type="button"
               className="btn btn-sm"
               onClick={handlePlanClick}
               onMouseDown={(e) => e.preventDefault()}
@@ -1893,118 +2006,6 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
               portalRoot,
             )}
 
-            <div className="priority-trigger-wrap" ref={priorityPickerRef}>
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                className="btn btn-sm dep-trigger"
-                data-testid="quick-entry-priority-button"
-                onClick={() => {
-                  setShowDeps(false);
-                  setShowAgentPicker(false);
-                  setAgentPickerPosition(null);
-                  setShowNodePicker(false);
-                  setNodePickerPosition(null);
-                  setIsModelMenuOpen(false);
-                  setModelMenuPosition(null);
-                  setActiveModelSubmenu(null);
-                  setShowPriorityPicker((prev) => {
-                    const next = !prev;
-                    if (next) {
-                      updatePriorityPickerPosition();
-                    } else {
-                      setPriorityPickerPosition(null);
-                    }
-                    return next;
-                  });
-                }}
-              >
-                <Flag size={12} style={{ verticalAlign: "middle" }} />
-                {` ${priority[0].toUpperCase()}${priority.slice(1)}`}
-              </button>
-            </div>
-
-            {showPriorityPicker && portalRoot && priorityPickerPosition && createPortal(
-              <div
-                ref={priorityPickerPortalRef}
-                className="dep-dropdown priority-picker-dropdown priority-picker-dropdown--portal"
-                onMouseDown={(e) => e.preventDefault()}
-                style={{
-                  position: "fixed",
-                  top: `${priorityPickerPosition.top}px`,
-                  left: `${priorityPickerPosition.left}px`,
-                  width: `${priorityPickerPosition.width}px`,
-                  maxHeight: priorityPickerPosition.maxHeight ? `${priorityPickerPosition.maxHeight}px` : undefined,
-                  overflowY: priorityPickerPosition.maxHeight ? "auto" : undefined,
-                }}
-              >
-                <div className="dep-dropdown-search-header">{t("tasks.selectPriority", "Select priority")}</div>
-                {TASK_PRIORITIES.map((taskPriority) => {
-                  const label = `${taskPriority[0].toUpperCase()}${taskPriority.slice(1)}`;
-                  return (
-                    <div
-                      key={taskPriority}
-                      className={`dep-dropdown-item${priority === taskPriority ? " selected" : ""}`}
-                      data-testid={`quick-entry-priority-option-${taskPriority}`}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        setPriority(taskPriority);
-                        setShowPriorityPicker(false);
-                        setPriorityPickerPosition(null);
-                      }}
-                    >
-                      <span className="dep-dropdown-title">{label}</span>
-                    </div>
-                  );
-                })}
-              </div>,
-              portalRoot,
-            )}
-
-            <button
-              type="button"
-              className={`btn btn-sm ${isFastMode ? "btn-primary" : ""}`}
-              onClick={() => setIsFastMode((prev) => !prev)}
-              onMouseDown={(e) => e.preventDefault()}
-              aria-pressed={isFastMode}
-              data-testid="quick-entry-fast-toggle"
-              title={t("tasks.toggleFastMode", "Toggle fast execution mode")}
-            >
-              {t("tasks.fast", "Fast")}
-            </button>
-
-            <button
-              type="button"
-              className={`btn btn-sm ${githubTrackingProjectEnabled && effectiveGithubTracking ? "btn-primary" : ""}`}
-              onClick={() => {
-                if (!githubTrackingProjectEnabled) {
-                  return;
-                }
-                setGithubTrackingOverride((prev) => (prev ?? true) ? false : true);
-              }}
-              onMouseDown={(e) => e.preventDefault()}
-              disabled={!githubTrackingProjectEnabled}
-              aria-pressed={effectiveGithubTracking}
-              aria-disabled={!githubTrackingProjectEnabled || undefined}
-              data-testid="quick-entry-github-toggle"
-              title={githubToggleLabel}
-              aria-label={githubToggleLabel}
-            >
-              <ProviderIcon provider="github" size="sm" />
-            </button>
-
-            <button
-              type="button"
-              className="btn btn-task-create btn-sm"
-              onClick={handleSaveClick}
-              onMouseDown={(e) => e.preventDefault()}
-              disabled={!description.trim() || isSubmitting}
-              data-testid="quick-entry-save"
-              title={t("tasks.createTaskTitle", "Create task")}
-            >
-              <Save size={12} style={{ verticalAlign: "middle", marginRight: 4 }} />
-              {t("tasks.save", "Save")}
-            </button>
           </div>
         )}
 
