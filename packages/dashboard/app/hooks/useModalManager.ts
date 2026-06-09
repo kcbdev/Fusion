@@ -58,6 +58,8 @@ export interface ModalManager {
   workflowEditorInitialPanel?: "settings";
   /** When the workflow editor opens, which modal action to start. */
   workflowEditorInitialAction?: "create";
+  /** When the workflow editor opens for editing, which workflow id to pre-select. */
+  workflowEditorInitialWorkflowId?: string;
   agentsOpen: boolean;
   scriptsOpen: boolean;
   setupWizardOpen: boolean;
@@ -120,7 +122,7 @@ export interface ModalManager {
   openGitManager: () => void;
   closeGitManager: () => void;
 
-  openWorkflowEditor: (initialPanelOrAction?: "settings" | "create") => void;
+  openWorkflowEditor: (initialPanelOrAction?: "settings" | "create", initialWorkflowId?: string) => void;
   closeWorkflowEditor: () => void;
 
   openAgents: () => void;
@@ -181,6 +183,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const [workflowEditorOpen, setWorkflowEditorOpen] = useState(false);
   const [workflowEditorInitialPanel, setWorkflowEditorInitialPanel] = useState<"settings" | undefined>(undefined);
   const [workflowEditorInitialAction, setWorkflowEditorInitialAction] = useState<"create" | undefined>(undefined);
+  const [workflowEditorInitialWorkflowId, setWorkflowEditorInitialWorkflowId] = useState<string | undefined>(undefined);
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [scriptsOpen, setScriptsOpen] = useState(false);
   const [setupWizardOpen, setSetupWizardOpen] = useState(false);
@@ -346,15 +349,19 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const openGitManager = useCallback(() => setGitManagerOpen(true), []);
   const closeGitManager = useCallback(() => setGitManagerOpen(false), []);
 
-  const openWorkflowEditor = useCallback((initialPanelOrAction?: "settings" | "create") => {
-    setWorkflowEditorInitialPanel(initialPanelOrAction === "settings" ? "settings" : undefined);
-    setWorkflowEditorInitialAction(initialPanelOrAction === "create" ? "create" : undefined);
+  const openWorkflowEditor = useCallback((initialPanelOrAction?: "settings" | "create", initialWorkflowId?: string) => {
+    const isSettingsOpen = initialPanelOrAction === "settings";
+    const isCreateOpen = initialPanelOrAction === "create";
+    setWorkflowEditorInitialPanel(isSettingsOpen ? "settings" : undefined);
+    setWorkflowEditorInitialAction(isCreateOpen ? "create" : undefined);
+    setWorkflowEditorInitialWorkflowId(!isSettingsOpen && !isCreateOpen ? initialWorkflowId : undefined);
     setWorkflowEditorOpen(true);
   }, []);
   const closeWorkflowEditor = useCallback(() => {
     setWorkflowEditorOpen(false);
     setWorkflowEditorInitialPanel(undefined);
     setWorkflowEditorInitialAction(undefined);
+    setWorkflowEditorInitialWorkflowId(undefined);
   }, []);
 
   const openAgents = useCallback(() => setAgentsOpen(true), []);
@@ -424,6 +431,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     workflowEditorOpen,
     workflowEditorInitialPanel,
     workflowEditorInitialAction,
+    workflowEditorInitialWorkflowId,
     agentsOpen,
     scriptsOpen,
     setupWizardOpen,

@@ -173,6 +173,8 @@ interface WorkflowNodeEditorProps {
   initialPanel?: "settings";
   /** When "create" the editor opens with the new-workflow dialog active. */
   initialAction?: "create";
+  /** Workflow id to pre-select when opening directly into an existing workflow. */
+  initialWorkflowId?: string;
 }
 
 let nodeSeq = 0;
@@ -657,6 +659,7 @@ function InnerEditor({
   projectId,
   initialPanel,
   initialAction,
+  initialWorkflowId,
   modalRef,
 }: Omit<WorkflowNodeEditorProps, "isOpen"> & { modalRef: React.RefObject<HTMLDivElement | null> }) {
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
@@ -972,16 +975,22 @@ function InnerEditor({
     try {
       const data = await fetchWorkflows(projectId);
       setWorkflows(data);
+      const requestedWorkflow = initialWorkflowId
+        ? data.find((workflow) => workflow.id === initialWorkflowId)
+        : undefined;
       setActiveId((prev) => {
         if (prev && data.some((workflow) => workflow.id === prev)) return prev;
-        return isMobileViewport ? null : data[0]?.id ?? null;
+        return requestedWorkflow?.id ?? (isMobileViewport ? null : data[0]?.id ?? null);
       });
+      if (requestedWorkflow && isMobileViewport) {
+        setWorkflowListStageOpen(false);
+      }
     } catch (err) {
       addToast(getErrorMessage(err) || "Failed to load workflows", "error");
     } finally {
       setLoading(false);
     }
-  }, [projectId, addToast, isMobileViewport]);
+  }, [projectId, addToast, isMobileViewport, initialWorkflowId]);
 
   useEffect(() => {
     void loadWorkflows();

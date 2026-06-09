@@ -104,6 +104,7 @@ The workflow editor opens as a full-screen modal editor for authoring custom wor
 
 Navigation:
 - Open a task or board surface that shows the workflow selector, then choose **Manage…**
+- From the board workflow toolbar, use the edit workflow button beside the selector to open the currently selected workflow directly when one is selected.
 
 Behavior:
 - Opens a workflow node editor with a workflow list/sidebar, canvas, inspector, and settings/authoring panels
@@ -111,7 +112,7 @@ Behavior:
 - The Settings panel is value-first for built-in workflows and groups workflow settings by Models, Review & Approval, Step Execution, and Advanced. Known workflow model values use the same model dropdown picker as **Settings → Project Models** so provider/model pairs are saved together; custom or non-model string values can still use typed inputs. Definitions remain available for custom workflow schema authoring.
 - The main Settings modal also exposes the default workflow's Plan/Triage, Executor, and Reviewer model lanes from **Project Models**; those dropdown controls write workflow setting values for the active default workflow.
 - On desktop, the editor uses a multi-panel layout for editing the graph and adjacent workflow metadata
-- On viewports `<=768px`, the editor switches to a full-screen mobile sheet, opens to the workflow list with no workflow preselected, prompts users to select a workflow to edit, and uses larger workflow-editor touch targets so each section remains scrollable and usable on phones
+- On viewports `<=768px`, the editor switches to a full-screen mobile sheet. Global workflow entry points open to the workflow list with no workflow preselected and prompt users to select a workflow to edit; the board workflow toolbar edit button opens directly to the selected workflow editor when that selected workflow is available.
 - The create-workflow dialog and workflow AI authoring popover follow the same mobile full-screen/sheet pattern so they are not clipped by the editor canvas on narrow screens
 
 ## Planning Mode

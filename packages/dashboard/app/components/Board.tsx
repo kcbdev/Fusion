@@ -67,8 +67,8 @@ interface BoardProps {
   lastFetchTimeMs?: number;
   /** Whether GitHub CLI auth is available for creating PRs from task cards. */
   prAuthAvailable?: boolean;
-  /** Opens the workflow editor modal. */
-  onOpenWorkflowEditor?: () => void;
+  /** Opens the workflow editor modal, optionally focused on a workflow id. */
+  onOpenWorkflowEditor?: (workflowId?: string) => void;
   /** Opens the workflow editor to create a new workflow. */
   onCreateWorkflow?: () => void;
 }
@@ -460,7 +460,7 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
               <button
                 type="button"
                 className="btn btn-icon btn-sm board-workflow-edit-btn"
-                onClick={onOpenWorkflowEditor}
+                onClick={() => onOpenWorkflowEditor(selectedWorkflow.id)}
                 title="Edit workflows"
                 aria-label="Edit workflows"
               >

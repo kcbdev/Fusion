@@ -1239,8 +1239,8 @@ function AppInner() {
     pushNav({ type: "modal", close: modalManager.closeScripts });
   }, [modalManager, pushNav]);
 
-  const openWorkflowEditorWithNav = useCallback(() => {
-    modalManager.openWorkflowEditor();
+  const openWorkflowEditorWithNav = useCallback((workflowId?: string) => {
+    modalManager.openWorkflowEditor(undefined, workflowId);
     pushNav({ type: "modal", close: modalManager.closeWorkflowEditor });
   }, [modalManager, pushNav]);
 

@@ -331,6 +331,28 @@ describe("WorkflowNodeEditor", () => {
     expect(screen.getAllByRole("button", { name: "QA" })[0]).toHaveClass("active");
   });
 
+  it("preselects the requested workflow id on desktop instead of the first workflow", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([def(), v2Def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} initialWorkflowId="WF-002" />);
+
+    expect(await screen.findByTestId("wf-workflow-name")).toHaveTextContent("Custom");
+    const workflowItems = document.querySelectorAll(".wf-editor-list-item");
+    expect(workflowItems[0]).toHaveTextContent("QA");
+    expect(workflowItems[0]).not.toHaveClass("active");
+    expect(workflowItems[1]).toHaveTextContent("Custom");
+    expect(workflowItems[1]).toHaveClass("active");
+  });
+
+  it("falls back to the first desktop workflow when the requested workflow id is missing", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([def(), v2Def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} initialWorkflowId="WF-deleted" />);
+
+    expect(await screen.findByTestId("wf-workflow-name")).toHaveTextContent("QA");
+    expect(screen.getAllByRole("button", { name: "QA" })[0]).toHaveClass("active");
+  });
+
   it("opens populated mobile workflows on the list with no preselected workflow", async () => {
     mockWorkflowEditorViewport("mobile");
     vi.mocked(fetchWorkflows).mockResolvedValue([def(), v2Def()]);
@@ -342,6 +364,52 @@ describe("WorkflowNodeEditor", () => {
     expect(screen.queryByTestId("wf-workflow-name")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "QA" })).not.toHaveClass("active");
     expect(screen.getByRole("button", { name: "Custom" })).not.toHaveClass("active");
+  });
+
+  it("opens the requested workflow id directly on mobile and bypasses the select stage", async () => {
+    mockWorkflowEditorViewport("mobile");
+    vi.mocked(fetchWorkflows).mockResolvedValue([def(), v2Def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} initialWorkflowId="WF-002" />);
+
+    expect(await screen.findByTestId("wf-workflow-name")).toHaveTextContent("Custom");
+    expect(screen.queryByTestId("wf-mobile-select-note")).not.toBeInTheDocument();
+    const workflowItems = document.querySelectorAll(".wf-editor-list-item");
+    expect(workflowItems[0]).toHaveTextContent("QA");
+    expect(workflowItems[0]).not.toHaveClass("active");
+    expect(workflowItems[1]).toHaveTextContent("Custom");
+    expect(workflowItems[1]).toHaveClass("active");
+  });
+
+  it("keeps the mobile list fallback when the requested workflow id is missing", async () => {
+    mockWorkflowEditorViewport("mobile");
+    vi.mocked(fetchWorkflows).mockResolvedValue([def(), v2Def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} initialWorkflowId="WF-deleted" />);
+
+    expect(await screen.findByTestId("wf-mobile-select-note")).toHaveTextContent("Select a workflow to edit.");
+    expect(screen.getByText(/No workflow selected/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("wf-workflow-name")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Custom" })).not.toHaveClass("active");
+  });
+
+  it("selects the requested workflow id on mobile even when workflow names are duplicated", async () => {
+    mockWorkflowEditorViewport("mobile");
+    vi.mocked(fetchWorkflows).mockResolvedValue([
+      { ...def(), id: "WF-DUP-A", name: "QA" },
+      { ...v2Def(), id: "WF-DUP-B", name: "QA" },
+    ]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} initialWorkflowId="WF-DUP-B" />);
+
+    expect(await screen.findByTestId("wf-workflow-name")).toHaveTextContent("QA");
+    expect(screen.queryByTestId("wf-mobile-select-note")).not.toBeInTheDocument();
+    const qaButtons = document.querySelectorAll(".wf-editor-list-item");
+    expect(qaButtons).toHaveLength(2);
+    expect(qaButtons[0]).toHaveTextContent("QA");
+    expect(qaButtons[0]).not.toHaveClass("active");
+    expect(qaButtons[1]).toHaveTextContent("QA");
+    expect(qaButtons[1]).toHaveClass("active");
   });
 
   it("selects by workflow id on mobile even when workflow names are duplicated", async () => {

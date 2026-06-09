@@ -344,4 +344,46 @@ describe("useModalManager", () => {
     expect(result.current.detailTask?.id).toBe("FN-B");
     expect(result.current.detailTask?.title).toBe("renamed");
   });
+
+  it("tracks a target workflow id for normal workflow editor opens and resets it on close", () => {
+    const { result } = renderHook(() =>
+      useModalManager({ projectId: "proj_1", planningSessions: [] }),
+    );
+
+    act(() => {
+      result.current.openWorkflowEditor(undefined, "WF-selected");
+    });
+
+    expect(result.current.workflowEditorOpen).toBe(true);
+    expect(result.current.workflowEditorInitialPanel).toBeUndefined();
+    expect(result.current.workflowEditorInitialAction).toBeUndefined();
+    expect(result.current.workflowEditorInitialWorkflowId).toBe("WF-selected");
+
+    act(() => {
+      result.current.closeWorkflowEditor();
+    });
+
+    expect(result.current.workflowEditorOpen).toBe(false);
+    expect(result.current.workflowEditorInitialWorkflowId).toBeUndefined();
+  });
+
+  it("keeps workflow editor settings and create modes distinct from target workflow opens", () => {
+    const { result } = renderHook(() =>
+      useModalManager({ projectId: "proj_1", planningSessions: [] }),
+    );
+
+    act(() => {
+      result.current.openWorkflowEditor("settings", "WF-ignored");
+    });
+    expect(result.current.workflowEditorInitialPanel).toBe("settings");
+    expect(result.current.workflowEditorInitialAction).toBeUndefined();
+    expect(result.current.workflowEditorInitialWorkflowId).toBeUndefined();
+
+    act(() => {
+      result.current.openWorkflowEditor("create", "WF-ignored");
+    });
+    expect(result.current.workflowEditorInitialPanel).toBeUndefined();
+    expect(result.current.workflowEditorInitialAction).toBe("create");
+    expect(result.current.workflowEditorInitialWorkflowId).toBeUndefined();
+  });
 });

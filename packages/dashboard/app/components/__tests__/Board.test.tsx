@@ -1012,6 +1012,7 @@ describe("Board", () => {
       fireEvent.click(screen.getByRole("button", { name: "Edit workflows" }));
       expect(onCreateWorkflow).toHaveBeenCalledTimes(1);
       expect(onOpenWorkflowEditor).toHaveBeenCalledTimes(1);
+      expect(onOpenWorkflowEditor).toHaveBeenCalledWith("builtin:coding");
     });
 
     it("preserves workflow toolbar partial action visibility", async () => {
@@ -1065,6 +1066,9 @@ describe("Board", () => {
       await waitFor(() => expect(screen.getByTestId("column-intake")).toBeDefined());
       expect(JSON.parse(screen.getByTestId("column-intake").getAttribute("data-tasks") || "[]").map((task: Task) => task.id).sort()).toEqual(["FN-2", "FN-3"]);
       expect(screen.queryByTestId("column-todo")).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Edit workflows" }));
+      expect(onOpenWorkflowEditor).toHaveBeenCalledWith("wf-custom");
     });
 
     it("keeps the default workflow first in the dropdown even when another workflow has cards", async () => {
