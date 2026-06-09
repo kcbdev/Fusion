@@ -777,6 +777,9 @@
   }
 
   .github-import-modal__body {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
     padding: var(--space-md);
     gap: var(--space-md);
   }
@@ -844,6 +847,12 @@
     max-height: 50vh;
   }
 
+  .github-import-workspace {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
   /* Mobile pane visibility - show one at a time */
   .github-import-list-pane.mobile {
     display: none;
@@ -864,7 +873,16 @@
   .github-import-preview-pane.mobile.active {
     display: flex;
     flex: 1;
+    min-height: 0;
     max-height: none;
+    overflow: hidden;
+  }
+
+  .github-import-preview-pane.mobile.active .github-import-pane-content {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   /* Back button styles */

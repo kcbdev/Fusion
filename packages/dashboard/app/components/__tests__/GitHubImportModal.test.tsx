@@ -83,6 +83,12 @@ describe("GitHubImportModal", () => {
     expect(source).toContain("Some hardcoded colors below");
   });
 
+  it("keeps mobile preview content vertically scrollable inside the active pane", () => {
+    const source = readFileSync(resolve(__dirname, "../GitHubImportModal.css"), "utf8");
+    expect(source).toContain(".github-import-preview-pane.mobile.active {\n    display: flex;\n    flex: 1;\n    min-height: 0;\n    max-height: none;\n    overflow: hidden;");
+    expect(source).toContain(".github-import-preview-pane.mobile.active .github-import-pane-content {\n    flex: 1;\n    min-height: 0;\n    overflow-y: auto;\n    overscroll-behavior: contain;");
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(fetchGitRemotes).mockReset();
@@ -181,6 +187,30 @@ describe("GitHubImportModal", () => {
     expect(within(previewCard).getByText("First Issue")).toBeTruthy();
     expect(within(previewCard).getByText("Body 1")).toBeTruthy();
     expect(screen.queryByTestId("github-import-preview-empty")).toBeNull();
+  });
+
+  it("preserves the no-description fallback for empty and null issue bodies", async () => {
+    const issues = [
+      { number: 1, title: "Empty Issue", body: "", html_url: "https://github.com/owner/repo/issues/1", labels: [] },
+      { number: 2, title: "Null Issue", body: null, html_url: "https://github.com/owner/repo/issues/2", labels: [] },
+    ];
+    vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+    vi.mocked(apiFetchGitHubIssues).mockResolvedValueOnce(issues);
+
+    render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Empty Issue")).toBeTruthy();
+      expect(screen.getByText("Null Issue")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("radio", { name: /Select issue #1/i }));
+    let previewCard = await screen.findByTestId("github-import-preview-card");
+    expect(within(previewCard).getByText("(no description)")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("radio", { name: /Select issue #2/i }));
+    previewCard = await screen.findByTestId("github-import-preview-card");
+    expect(within(previewCard).getByText("(no description)")).toBeTruthy();
   });
 
   it("has optional labels input with filter placeholder", async () => {
@@ -660,6 +690,136 @@ describe("GitHubImportModal", () => {
       // The back button is still in DOM but hidden via CSS - check that preview pane doesn't have 'active' class
       const previewPane = screen.getByTestId("github-import-preview-pane");
       expect(previewPane.classList.contains("active")).toBe(false);
+    });
+
+    it("renders long selected issue body in full on mobile without a truncation ellipsis", async () => {
+      Object.defineProperty(window, "innerWidth", {
+        writable: true,
+        configurable: true,
+        value: 480,
+      });
+
+      const beyondPreviousCutoff = "visible body text after the old cutoff";
+      const longBody = `${"A".repeat(210)} ${beyondPreviousCutoff}`;
+      const issues = [
+        { number: 1, title: "Long Issue", body: longBody, html_url: "https://github.com/owner/repo/issues/1", labels: [] },
+      ];
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+      vi.mocked(apiFetchGitHubIssues).mockResolvedValueOnce(issues);
+
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Long Issue")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("radio", { name: /Select issue #1/i }));
+
+      const previewPane = screen.getByTestId("github-import-preview-pane");
+      await waitFor(() => {
+        expect(previewPane.classList.contains("active")).toBe(true);
+      });
+
+      const previewCard = await screen.findByTestId("github-import-preview-card");
+      expect(within(previewCard).getByText((content) => content.includes(beyondPreviousCutoff))).toBeTruthy();
+      expect(previewCard.textContent).toContain(longBody);
+      expect(previewCard.textContent).not.toContain(`${"A".repeat(200)}…`);
+    });
+
+    it("renders long selected pull request body in full on mobile without a truncation ellipsis", async () => {
+      Object.defineProperty(window, "innerWidth", {
+        writable: true,
+        configurable: true,
+        value: 480,
+      });
+
+      const beyondPreviousCutoff = "visible pull request body text after the old cutoff";
+      const longBody = `${"P".repeat(210)} ${beyondPreviousCutoff}`;
+      const pulls = [
+        { number: 1, title: "Long PR", body: longBody, html_url: "https://github.com/owner/repo/pull/1", headBranch: "feature", baseBranch: "main" },
+      ];
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+      vi.mocked(apiFetchGitHubPulls).mockResolvedValueOnce(pulls);
+
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
+
+      fireEvent.click(await screen.findByRole("tab", { name: /Pull Requests/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Long PR")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("radio", { name: /Select pull request #1/i }));
+
+      const previewPane = screen.getByTestId("github-import-preview-pane");
+      await waitFor(() => {
+        expect(previewPane.classList.contains("active")).toBe(true);
+      });
+
+      const previewCard = await screen.findByTestId("github-import-preview-card");
+      expect(within(previewCard).getByText((content) => content.includes(beyondPreviousCutoff))).toBeTruthy();
+      expect(previewCard.textContent).toContain(longBody);
+      expect(previewCard.textContent).not.toContain(`${"P".repeat(200)}…`);
+    });
+
+    it("truncates long selected issue body on desktop", async () => {
+      Object.defineProperty(window, "innerWidth", {
+        writable: true,
+        configurable: true,
+        value: 1200,
+      });
+
+      const beyondDesktopCutoff = "desktop issue text after the cutoff";
+      const longBody = `${"I".repeat(210)} ${beyondDesktopCutoff}`;
+      const issues = [
+        { number: 1, title: "Long Desktop Issue", body: longBody, html_url: "https://github.com/owner/repo/issues/1", labels: [] },
+      ];
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+      vi.mocked(apiFetchGitHubIssues).mockResolvedValueOnce(issues);
+
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Long Desktop Issue")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("radio", { name: /Select issue #1/i }));
+
+      const previewCard = await screen.findByTestId("github-import-preview-card");
+      expect(previewCard.textContent).toContain(`${"I".repeat(200)}…`);
+      expect(previewCard.textContent).not.toContain(beyondDesktopCutoff);
+      expect(previewCard.textContent).not.toContain(longBody);
+    });
+
+    it("truncates long selected pull request body on desktop", async () => {
+      Object.defineProperty(window, "innerWidth", {
+        writable: true,
+        configurable: true,
+        value: 1200,
+      });
+
+      const beyondDesktopCutoff = "desktop pull request text after the cutoff";
+      const longBody = `${"R".repeat(210)} ${beyondDesktopCutoff}`;
+      const pulls = [
+        { number: 1, title: "Long Desktop PR", body: longBody, html_url: "https://github.com/owner/repo/pull/1", headBranch: "feature", baseBranch: "main" },
+      ];
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+      vi.mocked(apiFetchGitHubPulls).mockResolvedValueOnce(pulls);
+
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
+
+      fireEvent.click(await screen.findByRole("tab", { name: /Pull Requests/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Long Desktop PR")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("radio", { name: /Select pull request #1/i }));
+
+      const previewCard = await screen.findByTestId("github-import-preview-card");
+      expect(previewCard.textContent).toContain(`${"R".repeat(200)}…`);
+      expect(previewCard.textContent).not.toContain(beyondDesktopCutoff);
+      expect(previewCard.textContent).not.toContain(longBody);
     });
 
     it("returns to list view on mobile after successful import", async () => {

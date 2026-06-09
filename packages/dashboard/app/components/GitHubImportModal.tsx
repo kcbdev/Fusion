@@ -39,6 +39,16 @@ function clampListPaneWidth(width: number) {
   return Math.max(GITHUB_IMPORT_LIST_PANE_MIN_WIDTH, Math.min(GITHUB_IMPORT_LIST_PANE_MAX_WIDTH, width));
 }
 
+function formatPreviewBody(body: string | null | undefined, isMobile: boolean) {
+  if (!body) {
+    return null;
+  }
+  if (isMobile) {
+    return body;
+  }
+  return body.slice(0, 200) + (body.length > 200 ? "…" : "");
+}
+
 export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId }: GitHubImportModalProps) {
   useMobileScrollLock(isOpen);
   const { t } = useTranslation("app");
@@ -797,9 +807,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId 
                     <div className="preview-meta">{t("git.previewIssueMeta", "Issue #{{number}}", { number: selectedIssue.number })}</div>
                     <div className="preview-title">{selectedIssue.title}</div>
                     <div className="preview-body">
-                      {selectedIssue.body
-                        ? selectedIssue.body.slice(0, 200) + (selectedIssue.body.length > 200 ? "…" : "")
-                        : t("git.noDescription", "(no description)")}
+                      {formatPreviewBody(selectedIssue.body, isMobile) || t("git.noDescription", "(no description)")}
                     </div>
                   </div>
                 ) : activeTab === "issues" ? (
@@ -820,9 +828,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId 
                       <strong>{t("git.branchLabel", "Branch:")}</strong> {selectedPull.headBranch} → {selectedPull.baseBranch}
                     </div>
                     <div className="preview-body">
-                      {selectedPull.body
-                        ? selectedPull.body.slice(0, 200) + (selectedPull.body.length > 200 ? "…" : "")
-                        : t("git.noDescription", "(no description)")}
+                      {formatPreviewBody(selectedPull.body, isMobile) || t("git.noDescription", "(no description)")}
                     </div>
                   </div>
                 ) : activeTab === "pulls" ? (
