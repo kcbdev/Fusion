@@ -1547,85 +1547,93 @@ describe("Header", () => {
   });
 
   describe("Manage Projects action", () => {
-    const singleProject = [
+    const projects = [
       { id: "1", name: "Test Project", path: "/path/to/project", status: "active" as const },
+      { id: "2", name: "Other Project", path: "/path/to/other", status: "paused" as const },
     ];
 
-    it("renders project selector trigger on desktop with a single project", () => {
+    it("renders project selector trigger on desktop with multiple projects", () => {
       renderHeader({
-        projects: singleProject,
-        currentProject: singleProject[0],
+        projects,
+        currentProject: projects[0],
         onViewAllProjects: noop,
+        onSelectProject: noop,
       }, "desktop");
       expect(screen.getByTestId("project-selector-trigger")).toBeDefined();
     });
 
     it("shows current project name in the desktop project selector trigger", () => {
       renderHeader({
-        projects: singleProject,
-        currentProject: singleProject[0],
+        projects,
+        currentProject: projects[0],
         onViewAllProjects: noop,
+        onSelectProject: noop,
       }, "desktop");
 
       const trigger = screen.getByTestId("project-selector-trigger");
       expect(trigger).toHaveTextContent("Test Project");
     });
 
-    it("includes the full active project name in the trigger title for truncated labels", () => {
+    it("includes the full active project name in the trigger label for truncated labels", () => {
       const longName = "This is a very long project name that should be truncated in the header trigger";
-      const projects = [
+      const projectsWithLongName = [
         { id: "1", name: longName, path: "/path/to/project", status: "active" as const },
+        { id: "2", name: "Other Project", path: "/path/to/other", status: "paused" as const },
       ];
 
       renderHeader({
-        projects,
-        currentProject: projects[0],
+        projects: projectsWithLongName,
+        currentProject: projectsWithLongName[0],
         onViewAllProjects: noop,
+        onSelectProject: noop,
       }, "desktop");
 
       const trigger = screen.getByTestId("project-selector-trigger");
       expect(trigger).toHaveTextContent(longName);
-      expect(trigger).toHaveAttribute("title", `Switch project (current: ${longName})`);
     });
 
-    it("falls back to 'Projects' label when current project is missing", () => {
+    it("falls back to 'Select Project' label when current project is missing", () => {
       renderHeader({
-        projects: singleProject,
+        projects,
         currentProject: null,
         onViewAllProjects: noop,
+        onSelectProject: noop,
       }, "desktop");
 
       const trigger = screen.getByTestId("project-selector-trigger");
-      expect(trigger).toHaveTextContent("Projects");
+      expect(trigger).toHaveTextContent("Select Project");
     });
 
-    it("shows Manage Projects action in dropdown and calls onViewAllProjects", () => {
+    it("shows View All Projects action in dropdown and calls onViewAllProjects", () => {
       const onViewAllProjects = vi.fn();
       renderHeader({
-        projects: singleProject,
-        currentProject: singleProject[0],
+        projects,
+        currentProject: projects[0],
         onViewAllProjects,
+        onSelectProject: noop,
       }, "desktop");
 
       fireEvent.click(screen.getByTestId("project-selector-trigger"));
-      fireEvent.click(screen.getByTestId("manage-projects-action"));
+      fireEvent.click(screen.getByText("View All Projects"));
       expect(onViewAllProjects).toHaveBeenCalled();
       expect(screen.queryByTestId("project-selector-dropdown")).toBeNull();
     });
 
     it("does not render separate back button on desktop", () => {
       renderHeader({
-        projects: singleProject,
-        currentProject: singleProject[0],
+        projects,
+        currentProject: projects[0],
         onViewAllProjects: noop,
+        onSelectProject: noop,
       }, "desktop");
       expect(screen.queryByTestId("back-to-projects-btn")).toBeNull();
     });
 
     it("does not render project selector when onViewAllProjects is not provided", () => {
       renderHeader({
-        projects: singleProject,
-        currentProject: singleProject[0],
+        projects,
+        currentProject: projects[0],
+        onSelectProject: noop,
       }, "desktop");
       expect(screen.queryByTestId("project-selector-trigger")).toBeNull();
     });

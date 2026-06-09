@@ -130,6 +130,16 @@ describe("MultiProjectFlow", () => {
         viewMode = "overview";
       });
 
+      const otherProject: ProjectInfo = {
+        id: "proj_2",
+        name: "Second Project",
+        path: "/path/to/second",
+        status: "active",
+        isolationMode: "in-process",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+
       render(
         <Header
           onOpenSettings={noop}
@@ -138,15 +148,15 @@ describe("MultiProjectFlow", () => {
           enginePaused={false}
           onToggleGlobalPause={noop}
           onToggleEnginePause={noop}
-          projects={[singleProject]}
+          projects={[singleProject, otherProject]}
           currentProject={singleProject}
           onViewAllProjects={handleViewAllProjects}
+          onSelectProject={noop}
         />
       );
 
       fireEvent.click(screen.getByTestId("project-selector-trigger"));
-      const manageProjectsAction = screen.getByTestId("manage-projects-action");
-      expect(manageProjectsAction.textContent).toContain("Manage Projects");
+      const manageProjectsAction = screen.getByText("View All Projects");
 
       fireEvent.click(manageProjectsAction);
       expect(handleViewAllProjects).toHaveBeenCalled();
