@@ -4668,7 +4668,7 @@ export async function commitOrAmendMergeWithFixes(
     // that this attempt's integration worktree never advanced. Reset rootDir
     // to preAttemptHeadSha so the next merge attempt starts clean, and tag
     // the result so the caller's diagnostic includes that context.
-    const authority = await isBranchAuthoritativeForTask(rootDir, branch, taskId, preAttemptHeadSha).catch(
+    const authority = await isBranchAuthoritativeForTask(rootDir, branch, taskId).catch(
       () => ({ ok: false as const, reason: "authority-probe-failed" }),
     );
     if (authority.ok) {
