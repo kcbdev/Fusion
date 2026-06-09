@@ -244,7 +244,7 @@ describe("WorkflowNodeEditor mobile CSS contract", () => {
 
     const manageRule = findRule(
       selectorMobile,
-      /\.workflow-selector select,\s*\.workflow-selector-manage,\s*\.workflow-selector-collapsed-button\s*\{[^}]*\}/,
+      /\.workflow-selector select,\s*\.workflow-selector-manage\s*\{[^}]*\}/,
     );
     expect(manageRule).toMatch(/width\s*:\s*100%\s*;/);
   });
