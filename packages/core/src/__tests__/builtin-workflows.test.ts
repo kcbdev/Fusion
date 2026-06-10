@@ -4,7 +4,9 @@ import {
   BUILTIN_WORKFLOWS,
   defaultEnabledBuiltinWorkflowIds,
   getBuiltinWorkflow,
+  getRequiredPluginIdForBuiltinWorkflow,
   isBuiltinWorkflowId,
+  isBuiltinWorkflowPluginGated,
 } from "../builtin-workflows.js";
 import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
 import { BUILTIN_WORKFLOW_SETTINGS } from "../builtin-workflow-settings.js";
@@ -145,17 +147,33 @@ describe("built-in workflows", () => {
     expect(getBuiltinWorkflow("builtin:coding")?.ir).toBe(BUILTIN_CODING_WORKFLOW_IR);
     expect(BUILTIN_WORKFLOWS.find((workflow) => workflow.id === "builtin:coding")?.ir).toBe(BUILTIN_CODING_WORKFLOW_IR);
     expect(defaultEnabledBuiltinWorkflowIds()).toEqual(
-      BUILTIN_WORKFLOWS.filter((workflow) => workflow.kind !== "fragment").map((workflow) => workflow.id),
+      BUILTIN_WORKFLOWS.filter(
+        (workflow) => workflow.kind !== "fragment" && !isBuiltinWorkflowPluginGated(workflow.id),
+      ).map((workflow) => workflow.id),
     );
+    expect(defaultEnabledBuiltinWorkflowIds()).not.toContain("builtin:compound-engineering");
     expect(defaultEnabledBuiltinWorkflowIds()).not.toContain("builtin:pr-workflow");
     expect(getBuiltinWorkflow("builtin:pr-workflow")!.kind).toBe("fragment");
-    expect(defaultEnabledBuiltinWorkflowIds().slice(0, 5)).toEqual([
+    expect(defaultEnabledBuiltinWorkflowIds().slice(0, 4)).toEqual([
       "builtin:coding",
       "builtin:quick-fix",
       "builtin:review-heavy",
-      "builtin:compound-engineering",
       "builtin:stepwise-coding",
     ]);
+  });
+
+  it("identifies plugin-gated built-in workflows", () => {
+    expect(isBuiltinWorkflowPluginGated("builtin:compound-engineering")).toBe(true);
+    expect(isBuiltinWorkflowPluginGated("builtin:coding")).toBe(false);
+    expect(isBuiltinWorkflowPluginGated("builtin:quick-fix")).toBe(false);
+  });
+
+  it("resolves required plugin ids for plugin-gated built-in workflows", () => {
+    expect(getRequiredPluginIdForBuiltinWorkflow("builtin:compound-engineering")).toBe(
+      "fusion-plugin-compound-engineering",
+    );
+    expect(getRequiredPluginIdForBuiltinWorkflow("builtin:coding")).toBeUndefined();
+    expect(getRequiredPluginIdForBuiltinWorkflow("builtin:quick-fix")).toBeUndefined();
   });
   it("builtin:coding exposes execute retries after registry lookup and parse round-trip", () => {
     const coding = getBuiltinWorkflow("builtin:coding");
@@ -263,7 +281,7 @@ describe("built-in workflows", () => {
       expect(list.filter((workflow) => workflow.id.startsWith("builtin:")).map((workflow) => workflow.id)).toEqual([
         "builtin:coding",
       ]);
-      expect(await store.getWorkflowDefinition("builtin:compound-engineering")).toBeDefined();
+      expect(await store.getWorkflowDefinition("builtin:review-heavy")).toBeDefined();
     });
 
     it("can include disabled built-ins for workflow management surfaces", async () => {
@@ -274,7 +292,28 @@ describe("built-in workflows", () => {
 
       const managementList = await store.listWorkflowDefinitions({ includeDisabledBuiltins: true });
       expect(managementList.some((workflow) => workflow.id === "builtin:coding")).toBe(true);
-      expect(managementList.some((workflow) => workflow.id === "builtin:compound-engineering")).toBe(true);
+      expect(managementList.some((workflow) => workflow.id === "builtin:compound-engineering")).toBe(false);
+    });
+
+    it("hides the compound-engineering built-in when its plugin is not installed", async () => {
+      const list = await store.listWorkflowDefinitions();
+      expect(list.some((workflow) => workflow.id === "builtin:compound-engineering")).toBe(false);
+      expect(await store.getWorkflowDefinition("builtin:compound-engineering")).toBeUndefined();
+    });
+
+    it("shows the compound-engineering built-in when its plugin is installed", async () => {
+      await store.getPluginStore().registerPlugin({
+        manifest: {
+          id: "fusion-plugin-compound-engineering",
+          name: "Compound Engineering",
+          version: "1.0.0",
+        },
+        path: "/tmp/fusion-plugin-compound-engineering",
+      });
+
+      const list = await store.listWorkflowDefinitions();
+      expect(list.some((workflow) => workflow.id === "builtin:compound-engineering")).toBe(true);
+      expect(await store.getWorkflowDefinition("builtin:compound-engineering")).toBeDefined();
     });
 
     it("shows the built-in seam prompt text in node config", () => {
@@ -297,8 +336,8 @@ describe("built-in workflows", () => {
 
     it("a task can select a built-in workflow", async () => {
       const task = await store.createTask({ description: "T", enabledWorkflowSteps: [] });
-      await store.selectTaskWorkflow(task.id, "builtin:compound-engineering");
-      expect(store.getTaskWorkflowSelection(task.id)?.workflowId).toBe("builtin:compound-engineering");
+      await store.selectTaskWorkflow(task.id, "builtin:coding");
+      expect(store.getTaskWorkflowSelection(task.id)?.workflowId).toBe("builtin:coding");
     });
 
     it("rejects selecting the PR lifecycle fragment for a task", async () => {

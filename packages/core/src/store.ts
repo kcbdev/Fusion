@@ -78,7 +78,14 @@ import type {
   WorkflowNodeLayout,
 } from "./workflow-definition-types.js";
 import { compileWorkflowToSteps } from "./workflow-compiler.js";
-import { BUILTIN_WORKFLOWS, getBuiltinWorkflow, isBuiltinWorkflowEnabled, isBuiltinWorkflowId } from "./builtin-workflows.js";
+import {
+  BUILTIN_WORKFLOWS,
+  getBuiltinWorkflow,
+  getRequiredPluginIdForBuiltinWorkflow,
+  isBuiltinWorkflowEnabled,
+  isBuiltinWorkflowId,
+  isBuiltinWorkflowPluginGated,
+} from "./builtin-workflows.js";
 import { resolveWorkflowIrById } from "./workflow-ir-resolver.js";
 import { BUILTIN_WORKFLOW_SETTINGS } from "./builtin-workflow-settings.js";
 import {
@@ -13293,11 +13300,19 @@ ${stepsSection}`;
         enabledBuiltinWorkflowIds = undefined;
       }
     }
-    const visible = options?.includeDisabledBuiltins
+    const enabledVisible = options?.includeDisabledBuiltins
       ? all
       : all.filter((wf) => isBuiltinWorkflowEnabled(wf.id, enabledBuiltinWorkflowIds));
-    if (options?.kind) return visible.filter((wf) => wf.kind === options.kind);
-    return visible;
+    const visible = await Promise.all(
+      enabledVisible.map(async (wf) => {
+        const requiredPluginId = getRequiredPluginIdForBuiltinWorkflow(wf.id);
+        if (!requiredPluginId) return wf;
+        return (await this.isPluginInstalled(requiredPluginId)) ? wf : undefined;
+      }),
+    );
+    const pluginFiltered = visible.filter((wf): wf is WorkflowDefinition => Boolean(wf));
+    if (options?.kind) return pluginFiltered.filter((wf) => wf.kind === options.kind);
+    return pluginFiltered;
   }
 
   /** Read (and cache) the full merged workflow-definition set, oldest first.
@@ -13324,7 +13339,13 @@ ${stepsSection}`;
     id: string,
   ): Promise<WorkflowDefinition | undefined> {
     const builtin = getBuiltinWorkflow(id);
-    if (builtin) return builtin;
+    if (builtin) {
+      if (isBuiltinWorkflowPluginGated(id)) {
+        const requiredPluginId = getRequiredPluginIdForBuiltinWorkflow(id);
+        if (!requiredPluginId || !(await this.isPluginInstalled(requiredPluginId))) return undefined;
+      }
+      return builtin;
+    }
     const row = this.db.prepare("SELECT * FROM workflows WHERE id = ?").get(id) as
       | {
           id: string;
@@ -15146,8 +15167,22 @@ ${notificationsSection}`;
       // PluginStore persists install/state rows in central DB, so it must use
       // the same resolved global settings directory as TaskStore.
       this.pluginStore = new PluginStore(this.rootDir, { centralGlobalDir: this.globalSettingsDir });
+      const clearWorkflowDefinitionCache = () => {
+        this.workflowDefinitionsCache = null;
+      };
+      this.pluginStore.on("plugin:registered", clearWorkflowDefinitionCache);
+      this.pluginStore.on("plugin:unregistered", clearWorkflowDefinitionCache);
     }
     return this.pluginStore;
+  }
+
+  private async isPluginInstalled(pluginId: string): Promise<boolean> {
+    try {
+      const plugins = await this.getPluginStore().listPlugins();
+      return plugins.some((plugin) => plugin.id === pluginId);
+    } catch {
+      return false;
+    }
   }
 
   /**

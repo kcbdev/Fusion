@@ -302,7 +302,9 @@ export {
   BUILTIN_WORKFLOWS,
   BUILTIN_WORKFLOW_ID_PREFIX,
   getBuiltinWorkflow,
+  getRequiredPluginIdForBuiltinWorkflow,
   isBuiltinWorkflowId,
+  isBuiltinWorkflowPluginGated,
 } from "./builtin-workflows.js";
 export {
   resolveWorkflowIrForTask,

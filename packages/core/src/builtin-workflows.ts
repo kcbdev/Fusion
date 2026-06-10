@@ -14,8 +14,22 @@ export function isBuiltinWorkflowId(id: string): boolean {
   return id.startsWith(BUILTIN_WORKFLOW_ID_PREFIX);
 }
 
+const PLUGIN_GATED_BUILTIN_WORKFLOWS: ReadonlyMap<string, string> = new Map([
+  ["builtin:compound-engineering", "fusion-plugin-compound-engineering"],
+]);
+
+export function isBuiltinWorkflowPluginGated(id: string): boolean {
+  return PLUGIN_GATED_BUILTIN_WORKFLOWS.has(id);
+}
+
+export function getRequiredPluginIdForBuiltinWorkflow(id: string): string | undefined {
+  return PLUGIN_GATED_BUILTIN_WORKFLOWS.get(id);
+}
+
 export function defaultEnabledBuiltinWorkflowIds(): string[] {
-  return BUILTIN_WORKFLOWS.filter((workflow) => workflow.kind !== "fragment").map((workflow) => workflow.id);
+  return BUILTIN_WORKFLOWS.filter(
+    (workflow) => workflow.kind !== "fragment" && !PLUGIN_GATED_BUILTIN_WORKFLOWS.has(workflow.id),
+  ).map((workflow) => workflow.id);
 }
 
 export function isBuiltinWorkflowEnabled(id: string, enabledIds?: readonly string[]): boolean {
