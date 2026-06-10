@@ -4074,7 +4074,7 @@
 .changes-diff-patch .diff-hunk,
 .gm-diff-patch [data-prefix="@@"],
 .changes-diff-patch [data-prefix="@@"] {
-  color: #58a6ff;
+  color: var(--color-info, #58a6ff);
 }
 
 /* Block display for highlighted diff lines */
@@ -4110,7 +4110,7 @@
 [data-theme="light"] .changes-diff-patch .diff-hunk,
 [data-theme="light"] .gm-diff-patch [data-prefix="@@"],
 [data-theme="light"] .changes-diff-patch [data-prefix="@@"] {
-  color: #0969da;
+  color: var(--color-info, #0969da);
 }
 
 /* Light theme changed-files modal overrides */
