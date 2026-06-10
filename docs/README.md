@@ -66,6 +66,7 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 | [Secrets](./secrets.md) | Encrypted secrets storage, per-secret access policies, scopes, and agent tool wiring |
 | [Testing](./testing.md) | Full testing lanes, worker fanout guidance, test taxonomy, and file organization |
 | [Solutions Catalog](./solutions/) | Documented solutions to past problems (bugs, architecture patterns, best practices) organized by category |
+| [Localization Contributing Guide](./i18n-contributing.md) | Conventions for contributing translations, locale file structure, and i18n tooling |
 | [Mobile](../MOBILE.md) | Capacitor/PWA mobile development setup and workflow |
 
 ### Plugins
@@ -117,6 +118,7 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 | [Self-Healing Backward Move Audit](./self-healing-backward-move-audit.md) | Audit of self-healing backward-move safety checks and edge-case validation |
 | [Test-Speed Baseline (2026-06-03)](./test-speed-baseline-2026-06-03.md) | Measured per-file test timing baseline and optimization targets (successor to FN-5048 audit) |
 | [ACP Runtime Contract](./acp-contract.md) | Agent Client Protocol plugin launch/readiness contract and failure taxonomy |
+| [Mission Completion Gate Contract](./missions-completion-contract.md) | Decision record for mission completion gate invariants and acceptance flow |
 
 | [Lost-Work Tasks Incident (2026-05-23)](./incidents/2026-05-23-lost-work-tasks.md) | Incident catalog of 9 lost-work tasks from no-op finalize and reuse-handoff bugs |
 

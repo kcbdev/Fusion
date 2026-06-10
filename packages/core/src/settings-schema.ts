@@ -225,12 +225,7 @@ export const DEFAULT_GLOBAL_SETTINGS = {
     onFailure: "fail",
   },
   owningNodeHandoffPolicy: "reassign-to-local",
-  experimentalFeatures: {
-    workflowColumns: true,
-    workflowGraphExecutor: true,
-    workflowInterpreterDualObserve: true,
-    workflowInterpreterAuthoritative: true,
-  },
+  experimentalFeatures: {},
   cliAgents: {},
 } satisfies CompleteSettings<GlobalSettings>;
 
