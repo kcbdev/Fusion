@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { projectWorkflowWorkStatus } from "../workflow-work-projection.js";
+import { hasAuthoritativeWorkflowWork, projectWorkflowWorkStatus } from "../workflow-work-projection.js";
 import type { Task, WorkflowWorkItem } from "../types.js";
 
 const task = { id: "FN-PROJECT", mergeRetries: 4, status: "legacy status" } as Task;
@@ -75,6 +75,20 @@ describe("workflow work projection", () => {
     expect(projectWorkflowWorkStatus({ ...task, mergeRetries: 0, mergeTransientRetryCount: 2 }, [])).toEqual(expect.objectContaining({
       source: "legacy",
       attempt: 0,
+    }));
+  });
+
+  it("treats legacy retry counters as display-only when workflow work exists", () => {
+    const workflowItems = [
+      item({ id: "work-1", kind: "retry", state: "retrying", attempt: 1, retryAfter: "2026-06-09T00:05:00.000Z" }),
+    ];
+
+    expect(hasAuthoritativeWorkflowWork(workflowItems)).toBe(true);
+    expect(projectWorkflowWorkStatus({ ...task, mergeRetries: 99 }, workflowItems)).toEqual(expect.objectContaining({
+      source: "workflow",
+      status: "retrying",
+      attempt: 1,
+      retryAfter: "2026-06-09T00:05:00.000Z",
     }));
   });
 });
