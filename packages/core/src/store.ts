@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync, watch, type FSWatcher } from "node:fs";
-import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, ColumnId, CheckoutClaimPrecondition, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate, Agent, AutostashOrphanRecord, TaskCommitAssociation, TaskCommitAssociationMatchSource, TaskCommitAssociationConfidence, GithubIssueAction, MergeQueueEntry, MergeQueueEnqueueOptions, MergeQueueAcquireOptions, MergeQueueReleaseOutcome, HandoffToReviewOptions, GoalCitation, GoalCitationFilter, GoalCitationInput, GoalCitationSurface, BranchGroup, BranchGroupCreateInput, BranchGroupUpdate, TaskBranchAssignmentMode, MergeRequestRecord, MergeRequestState, CompletionHandoffMarker, WorkflowWorkItem, WorkflowWorkItemDueFilter, WorkflowWorkItemKind, WorkflowWorkItemState, WorkflowWorkItemTransitionPatch, WorkflowWorkItemUpsertInput, PrEntity, PrEntityCreateInput, PrEntityUpdate, PrEntityState, PrThreadState, PrThreadOutcome, PrConflictState, PrChecksRollup, PrReviewDecision } from "./types.js";
+import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, ColumnId, CheckoutClaimPrecondition, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate, Agent, AutostashOrphanRecord, TaskCommitAssociation, TaskCommitAssociationMatchSource, TaskCommitAssociationConfidence, GithubIssueAction, MergeQueueEntry, MergeQueueEnqueueOptions, MergeQueueAcquireOptions, MergeQueueReleaseOutcome, HandoffToReviewOptions, GoalCitation, GoalCitationFilter, GoalCitationInput, GoalCitationSurface, BranchGroup, BranchGroupCreateInput, BranchGroupUpdate, TaskBranchAssignmentMode, MergeRequestRecord, MergeRequestState, MergeRequestWorkflowProjectionOptions, CompletionHandoffMarker, WorkflowWorkItem, WorkflowWorkItemDueFilter, WorkflowWorkItemKind, WorkflowWorkItemState, WorkflowWorkItemTransitionPatch, WorkflowWorkItemUpsertInput, PrEntity, PrEntityCreateInput, PrEntityUpdate, PrEntityState, PrThreadState, PrThreadOutcome, PrConflictState, PrChecksRollup, PrReviewDecision } from "./types.js";
 import { createActivityLogSnapshot, createRunAuditSnapshot, createTaskMetadataSnapshot, toTaskMetadataRecord, validateSnapshotEnvelope, type ActivityLogSnapshot, type RunAuditSnapshot, type TaskMetadataSnapshot } from "./shared-mesh-state.js";
 import { VALID_TRANSITIONS, COLUMNS, DEFAULT_SETTINGS, isGlobalOnlySettingsKey, WORKFLOW_STEP_TEMPLATES, validateDocumentKey } from "./types.js";
 import { DEFAULT_PROJECT_SETTINGS } from "./settings-schema.js";
@@ -7139,6 +7139,11 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
           });
         }
       }
+      this.cancelActiveWorkflowWorkItemsForTask(id, {
+        kinds: ["merge", "manual-hold"],
+        now: movedAt,
+        lastError: "cancelled-by-user-hard-cancel",
+      });
       this.clearCompletionHandoffAcceptedMarker(id);
     }
     if (toColumn === "done") {
@@ -8844,6 +8849,19 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     return state === "succeeded" || state === "failed" || state === "cancelled" || state === "exhausted";
   }
 
+  private workflowStateForMergeRequestState(state: MergeRequestState): WorkflowWorkItemState {
+    const states: Record<MergeRequestState, WorkflowWorkItemState> = {
+      queued: "runnable",
+      running: "running",
+      retrying: "retrying",
+      succeeded: "succeeded",
+      exhausted: "exhausted",
+      cancelled: "cancelled",
+      "manual-required": "manual-required",
+    };
+    return states[state];
+  }
+
   private rowToWorkflowWorkItem(row: WorkflowWorkItemRow): WorkflowWorkItem {
     return {
       id: row.id,
@@ -8950,6 +8968,43 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
   getMergeRequestRecord(taskId: string): MergeRequestRecord | null {
     const row = this.db.prepare("SELECT * FROM merge_requests WHERE taskId = ?").get(taskId) as MergeRequestRow | undefined;
     return row ? this.rowToMergeRequestRecord(row) : null;
+  }
+
+  projectMergeRequestToWorkflowWorkItem(
+    taskId: string,
+    opts: MergeRequestWorkflowProjectionOptions = {},
+  ): WorkflowWorkItem | null {
+    return this.db.transactionImmediate(() => {
+      const record = this.getMergeRequestRecord(taskId);
+      if (!record) return null;
+      const state = this.workflowStateForMergeRequestState(record.state);
+      const kind = record.state === "manual-required" ? "manual-hold" : "merge";
+      const item = this.upsertWorkflowWorkItem({
+        runId: opts.runId ?? `merge-request:${taskId}`,
+        taskId,
+        nodeId: opts.nodeId ?? "builtin.merge.request",
+        kind,
+        state,
+        attempt: record.attemptCount,
+        lastError: record.lastError,
+        blockedReason: record.state === "manual-required" ? record.lastError ?? "manual merge required" : null,
+        now: opts.now ?? record.updatedAt,
+      });
+      this.cancelActiveWorkflowWorkItemsForTask(taskId, {
+        kinds: [kind === "manual-hold" ? "merge" : "manual-hold"],
+        now: opts.now ?? record.updatedAt,
+        lastError: "superseded-by-merge-request-projection",
+      });
+      this.insertRunAuditEventRow({
+        taskId,
+        runId: item.runId,
+        domain: "database",
+        mutationType: "mergeRequest:workflow-projection",
+        target: item.id,
+        metadata: { taskId, mergeRequestState: record.state, workflowState: item.state, workItemKind: item.kind },
+      });
+      return item;
+    });
   }
 
   upsertWorkflowWorkItem(input: WorkflowWorkItemUpsertInput): WorkflowWorkItem {
@@ -9071,6 +9126,42 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
   getWorkflowWorkItem(id: string): WorkflowWorkItem | null {
     const row = this.db.prepare("SELECT * FROM workflow_work_items WHERE id = ?").get(id) as WorkflowWorkItemRow | undefined;
     return row ? this.rowToWorkflowWorkItem(row) : null;
+  }
+
+  listWorkflowWorkItemsForTask(taskId: string, opts: { kinds?: WorkflowWorkItemKind[] } = {}): WorkflowWorkItem[] {
+    const conditions = ["taskId = ?"];
+    const params: unknown[] = [taskId];
+    if (opts.kinds?.length) {
+      conditions.push(`kind IN (${opts.kinds.map(() => "?").join(", ")})`);
+      params.push(...opts.kinds);
+    }
+    const rows = this.db
+      .prepare(
+        `SELECT *
+           FROM workflow_work_items
+          WHERE ${conditions.join(" AND ")}
+          ORDER BY createdAt ASC, id ASC`,
+      )
+      .all(...params) as WorkflowWorkItemRow[];
+    return rows.map((row) => this.rowToWorkflowWorkItem(row));
+  }
+
+  cancelActiveWorkflowWorkItemsForTask(
+    taskId: string,
+    opts: { kinds?: WorkflowWorkItemKind[]; now?: string; lastError?: string | null } = {},
+  ): WorkflowWorkItem[] {
+    return this.db.transactionImmediate(() => {
+      const activeStates: WorkflowWorkItemState[] = ["runnable", "running", "held", "retrying", "manual-required"];
+      const items = this.listWorkflowWorkItemsForTask(taskId, opts).filter((item) => activeStates.includes(item.state));
+      return items.map((item) =>
+        this.transitionWorkflowWorkItem(item.id, "cancelled", {
+          now: opts.now,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          lastError: opts.lastError ?? item.lastError ?? "cancelled-by-user-hard-cancel",
+        }),
+      );
+    });
   }
 
   listDueWorkflowWorkItems(filter: WorkflowWorkItemDueFilter = {}): WorkflowWorkItem[] {
