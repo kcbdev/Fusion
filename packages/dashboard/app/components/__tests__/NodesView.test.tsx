@@ -106,9 +106,8 @@ function makeUseNodesResult(overrides: Partial<ReturnType<typeof useNodes>> = {}
   };
 }
 
-function extractMobileMediaBlocks(css: string): string {
+function extractMediaBlocks(css: string, regex: RegExp): string {
   const blocks: string[] = [];
-  const regex = /@media[^{]*\(max-width: 768px\)[^{]*\{/g;
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(css)) !== null) {
@@ -128,6 +127,14 @@ function extractMobileMediaBlocks(css: string): string {
   }
 
   return blocks.join("\n");
+}
+
+function extractMobileMediaBlocks(css: string): string {
+  return extractMediaBlocks(css, /@media[^{]*\(max-width: 768px\)[^{]*\{/g);
+}
+
+function extractTabletMediaBlocks(css: string): string {
+  return extractMediaBlocks(css, /@media[^{]*\(min-width: 769px\)[^{]*\(max-width: 1024px\)[^{]*\{/g);
 }
 
 function extractRuleBlock(css: string, selector: string): string {
@@ -200,6 +207,18 @@ describe("NodesView", () => {
     const overlay = document.querySelector(".nodes-management-overlay");
     expect(overlay).toContainElement(screen.getByTestId("nodes-view"));
     expect(screen.getByRole("button", { name: "Close nodes view" })).toBeInTheDocument();
+  });
+
+  it("defines nodes overlay as a fixed fullscreen tablet panel", () => {
+    const tabletCss = extractTabletMediaBlocks(loadAllAppCss());
+    const overlayRule = extractRuleBlock(tabletCss, ".nodes-management-overlay");
+
+    expect(overlayRule).toContain("position: fixed;");
+    expect(overlayRule).toContain("inset: 0;");
+    expect(overlayRule).toContain("z-index: 50;");
+    expect(overlayRule).toContain("background: var(--bg);");
+    expect(overlayRule).toContain("overflow-y: auto;");
+    expect(overlayRule).toContain("-webkit-overflow-scrolling: touch;");
   });
 
   it("renders docker stat and passes docker data to matching node card", () => {

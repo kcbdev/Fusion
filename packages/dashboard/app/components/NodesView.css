@@ -717,6 +717,16 @@
   .nodes-view-section-title {
     font-size: calc(var(--space-md) + var(--space-xs) / 4);
   }
+}
 
-
+/* ── Nodes View Tablet Overlay ───────────────────────────────────────── */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .nodes-management-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: var(--bg);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
 }
