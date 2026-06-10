@@ -1484,7 +1484,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
             data-testid="quick-entry-actions"
             onTouchStart={(e: React.TouchEvent) => {
               const target = e.target;
-              if (!(target instanceof HTMLElement)) return;
+              if (!(target instanceof Element)) return;
               const button = target.closest("button");
               if (button && !button.disabled) {
                 e.preventDefault();

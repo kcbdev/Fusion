@@ -120,25 +120,28 @@ vi.mock("../../hooks/useNodes", () => ({
 }));
 
 // Mock lucide-react
-vi.mock("lucide-react", () => ({
-  Link: () => null,
-  Paperclip: () => null,
-  Brain: () => null,
-  Lightbulb: () => null,
-  ListTree: () => null,
-  Sparkles: () => null,
-  Save: () => null,
-  X: () => null,
-  ChevronDown: () => null,
-  ChevronUp: () => null,
-  ChevronRight: () => null,
-  Bot: () => null,
-  Server: () => null,
-  Flag: () => null,
-  Github: () => null,
-  Maximize2: () => null,
-  Minimize2: () => null,
-}));
+vi.mock("lucide-react", () => {
+  const MockIcon = (props: any) => <svg aria-hidden="true" {...props} />;
+  return {
+    Link: MockIcon,
+    Paperclip: MockIcon,
+    Brain: MockIcon,
+    Lightbulb: MockIcon,
+    ListTree: MockIcon,
+    Sparkles: MockIcon,
+    Save: MockIcon,
+    X: MockIcon,
+    ChevronDown: MockIcon,
+    ChevronUp: MockIcon,
+    ChevronRight: MockIcon,
+    Bot: MockIcon,
+    Server: MockIcon,
+    Flag: MockIcon,
+    Github: MockIcon,
+    Maximize2: MockIcon,
+    Minimize2: MockIcon,
+  };
+});
 
 // Mock ModelSelectionModal (kept for backward compatibility - no longer directly rendered)
 vi.mock("../ModelSelectionModal", () => ({
@@ -479,14 +482,14 @@ describe("QuickEntryBox", () => {
       return textarea;
     }
 
-    function fireCancelableTouchStart(target: HTMLElement) {
+    function fireCancelableTouchStart(target: Element) {
       const event = new Event("touchstart", { bubbles: true, cancelable: true });
       const preventDefaultSpy = vi.spyOn(event, "preventDefault");
       fireEvent(target, event);
       return { preventDefaultSpy };
     }
 
-    async function touchActionButton(button: HTMLElement) {
+    async function touchActionButton(button: Element) {
       const { preventDefaultSpy } = fireCancelableTouchStart(button);
       expect(preventDefaultSpy).toHaveBeenCalled();
       await act(async () => {
@@ -495,6 +498,78 @@ describe("QuickEntryBox", () => {
         vi.runOnlyPendingTimers();
       });
     }
+
+    async function touchPriorityOption(option: Element) {
+      await act(async () => {
+        fireEvent.touchStart(option);
+        fireEvent.touchEnd(option);
+        fireEvent.click(option);
+        vi.runOnlyPendingTimers();
+        vi.runOnlyPendingTimers();
+      });
+    }
+
+    it("captures an SVG touch target inside the priority button and opens the picker", async () => {
+      await renderMobileQuickEntryWithEnabledActions();
+      const priorityButton = screen.getByTestId("quick-entry-priority-button");
+      const svg = priorityButton.querySelector("svg");
+      expect(svg).not.toBeNull();
+
+      const { preventDefaultSpy } = fireCancelableTouchStart(svg!);
+      expect(preventDefaultSpy).toHaveBeenCalled();
+      await act(async () => {
+        fireEvent(svg!, new Event("touchend", { bubbles: true, cancelable: true }));
+        vi.runOnlyPendingTimers();
+        vi.runOnlyPendingTimers();
+      });
+
+      expect(await screen.findByTestId("quick-entry-priority-option-normal")).toBeTruthy();
+    });
+
+    it("toggles Fast pressed state via mobile touch", async () => {
+      await renderMobileQuickEntryWithEnabledActions();
+      const fastToggle = screen.getByTestId("quick-entry-fast-toggle");
+
+      expect(fastToggle.getAttribute("aria-pressed")).toBe("false");
+      await touchActionButton(fastToggle);
+      expect(fastToggle.getAttribute("aria-pressed")).toBe("true");
+    });
+
+    it("opens the priority picker via mobile touch", async () => {
+      await renderMobileQuickEntryWithEnabledActions();
+      await touchActionButton(screen.getByTestId("quick-entry-priority-button"));
+
+      expect(await screen.findByTestId("quick-entry-priority-option-normal")).toBeTruthy();
+    });
+
+    it("selects a priority option after mobile touch opens the picker", async () => {
+      await renderMobileQuickEntryWithEnabledActions();
+      const priorityButton = screen.getByTestId("quick-entry-priority-button");
+
+      await touchActionButton(priorityButton);
+      const highOption = await screen.findByTestId("quick-entry-priority-option-high");
+      await touchPriorityOption(highOption);
+
+      expect(priorityButton.textContent).toContain("High");
+      await waitFor(() => {
+        expect(screen.queryByTestId("quick-entry-priority-option-normal")).toBeNull();
+      });
+    });
+
+    it.each([
+      ["Priority", "quick-entry-priority-button"],
+      ["Models", "quick-entry-models"],
+      ["Node", "quick-entry-node-button"],
+      ["Agent", "quick-entry-agent-button"],
+    ] as const)("captures SVG touches on the %s action button", async (_label, testId) => {
+      await renderMobileQuickEntryWithEnabledActions();
+      const button = screen.getByTestId(testId);
+      const svg = button.querySelector("svg");
+      expect(svg).not.toBeNull();
+
+      const { preventDefaultSpy } = fireCancelableTouchStart(svg!);
+      expect(preventDefaultSpy).toHaveBeenCalled();
+    });
 
     it.each(QUICK_ENTRY_ACTION_BUTTONS)("keeps textarea focused during mobile touch on %s", async (_label, testId) => {
       await renderMobileQuickEntryWithEnabledActions();
