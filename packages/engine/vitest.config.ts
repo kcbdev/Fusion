@@ -95,7 +95,6 @@ export default defineConfig({
           include: ["src/**/*.test.ts"],
           exclude: [
             "src/__tests__/reliability-interactions/**/*.test.ts",
-            "src/__tests__/self-healing-db-corruption.test.ts",
             // Real-git heavy files run in the engine-slow project so local
             // `pnpm test` stays snappy. CI picks them up via `test:slow`
             // / `test:all` invoked from the root `test:full` script.
