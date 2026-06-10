@@ -189,6 +189,15 @@ function builtinPrDef(): WorkflowDefinition {
   };
 }
 
+async function selectBuiltinExecutePromptNode() {
+  await screen.findByTestId("wf-readonly-banner");
+  const promptNodes = await screen.findAllByTestId("wf-node-prompt");
+  const executeNode = promptNodes.find((node) => within(node).queryByText("Execute"));
+  expect(executeNode).toBeTruthy();
+  fireEvent.click(executeNode!);
+  return executeNode!;
+}
+
 function edgeRenderableAssertion(definition: WorkflowDefinition) {
   const flow = irToFlow(definition);
   const nodeIds = new Set(flow.nodes.map((node) => node.id));
@@ -639,6 +648,58 @@ describe("WorkflowNodeEditor", () => {
     expect(fullscreenPromptEditor).toBeInTheDocument();
 
     fireEvent.keyDown(fullscreenPromptEditor!, { key: "Escape" });
+
+    expect(getPromptFullscreenOverlay()).toBeNull();
+  });
+
+  it("shows a non-disabled expand button and read-only prompt for builtin workflow prompt nodes", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([builtinDef()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    await selectBuiltinExecutePromptNode();
+    const inspector = await screen.findByTestId("wf-node-inspector");
+    expect(within(inspector).getByLabelText("Prompt")).toHaveAttribute("readonly");
+
+    const expand = within(inspector).getByRole("button", { name: "Expand prompt editor" });
+    expect(expand).toBeInTheDocument();
+    expect(expand).not.toBeDisabled();
+  });
+
+  it("opens and collapses the fullscreen prompt editor for builtin workflows", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([builtinDef()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    await selectBuiltinExecutePromptNode();
+    fireEvent.click(await screen.findByRole("button", { name: "Expand prompt editor" }));
+
+    const fullscreenPromptEditor = getPromptFullscreenOverlay();
+    expect(fullscreenPromptEditor).toBeInTheDocument();
+    expect(fullscreenPromptEditor).toHaveClass("wf-prompt-editor--fullscreen");
+    expect(getPromptFullscreenTextarea()).toHaveAttribute("readonly");
+
+    fireEvent.click(within(fullscreenPromptEditor!).getByRole("button", { name: "Collapse prompt editor" }));
+
+    expect(getPromptFullscreenOverlay()).toBeNull();
+  });
+
+  it("opens and collapses the fullscreen prompt editor for builtin workflows on mobile", async () => {
+    mockWorkflowEditorViewport("mobile");
+    vi.mocked(fetchWorkflows).mockResolvedValue([builtinDef()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Default coding workflow" }));
+    await selectBuiltinExecutePromptNode();
+    const inspector = await screen.findByTestId("wf-node-inspector");
+    fireEvent.click(within(inspector).getByRole("button", { name: "Expand prompt editor" }));
+
+    const fullscreenPromptEditor = getPromptFullscreenOverlay();
+    expect(fullscreenPromptEditor).toBeInTheDocument();
+    expect(fullscreenPromptEditor).toHaveClass("wf-prompt-editor--fullscreen");
+
+    fireEvent.click(within(fullscreenPromptEditor!).getByRole("button", { name: "Collapse prompt editor" }));
 
     expect(getPromptFullscreenOverlay()).toBeNull();
   });

@@ -2148,6 +2148,7 @@ function InnerEditor({
               <textarea
                 rows={undefined}
                 value={selectedNodePromptValue}
+                readOnly={isBuiltin}
                 onChange={(e) => updateSelectedData({ config: { prompt: e.target.value } })}
                 autoFocus
               />
@@ -3176,6 +3177,7 @@ function InnerEditor({
                   onChange={(e) => updateSelectedData({ label: e.target.value })}
                 />
               </label>
+              </fieldset>
 
               {selectedNode.data.kind === "prompt" || selectedNode.data.kind === "gate" ? (
                 <div className="wf-prompt-editor">
@@ -3184,9 +3186,13 @@ function InnerEditor({
                     <textarea
                       rows={5}
                       value={selectedNodePromptValue}
+                      readOnly={isBuiltin}
                       onChange={(e) => updateSelectedData({ config: { prompt: e.target.value } })}
                     />
                   </label>
+                  {/* Expand button is outside <fieldset disabled={isBuiltin}> so it remains
+                      clickable for builtin workflows. Root cause: HTML spec disables all
+                      descendant buttons inside a disabled fieldset, including type="button". */}
                   <button
                     type="button"
                     className="btn btn-sm wf-prompt-expand-btn wf-prompt-expand-btn--inline"
@@ -3199,6 +3205,7 @@ function InnerEditor({
                 </div>
               ) : null}
 
+              <fieldset className="wf-inspector-fields" disabled={isBuiltin}>
               {selectedNode.data.kind === "prompt" ? (
                 <>
                   <label className="wf-field">
