@@ -1058,6 +1058,7 @@ export async function runTaskRetry(id: string, projectName?: string) {
   // and merge failures (all steps done).
   if (isInReviewRetry) {
     if (isExecutionFailureInReview) {
+      await store.moveTask(id, "todo", { preserveProgress: true });
       await store.updateTask(id, {
         status: null,
         error: null,
@@ -1070,7 +1071,6 @@ export async function runTaskRetry(id: string, projectName?: string) {
           ? `Retry requested from CLI (stranded in-review execution retry → todo, preserving progress${retryLogSuffix})`
           : `Retry requested from CLI (execution failure in-review → todo, preserving progress${retryLogSuffix})`,
       );
-      await store.moveTask(id, "todo", { preserveProgress: true });
 
       console.log();
       console.log(`  ✓ Retried ${id} → todo (execution failure, preserving step progress)`);
@@ -1078,19 +1078,25 @@ export async function runTaskRetry(id: string, projectName?: string) {
       return;
     }
 
+    await store.moveTask(id, "todo");
     await store.updateTask(id, {
       status: null,
       error: null,
       ...autoPauseClearPatch,
       ...buildManualRetryResetPatch({ resetMergeRetries: true }),
     });
-    await store.logEntry(id, `Retry requested from CLI (in-review merge retry, mergeRetries reset${retryLogSuffix})`);
+    await store.logEntry(id, `Retry requested from CLI (merge retry → todo, mergeRetries reset${retryLogSuffix})`);
 
     console.log();
-    console.log(`  ✓ Retried ${id} → in-review (merge retry state cleared)`);
+    console.log(`  ✓ Retried ${id} → todo (merge retry state cleared)`);
     console.log();
     return;
   }
+
+  // Move to todo column before applying retry resets. `moveTask` reads from the
+  // store's durable index and may overwrite task.json-only updates, so apply the
+  // manual retry reset patch after the move to make the cleared counters stick.
+  await store.moveTask(id, 'todo');
 
   // Clear failure state and stale branch refs so retry can choose a fresh base.
   await store.updateTask(id, {
@@ -1103,9 +1109,6 @@ export async function runTaskRetry(id: string, projectName?: string) {
     ...autoPauseClearPatch,
     ...buildManualRetryResetPatch({ resetMergeRetries: true }),
   });
-  
-  // Move to todo column
-  await store.moveTask(id, 'todo');
   
   // Log the retry action
   await store.logEntry(

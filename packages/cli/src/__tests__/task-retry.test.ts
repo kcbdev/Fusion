@@ -42,12 +42,14 @@ describe("runTaskRetry", () => {
       error: "merge deadlock",
       paused: true,
       pausedReason: "in-review-stall-deadlock",
+      steps: [{ name: "implemented", status: "done" }],
       mergeRetries: 4,
     });
 
     await runTaskRetry(task.id);
 
-    const updated = await store.getTask(task.id);
+    const verificationStore = await createStore();
+    const updated = await verificationStore.getTask(task.id);
     expect(updated.column).toBe("todo");
     expect(updated.status).toBeUndefined();
     expect(updated.error).toBeUndefined();

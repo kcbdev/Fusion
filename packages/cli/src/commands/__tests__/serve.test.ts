@@ -9,10 +9,12 @@ const { mockSyncStartupModels, mockShouldUseHybridExecutor, mockHybridExecutorCt
   mockShouldUseHybridExecutor: vi.fn().mockResolvedValue({ enabled: false, reason: "single-project-local-only" }),
   mockHybridExecutorInitialize: vi.fn().mockResolvedValue(undefined),
   mockHybridExecutorShutdown: vi.fn().mockResolvedValue(undefined),
-  mockHybridExecutorCtor: vi.fn().mockImplementation(() => ({
-    initialize: mockHybridExecutorInitialize,
-    shutdown: mockHybridExecutorShutdown,
-  })),
+  mockHybridExecutorCtor: vi.fn().mockImplementation(function () {
+    return {
+      initialize: mockHybridExecutorInitialize,
+      shutdown: mockHybridExecutorShutdown,
+    };
+  }),
 }));
 vi.mock("../startup-model-sync.js", () => ({
   syncStartupModels: mockSyncStartupModels,
@@ -132,13 +134,13 @@ const mocks = vi.hoisted(() => {
     });
   }
 
-  const taskStoreCtor = vi.fn().mockImplementation(() => {
+  const taskStoreCtor = vi.fn().mockImplementation(function () {
     const store = createTaskStoreMock();
     taskStores.push(store);
     return store;
   });
 
-  const automationStoreCtor = vi.fn().mockImplementation(() => {
+  const automationStoreCtor = vi.fn().mockImplementation(function () {
     const automationStore = {
       init: vi.fn().mockResolvedValue(undefined),
     };
@@ -146,7 +148,7 @@ const mocks = vi.hoisted(() => {
     return automationStore;
   });
 
-  const agentStoreCtor = vi.fn().mockImplementation(() => {
+  const agentStoreCtor = vi.fn().mockImplementation(function () {
     const agentStore = {
       init: vi.fn().mockResolvedValue(undefined),
     };
@@ -154,7 +156,7 @@ const mocks = vi.hoisted(() => {
     return agentStore;
   });
 
-  const centralCoreCtor = vi.fn().mockImplementation(() => {
+  const centralCoreCtor = vi.fn().mockImplementation(function () {
     const now = new Date().toISOString();
     const projects = [
       { ...PROJECT_FIXTURES.primary, createdAt: now, updatedAt: now },
@@ -223,7 +225,7 @@ const mocks = vi.hoisted(() => {
     }),
   }));
 
-  const triageCtor = vi.fn().mockImplementation(() => {
+  const triageCtor = vi.fn().mockImplementation(function () {
     const triage = {
       start: vi.fn(),
       stop: vi.fn(),
@@ -233,7 +235,7 @@ const mocks = vi.hoisted(() => {
     return triage;
   });
 
-  const executorCtor = vi.fn().mockImplementation(() => {
+  const executorCtor = vi.fn().mockImplementation(function () {
     const executor = {
       resumeOrphaned: vi.fn().mockResolvedValue(undefined),
       markStuckAborted: vi.fn(),
@@ -245,7 +247,7 @@ const mocks = vi.hoisted(() => {
     return executor;
   });
 
-  const schedulerCtor = vi.fn().mockImplementation(() => {
+  const schedulerCtor = vi.fn().mockImplementation(function () {
     const scheduler = {
       start: vi.fn(),
       stop: vi.fn(),
@@ -254,7 +256,7 @@ const mocks = vi.hoisted(() => {
     return scheduler;
   });
 
-  const stuckDetectorCtor = vi.fn().mockImplementation(() => {
+  const stuckDetectorCtor = vi.fn().mockImplementation(function () {
     const detector = {
       start: vi.fn(),
       stop: vi.fn(),
@@ -264,7 +266,7 @@ const mocks = vi.hoisted(() => {
     return detector;
   });
 
-  const selfHealingCtor = vi.fn().mockImplementation(() => {
+  const selfHealingCtor = vi.fn().mockImplementation(function () {
     const manager = {
       start: vi.fn(),
       stop: vi.fn(),
@@ -274,7 +276,7 @@ const mocks = vi.hoisted(() => {
     return manager;
   });
 
-  const cronRunnerCtor = vi.fn().mockImplementation(() => {
+  const cronRunnerCtor = vi.fn().mockImplementation(function () {
     const cron = {
       start: vi.fn(),
       stop: vi.fn(),
@@ -283,7 +285,7 @@ const mocks = vi.hoisted(() => {
     return cron;
   });
 
-  const missionAutopilotCtor = vi.fn().mockImplementation(() => {
+  const missionAutopilotCtor = vi.fn().mockImplementation(function () {
     const autopilot = {
       start: vi.fn(),
       stop: vi.fn(),
@@ -293,7 +295,7 @@ const mocks = vi.hoisted(() => {
     return autopilot;
   });
 
-  const missionExecutionLoopCtor = vi.fn().mockImplementation(() => {
+  const missionExecutionLoopCtor = vi.fn().mockImplementation(function () {
     const loop = {
       start: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn().mockResolvedValue(undefined),
@@ -304,7 +306,7 @@ const mocks = vi.hoisted(() => {
     return loop;
   });
 
-  const notifierCtor = vi.fn().mockImplementation(() => {
+  const notifierCtor = vi.fn().mockImplementation(function () {
     const notifier = {
       start: vi.fn(),
       stop: vi.fn(),
@@ -313,7 +315,7 @@ const mocks = vi.hoisted(() => {
     return notifier;
   });
 
-  const pluginStoreCtor = vi.fn().mockImplementation(() => {
+  const pluginStoreCtor = vi.fn().mockImplementation(function () {
     const pluginStore = {
       init: vi.fn().mockResolvedValue(undefined),
       listPlugins: vi.fn().mockResolvedValue([]),
@@ -329,7 +331,7 @@ const mocks = vi.hoisted(() => {
     return pluginStore;
   });
 
-  const pluginLoaderCtor = vi.fn().mockImplementation(() => {
+  const pluginLoaderCtor = vi.fn().mockImplementation(function () {
     const pluginLoader = {
       loadPlugin: vi.fn().mockResolvedValue(undefined),
       loadAllPlugins: vi.fn().mockResolvedValue({ loaded: 0, errors: 0 }),
@@ -361,25 +363,31 @@ const mocks = vi.hoisted(() => {
     refresh: vi.fn(),
   };
 
-  const agentSemaphoreCtor = vi.fn().mockImplementation(() => ({
-    _active: 0,
-    run: (fn: () => Promise<unknown>) => fn(),
-  }));
+  const agentSemaphoreCtor = vi.fn().mockImplementation(function () {
+    return {
+      _active: 0,
+      run: (fn: () => Promise<unknown>) => fn(),
+    };
+  });
 
-  const heartbeatMonitorCtor = vi.fn().mockImplementation(() => ({
-    start: vi.fn(),
-    stop: vi.fn(),
-    startRun: vi.fn().mockResolvedValue({ id: "run-1" }),
-    executeHeartbeat: vi.fn().mockResolvedValue({ id: "run-1" }),
-    stopRun: vi.fn().mockResolvedValue(undefined),
-  }));
+  const heartbeatMonitorCtor = vi.fn().mockImplementation(function () {
+    return {
+      start: vi.fn(),
+      stop: vi.fn(),
+      startRun: vi.fn().mockResolvedValue({ id: "run-1" }),
+      executeHeartbeat: vi.fn().mockResolvedValue({ id: "run-1" }),
+      stopRun: vi.fn().mockResolvedValue(undefined),
+    };
+  });
 
-  const heartbeatTriggerSchedulerCtor = vi.fn().mockImplementation(() => ({
-    start: vi.fn(),
-    stop: vi.fn(),
-    registerAgent: vi.fn(),
-    getRegisteredAgents: vi.fn().mockReturnValue([]),
-  }));
+  const heartbeatTriggerSchedulerCtor = vi.fn().mockImplementation(function () {
+    return {
+      start: vi.fn(),
+      stop: vi.fn(),
+      registerAgent: vi.fn(),
+      getRegisteredAgents: vi.fn().mockReturnValue([]),
+    };
+  });
 
   const createAiPromptExecutorMock = vi.fn().mockResolvedValue(vi.fn().mockResolvedValue("ok"));
   const syncInsightExtractionAutomationMock = vi.fn().mockResolvedValue(undefined);
@@ -393,7 +401,7 @@ const mocks = vi.hoisted(() => {
     pruning: { applied: false },
   });
 
-  const projectEngineCtor = vi.fn().mockImplementation((runtimeConfig: { workingDirectory: string }, _centralCore: unknown, options: { onInsightRunProcessed?: unknown }) => {
+  const projectEngineCtor = vi.fn().mockImplementation(function (runtimeConfig: { workingDirectory: string }, _centralCore: unknown, options: { onInsightRunProcessed?: unknown }) {
     const store = taskStoreCtor(runtimeConfig.workingDirectory);
     const automationStore = automationStoreCtor(runtimeConfig.workingDirectory);
     const agentStore = agentStoreCtor();
@@ -575,19 +583,25 @@ vi.mock("@fusion/core", async (importOriginal) => {
   syncInsightExtractionAutomation: mocks.syncInsightExtractionAutomationMock,
   INSIGHT_EXTRACTION_SCHEDULE_NAME: "Memory Insight Extraction",
   processAndAuditInsightExtraction: mocks.processAndAuditInsightExtractionMock,
-  DaemonTokenManager: vi.fn().mockImplementation(() => ({
-    getToken: vi.fn().mockResolvedValue(null),
-    generateToken: vi.fn().mockResolvedValue("fn_generated1234567890"),
-    storeToken: vi.fn().mockResolvedValue(undefined),
-  })),
-  GlobalSettingsStore: vi.fn().mockImplementation(() => ({})),
+  DaemonTokenManager: vi.fn().mockImplementation(function () {
+    return {
+      getToken: vi.fn().mockResolvedValue(null),
+      generateToken: vi.fn().mockResolvedValue("fn_generated1234567890"),
+      storeToken: vi.fn().mockResolvedValue(undefined),
+    };
+  }),
+  GlobalSettingsStore: vi.fn().mockImplementation(function () {
+    return {};
+  }),
   resolveGlobalDir: vi.fn().mockReturnValue("/mock/global"),
   });
 });
 
 vi.mock("@fusion/dashboard", () => ({
   createServer: mocks.createServerMock,
-  GitHubClient: vi.fn().mockImplementation(() => ({})),
+  GitHubClient: vi.fn().mockImplementation(function () {
+    return {};
+  }),
   createSkillsAdapter: vi.fn().mockReturnValue(undefined),
   getProjectSettingsPath: vi.fn().mockReturnValue("/tmp/project/.fusion/settings.json"),
   loadTlsCredentialsFromEnv: vi.fn().mockReturnValue(undefined),
@@ -597,7 +611,7 @@ vi.mock("@fusion/engine", async (importOriginal) => {
   const { createCliEngineMock } = await import("../../test/mockCoreEngine");
   return createCliEngineMock(() => importOriginal<typeof import("@fusion/engine")>(), {
   ProjectEngine: mocks.projectEngineCtor,
-  ProjectEngineManager: vi.fn().mockImplementation((centralCore: any, options: any) => {
+  ProjectEngineManager: vi.fn().mockImplementation(function (centralCore: any, options: any) {
     const engines = new Map<string, any>();
     return {
       startAll: vi.fn(async () => {
@@ -629,26 +643,34 @@ vi.mock("@fusion/engine", async (importOriginal) => {
       startReconciliation: vi.fn(),
     };
   }),
-  PeerExchangeService: vi.fn().mockImplementation(() => ({
-    start: vi.fn(),
-    stop: vi.fn().mockResolvedValue(undefined),
-  })),
+  PeerExchangeService: vi.fn().mockImplementation(function () {
+    return {
+      start: vi.fn(),
+      stop: vi.fn().mockResolvedValue(undefined),
+    };
+  }),
   TriageProcessor: mocks.triageCtor,
   TaskExecutor: mocks.executorCtor,
   Scheduler: mocks.schedulerCtor,
   AgentSemaphore: mocks.agentSemaphoreCtor,
-  WorktreePool: vi.fn().mockImplementation(() => ({
-    rehydrate: vi.fn(),
-  })),
+  WorktreePool: vi.fn().mockImplementation(function () {
+    return {
+      rehydrate: vi.fn(),
+    };
+  }),
   aiMergeTask: vi.fn().mockResolvedValue({ merged: true }),
-  UsageLimitPauser: vi.fn().mockImplementation(() => ({})),
+  UsageLimitPauser: vi.fn().mockImplementation(function () {
+    return {};
+  }),
   PRIORITY_MERGE: 100,
   scanIdleWorktrees: vi.fn().mockResolvedValue([]),
   cleanupOrphanedWorktrees: vi.fn().mockResolvedValue(0),
   NtfyNotifier: mocks.notifierCtor,
-  PrMonitor: vi.fn().mockImplementation(() => ({
-    onNewComments: vi.fn(),
-  })),
+  PrMonitor: vi.fn().mockImplementation(function () {
+    return {
+      onNewComments: vi.fn(),
+    };
+  }),
   PrCommentHandler: vi.fn().mockImplementation(() => ({
     handleNewComments: vi.fn(),
     createFollowUpTask: vi.fn().mockResolvedValue(undefined),
@@ -669,9 +691,11 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   AuthStorage: {
     create: vi.fn(() => mocks.authStorage),
   },
-  DefaultPackageManager: vi.fn().mockImplementation(() => ({
-    resolve: vi.fn().mockResolvedValue({ extensions: [] }),
-  })),
+  DefaultPackageManager: vi.fn().mockImplementation(function () {
+    return {
+      resolve: vi.fn().mockResolvedValue({ extensions: [] }),
+    };
+  }),
   ModelRegistry: {
     create: vi.fn(() => mocks.modelRegistry),
     inMemory: vi.fn(() => mocks.modelRegistry),
@@ -696,6 +720,8 @@ vi.mock("../task-lifecycle.js", () => ({
   processPullRequestMergeTask: vi.fn().mockResolvedValue("waiting"),
   createGroupPrCallback: vi.fn(() => vi.fn()),
   syncGroupPrCallback: vi.fn(() => vi.fn()),
+  createPrNodeGithubOps: vi.fn(() => ({})),
+  createPrReconcileGithubOps: vi.fn(() => ({})),
 }));
 
 vi.mock("../project-context.js", () => ({
@@ -735,9 +761,9 @@ describe("runServe", () => {
 
     signalHandlers = { SIGINT: [], SIGTERM: [] };
 
-    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    logSpy = vi.spyOn(console, "log").mockImplementation(function () {});
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(function () {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(function () {});
 
     cwdSpy = vi.spyOn(process, "cwd").mockReturnValue("/repo");
     processOnSpy = vi.spyOn(process, "on").mockImplementation(((event: string, listener: () => void) => {
@@ -956,7 +982,7 @@ describe("runServe — Plugin wiring", () => {
 
     signalHandlers = { SIGINT: [], SIGTERM: [] };
 
-    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    logSpy = vi.spyOn(console, "log").mockImplementation(function () {});
     cwdSpy = vi.spyOn(process, "cwd").mockReturnValue("/repo");
     processOnSpy = vi.spyOn(process, "on").mockImplementation(((event: string, listener: () => void) => {
       if (event === "SIGINT" || event === "SIGTERM") {
@@ -1041,16 +1067,18 @@ describe("runServe — Plugin wiring", () => {
 
   it("continues startup when plugin auto-load fails", async () => {
     const { PluginLoader } = await import("@fusion/core");
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    (PluginLoader as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
-      loadPlugin: vi.fn().mockResolvedValue(undefined),
-      loadAllPlugins: vi.fn().mockRejectedValue(new Error("plugin load failed")),
-      stopPlugin: vi.fn().mockResolvedValue(undefined),
-      reloadPlugin: vi.fn().mockResolvedValue(undefined),
-      getPluginRoutes: vi.fn().mockReturnValue([]),
-      getPlugin: vi.fn(),
-      getLoadedPlugins: vi.fn().mockReturnValue([]),
-    }));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(function () {});
+    (PluginLoader as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(function () {
+      return {
+        loadPlugin: vi.fn().mockResolvedValue(undefined),
+        loadAllPlugins: vi.fn().mockRejectedValue(new Error("plugin load failed")),
+        stopPlugin: vi.fn().mockResolvedValue(undefined),
+        reloadPlugin: vi.fn().mockResolvedValue(undefined),
+        getPluginRoutes: vi.fn().mockReturnValue([]),
+        getPlugin: vi.fn(),
+        getLoadedPlugins: vi.fn().mockReturnValue([]),
+      };
+    });
 
     await expect(runServe(4040, {})).resolves.toBeUndefined();
     expect(errorSpy).toHaveBeenCalledWith(
@@ -1101,9 +1129,9 @@ describe("runServe — Memory Insight Automation wiring", () => {
 
     signalHandlers = { SIGINT: [], SIGTERM: [] };
 
-    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    logSpy = vi.spyOn(console, "log").mockImplementation(function () {});
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(function () {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(function () {});
 
     cwdSpy = vi.spyOn(process, "cwd").mockReturnValue("/repo");
     processOnSpy = vi.spyOn(process, "on").mockImplementation(((event: string, listener: () => void) => {
@@ -1139,7 +1167,9 @@ describe("runServe — Memory Insight Automation wiring", () => {
       stopDiscovery: vi.fn(),
     };
     mocks.centralInstances.push(instance);
-    CentralCore.mockImplementation(() => instance);
+    CentralCore.mockImplementation(function () {
+      return instance;
+    });
   });
 
   afterEach(() => {
@@ -1229,7 +1259,7 @@ describe("runServe — Memory Insight Automation wiring", () => {
 
   it("handles syncInsightExtractionAutomation errors gracefully", async () => {
     const { syncInsightExtractionAutomation } = await import("@fusion/core");
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(function () {});
     syncInsightExtractionAutomation.mockRejectedValueOnce(new Error("Sync failed"));
 
     await runServe(4040, {});
@@ -1300,7 +1330,9 @@ describe("runServe — Semaphore boundary (task lanes only)", () => {
       stopDiscovery: vi.fn(),
     };
     mocks.centralInstances.push(instance);
-    CentralCore.mockImplementation(() => instance);
+    CentralCore.mockImplementation(function () {
+      return instance;
+    });
   });
 
   afterEach(() => {
@@ -1452,7 +1484,7 @@ describe("runServe — Peer exchange and discovery", () => {
 
     signalHandlers = { SIGINT: [], SIGTERM: [] };
 
-    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(function () {});
     cwdSpy = vi.spyOn(process, "cwd").mockReturnValue("/repo");
     processOnSpy = vi.spyOn(process, "on").mockImplementation(((event: string, listener: () => void) => {
       if (event === "SIGINT" || event === "SIGTERM") {
@@ -1465,7 +1497,7 @@ describe("runServe — Peer exchange and discovery", () => {
     // Override CentralCore to use original implementation that pushes to centralInstances
     const { CentralCore } = await import("@fusion/core");
     // Reset to the original constructor that creates and pushes instances
-    CentralCore.mockImplementation(() => {
+    CentralCore.mockImplementation(function () {
       const instance = {
         init: vi.fn().mockResolvedValue(undefined),
         close: vi.fn().mockResolvedValue(undefined),
@@ -1625,7 +1657,7 @@ describe("runServe --daemon flag", () => {
 
     signalHandlers = { SIGINT: [], SIGTERM: [] };
 
-    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    logSpy = vi.spyOn(console, "log").mockImplementation(function () {});
     cwdSpy = vi.spyOn(process, "cwd").mockReturnValue("/repo");
     processOnSpy = vi.spyOn(process, "on").mockImplementation(((event: string, listener: () => void) => {
       if (event === "SIGINT" || event === "SIGTERM") {
@@ -1637,7 +1669,7 @@ describe("runServe --daemon flag", () => {
 
     // Override CentralCore to use original implementation that pushes to centralInstances
     const { CentralCore } = await import("@fusion/core");
-    CentralCore.mockImplementation(() => {
+    CentralCore.mockImplementation(function () {
       const instance = {
         init: vi.fn().mockResolvedValue(undefined),
         close: vi.fn().mockResolvedValue(undefined),
@@ -1817,7 +1849,7 @@ describe("runServe — multi-project cwd/default engine resolution", () => {
 
     signalHandlers = { SIGINT: [], SIGTERM: [] };
 
-    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    logSpy = vi.spyOn(console, "log").mockImplementation(function () {});
     cwdSpy = vi.spyOn(process, "cwd").mockReturnValue("/repo");
     processOnSpy = vi.spyOn(process, "on").mockImplementation(((event: string, listener: () => void) => {
       if (event === "SIGINT" || event === "SIGTERM") {
@@ -1829,7 +1861,7 @@ describe("runServe — multi-project cwd/default engine resolution", () => {
 
     // Override CentralCore to use original implementation that pushes to centralInstances
     const { CentralCore } = await import("@fusion/core");
-    CentralCore.mockImplementation(() => {
+    CentralCore.mockImplementation(function () {
       const instance = {
         init: vi.fn().mockResolvedValue(undefined),
         close: vi.fn().mockResolvedValue(undefined),
@@ -1999,7 +2031,7 @@ describe("runServe — multi-project cwd/default engine resolution", () => {
   it("--no-auto-register falls back to existing started engines", async () => {
     const freshCwd = mkdtempSync(join(tmpdir(), "serve-no-auto-register-"));
     cwdSpy.mockReturnValue(freshCwd);
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(function () {});
     const ensureSpy = vi.spyOn(ensureProjectRegisteredModule, "ensureCwdProjectRegistered")
       .mockResolvedValue(null);
 

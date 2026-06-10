@@ -54,6 +54,23 @@ vi.mock("@fusion/core", async (importActual) => {
       return impl(...args);
     })) as typeof TaskStoreMock.mockImplementation;
 
+  const CentralCoreMock = vi.fn(function () {});
+  const centralCoreMockImplementation = CentralCoreMock.mockImplementation.bind(CentralCoreMock);
+  CentralCoreMock.mockImplementation = ((impl: (...args: any[]) => unknown) =>
+    centralCoreMockImplementation(function (this: unknown, ...args: any[]) {
+      return impl(...args);
+    })) as typeof CentralCoreMock.mockImplementation;
+  CentralCoreMock.mockImplementation(() => ({
+    init: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
+    listProjects: vi.fn().mockResolvedValue([]),
+    getProject: vi.fn().mockResolvedValue(undefined),
+    getProjectByPath: vi.fn().mockResolvedValue(undefined),
+    registerProject: vi.fn().mockResolvedValue({ id: "proj_test", name: "test", path: "/test" }),
+    getNode: vi.fn().mockResolvedValue(undefined),
+    getNodeByName: vi.fn().mockResolvedValue(undefined),
+  }));
+
   return {
     ...actual,
     TaskStore: TaskStoreMock,
@@ -74,18 +91,7 @@ vi.mock("@fusion/core", async (importActual) => {
       }
       return ids;
     }),
-    CentralCore: vi.fn().mockImplementation(function() {
-      return {
-        init: vi.fn().mockResolvedValue(undefined),
-        close: vi.fn().mockResolvedValue(undefined),
-        listProjects: vi.fn().mockResolvedValue([]),
-        getProject: vi.fn().mockResolvedValue(undefined),
-        getProjectByPath: vi.fn().mockResolvedValue(undefined),
-        registerProject: vi.fn().mockResolvedValue({ id: "proj_test", name: "test", path: "/test" }),
-        getNode: vi.fn().mockResolvedValue(undefined),
-        getNodeByName: vi.fn().mockResolvedValue(undefined),
-      };
-    }),
+    CentralCore: CentralCoreMock,
   };
 });
 
@@ -94,9 +100,11 @@ vi.mock("@fusion/engine", () => ({ aiMergeTask: vi.fn() }));
 
 // Mock @fusion/dashboard
 vi.mock("@fusion/dashboard", () => ({
-  GitHubClient: vi.fn().mockImplementation(() => ({
-    createPr: vi.fn(),
-  })),
+  GitHubClient: vi.fn().mockImplementation(function () {
+    return {
+      createPr: vi.fn(),
+    };
+  }),
   generatePrMetadata: vi.fn(),
   loadTlsCredentialsFromEnv: vi.fn().mockReturnValue(undefined),
 }));
@@ -167,6 +175,8 @@ function makeTask(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(resolveProject).mockRejectedValue(new Error("No project context"));
   vi.mocked(runDeterministicDuplicateGuard).mockResolvedValue({
     action: "proceed",
     fingerprint: null,
@@ -973,12 +983,16 @@ describe("project-aware task command behavior", () => {
     vi.mocked(isGhAvailable).mockReturnValue(true);
     vi.mocked(isGhAuthenticated).mockReturnValue(true);
     vi.mocked(getCurrentRepo).mockReturnValue({ owner: "acme", repo: "demo" });
-    vi.mocked(GitHubClient).mockImplementation(() => ({ createPr: mockCreatePr }) as never);
+    vi.mocked(GitHubClient).mockImplementation(function () {
+      return { createPr: mockCreatePr } as never;
+    });
 
     (TaskStore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
       init: vi.fn(),
       getTask: vi.fn().mockResolvedValue(makeTask({ id: "FN-001", column: "in-review", branchName: "fusion/fn-001" })),
       updatePrInfo: vi.fn().mockResolvedValue(undefined),
+      ensurePrEntityForSource: vi.fn(() => ({ id: "pr-entity-1" })),
+      updatePrEntity: vi.fn(),
       logEntry: vi.fn().mockResolvedValue(undefined),
     }));
 
@@ -2607,10 +2621,10 @@ describe("runTaskRetry", () => {
       error: null,
       mergeRetries: 0,
     }));
-    expect(mockMoveTask).not.toHaveBeenCalled();
+    expect(mockMoveTask).toHaveBeenCalledWith("FN-001", "todo");
     expect(mockLogEntry).toHaveBeenCalledWith(
       "FN-001",
-      "Retry requested from CLI (in-review merge retry, mergeRetries reset)",
+      "Retry requested from CLI (merge retry → todo, mergeRetries reset)",
     );
   });
 
@@ -3014,6 +3028,7 @@ describe("runTaskPrCreate", () => {
   }
 
   beforeEach(() => {
+    vi.clearAllMocks();
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     stderrWriteSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
@@ -3025,9 +3040,11 @@ describe("runTaskPrCreate", () => {
 
     // Setup GitHubClient mock
     mockCreatePr = vi.fn();
-    vi.mocked(GitHubClient).mockImplementation(() => ({
-      createPr: mockCreatePr,
-    } as unknown as GitHubClient));
+    vi.mocked(GitHubClient).mockImplementation(function () {
+      return {
+        createPr: mockCreatePr,
+      } as unknown as GitHubClient;
+    });
     vi.mocked(generatePrMetadata).mockResolvedValue({ title: "AI Generated Title", body: "AI Generated Body", templateUsed: false });
 
     // Setup gh-cli mocks
@@ -3044,6 +3061,8 @@ describe("runTaskPrCreate", () => {
       init: vi.fn(),
       getTask: mockGetTask,
       updatePrInfo: mockUpdatePrInfo,
+      ensurePrEntityForSource: vi.fn(() => ({ id: "pr-entity-1" })),
+      updatePrEntity: vi.fn(),
       logEntry: mockLogEntry,
     }));
   });

@@ -1,6 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runResearchCancel, runResearchCreate, runResearchExport, runResearchList, runResearchRetry, runResearchShow } from "../research.js";
 
+function makeConstructibleMock<T extends (...args: any[]) => unknown>(impl?: T) {
+  const mock = vi.fn(function () {});
+  const originalMockImplementation = mock.mockImplementation.bind(mock);
+  const originalMockImplementationOnce = mock.mockImplementationOnce.bind(mock);
+  const wrap = (nextImpl: T) => function (this: unknown, ...args: Parameters<T>) {
+    return nextImpl(...args);
+  };
+  mock.mockImplementation = ((nextImpl: T) => originalMockImplementation(wrap(nextImpl))) as typeof mock.mockImplementation;
+  mock.mockImplementationOnce = ((nextImpl: T) => originalMockImplementationOnce(wrap(nextImpl))) as typeof mock.mockImplementationOnce;
+  if (impl) {
+    mock.mockImplementation(impl);
+  }
+  return mock;
+}
+
 const mockRun = {
   id: "RR-001",
   query: "test query",
@@ -35,12 +50,12 @@ const orchestratorMock = {
 
 const { resolveResearchSettingsMock, providerRegistryMock, writeFileMock } = vi.hoisted(() => ({
   resolveResearchSettingsMock: vi.fn(() => ({ enabled: true, limits: { maxConcurrentRuns: 2, maxSourcesPerRun: 5, requestTimeoutMs: 1000, maxDurationMs: 5000 } })),
-  providerRegistryMock: vi.fn(() => ({ getAvailableProviders: () => ["tavily"], getProvider: () => ({ type: "tavily" }) })),
+  providerRegistryMock: makeConstructibleMock(function () { return { getAvailableProviders: () => ["tavily"], getProvider: () => ({ type: "tavily" }) }; }),
   writeFileMock: vi.fn(async () => undefined),
 }));
 
 vi.mock("@fusion/core", () => ({
-  TaskStore: vi.fn(() => storeMock),
+  TaskStore: makeConstructibleMock(() => storeMock),
   resolveResearchSettings: resolveResearchSettingsMock,
   RESEARCH_RUN_STATUSES: ["queued", "running", "cancelling", "retry_waiting", "completed", "failed", "cancelled", "timed_out", "retry_exhausted"],
   RESEARCH_EXPORT_FORMATS: ["json", "markdown", "pdf"],
@@ -49,7 +64,7 @@ vi.mock("@fusion/core", () => ({
 vi.mock("@fusion/engine", () => ({
   ResearchProviderRegistry: providerRegistryMock,
   ResearchStepRunner: vi.fn(),
-  ResearchOrchestrator: vi.fn(() => orchestratorMock),
+  ResearchOrchestrator: makeConstructibleMock(() => orchestratorMock),
 }));
 
 vi.mock("../../project-context.js", () => ({ resolveProject: vi.fn(async () => undefined) }));
@@ -66,7 +81,7 @@ describe("research commands", () => {
       throw new Error(`process.exit:${code ?? 0}`);
     }) as typeof process.exit);
     resolveResearchSettingsMock.mockReturnValue({ enabled: true, limits: { maxConcurrentRuns: 2, maxSourcesPerRun: 5, requestTimeoutMs: 1000, maxDurationMs: 5000 } });
-    providerRegistryMock.mockReturnValue({ getAvailableProviders: () => ["tavily"], getProvider: () => ({ type: "tavily" }) });
+    providerRegistryMock.mockImplementation(function () { return { getAvailableProviders: () => ["tavily"], getProvider: () => ({ type: "tavily" }) }; });
     researchStoreMock.getRun.mockReturnValue(mockRun);
     researchStoreMock.listRuns.mockReturnValue([mockRun]);
     orchestratorMock.retryRun.mockReturnValue("RR-003");
@@ -89,7 +104,7 @@ describe("research commands", () => {
       searchProvider: "builtin",
       limits: { maxConcurrentRuns: 2, maxSourcesPerRun: 5, requestTimeoutMs: 1000, maxDurationMs: 5000 },
     });
-    providerRegistryMock.mockReturnValueOnce({ getAvailableProviders: () => ["web-search"], getProvider: () => ({ type: "web-search" }) });
+    providerRegistryMock.mockImplementationOnce(function () { return { getAvailableProviders: () => ["web-search"], getProvider: () => ({ type: "web-search" }) }; });
 
     await runResearchCreate({ query: "hello builtin" });
 
@@ -154,7 +169,7 @@ describe("research commands", () => {
   });
 
   it("errors when providers are unavailable", async () => {
-    providerRegistryMock.mockReturnValue({ getAvailableProviders: () => [], getProvider: () => undefined });
+    providerRegistryMock.mockImplementation(function () { return { getAvailableProviders: () => [], getProvider: () => undefined }; });
     await expect(runResearchCreate({ query: "hello" })).rejects.toThrow("process.exit:1");
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("provider-unavailable"));
   });
