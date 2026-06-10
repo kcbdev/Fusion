@@ -31,6 +31,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, allowsAutoMergeProcessing, countRecentIdenticalStallEntries, detectDependencyCycle, detectSelfDefeatingDependency, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getStalePausedTodoSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, isMergeRequestContractShadowEnabled, isWorkflowColumnsEnabled, isSharedBranchGroupMemberIntegration, parseExplicitDuplicateMarker, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult } from "@fusion/core";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { createLogger, schedulerLog } from "./logger.js";
+import { publishWorkflowRecoveryEvent } from "./workflow-recovery-events.js";
 import { mergeEffectiveSettings } from "./effective-settings.js";
 import { RemovalReason, classifyTaskWorktree, getRegisteredWorktreeBranchMap, getRegisteredWorktreePaths, isUsableTaskWorktree, removeWorktree, resolveWorktreeBackend, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
 import {
@@ -5906,6 +5907,12 @@ export class SelfHealingManager {
             transientRecoveryCount: nextCount,
           },
         });
+        publishWorkflowRecoveryEvent(this.store, {
+          taskId: task.id,
+          kind: "transient-merge-failure",
+          source: "self-healing",
+          reason: errorSnippet,
+        });
         try {
           await audit.database({
             type: "merger:transient-failure-auto-recovered",
@@ -7064,6 +7071,12 @@ export class SelfHealingManager {
 
       await this.store.updateTask(task.id, {
         completionHandoffLimboRecoveryCount: currentCount + 1,
+      });
+      publishWorkflowRecoveryEvent(this.store, {
+        taskId: task.id,
+        kind: "completion-handoff-limbo",
+        source: "self-healing",
+        reason: `ageMs=${ageMs}; attempts=${currentCount + 1}`,
       });
 
       const audit = createRunAuditor(this.store, {
