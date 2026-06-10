@@ -465,11 +465,12 @@ describe("QuickEntryBox", () => {
       vi.mocked(fetchSettings).mockResolvedValueOnce({
         githubTrackingEnabledByDefault: true,
       } as any);
-      renderQuickEntryBox(props);
+      const result = renderQuickEntryBox(props);
       expandQuickEntry();
       await waitFor(() => {
         expect(screen.getByTestId("quick-entry-github-toggle")).not.toBeDisabled();
       });
+      return result;
     }
 
     function focusTextareaWithValue(value: string) {
@@ -533,6 +534,66 @@ describe("QuickEntryBox", () => {
       expect(fastToggle.getAttribute("aria-pressed")).toBe("false");
       await touchActionButton(fastToggle);
       expect(fastToggle.getAttribute("aria-pressed")).toBe("true");
+    });
+
+    it("toggles GitHub tracking pressed state via mobile touch", async () => {
+      await renderMobileQuickEntryWithEnabledActions();
+      const githubToggle = screen.getByTestId("quick-entry-github-toggle");
+
+      expect(githubToggle).toHaveAttribute("aria-pressed", "true");
+      await touchActionButton(githubToggle);
+      expect(githubToggle).toHaveAttribute("aria-pressed", "false");
+
+      await touchActionButton(githubToggle);
+      expect(githubToggle).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("captures an SVG touch target inside the GitHub tracking toggle", async () => {
+      await renderMobileQuickEntryWithEnabledActions();
+      const githubToggle = screen.getByTestId("quick-entry-github-toggle");
+      const svg = githubToggle.querySelector("svg");
+      expect(svg).not.toBeNull();
+
+      expect(githubToggle).toHaveAttribute("aria-pressed", "true");
+      const { preventDefaultSpy } = fireCancelableTouchStart(svg!);
+      expect(preventDefaultSpy).toHaveBeenCalled();
+      await act(async () => {
+        fireEvent(svg!, new Event("touchend", { bubbles: true, cancelable: true }));
+        vi.runOnlyPendingTimers();
+        vi.runOnlyPendingTimers();
+      });
+
+      expect(githubToggle).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("submits GitHub tracking override after mobile touch disables tracking", async () => {
+      const { props } = await renderMobileQuickEntryWithEnabledActions();
+      const githubToggle = screen.getByTestId("quick-entry-github-toggle");
+      const textarea = screen.getByTestId("quick-entry-input");
+
+      await touchActionButton(githubToggle);
+      expect(githubToggle).toHaveAttribute("aria-pressed", "false");
+
+      fireEvent.change(textarea, { target: { value: "Disable GitHub tracking by touch" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      await waitFor(() => {
+        expect(props.onCreate).toHaveBeenCalled();
+      });
+      const payload = props.onCreate.mock.calls[0]?.[0];
+      expect(payload.githubTracking).toEqual({ enabled: false });
+    });
+
+    it("toggles GitHub tracking primary button styling via mobile touch", async () => {
+      await renderMobileQuickEntryWithEnabledActions();
+      const githubToggle = screen.getByTestId("quick-entry-github-toggle");
+
+      expect(githubToggle.classList.contains("btn-primary")).toBe(true);
+      await touchActionButton(githubToggle);
+      expect(githubToggle.classList.contains("btn-primary")).toBe(false);
+
+      await touchActionButton(githubToggle);
+      expect(githubToggle.classList.contains("btn-primary")).toBe(true);
     });
 
     it("opens the priority picker via mobile touch", async () => {
