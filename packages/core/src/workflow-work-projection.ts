@@ -44,11 +44,11 @@ export function projectWorkflowWorkStatus(
   if (active.kind === "recovery") {
     return workflowProjection(active, "recovery");
   }
-  if (active.state === "retrying") {
-    return workflowProjection(active, "retrying");
-  }
   if (active.kind === "manual-hold" || active.state === "manual-required" || active.state === "held") {
     return workflowProjection(active, "manual-hold");
+  }
+  if (active.state === "retrying") {
+    return workflowProjection(active, "retrying");
   }
   if (active.state === "running") {
     return workflowProjection(active, "merge-running");

@@ -50,6 +50,17 @@ describe("workflow work projection", () => {
     }));
   });
 
+  it("keeps projection dispatch aligned with manual-hold sort priority", () => {
+    expect(projectWorkflowWorkStatus(task, [
+      item({ id: "work-running", kind: "merge", state: "running" }),
+      item({ id: "work-manual", kind: "manual-hold", state: "retrying", blockedReason: "autoMerge:false" }),
+    ])).toEqual(expect.objectContaining({
+      status: "manual-hold",
+      workItemId: "work-manual",
+      reason: "autoMerge:false",
+    }));
+  });
+
   it("falls back to legacy task fields only when no workflow work exists", () => {
     expect(projectWorkflowWorkStatus(task, [])).toEqual({
       status: "legacy",
