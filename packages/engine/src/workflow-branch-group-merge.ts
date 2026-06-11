@@ -21,14 +21,6 @@ export function decideBranchGroupMemberIntegration(input: BranchGroupWorkflowInp
   if (!isSharedMember) {
     return { stage: "member-integration", allowed: true, outcome: "success" };
   }
-  if (input.task.autoMerge === false) {
-    return {
-      stage: "member-integration",
-      allowed: false,
-      outcome: "manual-required",
-      reason: "task-auto-merge-disabled",
-    };
-  }
   return { stage: "member-integration", allowed: true, outcome: "success" };
 }
 
@@ -47,14 +39,6 @@ export function decideBranchGroupPromotion(input: BranchGroupWorkflowInput): Bra
       allowed: false,
       outcome: "manual-required",
       reason: "group-auto-merge-disabled",
-    };
-  }
-  if (input.task.autoMerge === false) {
-    return {
-      stage: "group-promotion",
-      allowed: false,
-      outcome: "manual-required",
-      reason: "task-auto-merge-disabled",
     };
   }
   return { stage: "group-promotion", allowed: true, outcome: "success" };
