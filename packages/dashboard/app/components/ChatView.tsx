@@ -60,19 +60,23 @@ export interface ChatViewProps {
 // Keep a generous cap so pasted multi-paragraph text stays visible while
 // still preventing the composer from overtaking the message pane on short viewports.
 const CHAT_INPUT_MAX_HEIGHT_PX = 640;
+const TABLET_INPUT_MAX_HEIGHT_PX = 200;
 /** Canonical definition lives in packages/dashboard/src/chat.ts (ROOM_SKIP_SENTINEL). */
 const ROOM_SKIP_SENTINEL = "__SKIP__";
 let chatViewWasPreviouslyInactive = false;
 
-export function resolveChatInputOverflowY(scrollHeight: number): "auto" | "hidden" {
-  return scrollHeight > CHAT_INPUT_MAX_HEIGHT_PX ? "auto" : "hidden";
+export function resolveChatInputOverflowY(
+  scrollHeight: number,
+  maxHeight: number = CHAT_INPUT_MAX_HEIGHT_PX,
+): "auto" | "hidden" {
+  return scrollHeight > maxHeight ? "auto" : "hidden";
 }
 
-export function clampChatInputHeight(scrollHeight: number): number {
+export function clampChatInputHeight(scrollHeight: number, maxHeight: number = CHAT_INPUT_MAX_HEIGHT_PX): number {
   // Floor matches QuickChat (clampQuickChatInputHeight) and the CSS min-height,
   // so a 0-scrollHeight measurement (e.g. before layout) still yields a
   // sensible inline height instead of collapsing the composer to 0.
-  return Math.max(40, Math.min(scrollHeight, CHAT_INPUT_MAX_HEIGHT_PX));
+  return Math.max(40, Math.min(scrollHeight, maxHeight));
 }
 
 function formatRelativeTime(dateStr: string, t: TFunction<"app">): string {
@@ -1863,10 +1867,12 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       return;
     }
 
+    const effectiveMax = mode === "tablet" ? TABLET_INPUT_MAX_HEIGHT_PX : CHAT_INPUT_MAX_HEIGHT_PX;
+
     composer.style.height = "auto";
-    composer.style.height = `${clampChatInputHeight(composer.scrollHeight)}px`;
-    composer.style.overflowY = resolveChatInputOverflowY(composer.scrollHeight);
-  }, []);
+    composer.style.height = `${clampChatInputHeight(composer.scrollHeight, effectiveMax)}px`;
+    composer.style.overflowY = resolveChatInputOverflowY(composer.scrollHeight, effectiveMax);
+  }, [mode]);
 
   const handleComposerRef = useCallback((textarea: HTMLTextAreaElement | null) => {
     inputRef.current = textarea;

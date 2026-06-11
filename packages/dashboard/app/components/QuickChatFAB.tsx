@@ -109,10 +109,10 @@ function formatModelTagName(modelInfo: ModelInfo | null, parsedSelection: Parsed
     .trim();
 }
 
-export function clampQuickChatInputHeight(scrollHeight: number): number {
+export function clampQuickChatInputHeight(scrollHeight: number, maxHeight: number = 640): number {
   // Match ChatView's 640px cap so pasted multi-paragraph text remains visible,
   // while keeping an upper bound that protects message visibility on short screens.
-  return Math.max(40, Math.min(scrollHeight, 640));
+  return Math.max(40, Math.min(scrollHeight, maxHeight));
 }
 
 function truncateToolValue(value: string, maxLength: number): string {

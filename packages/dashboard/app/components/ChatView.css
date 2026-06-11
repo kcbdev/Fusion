@@ -1476,6 +1476,15 @@
   overscroll-behavior: contain;
 }
 
+/* FN-6212: On tablet viewports (769–1024px), cap the composer to 200px
+   so it doesn't consume most of the visible thread. Desktop keeps 640px;
+   mobile is already flex-constrained by the chat-thread layout. */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .chat-input-textarea {
+    max-height: 200px;
+  }
+}
+
 .chat-input-textarea:focus {
   outline: none;
   border-color: var(--accent);
