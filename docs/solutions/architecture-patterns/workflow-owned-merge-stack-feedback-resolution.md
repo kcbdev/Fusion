@@ -220,6 +220,7 @@ pnpm --filter @fusion/engine exec vitest run \
   src/__tests__/workflow-merge-nodes.test.ts \
   src/__tests__/workflow-node-retry-policy.test.ts \
   src/__tests__/workflow-recovery-events.test.ts \
+  src/__tests__/workflow-scheduler-policy-deletion.test.ts \
   src/__tests__/workflow-merge-policy-deletion.test.ts \
   src/__tests__/workflow-self-healing-policy-deletion.test.ts \
   src/__tests__/workflow-cutover-matrix.test.ts \
