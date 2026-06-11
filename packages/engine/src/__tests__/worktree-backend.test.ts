@@ -10,7 +10,19 @@ import {
 } from "../worktree-backend.js";
 import { activeSessionRegistry } from "../active-session-registry.js";
 
-const { execMock, accessMock, rmMock, existsSyncMock, parseIndexLockPathMock, classifyStaleLockMock, tryRemoveStaleLockMock, parseStaleRegistrationPathMock, recoverStaleRegistrationMock, installGuardMock } = vi.hoisted(() => {
+const {
+  execMock,
+  accessMock,
+  rmMock,
+  existsSyncMock,
+  parseIndexLockPathMock,
+  classifyStaleLockMock,
+  tryRemoveStaleLockMock,
+  parseStaleRegistrationPathMock,
+  recoverStaleRegistrationMock,
+  installGuardMock,
+  pruneWorktreeAdminEntriesMock,
+} = vi.hoisted(() => {
   const mock = vi.fn();
   (mock as any)[Symbol.for("nodejs.util.promisify.custom")] = mock;
   return {
@@ -24,6 +36,7 @@ const { execMock, accessMock, rmMock, existsSyncMock, parseIndexLockPathMock, cl
     parseStaleRegistrationPathMock: vi.fn(),
     recoverStaleRegistrationMock: vi.fn(),
     installGuardMock: vi.fn(),
+    pruneWorktreeAdminEntriesMock: vi.fn(),
   };
 });
 
@@ -58,6 +71,9 @@ vi.mock("../worktree-stale-registration.js", () => ({
   parseStaleRegistrationPath: parseStaleRegistrationPathMock,
   recoverStaleRegistration: recoverStaleRegistrationMock,
 }));
+vi.mock("../worktree-prune.js", () => ({
+  pruneWorktreeAdminEntries: pruneWorktreeAdminEntriesMock,
+}));
 
 beforeEach(() => {
   execMock.mockReset();
@@ -72,6 +88,8 @@ beforeEach(() => {
   tryRemoveStaleLockMock.mockReset();
   installGuardMock.mockReset();
   installGuardMock.mockResolvedValue(undefined);
+  pruneWorktreeAdminEntriesMock.mockReset();
+  pruneWorktreeAdminEntriesMock.mockResolvedValue(undefined);
   parseIndexLockPathMock.mockReturnValue(null);
   parseStaleRegistrationPathMock.mockReset();
   parseStaleRegistrationPathMock.mockReturnValue(null);
@@ -150,6 +168,99 @@ describe("NativeWorktreeBackend", () => {
       'git worktree remove --force "/repo/.worktrees/fn-1"',
       expect.objectContaining({ cwd: "/repo", timeout: 60000, maxBuffer: 10485760 }),
     );
+    expect(rmMock).not.toHaveBeenCalled();
+    expect(pruneWorktreeAdminEntriesMock).not.toHaveBeenCalled();
+  });
+
+  it("falls back to filesystem removal and prunes admin entries when native remove leaves a non-empty directory", async () => {
+    const audit = { git: vi.fn().mockResolvedValue(undefined) };
+    execMock.mockRejectedValueOnce({
+      message: "Command failed: git worktree remove --force /repo/.worktrees/fn-1",
+      stderr: "error: failed to delete '/repo/.worktrees/fn-1': Directory not empty",
+    });
+
+    await new NativeWorktreeBackend({ audit }).remove({
+      rootDir: "/repo",
+      worktreePath: "/repo/.worktrees/fn-1",
+    });
+
+    expect(rmMock).toHaveBeenCalledWith("/repo/.worktrees/fn-1", { recursive: true, force: true });
+    expect(pruneWorktreeAdminEntriesMock).toHaveBeenCalledWith({
+      rootDir: "/repo",
+      auditor: audit,
+      reason: "remove-non-empty-fallback",
+      target: "/repo/.worktrees/fn-1",
+      logger: undefined,
+    });
+    expect(audit.git).toHaveBeenCalledWith({
+      type: "worktree:remove-fallback",
+      target: "/repo/.worktrees/fn-1",
+      metadata: expect.objectContaining({ fallback: "filesystem-non-empty", error: expect.stringContaining("Directory not empty") }),
+    });
+  });
+
+  it("falls back for modified or untracked file native remove failures", async () => {
+    execMock.mockRejectedValueOnce({
+      message: "fatal: '/repo/.worktrees/fn-1' contains modified or untracked files, use --force to delete it",
+      stderr: "",
+    });
+
+    await new NativeWorktreeBackend().remove({
+      rootDir: "/repo",
+      worktreePath: "/repo/.worktrees/fn-1",
+    });
+
+    expect(rmMock).toHaveBeenCalledWith("/repo/.worktrees/fn-1", { recursive: true, force: true });
+    expect(pruneWorktreeAdminEntriesMock).toHaveBeenCalledWith(
+      expect.objectContaining({ rootDir: "/repo", reason: "remove-non-empty-fallback", target: "/repo/.worktrees/fn-1" }),
+    );
+  });
+
+  it("falls back for failed-to-delete native remove failures without a directory-not-empty suffix", async () => {
+    execMock.mockRejectedValueOnce({
+      message: "Command failed: git worktree remove --force /repo/.worktrees/fn-1",
+      stderr: "error: failed to delete '/repo/.worktrees/fn-1'",
+    });
+
+    await new NativeWorktreeBackend().remove({
+      rootDir: "/repo",
+      worktreePath: "/repo/.worktrees/fn-1",
+    });
+
+    expect(rmMock).toHaveBeenCalledWith("/repo/.worktrees/fn-1", { recursive: true, force: true });
+    expect(pruneWorktreeAdminEntriesMock).toHaveBeenCalledWith(
+      expect.objectContaining({ rootDir: "/repo", reason: "remove-non-empty-fallback", target: "/repo/.worktrees/fn-1" }),
+    );
+  });
+
+  it("rethrows non-recoverable native remove failures without filesystem fallback", async () => {
+    const error = { message: "fatal: not a git repository", stderr: "fatal: not a git repository" };
+    execMock.mockRejectedValueOnce(error);
+
+    await expect(
+      new NativeWorktreeBackend().remove({
+        rootDir: "/repo",
+        worktreePath: "/repo/.worktrees/fn-1",
+      }),
+    ).rejects.toBe(error);
+
+    expect(rmMock).not.toHaveBeenCalled();
+    expect(pruneWorktreeAdminEntriesMock).not.toHaveBeenCalled();
+  });
+
+  it("rethrows filesystem removal failure after recoverable native remove failure", async () => {
+    const rmError = new Error("EACCES: permission denied");
+    execMock.mockRejectedValueOnce({ stderr: "error: failed to delete '/repo/.worktrees/fn-1': Directory not empty" });
+    rmMock.mockRejectedValueOnce(rmError as never);
+
+    await expect(
+      new NativeWorktreeBackend().remove({
+        rootDir: "/repo",
+        worktreePath: "/repo/.worktrees/fn-1",
+      }),
+    ).rejects.toBe(rmError);
+
+    expect(pruneWorktreeAdminEntriesMock).not.toHaveBeenCalled();
   });
 
   it("syncs by fetching then rebasing", async () => {

@@ -137,6 +137,22 @@ function getErrorExitCode(error: unknown): number | null {
   return null;
 }
 
+function getErrorMessageWithStderr(error: unknown): string {
+  const message =
+    error instanceof Error
+      ? error.message
+      : error && typeof error === "object" && "message" in error
+        ? String((error as { message?: unknown }).message)
+        : String(error);
+  const stderr = getErrorStderr(error);
+  return stderr ? `${message}\n${stderr}` : message;
+}
+
+function isRecoverableNativeWorktreeRemoveError(error: unknown): boolean {
+  const message = getErrorMessageWithStderr(error);
+  return /Directory not empty/i.test(message) || /failed to delete/i.test(message) || /contains modified or untracked files/i.test(message);
+}
+
 function findStringByKey(value: unknown, key: string): string | null {
   if (!value || typeof value !== "object") return null;
   if (Array.isArray(value)) {
@@ -396,12 +412,41 @@ export class NativeWorktreeBackend implements WorktreeBackend {
   }
 
   async remove(input: WorktreeRemoveInput): Promise<void> {
-    await execAsync(`git worktree remove --force ${quoteShellArg(input.worktreePath)}`, {
-      cwd: input.rootDir,
-      encoding: "utf-8",
-      timeout: REMOVE_TIMEOUT_MS,
-      maxBuffer: MAX_BUFFER,
-    });
+    try {
+      await execAsync(`git worktree remove --force ${quoteShellArg(input.worktreePath)}`, {
+        cwd: input.rootDir,
+        encoding: "utf-8",
+        timeout: REMOVE_TIMEOUT_MS,
+        maxBuffer: MAX_BUFFER,
+      });
+      return;
+    } catch (error) {
+      if (!isRecoverableNativeWorktreeRemoveError(error)) {
+        throw error;
+      }
+
+      const errorMessage = getErrorMessageWithStderr(error);
+      this.deps.logger?.warn?.(
+        `[worktree-backend] git worktree remove failed for ${input.worktreePath}: ${errorMessage} — falling back to filesystem removal`,
+      );
+      await this.deps.audit?.git({
+        type: "worktree:remove-fallback",
+        target: input.worktreePath,
+        metadata: {
+          fallback: "filesystem-non-empty",
+          error: errorMessage,
+        },
+      });
+
+      await rm(input.worktreePath, { recursive: true, force: true });
+      await pruneWorktreeAdminEntries({
+        rootDir: input.rootDir,
+        auditor: this.deps.audit,
+        reason: "remove-non-empty-fallback",
+        target: input.worktreePath,
+        logger: this.deps.logger,
+      });
+    }
   }
 
   async sync(input: WorktreeSyncInput): Promise<{ skipped: boolean }> {

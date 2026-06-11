@@ -91,6 +91,7 @@ export interface EngineRunContext {
 export type GitMutationType =
   | "worktree:create"
   | "worktree:remove"
+  | "worktree:remove-fallback"
   | "worktree:reuse"
   | "worktree:incomplete-detected"
   | "worktree:reanchored"
