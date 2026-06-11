@@ -69,4 +69,43 @@ describe("workflow recovery events", () => {
       }),
     ]);
   });
+
+  it("publishes a fresh recovery work item when the previous event is terminal", async () => {
+    const task = await store.createTask({ description: "recurring recovery" });
+
+    const first = publishWorkflowRecoveryEvent(store, {
+      taskId: task.id,
+      kind: "transient-merge-failure",
+      source: "self-healing",
+      reason: "socket hang up",
+      now: "2026-06-09T00:00:00.000Z",
+    });
+    store.transitionWorkflowWorkItem(first.id, "succeeded", {
+      now: "2026-06-09T00:00:01.000Z",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    });
+
+    const second = publishWorkflowRecoveryEvent(store, {
+      taskId: task.id,
+      kind: "transient-merge-failure",
+      source: "self-healing",
+      reason: "socket hang up again",
+      now: "2026-06-09T00:00:02.000Z",
+    });
+
+    expect(second.id).not.toBe(first.id);
+    expect(second.runId).toMatch(new RegExp(`^recovery:transient-merge-failure:${task.id}:`));
+    expect(store.listWorkflowWorkItemsForTask(task.id, { kinds: ["recovery"] })).toEqual([
+      expect.objectContaining({
+        id: first.id,
+        state: "succeeded",
+      }),
+      expect.objectContaining({
+        id: second.id,
+        state: "runnable",
+        lastError: "socket hang up again",
+      }),
+    ]);
+  });
 });

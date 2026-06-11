@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { WorkflowWorkItem } from "@fusion/core";
 
 export type WorkflowRecoveryEventKind =
@@ -17,6 +18,7 @@ export interface WorkflowRecoveryEventInput {
 }
 
 export interface WorkflowRecoveryEventStore {
+  listWorkflowWorkItemsForTask?: (taskId: string, opts?: { kinds?: ["recovery"] }) => WorkflowWorkItem[];
   upsertWorkflowWorkItem(input: {
     runId: string;
     taskId: string;
@@ -33,7 +35,8 @@ export function publishWorkflowRecoveryEvent(
   store: WorkflowRecoveryEventStore,
   input: WorkflowRecoveryEventInput,
 ): WorkflowWorkItem {
-  const runId = input.runId ?? `recovery:${input.kind}:${input.taskId}`;
+  const baseRunId = input.runId ?? `recovery:${input.kind}:${input.taskId}`;
+  const runId = input.runId ? baseRunId : recoveryRunIdForPublish(store, input.taskId, baseRunId);
   return store.upsertWorkflowWorkItem({
     runId,
     taskId: input.taskId,
@@ -44,4 +47,14 @@ export function publishWorkflowRecoveryEvent(
     lastError: input.reason ?? null,
     now: input.now,
   });
+}
+
+function recoveryRunIdForPublish(store: WorkflowRecoveryEventStore, taskId: string, baseRunId: string): string {
+  const existing = store.listWorkflowWorkItemsForTask?.(taskId, { kinds: ["recovery"] })
+    .find((item) => item.runId === baseRunId && item.nodeId === "recovery-router" && item.kind === "recovery");
+  if (!existing) return baseRunId;
+  if (existing.state === "succeeded" || existing.state === "failed" || existing.state === "cancelled" || existing.state === "exhausted") {
+    return `${baseRunId}:${randomUUID()}`;
+  }
+  return baseRunId;
 }
