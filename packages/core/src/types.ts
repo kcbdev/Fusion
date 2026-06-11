@@ -160,6 +160,12 @@ export interface WorkflowWorkItemDueFilter {
   states?: WorkflowWorkItemState[];
 }
 
+export interface MergeRequestWorkflowProjectionOptions {
+  runId?: string;
+  nodeId?: string;
+  now?: string;
+}
+
 export interface MergeQueueEntry {
   taskId: string;
   enqueuedAt: string;
