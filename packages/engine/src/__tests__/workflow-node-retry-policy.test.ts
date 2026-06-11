@@ -95,4 +95,28 @@ describe("workflow node retry policy", () => {
     });
     expect(result.contextPatch).not.toHaveProperty("workflow:retry:execute:attempt");
   });
+
+  it("honors configured retry base delay in the node handler", async () => {
+    const handlers = createDefaultNodeHandlers(createNoopLegacySeams());
+    const result = await handlers["retry-backoff"](
+      { id: "merge-retry", kind: "retry-backoff", config: { maxAttempts: 3, baseDelayMs: 5_000 } },
+      {
+        task: { id: "FN-RETRY", description: "retry" } as any,
+        settings: { experimentalFeatures: {} },
+        context: {
+          "workflow:run-id": "run-1",
+          "workflow:now": "2026-06-09T00:00:00.000Z",
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      outcome: "success",
+      value: "retry-scheduled",
+      contextPatch: {
+        "workflow:retry:merge-retry:attempt": 1,
+        "workflow:retry:merge-retry:retryAfter": "2026-06-09T00:00:05.000Z",
+      },
+    });
+  });
 });

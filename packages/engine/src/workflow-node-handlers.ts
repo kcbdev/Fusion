@@ -956,6 +956,7 @@ export function createDefaultNodeHandlers(
           ? ctx.context[`workflow:retry:${node.id}:attempt`] as number
           : 0,
         maxAttempts: typeof node.config?.maxAttempts === "number" ? node.config.maxAttempts : 3,
+        baseDelayMs: typeof node.config?.baseDelayMs === "number" ? node.config.baseDelayMs : undefined,
         now: typeof ctx.context["workflow:now"] === "string" ? ctx.context["workflow:now"] : undefined,
         lastError: typeof ctx.context["workflow:last-error"] === "string" ? ctx.context["workflow:last-error"] : null,
       });
