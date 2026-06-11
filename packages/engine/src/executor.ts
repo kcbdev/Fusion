@@ -5606,6 +5606,22 @@ export class TaskExecutor {
       return this.runCliAgentNode(node, live, cfg);
     }
 
+    // Fast mode bypasses pre-merge automated review/validation gates. Custom
+    // graph prompt/script/gate nodes are implemented by synthesizing pre-merge
+    // WorkflowStep executions below, so skip them here before worktree or CLI
+    // approval gates can fire. Human waits (`awaitInput`) and implementation
+    // CLI-agent nodes are handled above and remain enforced.
+    if (live.executionMode === "fast" && !cfg.seam && (node.kind === "prompt" || node.kind === "script" || node.kind === "gate")) {
+      executorLog.log(`${live.id}: fast mode — skipping custom graph node '${node.id}'`);
+      await this.store.logEntry(
+        live.id,
+        `Fast mode — custom graph node '${node.id}' skipped`,
+        undefined,
+        this.getRunContextFor(live.id),
+      );
+      return { outcome: "success", value: "workflow-step-skipped" };
+    }
+
     const scriptName = typeof cfg.scriptName === "string" && cfg.scriptName.trim() ? cfg.scriptName : undefined;
     const rawCliCommand = executorKind === "cli" && typeof cfg.cliCommand === "string" && cfg.cliCommand.trim()
       ? cfg.cliCommand.trim()

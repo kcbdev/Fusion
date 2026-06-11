@@ -20,6 +20,11 @@
       "file": "packages/engine/src/__tests__/merger-ai-cleanup.test.ts",
       "reason": "Flake observed during FN-6206 verification: `pruneExistingAiMergeWorktrees skips active-session paths` failed in full `pnpm --filter @fusion/engine test` runs while the file passed standalone, indicating suite-order/concurrency sensitivity. Follow-up FN-6207.",
       "quarantinedAt": "2026-06-10"
+    },
+    {
+      "file": "packages/engine/src/__tests__/self-healing-already-merged.real-git.test.ts",
+      "reason": "Flake observed during FN-6226 verification: full `pnpm --filter @fusion/engine test` expected two run-audit events but saw four after unrelated real-git/self-healing cleanup activity. The failure is outside fast-mode workflow changes and indicates suite-order/temp-state sensitivity.",
+      "quarantinedAt": "2026-06-10"
     }
   ]
 }

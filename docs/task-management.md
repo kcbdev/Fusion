@@ -444,9 +444,12 @@ When `executionMode: "fast"`, the following automated review/validation gates ar
 |------|---------------|-----------|
 | `review_step` tool enforcement | Available to executor agent | **Not injected** |
 | Pre-merge workflow-step execution | Runs configured steps | **Skipped** |
+| Custom graph pre-merge prompt/script/gate nodes | Run in selected custom workflows | **Skipped** |
 | Workflow revision loop | Enabled (feedback → fix → re-review) | **Disabled** |
 
 ### Fast Mode Mandatory Gates
+
+The bypass applies to both the legacy workflow-step path and the workflow graph executor path (including custom non-`builtin:coding` workflows). `undefined` or `null` execution mode is treated as standard mode.
 
 The following quality gates **remain enforced** in fast mode:
 
@@ -461,7 +464,8 @@ The following quality gates **remain enforced** in fast mode:
 | Feature | Standard | Fast |
 |---------|----------|------|
 | Executor agent session | Full prompt + tools | Full prompt (minus review_step) |
-| Pre-merge workflow steps | ✅ Run | ❌ Bypassed |
+| Pre-merge workflow steps (legacy, builtin, and custom graph workflows) | ✅ Run | ❌ Bypassed |
+| Custom graph prompt/script/gate validation nodes | ✅ Run | ❌ Bypassed |
 | `review_step` tool | ✅ Available | ❌ Not available |
 | Post-merge workflow steps | ✅ Run | ✅ Run |
 | Completion blockers (test/build/typecheck) | ✅ Enforced | ✅ Enforced |
