@@ -211,8 +211,7 @@ function sweepDeadTmpdirRedirectSinks(): void {
   try {
     ownerPids = Array.from(new Set(
       readFileSync(TMPDIR_REDIRECT_REGISTRY, "utf8")
-        .split(/?
-/)
+        .split(/\r?\n/)
         .map((line) => Number.parseInt(line, 10))
         .filter((pid) => Number.isInteger(pid) && pid > 0),
     ));
@@ -249,9 +248,7 @@ function sweepDeadTmpdirRedirectSinks(): void {
   }
 
   try {
-    writeFileSync(TMPDIR_REDIRECT_REGISTRY, liveOwnerPids.length > 0 ? `${liveOwnerPids.join("
-")}
-` : "");
+    writeFileSync(TMPDIR_REDIRECT_REGISTRY, liveOwnerPids.length > 0 ? `${liveOwnerPids.join("\n")}\n` : "");
   } catch {
     // Best-effort only; stale entries are harmless and swept by future workers.
   }
@@ -264,8 +261,7 @@ function ensureTmpdirRedirectSink(): string {
   const sink = join(WORKER_ROOT, `redir-${process.pid}`);
   mkdirSync(sink, { recursive: true });
   try {
-    appendFileSync(TMPDIR_REDIRECT_REGISTRY, `${process.pid}
-`);
+    appendFileSync(TMPDIR_REDIRECT_REGISTRY, `${process.pid}\n`);
   } catch {
     // Best-effort only; the process exit hook and global teardown still clean up.
   }
@@ -297,7 +293,6 @@ function redirectTmpdirPrefix<T>(prefix: T): T {
   if (parent !== tmpdir() && parent !== REAL_TMPDIR) return prefix;
 
   return join(ensureTmpdirRedirectSink(), basename(prefix)) as T;
-}
 }
 
 function ensureIsolatedHome(): void {
