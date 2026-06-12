@@ -1214,6 +1214,10 @@ Task steps use statuses: `pending`, `in-progress`, `done`, `skipped`.
 - **Pre-merge** steps run in executor (`runWorkflowSteps()`) — bypassed in fast mode
 - **Post-merge** steps run in merger (`runPostMergeWorkflowSteps()`)
 
+### Task pause ownership
+- Only explicit user actions pause ordinary tasks: the dashboard/CLI task pause controls and manual `in-progress → todo` moves. System safety pauses remain reserved for explicit approval waits and bounded guardrails such as token-budget, worktrunk-failure, and dispatch-oscillation protection.
+- Agent pause/sleep and heartbeat recovery never pause assigned tasks. Assigned tasks stay in their current column and retain their existing `paused`/`pausedByAgentId` state so the scheduler can re-dispatch unpaused work and user-paused work remains intentionally parked.
+
 ### User cancel via move-to-todo
 - `TaskStore.moveTask()` accepts `moveSource: "user" | "engine"` (default `"engine"`) and emits `task:moved` with `source` so listeners can distinguish manual moves from engine rebounds.
 - Manual `in-progress → todo` moves (dashboard route `/tasks/:id/move` with `moveSource: "user"`) atomically set `task.userPaused = true`; engine/default rebounds do not.

@@ -571,6 +571,71 @@ describe("executeHeartbeat", () => {
     expect(args.permanentAgentGating?.permissionPolicy?.presetId).toBe("unrestricted");
   });
 
+  describe("agent pause does not pause assigned tasks", () => {
+    it("pauseAgent leaves zero, one, and many assigned tasks untouched", async () => {
+      for (const assignedTasks of [
+        [],
+        [{ id: "FN-001", paused: undefined, pausedByAgentId: undefined }],
+        [
+          { id: "FN-001", paused: undefined, pausedByAgentId: undefined },
+          { id: "FN-002", paused: false, pausedByAgentId: undefined },
+          { id: "FN-003", paused: true, userPaused: true, pausedByAgentId: undefined },
+        ],
+      ]) {
+        const pauseTask = vi.fn().mockResolvedValue(undefined);
+        const getTasksByAssignedAgent = vi.fn().mockResolvedValue(assignedTasks);
+        mockTaskStore = createMockTaskStore({ pauseTask, getTasksByAssignedAgent });
+        const store = createStoreWithAgentForExec({ taskId: assignedTasks[0]?.id });
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+        const before = structuredClone(assignedTasks);
+
+        await monitor.pauseAgent("agent-001");
+
+        expect(pauseTask).not.toHaveBeenCalledWith(expect.any(String), true, expect.anything(), expect.anything());
+        expect(pauseTask).not.toHaveBeenCalled();
+        expect(getTasksByAssignedAgent).not.toHaveBeenCalled();
+        expect(assignedTasks).toEqual(before);
+      }
+    });
+
+    it("reproduces agent sleep symptom and keeps assigned task pause fields unchanged", async () => {
+      const assignedTask = {
+        id: "FN-001",
+        column: "todo",
+        paused: undefined,
+        pausedByAgentId: undefined,
+      };
+      const pauseTask = vi.fn().mockResolvedValue(undefined);
+      mockTaskStore = createMockTaskStore({
+        pauseTask,
+        getTasksByAssignedAgent: vi.fn().mockResolvedValue([assignedTask]),
+      });
+      const store = createStoreWithAgentForExec({ taskId: "FN-001" });
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      await monitor.pauseAgent("agent-001");
+
+      expect(pauseTask).not.toHaveBeenCalled();
+      expect(assignedTask.paused).toBeUndefined();
+      expect(assignedTask.pausedByAgentId).toBeUndefined();
+      expect(assignedTask.column).toBe("todo");
+    });
+
+    it("executeHeartbeat does not pause its assigned task", async () => {
+      const pauseTask = vi.fn().mockResolvedValue(undefined);
+      mockTaskStore = createMockTaskStore({ pauseTask });
+      const store = createStoreWithAgentForExec({ taskId: "FN-001" });
+      const mockSession = createMockAgentSession();
+      mockedCreateFnAgent.mockResolvedValue({ session: mockSession as any });
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+      expect(pauseTask).not.toHaveBeenCalledWith(expect.any(String), true, expect.anything(), expect.anything());
+      expect(pauseTask).not.toHaveBeenCalled();
+    });
+  });
+
   it("pauseForApproval pauses task and agent when taskId exists", async () => {
     const store = createStoreWithAgentForExec({ taskId: "FN-001" });
     const pauseTask = vi.fn().mockResolvedValue(undefined);
@@ -1222,19 +1287,19 @@ describe("executeHeartbeat", () => {
     });
 
     it("no-task run overrides a seeded task-scoped heartbeatProcedurePath in the assembled prompt", async () => {
-      const tmpRoot = mkdtempSync(join(tmpdir(), "fn-hb-no-task-procedure-"));
+      const tmpDir = mkdtempSync(join(process.cwd(), ".tmp-fn-hb-no-task-procedure-"));
       try {
-        writeFileSync(join(tmpRoot, "HEARTBEAT.md"), HEARTBEAT_PROCEDURE, "utf-8");
+        writeFileSync(join(tmpDir, "HEARTBEAT.md"), HEARTBEAT_PROCEDURE, "utf-8");
 
         const store = createStoreWithAgentForExec({
           taskId: undefined,
           soul: "I am a coordinator",
-          heartbeatProcedurePath: "HEARTBEAT.md",
+          heartbeatProcedurePath: `${tmpDir.split("/").pop()}/HEARTBEAT.md`,
         });
         const mockSession = createMockAgentSession();
         mockedCreateFnAgent.mockResolvedValue({ session: mockSession as any });
 
-        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: tmpRoot });
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: process.cwd() });
         const result = await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
 
         expect(result.status).toBe("completed");
@@ -1248,7 +1313,7 @@ describe("executeHeartbeat", () => {
         const savedRun = await store.getRunDetail("agent-001", result.id);
         expect(savedRun?.heartbeatProcedureSource).toBe("default-no-task-override");
       } finally {
-        rmSync(tmpRoot, { recursive: true, force: true });
+        rmSync(tmpDir, { recursive: true, force: true });
       }
     });
 

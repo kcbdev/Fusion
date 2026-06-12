@@ -1222,7 +1222,7 @@ Effects:
 - Agent state transitions `running/active → paused → active`
 - Orphan reconcile uses `3 × heartbeatTimeoutMs` where the timeout is likewise multiplier-scaled first
 - `pauseReason` is set to `heartbeat-unresponsive` during recovery and cleared on resume
-- Assigned tasks are auto-paused with `pausedByAgentId` during pause, then only those same tasks are auto-unpaused on resume
+- Assigned tasks are not paused or unpaused by agent sleep/heartbeat recovery; unpaused work stays eligible for scheduler re-dispatch, while tasks already paused by a user retain their existing pause state
 - Resume triggers one on-demand heartbeat restart only when `runtimeConfig.enabled !== false`
 - `onTerminated` is a run-level callback for terminated heartbeat runs and is not used by unresponsive recovery
 

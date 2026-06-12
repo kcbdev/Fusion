@@ -158,10 +158,9 @@ export interface PauseAgentOptions {
   pauseReason?: string;
   stopActiveRun?: boolean;
   /**
-   * When true (default), assigned tasks are also paused with `pausedByAgentId`
-   * set to this agent. Set to false for internal/recovery flows that should
-   * not visibly pause user-facing tasks (e.g. heartbeat-unresponsive recovery,
-   * which immediately calls resumeAgent afterward).
+   * Deprecated/ignored for pause: pausing or sleeping an agent never pauses
+   * assigned tasks. Tasks remain in their current column so the scheduler can
+   * re-dispatch them.
    */
   cascadeToTasks?: boolean;
 }
@@ -170,7 +169,10 @@ export interface ResumeAgentOptions {
   triggerDetail?: string;
   triggerSource?: string;
   clearPauseReason?: boolean;
-  /** When true (default), unpauses tasks paused by this agent. */
+  /**
+   * When true, unpauses tasks paused by this agent. Defaults to false; this is
+   * legacy cleanup only and correctness must not depend on cascade-unpause.
+   */
   cascadeToTasks?: boolean;
 }
 
@@ -1611,7 +1613,7 @@ export class HeartbeatMonitor {
   }
 
   async pauseAgent(agentId: string, options: PauseAgentOptions = {}): Promise<Agent> {
-    const { pauseReason, stopActiveRun = false, cascadeToTasks = true } = options;
+    const { pauseReason, stopActiveRun = false } = options;
 
     if (stopActiveRun) {
       try {
@@ -1635,19 +1637,6 @@ export class HeartbeatMonitor {
       updated = await this.store.updateAgent(agentId, { pauseReason });
     }
 
-    if (this.taskStore && cascadeToTasks) {
-      const assignedTasks = await this.taskStore.getTasksByAssignedAgent(agentId, { excludeArchived: true });
-      const toPause = assignedTasks.filter((task) => task.paused !== true);
-      const results = await Promise.allSettled(
-        toPause.map((task) => this.taskStore!.pauseTask(task.id, true, undefined, { pausedByAgentId: agentId })),
-      );
-      results.forEach((result, index) => {
-        if (result.status === "rejected") {
-          heartbeatLog.warn(`pauseAgent(${agentId}) failed to pause assigned task ${toPause[index]?.id}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
-        }
-      });
-    }
-
     return updated;
   }
 
@@ -1656,7 +1645,7 @@ export class HeartbeatMonitor {
       triggerDetail = "Triggered from state resume",
       triggerSource = "state-resume",
       clearPauseReason = true,
-      cascadeToTasks = true,
+      cascadeToTasks = false,
     } = options;
 
     const current = await this.store.getAgent(agentId);
