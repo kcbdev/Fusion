@@ -1,7 +1,8 @@
 import { access, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { resolvePlanningSettingsModel } from "@fusion/core";
+import { customProviderRegistryKey, resolvePlanningSettingsModel } from "@fusion/core";
+import type { CustomProvider } from "@fusion/core";
 import { ApiError } from "../api-error.js";
 import type { ApiRouteRegistrar } from "./types.js";
 
@@ -77,6 +78,7 @@ export const registerModelRoutes: ApiRouteRegistrar = (ctx) => {
     let useCursorCli = false;
     let resolvedPlanningProvider: string | undefined;
     let resolvedPlanningModelId: string | undefined;
+    let customProviders: CustomProvider[] = [];
     if (store) {
       try {
         const globalStore = store.getGlobalSettingsStore();
@@ -89,6 +91,7 @@ export const registerModelRoutes: ApiRouteRegistrar = (ctx) => {
         useDroidCli = globalSettings.useDroidCli === true;
         useLlamaCpp = globalSettings.useLlamaCpp === true;
         useCursorCli = (globalSettings as Record<string, unknown>).useCursorCli === true;
+        customProviders = globalSettings.customProviders ?? [];
 
         const mergedSettings = await store.getSettingsFast();
         const resolvedPlanningModel = resolvePlanningSettingsModel(mergedSettings);
@@ -163,6 +166,11 @@ export const registerModelRoutes: ApiRouteRegistrar = (ctx) => {
       if (useClaudeCli) configuredProviders.add("pi-claude-cli");
       if (useDroidCli) configuredProviders.add("droid-cli");
       if (useLlamaCpp) configuredProviders.add("llama-server");
+      // Custom providers are configured in Fusion's global settings rather than
+      // the auth.json/models.json stores, so add their registry keys explicitly.
+      for (const provider of customProviders) {
+        configuredProviders.add(customProviderRegistryKey(provider, customProviders));
+      }
       models = models.filter((m) => configuredProviders.has(m.provider));
 
       res.json({
