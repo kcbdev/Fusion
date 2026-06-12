@@ -274,6 +274,67 @@ describe("custom provider routes", () => {
     });
   });
 
+  it("PUT /custom-providers/:id preserves stored key when a masked key is echoed back", async () => {
+    settings.customProviders = [
+      {
+        id: "cp-1",
+        name: "Original",
+        apiType: "openai-compatible",
+        baseUrl: "https://original.example.com",
+        apiKey: "sk-real-secret-1234",
+      },
+    ];
+
+    const updates: Array<Partial<GlobalSettings>> = [];
+    const app = createApp(settings, (patch) => updates.push(patch));
+    const res = await REQUEST(app, "PUT", "/api/custom-providers/cp-1", {
+      name: "Updated",
+      // The UI sends back the masked key when the field is left untouched.
+      apiKey: "sk-•••••1234",
+    });
+
+    expect(res.status).toBe(200);
+    const persisted = updates[0].customProviders as CustomProvider[];
+    // The original key must survive — never overwritten with the mask.
+    expect(persisted[0]?.apiKey).toBe("sk-real-secret-1234");
+    // And no mask character ever reaches the stored credential.
+    expect(persisted[0]?.apiKey).not.toContain("•");
+  });
+
+  it("PUT /custom-providers/:id updates the key when a real key is provided", async () => {
+    settings.customProviders = [
+      {
+        id: "cp-1",
+        name: "Original",
+        apiType: "openai-compatible",
+        baseUrl: "https://original.example.com",
+        apiKey: "sk-old-key-0000",
+      },
+    ];
+
+    const updates: Array<Partial<GlobalSettings>> = [];
+    const app = createApp(settings, (patch) => updates.push(patch));
+    const res = await REQUEST(app, "PUT", "/api/custom-providers/cp-1", {
+      apiKey: "sk-brand-new-9999",
+    });
+
+    expect(res.status).toBe(200);
+    const persisted = updates[0].customProviders as CustomProvider[];
+    expect(persisted[0]?.apiKey).toBe("sk-brand-new-9999");
+  });
+
+  it("POST /custom-providers rejects a masked API key", async () => {
+    const app = createApp(settings);
+    const res = await REQUEST(app, "POST", "/api/custom-providers", {
+      name: "My Provider",
+      apiType: "openai-compatible",
+      baseUrl: "https://example.com/v1",
+      apiKey: "sk-•••••5678",
+    });
+
+    expect(res.status).toBe(400);
+  });
+
   it("PUT /custom-providers/:id returns 404 for non-existent id", async () => {
     const app = createApp(settings);
     const res = await REQUEST(app, "PUT", "/api/custom-providers/missing", {
