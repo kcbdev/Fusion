@@ -179,7 +179,7 @@ export interface VerificationCapability {
  * additional shell behavior. Agent-supplied test paths containing any of these
  * are rejected before execution.
  */
-const SHELL_METACHARACTERS = /[;&|`$(){}<>!*?\[\]\\"'\n\r\t\0]/;
+const SHELL_METACHARACTERS = /[;&|`$(){}<>!*?[\]\\"'\n\r\t\0]/;
 
 /**
  * Validate an agent-supplied test-file path. Returns the normalized path when
@@ -445,6 +445,9 @@ export class TestExecutionVerificationCapability implements VerificationCapabili
     if (!request.integrationSha) {
       return this.inconclusive(assertionId, "no integration SHA available to materialize a trusted checkout");
     }
+    // Capture the narrowed (string) value: property-access narrowing does not
+    // carry into the nested async IIFE below, so reference this const there.
+    const integrationSha = request.integrationSha;
 
     // R19: validate any agent-supplied proof path BEFORE doing any work.
     let validatedTestPath: string | undefined;
@@ -481,8 +484,10 @@ export class TestExecutionVerificationCapability implements VerificationCapabili
 
     let implCheckout: DisposableCheckout | undefined;
     let baselineCheckout: DisposableCheckout | undefined;
+    let outcome: VerificationOutcome;
     try {
-      implCheckout = await this.materializer.materialize(this.rootDir, request.integrationSha);
+      outcome = await (async (): Promise<VerificationOutcome> => {
+      implCheckout = await this.materializer.materialize(this.rootDir, integrationSha);
 
       const implResult = await runVerificationCommand(
         this.store,
@@ -546,23 +551,33 @@ export class TestExecutionVerificationCapability implements VerificationCapabili
         reason: "verification suite failed on the implementation checkout; behavior not confirmed",
         detail: implResult.stderr || implResult.stdout || undefined,
       };
+      })();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // R9: any setup/exec failure (timeout, abort, materialization error) is a
       // non-pass; we route it to inconclusive (infra, not behavioral).
-      return this.inconclusive(assertionId, `verification run could not complete: ${message}`);
+      outcome = this.inconclusive(assertionId, `verification run could not complete: ${message}`);
     } finally {
       restoreBackend();
       await implCheckout?.dispose();
       await baselineCheckout?.dispose();
-      // R17: the source tree feeding diff/merge must be byte-clean afterwards.
-      try {
-        await this.materializer.assertSourceClean(this.rootDir);
-      } catch (cleanErr) {
-        verifyLog.error("Verification post-condition violated (source not git-clean):", cleanErr);
-        throw cleanErr instanceof Error ? cleanErr : new Error(String(cleanErr));
-      }
     }
+
+    // R17 post-condition — checked OUTSIDE finally so it never masks the verdict
+    // via an unsafe finally-throw. The source tree feeding diff/merge must be
+    // byte-clean afterwards; a violation means verification mutated the source, so
+    // we fail closed to inconclusive rather than trusting the verdict.
+    try {
+      await this.materializer.assertSourceClean(this.rootDir);
+    } catch (cleanErr) {
+      const message = cleanErr instanceof Error ? cleanErr.message : String(cleanErr);
+      verifyLog.error("Verification post-condition violated (source not git-clean):", cleanErr);
+      return this.inconclusive(
+        assertionId,
+        `verification post-condition violated: source tree not git-clean after run: ${message}`,
+      );
+    }
+    return outcome;
   }
 
   private inconclusive(assertionId: string, reason: string): VerificationOutcome {

@@ -333,7 +333,7 @@ describe("TestExecutionVerificationCapability", () => {
     expect(materializer.cleanCalls).toBe(1);
   });
 
-  it("throws if the source tree is dirty after a run (R17 post-condition)", async () => {
+  it("fails closed to inconclusive if the source tree is dirty after a run (R17 post-condition)", async () => {
     const materializer = makeFakeMaterializer();
     materializer.setDirty(true);
     const cap = new TestExecutionVerificationCapability({
@@ -345,6 +345,11 @@ describe("TestExecutionVerificationCapability", () => {
       backendFactory: () =>
         makeScriptedBackend([{ outcome: "success", stdout: "ok", stderr: "", bufferOverflow: false }]),
     });
-    await expect(cap.verifyBehavioralAssertion(baseRequest())).rejects.toThrow(/git-clean/);
+    // A dirty tree means verification mutated the source — never trust the
+    // verdict; fail closed to inconclusive (the post-condition is checked
+    // outside finally so it cannot mask the verdict via an unsafe throw).
+    const outcome = await cap.verifyBehavioralAssertion(baseRequest());
+    expect(outcome.verdict).toBe("inconclusive");
+    expect(outcome.reason).toMatch(/git-clean/);
   });
 });
