@@ -656,7 +656,9 @@ function evaluatePromptDerivedNoCommitEligibility(task: Task, promptContent: str
     ? task.sourceMetadata.fileScope.filter((entry): entry is string => typeof entry === "string")
     : [];
   const declaredScope = [...promptScopeEntries, ...metadataScope];
+  if (declaredScope.length === 0) return { eligible: false };
   if (declaredScope.some(hasSourceChangingScopeEntry)) return { eligible: false };
+  if (!declaredScope.every(isNoSourceScopeEntry)) return { eligible: false };
 
   const stepsComplete = Array.isArray(task.steps) && task.steps.length > 0
     ? task.steps.every((step) => step.status === "done" || step.status === "skipped")

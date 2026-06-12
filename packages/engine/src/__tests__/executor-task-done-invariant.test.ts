@@ -93,7 +93,7 @@ async function setup(overrides: Record<string, unknown> = {}) {
   });
 
   const executor = new TaskExecutor(store as any, "/repo");
-  await executor.execute(baseTask() as any);
+  await executor.execute(task as any);
 
   return { store, tool, setTask: (next: any) => (task = { ...task, ...next }) };
 }
@@ -217,13 +217,52 @@ describe("FN-4114 fn_task_done invariants", () => {
       evidence: expect.objectContaining({ reason: "invariant-check-failed" }),
     }));
     expect(store.logEntry).toHaveBeenCalledWith(
-      "FN-4114",
+      "FN-416",
       expect.stringContaining("prompt/source metadata derived operational no-commit contract"),
       undefined,
       undefined,
     );
     const revListCalled = mockedExecSync.mock.calls.some(([cmd]) => String(cmd).includes("rev-list --count"));
     expect(revListCalled).toBe(false);
+  });
+
+
+  it("FN-416 refuses plan-only operational no-source completion when File Scope is missing", async () => {
+    const promptWithoutFileScope = `# Task: FN-417 - Assign ready implementation task to active owner
+
+## Review Level: 1 (Plan Only)
+
+**Assessment:** This is an operational routing task with no expected product-source changes.
+
+## Mission
+Assign or route exactly one ready implementation task to an eligible active owner, or record an intentional no-route state. No source files expected.
+
+## Steps
+
+### Step 1: Route exactly one existing ready task or record no-route
+- [x] Record evidence in task documents/logs
+`;
+    const { store, tool } = await setup({
+      id: "FN-417",
+      title: "Assign ready implementation task to active owner",
+      description: "Operational routing task with no expected product-source changes; record routing evidence or no-route state.",
+      reviewLevel: 1,
+      prompt: promptWithoutFileScope,
+      sourceMetadata: {},
+      log: [{ timestamp: new Date().toISOString(), action: "Routing evidence recorded", outcome: "No-route state documented in task docs" }],
+      steps: [{ name: "Route or record no-route", status: "done" as const }],
+    });
+    mockedExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("rev-parse --show-toplevel")) return Buffer.from("/repo/.worktrees/swift-falcon\n");
+      if (cmd.includes("rev-parse --abbrev-ref HEAD")) return Buffer.from("fusion/fn-4114\n");
+      if (cmd.includes("rev-list --count")) return Buffer.from("0\n");
+      if (cmd.includes("rev-parse HEAD")) return Buffer.from("def456\n");
+      return Buffer.from("");
+    });
+
+    const result = await tool.execute("id", {});
+    expect(result.content[0].text).toContain("fn_task_done refused: no_commits");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-417", "todo", { preserveProgress: true });
   });
 
   it("FN-416 keeps the missing-commit guard for source-changing plan-only tasks without an explicit contract", async () => {
