@@ -911,6 +911,100 @@ describe("removeWorktree", () => {
     expect(audit.git).toHaveBeenCalledWith({ type: "worktree:remove", target: "/repo/.worktrees/fn-1" });
   });
 
+  it("classifies FN-343 nonstandard temp merge worktree remove failures as harmless when porcelain is absent after prune", async () => {
+    const tempPath = "/var/folders/demo/T/fusion-ai-merge-fn-327-A5uY3j";
+    const validationError = {
+      message: `Command failed: git worktree remove --force ${tempPath}`,
+      stderr: `fatal: validation failed, cannot remove working tree: '${tempPath}/.git' is not a .git file, error code 2`,
+      status: 2,
+    };
+    execMock
+      .mockRejectedValueOnce(validationError)
+      .mockResolvedValueOnce({ stdout: "", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "worktree /repo\nbranch refs/heads/main\n", stderr: "" });
+    const audit = { git: vi.fn().mockResolvedValue(undefined) } as any;
+
+    // A real-git fixture for this exact macOS temp shape is git-version sensitive:
+    // some versions prune the malformed admin entry before emitting the validation
+    // string. Keep the classifier deterministic by simulating the exact FN-327
+    // command stderr, then assert the porcelain proof that no registered worktree
+    // remains for the temp path.
+    await expect(
+      removeWorktree({
+        rootDir: "/repo",
+        worktreePath: tempPath,
+        settings: {},
+        audit,
+        taskId: "FN-327",
+        reason: RemovalReason.MergerCleanup,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(execMock).toHaveBeenNthCalledWith(
+      2,
+      "git worktree prune",
+      expect.objectContaining({ cwd: "/repo" }),
+    );
+    expect(execMock).toHaveBeenNthCalledWith(
+      3,
+      "git worktree list --porcelain",
+      expect.objectContaining({ cwd: "/repo" }),
+    );
+    expect(audit.git).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "worktree:remove-classified-harmless",
+        target: tempPath,
+        metadata: expect.objectContaining({
+          reason: RemovalReason.MergerCleanup,
+          classification: "not-registered-after-prune",
+          registeredAfterPrune: false,
+          stderrPreview: expect.stringContaining("is not a .git file"),
+        }),
+      }),
+    );
+  });
+
+  it("keeps FN-343 remove failures visible when the temp path remains registered after prune", async () => {
+    const tempPath = "/var/folders/demo/T/fusion-ai-merge-fn-327-A5uY3j";
+    const validationError = {
+      message: `Command failed: git worktree remove --force ${tempPath}`,
+      stderr: `fatal: validation failed, cannot remove working tree: '${tempPath}/.git' is not a .git file, error code 2`,
+      status: 2,
+    };
+    execMock
+      .mockRejectedValueOnce(validationError)
+      .mockResolvedValueOnce({ stdout: "", stderr: "" })
+      .mockResolvedValueOnce({
+        stdout: `worktree /repo\nbranch refs/heads/main\n\nworktree ${tempPath}\nbranch refs/heads/fusion/fn-327\n`,
+        stderr: "",
+      });
+    const audit = { git: vi.fn().mockResolvedValue(undefined) } as any;
+
+    await expect(
+      removeWorktree({
+        rootDir: "/repo",
+        worktreePath: tempPath,
+        settings: {},
+        audit,
+        taskId: "FN-327",
+        reason: RemovalReason.MergerCleanup,
+      }),
+    ).rejects.toMatchObject({ stderr: expect.stringContaining("is not a .git file") });
+
+    expect(execMock).toHaveBeenNthCalledWith(2, "git worktree prune", expect.objectContaining({ cwd: "/repo" }));
+    expect(execMock).toHaveBeenNthCalledWith(3, "git worktree list --porcelain", expect.objectContaining({ cwd: "/repo" }));
+    expect(audit.git).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "worktree:remove-leaked-registered-worktree",
+        target: tempPath,
+        metadata: expect.objectContaining({
+          reason: RemovalReason.MergerCleanup,
+          registeredAfterPrune: true,
+        }),
+      }),
+    );
+  });
+
   it("uses worktrunk remove and emits worktree:worktrunk-remove", async () => {
     execMock.mockResolvedValue({ stdout: "", stderr: "" });
     const audit = { git: vi.fn().mockResolvedValue(undefined) } as any;
