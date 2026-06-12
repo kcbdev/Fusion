@@ -140,3 +140,21 @@ FN-5416 extends resume-correlation coverage to stream-focused hooks and their pr
 - Route shells
   - `DevServerView`: `remount` / `route-active` / `route-inactive`
   - `ResearchView`: `remount` / `route-active` / `route-inactive`
+
+## Merge temp worktree cleanup classification (`[merger]`)
+
+Fusion merge cleanup treats a narrow class of temporary merge/post-merge worktree removal failures as non-fatal only after Git admin state proves there is no registered worktree leak.
+
+- Applies to Fusion-created temp merge paths such as `fusion-ai-merge-*` and post-merge paths such as `post-merge-*` during `merger-cleanup` / `merger-post-merge` removal.
+- Trigger shape: `git worktree remove --force <path>` fails with validation text such as `fatal: validation failed, cannot remove working tree: '<path>/.git' is not a .git file`.
+- Recovery proof: Fusion runs `git worktree prune`, then inspects `git worktree list --porcelain`.
+- Harmless classification: if the target path is absent from porcelain after prune, the merger logs that cleanup remove failed but no registered worktree remains. If a directory still exists, Fusion reports it as residue for operator inspection; it does not delete arbitrary `/var/folders` content.
+- Leak classification: if the target path is still present in porcelain after prune, the cleanup failure remains visible as a real registered-worktree leak.
+
+Operator verification command:
+
+```bash
+git worktree list --porcelain | grep -F "<temp-worktree-path>"
+```
+
+No output means Git no longer registers that temp path; matching `worktree <temp-worktree-path>` output means the leak is still registered and needs operator cleanup.
