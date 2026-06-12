@@ -894,6 +894,8 @@
   .modal.task-detail-modal {
     width: min(92vw, 960px);
     max-width: 92vw;
+    height: 92vh;
+    max-height: calc(100dvh - var(--overlay-padding-top, 6vh) - 16px);
   }
 }
 

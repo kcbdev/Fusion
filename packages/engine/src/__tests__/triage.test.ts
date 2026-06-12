@@ -3,6 +3,7 @@ import type { TaskStore, Task, TaskDetail, Settings } from "@fusion/core";
 import { resolveAgentPrompt } from "@fusion/core";
 import {
   TriageProcessor,
+  TRIAGE_SYSTEM_PROMPT,
   FAST_TRIAGE_SYSTEM_PROMPT,
   buildSpecificationPrompt,
   readAttachmentContents,
@@ -675,7 +676,7 @@ describe("FN-5893 invariant regression wording", () => {
     const missingSectionRevisePattern =
       /For bug fixes and UI-affordance add\/remove tasks, the spec MUST include a `## Surface Enumeration` section\. During self-review via `fn_review_spec\(\)`, treat a missing section on a bug-fix or UI-affordance add\/remove spec as a blocking REVISE\./;
 
-    for (const prompt of [TRIAGE_POLICY_PROMPT, FAST_TRIAGE_SYSTEM_PROMPT]) {
+    for (const prompt of [TRIAGE_POLICY_PROMPT, TRIAGE_SYSTEM_PROMPT, FAST_TRIAGE_SYSTEM_PROMPT]) {
       expect(prompt).toContain("## Surface Enumeration");
       expect(prompt).toMatch(missingSectionRevisePattern);
       expect(prompt).toContain("docs/testing.md");
@@ -708,7 +709,7 @@ describe("FN-5893 invariant regression wording", () => {
   });
 
   it("defines the FN-6229 Symptom Verification contract in standard and fast prompts", () => {
-    for (const prompt of [TRIAGE_POLICY_PROMPT, FAST_TRIAGE_SYSTEM_PROMPT]) {
+    for (const prompt of [TRIAGE_POLICY_PROMPT, TRIAGE_SYSTEM_PROMPT, FAST_TRIAGE_SYSTEM_PROMPT]) {
       expect(prompt).toContain("## Symptom Verification");
       expect(prompt).toContain("Use the exact heading `## Symptom Verification`");
       expect(prompt).toContain("**Original symptom** — what the user/issue reported was broken");

@@ -4,11 +4,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 
-function getMainMobileBlock(css: string): string {
-  // Mobile rules now live both in styles.css (cross-cutting) and in
-  // co-located @media (max-width: 768px) blocks at the bottom of each
-  // component CSS file. Aggregate all such media-query blocks.
-  const matches = [...css.matchAll(/@media[^{]*\(max-width:\s*768px\)[^{]*\{/g)];
+function getMediaBlocks(css: string, pattern: RegExp): string {
+  const matches = [...css.matchAll(pattern)];
   expect(matches.length).toBeGreaterThan(0);
 
   const parts: string[] = [];
@@ -24,13 +21,78 @@ function getMainMobileBlock(css: string): string {
     }
     parts.push(css.slice(start, i));
   }
-  const block = parts.join("\n");
+  return parts.join("\n");
+}
+
+function getMainMobileBlock(css: string): string {
+  // Mobile rules now live both in styles.css (cross-cutting) and in
+  // co-located @media (max-width: 768px) blocks at the bottom of each
+  // component CSS file. Aggregate all such media-query blocks.
+  const block = getMediaBlocks(css, /@media[^{]*\(max-width:\s*768px\)[^{]*\{/g);
   expect(block).toContain(".modal-overlay");
   expect(block).toContain(".detail-tabs");
   return block;
 }
 
+function getTabletBlock(css: string): string {
+  const block = getMediaBlocks(
+    css,
+    /@media[^{]*\(min-width:\s*769px\)[^{]*\(max-width:\s*1024px\)[^{]*\{/g,
+  );
+  expect(block).toContain(".modal.task-detail-modal");
+  return block;
+}
+
+function getRuleBlocks(css: string, selector: string): string[] {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return [...css.matchAll(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`, "g"))]
+    .map((match) => match[1]);
+}
+
+function getFirstRuleBlock(css: string, selector: string): string {
+  const block = getRuleBlocks(css, selector).at(0);
+  expect(block).toBeTruthy();
+  return block!;
+}
+
+function getLastRuleBlock(css: string, selector: string): string {
+  const block = getRuleBlocks(css, selector).at(-1);
+  expect(block).toBeTruthy();
+  return block!;
+}
+
+function extractVhHeight(rule: string): number {
+  const heightMatch = rule.match(/height:\s*(\d+)vh;/);
+  expect(heightMatch).toBeTruthy();
+  return Number(heightMatch![1]);
+}
+
 describe("core modals mobile css coverage", () => {
+  it("TaskDetailModal: keeps desktop, tablet, mobile, and embedded height invariants", () => {
+    const css = loadAllAppCss();
+    const tabletBlock = getTabletBlock(css);
+    const mobileBlock = getMainMobileBlock(css);
+
+    const baseRule = getFirstRuleBlock(css, ".modal.task-detail-modal");
+    expect(baseRule).toContain("height: 85vh;");
+    expect(baseRule).toContain("max-height: calc(100dvh - var(--overlay-padding-top, 10vh) - 16px);");
+    expect(baseRule).toContain("resize: both;");
+
+    const tabletRule = getLastRuleBlock(tabletBlock, ".modal.task-detail-modal");
+    expect(tabletRule).toContain("height: 92vh;");
+    expect(extractVhHeight(tabletRule)).toBeGreaterThan(extractVhHeight(baseRule));
+    expect(tabletRule).toContain("max-height: calc(100dvh - var(--overlay-padding-top, 6vh) - 16px);");
+
+    const mobileRule = getLastRuleBlock(mobileBlock, ".modal.task-detail-modal");
+    expect(mobileRule).toContain("height: 100dvh;");
+    expect(mobileRule).toContain("max-height: 100dvh;");
+    expect(mobileRule).toContain("resize: none;");
+
+    const embeddedRule = getFirstRuleBlock(css, ".task-detail-content--embedded");
+    expect(embeddedRule).toContain("height: 100%;");
+    expect(tabletBlock).not.toContain(".task-detail-content--embedded");
+  });
+
   it("TaskDetailModal: modal-actions uses safe-area inset bottom padding", () => {
     const css = loadAllAppCss();
     const mobileBlock = getMainMobileBlock(css);
