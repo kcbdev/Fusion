@@ -1032,6 +1032,45 @@ describe("removeWorktree", () => {
     );
   });
 
+
+  it("preserves the original remove failure when classification probes fail", async () => {
+    const tempPath = "/var/folders/demo/T/fusion-ai-merge-fn-327-A5uY3j";
+    const validationError = {
+      message: `Command failed: git worktree remove --force ${tempPath}`,
+      stderr: `fatal: validation failed, cannot remove working tree: '${tempPath}/.git' is not a .git file, error code 2`,
+      status: 2,
+    };
+    const probeError = new Error("git worktree prune failed");
+    execMock
+      .mockRejectedValueOnce(validationError)
+      .mockRejectedValueOnce(probeError);
+    const audit = { git: vi.fn().mockResolvedValue(undefined) } as any;
+
+    await expect(
+      removeWorktree({
+        rootDir: "/repo",
+        worktreePath: tempPath,
+        settings: {},
+        audit,
+        taskId: "FN-327",
+        reason: RemovalReason.MergerCleanup,
+      }),
+    ).rejects.toBe(validationError);
+
+    expect(execMock).toHaveBeenNthCalledWith(2, "git worktree prune", expect.objectContaining({ cwd: "/repo" }));
+    expect(audit.git).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "worktree:remove-classification-probe-failed",
+        target: tempPath,
+        metadata: expect.objectContaining({
+          reason: RemovalReason.MergerCleanup,
+          stderrPreview: expect.stringContaining("is not a .git file"),
+          probeError: expect.stringContaining("git worktree prune failed"),
+        }),
+      }),
+    );
+  });
+
   it("uses worktrunk remove and emits worktree:worktrunk-remove", async () => {
     execMock.mockResolvedValue({ stdout: "", stderr: "" });
     const audit = { git: vi.fn().mockResolvedValue(undefined) } as any;

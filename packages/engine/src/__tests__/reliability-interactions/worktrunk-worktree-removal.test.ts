@@ -22,6 +22,26 @@ vi.mock("node:fs", async (importOriginal) => {
   return { ...actual, existsSync: existsSpy, readdirSync: readdirSpy };
 });
 
+
+function mockWorktreeRemoveFailure(postMergePath: string, porcelainOutput: string): void {
+  execSpy.mockImplementation((cmd: string, _opts: unknown, cb: (err: any, stdout: string, stderr: string) => void) => {
+    if (cmd.includes("git worktree remove")) {
+      const stderr = `fatal: validation failed, cannot remove working tree: '${postMergePath}/.git' is not a .git file, error code 2`;
+      cb(Object.assign(new Error(stderr), { stderr, status: 2 }), "", stderr);
+      return;
+    }
+    if (cmd === "git worktree prune") {
+      cb(null, "", "");
+      return;
+    }
+    if (cmd === "git worktree list --porcelain") {
+      cb(null, porcelainOutput, "");
+      return;
+    }
+    cb(null, "", "");
+  });
+}
+
 function storeForSelfHealing(settings: Partial<Settings>, task: Partial<Task>): TaskStore & EventEmitter {
   const emitter = new EventEmitter();
   return Object.assign(emitter, {
@@ -59,22 +79,7 @@ describe("reliability interactions: worktrunk worktree removal routing", () => {
   it("merger post-merge cleanup logs harmless classified temp residue when porcelain is absent after prune", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const postMergePath = "/repo/.worktrees/post-merge-FN-343-abcd1234";
-    execSpy.mockImplementation((cmd: string, _opts: unknown, cb: (err: any, stdout: string, stderr: string) => void) => {
-      if (cmd.includes("git worktree remove")) {
-        const stderr = `fatal: validation failed, cannot remove working tree: '${postMergePath}/.git' is not a .git file, error code 2`;
-        cb(Object.assign(new Error(stderr), { stderr, status: 2 }), "", stderr);
-        return;
-      }
-      if (cmd === "git worktree prune") {
-        cb(null, "", "");
-        return;
-      }
-      if (cmd === "git worktree list --porcelain") {
-        cb(null, "worktree /repo\nbranch refs/heads/main\n", "");
-        return;
-      }
-      cb(null, "", "");
-    });
+    mockWorktreeRemoveFailure(postMergePath, "worktree /repo\nbranch refs/heads/main\n");
 
     await mergerTestHooks.removePostMergeWorktree("/repo", postMergePath, "FN-343", {});
 
@@ -91,22 +96,7 @@ describe("reliability interactions: worktrunk worktree removal routing", () => {
   it("merger post-merge cleanup keeps still-registered temp worktree failures visible", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const postMergePath = "/repo/.worktrees/post-merge-FN-343-abcd1234";
-    execSpy.mockImplementation((cmd: string, _opts: unknown, cb: (err: any, stdout: string, stderr: string) => void) => {
-      if (cmd.includes("git worktree remove")) {
-        const stderr = `fatal: validation failed, cannot remove working tree: '${postMergePath}/.git' is not a .git file, error code 2`;
-        cb(Object.assign(new Error(stderr), { stderr, status: 2 }), "", stderr);
-        return;
-      }
-      if (cmd === "git worktree prune") {
-        cb(null, "", "");
-        return;
-      }
-      if (cmd === "git worktree list --porcelain") {
-        cb(null, `worktree /repo\nbranch refs/heads/main\n\nworktree ${postMergePath}\nbranch refs/heads/fusion/fn-343\n`, "");
-        return;
-      }
-      cb(null, "", "");
-    });
+    mockWorktreeRemoveFailure(postMergePath, `worktree /repo\nbranch refs/heads/main\n\nworktree ${postMergePath}\nbranch refs/heads/fusion/fn-343\n`);
 
     await mergerTestHooks.removePostMergeWorktree("/repo", postMergePath, "FN-343", {});
 

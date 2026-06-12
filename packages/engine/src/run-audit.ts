@@ -93,6 +93,7 @@ export type GitMutationType =
   | "worktree:remove"
   | "worktree:remove-fallback"
   | "worktree:remove-classified-harmless"
+  | "worktree:remove-classification-probe-failed"
   | "worktree:remove-leaked-registered-worktree"
   | "worktree:reuse"
   | "worktree:incomplete-detected"

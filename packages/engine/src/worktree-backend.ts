@@ -95,20 +95,37 @@ async function classifyHarmlessMergeRemoveFailure(input: {
   const pathExists = existsSync(input.worktreePath);
   const gitFileExists = existsSync(resolve(input.worktreePath, ".git"));
 
-  await execAsync("git worktree prune", {
-    cwd: input.rootDir,
-    encoding: "utf-8",
-    timeout: NATIVE_TIMEOUT_MS,
-    maxBuffer: MAX_BUFFER,
-  });
+  let stdout: string;
+  try {
+    await execAsync("git worktree prune", {
+      cwd: input.rootDir,
+      encoding: "utf-8",
+      timeout: NATIVE_TIMEOUT_MS,
+      maxBuffer: MAX_BUFFER,
+    });
 
-  const listResult = await execAsync("git worktree list --porcelain", {
-    cwd: input.rootDir,
-    encoding: "utf-8",
-    timeout: 10_000,
-    maxBuffer: MAX_BUFFER,
-  });
-  const stdout = typeof listResult === "string" ? listResult : String(listResult.stdout ?? "");
+    const listResult = await execAsync("git worktree list --porcelain", {
+      cwd: input.rootDir,
+      encoding: "utf-8",
+      timeout: 10_000,
+      maxBuffer: MAX_BUFFER,
+    });
+    stdout = typeof listResult === "string" ? listResult : String(listResult.stdout ?? "");
+  } catch (probeError) {
+    await input.audit?.git({
+      type: "worktree:remove-classification-probe-failed",
+      target: input.worktreePath,
+      metadata: {
+        taskId: input.taskId,
+        reason: input.reason,
+        stderrPreview,
+        probeError: previewError(probeError),
+        pathExists,
+        gitFileExists,
+      },
+    });
+    return null;
+  }
   const registeredAfterPrune = porcelainContainsWorktree(stdout, input.worktreePath);
 
   if (registeredAfterPrune) {
