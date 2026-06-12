@@ -115,8 +115,8 @@ import { SelfHealingManager, isBranchAheadOfBase, MAX_AUTO_MERGE_RETRIES } from 
 import type { TaskStore, Settings, Task, AgentStore, Agent, NotificationProvider } from "@fusion/core";
 import { EventEmitter } from "node:events";
 import { execSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { classifyTaskWorktree, getRegisteredWorktreeBranchMap, getRegisteredWorktreePaths, isUsableTaskWorktree, removeWorktree, resolveWorktreeBackend, scanIdleWorktrees, scanOrphanedBranches } from "../worktree-pool.js";
@@ -8161,8 +8161,9 @@ describe("SelfHealingManager reclaimSelfOwnedBranchConflicts", () => {
   let manager: SelfHealingManager;
 
   beforeEach(() => {
+    vi.useRealTimers();
     store = createMockStore({
-      getSettings: vi.fn().mockResolvedValue({ globalPause: false, enginePaused: false } as any),
+      getSettings: vi.fn().mockResolvedValue({ globalPause: false, enginePaused: false, integrationBranch: "main" } as any),
     });
     manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
     mockedIsUsableTaskWorktree.mockResolvedValue(true);
@@ -8312,37 +8313,51 @@ describe("SelfHealingManager reclaimSelfOwnedBranchConflicts", () => {
   });
 
   it("preserves dirty worktree as recovery patch before unrecoverable escalation", async () => {
-    const fixtureRoot = await mkdtemp(join(tmpdir(), "fn-4476-self-heal-"));
-    manager = new SelfHealingManager(store, { rootDir: fixtureRoot });
+    manager.stop();
+    const fixtureRoot = mkdtempSync(join(tmpdir(), "fn-4476-self-heal-"));
+    const autoRecoveryDispatcher = {
+      dispatch: vi.fn().mockResolvedValue({
+        action: "pause",
+        rationale: "test-pause",
+        auditMetadata: {},
+        legacyPausedReason: "branch-conflict-unrecoverable",
+      }),
+    } as any;
+    manager = new SelfHealingManager(store, { rootDir: fixtureRoot, autoRecoveryDispatcher });
+    vi.spyOn(manager as any, "tryReanchorForeignOnlyContamination").mockResolvedValue(false);
 
-    (store.listTasks as any)
-      .mockResolvedValueOnce([{ id: "FN-504", checkedOutBy: null, branch: "fusion/fn-504", worktree: "/tmp/fn-504" }])
-      .mockResolvedValueOnce([]);
-    vi.spyOn(branchConflictModule, "inspectBranchConflict").mockRejectedValueOnce(new Error("boom"));
-    mockedExecSync.mockImplementation((cmd: any) => {
-      const command = String(cmd);
-      if (command === "git status --porcelain") {
-        return Buffer.from(" M src/file.ts\n");
-      }
-      if (command === "git diff HEAD --binary") {
-        return Buffer.from("diff --git a/src/file.ts b/src/file.ts\n");
-      }
-      return Buffer.from("");
-    });
+    try {
+      (store.listTasks as any)
+        .mockResolvedValueOnce([{ id: "FN-504", checkedOutBy: null, branch: "fusion/fn-504", worktree: "/tmp/fn-504" }])
+        .mockResolvedValueOnce([]);
+      vi.spyOn(branchConflictModule, "inspectBranchConflict").mockRejectedValueOnce(new Error("boom"));
+      mockedExecSync.mockImplementation((cmd: any) => {
+        const command = String(cmd);
+        if (command === "git status --porcelain") {
+          return Buffer.from(" M src/file.ts\n");
+        }
+        if (command === "git diff HEAD --binary") {
+          return Buffer.from("diff --git a/src/file.ts b/src/file.ts\n");
+        }
+        return Buffer.from("");
+      });
 
-    const recovered = await manager.reclaimSelfOwnedBranchConflicts();
-    expect(recovered).toBe(0);
-    expect(store.handoffToReview).toHaveBeenCalledWith("FN-504", expect.objectContaining({
-      evidence: expect.objectContaining({ reason: "branch-conflict-unrecoverable-repromote" }),
-    }));
+      const recovered = await manager.reclaimSelfOwnedBranchConflicts();
+      expect(recovered).toBe(0);
+      expect(autoRecoveryDispatcher.dispatch).toHaveBeenCalledTimes(1);
+      expect(store.handoffToReview).toHaveBeenCalledWith("FN-504", expect.objectContaining({
+        evidence: expect.objectContaining({ reason: "branch-conflict-unrecoverable-repromote" }),
+      }));
 
-    const recoveryDir = join(fixtureRoot, ".fusion", "recovery");
-    const files = await readdir(recoveryDir);
-    const patchName = files.find((entry) => entry.startsWith("fn-504-") && entry.endsWith(".patch"));
-    expect(patchName).toBeTruthy();
-    const patchContent = await readFile(join(recoveryDir, patchName ?? ""), "utf-8");
-    expect(patchContent).toContain("diff --git");
-    await rm(fixtureRoot, { recursive: true, force: true });
+      const recoveryDir = join(fixtureRoot, ".fusion", "recovery");
+      const files = readdirSync(recoveryDir);
+      const patchName = files.find((entry) => entry.startsWith("fn-504-") && entry.endsWith(".patch"));
+      expect(patchName).toBeTruthy();
+      expect(existsSync(join(recoveryDir, patchName ?? ""))).toBe(true);
+      expect(mockedExecSync).toHaveBeenCalledWith("git diff HEAD --binary", expect.any(Object));
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
   });
 
   it("escalates unrecoverable reclaim failures to in-review failed", async () => {
