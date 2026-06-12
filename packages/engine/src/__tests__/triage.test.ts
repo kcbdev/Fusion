@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { TaskStore, Task, TaskDetail, Settings } from "@fusion/core";
-import { resolveAgentPrompt } from "@fusion/core";
+import { renderTriagePolicyPlaceholders, resolveAgentPrompt } from "@fusion/core";
 import {
   TriageProcessor,
-  TRIAGE_SYSTEM_PROMPT,
   FAST_TRIAGE_SYSTEM_PROMPT,
   buildSpecificationPrompt,
   readAttachmentContents,
@@ -23,6 +22,7 @@ const { mockReviewStep, mockCreateFnAgent } = vi.hoisted(() => ({
 }));
 
 const TRIAGE_POLICY_PROMPT = resolveAgentPrompt("triage");
+const RENDERED_TRIAGE_POLICY_PROMPT = renderTriagePolicyPlaceholders(TRIAGE_POLICY_PROMPT, {});
 
 vi.mock("../reviewer.js", () => ({
   reviewStep: mockReviewStep,
@@ -635,11 +635,12 @@ describe("canonical triage policy prompt", () => {
     );
   });
 
-  it("includes explicit subtask breakdown thresholds", () => {
-    expect(TRIAGE_POLICY_PROMPT).toContain("MORE THAN 7 implementation steps");
-    expect(TRIAGE_POLICY_PROMPT).toContain(
+  it("includes explicit rendered subtask breakdown thresholds", () => {
+    expect(RENDERED_TRIAGE_POLICY_PROMPT).toContain("MORE THAN 7 implementation steps");
+    expect(RENDERED_TRIAGE_POLICY_PROMPT).toContain(
       "MORE THAN 3 different packages/modules",
     );
+    expect(TRIAGE_POLICY_PROMPT).toContain("MORE THAN {{triageSubtaskStepThreshold}} implementation steps");
   });
 
   it("biases toward keeping tasks whole and acknowledges coordination overhead", () => {
@@ -676,7 +677,7 @@ describe("FN-5893 invariant regression wording", () => {
     const missingSectionRevisePattern =
       /For bug fixes and UI-affordance add\/remove tasks, the spec MUST include a `## Surface Enumeration` section\. During self-review via `fn_review_spec\(\)`, treat a missing section on a bug-fix or UI-affordance add\/remove spec as a blocking REVISE\./;
 
-    for (const prompt of [TRIAGE_POLICY_PROMPT, TRIAGE_SYSTEM_PROMPT, FAST_TRIAGE_SYSTEM_PROMPT]) {
+    for (const prompt of [TRIAGE_POLICY_PROMPT, FAST_TRIAGE_SYSTEM_PROMPT]) {
       expect(prompt).toContain("## Surface Enumeration");
       expect(prompt).toMatch(missingSectionRevisePattern);
       expect(prompt).toContain("docs/testing.md");
@@ -709,7 +710,7 @@ describe("FN-5893 invariant regression wording", () => {
   });
 
   it("defines the FN-6229 Symptom Verification contract in standard and fast prompts", () => {
-    for (const prompt of [TRIAGE_POLICY_PROMPT, TRIAGE_SYSTEM_PROMPT, FAST_TRIAGE_SYSTEM_PROMPT]) {
+    for (const prompt of [TRIAGE_POLICY_PROMPT, FAST_TRIAGE_SYSTEM_PROMPT]) {
       expect(prompt).toContain("## Symptom Verification");
       expect(prompt).toContain("Use the exact heading `## Symptom Verification`");
       expect(prompt).toContain("**Original symptom** — what the user/issue reported was broken");
@@ -759,7 +760,7 @@ describe("fast-mode triage", () => {
   });
 
   it("documents workflow routing in standard and fast prompts", () => {
-    for (const prompt of [TRIAGE_POLICY_PROMPT, FAST_TRIAGE_SYSTEM_PROMPT]) {
+    for (const prompt of [RENDERED_TRIAGE_POLICY_PROMPT, FAST_TRIAGE_SYSTEM_PROMPT]) {
       expect(prompt).toContain("## Workflow Routing");
       expect(prompt).toContain("fn_workflow_list");
       expect(prompt).toContain("fn_workflow_select");

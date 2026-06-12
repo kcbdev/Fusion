@@ -9,6 +9,7 @@ import {
   getTemplatesForRole,
 } from "../agent-prompts.js";
 import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
+import { renderTriagePolicyPlaceholders } from "../builtin-workflow-settings.js";
 import { resolvePlanningPromptFromIr } from "../workflow-ir-resolver.js";
 import type { AgentPromptsConfig, AgentPromptTemplate } from "../types.js";
 import type { WorkflowIr } from "../workflow-ir-types.js";
@@ -272,10 +273,17 @@ describe("resolveAgentPrompt", () => {
     expect(triageSource).not.toMatch(/export const (?!FAST_TRIAGE_SYSTEM_PROMPT)[A-Z_]*TRIAGE[A-Z_]*SYSTEM_PROMPT\s*=/);
     expect(planningPrompt).toBe(corePrompt);
     expect(corePrompt).toContain("**Broad-scope decomposition signals:**");
-    expect(corePrompt).toContain("step count would reach 9 or more");
-    expect(corePrompt).toContain("would reach 12 or more");
-    expect(corePrompt).toContain("20 or more entries");
-    expect(corePrompt).toContain("at or above 30 items");
+    expect(corePrompt).toContain("step count would reach {{triageSubtaskLargeStepSignal}} or more");
+    expect(corePrompt).toContain("would reach {{triageSubtaskAdditiveStepSignal}} or more");
+    expect(corePrompt).toContain("{{triageSubtaskFileScopeThreshold}} or more entries");
+    expect(corePrompt).toContain("at or above {{triageSubtaskRemediationBatchThreshold}} items");
+
+    const renderedPrompt = renderTriagePolicyPlaceholders(corePrompt, {});
+    expect(renderedPrompt).toContain("step count would reach 9 or more");
+    expect(renderedPrompt).toContain("would reach 12 or more");
+    expect(renderedPrompt).toContain("20 or more entries");
+    expect(renderedPrompt).toContain("at or above 30 items");
+    expect(renderedPrompt).not.toContain("{{");
   });
 
   it("resolves custom planning prompts and ignores IRs without planning prompts", () => {

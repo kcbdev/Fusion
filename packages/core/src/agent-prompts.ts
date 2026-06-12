@@ -402,8 +402,8 @@ When the task includes \`breakIntoSubtasks: true\`, first decide whether it shou
 For tasks you assess as Size M or L, consider whether splitting into 2-5 child tasks would improve execution quality. Default to keeping the task whole; only split when the work is genuinely large or has clearly independent deliverables.
 
 **Consider splitting when ANY of these apply:**
-- The task will require MORE THAN 7 implementation steps
-- The task affects MORE THAN 3 different packages/modules with distinct concerns (a typed field change that naturally touches core types + store + UI + tests is NOT 4 distinct concerns — it's one coherent change)
+- The task will require MORE THAN {{triageSubtaskStepThreshold}} implementation steps
+- The task affects MORE THAN {{triageSubtaskPackageThreshold}} different packages/modules with distinct concerns (a typed field change that naturally touches core types + store + UI + tests is NOT 4 distinct concerns — it's one coherent change)
 - Any single step would take more than 1-2 hours to complete
 - The task has multiple clearly independent deliverables that could be developed and shipped in parallel by different people
 
@@ -416,10 +416,10 @@ For tasks you assess as Size M or L, consider whether splitting into 2-5 child t
 - If you decide not to split an M/L task, proceed with a normal PROMPT.md specification
 
 **Broad-scope decomposition signals:**
-- Size L tasks, especially when the planned step count would reach 9 or more.
-- Plans whose implementation-step count would reach 12 or more (additive signal — counts even when the surrounding "more than 7/10 steps" threshold above has not yet fired).
-- Tasks whose declared \`## File Scope\` would list 20 or more entries.
-- Descriptions that quantify large remediation batches (for example "47 failing tests", "30+ broken files") at or above 30 items — treat as a strong signal that the work should be partitioned by subsystem or file group before specifying.
+- Size L tasks, especially when the planned step count would reach {{triageSubtaskLargeStepSignal}} or more.
+- Plans whose implementation-step count would reach {{triageSubtaskAdditiveStepSignal}} or more (additive signal — counts even when the surrounding step-count threshold above has not yet fired).
+- Tasks whose declared \`## File Scope\` would list {{triageSubtaskFileScopeThreshold}} or more entries.
+- Descriptions that quantify large remediation batches (for example "47 failing tests", "30+ broken files") at or above {{triageSubtaskRemediationBatchThreshold}} items — treat as a strong signal that the work should be partitioned by subsystem or file group before specifying.
 - When two or more of the signals above fire together, default to splitting via \`fn_task_create\`. If you still choose to keep the task as a single unit, justify the decision explicitly in the PROMPT.md \`## Mission\` paragraph.
 
 ## Triage tools
@@ -445,7 +445,7 @@ When ALL of the following are true, include this metadata line in the header blo
 - Add this exact line: **No commits expected:** true
 
 Set it only when all of these conditions hold:
-- Title/mission starts with decision verbs like "Decide", "Evaluate", "Verify", "Confirm", "Audit", "Review whether", or "Investigate and report"
+- Title/mission starts with decision verbs like {{triageNoCommitsDecisionVerbs}}
 - Acceptance criteria are strictly observational (record findings, log a decision, update task log/docs) with no required code/config/file mutations
 - Task description explicitly says things like "no code changes expected" or "the deliverable is the recorded decision"
 
@@ -463,7 +463,7 @@ Anti-heuristics (bias to false-negative when ambiguous):
 - Always include a testing step and a documentation step
 - For tasks whose primary deliverable is documentation (updating docs, writing README, API references), include an explicit step or checkbox instructing the executor to save the final documentation content via \`fn_task_document_write\`
 - Include a "Do NOT" section with project-appropriate guardrails
-- Size assessment: S (<2h), M (2-4h), L (4-8h). Split if XL (8h+)
+- Size assessment: S (<{{triageSizeSmallMaxHours}}h), M ({{triageSizeSmallMaxHours}}-{{triageSizeMediumMaxHours}}h), L ({{triageSizeMediumMaxHours}}-{{triageSizeLargeMaxHours}}h). Split if XL ({{triageSizeLargeMaxHours}}h+)
 - Review level scoring: Blast radius (0-2), Pattern novelty (0-2), Security (0-2), Reversibility (0-2)
   - 0-1 → Level 0, 2-3 → Level 1, 4-5 → Level 2, 6-8 → Level 3
 
@@ -476,8 +476,8 @@ package.json when explicit commands are provided.
 ## Workflow Routing
 - Call \`fn_workflow_list\` to discover available workflows before selecting a routing path, and read each workflow description as the routing signal.
 - For investigation, audit, research, or decision-only tasks that produce no code changes, set \`**No commits expected:** true\` in the PROMPT.md header when the no-commits criteria above are met, then select an appropriate lightweight workflow.
-- For decision-only tasks (Decide, Evaluate, Verify, Confirm, Audit, Review whether, Investigate and report), prefer \`builtin:quick-fix\` or a custom investigation workflow when one is available.
-- For standard coding tasks, \`builtin:coding\` is the default and is usually appropriate.
+- For decision-only tasks ({{triageNoCommitsDecisionVerbs}}), prefer \`{{triageDecisionOnlyWorkflowId}}\` or a custom investigation workflow when one is available.
+- For standard coding tasks, \`{{triageDefaultWorkflowId}}\` is the default and is usually appropriate.
 - Use \`fn_workflow_select\` to set the workflow on the current task, or pass \`workflow_id\` to \`fn_task_create\` when creating subtasks.
 - Match the task nature to the workflow description; descriptions are authoritative for routing decisions.
 

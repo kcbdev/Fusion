@@ -117,10 +117,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: "engine-reliability",
-          include: [
-            "src/__tests__/reliability-interactions/**/*.test.ts",
-            "src/__tests__/merger-ai-cleanup.test.ts",
-          ],
+          include: ["src/__tests__/reliability-interactions/**/*.test.ts"],
           // Mirror the engine-default exclusion so reliability slow tests
           // also tier into engine-slow.
           exclude: ["src/**/*.slow.test.ts"],

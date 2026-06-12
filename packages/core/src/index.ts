@@ -105,7 +105,12 @@ export type {
 export { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
 export { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "./builtin-stepwise-coding-workflow-ir.js";
 export { BUILTIN_PR_WORKFLOW_IR } from "./builtin-pr-workflow-ir.js";
-export { BUILTIN_WORKFLOW_SETTINGS } from "./builtin-workflow-settings.js";
+export {
+  BUILTIN_WORKFLOW_SETTINGS,
+  BUILTIN_MOVED_WORKFLOW_SETTINGS,
+  BUILTIN_TRIAGE_POLICY_SETTINGS,
+  renderTriagePolicyPlaceholders,
+} from "./builtin-workflow-settings.js";
 export {
   MOVED_SETTINGS_KEYS,
   SETTINGS_MIGRATION_VERSION,

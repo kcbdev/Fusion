@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Settings, Task, TaskDetail, TaskStore, WorkflowIr } from "@fusion/core";
 import {
   BUILTIN_CODING_WORKFLOW_IR,
+  renderTriagePolicyPlaceholders,
   resolveAgentPrompt,
   resolvePlanningPromptFromIr,
 } from "@fusion/core";
@@ -107,6 +108,8 @@ async function captureBasePrompt(task: Task, store: TaskStore): Promise<string> 
 }
 
 const canonicalPlanningPrompt = resolvePlanningPromptFromIr(BUILTIN_CODING_WORKFLOW_IR)!;
+const renderedCanonicalPlanningPrompt = renderTriagePolicyPlaceholders(canonicalPlanningPrompt, {});
+const renderedDefaultTriagePrompt = renderTriagePolicyPlaceholders(resolveAgentPrompt("triage"), {});
 
 describe("triage planning prompt single source", () => {
   beforeEach(() => {
@@ -119,14 +122,14 @@ describe("triage planning prompt single source", () => {
       getTaskWorkflowSelection: vi.fn().mockReturnValue({ workflowId: "builtin:coding", stepIds: [] }),
     });
 
-    await expect(captureBasePrompt(task, store)).resolves.toBe(canonicalPlanningPrompt);
+    await expect(captureBasePrompt(task, store)).resolves.toBe(renderedCanonicalPlanningPrompt);
   });
 
   it("uses the built-in workflow IR planning prompt when no workflow is selected", async () => {
     const task = createTask({ id: "FN-6232-NO-SELECTION", executionMode: "standard" });
     const store = createStore(task);
 
-    await expect(captureBasePrompt(task, store)).resolves.toBe(canonicalPlanningPrompt);
+    await expect(captureBasePrompt(task, store)).resolves.toBe(renderedCanonicalPlanningPrompt);
   });
 
   it("preserves user triage prompt override precedence", async () => {
@@ -174,6 +177,6 @@ describe("triage planning prompt single source", () => {
       }),
     });
 
-    await expect(captureBasePrompt(task, store)).resolves.toBe(resolveAgentPrompt("triage"));
+    await expect(captureBasePrompt(task, store)).resolves.toBe(renderedDefaultTriagePrompt);
   });
 });

@@ -40,7 +40,7 @@ The default built-in catalog entry `builtin:coding` is backed by the canonical `
 
 `builtin:stepwise-coding` is a separate graph variant backed by `BUILTIN_STEPWISE_CODING_WORKFLOW_IR`; it keeps the same lifecycle columns/traits while modeling per-step parse/execute/review/rework as authored graph structure.
 
-During triage/planning sessions, agents can call `fn_workflow_list` to discover available built-in and custom workflows and read their descriptions before routing work. They can call `fn_workflow_select` to select a workflow for the task being specified, or pass `workflow_id` when creating child tasks with `fn_task_create`; decision-only or investigation tasks can also set `noCommitsExpected` / `**No commits expected:** true` when no code changes are expected.
+During triage/planning sessions, agents can call `fn_workflow_list` to discover available built-in and custom workflows and read their descriptions before routing work. They can call `fn_workflow_select` to select a workflow for the task being specified, or pass `workflow_id` when creating child tasks with `fn_task_create`; decision-only or investigation tasks can also set `noCommitsExpected` / `**No commits expected:** true` when no code changes are expected. The built-in triage thresholds, decision-only verb list, and default routing IDs are workflow-native typed settings resolved from the selected workflow.
 
 #### Runtime invariant criterion
 

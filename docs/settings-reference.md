@@ -236,6 +236,25 @@ These groups moved out of project settings and into workflow settings (built-in
 | **Review / approval** | `requirePrApproval`, `requirePlanApproval`, `reviewHandoffPolicy`, `maxReviewerContextRetries`, `maxReviewerFallbackRetries` |
 | **Per-phase model lanes** | `executionProvider`/`executionModelId`, `planningProvider`/`planningModelId` (+ fallbacks), `validatorProvider`/`validatorModelId` (+ fallbacks) |
 
+### Workflow-native triage policy settings
+
+The built-in workflows also declare triage/spec policy settings that were **not** moved from project settings. They are workflow-native declarations: they never lived in `DEFAULT_PROJECT_SETTINGS`, are not `MOVED_SETTINGS_KEYS`, and resolve only through the workflow effective-settings path.
+
+| Setting | Default | Purpose |
+|---|---:|---|
+| `triageSizeSmallMaxHours` | `2` | Size S upper hour boundary (`S (<2h)`). |
+| `triageSizeMediumMaxHours` | `4` | Size M upper hour boundary (`M (2-4h)`). |
+| `triageSizeLargeMaxHours` | `8` | Size L upper hour boundary; XL starts at `8h+`. |
+| `triageSubtaskStepThreshold` | `7` | Canonical “MORE THAN 7 implementation steps” split-consideration threshold. |
+| `triageSubtaskLargeStepSignal` | `9` | Broad-scope signal for large tasks whose plan reaches 9+ steps. |
+| `triageSubtaskAdditiveStepSignal` | `12` | Additive partitioning signal for 12+ implementation steps. |
+| `triageSubtaskPackageThreshold` | `3` | Canonical package/module breadth threshold (“MORE THAN 3 different packages/modules”). |
+| `triageSubtaskFileScopeThreshold` | `20` | File Scope entry count that signals broad work. |
+| `triageSubtaskRemediationBatchThreshold` | `30` | Large remediation batch threshold. |
+| `triageNoCommitsDecisionVerbs` | all seven built-ins | Decision-only verbs: Decide, Evaluate, Verify, Confirm, Audit, Review whether, Investigate and report. |
+| `triageDecisionOnlyWorkflowId` | `builtin:quick-fix` | Preferred workflow for decision-only/no-commit tasks. |
+| `triageDefaultWorkflowId` | `builtin:coding` | Default workflow for standard coding tasks. |
+
 In the dashboard Settings modal, Project Models now exposes Plan/Triage, Executor,
 and Reviewer dropdown controls for the default workflow. The modal's primary
 **Save** action persists pending default-workflow model lane overrides; there is no
