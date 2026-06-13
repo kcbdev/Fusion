@@ -9,10 +9,15 @@ If no PR number was provided, detect from the current branch:
 gh pr view --json number -q .number
 ```
 
-Then fetch all feedback using the GraphQL script at [scripts/get-pr-comments](../scripts/get-pr-comments):
+Then fetch all feedback using the GraphQL script at [scripts/get-pr-comments](../scripts/get-pr-comments).
+
+> The session's working directory is the project root, not this skill's
+> directory. Invoke bundled scripts by absolute path. Under Fusion the skills
+> root is exported as `$FUSION_CE_SKILLS_DIR`; otherwise substitute this skill's
+> own directory.
 
 ```bash
-bash scripts/get-pr-comments PR_NUMBER
+bash "${FUSION_CE_SKILLS_DIR:-.}/ce-resolve-pr-feedback/scripts/get-pr-comments" PR_NUMBER
 ```
 
 Returns a JSON object with three keys:
@@ -163,12 +168,12 @@ For `needs-human` verdicts, post the reply but do NOT resolve the thread. Leave 
 
 1. **Reply** using [scripts/reply-to-pr-thread](../scripts/reply-to-pr-thread):
 ```bash
-echo "REPLY_TEXT" | bash scripts/reply-to-pr-thread THREAD_ID
+echo "REPLY_TEXT" | bash "${FUSION_CE_SKILLS_DIR:-.}/ce-resolve-pr-feedback/scripts/reply-to-pr-thread" THREAD_ID
 ```
 
 2. **Resolve** using [scripts/resolve-pr-thread](../scripts/resolve-pr-thread):
 ```bash
-bash scripts/resolve-pr-thread THREAD_ID
+bash "${FUSION_CE_SKILLS_DIR:-.}/ce-resolve-pr-feedback/scripts/resolve-pr-thread" THREAD_ID
 ```
 
 ### PR comments and review bodies
@@ -186,7 +191,7 @@ Include enough quoted context in the reply so the reader can follow which commen
 Re-fetch feedback to confirm resolution:
 
 ```bash
-bash scripts/get-pr-comments PR_NUMBER
+bash "${FUSION_CE_SKILLS_DIR:-.}/ce-resolve-pr-feedback/scripts/get-pr-comments" PR_NUMBER
 ```
 
 The `review_threads` array should be empty (except `needs-human` items).
@@ -244,6 +249,16 @@ Still pending from a previous run (count):
 
 If a blocking question tool is available, use it to ask about all pending decisions (both new `needs-human` and previous-run pending) together. If there are only pending decisions and no new work was done, the summary is just the pending items.
 
-Use the platform's blocking question tool: `AskUserQuestion` in Claude Code (call `ToolSearch` with `select:AskUserQuestion` first if its schema isn't loaded), `request_user_input` in Codex, `ask_user` in Gemini, `ask_user` in Pi (requires the `pi-ask-user` extension). Use it to present the decisions and wait for the user's response. After they decide, process the remaining items: fix the code, compose the reply, post it, and resolve the thread.
+**Running inside Fusion (autonomous workflow step):** when the environment variable `FUSION_WORKFLOW_STEP` is set you are a Fusion workflow step, not an interactive session. There is no synchronous blocking-question tool — `AskUserQuestion` has no listener here and must NOT be called. Instead, emit a single await-input block and stop. Fusion parses it, pauses the task (`awaiting-user-input`), surfaces it to a human via the task card, and re-runs this step with their reply as the latest steering comment. Emit at most one question per run, exactly in this form:
+
+```
+===FUSION_AWAIT_INPUT===
+<the pending decisions as a short list, with options for each>
+===END_FUSION_AWAIT_INPUT===
+```
+
+On the re-run, read the most recent steering comment as the answer, then process the items: fix the code, compose the reply, post it, and resolve the thread. (The `needs-human` threads stay open on the PR until resolved.)
+
+**Interactive sessions:** use the platform's blocking question tool: `AskUserQuestion` in Claude Code (call `ToolSearch` with `select:AskUserQuestion` first if its schema isn't loaded), `request_user_input` in Codex, `ask_user` in Gemini, `ask_user` in Pi (requires the `pi-ask-user` extension). Use it to present the decisions and wait for the user's response, then process the remaining items as above.
 
 Fall back to presenting the decisions in the summary output and waiting in conversation only when no blocking tool exists in the harness or the call errors (e.g., Codex edit modes) — not because a schema load is required. Never silently skip. If the user doesn't respond, the items remain open on the PR for later handling.

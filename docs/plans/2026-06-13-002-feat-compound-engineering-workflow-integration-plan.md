@@ -120,7 +120,7 @@ flowchart TD
 
 ## Output Structure (new/changed surfaces)
 
-```
+```text
 packages/
   core/src/builtin-workflows.ts                      # rewire execute/merge/plan nodes
   core/src/__tests__/builtin-workflows.test.ts       # updated assertions

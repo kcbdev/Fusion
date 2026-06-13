@@ -17,7 +17,7 @@ gh api repos/OWNER/REPO/pulls/comments/COMMENT_ID \
 
 **Step 2** -- Map comment to its thread ID. Use [scripts/get-thread-for-comment](../scripts/get-thread-for-comment):
 ```bash
-bash scripts/get-thread-for-comment PR_NUMBER COMMENT_NODE_ID [OWNER/REPO]
+bash "${FUSION_CE_SKILLS_DIR:-.}/ce-resolve-pr-feedback/scripts/get-thread-for-comment" PR_NUMBER COMMENT_NODE_ID [OWNER/REPO]
 ```
 
 This fetches thread IDs and their first comment IDs (minimal fields, no bodies) and returns the matching thread with full comment details.

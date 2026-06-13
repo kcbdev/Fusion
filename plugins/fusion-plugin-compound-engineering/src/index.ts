@@ -1,6 +1,6 @@
 import { definePlugin } from "@fusion/plugin-sdk";
 import { COMPOUND_ENGINEERING_SKILLS } from "./skills.js";
-import { installBundledCeSkills } from "./skill-installation.js";
+import { installBundledCeSkills, resolveDefaultInstallTargetRoot } from "./skill-installation.js";
 import {
   installBundledCeAgents,
   resolveDefaultAgentsInstallTargetRoot,
@@ -8,6 +8,7 @@ import {
 import { ensureCeSchema } from "./schema.js";
 import { createSessionRoutes } from "./routes/session-routes.js";
 import { createArtifactRoutes } from "./routes/artifact-routes.js";
+import { recoverStaleSessionsForContext } from "./session/session-recovery.js";
 import { getCePipelineStore } from "./sync/pipeline-store.js";
 import { reconcileCePipelines } from "./sync/reconciler.js";
 import { settingsSchema } from "./settings.js";
@@ -161,6 +162,8 @@ const plugin = definePlugin({
         const message = error instanceof Error ? error.message : String(error);
         ctx.logger.error(`Compound Engineering agent install failed: ${message}`);
       }
+
+      recoverStaleSessionsForContext(ctx, { reason: "load", force: true, emitEvent: true });
     },
   },
   // Expose the plugin-local ce-* persona-definition directory to executor /
@@ -169,8 +172,15 @@ const plugin = definePlugin({
   // the lightweight subagent path (no plugin agent-contribution channel exists).
   // Defs are installed in onLoad.
   executorRuntimeEnv: () => ({
-    env: { FUSION_CE_AGENTS_DIR: resolveDefaultAgentsInstallTargetRoot() },
-    description: "compound-engineering ce-* persona definitions directory",
+    env: {
+      FUSION_CE_AGENTS_DIR: resolveDefaultAgentsInstallTargetRoot(),
+      // Step sessions run with cwd=projectRoot, so a CE skill can't reach its
+      // bundled scripts via a relative `scripts/...` path. Expose the installed
+      // skills root so skill docs can invoke scripts by absolute path
+      // (`"$FUSION_CE_SKILLS_DIR/<skill-id>/scripts/<name>"`).
+      FUSION_CE_SKILLS_DIR: resolveDefaultInstallTargetRoot(),
+    },
+    description: "compound-engineering ce-* persona definitions and bundled skills directories",
   }),
   routes: [...createSessionRoutes(), ...createArtifactRoutes()],
   dashboardViews: [

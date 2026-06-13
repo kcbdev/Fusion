@@ -2030,8 +2030,8 @@ function TaskCardComponent({
                 e.stopPropagation();
                 onOpenDetailWithTab(task, "workflow");
               }}
-              title={t("tasks.answerQuestions", "Answer the agent's questions")}
-              aria-label={t("tasks.answerQuestions", "Answer the agent's questions")}
+              title={t("tasks.answerQuestions", "Answer questions")}
+              aria-label={t("tasks.answerQuestions", "Answer questions")}
             >
               {t("tasks.answerQuestions", "Answer questions")}
             </button>

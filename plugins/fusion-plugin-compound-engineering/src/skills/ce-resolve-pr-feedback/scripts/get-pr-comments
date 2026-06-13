@@ -148,7 +148,7 @@ jq -n \
       | select(.author.login as $l | $ci_bot_logins | index($l) | not)
       | select(.body | test("^\\s*$") | not)],
     review_bodies: [$all_reviews[]
-      | select(.body != null and .body != "")
+      | select(.body != null and (.body | test("^\\s*$") | not))
       | select(.author.login != $author.login)
       | select(.author.login as $l | $ci_bot_logins | index($l) | not)]
   }'

@@ -115,8 +115,11 @@ Determine how to proceed based on what was provided in `<input_document>`.
 
    **Option B: Use a worktree (recommended for parallel development)**
    ```bash
-   skill: ce-worktree
-   # The skill will create a new branch from the default branch in an isolated worktree
+   # Create a new branch from the default branch in an isolated worktree.
+   # (In a Fusion workflow run the task already executes inside its own
+   # worktree/branch — skip this and continue there.)
+   git pull origin [default_branch]
+   git worktree add ../feature-branch-name -b feature-branch-name [default_branch]
    ```
 
    **Option C: Continue on the default branch**

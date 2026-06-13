@@ -171,7 +171,7 @@ describe("TaskCard", () => {
       />,
     );
 
-    const btn = screen.getByLabelText("Answer the agent's questions");
+    const btn = screen.getByLabelText("Answer questions");
     fireEvent.click(btn);
     expect(onOpenDetailWithTab).toHaveBeenCalledTimes(1);
     expect(onOpenDetailWithTab.mock.calls[0][1]).toBe("workflow");
@@ -186,7 +186,7 @@ describe("TaskCard", () => {
         onOpenDetailWithTab={vi.fn()}
       />,
     );
-    expect(screen.queryByLabelText("Answer the agent's questions")).toBeNull();
+    expect(screen.queryByLabelText("Answer questions")).toBeNull();
   });
 
   it("uses githubIssueAction for tracked task delete", async () => {
