@@ -424,7 +424,7 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
   const activeSession = isActiveAgentSession(task, { sessionLive });
   const sessionHint = activeSession
     ? "Message the active agent session. Guidance is delivered to the running session in real time."
-    : "Message saved here will be picked up by the next session when work resumes.";
+    : null;
   const canSend = draft.trim().length > 0 && !sending;
 
   const resizeComposer = useCallback(() => {
@@ -623,15 +623,17 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
       </div>
 
       <form className="task-chat-composer card" onSubmit={handleSubmit}>
-        <div className="task-chat-session-hint" role="status">
-          {sessionHint}
-        </div>
+        {sessionHint ? (
+          <div className="task-chat-session-hint" role="status">
+            {sessionHint}
+          </div>
+        ) : null}
         <div className="task-chat-composer-row">
           <textarea
             ref={textareaRef}
             className="input task-chat-input"
             value={draft}
-            placeholder={activeSession ? "Message the active agent session…" : "Message now; it will be picked up by the next session…"}
+            placeholder={activeSession ? "Message the active agent session…" : "Message the agent…"}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={handleKeyDown}
             disabled={sending}

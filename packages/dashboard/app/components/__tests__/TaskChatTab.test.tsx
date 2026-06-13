@@ -117,8 +117,10 @@ function expectComposerSendableAfterDraft(message = "Please continue") {
   expect(sendButton).not.toBeDisabled();
 }
 
-function expectQueuedSessionCopy() {
-  expect(screen.getByText(/picked up by the next session/i)).toBeInTheDocument();
+function expectNoInactiveSessionHint() {
+  expect(screen.queryByText(/picked up by the next session/i)).not.toBeInTheDocument();
+  expect(document.querySelector(".task-chat-session-hint")).not.toBeInTheDocument();
+  expect(screen.getByPlaceholderText("Message the agent…")).toBeInTheDocument();
 }
 
 function expectActiveSessionCopy() {
@@ -868,7 +870,7 @@ describe("TaskChatTab", () => {
     );
 
     expect(screen.queryByText(/No active steerable agent session/)).not.toBeInTheDocument();
-    expect(screen.getByText(/picked up by the next session/i)).toBeInTheDocument();
+    expectNoInactiveSessionHint();
     const input = screen.getByLabelText("Message active agent session");
     expect(input).not.toBeDisabled();
     const sendButton = screen.getByRole("button", { name: "Send" });
@@ -938,7 +940,7 @@ describe("TaskChatTab", () => {
       />,
     );
 
-    expectQueuedSessionCopy();
+    expectNoInactiveSessionHint();
     expectComposerSendableAfterDraft();
   });
 
@@ -1071,7 +1073,7 @@ describe("TaskChatTab", () => {
     if (showsActiveCopy) {
       expectActiveSessionCopy();
     } else {
-      expectQueuedSessionCopy();
+      expectNoInactiveSessionHint();
     }
     expectComposerSendableAfterDraft();
   });
@@ -1086,7 +1088,7 @@ describe("TaskChatTab", () => {
   ])("keeps the composer sendable with queued copy for %s", (_label, task) => {
     render(<TaskChatTab task={task} active addToast={vi.fn()} />);
 
-    expectQueuedSessionCopy();
+    expectNoInactiveSessionHint();
     expectComposerSendableAfterDraft();
   });
 
@@ -1098,7 +1100,7 @@ describe("TaskChatTab", () => {
   ])("keeps the composer sendable with queued copy for %s", (_label, task) => {
     render(<TaskChatTab task={task} active addToast={vi.fn()} sessionLive={true} />);
 
-    expectQueuedSessionCopy();
+    expectNoInactiveSessionHint();
     expectComposerSendableAfterDraft();
   });
 
@@ -1107,7 +1109,7 @@ describe("TaskChatTab", () => {
     (status) => {
       render(<TaskChatTab task={makeTask({ column: "in-progress", assignedAgentId: "agent-1", status })} active addToast={vi.fn()} />);
 
-      expectQueuedSessionCopy();
+      expectNoInactiveSessionHint();
       expectComposerSendableAfterDraft();
     },
   );

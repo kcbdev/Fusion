@@ -1357,6 +1357,17 @@ export interface CliAgentRuntime {
   hookDirRoot?: string;
 }
 
+interface ActiveExecutorSessionState {
+  session: AgentSession;
+  seenSteeringIds: Set<string>;
+  lastResolvedModelProvider?: string;
+  lastResolvedModelId?: string;
+  lastTaskModelProvider?: string | null;
+  lastTaskModelId?: string | null;
+  lastAssignedAgentId?: string | null;
+  lastEffectiveColumnAgentId?: string | null;
+}
+
 export class TaskExecutor {
   private activeWorktrees = new Map<string, string>();
   private executing = new Set<string>();
@@ -1374,24 +1385,11 @@ export class TaskExecutor {
    *  session being fully reaped before creating/acquiring a new worktree. */
   private pendingTaskDisposals = new Map<string, Promise<void>>();
   /** Active agent sessions per task, used to terminate on pause and inject steering. */
-  private activeSessions = new Map<string, {
-    session: AgentSession;
-    seenSteeringIds: Set<string>;
-    lastResolvedModelProvider?: string;
-    lastResolvedModelId?: string;
-    lastTaskModelProvider?: string | null;
-    lastTaskModelId?: string | null;
-    lastAssignedAgentId?: string | null;
-    // Column-agent restart-invalidation (plan U5, R7/KTD-4). The effective
-    // column-agent id governing this session's seam (undefined when no binding
-    // governs — the legacy path). Tracked so the watcher can detect a workflow-
-    // definition edit or agent runtimeConfig change that re-keys the column-
-    // effective agent/model mid-flight and trigger the same restart path a
-    // task.modelProvider change does today.
-    lastEffectiveColumnAgentId?: string | null;
-  }>();
+  private activeSessions = new Map<string, ActiveExecutorSessionState>();
   /** Active step-session executors per task (mutually exclusive with activeSessions). */
   private activeStepExecutors = new Map<string, StepSessionExecutor>();
+  /** Steering comments already observed for active step-session executor runs. */
+  private activeStepExecutorSeenSteeringIds = new Map<string, Set<string>>();
   /** Column-agent principal alignment (plan U5, R6): the EFFECTIVE column-agent id
    *  currently running each executing task's coding/step session, when an
    *  override/defer binding governs the in-flight seam. Keyed by task id, populated
@@ -1404,6 +1402,8 @@ export class TaskExecutor {
   private effectiveColumnAgentByTask = new Map<string, string>();
   /** Active pre-merge workflow step sessions per task. */
   private activeWorkflowStepSessions = new Map<string, AgentSession>();
+  /** Steering comments already observed for active workflow step sessions. */
+  private activeWorkflowStepSessionSeenSteeringIds = new Map<string, Set<string>>();
   /** Active configured-command abort controllers keyed by task. */
   private activeConfiguredCommandControllers = new Map<string, Set<AbortController>>();
   /**
@@ -1448,16 +1448,7 @@ export class TaskExecutor {
   /** Set of ephemeral spawned agent IDs with in-flight cleanup (prevents duplicate deletion attempts). */
   private pendingEphemeralDeletions = new Set<string>();
 
-  private setActiveSession(taskId: string, sessionState: {
-    session: AgentSession;
-    seenSteeringIds: Set<string>;
-    lastResolvedModelProvider?: string;
-    lastResolvedModelId?: string;
-    lastTaskModelProvider?: string | null;
-    lastTaskModelId?: string | null;
-    lastAssignedAgentId?: string | null;
-    lastEffectiveColumnAgentId?: string | null;
-  }, worktreePath: string): void {
+  private setActiveSession(taskId: string, sessionState: ActiveExecutorSessionState, worktreePath: string): void {
     this.activeSessions.set(taskId, sessionState);
     activeSessionRegistry.registerPath(worktreePath, { taskId, kind: "executor", ownerKey: taskId });
   }
@@ -1472,13 +1463,15 @@ export class TaskExecutor {
     }
   }
 
-  private setActiveStepExecutor(taskId: string, stepExecutor: StepSessionExecutor, worktreePath: string): void {
+  private setActiveStepExecutor(taskId: string, stepExecutor: StepSessionExecutor, worktreePath: string, seenSteeringIds = new Set<string>()): void {
     this.activeStepExecutors.set(taskId, stepExecutor);
+    this.activeStepExecutorSeenSteeringIds.set(taskId, seenSteeringIds);
     activeSessionRegistry.registerPath(worktreePath, { taskId, kind: "step-session", ownerKey: `${taskId}#step-session` });
   }
 
   private deleteActiveStepExecutor(taskId: string, worktreePath?: string): void {
     this.activeStepExecutors.delete(taskId);
+    this.activeStepExecutorSeenSteeringIds.delete(taskId);
     // U5: drop the effective column-agent principal for this task's step session.
     this.effectiveColumnAgentByTask.delete(taskId);
     const resolvedWorktreePath = worktreePath ?? this.activeWorktrees.get(taskId);
@@ -1487,17 +1480,27 @@ export class TaskExecutor {
     }
   }
 
-  private setActiveWorkflowStepSession(taskId: string, session: AgentSession, worktreePath: string): void {
+  private setActiveWorkflowStepSession(taskId: string, session: AgentSession, worktreePath: string, seenSteeringIds = new Set<string>()): void {
     this.activeWorkflowStepSessions.set(taskId, session);
+    this.activeWorkflowStepSessionSeenSteeringIds.set(taskId, seenSteeringIds);
     activeSessionRegistry.registerPath(worktreePath, { taskId, kind: "workflow-step", ownerKey: `${taskId}#workflow-step` });
   }
 
   private deleteActiveWorkflowStepSession(taskId: string, worktreePath?: string): void {
     this.activeWorkflowStepSessions.delete(taskId);
+    this.activeWorkflowStepSessionSeenSteeringIds.delete(taskId);
     const resolvedWorktreePath = worktreePath ?? this.activeWorktrees.get(taskId);
     if (resolvedWorktreePath) {
       activeSessionRegistry.unregisterPath(resolvedWorktreePath);
     }
+  }
+
+  private createSeenSteeringIds(task: { comments?: Array<{ id: string }>; steeringComments?: Array<{ id: string }> }): Set<string> {
+    const seenSteeringIds = new Set<string>();
+    for (const comment of task.steeringComments ?? task.comments ?? []) {
+      seenSteeringIds.add(comment.id);
+    }
+    return seenSteeringIds;
   }
 
   private registerConfiguredCommandController(taskId: string, controller: AbortController): void {
@@ -2544,56 +2547,117 @@ export class TaskExecutor {
           }
         }
 
-        // Handle steering comments - inject new ones into the running session
-        // Only process if session is active (activeSessions check is sufficient
-        // since entries are only added when a task is in-progress)
-        if (this.activeSessions.has(task.id) && task.steeringComments) {
-          const activeSession = this.activeSessions.get(task.id)!;
-          const { session, seenSteeringIds } = activeSession;
+        // Handle steering comments - inject new ones into whichever execution
+        // surface currently owns the task: legacy single-session, step-session
+        // executor (including graph-pinned/workflow stepwise runs), or an
+        // individual workflow step AgentSession.
+        if (task.steeringComments) {
+          const injectionTargets: Array<{
+            kind: "legacy" | "step-session" | "workflow-step";
+            seenSteeringIds: Set<string>;
+            inject: (message: string) => Promise<void>;
+            legacySession?: AgentSession;
+            legacyState?: ActiveExecutorSessionState;
+          }> = [];
 
-          // Find new steering comments that haven't been seen yet
-          const newComments = task.steeringComments.filter(c => !seenSteeringIds.has(c.id));
+          const activeSession = this.activeSessions.get(task.id);
+          if (activeSession) {
+            injectionTargets.push({
+              kind: "legacy",
+              seenSteeringIds: activeSession.seenSteeringIds,
+              inject: (message) => activeSession.session.steer(message),
+              legacySession: activeSession.session,
+              legacyState: activeSession,
+            });
+          }
 
-          if (newComments.length > 0) {
+          const stepExecutor = this.activeStepExecutors.get(task.id);
+          if (stepExecutor) {
+            const seenSteeringIds = this.activeStepExecutorSeenSteeringIds.get(task.id) ?? this.createSeenSteeringIds(task);
+            this.activeStepExecutorSeenSteeringIds.set(task.id, seenSteeringIds);
+            injectionTargets.push({
+              kind: "step-session",
+              seenSteeringIds,
+              inject: (message) => stepExecutor.steerActiveSessions(message),
+            });
+          }
+
+          const workflowSession = this.activeWorkflowStepSessions.get(task.id);
+          if (workflowSession) {
+            const seenSteeringIds = this.activeWorkflowStepSessionSeenSteeringIds.get(task.id) ?? this.createSeenSteeringIds(task);
+            this.activeWorkflowStepSessionSeenSteeringIds.set(task.id, seenSteeringIds);
+            injectionTargets.push({
+              kind: "workflow-step",
+              seenSteeringIds,
+              inject: (message) => workflowSession.steer(message),
+            });
+          }
+
+          const loggedCommentIds = new Set<string>();
+          let legacyReviewHandoff: {
+            comments: import("@fusion/core").SteeringComment[];
+            session: AgentSession;
+            state: ActiveExecutorSessionState;
+          } | undefined;
+
+          for (const target of injectionTargets) {
+            // Find new steering comments that haven't been seen by this running surface yet.
+            const newComments = task.steeringComments.filter(c => !target.seenSteeringIds.has(c.id));
+            if (newComments.length === 0) continue;
+
             for (const comment of newComments) {
               const summary = comment.text.length > 80
                 ? comment.text.slice(0, 80) + "..."
                 : comment.text;
 
-              // Mark as seen BEFORE attempting injection to prevent retry loops on failure
-              seenSteeringIds.add(comment.id);
+              // Mark as seen BEFORE attempting injection to prevent retry loops on failure.
+              target.seenSteeringIds.add(comment.id);
 
-              // Format and inject the comment
               const commentMessage = formatCommentForInjection(comment);
               try {
-                executorLog.log(`Injecting comment into ${task.id}: ${summary}`);
-                await session.steer(commentMessage);
-                executorLog.log(`Successfully injected comment into ${task.id}`);
+                executorLog.log(`Injecting comment into ${task.id} (${target.kind}): ${summary}`);
+                await target.inject(commentMessage);
+                executorLog.log(`Successfully injected comment into ${task.id} (${target.kind})`);
 
-                // Log to the task that comment was received
-                await this.store.logEntry(
-                  task.id,
-                  `Comment received mid-execution: ${summary}`,
-                  `by ${comment.author}`
-                );
+                // Log to the task once per comment/tick even if multiple active surfaces exist.
+                if (!loggedCommentIds.has(comment.id)) {
+                  await this.store.logEntry(
+                    task.id,
+                    `Comment received mid-execution: ${summary}`,
+                    `by ${comment.author}`
+                  );
+                  loggedCommentIds.add(comment.id);
+                }
               } catch (err) {
-                executorLog.error(`Failed to inject comment for ${task.id}:`, err);
+                executorLog.error(`Failed to inject comment for ${task.id} (${target.kind}):`, err);
                 // Comment is already marked as seen - we won't retry to avoid spamming
                 // the agent with failed injections. The error is logged for debugging.
               }
             }
 
-            // After injecting comments, check for review handoff intent
+            if (target.kind === "legacy" && target.legacySession && target.legacyState) {
+              legacyReviewHandoff = {
+                comments: newComments,
+                session: target.legacySession,
+                state: target.legacyState,
+              };
+            }
+          }
+
+          // After injecting comments, check for review handoff intent on the legacy
+          // session path. Step-session/workflow-step runs do not have the legacy
+          // review handoff state required by executeReviewHandoff.
+          if (legacyReviewHandoff) {
             // Only detect handoff in agent-authored comments when policy is enabled.
             // Merge per-task effective workflow settings (U3, KTD-3) so
             // reviewHandoffPolicy resolves from the workflow. Behavior-inert by default.
             const settings = await mergeEffectiveSettings(this.store, task, await this.store.getSettings());
             if (settings.reviewHandoffPolicy === "comment-triggered") {
-              const agentComments = newComments.filter(c => c.author !== "user");
+              const agentComments = legacyReviewHandoff.comments.filter(c => c.author !== "user");
               for (const comment of agentComments) {
                 if (detectReviewHandoffIntent(comment.text)) {
                   executorLog.log(`Review handoff detected in ${task.id}: ${comment.text.slice(0, 50)}...`);
-                  await this.executeReviewHandoff(task, session, activeSession);
+                  await this.executeReviewHandoff(task, legacyReviewHandoff.session, legacyReviewHandoff.state);
                   return; // Exit early - handoff handles session disposal
                 }
               }
@@ -6938,7 +7002,7 @@ export class TaskExecutor {
             });
           },
         });
-        this.setActiveStepExecutor(task.id, stepExecutor, worktreePath);
+        this.setActiveStepExecutor(task.id, stepExecutor, worktreePath, this.createSeenSteeringIds(detail));
 
         const stepWork = async () => {
           const results = await stepExecutor.executeAll();
@@ -7662,14 +7726,10 @@ export class TaskExecutor {
         // Make session available to custom tools (fn_task_update checkpoint capture, fn_review_step rewind)
         sessionRef.current = session;
 
-        // Register session so the pause listener can terminate it
-        // Initialize with empty set of seen comments
-        const seenSteeringIds = new Set<string>();
-        if (detail.comments) {
-          for (const comment of detail.comments) {
-            seenSteeringIds.add(comment.id);
-          }
-        }
+        // Register session so the pause listener can terminate it.
+        // Initialize with all existing steering comments so only mid-flight
+        // comments are injected into the running session.
+        const seenSteeringIds = this.createSeenSteeringIds(detail);
         this.setActiveSession(task.id, {
           session,
           seenSteeringIds,
@@ -11921,7 +11981,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         task.id,
         `Workflow step '${workflowStep.name}' using model: ${describeModel(session)}${useOverride && attemptLabel === "primary" ? " (workflow step override)" : ""}${attemptLabel === "fallback" ? " (fallback after timeout)" : ""}`,
       );
-      this.setActiveWorkflowStepSession(task.id, session, worktreePath);
+      this.setActiveWorkflowStepSession(task.id, session, worktreePath, this.createSeenSteeringIds(task));
 
       let output = "";
       const deltaNormalizer = createStreamingDeltaNormalizer();
