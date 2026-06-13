@@ -82,8 +82,10 @@
   flex-direction: column;
   gap: var(--space-xs);
   width: 300px;
+  min-width: 0;
   padding: var(--space-sm);
   border-right: 1px solid var(--border);
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
@@ -95,6 +97,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
+  min-width: 0;
   margin-top: var(--space-sm);
   padding-top: var(--space-sm);
   border-top: 1px solid var(--border);
@@ -104,6 +107,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
+  min-width: 0;
 }
 
 .wf-sidebar-section-toggle {
@@ -111,6 +115,7 @@
   align-items: center;
   gap: var(--space-xs);
   width: 100%;
+  min-width: 0;
   padding: var(--space-xs) var(--space-sm);
   background: transparent;
   border: none;
@@ -222,11 +227,20 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
+}
+
+.wf-editor-list li {
+  min-width: 0;
 }
 
 .wf-editor-list-item {
   width: 100%;
+  min-width: 0;
+  overflow: hidden;
   text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: var(--space-xs) var(--space-sm);
   background: transparent;
   border: 1px solid transparent;
@@ -338,6 +352,7 @@
   display: flex;
   gap: var(--space-xs);
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .wf-palette-btn,
@@ -347,12 +362,14 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
+  min-width: 0;
   padding: var(--space-xs) var(--space-sm);
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text);
   cursor: pointer;
+  overflow-wrap: anywhere;
   transition: background var(--transition-fast);
 }
 
@@ -923,6 +940,12 @@
   overflow-x: auto;
 }
 
+.wf-editor-sidebar .wf-code-source {
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 /* Header overflow priority (R1): icon fixed-width; label flex-shrinks first
  *  with ellipsis; badges + error badge hold their width flush right. */
 .wf-node-icon {
@@ -1365,10 +1388,12 @@
   .wf-editor-body--list-stage .wf-editor-sidebar {
     display: flex;
     width: 100%;
+    min-width: 0;
     flex: 1 1 auto;
     max-height: none;
     border-right: none;
     border-bottom: none;
+    overflow-x: hidden;
     overflow-y: auto;
   }
 
