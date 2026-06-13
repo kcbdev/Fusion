@@ -276,6 +276,43 @@ describe("TaskChatTab", () => {
     expect(screen.getByText(/No agent output yet/)).toBeTruthy();
   });
 
+  it("renders the collapsed expand toggle and calls the toggle handler", () => {
+    const onToggleExpanded = vi.fn();
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} expanded={false} onToggleExpanded={onToggleExpanded} />);
+
+    const toggle = screen.getByTestId("task-chat-expand-toggle");
+    expect(toggle).toHaveAttribute("aria-label", "Expand chat to full modal");
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(toggle).toHaveTextContent("Expand");
+
+    fireEvent.click(toggle);
+    expect(onToggleExpanded).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the expanded collapse toggle", () => {
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} expanded onToggleExpanded={vi.fn()} />);
+
+    const toggle = screen.getByTestId("task-chat-expand-toggle");
+    expect(toggle).toHaveAttribute("aria-label", "Collapse chat");
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(toggle).toHaveTextContent("Collapse");
+  });
+
+  it("renders the expand toggle while the transcript is loading", () => {
+    mockLogs([], true);
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} onToggleExpanded={vi.fn()} />);
+
+    expect(screen.getByTestId("task-chat-expand-toggle")).toBeInTheDocument();
+    expect(screen.getByText("Loading agent output…")).toBeInTheDocument();
+  });
+
+  it("renders the expand toggle in the empty transcript state", () => {
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} onToggleExpanded={vi.fn()} />);
+
+    expect(screen.getByTestId("task-chat-expand-toggle")).toBeInTheDocument();
+    expect(screen.getByText(/No agent output yet/)).toBeInTheDocument();
+  });
+
   it("labels every agent role and the legacy undefined-agent fallback", () => {
     mockLogs([
       makeEntry({ agent: "triage", text: "planning output" }),

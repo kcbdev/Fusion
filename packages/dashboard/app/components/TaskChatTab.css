@@ -7,6 +7,19 @@
   height: 100%;
 }
 
+.task-chat-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
+.task-chat-expand-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
 .task-chat-transcript {
   display: flex;
   flex: 1 1 auto;
@@ -323,6 +336,15 @@
 @media (max-width: 768px) {
   .task-chat-tab {
     gap: var(--space-sm);
+  }
+
+  .task-chat-toolbar {
+    justify-content: stretch;
+  }
+
+  .task-chat-expand-toggle {
+    justify-content: center;
+    width: 100%;
   }
 
   .task-chat-transcript {

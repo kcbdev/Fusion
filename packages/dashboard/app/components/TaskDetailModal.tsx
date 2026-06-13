@@ -564,6 +564,7 @@ export function TaskDetailContent({
   const { t } = useTranslation("app");
   const columnLabel = useColumnLabel();
   const [activeTab, setActiveTab] = useState<TabId>(initialTab === "retries" ? "definition" : initialTab);
+  const [chatExpanded, setChatExpanded] = useState(false);
 
   // ── CLI agent session (U11) ────────────────────────────────────────────────
   const [cliSession, setCliSession] = useState<CliSessionSummaryRecord | null>(null);
@@ -777,6 +778,13 @@ export function TaskDetailContent({
 
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
+
+  useEffect(() => {
+    if (activeTab !== "chat" || isEditing) {
+      setChatExpanded(false);
+    }
+  }, [activeTab, isEditing]);
+
   const [editTitle, setEditTitle] = useState(task.title || "");
   const [editDescription, setEditDescription] = useState(task.description || "");
   const [editDependencies, setEditDependencies] = useState<string[]>(task.dependencies || []);
@@ -2625,6 +2633,7 @@ export function TaskDetailContent({
   const autoMergeEnabled = autoMergeEnabledProp ?? (settings?.autoMerge ?? false);
   const effectiveAutoMerge = resolveEffectiveAutoMerge({ autoMerge: task.autoMerge }, { autoMerge: autoMergeEnabled });
   const isManualPrFlow = mergeStrategy === "pull-request" && !autoMergeEnabled;
+  const isChatExpanded = chatExpanded && activeTab === "chat" && !isEditing;
 
   const isCheckPrStatusAction = isManualPrFlow && !prAutomationLabel && task.prInfo?.status === "open";
   let manualReviewActionLabel = t("taskDetail.pr.mergeAndClose", "Merge & Close");
@@ -2640,7 +2649,7 @@ export function TaskDetailContent({
 
   return (
     <div
-      className={embedded ? "task-detail-content task-detail-content--embedded" : "task-detail-content"}
+      className={`task-detail-content${embedded ? " task-detail-content--embedded" : ""}${isChatExpanded ? " task-detail-content--chat-expanded" : ""}`}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
@@ -3144,6 +3153,8 @@ export function TaskDetailContent({
                 addToast={addToast}
                 sessionLive={isCliSessionLive(cliSession)}
                 onTaskUpdated={handleChatTaskUpdated}
+                expanded={chatExpanded}
+                onToggleExpanded={() => setChatExpanded((value) => !value)}
               />
             </div>
           ) : activeTab === "logs" ? (

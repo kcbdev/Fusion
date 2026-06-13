@@ -2,7 +2,7 @@ import type { AgentLogEntry, AgentRole, SteeringComment, Task, TaskDetail } from
 import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChevronDown, Loader2, Send } from "lucide-react";
+import { ChevronDown, Loader2, Maximize2, Minimize2, Send } from "lucide-react";
 import { addSteeringComment } from "../api";
 import { useAgentLogs } from "../hooks/useAgentLogs";
 import type { ToastType } from "../hooks/useToast";
@@ -20,6 +20,8 @@ interface TaskChatTabProps {
   addToast: (msg: string, type?: ToastType) => void;
   sessionLive?: boolean;
   onTaskUpdated?: (task: Task) => void;
+  expanded?: boolean;
+  onToggleExpanded?: () => void;
 }
 
 type AgentLogRole = AgentRole | undefined;
@@ -407,7 +409,7 @@ function TaskChatUserMessage({ message }: { message: UserChatMessage }) {
   );
 }
 
-export function TaskChatTab({ task, projectId, active, addToast, sessionLive, onTaskUpdated }: TaskChatTabProps) {
+export function TaskChatTab({ task, projectId, active, addToast, sessionLive, onTaskUpdated, expanded = false, onToggleExpanded }: TaskChatTabProps) {
   const { entries, loading } = useAgentLogs(task.id, active, projectId);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -601,6 +603,21 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
 
   return (
     <div className="task-chat-tab" data-testid="task-chat-tab">
+      {onToggleExpanded ? (
+        <div className="task-chat-toolbar">
+          <button
+            type="button"
+            className="btn btn-sm task-chat-expand-toggle"
+            onClick={onToggleExpanded}
+            aria-label={expanded ? "Collapse chat" : "Expand chat to full modal"}
+            aria-pressed={expanded}
+            data-testid="task-chat-expand-toggle"
+          >
+            {expanded ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
+            <span>{expanded ? "Collapse" : "Expand"}</span>
+          </button>
+        </div>
+      ) : null}
       <div
         className="task-chat-transcript"
         ref={transcriptRef}
