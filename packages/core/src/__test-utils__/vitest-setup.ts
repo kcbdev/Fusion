@@ -14,6 +14,7 @@
 
 import { afterEach, expect } from "vitest";
 import { createRequire, syncBuiltinESMExports } from "node:module";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -74,6 +75,8 @@ function installWarningFilter(): void {
 installWarningFilter();
 
 const TEST_HOME_PREFIX = "fn-test-home-";
+const WORKER_ROOT_OWNER_FILE = ".fusion-test-worker-root-owner";
+const FUSION_TEST_RUN_TOKEN_ENV = "FUSION_TEST_RUN_TOKEN";
 const DEFAULT_TEST_SUBPROCESS_TIMEOUT_MS = Math.max(
   1_000,
   Number.parseInt(process.env.FUSION_TEST_SUBPROCESS_TIMEOUT_MS ?? "30000", 10) || 30_000,
@@ -170,14 +173,43 @@ if (!process.env.FUSION_MASTER_KEY_DISABLE_KEYCHAIN) {
 // bounded one-level sweep of WORKER_ROOT, and a static root can accumulate enough
 // stale worker/home dirs after interrupted runs to make every mkdtempSync call
 // take seconds.
-const WORKER_ROOT = (() => {
+function ensureTestRunToken(): string {
+  const existing = process.env[FUSION_TEST_RUN_TOKEN_ENV];
+  if (existing && existing.trim().length > 0) return existing;
+  const token = randomUUID();
+  process.env[FUSION_TEST_RUN_TOKEN_ENV] = token;
+  return token;
+}
+
+function writeWorkerRootOwnerMarker(root: string): void {
+  try {
+    writeFileSync(
+      join(root, WORKER_ROOT_OWNER_FILE),
+      `${process.pid}\nrunToken=${ensureTestRunToken()}\n`,
+    );
+  } catch {
+    // Best effort only. The marker helps the pnpm-test runner distinguish a
+    // live same-run root from stale pid reuse; local exit cleanup still owns
+    // self-minted fallback roots by absolute path.
+  }
+}
+
+const { root: WORKER_ROOT, selfMinted: SELF_MINTED_WORKER_ROOT } = (() => {
   const fromEnv = process.env.FUSION_TEST_WORKER_ROOT;
-  const root = fromEnv && fromEnv.trim().length > 0
-    ? resolve(fromEnv)
-    : realpathSync(mkdtempSync(join(tmpdir(), "fusion-test-workers-")));
+  const selfMinted = !(fromEnv && fromEnv.trim().length > 0);
+  const root = selfMinted
+    ? realpathSync(mkdtempSync(join(tmpdir(), "fusion-test-workers-")))
+    : resolve(fromEnv);
   try { mkdirSync(root, { recursive: true }); } catch { /* ignore */ }
   process.env.FUSION_TEST_WORKER_ROOT = root;
-  return root;
+  ensureTestRunToken();
+  if (selfMinted) {
+    // FN-6396/FN-6360 recurrence: without globalSetup there is no teardown
+    // owner for this fallback root. Mark it and remove the root itself on exit
+    // so an empty fusion-test-workers-* shell cannot trip check-test-isolation.
+    writeWorkerRootOwnerMarker(root);
+  }
+  return { root, selfMinted };
 })();
 
 const REAL_TMPDIR = (() => {
@@ -1036,6 +1068,32 @@ afterEach(async () => {
   }
 });
 
+function sleepMsSync(ms: number): void {
+  if (ms <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function removeSelfMintedWorkerRootWithRetry(
+  workerRoot = WORKER_ROOT,
+  selfMinted = SELF_MINTED_WORKER_ROOT,
+  delayMs = 25,
+): void {
+  if (!selfMinted) return;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      rmSync(workerRoot, { recursive: true, force: true });
+      return;
+    } catch {
+      if (attempt < 3) sleepMsSync(delayMs);
+    }
+  }
+}
+
+export const __fusionWorkerRootCleanupTestHooks = {
+  removeSelfMintedWorkerRootWithRetry,
+  writeWorkerRootOwnerMarker,
+};
+
 process.on("exit", () => {
   for (const [proc] of trackedSubprocesses) {
     try {
@@ -1045,11 +1103,14 @@ process.on("exit", () => {
     }
     cleanupTrackedSubprocess(proc);
   }
-  if (!workerTempDir) return;
-  try {
-    originalChdir(tmpdir());
-    rmSync(workerTempDir, { recursive: true, force: true });
-  } catch {
-    // Ignore — globalTeardown sweeps WORKER_ROOT anyway.
+  if (workerTempDir) {
+    try {
+      originalChdir(tmpdir());
+      rmSync(workerTempDir, { recursive: true, force: true });
+    } catch {
+      // Ignore — globalTeardown sweeps env-owned WORKER_ROOT; self-minted roots
+      // get their own bounded best-effort removal below.
+    }
   }
+  removeSelfMintedWorkerRootWithRetry();
 });

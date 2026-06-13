@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 export const WORKER_ROOT_OWNER_FILE = ".fusion-test-worker-root-owner";
+const FUSION_TEST_RUN_TOKEN_ENV = "FUSION_TEST_RUN_TOKEN";
 
 let workerRootRmSync = rmSync;
 let workerRootSleepMsSync = sleepMsSync;
@@ -57,10 +58,13 @@ export default function setup(): () => Promise<void> {
   // prior interrupted run.
   const workerRoot = resolve(mkdtempSync(join(tmpdir(), "fusion-test-workers-")));
   try {
-    writeFileSync(join(workerRoot, WORKER_ROOT_OWNER_FILE), `${process.pid}\n`);
+    const runToken = process.env[FUSION_TEST_RUN_TOKEN_ENV];
+    const tokenLine = runToken && runToken.trim().length > 0 ? `runToken=${runToken}\n` : "";
+    writeFileSync(join(workerRoot, WORKER_ROOT_OWNER_FILE), `${process.pid}\n${tokenLine}`);
   } catch {
     // Best effort only. The marker protects active roots from external orphan
-    // pruning; teardown still owns this root by absolute path.
+    // pruning; FN-6396 adds the runner token so stale pid reuse cannot keep an
+    // orphaned root alive. Teardown still owns this root by absolute path.
   }
   process.env.FUSION_TEST_WORKER_ROOT = workerRoot;
 
