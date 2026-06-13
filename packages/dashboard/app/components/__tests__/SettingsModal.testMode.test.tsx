@@ -18,7 +18,11 @@ vi.mock("../../hooks/useMemoryBackendStatus", () => ({
   useMemoryBackendStatus: () => ({ status: null, capabilities: null, loading: false, error: null, refresh: vi.fn() }),
 }));
 vi.mock("../../hooks/useViewportMode", () => ({
-  MOBILE_MEDIA_QUERY: "(max-width: 768px), (max-height: 480px)", useViewportMode: () => "desktop" }));
+  MOBILE_MEDIA_QUERY: "(max-width: 768px), (max-height: 480px)",
+  useViewportMode: () => "desktop",
+  getViewportMode: () => "desktop",
+  isMobileViewport: () => false,
+}));
 vi.mock("../../hooks/useMobileKeyboard", () => ({
   useMobileKeyboard: () => ({ keyboardOverlap: 0, viewportHeight: null, viewportOffsetTop: 0, keyboardOpen: false }),
 }));

@@ -45,6 +45,12 @@ pnpm --filter @fusion/dashboard test:build          # built client output contra
 
 Run `test:deep` when changing broad dashboard architecture, shared modal/view infrastructure, or route registration. Run `test:browser-smoke` for layout/responsive/navigation/modal/CSS changes. Run `test:build` for Vite output, lazy-loading, chunking, or client-dist changes.
 
+The shared mobile/tablet overflow-containment net lives at `packages/dashboard/app/__tests__/dashboard-overflow-containment.test.tsx`. It covers board/kanban columns, task-detail modal shell, workflow/simple workflow editors, and Activity Log modal at mobile, tablet, and landscape-phone breakpoints. Run it directly when touching dashboard viewport containment or shared modal/workflow CSS:
+
+```bash
+pnpm --filter @fusion/dashboard exec vitest run --project dashboard-app app/__tests__/dashboard-overflow-containment.test.tsx --silent=passed-only --reporter=dot --exclude '**/build-output.test.ts'
+```
+
 `pnpm --filter @fusion/dashboard test` runs the curated app/API quality gate through
 `packages/dashboard/scripts/run-quality-tests.mjs` (FN-6308). The orchestrator keeps
 the historical app/API quality split and the curated/backfill lane boundaries, but
