@@ -797,6 +797,7 @@ export class InProcessRuntime
         getActiveMergeTaskId: () => this.activeMergeTaskIdProvider?.() ?? null,
         leaseManager: this.leaseManager,
         hasActiveAgentExecution: (agentId: string) => this.heartbeatMonitor?.getTrackedAgents().includes(agentId) ?? false,
+        resumeAssignedTaskForAgent: (agentId: string) => this.executor.resumeTaskForAgent(agentId),
         recoverActiveMissionValidations: async () => {
           if (!this.missionExecutionLoop) {
             return { recoveredCount: 0 };

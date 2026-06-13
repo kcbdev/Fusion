@@ -507,6 +507,7 @@ export type DatabaseMutationType =
   /** Metadata: { taskId, branch, worktree, checkedOutBy, executionStartedAt, executionAgeMs, graceMs, liveWorktreeBoundBranch, reason } */
   | "task:reclaim-self-owned-branch-conflict-no-action"
   | "task:orphan-detected-no-action"
+  | "task:reattach-orphaned-execution"
   /** Metadata: { taskId, lastReason, stuckKillCount, attemptedStuckKillCount, maxStuckKills, checkedOutBy, executionStartedAt, executionAgeMs, graceMs, liveWorktreeBoundBranch } */
   | "task:stuck-loop-exhausted-no-action"
   /** Metadata: { taskId: string; ignoredStepUpdateCount: number; stuckKillStreak: number; lastReason: "no-progress-churn" } */

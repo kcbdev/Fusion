@@ -316,6 +316,12 @@ export interface SelfHealingOptions {
    */
   unbackedMergingFanoutGraceMs?: number;
   hasActiveAgentExecution?: (agentId: string) => boolean;
+  /**
+   * Re-dispatches an agent's orphaned assigned in-progress execution forward,
+   * via Executor.resumeTaskForAgent. This must never move the task backward in
+   * lifecycle; the executor seam owns all in-memory double-execution guards.
+   */
+  resumeAssignedTaskForAgent?: (agentId: string) => Promise<void>;
   restartDurableAgentHeartbeat?: (agentId: string, context: { reason: string; attempt: number }) => Promise<boolean>;
   autoRecoveryDispatcher?: AutoRecoveryDispatcher;
   /** Optional ChatStore for maintenance chat-retention cleanup. */
@@ -1029,6 +1035,7 @@ export class SelfHealingManager {
       { name: "orphaned-planning", fn: () => this.recoverOrphanedPlanningTasks().then(() => undefined) },
       { name: "recover-orphaned-agents", fn: () => this.recoverOrphanedAgents().then(() => undefined) },
       { name: "recover-stale-heartbeat-runs", fn: () => this.recoverStaleHeartbeatRuns().then(() => undefined) },
+      { name: "reattach-orphaned-assigned-executions", fn: () => this.reattachOrphanedAssignedExecutions().then(() => undefined) },
       {
         name: "reap-stale-mission-validator-runs",
         fn: async () => {
@@ -1988,6 +1995,7 @@ export class SelfHealingManager {
           { name: "recover-ghost-review", fn: () => this.recoverGhostReviewTasks() },
           { name: "recover-orphaned-agents", fn: () => this.recoverOrphanedAgents() },
           { name: "recover-stale-heartbeat-runs", fn: () => this.recoverStaleHeartbeatRuns() },
+          { name: "reattach-orphaned-assigned-executions", fn: () => this.reattachOrphanedAssignedExecutions() },
           { name: "recover-running-on-inactive-tasks", fn: () => this.recoverAgentsRunningOnInactiveTasks() },
           { name: "recover-drifted-agent-task-links", fn: () => this.recoverDriftedAgentTaskLinks() },
           { name: "reconcile-soft-delete-column-drift", fn: () => this.reconcileSoftDeletedColumnDrift() },
@@ -7892,6 +7900,120 @@ export class SelfHealingManager {
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       log.error(`Orphaned executor recovery failed: ${errorMessage}`);
+      return 0;
+    }
+  }
+
+  /**
+   * Re-dispatch assigned in-progress tasks whose durable agent has no active
+   * heartbeat run and no active executor session. This is a forward resume via
+   * Executor.resumeTaskForAgent; it never moves lifecycle backward and
+   * complements the observation-only recoverOrphanedExecutions pass.
+   */
+  async reattachOrphanedAssignedExecutions(): Promise<number> {
+    try {
+      const settings = await this.store.getSettings();
+      if (settings.globalPause || settings.enginePaused) {
+        return 0;
+      }
+
+      const agentStore = this.options.agentStore;
+      const resumeAssignedTaskForAgent = this.options.resumeAssignedTaskForAgent;
+      if (!agentStore || !resumeAssignedTaskForAgent) {
+        return 0;
+      }
+
+      const tasks = await this.store.listTasks({ column: "in-progress", slim: true });
+      const executingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
+      const now = Date.now();
+      const candidates: Task[] = [];
+
+      for (const task of tasks) {
+        if (task.column !== "in-progress") continue;
+        if (task.paused || task.deletedAt) continue;
+        if (!task.assignedAgentId) continue;
+        if (executingIds.has(task.id)) continue;
+        if (isTaskWorkComplete(task)) continue;
+
+        const updatedAtMs = new Date(task.updatedAt).getTime();
+        if (!Number.isFinite(updatedAtMs)) continue;
+        const hadWorktree = Boolean(task.worktree && existsSync(task.worktree));
+        const graceMs = hadWorktree ? ORPHANED_WITH_WORKTREE_GRACE_MS : ORPHANED_EXECUTION_RECOVERY_GRACE_MS;
+        if (now - updatedAtMs < graceMs) continue;
+
+        candidates.push(task);
+      }
+
+      if (candidates.length === 0) {
+        return 0;
+      }
+
+      const tasksByAgent = new Map<string, Task[]>();
+      for (const task of candidates) {
+        const agentId = task.assignedAgentId;
+        if (!agentId) continue;
+
+        const agent = await agentStore.getAgent(agentId);
+        if (!agent) continue;
+
+        const activeRun = await agentStore.getActiveHeartbeatRun(agentId);
+        if (activeRun) continue;
+        if (this.options.hasActiveAgentExecution?.(agentId) === true) continue;
+
+        const agentTasks = tasksByAgent.get(agentId) ?? [];
+        agentTasks.push(task);
+        tasksByAgent.set(agentId, agentTasks);
+      }
+
+      let reattachedAgents = 0;
+      for (const [agentId, agentTasks] of tasksByAgent) {
+        try {
+          await resumeAssignedTaskForAgent(agentId);
+          reattachedAgents += 1;
+
+          for (const task of agentTasks) {
+            try {
+              const hadWorktree = Boolean(task.worktree && existsSync(task.worktree));
+              const stalenessMs = now - new Date(task.updatedAt).getTime();
+              const reason = hadWorktree
+                ? "assigned-agent-no-active-run-or-execution-worktree-exists"
+                : "assigned-agent-no-active-run-or-execution";
+
+              await createRunAuditor(this.store, {
+                runId: generateSyntheticRunId("self-healing-reattach-orphaned-execution", task.id),
+                agentId: "self-healing",
+                taskId: task.id,
+                taskLineageId: task.lineageId,
+                phase: "reattach-orphaned-assigned-executions",
+              }).database({
+                type: "task:reattach-orphaned-execution",
+                target: task.id,
+                metadata: {
+                  assignedAgentId: agentId,
+                  priorWorktree: task.worktree ?? null,
+                  priorBranch: task.branch ?? null,
+                  hadWorktree,
+                  stalenessMs,
+                  reason,
+                },
+              });
+
+              log.log(`[reattach-orphaned-execution] ${task.id}: re-dispatched agent ${agentId} (${reason})`);
+            } catch (err: unknown) {
+              const errorMessage = err instanceof Error ? err.message : String(err);
+              log.error(`Failed to annotate reattached orphaned execution ${task.id}: ${errorMessage}`);
+            }
+          }
+        } catch (err: unknown) {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          log.error(`Failed to reattach orphaned assigned executions for ${agentId}: ${errorMessage}`);
+        }
+      }
+
+      return reattachedAgents;
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      log.error(`Orphaned assigned execution reattach failed: ${errorMessage}`);
       return 0;
     }
   }
