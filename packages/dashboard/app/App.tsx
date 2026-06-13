@@ -1103,7 +1103,7 @@ function AppInner() {
     addToast,
   });
 
-  const handleOpenDetailWithTab = useCallback((task: Task | TaskDetail, initialTab: "changes" | "retries") => {
+  const handleOpenDetailWithTab = useCallback((task: Task | TaskDetail, initialTab: "changes" | "retries" | "workflow") => {
     if (initialTab === "changes") {
       modalManager.openDetailWithChangesTab(task);
     } else {

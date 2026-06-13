@@ -160,6 +160,35 @@ afterEach(() => {
 });
 
 describe("TaskCard", () => {
+  it("shows an Answer-questions button when awaiting user input and opens the workflow tab", async () => {
+    const onOpenDetailWithTab = vi.fn();
+    render(
+      <TaskCard
+        task={makeTask({ status: "awaiting-user-input" as any })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onOpenDetailWithTab={onOpenDetailWithTab}
+      />,
+    );
+
+    const btn = screen.getByLabelText("Answer questions");
+    fireEvent.click(btn);
+    expect(onOpenDetailWithTab).toHaveBeenCalledTimes(1);
+    expect(onOpenDetailWithTab.mock.calls[0][1]).toBe("workflow");
+  });
+
+  it("does not show the Answer-questions button when not awaiting input", () => {
+    render(
+      <TaskCard
+        task={makeTask({ status: "executing" as any })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onOpenDetailWithTab={vi.fn()}
+      />,
+    );
+    expect(screen.queryByLabelText("Answer questions")).toBeNull();
+  });
+
   it("uses githubIssueAction for tracked task delete", async () => {
     const onDeleteTask = vi.fn(async () => makeTask());
     mockConfirm

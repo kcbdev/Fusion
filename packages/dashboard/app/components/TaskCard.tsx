@@ -386,7 +386,7 @@ interface TaskCardProps {
     githubIssueAction?: GithubIssueAction;
   }) => Promise<Task>;
   onRetryTask?: (id: string) => Promise<Task>;
-  onOpenDetailWithTab?: (task: Task | TaskDetail, initialTab: "changes" | "retries") => void;
+  onOpenDetailWithTab?: (task: Task | TaskDetail, initialTab: "changes" | "retries" | "workflow") => void;
   /** Project-level stuck task timeout in milliseconds (undefined = disabled) */
   taskStuckTimeoutMs?: number;
   /** Called when user clicks the mission badge on a task card. */
@@ -2023,6 +2023,19 @@ function TaskCardComponent({
           </span>
         )}
         <div className="card-header-actions">
+          {isAwaitingInput && onOpenDetailWithTab && (
+            <button
+              className="card-answer-questions-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenDetailWithTab(task, "workflow");
+              }}
+              title={t("tasks.answerQuestions", "Answer questions")}
+              aria-label={t("tasks.answerQuestions", "Answer questions")}
+            >
+              {t("tasks.answerQuestions", "Answer questions")}
+            </button>
+          )}
           {canEdit && (
             <button
               className="card-edit-btn"

@@ -1170,6 +1170,31 @@
     color var(--transition-fast);
 }
 
+/* Prominent affordance to answer an agent's blocking planning question.
+   Always visible (not hover-gated) — the task is parked waiting on the user. */
+.card-answer-questions-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 600;
+  background: var(--todo);
+  color: var(--background, #fff);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: filter var(--transition-fast);
+}
+
+.card-answer-questions-btn:hover {
+  filter: brightness(1.1);
+}
+
+.card-answer-questions-btn:focus {
+  outline: 1px solid var(--todo);
+  outline-offset: 1px;
+}
+
 .card:hover .card-edit-btn {
   opacity: 1;
 }
